@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"uvplatform.com/uvp-gb28181/app/controllers"
+	"uvplatform.com/uvp-gb28181/app/gb28181/netif"
 	gbsetup "uvplatform.com/uvp-gb28181/app/gb28181/setup"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 )
@@ -88,7 +89,8 @@ func (sc *SetupController) SaveConfig(c *gin.Context) {
 		sc.Fail(c, "SIP 配置请求格式错误", err, http.StatusBadRequest)
 		return
 	}
-	view, err := gbsetup.NewSIPConfigService(sc.db).Save(c.Request.Context(), gbsetup.SaveSIPConfigRequest{
+	// 保存时要把「当前网卡能否作为媒体地址兜底」算进来，所以复用同一份网卡 provider。
+	view, err := gbsetup.NewSIPConfigService(sc.db).WithInterfaces(sc.interfaces).Save(c.Request.Context(), gbsetup.SaveSIPConfigRequest{
 		DeploymentMode:      request.DeploymentMode,
 		ListenIP:            request.ListenIP,
 		AdvertiseIP:         request.AdvertiseIP,
@@ -154,11 +156,16 @@ func (sc *SetupController) Skip(c *gin.Context) {
 func (sc *SetupController) NetworkInterfaces(c *gin.Context) {
 	items, err := gbsetup.EnumerateNetworkAddresses(sc.interfaces)
 	response := NetworkInterfacesResponse{Items: items, ScanStatus: "ok"}
-	if err != nil {
+	switch {
+	case err != nil:
 		response.ScanStatus = "failed"
 		response.Warning = "本机网络接口读取失败，请手动填写接入地址"
-	} else if len(items) == 1 {
+	case len(items) == 1:
 		response.Warning = "未发现可用的本机 IPv4 地址，请手动填写接入地址"
+	default:
+		// 容器（Docker 默认 bridge 网络）里只有容器自己的 eth0，一张虚拟网卡都看不见，
+		// 向导会把容器内地址当推荐地址推荐出去 —— 设备根本路由不到，只是单独提示。
+		response.Warning = gbsetup.ContainerAddressWarning(items, netif.InContainer())
 	}
 	sc.Success(c, response)
 }

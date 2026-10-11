@@ -37,8 +37,8 @@ safe:
   loginlockexpire: 60
   #账号锁定时长(单位秒)
   loginlockduration: 600
-  #密码最小长度
-  minpasswordlength: 6
+  #密码最小长度(密码还须同时包含大写和小写字母)
+  minpasswordlength: 8
   #密码是否必须包含特殊字符
   requirespecialchar: true
 captcha: # 登录验证码
@@ -67,6 +67,7 @@ openapi:
   master_key_id: "" # 必须与已有密文 keyId 匹配；不在此文件存主密钥
   # 主密钥仅从 UVP_OPENAPI_MASTER_KEY 注入：32 随机字节的无填充 base64url
   request_timeout_seconds: 5 # 预留末尾 1 秒同步审计；HTTP write_timeout 必须大于此值+1
+  startup_timeout_seconds: 60 # 启动期 schema 探针、能力目录首次发布和 runtime hydrate 的总超时；有效范围 15-300 秒，越界回落 60
   revocation_bindings_file: "" # 运维受控文件绝对路径；空值不启动清退。仅启动读取，独立于上面两个开关；见 openapi-revocation.example.yml
 token:
   jwttokensignkey:  "CHANGE_ME_TO_A_RANDOM_SECRET"   # ⚠️ 部署前必须改成项目专属随机字符串(token 加密签名,泄露=任何人可伪造 token)

@@ -15,19 +15,21 @@ import (
 )
 
 type SnapshotInput struct {
-	OwnerUserID  uint
-	ChannelID    uint
-	DeviceCode   string
-	ChannelCode  string
-	QueryID      string
-	SegmentStart time.Time
-	SegmentEnd   time.Time
-	Record       manscdp.RecordInfoItem
+	OwnerUserID   uint
+	OwnerClientID int64
+	ChannelID     uint
+	DeviceCode    string
+	ChannelCode   string
+	QueryID       string
+	SegmentStart  time.Time
+	SegmentEnd    time.Time
+	Record        manscdp.RecordInfoItem
 }
 
 type Snapshot struct {
 	RecordKey        string
 	OwnerUserID      uint
+	OwnerClientID    int64
 	ChannelID        uint
 	DeviceCode       string
 	ChannelCode      string
@@ -42,10 +44,11 @@ type Snapshot struct {
 }
 
 type ResolveRequest struct {
-	RecordKey   string
-	OwnerUserID uint
-	ChannelID   uint
-	PlayFrom    time.Time
+	RecordKey     string
+	OwnerUserID   uint
+	OwnerClientID int64
+	ChannelID     uint
+	PlayFrom      time.Time
 }
 
 type ResultSnapshotStore struct {
@@ -53,7 +56,7 @@ type ResultSnapshotStore struct {
 	ttl         time.Duration
 	now         func() time.Time
 	snapshots   map[string]Snapshot
-	generations map[ownerChannel]string
+	generations map[ownerChannel]queryGeneration
 	// invalidatedScopes 记录被显式失效过的查询范围:旧 RecordKey 报"过期"
 	invalidatedScopes map[ownerChannel]struct{}
 	closed            bool
@@ -65,8 +68,44 @@ type ResultSnapshotStore struct {
 const defaultMaxSnapshots = 512
 
 type ownerChannel struct {
-	ownerUserID uint
-	channelID   uint
+	ownerKind     uint8
+	ownerUserID   uint
+	ownerClientID int64
+	channelID     uint
+}
+
+type queryGeneration struct {
+	queryID   string
+	expiresAt time.Time
+}
+
+const (
+	ownerKindUser uint8 = iota + 1
+	ownerKindClient
+)
+
+func userOwnerChannel(ownerUserID, channelID uint) (ownerChannel, bool) {
+	if ownerUserID == 0 || channelID == 0 {
+		return ownerChannel{}, false
+	}
+	return ownerChannel{ownerKind: ownerKindUser, ownerUserID: ownerUserID, channelID: channelID}, true
+}
+
+func clientOwnerChannel(ownerClientID int64, channelID uint) (ownerChannel, bool) {
+	if ownerClientID <= 0 || channelID == 0 {
+		return ownerChannel{}, false
+	}
+	return ownerChannel{ownerKind: ownerKindClient, ownerClientID: ownerClientID, channelID: channelID}, true
+}
+
+func ownerChannelFor(userID uint, clientID int64, channelID uint) (ownerChannel, bool) {
+	if (userID > 0) == (clientID > 0) {
+		return ownerChannel{}, false
+	}
+	if userID > 0 {
+		return userOwnerChannel(userID, channelID)
+	}
+	return clientOwnerChannel(clientID, channelID)
 }
 
 func NewResultSnapshotStore(ttl time.Duration, now func() time.Time) (*ResultSnapshotStore, error) {
@@ -77,13 +116,29 @@ func NewResultSnapshotStore(ttl time.Duration, now func() time.Time) (*ResultSna
 		now = time.Now
 	}
 	return &ResultSnapshotStore{
-		ttl: ttl, now: now, snapshots: make(map[string]Snapshot), generations: make(map[ownerChannel]string),
+		ttl: ttl, now: now, snapshots: make(map[string]Snapshot), generations: make(map[ownerChannel]queryGeneration),
 		invalidatedScopes: make(map[ownerChannel]struct{}), maxSnapshots: defaultMaxSnapshots,
 	}, nil
 }
 
 func (s *ResultSnapshotStore) BeginQuery(ownerUserID, channelID uint, queryID string) error {
-	if s == nil || ownerUserID == 0 || channelID == 0 || normalizeIdentity(queryID) == "" {
+	key, ok := userOwnerChannel(ownerUserID, channelID)
+	if !ok {
+		return queryError(ErrorCodeInvalidArgument, ErrInvalidArgument)
+	}
+	return s.beginQuery(key, queryID)
+}
+
+func (s *ResultSnapshotStore) BeginQueryForClient(ownerClientID int64, channelID uint, queryID string) error {
+	key, ok := clientOwnerChannel(ownerClientID, channelID)
+	if !ok {
+		return queryError(ErrorCodeInvalidArgument, ErrInvalidArgument)
+	}
+	return s.beginQuery(key, queryID)
+}
+
+func (s *ResultSnapshotStore) beginQuery(key ownerChannel, queryID string) error {
+	if s == nil || key.channelID == 0 || normalizeIdentity(queryID) == "" {
 		return queryError(ErrorCodeInvalidArgument, ErrInvalidArgument)
 	}
 	s.mu.Lock()
@@ -91,13 +146,37 @@ func (s *ResultSnapshotStore) BeginQuery(ownerUserID, channelID uint, queryID st
 	if s.closed {
 		return queryError(ErrorCodeUnavailable, ErrUnavailable)
 	}
-	s.invalidateOwnerChannelLocked(ownerUserID, channelID)
-	s.generations[ownerChannel{ownerUserID: ownerUserID, channelID: channelID}] = normalizeIdentity(queryID)
+	s.invalidateOwnerChannelLocked(key)
+	s.generations[key] = queryGeneration{queryID: normalizeIdentity(queryID), expiresAt: s.now().Add(s.ttl)}
 	return nil
 }
 
+// IsCurrentClientQuery reports whether a continuation still belongs to the
+// latest non-expired result generation for this client and channel.
+func (s *ResultSnapshotStore) IsCurrentClientQuery(ownerClientID int64, channelID uint, queryID string) bool {
+	key, ok := clientOwnerChannel(ownerClientID, channelID)
+	if s == nil || !ok || normalizeIdentity(queryID) == "" {
+		return false
+	}
+	now := s.now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false
+	}
+	generation, exists := s.generations[key]
+	if !exists || generation.queryID != normalizeIdentity(queryID) || !now.Before(generation.expiresAt) {
+		if exists && !now.Before(generation.expiresAt) {
+			delete(s.generations, key)
+		}
+		return false
+	}
+	return true
+}
+
 func (s *ResultSnapshotStore) Issue(input SnapshotInput) (Snapshot, error) {
-	if s == nil || input.OwnerUserID == 0 || input.ChannelID == 0 || normalizeIdentity(input.DeviceCode) == "" ||
+	key, ownerOK := ownerChannelFor(input.OwnerUserID, input.OwnerClientID, input.ChannelID)
+	if s == nil || !ownerOK || normalizeIdentity(input.DeviceCode) == "" ||
 		normalizeIdentity(input.ChannelCode) == "" || normalizeIdentity(input.QueryID) == "" ||
 		input.SegmentStart.IsZero() || !input.SegmentEnd.After(input.SegmentStart) {
 		return Snapshot{}, queryError(ErrorCodeInvalidArgument, ErrInvalidArgument)
@@ -108,7 +187,7 @@ func (s *ResultSnapshotStore) Issue(input SnapshotInput) (Snapshot, error) {
 	}
 	now := s.now()
 	snapshot := Snapshot{
-		RecordKey: recordKey, OwnerUserID: input.OwnerUserID, ChannelID: input.ChannelID,
+		RecordKey: recordKey, OwnerUserID: input.OwnerUserID, OwnerClientID: input.OwnerClientID, ChannelID: input.ChannelID,
 		DeviceCode: normalizeIdentity(input.DeviceCode), ChannelCode: normalizeIdentity(input.ChannelCode), QueryID: normalizeIdentity(input.QueryID),
 		SegmentStart: input.SegmentStart, SegmentEnd: input.SegmentEnd, Record: input.Record,
 		MetadataDigest: recordDigest(input.Record), ExpiresAt: now.Add(s.ttl),
@@ -119,12 +198,12 @@ func (s *ResultSnapshotStore) Issue(input SnapshotInput) (Snapshot, error) {
 		s.mu.Unlock()
 		return Snapshot{}, queryError(ErrorCodeUnavailable, ErrUnavailable)
 	}
-	generationKey := ownerChannel{ownerUserID: input.OwnerUserID, channelID: input.ChannelID}
-	currentQueryID, exists := s.generations[generationKey]
+	generationKey := key
+	current, exists := s.generations[generationKey]
 	if !exists {
-		s.generations[generationKey] = snapshot.QueryID
+		s.generations[generationKey] = queryGeneration{queryID: snapshot.QueryID, expiresAt: now.Add(s.ttl)}
 		delete(s.invalidatedScopes, generationKey)
-	} else if currentQueryID != snapshot.QueryID {
+	} else if current.queryID != snapshot.QueryID || !now.Before(current.expiresAt) {
 		s.mu.Unlock()
 		return Snapshot{}, queryError(ErrorCodeExpired, ErrSnapshotExpired)
 	}
@@ -139,7 +218,8 @@ func (s *ResultSnapshotStore) Issue(input SnapshotInput) (Snapshot, error) {
 }
 
 func (s *ResultSnapshotStore) Resolve(request ResolveRequest) (Snapshot, error) {
-	if s == nil || normalizeIdentity(request.RecordKey) == "" || request.OwnerUserID == 0 || request.ChannelID == 0 {
+	key, ownerOK := ownerChannelFor(request.OwnerUserID, request.OwnerClientID, request.ChannelID)
+	if s == nil || normalizeIdentity(request.RecordKey) == "" || !ownerOK {
 		return Snapshot{}, queryError(ErrorCodeSnapshotMissing, ErrSnapshotNotFound)
 	}
 	now := s.now()
@@ -155,10 +235,10 @@ func (s *ResultSnapshotStore) Resolve(request ResolveRequest) (Snapshot, error) 
 		return Snapshot{}, queryError(ErrorCodeExpired, ErrSnapshotExpired)
 	}
 	s.mu.Unlock()
-	if !exists || snapshot.OwnerUserID != request.OwnerUserID || snapshot.ChannelID != request.ChannelID {
+	if !exists || snapshot.OwnerUserID != request.OwnerUserID || snapshot.OwnerClientID != request.OwnerClientID || snapshot.ChannelID != request.ChannelID {
 		// 被新查询取代/显式失效而删除的旧快照:报"过期"而非"不存在"
 		s.mu.Lock()
-		genKey := ownerChannel{ownerUserID: request.OwnerUserID, channelID: request.ChannelID}
+		genKey := key
 		_, hasGeneration := s.generations[genKey]
 		_, wasInvalidated := s.invalidatedScopes[genKey]
 		s.mu.Unlock()
@@ -202,6 +282,22 @@ func (s *ResultSnapshotStore) Validate(candidate Snapshot) error {
 }
 
 func (s *ResultSnapshotStore) InvalidateOwnerChannel(ownerUserID, channelID uint) {
+	key, ok := userOwnerChannel(ownerUserID, channelID)
+	if !ok {
+		return
+	}
+	s.invalidateOwnerChannel(key)
+}
+
+func (s *ResultSnapshotStore) InvalidateClientChannel(ownerClientID int64, channelID uint) {
+	key, ok := clientOwnerChannel(ownerClientID, channelID)
+	if !ok {
+		return
+	}
+	s.invalidateOwnerChannel(key)
+}
+
+func (s *ResultSnapshotStore) invalidateOwnerChannel(key ownerChannel) {
 	if s == nil {
 		return
 	}
@@ -210,19 +306,18 @@ func (s *ResultSnapshotStore) InvalidateOwnerChannel(ownerUserID, channelID uint
 		s.mu.Unlock()
 		return
 	}
-	s.invalidateOwnerChannelLocked(ownerUserID, channelID)
-	genKey := ownerChannel{ownerUserID: ownerUserID, channelID: channelID}
-	delete(s.generations, genKey)
-	s.invalidatedScopes[genKey] = struct{}{}
+	s.invalidateOwnerChannelLocked(key)
+	delete(s.generations, key)
+	s.invalidatedScopes[key] = struct{}{}
 	s.mu.Unlock()
 }
 
-func (s *ResultSnapshotStore) invalidateOwnerChannelLocked(ownerUserID, channelID uint) {
+func (s *ResultSnapshotStore) invalidateOwnerChannelLocked(key ownerChannel) {
 	// 新查询开始即删除同用户/通道的旧快照:只标记失效会持续累积
 	// 无效记录,并让每次失效/清理都全表扫描
-	for key, snapshot := range s.snapshots {
-		if snapshot.OwnerUserID == ownerUserID && snapshot.ChannelID == channelID {
-			delete(s.snapshots, key)
+	for recordKey, snapshot := range s.snapshots {
+		if snapshot.OwnerUserID == key.ownerUserID && snapshot.OwnerClientID == key.ownerClientID && snapshot.ChannelID == key.channelID {
+			delete(s.snapshots, recordKey)
 		}
 	}
 	// 总量硬上限:删除最旧快照,防高频查询导致内存无界增长
@@ -293,7 +388,7 @@ func publicSnapshot(snapshot Snapshot) Snapshot {
 func snapshotDigest(snapshot Snapshot) string {
 	hash := sha256.New()
 	fields := []string{
-		snapshot.RecordKey, strconv.FormatUint(uint64(snapshot.OwnerUserID), 10), strconv.FormatUint(uint64(snapshot.ChannelID), 10),
+		snapshot.RecordKey, strconv.FormatUint(uint64(snapshot.OwnerUserID), 10), strconv.FormatInt(snapshot.OwnerClientID, 10), strconv.FormatUint(uint64(snapshot.ChannelID), 10),
 		snapshot.DeviceCode, snapshot.ChannelCode, snapshot.QueryID,
 		snapshot.SegmentStart.UTC().Format(time.RFC3339Nano), snapshot.SegmentEnd.UTC().Format(time.RFC3339Nano),
 		snapshot.MetadataDigest, snapshot.ExpiresAt.UTC().Format(time.RFC3339Nano), recordDigest(snapshot.Record),

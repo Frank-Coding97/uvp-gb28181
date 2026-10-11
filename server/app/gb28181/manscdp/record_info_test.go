@@ -70,6 +70,29 @@ func TestBuildRecordInfoQueryUses2022GB18030(t *testing.T) {
 	}
 }
 
+func TestBuildRecordInfoQueryUses2016GB2312(t *testing.T) {
+	profile := protocol.ProfileFor(protocol.Version2016)
+	body, err := BuildRecordInfoQueryWithProfile(profile, RecordInfoQuery{
+		SN:         9,
+		DeviceID:   "34020000001320000001",
+		StartTime:  mustRecordInfoTime(t, "2026-08-02T08:00:00"),
+		EndTime:    mustRecordInfoTime(t, "2026-08-02T09:00:00"),
+		Type:       RecordInfoQueryTypeAll,
+		RecorderID: "录像机",
+	})
+	require.NoError(t, err)
+	require.True(t, bytes.HasPrefix(body, []byte(`<?xml version="1.0" encoding="GB2312"?>`)))
+	require.NotContains(t, string(body), "录像机", "wire body must use the negotiated legacy encoding")
+
+	encodedRecorder, err := simplifiedchinese.GBK.NewEncoder().Bytes([]byte("录像机"))
+	require.NoError(t, err)
+	require.True(t, bytes.Contains(body, encodedRecorder))
+
+	decoded, err := DecodeProfiledXMLBytes(profile, body)
+	require.NoError(t, err)
+	require.Contains(t, string(decoded), "<RecorderID>录像机</RecorderID>")
+}
+
 func TestBuildRecordInfoQueryTypeAndArgumentValidation(t *testing.T) {
 	base := RecordInfoQuery{
 		SN:        1,

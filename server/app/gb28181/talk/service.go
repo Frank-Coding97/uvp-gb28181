@@ -18,15 +18,19 @@ import (
 )
 
 var (
-	ErrInvalidTalkSessionMode   = errors.New("对讲模式不合法")
-	ErrTalkTargetOffline        = errors.New("设备或通道离线")
-	ErrTalkNodeUnavailable      = errors.New("无可用对讲媒体节点")
-	ErrSecurePublishUnavailable = errors.New("媒体节点未提供安全发布端口")
+	ErrInvalidTalkSessionMode     = errors.New("对讲模式不合法")
+	ErrTalkTargetOffline          = errors.New("设备或通道离线")
+	ErrTalkNodeUnavailable        = errors.New("无可用对讲媒体节点")
+	ErrSecurePublishUnavailable   = errors.New("媒体节点未提供安全发布端口")
+	ErrOpenAPIIdempotencyConflict = errors.New("OpenAPI 对讲幂等键已用于其他请求")
+	ErrInvalidOpenAPIIdentity     = errors.New("OpenAPI 对讲 client 身份不合法")
 )
 
 type TalkRepo interface {
 	Create(context.Context, *models.GbTalkSession, string) error
 	FindBySession(context.Context, string) (*models.GbTalkSession, error)
+	FindByOpenAPIClient(context.Context, int64, string) (*models.GbTalkSession, error)
+	FindByOpenAPIIdempotency(context.Context, int64, string) (*models.GbTalkSession, error)
 	FindBySource(context.Context, int64, string, string) (*models.GbTalkSession, error)
 	FindByCallID(context.Context, string) (*models.GbTalkSession, error)
 	FindByBroadcastSN(context.Context, uint, string, string) (*models.GbTalkSession, error)
@@ -70,11 +74,14 @@ type Service struct {
 }
 
 type CreateRequest struct {
-	Channel     *models.GbChannel
-	Device      *models.GbDevice
-	ActorID     uint
-	ActorDeptID uint
-	Mode        models.TalkSessionMode
+	Channel               *models.GbChannel
+	Device                *models.GbDevice
+	ActorID               uint
+	ActorDeptID           uint
+	Mode                  models.TalkSessionMode
+	OpenAPIClientID       int64
+	OpenAPIIdempotencyKey string
+	OpenAPIRequestHash    string
 }
 
 // uplinkPathPrefix 是上行入口在 device-mgmt 分组内的相对路径片段。
@@ -125,6 +132,10 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (*CreateRes
 	if !request.Mode.Valid() {
 		return nil, ErrInvalidTalkSessionMode
 	}
+	if request.OpenAPIClientID < 0 || (request.OpenAPIClientID == 0 && (request.OpenAPIIdempotencyKey != "" || request.OpenAPIRequestHash != "")) ||
+		(request.OpenAPIClientID > 0 && (!validOpenAPIIdempotencyKey(request.OpenAPIIdempotencyKey) || len(request.OpenAPIRequestHash) != 64)) {
+		return nil, ErrInvalidOpenAPIIdentity
+	}
 	if request.Channel == nil || request.Device == nil || request.Channel.Status != models.ChannelStatusOnline || request.Device.Status != models.DeviceStatusOnline {
 		return nil, ErrTalkTargetOffline
 	}
@@ -156,9 +167,14 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (*CreateRes
 		SessionID: sessionID, ChannelID: request.Channel.ID, DeviceID: request.Device.DeviceID,
 		TargetID: request.Channel.ChannelID,
 		ActorID:  request.ActorID, ActorDeptID: request.ActorDeptID,
+		OpenAPIClientID: request.OpenAPIClientID, OpenAPIRequestHash: request.OpenAPIRequestHash,
 		Mode:   request.Mode,
 		NodeID: mediaNode.ID, App: "talk", SourceStream: sourceStream, RecvStream: recvStream, SSRC: ssrc,
 		State: models.TalkSessionReserved, ExpiresAt: expiresAt,
+	}
+	if request.OpenAPIClientID > 0 {
+		key := strings.TrimSpace(request.OpenAPIIdempotencyKey)
+		session.OpenAPIIdempotencyKey = &key
 	}
 	if err := s.repo.Create(ctx, session, token); err != nil {
 		return nil, err
@@ -166,14 +182,60 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (*CreateRes
 	// 这里生成的令牌只用于满足 repo.Create 的非空约束,随后会被 PrepareUplink
 	// 在转发前轮换掉 —— 明文令牌永不离开后端,响应里也没有它的位置。
 	return &CreateResult{
-		SessionID: sessionID, Mode: session.Mode, State: string(session.State), ExpiresAt: expiresAt,
+		SessionID: session.SessionID, Mode: session.Mode, State: string(session.State), ExpiresAt: session.ExpiresAt,
 		Uplink: UplinkDescriptor{
 			Protocol:    "whip",
-			Path:        uplinkPathPrefix + sessionID + "/uplink",
+			Path:        uplinkPathPrefix + session.SessionID + "/uplink",
 			ContentType: "application/sdp",
 			ICEServers:  BuildICEServers(config),
 		},
 	}, nil
+}
+
+func validOpenAPIIdempotencyKey(value string) bool {
+	if len(value) == 0 || len(value) > 128 {
+		return false
+	}
+	for i := range value {
+		if value[i] < 0x21 || value[i] > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
+// GetForOpenAPIClient masks a session owned by another client as absent.
+func (s *Service) GetForOpenAPIClient(ctx context.Context, clientID int64, sessionID string) (*models.GbTalkSession, error) {
+	if s == nil || s.repo == nil || clientID <= 0 || strings.TrimSpace(sessionID) == "" {
+		return nil, ErrTalkSessionNotFound
+	}
+	return s.repo.FindByOpenAPIClient(ctx, clientID, sessionID)
+}
+
+// CleanupForOpenAPIClient checks durable ownership before entering the shared
+// cleanup path so a caller cannot terminate another client's media session.
+func (s *Service) CleanupForOpenAPIClient(ctx context.Context, clientID int64, sessionID string, terminal models.TalkSessionState, reason string) error {
+	session, err := s.GetForOpenAPIClient(ctx, clientID, sessionID)
+	if err != nil {
+		return err
+	}
+	if session == nil {
+		return ErrTalkSessionNotFound
+	}
+	return s.Cleanup(ctx, sessionID, terminal, reason)
+}
+
+// PrepareUplinkForOpenAPIClient only creates the one-use media target after
+// looking up the session under the authenticated OpenAPI client identity.
+func (s *Service) PrepareUplinkForOpenAPIClient(ctx context.Context, clientID int64, sessionID string) (*UplinkTarget, error) {
+	session, err := s.GetForOpenAPIClient(ctx, clientID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if session == nil {
+		return nil, ErrTalkSessionNotFound
+	}
+	return s.PrepareUplink(ctx, sessionID)
 }
 
 func (s *Service) AuthorizePublish(ctx context.Context, request PublishAuthorization) (bool, error) {

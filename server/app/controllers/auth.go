@@ -217,7 +217,7 @@ func (ac *AuthController) recordLogin(c *gin.Context, user *models.User, usernam
 		userID = &id
 	}
 	event := app.LoginLogEvent{UserID: userID, Username: username, Result: result, FailureReason: reason}
-	metadata := service.LoginMetadataFrom(c.ClientIP(), c.Request.UserAgent())
+	metadata := service.LoginMetadataWithContext(c.Request.Context(), c.ClientIP(), c.Request.UserAgent())
 	event.IP, event.Location, event.UserAgent = metadata.ClientIP, metadata.LoginLocation, metadata.UserAgent
 	event.Browser, event.OS = metadata.Browser, metadata.OS
 	service.RecordLoginAttempt(c.Request.Context(), app.LoginLogRecorder, event)
@@ -312,7 +312,7 @@ func (ac *AuthController) Logout(c *gin.Context) {
 }
 
 func loginMetadata(c *gin.Context) service.LoginMetadata {
-	return service.LoginMetadataFrom(c.ClientIP(), c.Request.UserAgent())
+	return service.LoginMetadataWithContext(c.Request.Context(), c.ClientIP(), c.Request.UserAgent())
 }
 
 // GetVerifyImgString 获取验证码图片字符串

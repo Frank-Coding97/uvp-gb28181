@@ -233,6 +233,69 @@ func controlScopeKey(scope, code string) (string, error) {
 // left queued for the persistent scheduler; legacy one-way commands retain
 // their synchronous send semantics.
 func (s *Service) Execute(ctx context.Context, target Target, command Command) (gbmodels.GbPTZOperation, error) {
+	operations, err := s.ExecuteBatch(ctx, target, []Command{command})
+	if len(operations) > 0 {
+		return operations[0], err
+	}
+	return gbmodels.GbPTZOperation{}, err
+}
+
+// ExecuteBatch keeps commands for one control target together under the same
+// lock used by Execute, so another PTZ operation cannot be sent between steps.
+// It stops at the first error and returns the completed prefix, including the
+// operation record for a command whose transport send failed.
+func (s *Service) ExecuteBatch(ctx context.Context, target Target, commands []Command) ([]gbmodels.GbPTZOperation, error) {
+	if s == nil || s.db == nil {
+		return nil, operationError(ErrorCodeHomePositionUnavailable, "PTZ service 未就绪", nil)
+	}
+	if len(commands) == 0 {
+		return nil, fmt.Errorf("PTZ 批次不能为空")
+	}
+	scope, code := commandTarget(commands[0], target)
+	for _, command := range commands[1:] {
+		commandScope, commandCode := commandTarget(command, target)
+		if commandScope != scope || commandCode != code {
+			return nil, fmt.Errorf("PTZ 批次必须指向同一目标")
+		}
+	}
+	lockID := target.ChannelID
+	if scope == gbmodels.ControlTargetScopeDevice {
+		lockID = 0
+	}
+	entry := s.lockChannel(lockID)
+	entry.mu.Lock()
+	defer func() {
+		entry.mu.Unlock()
+		s.unlockChannel(lockID, entry)
+	}()
+
+	operations := make([]gbmodels.GbPTZOperation, 0, len(commands))
+	for _, command := range commands {
+		operation, err := s.executeLocked(ctx, target, command)
+		operations = append(operations, operation)
+		if err != nil {
+			return operations, err
+		}
+	}
+	return operations, nil
+}
+
+func commandTarget(command Command, target Target) (string, string) {
+	scope := strings.TrimSpace(command.TargetScope)
+	if scope == "" {
+		scope = gbmodels.ControlTargetScopeChannel
+	}
+	code := strings.TrimSpace(command.TargetCode)
+	if code == "" {
+		code = target.ChannelCode
+		if scope == gbmodels.ControlTargetScopeDevice {
+			code = target.DeviceCode
+		}
+	}
+	return scope, code
+}
+
+func (s *Service) executeLocked(ctx context.Context, target Target, command Command) (gbmodels.GbPTZOperation, error) {
 	if s == nil || s.db == nil {
 		return gbmodels.GbPTZOperation{}, operationError(ErrorCodeHomePositionUnavailable, "PTZ service 未就绪", nil)
 	}
@@ -259,27 +322,7 @@ func (s *Service) Execute(ctx context.Context, target Target, command Command) (
 		return gbmodels.GbPTZOperation{}, err
 	}
 
-	requestedScope := strings.TrimSpace(command.TargetScope)
-	if requestedScope == "" {
-		requestedScope = gbmodels.ControlTargetScopeChannel
-	}
-	requestedCode := strings.TrimSpace(command.TargetCode)
-	if requestedCode == "" {
-		requestedCode = target.ChannelCode
-		if requestedScope == gbmodels.ControlTargetScopeDevice {
-			requestedCode = target.DeviceCode
-		}
-	}
-	lockID := target.ChannelID
-	if requestedScope == gbmodels.ControlTargetScopeDevice {
-		lockID = 0
-	}
-	entry := s.lockChannel(lockID)
-	entry.mu.Lock()
-	defer func() {
-		entry.mu.Unlock()
-		s.unlockChannel(lockID, entry)
-	}()
+	requestedScope, requestedCode := commandTarget(command, target)
 
 	existing, found, err := s.findIdempotentOperation(ctx, target, requestedScope, requestedCode, command.IdempotencyKey)
 	if err != nil {

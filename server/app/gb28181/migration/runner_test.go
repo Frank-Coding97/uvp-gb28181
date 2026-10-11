@@ -205,6 +205,84 @@ func TestJobResultSummaryMigrationNamesMapToColumn(t *testing.T) {
 	}
 }
 
+func TestDeviceCaptureSessionMigrationNamesMapToTable(t *testing.T) {
+	for _, name := range []string{
+		"2026-10-11-openapi-device-capture-session.sql",
+		"2026-10-11-openapi-device-capture-session-postgresql.sql",
+		"2026-10-11-openapi-device-capture-session-sqlserver.sql",
+		"2026-10-11-openapi-device-capture-session-sqlite.sql",
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, "sys_openapi_device_capture_session", baselineTableMigrations[name])
+		})
+	}
+}
+
+func TestDeviceEventSubscriptionMigrationNamesMapToTable(t *testing.T) {
+	for _, name := range []string{
+		"2026-10-11-openapi-device-event-subscription.sql",
+		"2026-10-11-openapi-device-event-subscription-postgresql.sql",
+		"2026-10-11-openapi-device-event-subscription-sqlserver.sql",
+		"2026-10-11-openapi-device-event-subscription-sqlite.sql",
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, "sys_openapi_device_subscription", baselineTableMigrations[name])
+		})
+	}
+}
+
+func TestRunEmptyLedgerAppliesDeviceEventSubscriptionMigrationToOlderBaseline(t *testing.T) {
+	store, lock, src, exec := newFakes()
+	name := "2026-10-11-openapi-device-event-subscription-sqlite.sql"
+	src.files[name] = "CREATE DEVICE EVENT SUBSCRIPTION TABLE"
+	probe := schemaProbe{
+		hasTable: func(table string) (bool, error) {
+			return table != "sys_openapi_device_subscription", nil
+		},
+	}
+
+	require.NoError(t, run(store, lock, src, exec, probe))
+	require.Equal(t, []string{"CREATE DEVICE EVENT SUBSCRIPTION TABLE"}, exec.executed)
+	require.Equal(t, [][]string{{name}}, store.marks)
+}
+
+func TestRunEmptyLedgerAppliesCaptureTableMigrationToOlderBaseline(t *testing.T) {
+	store, lock, src, exec := newFakes()
+	name := "2026-10-11-openapi-device-capture-session-sqlite.sql"
+	src.files[name] = "CREATE CAPTURE SESSION TABLE"
+	probe := schemaProbe{
+		hasTable: func(table string) (bool, error) {
+			return table != "sys_openapi_device_capture_session", nil
+		},
+	}
+
+	require.NoError(t, run(store, lock, src, exec, probe))
+	require.Equal(t, []string{"CREATE CAPTURE SESSION TABLE"}, exec.executed)
+	require.Equal(t, [][]string{{name}}, store.marks)
+}
+
+func TestRunEmptyLedgerBaselinesCaptureTableWhenAlreadyPresent(t *testing.T) {
+	store, lock, src, exec := newFakes()
+	name := "2026-10-11-openapi-device-capture-session-sqlite.sql"
+	src.files[name] = "CREATE CAPTURE SESSION TABLE"
+
+	require.NoError(t, run(store, lock, src, exec, allTablesExistProbe()))
+	require.Empty(t, exec.executed)
+	require.Equal(t, [][]string{{name}}, store.marks)
+}
+
+func TestRunResumesCaptureTableMigrationWhenTableWasCreated(t *testing.T) {
+	store, lock, src, exec := newFakes()
+	store.applied["previous.sql"] = true
+	name := "2026-10-11-openapi-device-capture-session-sqlite.sql"
+	src.files[name] = "CREATE CAPTURE SESSION TABLE"
+
+	require.NoError(t, run(store, lock, src, exec, allTablesExistProbe()))
+	require.Empty(t, exec.executed)
+	require.True(t, store.applied[name])
+	require.Equal(t, [][]string{{name}}, store.marks)
+}
+
 // ---- 3.6 锁失败透传 ----
 
 func TestRunLockFailureBlocks(t *testing.T) {

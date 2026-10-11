@@ -144,7 +144,22 @@ func (d *logDirectory) open(name string, flags int) (*os.File, error) {
 	perm := os.O_RDONLY
 	switch {
 	case flags&logAppend != 0:
-		perm = os.O_WRONLY | os.O_APPEND
+		// ⛔⛔ 必须是 **O_RDWR**，不能写 O_WRONLY。Go 在 Windows 上算 CreateFile 的
+		//   dwDesiredAccess 时，`O_APPEND` 会**无条件**把 GENERIC_WRITE 剥掉、换成
+		//   FILE_APPEND_DATA（见 src/syscall/syscall_windows.go 的 Open）：
+		//     O_WRONLY|O_APPEND → FILE_APPEND_DATA（既无 GENERIC_READ 也无 GENERIC_WRITE）
+		//     O_RDWR  |O_APPEND → GENERIC_READ | FILE_APPEND_DATA
+		//   而 `LockFileEx` **严格要求**句柄带 GENERIC_READ 或 GENERIC_WRITE ⇒ 用
+		//   O_WRONLY 时加锁必然 ERROR_ACCESS_DENIED，被 writer.go 统一报成
+		//   「log file is managed by another process」—— **看着像"锁被别的进程占了"，
+		//   实际是"句柄权限不够、根本加不了锁"**，而且每次启动必现：后端整个死在
+		//   phase=logging，stderr 只有一行 startup.failed JSON，毫无线索
+		//   （2026-10-10 实测踩到，见 writer_test.go 全红）。
+		//   ⚠️ 顺带说明「安全检查过了、加锁却失败」为何不矛盾：
+		//     `GetFileInformationByHandle`（safeHandle）文档上同样要求 FILE_READ_ATTRIBUTES，
+		//     但实践中对 FILE_APPEND_DATA 句柄并不报错，而 LockFileEx 是硬校验。
+		//   改成 O_RDWR 后**写入语义不变** —— 原子追加仍由 FILE_APPEND_DATA 保证。
+		perm = os.O_RDWR | os.O_APPEND
 		if flags&logCreate != 0 {
 			perm |= os.O_CREATE
 		}

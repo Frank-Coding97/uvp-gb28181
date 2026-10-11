@@ -80,7 +80,10 @@ func openFileWriter(o writerOptions) (w *fileWriter, err error) {
 		return nil, err
 	}
 	if err = lockLogFile(w.lock); err != nil {
-		return nil, errors.New("log file is managed by another process")
+		// ⛔ 把底层 err 带上。只报"被另一个进程占用"会把真正的原因（句柄权限不足、
+		//   文件系统不支持独占锁…）全部掩盖掉 —— Windows 上就因此绕了远路：
+		//   O_WRONLY 打开的句柄加不了锁，报出来的却是"别的进程占着"。
+		return nil, fmt.Errorf("log file is managed by another process: %w", err)
 	}
 	if err = w.recoverTemps(); err != nil {
 		return nil, err

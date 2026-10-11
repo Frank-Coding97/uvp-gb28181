@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.com/uvp-gb28181/app/gb28181/uac"
 )
 
@@ -122,16 +123,20 @@ type Options struct {
 
 type QueryRequest struct {
 	OwnerUserID uint
-	ChannelID   uint
-	DeviceCode  string
-	ChannelCode string
-	Destination string
-	Transport   string
-	StartTime   time.Time
-	EndTime     time.Time
-	Type        manscdp.RecordInfoQueryType
-	Secrecy     int
-	RecorderID  string
+	// OwnerClientID is an OpenAPI machine-client identity. It is a separate
+	// principal from OwnerUserID and must never be populated with a user ID.
+	OwnerClientID   int64
+	ChannelID       uint
+	DeviceCode      string
+	ChannelCode     string
+	Destination     string
+	Transport       string
+	ProtocolVersion protocol.Version
+	StartTime       time.Time
+	EndTime         time.Time
+	Type            manscdp.RecordInfoQueryType
+	Secrecy         int
+	RecorderID      string
 }
 
 type Record struct {

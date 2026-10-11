@@ -14,6 +14,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/gookit/validate v1.5.5
 	github.com/icholy/digest v1.1.0
+	github.com/lionsoul2014/ip2region/binding/golang v0.0.0-20261008081544-02f04aa559ac
 	github.com/mojocn/base64Captcha v1.3.8
 	github.com/mssola/user_agent v0.6.0
 	github.com/natefinch/lumberjack v2.0.0+incompatible
@@ -65,6 +66,7 @@ require (
 	github.com/gookit/goutil v0.6.18 // indirect
 	github.com/hashicorp/go-version v1.7.0 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
+	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/pascaldekloe/name v1.0.1 // indirect
 	github.com/paulmach/orb v0.11.1 // indirect
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect

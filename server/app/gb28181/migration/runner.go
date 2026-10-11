@@ -99,6 +99,19 @@ var baselineColumnMigrations = map[string]baselineColumnRequirement{
 	"2026-10-09-meta-node-receive-mode-sqlite.sql":     {table: "meta_node", column: "rtp_receive_mode"},
 }
 
+// baselineTableMigrations lists additive table migrations that must still run
+// when an older full baseline has an empty migration ledger.
+var baselineTableMigrations = map[string]string{
+	"2026-10-11-openapi-device-capture-session.sql":               "sys_openapi_device_capture_session",
+	"2026-10-11-openapi-device-capture-session-postgresql.sql":    "sys_openapi_device_capture_session",
+	"2026-10-11-openapi-device-capture-session-sqlserver.sql":     "sys_openapi_device_capture_session",
+	"2026-10-11-openapi-device-capture-session-sqlite.sql":        "sys_openapi_device_capture_session",
+	"2026-10-11-openapi-device-event-subscription.sql":            "sys_openapi_device_subscription",
+	"2026-10-11-openapi-device-event-subscription-postgresql.sql": "sys_openapi_device_subscription",
+	"2026-10-11-openapi-device-event-subscription-sqlserver.sql":  "sys_openapi_device_subscription",
+	"2026-10-11-openapi-device-event-subscription-sqlite.sql":     "sys_openapi_device_subscription",
+}
+
 // needsBaselineColumnUpgrade applies only to additive column migrations whose
 // presence can be checked safely. All other embedded migrations keep the
 // normal empty-ledger baseline behavior.
@@ -122,6 +135,28 @@ func needsBaselineColumnUpgrade(name string, probe schemaProbe) (bool, error) {
 		return false, fmt.Errorf("探测 %s.%s 失败: %w", requirement.table, requirement.column, err)
 	}
 	return !exists, nil
+}
+
+func needsBaselineTableUpgrade(name string, probe schemaProbe) (bool, error) {
+	table, ok := baselineTableMigrations[name]
+	if !ok {
+		return false, nil
+	}
+	if probe.hasTable == nil {
+		return false, fmt.Errorf("表迁移缺少表探测器")
+	}
+	exists, err := probe.hasTable(table)
+	if err != nil {
+		return false, fmt.Errorf("探测 %s 表失败: %w", table, err)
+	}
+	return !exists, nil
+}
+
+func needsBaselineUpgrade(name string, probe schemaProbe) (bool, error) {
+	if _, ok := baselineColumnMigrations[name]; ok {
+		return needsBaselineColumnUpgrade(name, probe)
+	}
+	return needsBaselineTableUpgrade(name, probe)
 }
 
 // migrationExecutor 执行单条迁移 SQL。
@@ -274,13 +309,13 @@ func run(store versionStore, lock locker, src migrationSource, exec migrationExe
 			}
 		}
 
-		// New full baselines already contain all additive columns, but older
-		// snapshots have an empty ledger too. Probe only migrations with an
-		// explicit column requirement before baseline-marking so an upgrade cannot
-		// silently skip those columns.
+		// New full baselines already contain the additive objects, but older
+		// snapshots have an empty ledger too. Probe explicitly mapped column and
+		// table migrations before baseline-marking so an upgrade cannot silently
+		// skip them.
 		pending := make(map[string]bool)
 		for _, name := range names {
-			needed, err := needsBaselineColumnUpgrade(name, probe)
+			needed, err := needsBaselineUpgrade(name, probe)
 			if err != nil {
 				return err
 			}
@@ -319,11 +354,13 @@ func run(store versionStore, lock locker, src migrationSource, exec migrationExe
 		if appliedSet[name] {
 			continue
 		}
-		if _, isColumnMigration := baselineColumnMigrations[name]; isColumnMigration {
-			// An interrupted additive migration may have added its column before
-			// the version row was written. Record it as applied instead of replaying
-			// a dialect-specific ADD COLUMN statement.
-			needed, err := needsBaselineColumnUpgrade(name, probe)
+		_, isColumnMigration := baselineColumnMigrations[name]
+		_, isTableMigration := baselineTableMigrations[name]
+		if isColumnMigration || isTableMigration {
+			// An interrupted additive migration may have created its schema object
+			// before the version row was written. Record it as applied instead of
+			// replaying a dialect-specific migration statement.
+			needed, err := needsBaselineUpgrade(name, probe)
 			if err != nil {
 				return err
 			}

@@ -78,6 +78,22 @@ func (r *GormRepo) Create(ctx context.Context, session *models.GbTalkSession, pu
 	if strings.TrimSpace(publishToken) == "" {
 		return ErrEmptyPublishToken
 	}
+	if session.OpenAPIClientID > 0 {
+		if session.OpenAPIIdempotencyKey == nil || !validOpenAPIIdempotencyKey(*session.OpenAPIIdempotencyKey) || len(session.OpenAPIRequestHash) != 64 {
+			return ErrInvalidOpenAPIIdentity
+		}
+		previous, err := r.FindByOpenAPIIdempotency(ctx, session.OpenAPIClientID, *session.OpenAPIIdempotencyKey)
+		if err != nil {
+			return err
+		}
+		if previous != nil {
+			if previous.OpenAPIRequestHash != session.OpenAPIRequestHash {
+				return ErrOpenAPIIdempotencyConflict
+			}
+			*session = *previous
+			return nil
+		}
+	}
 	row := *session
 	row.ID = 0
 	if row.Mode == "" {
@@ -98,6 +114,32 @@ func (r *GormRepo) FindBySession(ctx context.Context, sessionID string) (*models
 		return nil, nil
 	}
 	return r.findOne(ctx, "session_id = ?", sessionID)
+}
+
+func (r *GormRepo) FindByOpenAPIClient(ctx context.Context, clientID int64, sessionID string) (*models.GbTalkSession, error) {
+	if clientID <= 0 || strings.TrimSpace(sessionID) == "" {
+		return nil, nil
+	}
+	return r.findOne(ctx, "openapi_client_id = ? AND session_id = ?", clientID, sessionID)
+}
+
+func (r *GormRepo) FindByOpenAPIIdempotency(ctx context.Context, clientID int64, key string) (*models.GbTalkSession, error) {
+	key = strings.TrimSpace(key)
+	if clientID <= 0 || key == "" {
+		return nil, nil
+	}
+	var sessions []models.GbTalkSession
+	if err := r.db.WithContext(ctx).Where("openapi_client_id = ? AND openapi_idempotency_key = ?", clientID, key).
+		Order("id DESC").Limit(2).Find(&sessions).Error; err != nil {
+		return nil, err
+	}
+	if len(sessions) > 1 {
+		return nil, ErrOpenAPIIdempotencyConflict
+	}
+	if len(sessions) == 0 {
+		return nil, nil
+	}
+	return &sessions[0], nil
 }
 
 func (r *GormRepo) FindBySource(ctx context.Context, nodeID int64, app, sourceStream string) (*models.GbTalkSession, error) {

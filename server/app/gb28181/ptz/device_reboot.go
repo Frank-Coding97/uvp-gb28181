@@ -237,7 +237,27 @@ func (s *Service) executeDeviceRebootDetailed(ctx context.Context, target Device
 
 func deviceRebootIdempotencyKey(deviceID uint, rawKey string) string {
 	digest := sha256.Sum256([]byte(strconv.FormatUint(uint64(deviceID), 10) + "\x00" + rawKey))
-	return deviceRebootDerivedV1 + hex.EncodeToString(digest[:])
+	return deviceRebootNamespacePrefix(rawKey) + hex.EncodeToString(digest[:])
+}
+
+// DeviceRebootClientOperationPrefix returns the opaque durable-key prefix
+// used to authorize OpenAPI operation reads for one client. The idempotency
+// value after this prefix remains a device-bound SHA-256 digest.
+func DeviceRebootClientOperationPrefix(clientID uint64) string {
+	return deviceRebootDerivedV1 + "openapi-client:" + strconv.FormatUint(clientID, 10) + ":"
+}
+
+func deviceRebootNamespacePrefix(rawKey string) string {
+	const namespace = "openapi-client:"
+	if !strings.HasPrefix(rawKey, namespace) {
+		return deviceRebootDerivedV1
+	}
+	clientIDValue, _, found := strings.Cut(strings.TrimPrefix(rawKey, namespace), ":")
+	clientID, err := strconv.ParseUint(clientIDValue, 10, 64)
+	if !found || err != nil || clientID == 0 {
+		return deviceRebootDerivedV1
+	}
+	return DeviceRebootClientOperationPrefix(clientID)
 }
 
 func lockDeviceRebootRow(tx *gorm.DB, target DeviceRebootTarget) (gbmodels.GbDevice, error) {

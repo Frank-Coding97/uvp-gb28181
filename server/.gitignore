@@ -44,6 +44,9 @@ resource/logs/*.log
 
 # resource 目录配置 - 只提交 database 文件夹下的内容，public 文件夹本身不提交
 /resource/*
+# ip2region 数据库随发行包发布；源码部署缺失时自动降级，不影响启动。
+!/resource/ipdb/
+!/resource/ipdb/ip2region_v4.xdb
 
 # ⛔ 种子资源（绿色包要随包交付的静态文件，如 admin 默认头像）**必须入库**。
 #   /resource/* 把整个 resource 目录排除了，而 resource/public 里的东西

@@ -198,4 +198,13 @@ func TestExecuteDeviceRebootRejectsRetiredService(t *testing.T) {
 	require.Equal(t, ErrorCodeHomePositionUnavailable, operationErr.Code)
 }
 
+func TestDeviceRebootDerivedKeyRetainsOpenAPIClientReadNamespace(t *testing.T) {
+	rawKey := "openapi-client:5:opaque-request-digest"
+	first := deviceRebootIdempotencyKey(42, rawKey)
+	require.True(t, strings.HasPrefix(first, DeviceRebootClientOperationPrefix(5)))
+	require.NotContains(t, first, "opaque-request-digest")
+	require.NotEqual(t, first, deviceRebootIdempotencyKey(42, "openapi-client:6:opaque-request-digest"))
+	require.NotEqual(t, first, deviceRebootIdempotencyKey(43, rawKey))
+}
+
 const manscdpDeviceControl = "DeviceControl"

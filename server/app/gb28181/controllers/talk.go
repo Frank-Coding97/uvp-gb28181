@@ -1,9 +1,7 @@
 package controllers
 
 import (
-	"bytes"
 	"context"
-	"crypto/tls"
 	"errors"
 	"io"
 	"net/http"
@@ -26,13 +24,6 @@ import (
 )
 
 const (
-	// 前端上行 SDP 通常几 KB,64KB 足够,同时挡住把转发端当上传口用。
-	maxTalkUplinkOfferBytes = 64 << 10
-	// 上游回答 SDP 不应比 offer 大一个量级,给同一个上限即可。
-	maxTalkUplinkAnswerBytes = 64 << 10
-	// 单次转发到媒体节点的超时。WHIP 的 POST 要等 ICE 协商完成,给足 10s。
-	talkUplinkTimeout = 10 * time.Second
-
 	// 语音对讲端点的路由模式串(相对 device-mgmt 分组),routes 与这里共用同一常量。
 	// 公开地址必须从平台自己的路由推导:t.FullPath() 裁掉这两段就是 API 分组前缀,
 	// 于是「注册在哪」与「对外怎么拼地址」不可能错配。
@@ -79,16 +70,7 @@ func NewTalkController(service TalkSessionService) *TalkController {
 // 而浏览器侧看到的是平台自己的证书,不再直连节点,这正是反代要解决的问题。
 // 连接池刻意开小:上行转发只在会话建立时发生一次,不承载持续流量。
 func newTalkUplinkClient() *http.Client {
-	return &http.Client{
-		Timeout: talkUplinkTimeout,
-		Transport: &http.Transport{
-			// #nosec G402 -- 内网媒体节点自签证书,链路由部署环境保证。
-			TLSClientConfig:   &tls.Config{InsecureSkipVerify: true},
-			ForceAttemptHTTP2: false,
-			MaxIdleConns:      8,
-			IdleConnTimeout:   90 * time.Second,
-		},
-	}
+	return talk.NewUplinkProxyClient()
 }
 
 // talkPublicOrigin 返回平台自己的对外基址(scheme + host + 分组前缀)。
@@ -222,41 +204,41 @@ func (c *TalkController) Uplink(ctx *gin.Context) {
 		c.writeUplinkError(ctx, err)
 		return
 	}
-	offer, err := io.ReadAll(io.LimitReader(ctx.Request.Body, maxTalkUplinkOfferBytes+1))
+	offer, offerStatus := readUplinkOffer(ctx)
+	if offerStatus != 0 {
+		response.Fail(ctx, "发布请求无效", offerStatus)
+		return
+	}
+	answer, err := talk.ProxyUplink(ctx.Request.Context(), c.uplinkClient, target, offer)
 	if err != nil {
-		response.Fail(ctx, "读取发布请求失败", http.StatusBadRequest)
-		return
-	}
-	if len(offer) > maxTalkUplinkOfferBytes {
-		response.Fail(ctx, "发布请求过大", http.StatusRequestEntityTooLarge)
-		return
-	}
-	upstream, err := http.NewRequestWithContext(ctx.Request.Context(), http.MethodPost, target.URL, bytes.NewReader(offer))
-	if err != nil {
-		response.Fail(ctx, "语音对讲媒体服务不可用", http.StatusServiceUnavailable)
-		return
-	}
-	upstream.Header.Set("Content-Type", target.ContentType)
-	upstream.Header.Set("Accept", target.ContentType)
-
-	answer, err := c.uplinkClient.Do(upstream)
-	if err != nil {
-		response.Fail(ctx, "语音对讲媒体服务不可用", http.StatusServiceUnavailable)
-		return
-	}
-	// 上游响应体的关闭错误无法改变已经建立的 HTTP 响应；显式忽略清理错误。
-	defer func() { _ = answer.Body.Close() }()
-	body, err := io.ReadAll(io.LimitReader(answer.Body, maxTalkUplinkAnswerBytes+1))
-	if err != nil || len(body) > maxTalkUplinkAnswerBytes {
-		response.Fail(ctx, "语音对讲媒体服务响应异常", http.StatusBadGateway)
+		if errors.Is(err, talk.ErrInvalidUplinkResponse) {
+			response.Fail(ctx, "语音对讲媒体服务响应异常", http.StatusBadGateway)
+		} else {
+			response.Fail(ctx, "语音对讲媒体服务不可用", http.StatusServiceUnavailable)
+		}
 		return
 	}
 	// 只回传状态码与 SDP。上游其余响应头一律不透传,尤其不能让 Location 把
 	// 媒体节点地址带回浏览器 —— 换成平台自己的会话地址。
-	if answer.Header.Get("Location") != "" {
+	if answer.Location != "" {
 		ctx.Header("Location", talkPublicOrigin(ctx)+"/talk-sessions/"+url.PathEscape(sessionID))
 	}
-	ctx.Data(answer.StatusCode, target.ContentType, body)
+	ctx.Data(answer.StatusCode, target.ContentType, answer.Body)
+}
+
+func readUplinkOffer(ctx *gin.Context) ([]byte, int) {
+	const maxOfferBytes = 64 << 10
+	if ctx.Request.ContentLength > maxOfferBytes {
+		return nil, http.StatusRequestEntityTooLarge
+	}
+	body, err := io.ReadAll(io.LimitReader(ctx.Request.Body, maxOfferBytes+1))
+	if err != nil || len(body) == 0 {
+		return nil, http.StatusBadRequest
+	}
+	if len(body) > maxOfferBytes {
+		return nil, http.StatusRequestEntityTooLarge
+	}
+	return body, 0
 }
 
 func (c *TalkController) ready(ctx *gin.Context) bool {

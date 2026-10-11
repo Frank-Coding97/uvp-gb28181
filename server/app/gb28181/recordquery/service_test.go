@@ -1,6 +1,7 @@
 package recordquery
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.com/uvp-gb28181/app/gb28181/uac"
 )
 
@@ -99,6 +101,57 @@ func TestServiceRegistersBeforeSendAndAggregatesOutOfOrder(t *testing.T) {
 		require.NotEmpty(t, item.RecordKey)
 	}
 	require.Equal(t, 0, service.Active())
+}
+
+func TestServiceUsesNegotiatedRecordInfoProfile(t *testing.T) {
+	for _, test := range []struct {
+		version protocol.Version
+		charset string
+	}{{protocol.Version2016, "GB2312"}, {protocol.Version2022, "GB18030"}} {
+		t.Run(string(test.version), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var sent []byte
+			service := newTestService(t, senderFunc(func(_ context.Context, _, _, _ string, body []byte) (uac.TrackedMessageResult, error) {
+				sent = append([]byte(nil), body...)
+				cancel()
+				return uac.TrackedMessageResult{StatusCode: 200}, nil
+			}), nil)
+			request := queryFixture()
+			request.ProtocolVersion = test.version
+			_, err := service.Query(ctx, request)
+			require.ErrorIs(t, err, context.Canceled)
+			require.True(t, bytes.HasPrefix(sent, []byte(`<?xml version="1.0" encoding="`+test.charset+`"?>`)))
+		})
+	}
+}
+
+func TestServiceRetainsPlaybackSnapshotsForEveryAcceptedRecord(t *testing.T) {
+	const recordCount = 520
+	var service *Service
+	sender := senderFunc(func(_ context.Context, deviceCode, _, _ string, body []byte) (uac.TrackedMessageResult, error) {
+		sn, channelCode := sentQuery(t, body)
+		items := make([]manscdp.RecordInfoItem, 0, recordCount)
+		for index := 0; index < recordCount; index++ {
+			start := time.Date(2026, 8, 2, 8, 0, 0, 0, time.UTC)
+			items = append(items, manscdp.RecordInfoItem{
+				DeviceID: channelCode, Name: "record-" + strconv.Itoa(index),
+				StartTime: start.Format("2006-01-02T15:04:05"), EndTime: start.Add(time.Minute).Format("2006-01-02T15:04:05"),
+			})
+		}
+		require.True(t, service.Accept(deviceCode, &manscdp.RecordInfoResponse{SN: sn, DeviceID: channelCode, SumNum: recordCount, Items: items}))
+		return uac.TrackedMessageResult{StatusCode: 200}, nil
+	})
+	service = newTestService(t, sender, func(options *Options) { options.MaxRecordsPerQuery = recordCount })
+	request := queryFixture()
+	request.OwnerUserID, request.OwnerClientID = 0, 41
+	result, err := service.Query(context.Background(), request)
+	require.NoError(t, err)
+	require.Len(t, result.Records, recordCount)
+	_, err = service.Snapshots().Resolve(ResolveRequest{
+		RecordKey: result.Records[0].RecordKey, OwnerClientID: 41, ChannelID: request.ChannelID, PlayFrom: request.StartTime,
+	})
+	require.NoError(t, err, "the earliest page must retain a valid playback snapshot")
 }
 
 func TestServiceCorrelationDeviceValidationDedupeAndSumDrift(t *testing.T) {

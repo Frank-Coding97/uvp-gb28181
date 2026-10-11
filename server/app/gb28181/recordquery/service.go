@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 )
 
 type Service struct {
@@ -43,6 +44,10 @@ func NewService(sender TrackedSender, options Options) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Every accepted record can become an OpenAPI playback reference. Keep the
+	// snapshot cap aligned with the aggregation cap so early pages do not lose
+	// their playable record keys when one response contains many records.
+	snapshots.maxSnapshots = options.MaxRecordsPerQuery
 	lifecycle, cancel := context.WithCancel(context.Background())
 	return &Service{sender: sender, options: options, registry: registry, snapshots: snapshots, lifecycle: lifecycle, cancel: cancel}, nil
 }
@@ -72,8 +77,14 @@ func (s *Service) Query(ctx context.Context, request QueryRequest) (QueryResult,
 		return result, err
 	}
 	defer s.registry.remove(request.DeviceCode, sn)
-	if err := s.snapshots.BeginQuery(request.OwnerUserID, request.ChannelID, queryID); err != nil {
-		return result, err
+	var beginErr error
+	if request.OwnerClientID > 0 {
+		beginErr = s.snapshots.BeginQueryForClient(request.OwnerClientID, request.ChannelID, queryID)
+	} else {
+		beginErr = s.snapshots.BeginQuery(request.OwnerUserID, request.ChannelID, queryID)
+	}
+	if beginErr != nil {
+		return result, beginErr
 	}
 
 	return s.sendAndWait(ctx, result, request, entry)
@@ -81,7 +92,11 @@ func (s *Service) Query(ctx context.Context, request QueryRequest) (QueryResult,
 
 // sendAndWait 发送录像查询并等待聚合收敛(发送/等待两阶段)
 func (s *Service) sendAndWait(ctx context.Context, result QueryResult, request QueryRequest, entry *queryEntry) (QueryResult, error) {
-	body, err := manscdp.BuildRecordInfoQuery(manscdp.RecordInfoQuery{
+	version := request.ProtocolVersion
+	if version == "" {
+		version = protocol.Version2022
+	}
+	body, err := manscdp.BuildRecordInfoQueryWithProfile(protocol.ProfileForVersion(version), manscdp.RecordInfoQuery{
 		SN: result.SN, DeviceID: request.ChannelCode, StartTime: request.StartTime, EndTime: request.EndTime,
 		Type: request.Type, Secrecy: request.Secrecy, RecorderID: request.RecorderID,
 	})
@@ -206,6 +221,10 @@ func (s *Service) Snapshots() *ResultSnapshotStore {
 	return s.snapshots
 }
 
+func (s *Service) IsClientQueryCurrent(ownerClientID int64, channelID uint, queryID string) bool {
+	return s != nil && s.snapshots != nil && s.snapshots.IsCurrentClientQuery(ownerClientID, channelID, queryID)
+}
+
 func (s *Service) Close() {
 	if s == nil {
 		return
@@ -249,7 +268,7 @@ func (s *Service) finish(result QueryResult, request QueryRequest, snapshot entr
 			continue
 		}
 		issued, issueErr := s.snapshots.Issue(SnapshotInput{
-			OwnerUserID: request.OwnerUserID, ChannelID: request.ChannelID,
+			OwnerUserID: request.OwnerUserID, OwnerClientID: request.OwnerClientID, ChannelID: request.ChannelID,
 			DeviceCode: request.DeviceCode, ChannelCode: request.ChannelCode, QueryID: result.QueryID,
 			SegmentStart: start, SegmentEnd: end, Record: item,
 		})
@@ -280,9 +299,12 @@ func (s *Service) nextSequence() int {
 }
 
 func validateQueryRequest(request QueryRequest) error {
-	if request.OwnerUserID == 0 || request.ChannelID == 0 || normalizeIdentity(request.DeviceCode) == "" ||
+	if (request.OwnerUserID > 0) == (request.OwnerClientID > 0) || request.ChannelID == 0 || normalizeIdentity(request.DeviceCode) == "" ||
 		normalizeIdentity(request.ChannelCode) == "" || normalizeIdentity(request.Destination) == "" ||
 		request.StartTime.IsZero() || !request.EndTime.After(request.StartTime) {
+		return queryError(ErrorCodeInvalidArgument, ErrInvalidArgument)
+	}
+	if request.ProtocolVersion != "" && request.ProtocolVersion != protocol.Version2016 && request.ProtocolVersion != protocol.Version2022 {
 		return queryError(ErrorCodeInvalidArgument, ErrInvalidArgument)
 	}
 	requestType := manscdp.RecordInfoQueryType(strings.ToLower(strings.TrimSpace(string(request.Type))))

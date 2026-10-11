@@ -16,6 +16,7 @@ import (
 	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
 	"uvplatform.com/uvp-gb28181/app/gb28181/handler"
 	"uvplatform.com/uvp-gb28181/app/gb28181/metrics"
+	"uvplatform.com/uvp-gb28181/app/gb28181/netif"
 	gbsecurity "uvplatform.com/uvp-gb28181/app/gb28181/security"
 	gbtrace "uvplatform.com/uvp-gb28181/app/gb28181/trace"
 	"uvplatform.com/uvp-gb28181/app/gb28181/uac"
@@ -748,21 +749,12 @@ func firstLocalIPv4() string {
 	return ""
 }
 
-// isVirtualInterfaceName 与 `setup.isVirtualInterface`(setup/network.go) **同口径**:
-// VPN / 容器 / 虚拟机网卡上的地址设备路由不到,不能被选成 Contact Host。
-// 两处规则要一起改,别只改一边。
+// isVirtualInterfaceName 判定网卡是否虚拟/容器/VPN 类，用于挑选 SIP Contact Host。
+// ⛔ 实现只有一处：app/gb28181/netif.IsVirtualName（setup/network.go 也委托到它）。
+// VPN / 容器 / 虚拟机网卡上的地址设备路由不到，不能被选成 Contact Host。
+// 两处曾各写一份清单靠注释同步，现在统一委托，别再在本地另加前缀表。
 func isVirtualInterfaceName(name string) bool {
-	lowered := strings.ToLower(strings.TrimSpace(name))
-	for _, prefix := range []string{
-		"br-", "bridge", "cali", "cni", "docker", "flannel", "kube",
-		"podman", "tap", "tailscale", "tun", "utun", "vboxnet", "veth",
-		"virbr", "vmnet", "wg",
-	} {
-		if strings.HasPrefix(lowered, prefix) {
-			return true
-		}
-	}
-	return false
+	return netif.IsVirtualName(name)
 }
 
 func (s *Server) ByeBroadcast(ctx context.Context, callID string) error {

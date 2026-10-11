@@ -550,6 +550,16 @@ func (s *Service) GetForOwner(sessionID, ownerID string) (*Session, bool) {
 	return session, ok
 }
 
+// PeekForOwner returns an owned session without refreshing its idle lease.
+// Callers that need to revalidate an external resource binding must peek first;
+// only a session that passes that check should be read through GetForOwner.
+func (s *Service) PeekForOwner(sessionID, ownerID string) (*Session, bool) {
+	if s == nil || s.registry == nil {
+		return nil, false
+	}
+	return s.registry.GetForOwner(sessionID, ownerID)
+}
+
 func (s *Service) StopForOwner(ctx context.Context, sessionID, ownerID, reason string) error {
 	if s == nil || s.registry == nil {
 		return ErrPlaybackNotFound

@@ -56,9 +56,14 @@ import (
 	gbzlmsvc "uvplatform.com/uvp-gb28181/app/gb28181/zlm/service"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 	"uvplatform.com/uvp-gb28181/app/logcleanup"
+	openapiadapters "uvplatform.com/uvp-gb28181/app/openapi/adapters"
+	openapideviceconfig "uvplatform.com/uvp-gb28181/app/openapi/deviceconfig"
+	openapideviceupgrade "uvplatform.com/uvp-gb28181/app/openapi/deviceupgrade"
 	openapiplay "uvplatform.com/uvp-gb28181/app/openapi/play"
 	"uvplatform.com/uvp-gb28181/app/openapi/processauthority"
 	openapiptz "uvplatform.com/uvp-gb28181/app/openapi/ptz"
+	openapirecording "uvplatform.com/uvp-gb28181/app/openapi/recording"
+	openapivoice "uvplatform.com/uvp-gb28181/app/openapi/voice"
 	"uvplatform.com/uvp-gb28181/app/scheduler/executors"
 	"uvplatform.com/uvp-gb28181/app/utils/asyncgroup"
 	"uvplatform.com/uvp-gb28181/app/utils/cachehelper"
@@ -487,12 +492,16 @@ func startControlPlane(cfg gbconfig.Config, authority *processauthority.Authorit
 		// gb_sip_config 是引导保存的持久化来源；启动时把平台级媒体地址
 		// 注入节点运行时。不存在配置时继续使用 config.yml defaults。
 		if row, err := gbsetup.NewSIPConfigRepository(app.DB()).Get(context.Background()); err == nil && row != nil {
-			tuning.HookIP = row.HookIP
-			tuning.StreamIP = platformStreamHost(row.StreamIP, cfg.ZLM.EffectivePlaybackHost())
+			// 留空的媒体地址在这里落成实际地址（局域网跟随选中的网卡；公网的
+			// SDP/Stream 跟随公网接入 IP、Hook 走监听网卡）。
+			// ⛔ 库里存的仍是空值 —— 换网卡后下次装配自动跟着变，不需要用户回去重填。
+			mediaPolicy := gbsetup.SystemMediaAddressPolicy(row.DeploymentMode, row.ListenIP, row.AdvertiseIP)
+			tuning.HookIP = firstNonEmpty(row.HookIP, mediaPolicy.HookIP)
+			tuning.StreamIP = firstNonEmpty(row.StreamIP, mediaPolicy.StreamIP, cfg.ZLM.EffectivePlaybackHost())
 			zlmRegistry.SetPlatformPlaybackHost(tuning.StreamIP)
 			// SDP 地址是设备回推RTP 的目标,与播放地址是两个独立旋钮
 			// (NAT / 端口映射场景下两者常常不同)。
-			zlmRegistry.SetPlatformSDPIP(strings.TrimSpace(row.SDPIP))
+			zlmRegistry.SetPlatformSDPIP(firstNonEmpty(row.SDPIP, mediaPolicy.SDPIP))
 		} else if err != nil {
 			app.ZapLog.Debug("读取平台媒体网络默认值失败,沿用 YAML 配置", zap.String("event", "zlm.platform_media_defaults_load_failed"), zap.Error(err))
 		}
@@ -704,10 +713,12 @@ func loadSIPConfigFromDB(base gbconfig.Config) (gbconfig.Config, bool, error) {
 	// Deprecated single-node playback paths still read cfg.ZLM.PlaybackHost /
 	// SDPIP; carry the persisted platform defaults into that runtime too.
 	// Node-level PlaybackHost / SDPIP remain authoritative in the registry path.
-	if streamIP := strings.TrimSpace(row.StreamIP); streamIP != "" {
+	// 留空时同样落到按网卡推断出的地址，与上面 registry 那条路径保持一致。
+	mediaPolicy := gbsetup.SystemMediaAddressPolicy(row.DeploymentMode, row.ListenIP, row.AdvertiseIP)
+	if streamIP := firstNonEmpty(row.StreamIP, mediaPolicy.StreamIP); streamIP != "" {
 		base.ZLM.PlaybackHost = streamIP
 	}
-	if sdpIP := strings.TrimSpace(row.SDPIP); sdpIP != "" {
+	if sdpIP := firstNonEmpty(row.SDPIP, mediaPolicy.SDPIP); sdpIP != "" {
 		base.ZLM.SDPIP = sdpIP
 	}
 	if len(base.SIP.Transport) == 0 {
@@ -716,14 +727,18 @@ func loadSIPConfigFromDB(base gbconfig.Config) (gbconfig.Config, bool, error) {
 	return base, true, nil
 }
 
-// platformStreamHost keeps the existing YAML playback address active when the
-// optional SIP wizard field is empty. An empty wizard value means "use the
-// existing address strategy", not "force every multi-node URL back to node.Host".
-func platformStreamHost(configured, yamlFallback string) string {
-	if host := strings.TrimSpace(configured); host != "" {
-		return host
+// firstNonEmpty 返回第一个去空格后非空的值。
+//
+// 用途：媒体地址（Hook / SDP / Stream）的运行时兜底 —— 配置里留空时依次落到
+// 「按当前网卡推断出的地址」→「YAML 里的旧地址」。留空是**正常的**编辑结果
+// （向导里选真实网卡就能不填），不是错误状态。
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
 	}
-	return strings.TrimSpace(yamlFallback)
+	return ""
 }
 
 func setupSecurityRuntime() *gbsecurity.Runtime {
@@ -1074,6 +1089,33 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 	if err := startDeviceCleanupReconciler(playSvc,
 		playauth.NewDeviceCleanupStore(deviceDB), deviceIntents); err != nil {
 		return err
+	}
+	openAPIRecordings := openapirecording.NewDispatcher(
+		openapirecording.NewGormTargetResolver(deviceDB), recordQueryService,
+		recordQueryService.Snapshots(), playbackService,
+		openapirecording.Config{
+			Location: cfg.RecordQuery.Location, MaxRangeHours: cfg.RecordQuery.MaxRangeHours,
+			DefaultProtocol: gbconfig.CurrentDefaultPlaybackProtocol(), Secure: true,
+		},
+	)
+	openAPIAdapterRegistrations := openapiadapters.NewMaintenanceAdapterRegistrations(
+		openapiadapters.NewGormMaintenanceResolver(deviceDB), newPTZService,
+		openapiadapters.NewGormMaintenanceOperationReader(deviceDB),
+	)
+	openAPIAdapterRegistrations = append(openAPIAdapterRegistrations,
+		openapiadapters.NewDeviceConfigAdapterRegistrations(openapideviceconfig.New(deviceDB, newPTZService))...)
+	openAPIAdapterRegistrations = append(openAPIAdapterRegistrations, openapideviceupgrade.NewDispatcher(deviceDB, newFirmwareUpgradeService).Registrations()...)
+	openAPIAdapterRegistrations = append(openAPIAdapterRegistrations, openapirecording.NewAdapterRegistrations(openAPIRecordings)...)
+	openAPIVoice := openapivoice.NewDispatcher(openapivoice.NewGormTargetResolver(deviceDB), talkSvc)
+	openAPIAdapterRegistrations = append(openAPIAdapterRegistrations, openapivoice.NewAdapterRegistrations(openAPIVoice)...)
+	if eventRegistrations, err := openAPIDeviceEventAdapterRegistrations(deviceDB, subscriptionService); err != nil {
+		app.ZapLog.Info("OpenAPI 设备事件能力未绑定(需要稳定的 UVP_OPENAPI_MASTER_KEY 和 SIP subscription service)",
+			zap.String("event", "openapi.device_events.unavailable"))
+	} else {
+		openAPIAdapterRegistrations = append(openAPIAdapterRegistrations, eventRegistrations...)
+	}
+	if err := BindOpenAPIOperationAdapters(openAPIAdapterRegistrations); err != nil {
+		return fmt.Errorf("绑定 OpenAPI 设备操作 adapter 失败: %w", err)
 	}
 	return nil
 }
@@ -1657,10 +1699,16 @@ func reloadZLMPlatformMediaDefaults() error {
 	if row == nil {
 		return nil
 	}
-	streamHost := platformStreamHost(row.StreamIP, gbconfig.Load().ZLM.EffectivePlaybackHost())
+	// 热重载同样要带上「留空 ⇒ 跟随网卡」的兜底，否则保存后进程内生效的地址
+	// 会和下次重启后装配出来的地址不一致（表现为「重启一次才好」）。
+	mediaPolicy := gbsetup.SystemMediaAddressPolicy(row.DeploymentMode, row.ListenIP, row.AdvertiseIP)
+	streamHost := firstNonEmpty(row.StreamIP, mediaPolicy.StreamIP, gbconfig.Load().ZLM.EffectivePlaybackHost())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return zlmNodeService.ReloadPlatformMediaDefaults(ctx, row.HookIP, row.SDPIP, streamHost)
+	return zlmNodeService.ReloadPlatformMediaDefaults(ctx,
+		firstNonEmpty(row.HookIP, mediaPolicy.HookIP),
+		firstNonEmpty(row.SDPIP, mediaPolicy.SDPIP),
+		streamHost)
 }
 
 func setupTraceController(cfg gbconfig.Config, runtime gbtrace.Runtime) {

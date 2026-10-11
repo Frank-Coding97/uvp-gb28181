@@ -18,7 +18,7 @@ const (
 )
 
 // RecordInfoQueryType is deliberately narrower than the Type values accepted
-// in responses. GB/T 28181-2022 queries only use all, manual, or alarm here.
+// in responses. The supported 2016/2022 query profile uses all, manual, or alarm.
 type RecordInfoQueryType string
 
 const (
@@ -92,17 +92,19 @@ type recordInfoQueryWire struct {
 	RecorderID string   `xml:"RecorderID,omitempty"`
 }
 
-// BuildRecordInfoQuery builds the GB/T 28181-2022 RecordInfo query body.
+// BuildRecordInfoQuery builds a GB/T 28181-2022 RecordInfo query body for
+// backward compatibility. Version-aware callers should use
+// BuildRecordInfoQueryWithProfile.
 func BuildRecordInfoQuery(query RecordInfoQuery) ([]byte, error) {
 	return BuildRecordInfoQueryWithProfile(protocol.ProfileFor(protocol.Version2022), query)
 }
 
-// BuildRecordInfoQueryWithProfile applies the shared profile codec while
-// enforcing the 2022 GB18030 wire contract used by device recording queries.
+// BuildRecordInfoQueryWithProfile applies the shared profile codec for the
+// negotiated 2016 or 2022 RecordInfo query wire contract.
 func BuildRecordInfoQueryWithProfile(profile protocol.Profile, query RecordInfoQuery) ([]byte, error) {
-	if profile.Version != protocol.Version(protocol.Version2022) ||
-		(profile.Charset != "" && profile.Charset != protocol.Charset(protocol.CharsetGB18030)) {
-		return nil, invalidRecordInfoArgument("profile", "必须使用 2022/GB18030 profile")
+	if (profile.Version != protocol.Version(protocol.Version2016) && profile.Version != protocol.Version(protocol.Version2022)) ||
+		(profile.Charset != "" && profile.Charset != protocol.ProfileForVersion(profile.Version).Charset) {
+		return nil, invalidRecordInfoArgument("profile", "必须使用匹配的 2016/GB2312 或 2022/GB18030 profile")
 	}
 	query.DeviceID = strings.TrimSpace(query.DeviceID)
 	query.RecorderID = strings.TrimSpace(query.RecorderID)

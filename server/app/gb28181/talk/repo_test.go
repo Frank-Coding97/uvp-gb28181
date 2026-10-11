@@ -61,11 +61,15 @@ func TestTalkModelIndexesMatchMigration(t *testing.T) {
 		"uk_talk_session_recv_key",
 		"uk_talk_session_ssrc_key",
 		"idx_talk_session_state_expires",
+		"idx_talk_session_openapi_idempotency",
 	} {
 		require.True(t, db.Migrator().HasIndex(&models.GbTalkSession{}, index), index)
 	}
 	require.True(t, db.Migrator().HasColumn(&models.GbTalkSession{}, "publish_token_hash"))
 	require.True(t, db.Migrator().HasColumn(&models.GbTalkSession{}, "mode"))
+	require.True(t, db.Migrator().HasColumn(&models.GbTalkSession{}, "openapi_client_id"))
+	require.True(t, db.Migrator().HasColumn(&models.GbTalkSession{}, "openapi_idempotency_key"))
+	require.True(t, db.Migrator().HasColumn(&models.GbTalkSession{}, "openapi_request_hash"))
 	require.False(t, db.Migrator().HasColumn(&models.GbTalkSession{}, "publish_token"))
 }
 

@@ -452,6 +452,7 @@ func stopSIPDependenciesSnapshot(ctx context.Context, r sipShutdownSnapshot) err
 	}
 	// Stop new transfers before detaching generation dependencies.
 	gbroutes.SetDeviceTransferBarrier(nil)
+	ClearOpenAPIOperationAdapters()
 	var stopErr error
 	clearZLMManagementController()
 	if r.playback != nil {

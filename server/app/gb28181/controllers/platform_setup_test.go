@@ -31,9 +31,11 @@ func TestPlatformController_UsesPersistedAdvertiseAddress(t *testing.T) {
 	t.Cleanup(func() { globalapp.AppVersion = previousVersion })
 	db := newSetupControllerDB(t)
 	password := "Sec12345Aa!!"
+	// 监听地址是 0.0.0.0（推断不出唯一地址）⇒ 三个媒体地址必须手填。
 	_, err := gbsetup.NewSIPConfigService(db).Save(t.Context(), gbsetup.SaveSIPConfigRequest{
 		DeploymentMode: gbsetup.DeploymentLAN, ListenIP: "0.0.0.0", AdvertiseIP: "192.168.1.10",
-		SDPIP: "192.168.1.10", Port: 5061, Domain: "3402000000", ServerID: "34020000002000000001", Password: &password,
+		HookIP: "192.168.1.10", SDPIP: "192.168.1.10", StreamIP: "192.168.1.10",
+		Port: 5061, Domain: "3402000000", ServerID: "34020000002000000001", Password: &password,
 	})
 	require.NoError(t, err)
 	runtime := gbsetup.NewRuntimeStatus()

@@ -148,6 +148,9 @@ func (r *Registry) Create(ctx context.Context, request CreateRequest) (CreateRes
 	if request.Mode != ModePlayback && request.Mode != ModeDownload {
 		return CreateResult{}, ErrInvalidSession
 	}
+	if request.PlayFrom.IsZero() {
+		request.PlayFrom = request.SegmentStart
+	}
 	now := request.Now
 	if now.IsZero() {
 		now = r.now()
@@ -163,7 +166,10 @@ func (r *Registry) Create(ctx context.Context, request CreateRequest) (CreateRes
 				record.mu.Lock()
 				session := record.session.clone()
 				record.mu.Unlock()
-				if session.Authorization != request.Authorization || session.DeviceID != request.DeviceID || session.Mode != request.Mode {
+				if session.Authorization != request.Authorization || session.DeviceID != request.DeviceID || session.ChannelID != request.ChannelID ||
+					session.Mode != request.Mode || session.RecordKey != request.RecordKey ||
+					!session.SegmentStart.Equal(request.SegmentStart) || !session.SegmentEnd.Equal(request.SegmentEnd) || !session.PlayFrom.Equal(request.PlayFrom) ||
+					session.DownloadSpeed != request.DownloadSpeed {
 					return CreateResult{}, ErrPlaybackBusy
 				}
 				return CreateResult{Session: session, Existing: true}, nil
