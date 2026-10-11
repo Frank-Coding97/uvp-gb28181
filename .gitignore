@@ -83,3 +83,8 @@ test-long-text.json
 # Local credential keys
 **/secrets/cascade.key
 **/secrets/.cascade-key-*
+
+# 出包脚本的"预置源码包"目录（UVP_SRCDIR 指向它，容器里挂成 /src/.uvp-src）。
+# 装的是 nginx/openssl/pcre2/zlib/redis 的官方 tar 包，合计 ~25MB ——
+# 它们只是网络不稳时的离线兜底，不该进仓库（每次出包都能重新下）。
+.uvp-src/

@@ -4,7 +4,7 @@
 # 出 ARM64（aarch64）包：UVP_PKG_ARCH=arm64 bash deploy/standalone/build-standalone.sh
 #   ⛔ 前置的三个原生二进制（ZLM / nginx / redis）也必须是 aarch64 的，
 #     脚本会在出包前逐个用 `file` 断言（见文件后半的静态校验段）。
-#     构建它们的容器见本目录下的 arm64/（CentOS 7 AltArch + glibc 2.17 构建镜像）。
+#     构建它们的容器见本目录下的 arm64/（openEuler 20.03 LTS 底座，自带 gcc 7.3）。
 #
 # 产出一个 tar.gz：解压后执行 ./uvp-gb28181-ctl.sh start 即可用，
 # 不需要 Docker / nginx / MySQL / Redis（Redis 与 SQLite 都自带）。
@@ -18,7 +18,7 @@
 #   deploy/standalone/build-standalone.sh [--skip-frontend] [--out DIR]
 #
 # 前置：
-#   · server/bin/uvp-server            —— linux/amd64 静态二进制
+#   · server/bin/uvp-server            —— ${PKG_OS}/${PKG_ARCH} 静态二进制（由本脚本交叉编译产出）
 #   · deploy/standalone/bin/redis-server、redis-cli
 #   · web/dist                          —— 前端产物（--skip-frontend 时复用）
 #   · server/resource/database/sqlitebaseline/baseline.sql —— SQLite 建库脚本（已生成）
@@ -225,6 +225,16 @@ else
   ) || fail "后端构建失败（见上）。⚠️ 不要用旧的 bin/uvp-server 顶替——那就是本周反复踩的坑。"
   log "  后端二进制: $(du -h bin/uvp-server 2>/dev/null | cut -f1 || echo '?')"
 
+  # ⛔⛔ `--skip-frontend` 必须真的跳过前端构建。
+  #   原实现只在后面的"前端产物存在性检查"（见 `if [ "$SKIP_FRONTEND" -eq 0 ]`）
+  #   用了这个开关，**构建这一段根本没看它** ⇒ 传了 --skip-frontend 照样 `rm -rf dist`
+  #   再 vite build 一遍，白等几分钟（2026-10-11 出 arm64 包时实测踩到，
+  #   而且当时 dest 删除被安全护栏拦住，前端产物被删掉一半才失败，很费解）。
+  # ⛔ 这里刻意**不重排块内缩进**：这个块有 40 行、含 SIP 端口注入的读回断言，
+  #   为了对齐缩进动大段代码得不偿失，bash 也不在乎。
+  if [ "$SKIP_FRONTEND" -eq 1 ]; then
+  log "跳过前端构建（--skip-frontend）：复用已有 $WEB_DIR/dist"
+  else
   log "构建前端产物（SIP 默认端口 ${SIP_PORT} 构建期注入）"
   (
     cd "$WEB_DIR" || exit 1
@@ -263,6 +273,7 @@ else
     #   才在最后一行日志炸掉，看起来像"前端构建失败"，其实构建是好的）。
     log "  已注入 SIP 默认端口 ${SIP_PORT}（产物内读回校验通过）"
   ) || fail "前端构建失败（见上）"
+  fi   # ← 对应上面的 `if [ "$SKIP_FRONTEND" -eq 1 ]`
 fi
 
 [ -x "$SERVER_DIR/bin/uvp-server" ] || fail "缺少后端二进制：$SERVER_DIR/bin/uvp-server"

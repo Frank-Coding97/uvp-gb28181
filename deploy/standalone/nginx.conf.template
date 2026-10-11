@@ -22,6 +22,19 @@
 #   不要手工改包内的模板。
 #==============================================================
 
+# ---------------- 工作进程身份（由 ctl.sh 渲染时填入）----------------
+# ⛔⛔ 必须显式声明，且**用户与组都要写全**。原因：
+#   源码编译的 nginx，默认 user/group 都是 nobody，运行期按**名字**解析；
+#   而 Debian 系（Ubuntu / UOS）里 nobody 用户的**主组叫 nogroup**，
+#   系统里根本没有 nobody 这个组 ⇒ 报 `getgrnam("nobody") failed`，nginx 直接起不来。
+#   症状极具误导性：ZLM / Redis / 后端全都正常，只有 nginx 挂（已实测）。
+# ⛔ 只写 `user nobody;` 也不行：nginx 在**只给一个参数**时会去查
+#   「与用户同名的组」（不是用户的主组），Debian 上照样失败（已实测）。
+# ⇒ 只能把「用户 + 其主组名」都写出来，而主组名随发行版而变
+#   （RPM 系是 nobody、Debian 系是 nogroup），所以由 uvp-gb28181-ctl.sh
+#   在渲染时用 `id -gn` 问出真实主组名填进来，**不写死、不猜**。
+@NGINX_WORKER_DIRECTIVE@
+
 worker_processes  auto;
 # ⛔ pid 写在包内而不是 /run：绿色包不写系统目录，多实例也不会互相覆盖。
 pid  @ROOT@/run/nginx.pid;
@@ -232,7 +245,10 @@ http {
         }
 
         location / {
-            return 301 https://$host$request_uri;
+            # ⛔ 必须带上 HTTPS 端口：`$host` **不含端口**，
+            #   写成 `https://$host$request_uri` 会跳到 443 端口（那儿没有服务）
+            #   ⇒ 客户从明文端口进来只会看到「打不开」，与真因完全对不上。
+            return 301 https://$host:@HTTPS_PORT@$request_uri;
         }
     }
 }

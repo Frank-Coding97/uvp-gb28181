@@ -911,6 +911,30 @@ NGINX_HTTP_PORT="${NGINX_HTTP_PORT:-51001}"
 
 # ------------------------------------------------------------ nginx ----
 
+# resolve_nginx_worker 决定 nginx 的 `user` 指令该写什么（返回「用户 组」两个名字）。
+#
+# ⛔⛔ 为什么必须显式声明、且必须把**组**也写出来：
+#   源码编译的 nginx 默认 user/group 都是 nobody，运行期按**名字**解析；
+#   而 Debian 系（Ubuntu / 统信 UOS）里 nobody 用户的**主组叫 nogroup**，
+#   系统里根本没有 nobody 这个组 ⇒ 报 `getgrnam("nobody") failed`，nginx 起不来。
+#   现场症状极具误导性：ZLM / Redis / 后端全部正常，**只有 nginx 挂**。
+# ⛔ 只写 `user nobody;` 同样不行：nginx 在只给一个参数时会去查
+#   「与用户同名的组」（不是该用户的主组），Debian 上照样失败（2026-10-11 实测）。
+# ⇒ 用 `id -gn` 问出该用户**实际的主组名**填进去，跨发行版通用：
+#     RPM 系（openEuler/麒麟）  → nobody 的主组是 nobody  ⇒ `user nobody nobody;`
+#     Debian 系（Ubuntu/UOS）   → nobody 的主组是 nogroup ⇒ `user nobody nogroup;`
+# ⛔ 不要"猜"发行版再分支 —— 同一发行版不同版本也可能不一样，问系统才是准的。
+resolve_nginx_worker() {
+  local u grp
+  for u in nobody nginx www-data daemon; do
+    grp="$(id -gn "$u" 2>/dev/null)" || continue
+    [ -n "$grp" ] || continue
+    printf '%s %s' "$u" "$grp"
+    return 0
+  done
+  return 1
+}
+
 # render_nginx_conf 从模板生成实际配置：把 @ROOT@ / @BACKEND_PORT@ / 端口
 # 替换成真实值。
 #
@@ -923,6 +947,18 @@ render_nginx_conf() {
     log "⚠️  缺少 nginx 配置模板（${NGINX_CONF_TEMPLATE}），跳过 nginx"
     return 1
   }
+
+  # ⛔ nginx 工作进程身份：见 resolve_nginx_worker 的注释（Debian 系缺 nobody 组）。
+  #   填进去的是「整行指令」，因为取值失败时要整行换成注释（不能让
+  #   `user ;` 这种半截指令进配置 —— 那会是一个与真因无关的语法错误）。
+  local worker_line worker_pair
+  if worker_pair="$(resolve_nginx_worker)"; then
+    worker_line="user ${worker_pair};"
+  else
+    worker_line="# ⚠️ 未设置 user：本机没有可用的 nginx 运行账号（试过 nobody/nginx/www-data/daemon）"
+    log "⚠️  未找到可用的 nginx 运行账号，将保留 nginx 编译默认值（若发行版缺 nobody 组会启动失败）"
+  fi
+
   # ⛔⛔ 只做「@占位符@ → 字面值」这一种替换，不要去匹配 `listenNNNssl;` 这类文本。
   #   实测踩过：模式 `listen      80;` 会把 80 误换成**后端端口**（因为它同样匹配
   #   别的行），而带空格的 `listen      443 ssl;` 又匹配不上 ⇒ 一行都没换对。
@@ -931,6 +967,7 @@ render_nginx_conf() {
       -e "s|@BACKEND_PORT@|$HTTP_PORT|g" \
       -e "s|@HTTPS_PORT@|$NGINX_HTTPS_PORT|g" \
       -e "s|@PLAIN_HTTP_PORT@|$NGINX_HTTP_PORT|g" \
+      -e "s|@NGINX_WORKER_DIRECTIVE@|$worker_line|g" \
       "$NGINX_CONF_TEMPLATE" > "$NGINX_CONF"
 
   # ⛔ 渲染后自检：模板里不该再有 @...@。有就是漏了某个占位符，
