@@ -7,8 +7,8 @@ const ArcoInputStub = defineComponent({
   inheritAttrs: false,
   props: { modelValue: { type: [String, Number], default: "" }, disabled: Boolean, placeholder: String },
   emits: ["update:modelValue", "input", "change", "pressEnter"],
-  setup(props, { attrs, emit }) {
-    return () =>
+  setup(props, { attrs, emit, slots }) {
+    return () => [
       h("input", {
         ...attrs,
         modelvalue: props.modelValue,
@@ -24,7 +24,11 @@ const ArcoInputStub = defineComponent({
         onKeydown: (event: KeyboardEvent) => {
           if (event.key === "Enter") emit("pressEnter", event);
         }
-      });
+      }),
+      // ⛔ 真实 a-input 的 #suffix 是会被渲染的(如"20/20"位数指示)。
+      //    桩丢掉它 ⇒ 后缀类断言恒为空数组,看起来像"功能没做"其实是测试基建漏了。
+      slots.suffix ? h("span", { class: "arco-input-suffix" }, slots.suffix()) : null
+    ];
   }
 });
 

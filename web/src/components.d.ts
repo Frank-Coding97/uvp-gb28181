@@ -103,6 +103,7 @@ declare module 'vue' {
     SMainTransition: typeof import('./components/s-main-transition/index.vue')['default']
     SNumberField: typeof import('./components/s-number-field/index.vue')['default']
     SPasswordField: typeof import('./components/s-password-field/index.vue')['default']
+    SPasswordRules: typeof import('./components/s-password-rules/index.vue')['default']
     SPinyinPro: typeof import('./components/s-pinyin-pro/index.vue')['default']
     SQrcodeDraw: typeof import('./components/s-qrcode-draw/index.vue')['default']
     SRecorderPcm: typeof import('./components/s-recorder-pcm/index.vue')['default']

@@ -200,7 +200,7 @@
                       placeholder="请输入密码最小长度"
                     />
                     <template #extra>
-                      <div>密码最小长度，默认6位</div>
+                      <div>密码最小长度，默认8位；密码还须同时包含大写和小写字母</div>
                     </template>
                   </a-form-item>
                 </a-col>

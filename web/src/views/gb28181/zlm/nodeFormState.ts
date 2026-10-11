@@ -1,5 +1,5 @@
 import type { CreateZLMNodeReq, UpdateZLMNodeReq, ZLMNode } from "@/api/gb28181-zlm";
-import { validateOptionalHookIp, validateOptionalStreamIp, validateRequiredSdpIp } from "../sip/mediaNetworkAddress";
+import { validateOptionalHookIp, validateOptionalSdpIp, validateOptionalStreamIp } from "../sip/mediaNetworkAddress";
 
 export interface NodeFormState {
   name: string;
@@ -69,7 +69,7 @@ export function validateNodeForm(form: NodeFormState, editing: boolean): NodeFor
   // 节点级 sdp_ip 留空时回落到平台默认，所以这里只在填了值时校验格式；
   // 一旦填了回环地址就必须拦下 —— 那会让该节点的点播永远没有画面。
   if (form.sdpIp.trim()) {
-    const sdpIpError = validateRequiredSdpIp(form.sdpIp);
+    const sdpIpError = validateOptionalSdpIp(form.sdpIp);
     if (sdpIpError) errors.sdpIp = sdpIpError;
   }
   const streamIpError = validateOptionalStreamIp(form.playbackHost);

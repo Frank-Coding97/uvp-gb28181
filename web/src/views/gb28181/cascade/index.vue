@@ -780,9 +780,14 @@ async function loadLocalSipConfig() {
         const networkResponse = await fetchSipNetworkInterfaces();
         if (networkResponse.code === 0) {
           const addresses = networkResponse.data?.items || [];
+          // 优先序与平台接入向导一致:推荐且非虚拟 > 非虚拟 > 推荐 > 任意具体地址。
+          // ⛔ "非虚拟"要比"推荐"靠前:后端靠网卡名猜,认不出某些虚拟网卡是常态。
+          const usable = (item: (typeof addresses)[number]) => !item.loopback && !item.listenOnly;
           advertiseIp =
-            addresses.find(item => item.recommended && !item.loopback && !item.listenOnly)?.ip ||
-            addresses.find(item => !item.loopback && !item.listenOnly)?.ip ||
+            addresses.find(item => usable(item) && item.recommended && !item.virtual)?.ip ||
+            addresses.find(item => usable(item) && !item.virtual)?.ip ||
+            addresses.find(item => usable(item) && item.recommended)?.ip ||
+            addresses.find(usable)?.ip ||
             "";
         }
       }

@@ -8,7 +8,7 @@ import IdentityStep from "@/views/gb28181/sip/steps/IdentityStep.vue";
 import ConfirmStep from "@/views/gb28181/sip/steps/ConfirmStep.vue";
 import { useSipSetup } from "@/views/gb28181/sip/useSipSetup";
 import { identityCanContinue, networkCanContinue } from "@/views/gb28181/sip/sipSetupRules";
-import { mediaNetworkAddressesCanContinue } from "@/views/gb28181/sip/mediaNetworkAddress";
+import { mediaAddressesCanContinue, resolveMediaAddressPolicy } from "@/views/gb28181/sip/mediaNetworkAddress";
 
 const props = withDefaults(
   defineProps<{
@@ -36,7 +36,19 @@ const canNext = computed(() => {
   if (step.value === 2)
     return (
       networkCanContinue(setup.form.deploymentMode, setup.form.listenIp, setup.form.advertiseIp) &&
-      mediaNetworkAddressesCanContinue(setup.form.hookIp, setup.form.sdpIp, setup.form.streamIp)
+      // 三个媒体地址是否必填由「当前选中的网卡」决定（虚拟网卡 / 0.0.0.0 ⇒ 必填），
+      // 判据包在 resolveMediaAddressPolicy 里，与 NetworkStep 的提示同源。
+      mediaAddressesCanContinue(
+        resolveMediaAddressPolicy({
+          deploymentMode: setup.form.deploymentMode,
+          listenIp: setup.form.listenIp,
+          advertiseIp: setup.form.advertiseIp,
+          networkItems: setup.network.value?.items
+        }),
+        setup.form.hookIp,
+        setup.form.sdpIp,
+        setup.form.streamIp
+      )
     );
   if (step.value === 3)
     return identityCanContinue(
