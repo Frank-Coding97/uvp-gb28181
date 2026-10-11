@@ -70,10 +70,15 @@ export interface OpenAPIScopeView {
 export interface OpenAPICapability {
   scope: string;
   name: string;
+  description?: string;
   method: string;
   externalPath: string;
   resourceType: string;
   risk: string;
+  protocolVersions?: string[];
+  standardRefs?: string[];
+  requiresConfirmation?: boolean;
+  idempotencyMode?: string;
   idempotencyRequired: boolean;
 }
 

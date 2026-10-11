@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+	catalogruntime "uvplatform.com/uvp-gb28181/app/openapi/catalog/runtime"
 	"uvplatform.com/uvp-gb28181/app/openapi/client"
 	"uvplatform.com/uvp-gb28181/app/openapi/limit"
 )
@@ -28,7 +29,11 @@ func (g *Gateway) handlePTZ(c *gin.Context, requestID, scope string, respond fun
 		return
 	}
 	method := r.Method
-	q := gatewayRequest{method: method, path: r.URL.Path, rawURI: r.RequestURI, rawQuery: r.URL.RawQuery, pattern: c.FullPath(), scope: scope, deviceID: c.Param("deviceId"), channelID: c.Param("channelId"), presetID: c.Param("presetId"), operationID: c.Param("operationId"), requestID: requestID, source: c.ClientIP()}
+	q := gatewayRequest{method: method, path: r.URL.Path, rawURI: r.RequestURI, rawQuery: r.URL.RawQuery, pattern: c.FullPath(), scope: scope, deviceID: c.Param("deviceId"), channelID: c.Param("channelId"), presetID: c.Param("presetId"), trackID: c.Param("trackId"), operationID: c.Param("operationId"), requestID: requestID, source: c.ClientIP()}
+	q.params = make(map[string]string, len(c.Params))
+	for _, param := range c.Params {
+		q.params[param.Key] = param.Value
+	}
 	q.headers = captureGatewayHeaders(r)
 	if len(q.headers.IdempotencyKey) > 1 {
 		failEarly(gatewayError(requestID, http.StatusBadRequest, "INVALID_REQUEST"))
@@ -184,8 +189,17 @@ func (g *Gateway) processPTZ(hardContext context.Context, q gatewayRequest) (out
 		}
 		return invalid(http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE")
 	}
-	request := PTZRequest{Scope: q.scope, ClientID: view.ID, OwnerDeptID: view.OwnerDeptID, DataScope: view.DataScope, DeviceID: q.deviceID, ChannelID: q.channelID, PresetID: q.presetID, OperationID: q.operationID, IdempotencyKey: q.idempotencyKey, Body: append([]byte(nil), q.body...)}
-	data, dispatchErr := g.ptz.Handle(ctx, request)
+	request := PTZRequest{Scope: q.scope, ClientID: view.ID, OwnerDeptID: view.OwnerDeptID, DataScope: view.DataScope, DeviceID: q.deviceID, ChannelID: q.channelID, PresetID: q.presetID, TrackID: q.trackID, OperationID: q.operationID, IdempotencyKey: q.idempotencyKey, Body: append([]byte(nil), q.body...)}
+	var data any
+	var dispatchErr error
+	if g.catalog != nil && g.catalog.Active() != nil {
+		data, dispatchErr = g.catalog.Dispatch(ctx, q.scope, catalogruntime.Invocation{
+			Method: q.method, Path: q.path, Params: q.params, Body: append([]byte(nil), q.body...),
+			Value: request,
+		})
+	} else {
+		data, dispatchErr = g.ptz.Handle(ctx, request)
+	}
 	response := gatewayError(q.requestID, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE")
 	code := "SERVICE_UNAVAILABLE"
 	if dispatchErr == nil {
@@ -200,6 +214,8 @@ func (g *Gateway) processPTZ(hardContext context.Context, q gatewayRequest) (out
 			code = "CONFLICT"
 		case "INVALID_REQUEST":
 			code = "INVALID_REQUEST"
+		case "CAPABILITY_NOT_SUPPORTED":
+			code = "CAPABILITY_NOT_SUPPORTED"
 		}
 	}
 	if err := g.complete(hardContext, q.requestID, code, time.Since(start)); err != nil {

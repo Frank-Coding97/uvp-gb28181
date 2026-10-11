@@ -18,6 +18,15 @@ var (
 	// ErrInvalidRequest is reserved for malformed values reaching an adapter.
 	// The HTTP boundary normally rejects these before dispatch.
 	ErrInvalidRequest = errors.New("openapi adapter request is invalid")
+	// ErrCapabilityNotSupported means the addressed device has not explicitly
+	// reported support for the requested operation.
+	ErrCapabilityNotSupported = errors.New("device capability is not supported")
+	// ErrDeviceOffline is a known device state and is distinct from a failed
+	// platform dependency.
+	ErrDeviceOffline = errors.New("device is offline")
+	// ErrConflict covers a request that conflicts with a durable operation,
+	// including reuse of an idempotency key for a different command.
+	ErrConflict = errors.New("openapi adapter operation conflict")
 	// ErrUnavailable hides dependency and configuration details from callers.
 	ErrUnavailable = errors.New("openapi adapter unavailable")
 )
@@ -26,10 +35,14 @@ var (
 // a published operation. ResourceScope is trusted client state, never an HTTP
 // field. DeviceID and ChannelID are stable external GB identifiers.
 type Request struct {
-	ResourceScope resource.DepartmentScope
-	DeviceID      string
-	ChannelID     string
-	List          ListOptions
+	ClientID       int64
+	IdempotencyKey string
+	ResourceScope  resource.DepartmentScope
+	DeviceID       string
+	ChannelID      string
+	List           ListOptions
+	Cursor         string
+	Query          map[string]string
 }
 
 // ListOptions is deliberately shared by device and channel reads. The
@@ -81,6 +94,12 @@ func ErrorCode(err error) string {
 		return "RESOURCE_NOT_FOUND"
 	case errors.Is(err, ErrInvalidRequest):
 		return "INVALID_REQUEST"
+	case errors.Is(err, ErrCapabilityNotSupported):
+		return "CAPABILITY_NOT_SUPPORTED"
+	case errors.Is(err, ErrDeviceOffline):
+		return "DEVICE_OFFLINE"
+	case errors.Is(err, ErrConflict):
+		return "CONFLICT"
 	default:
 		return "SERVICE_UNAVAILABLE"
 	}
@@ -94,6 +113,8 @@ func HTTPStatus(err error) int {
 		return http.StatusNotFound
 	case "INVALID_REQUEST":
 		return http.StatusBadRequest
+	case "CAPABILITY_NOT_SUPPORTED", "DEVICE_OFFLINE", "CONFLICT":
+		return http.StatusConflict
 	default:
 		return http.StatusServiceUnavailable
 	}

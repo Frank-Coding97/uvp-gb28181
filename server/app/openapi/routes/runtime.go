@@ -8,6 +8,7 @@ import (
 
 	"gorm.io/gorm"
 	"uvplatform.com/uvp-gb28181/app/openapi/auth"
+	catalogruntime "uvplatform.com/uvp-gb28181/app/openapi/catalog/runtime"
 	"uvplatform.com/uvp-gb28181/app/openapi/client"
 	"uvplatform.com/uvp-gb28181/app/openapi/controllers"
 	"uvplatform.com/uvp-gb28181/app/openapi/models"
@@ -25,6 +26,14 @@ type RuntimeSettings interface {
 // Enabled gateway startup
 // cannot silently fall back after recovery/configuration/dependency failure.
 func InitializeRuntime(ctx context.Context, db *gorm.DB, permissions client.ManagementPermissionAuthorizer, settings RuntimeSettings, ptz auth.PTZDispatcher, playback ...auth.PlayDispatcher) (*auth.Gateway, *controllers.ClientAdminController, error) {
+	return InitializeRuntimeWithBindings(ctx, db, permissions, settings, nil, ptz, playback...)
+}
+
+// InitializeRuntimeWithBindings installs the code-owned adapter forwarders
+// alongside the dedicated PTZ/play dispatchers. The forwarders are stable for
+// this gateway lifetime while their underlying domain services may be
+// replaced by SIP runtime generations.
+func InitializeRuntimeWithBindings(ctx context.Context, db *gorm.DB, permissions client.ManagementPermissionAuthorizer, settings RuntimeSettings, adapterBindings map[string]catalogruntime.Adapter, ptz auth.PTZDispatcher, playback ...auth.PlayDispatcher) (*auth.Gateway, *controllers.ClientAdminController, error) {
 	if settings == nil {
 		return nil, nil, auth.ErrUnavailable
 	}
@@ -38,7 +47,16 @@ func InitializeRuntime(ctx context.Context, db *gorm.DB, permissions client.Mana
 	if err := checkRuntimeSchema(ctx, db); err != nil {
 		return nil, nil, auth.ErrUnavailable
 	}
-	catalogRuntime, err := InitializeCatalogRuntime(ctx, db)
+	bindings := make(map[string]catalogruntime.Adapter, len(adapterBindings))
+	for key, adapter := range adapterBindings {
+		if adapter != nil {
+			bindings[key] = adapter
+		}
+	}
+	for key, adapter := range delegatedRuntimeBindings(ptz, playback...) {
+		bindings[key] = adapter
+	}
+	catalogRuntime, err := InitializeCatalogRuntime(ctx, db, bindings)
 	if err != nil {
 		return nil, nil, auth.ErrUnavailable
 	}

@@ -11,6 +11,7 @@ import (
 	appmodels "uvplatform.com/uvp-gb28181/app/models"
 	"uvplatform.com/uvp-gb28181/app/openapi/adapters"
 	catalogruntime "uvplatform.com/uvp-gb28181/app/openapi/catalog/runtime"
+	"uvplatform.com/uvp-gb28181/app/openapi/contracts"
 	openapimodels "uvplatform.com/uvp-gb28181/app/openapi/models"
 	"uvplatform.com/uvp-gb28181/app/openapi/resource"
 )
@@ -18,9 +19,10 @@ import (
 // publishFixture 建一个覆盖全部发布路径的库。
 //
 // ⛔⛔ 为什么要专门测这条路径：`EnsureCoreCatalog`（seed）有测试，
-//   但 `EnsurePublishedCatalog`（seed + 组 draft + 落 release）只在
-//   集成测试里出现过，而集成测试用的是**自建的表**，不是绿色包的 SQLite 基线。
-//   真实故障恰恰是"基线建出来的表 + 首次发布"这个组合—— 启动即 panic。
+//
+//	但 `EnsurePublishedCatalog`（seed + 组 draft + 落 release）只在
+//	集成测试里出现过，而集成测试用的是**自建的表**，不是绿色包的 SQLite 基线。
+//	真实故障恰恰是"基线建出来的表 + 首次发布"这个组合—— 启动即 panic。
 func publishFixture(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -50,10 +52,26 @@ func newTestRuntime(t *testing.T, db *gorm.DB) *catalogruntime.CatalogRuntime {
 	reader := resource.New(db)
 	registrations := adapters.NewDeviceChannelAdapterRegistrations(reader)
 	registrations = append(registrations, adapters.NewDelegatedPlaneRegistrations()...)
+	registered := make(map[string]struct{}, len(registrations))
 	for _, registration := range registrations {
 		require.NoError(t, registry.Register(registration))
+		registered[registration.Key] = struct{}{}
+	}
+	for _, operation := range contracts.Operations() {
+		if _, ok := registered[operation.AdapterKey]; ok {
+			continue
+		}
+		require.NoError(t, registry.Register(catalogruntime.AdapterRegistration{
+			Key: operation.AdapterKey, ContractVersion: operation.AdapterVersion, Adapter: publishTestUnavailableAdapter{},
+		}))
 	}
 	return catalogruntime.NewCatalogRuntime(registry, nil)
+}
+
+type publishTestUnavailableAdapter struct{}
+
+func (publishTestUnavailableAdapter) Execute(context.Context, catalogruntime.Invocation) (any, error) {
+	return nil, adapters.ErrUnavailable
 }
 
 // 首次发布必须成功。任何 ErrMissingWhereClause 都会让真实部署启动即 panic

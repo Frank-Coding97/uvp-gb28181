@@ -23,6 +23,8 @@ func TestOpenAPIPublicBoundaryRejectsWithoutRedirectOrGlobalMiddleware(t *testin
 		{"GET", "/openapi/v1/devices/", 404},
 		{"GET", "/openapi/v1//devices", 404},
 		{"GET", "/openapi/v1/%64evices", 400},
+		{"POST", "/openapi/v1/devices/34020000002000000010/firmware-upgrades", 503},
+		{"GET", "/openapi/v1/devices/34020000002000000010/firmware-upgrades/operation-1", 503},
 		{"GET", "/openapi", 404},
 		{"HEAD", "/openapi/v1/devices", 405},
 		{"OPTIONS", "/openapi/v1/devices", 405},

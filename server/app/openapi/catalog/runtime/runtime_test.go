@@ -10,6 +10,49 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAdapterBindingSetForwardersFailClosedAndFollowBindings(t *testing.T) {
+	set := NewAdapterBindingSet()
+	forwarder := set.Forwarders([]string{"device.test.v1"})["device.test.v1"]
+	_, err := forwarder.Execute(context.Background(), Invocation{Scope: "device:test"})
+	require.ErrorIs(t, err, ErrAdapterNotFound)
+
+	first := &bindingSetTestAdapter{key: "first"}
+	require.NoError(t, set.Bind([]AdapterRegistration{{Key: "device.test.v1", ContractVersion: "v1", Adapter: first}}))
+	value, err := forwarder.Execute(context.Background(), Invocation{Scope: "device:test"})
+	require.NoError(t, err)
+	require.Equal(t, "first", value)
+
+	second := &bindingSetTestAdapter{key: "second"}
+	require.NoError(t, set.Bind([]AdapterRegistration{{Key: "device.test.v1", ContractVersion: "v1", Adapter: second}}))
+	value, err = forwarder.Execute(context.Background(), Invocation{Scope: "device:test"})
+	require.NoError(t, err)
+	require.Equal(t, "second", value)
+	set.Clear()
+	_, err = forwarder.Execute(context.Background(), Invocation{Scope: "device:test"})
+	require.ErrorIs(t, err, ErrAdapterNotFound)
+}
+
+func TestAdapterBindingSetRejectsInvalidBatchWithoutPartialBindings(t *testing.T) {
+	set := NewAdapterBindingSet()
+	err := set.Bind([]AdapterRegistration{
+		{Key: "device.valid.v1", ContractVersion: "v1", Adapter: &bindingSetTestAdapter{key: "valid"}},
+		{Key: "device.invalid.v1", ContractVersion: "", Adapter: &bindingSetTestAdapter{key: "invalid"}},
+	})
+	require.ErrorIs(t, err, ErrInvalidAdapterRegistration)
+	_, err = set.Forwarders([]string{"device.valid.v1"})["device.valid.v1"].Execute(context.Background(), Invocation{})
+	require.ErrorIs(t, err, ErrAdapterNotFound)
+
+	err = set.Bind([]AdapterRegistration{
+		{Key: "device.same.v1", ContractVersion: "v1", Adapter: &bindingSetTestAdapter{key: "first"}},
+		{Key: "device.same.v1", ContractVersion: "v1", Adapter: &bindingSetTestAdapter{key: "second"}},
+	})
+	require.ErrorIs(t, err, ErrAdapterAlreadyRegistered)
+}
+
+type bindingSetTestAdapter struct{ key string }
+
+func (a *bindingSetTestAdapter) Execute(context.Context, Invocation) (any, error) { return a.key, nil }
+
 type recordingAdapter struct {
 	mu    sync.Mutex
 	count int

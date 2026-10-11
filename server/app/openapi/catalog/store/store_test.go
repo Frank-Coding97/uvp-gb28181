@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	catalogruntime "uvplatform.com/uvp-gb28181/app/openapi/catalog/runtime"
+	"uvplatform.com/uvp-gb28181/app/openapi/contracts"
 	openapimodels "uvplatform.com/uvp-gb28181/app/openapi/models"
 )
 
@@ -49,6 +50,96 @@ func TestRepositoryBuildDraftMapsCatalogAndRetainsClientOrphans(t *testing.T) {
 	require.Zero(t, draft.Operations[0].SysAPIID)
 	require.Equal(t, "/api/gb28181/device-mgmt/devices", draft.Operations[0].SysAPIPath)
 	require.Contains(t, draft.OrphanScopes, "legacy:scope")
+}
+
+func TestMakeReleaseItemCapturesPublicContractMetadata(t *testing.T) {
+	var definition contracts.Operation
+	for _, candidate := range contracts.Operations() {
+		if candidate.Scope == "ptz:preset:call" {
+			definition = candidate
+			break
+		}
+	}
+	require.NotEmpty(t, definition.Scope)
+
+	item, err := makeReleaseItem(sourceOperation{
+		group: openapimodels.CapabilityGroup{Code: definition.GroupCode, Name: definition.GroupName},
+		capability: openapimodels.Capability{
+			ID: 12, Code: definition.Code, Scope: definition.Scope, Name: definition.Name,
+			Description: definition.Description, ResourceType: definition.ResourceType,
+		},
+		operation: openapimodels.Operation{
+			ID: 34, CapabilityID: 12, Name: definition.Name, Method: definition.Method,
+			ExternalPath: definition.ExternalPath, AdapterKey: definition.AdapterKey,
+			AdapterContractVersion: definition.AdapterVersion, ResourceType: definition.ResourceType,
+			RiskLevel: definition.RiskLevel, IdempotencyMode: definition.IdempotencyMode,
+			RequestSchema: definition.RequestSchema, ResponseSchema: definition.ResponseSchema,
+		},
+	}, catalogruntime.Operation{
+		Scope: definition.Scope, Name: definition.Name, Method: definition.Method,
+		ExternalPath: definition.ExternalPath, AdapterKey: definition.AdapterKey,
+		ContractVersion: definition.AdapterVersion, Risk: definition.RiskLevel,
+	})
+	require.NoError(t, err)
+
+	var snapshot struct {
+		Description          string   `json:"description"`
+		ProtocolVersions     []string `json:"protocolVersions"`
+		StandardRefs         []string `json:"standardRefs"`
+		RequiresConfirmation bool     `json:"requiresConfirmation"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(item.SnapshotJSON), &snapshot))
+	require.Equal(t, definition.Description, snapshot.Description)
+	require.Equal(t, definition.ProtocolVersions, snapshot.ProtocolVersions)
+	require.Equal(t, definition.StandardRefs, snapshot.StandardRefs)
+	require.Equal(t, definition.RequiresConfirmation, snapshot.RequiresConfirmation)
+}
+
+func TestValidateReleaseSnapshotKeepsHistoricalJSONAndHashCompatible(t *testing.T) {
+	legacy := struct {
+		CapabilityID           int64  `json:"capabilityId"`
+		OperationID            int64  `json:"operationId"`
+		GroupCode              string `json:"groupCode"`
+		GroupName              string `json:"groupName"`
+		CapabilityCode         string `json:"capabilityCode"`
+		CapabilityName         string `json:"capabilityName"`
+		OperationName          string `json:"operationName"`
+		Scope                  string `json:"scope"`
+		Method                 string `json:"method"`
+		ExternalPath           string `json:"externalPath"`
+		AdapterKey             string `json:"adapterKey"`
+		AdapterContractVersion string `json:"adapterContractVersion"`
+		ResourceType           string `json:"resourceType"`
+		RiskLevel              string `json:"riskLevel"`
+		IdempotencyMode        string `json:"idempotencyMode"`
+		RequestSchema          string `json:"requestSchema"`
+		ResponseSchema         string `json:"responseSchema"`
+		SysAPIPath             string `json:"sysApiPath"`
+		SysAPIMethod           string `json:"sysApiMethod"`
+		Sort                   int    `json:"sort"`
+	}{
+		GroupCode: "device-management", GroupName: "设备管理", CapabilityCode: "device.list",
+		CapabilityName: "设备列表", OperationName: "历史操作名", Scope: "device:list", Method: "GET",
+		ExternalPath: "/openapi/v1/devices", AdapterKey: "resource.device.list.v1",
+		AdapterContractVersion: "v1", ResourceType: "device", RiskLevel: "read",
+		IdempotencyMode: "none", RequestSchema: `{}`, ResponseSchema: `{}`,
+	}
+	raw, err := json.Marshal(legacy)
+	require.NoError(t, err)
+	item := openapimodels.ReleaseItem{
+		GroupCode: legacy.GroupCode, GroupName: legacy.GroupName,
+		CapabilityCode: legacy.CapabilityCode, CapabilityName: legacy.CapabilityName,
+		Scope: legacy.Scope, Method: legacy.Method, ExternalPath: legacy.ExternalPath,
+		AdapterKey: legacy.AdapterKey, AdapterContractVersion: legacy.AdapterContractVersion,
+		ResourceType: legacy.ResourceType, RiskLevel: legacy.RiskLevel,
+		IdempotencyMode: legacy.IdempotencyMode, RequestSchema: legacy.RequestSchema,
+		ResponseSchema: legacy.ResponseSchema, SysAPIPath: legacy.SysAPIPath,
+		SysAPIMethod: legacy.SysAPIMethod, Sort: legacy.Sort, SnapshotJSON: string(raw),
+	}
+	digest, err := hashReleaseItems([]openapimodels.ReleaseItem{item})
+	require.NoError(t, err)
+	require.NoError(t, validateReleaseSnapshot(openapimodels.Release{ItemCount: 1, SnapshotHash: digest}, []openapimodels.ReleaseItem{item}))
+	require.Equal(t, string(raw), item.SnapshotJSON)
 }
 
 func TestRepositoryTreatsNilContextAsBackgroundContext(t *testing.T) {

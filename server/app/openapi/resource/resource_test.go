@@ -38,7 +38,7 @@ func newResourceTestDB(t *testing.T) *gorm.DB {
 	raw, err := db.DB()
 	require.NoError(t, err)
 	raw.SetMaxOpenConns(1)
-	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &appmodels.SysDepartment{}))
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &gbmodels.GbDeviceStorageCard{}, &appmodels.SysDepartment{}))
 	t.Cleanup(func() { _ = raw.Close() })
 	seedResourceRows(t, db)
 	return db
@@ -125,6 +125,63 @@ func TestOpenAPIResourceDepartmentScopeIncludesActiveDescendants(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidDepartmentScope)
 	_, err = svc.GetDeviceInScope(ctx, DepartmentScope{OwnerDeptID: 40, DataScope: DataScopeDepartmentAndChildren}, resourceInvalid)
 	assert.ErrorIs(t, err, ErrResourceNotFound)
+}
+
+func TestChannelControlCapabilitiesAreScopedAndKeepUnknownDeviceClaimsUnknown(t *testing.T) {
+	db := newResourceTestDB(t)
+	svc := New(db)
+	scope := DepartmentScope{OwnerDeptID: resourceOwnerDept, DataScope: DataScopeDepartment}
+
+	capabilities, err := svc.GetChannelControlCapabilitiesInScope(context.Background(), scope, resourceDevice, resourceChannel)
+	require.NoError(t, err)
+	assert.Equal(t, "supported", string(capabilities.BasicPTZ.State))
+	assert.Equal(t, "unknown", string(capabilities.TargetTrack.State))
+	assert.Equal(t, "unknown", string(capabilities.TeleBoot.State))
+
+	_, err = svc.GetChannelControlCapabilitiesInScope(context.Background(), scope, resourceOther, "37011200001310000020")
+	assert.ErrorIs(t, err, ErrResourceNotFound)
+}
+
+func TestChannelStorageCardSnapshotIsScopedAndOmitsInternalIdentifiers(t *testing.T) {
+	db := newResourceTestDB(t)
+	svc := New(db)
+	var device gbmodels.GbDevice
+	require.NoError(t, db.Where("device_id = ?", resourceDevice).First(&device).Error)
+	observedAt := time.Now().UTC().Truncate(time.Second)
+	require.NoError(t, db.Create(&gbmodels.GbDeviceStorageCard{
+		DeviceID: uint(device.ID), TargetCode: resourceChannel, CardID: 1, HddName: "SD-1",
+		Status: gbmodels.StorageCardStateOK, CapacityMB: 1000, FreeSpaceMB: 250, ObservedAt: observedAt,
+	}).Error)
+	scope := DepartmentScope{OwnerDeptID: resourceOwnerDept, DataScope: DataScopeDepartment}
+
+	snapshot, err := svc.GetChannelStorageCardsInScope(context.Background(), scope, resourceDevice, resourceChannel)
+	require.NoError(t, err)
+	require.Equal(t, "fresh", snapshot.Freshness)
+	require.Equal(t, observedAt, *snapshot.ObservedAt)
+	require.Equal(t, []StorageCard{{
+		CardID: 1, HddName: "SD-1", Status: "ok", CapacityMB: 1000, FreeSpaceMB: 250, ObservedAt: observedAt,
+	}}, snapshot.Items)
+	encoded, err := json.Marshal(snapshot)
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), "deviceId")
+	assert.NotContains(t, string(encoded), "sourceOperationId")
+
+	_, err = svc.GetChannelStorageCardsInScope(context.Background(), scope, resourceOther, "37011200001310000020")
+	assert.ErrorIs(t, err, ErrResourceNotFound)
+	_, err = svc.GetChannelStorageCardsInScope(context.Background(), scope, resourceDevice, "37011200001310000020")
+	assert.ErrorIs(t, err, ErrResourceNotFound)
+	require.NoError(t, db.Model(&gbmodels.GbDeviceStorageCard{}).Where("device_id = ?", device.ID).
+		Update("observed_at", observedAt.Add(-2*time.Minute)).Error)
+	snapshot, err = svc.GetChannelStorageCardsInScope(context.Background(), scope, resourceDevice, resourceChannel)
+	require.NoError(t, err)
+	assert.Equal(t, "stale", snapshot.Freshness)
+	require.NoError(t, db.Where("device_id = ?", device.ID).Delete(&gbmodels.GbDeviceStorageCard{}).Error)
+	snapshot, err = svc.GetChannelStorageCardsInScope(context.Background(), scope, resourceDevice, resourceChannel)
+	require.NoError(t, err)
+	assert.Equal(t, "unknown", snapshot.Freshness)
+	assert.Empty(t, snapshot.Items)
+	assert.NotNil(t, snapshot.Items, "empty cache must encode as []")
+	assert.Nil(t, snapshot.ObservedAt)
 }
 
 func TestResolveDepartmentIDsStopsAtInactiveNodesAndBreaksCycles(t *testing.T) {

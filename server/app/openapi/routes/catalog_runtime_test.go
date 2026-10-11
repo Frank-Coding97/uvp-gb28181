@@ -2,6 +2,7 @@ package routes
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"testing"
 
@@ -10,8 +11,11 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	appmodels "uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/openapi/adapters"
 	"uvplatform.com/uvp-gb28181/app/openapi/catalog/bootstrap"
+	catalogruntime "uvplatform.com/uvp-gb28181/app/openapi/catalog/runtime"
 	catalogstore "uvplatform.com/uvp-gb28181/app/openapi/catalog/store"
+	"uvplatform.com/uvp-gb28181/app/openapi/contracts"
 	"uvplatform.com/uvp-gb28181/app/openapi/models"
 )
 
@@ -93,18 +97,53 @@ func TestInitializeCatalogRuntimeHydratesPublishedRelease(t *testing.T) {
 	require.Equal(t, int64(1), releases, "已经完整的 release 不该被启动链路再发一版")
 }
 
+func TestCatalogRuntimeRegistersScopedDeviceQueryAdapters(t *testing.T) {
+	db := newCatalogRuntimeTestDB(t)
+	require.NoError(t, db.AutoMigrate(catalogRuntimeTables(t, true)...))
+	runtime, err := InitializeCatalogRuntime(context.Background(), db)
+	require.NoError(t, err)
+
+	deviceID := "34020000002000000010"
+	channelID := "37011200001310000010"
+	for _, operation := range []struct {
+		scope string
+		path  string
+	}{
+		{"device:alarms", "/openapi/v1/devices/" + deviceID + "/alarms"},
+		{"device:status-events", "/openapi/v1/devices/" + deviceID + "/status-events"},
+		{"channel:precise-status", "/openapi/v1/devices/" + deviceID + "/channels/" + channelID + "/ptz/precise-status"},
+		{"ptz:home-position:read", "/openapi/v1/devices/" + deviceID + "/channels/" + channelID + "/ptz/home-position"},
+		{"ptz:cruise:read", "/openapi/v1/devices/" + deviceID + "/channels/" + channelID + "/ptz/cruise/tracks"},
+		{"channel:target-track:read", "/openapi/v1/devices/" + deviceID + "/channels/" + channelID + "/target-track"},
+	} {
+		_, err := runtime.Dispatch(context.Background(), operation.scope, catalogruntime.Invocation{
+			Method: "GET", Path: operation.path,
+			Value: adapters.Request{DeviceID: deviceID, ChannelID: channelID},
+		})
+		require.ErrorIsf(t, err, adapters.ErrNotFound, "scope %s must dispatch to its query adapter", operation.scope)
+	}
+}
+
 // An installation that published before this binary learned about the PTZ
 // delegated scopes is repaired additively on the next startup.
 func TestInitializeCatalogRuntimeRepairsPartialRelease(t *testing.T) {
 	db := newCatalogRuntimeTestDB(t)
 	require.NoError(t, db.AutoMigrate(catalogRuntimeTables(t, true)...))
 	seedPartialCatalogRuntimeRelease(t, db)
-	read := make([]string, 0, len(bootstrap.CoreCatalogScopes()))
+	partial := make(map[string]struct{}, len(bootstrap.CoreCatalogScopes()))
 	for _, scope := range bootstrap.CoreCatalogScopes() {
-		if !strings.Contains(scope, "play:") && !strings.Contains(scope, "ptz:") {
-			read = append(read, scope)
+		partial[scope] = struct{}{}
+	}
+	for _, operation := range contracts.Operations() {
+		if strings.HasPrefix(operation.AdapterKey, "delegated.") {
+			delete(partial, operation.Scope)
 		}
 	}
+	read := make([]string, 0, len(partial))
+	for scope := range partial {
+		read = append(read, scope)
+	}
+	sort.Strings(read)
 	require.Equal(t, read, activeReleaseScopes(t, db))
 
 	runtime, err := InitializeCatalogRuntime(context.Background(), db)
@@ -206,4 +245,49 @@ func seedPartialCatalogRuntimeRelease(t *testing.T, db *gorm.DB) {
 	require.NoError(t, err)
 	_, err = repository.Publish(context.Background(), draft, catalogstore.PublishOptions{Name: "legacy"})
 	require.NoError(t, err)
+}
+
+func TestCatalogPublishFailureReasonClassifiesTimeout(t *testing.T) {
+	require.Equal(t, "catalog_publish_timeout", catalogPublishFailureReason(context.DeadlineExceeded))
+}
+
+func TestCatalogHydrateReadsSysAPIMetadataInOneBatch(t *testing.T) {
+	db := newCatalogRuntimeTestDB(t)
+	require.NoError(t, db.AutoMigrate(catalogRuntimeTables(t, true)...))
+	_, err := InitializeCatalogRuntime(context.Background(), db)
+	require.NoError(t, err)
+	queries := 0
+	require.NoError(t, db.Callback().Query().Before("gorm:query").Register("test:sys_api_count", func(tx *gorm.DB) {
+		if tx.Statement.Table == "sys_api" {
+			queries++
+		}
+	}))
+	_, err = InitializeCatalogRuntime(context.Background(), db)
+	require.NoError(t, err)
+	require.Equal(t, 1, queries, "hydration metadata checks must not query once per operation")
+}
+
+func TestCatalogSysAPIBatchPreservesOrderMissingAssetsAndFirstMatch(t *testing.T) {
+	db := newCatalogRuntimeTestDB(t)
+	require.NoError(t, db.AutoMigrate(&appmodels.SysApi{}))
+	for _, row := range []appmodels.SysApi{
+		{BaseModel: appmodels.BaseModel{ID: 20}, Path: "/internal", Method: "GET"},
+		{BaseModel: appmodels.BaseModel{ID: 10}, Path: "/internal", Method: "GET"},
+		{BaseModel: appmodels.BaseModel{ID: 30}, Path: "/internal", Method: "POST"},
+	} {
+		require.NoError(t, db.Create(&row).Error)
+	}
+	resolver := catalogSysAPIResolver{db: db}
+	assets, err := resolver.ResolveBatch(context.Background(), []catalogruntime.SysAPIAsset{
+		{Path: "/internal", Method: "POST"},
+		{Path: "/missing", Method: "GET"},
+		{Path: "/internal", Method: "GET"},
+	})
+	require.NoError(t, err)
+	require.Len(t, assets, 3)
+	require.EqualValues(t, 30, assets[0].ID)
+	require.True(t, assets[1].Deleted)
+	require.Equal(t, "/missing", assets[1].Path)
+	require.EqualValues(t, 10, assets[2].ID)
+	require.False(t, assets[2].Deleted)
 }

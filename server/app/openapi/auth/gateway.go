@@ -16,6 +16,7 @@ import (
 	"uvplatform.com/uvp-gb28181/app/openapi/audit"
 	catalogruntime "uvplatform.com/uvp-gb28181/app/openapi/catalog/runtime"
 	"uvplatform.com/uvp-gb28181/app/openapi/client"
+	"uvplatform.com/uvp-gb28181/app/openapi/contracts"
 	"uvplatform.com/uvp-gb28181/app/openapi/limit"
 	"uvplatform.com/uvp-gb28181/app/openapi/resource"
 )
@@ -44,10 +45,11 @@ type Gateway struct {
 	catalog   *catalogruntime.CatalogRuntime
 }
 type gatewayRequest struct {
-	method, path, rawURI, rawQuery, pattern, scope, deviceID, channelID, presetID, operationID, idempotencyKey, requestID, source string
-	headers                                                                                                                       HeaderValues
-	contentType                                                                                                                   string
-	body                                                                                                                          []byte
+	method, path, rawURI, rawQuery, pattern, scope, deviceID, channelID, presetID, trackID, operationID, idempotencyKey, requestID, source string
+	headers                                                                                                                                HeaderValues
+	contentType                                                                                                                            string
+	body                                                                                                                                   []byte
+	params                                                                                                                                 map[string]string
 }
 type gatewayResponse struct {
 	status           int
@@ -116,43 +118,58 @@ func (g *Gateway) Handler(scope string) gin.HandlerFunc {
 			g.handlePTZ(c, requestID, scope, respond)
 			return
 		}
-		if c.Request.ContentLength != 0 || len(c.Request.TransferEncoding) != 0 || c.Request.URL.RawPath != "" {
-			respond(gatewayError(requestID, 400, "INVALID_REQUEST"))
-			return
-		}
-		r := c.Request
-		q := gatewayRequest{method: r.Method, path: r.URL.Path, rawURI: r.RequestURI, rawQuery: r.URL.RawQuery, pattern: c.FullPath(), scope: scope, deviceID: c.Param("deviceId"), channelID: c.Param("channelId"), requestID: requestID, source: c.ClientIP()}
-		q.headers = HeaderValues{SignVersion: append([]string(nil), r.Header.Values("X-UVP-Sign-Version")...), AccessKey: append([]string(nil), r.Header.Values("X-UVP-Access-Key")...), Timestamp: append([]string(nil), r.Header.Values("X-UVP-Timestamp")...), Nonce: append([]string(nil), r.Header.Values("X-UVP-Nonce")...), Signature: append([]string(nil), r.Header.Values("X-UVP-Signature")...), ContentType: append([]string(nil), r.Header.Values("Content-Type")...), ContentEncoding: append([]string(nil), r.Header.Values("Content-Encoding")...), IdempotencyKey: append([]string(nil), r.Header.Values("Idempotency-Key")...)}
-		for _, name := range []string{"X-HTTP-Method-Override", "X-HTTP-Method", "X-Method-Override"} {
-			q.headers.MethodOverride = append(q.headers.MethodOverride, r.Header.Values(name)...)
-		}
-		select {
-		case g.slots <- struct{}{}:
-		default:
-			respond(gatewayError(requestID, 503, "SERVICE_UNAVAILABLE"))
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), g.config.Timeout)
-		defer cancel()
-		finished := make(chan gatewayResponse, 1)
-		go func() {
-			defer func() { <-g.slots }()
-			defer func() {
-				if recover() != nil {
-					finished <- gatewayError(requestID, 503, "SERVICE_UNAVAILABLE")
-				}
-			}()
-			finished <- g.run(ctx, q)
-		}()
-		select {
-		case <-ctx.Done():
-			respond(gatewayError(requestID, 503, "SERVICE_UNAVAILABLE"))
-		case response := <-finished:
-			if ctx.Err() != nil {
-				response = gatewayError(requestID, 503, "SERVICE_UNAVAILABLE")
+		g.handleCatalog(c, requestID, scope, respond)
+	}
+}
+
+func (g *Gateway) handleCatalog(c *gin.Context, requestID, scope string, respond func(gatewayResponse)) {
+	if c.Request.URL.RawPath != "" {
+		respond(gatewayError(requestID, 400, "INVALID_REQUEST"))
+		return
+	}
+	r := c.Request
+	q := gatewayRequest{method: r.Method, path: r.URL.Path, rawURI: r.RequestURI, rawQuery: r.URL.RawQuery, pattern: c.FullPath(), scope: scope, deviceID: c.Param("deviceId"), channelID: c.Param("channelId"), requestID: requestID, source: c.ClientIP(), params: make(map[string]string)}
+	for _, param := range c.Params {
+		q.params[param.Key] = param.Value
+	}
+	if err := captureCatalogBody(c, &q); err != nil {
+		c.Header("Connection", "close")
+		respond(gatewayError(requestID, 400, "INVALID_REQUEST"))
+		return
+	}
+	q.headers = HeaderValues{SignVersion: append([]string(nil), r.Header.Values("X-UVP-Sign-Version")...), AccessKey: append([]string(nil), r.Header.Values("X-UVP-Access-Key")...), Timestamp: append([]string(nil), r.Header.Values("X-UVP-Timestamp")...), Nonce: append([]string(nil), r.Header.Values("X-UVP-Nonce")...), Signature: append([]string(nil), r.Header.Values("X-UVP-Signature")...), ContentType: append([]string(nil), r.Header.Values("Content-Type")...), ContentEncoding: append([]string(nil), r.Header.Values("Content-Encoding")...), IdempotencyKey: append([]string(nil), r.Header.Values("Idempotency-Key")...)}
+	if len(q.headers.IdempotencyKey) == 1 {
+		q.idempotencyKey = q.headers.IdempotencyKey[0]
+	}
+	for _, name := range []string{"X-HTTP-Method-Override", "X-HTTP-Method", "X-Method-Override"} {
+		q.headers.MethodOverride = append(q.headers.MethodOverride, r.Header.Values(name)...)
+	}
+	select {
+	case g.slots <- struct{}{}:
+	default:
+		respond(gatewayError(requestID, 503, "SERVICE_UNAVAILABLE"))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), g.config.Timeout)
+	defer cancel()
+	finished := make(chan gatewayResponse, 1)
+	go func() {
+		defer func() { <-g.slots }()
+		defer func() {
+			if recover() != nil {
+				finished <- gatewayError(requestID, 503, "SERVICE_UNAVAILABLE")
 			}
-			respond(response)
+		}()
+		finished <- g.run(ctx, q)
+	}()
+	select {
+	case <-ctx.Done():
+		respond(gatewayError(requestID, 503, "SERVICE_UNAVAILABLE"))
+	case response := <-finished:
+		if ctx.Err() != nil {
+			response = gatewayError(requestID, 503, "SERVICE_UNAVAILABLE")
 		}
+		respond(response)
 	}
 }
 
@@ -167,7 +184,7 @@ func gatewayError(id string, status int, code string) gatewayResponse {
 	return encodeGateway(id, status, code, nil)
 }
 func encodeGateway(id string, status int, code string, data any) gatewayResponse {
-	messages := map[string]string{"OK": "success", "INVALID_REQUEST": "invalid request", "AUTHENTICATION_FAILED": "authentication failed", "REQUEST_EXPIRED": "request expired", "REQUEST_REPLAYED": "request replayed", "CAPABILITY_DENIED": "capability denied", "RESOURCE_NOT_FOUND": "resource not found", "CONFLICT": "conflict", "RATE_LIMITED": "rate limited", "QUOTA_EXCEEDED": "quota exceeded", "SERVICE_UNAVAILABLE": "service unavailable"}
+	messages := map[string]string{"OK": "success", "INVALID_REQUEST": "invalid request", "AUTHENTICATION_FAILED": "authentication failed", "REQUEST_EXPIRED": "request expired", "REQUEST_REPLAYED": "request replayed", "CAPABILITY_DENIED": "capability denied", "CAPABILITY_NOT_SUPPORTED": "device capability not supported", "DEVICE_OFFLINE": "device offline", "RESOURCE_NOT_FOUND": "resource not found", "CONFLICT": "conflict", "RATE_LIMITED": "rate limited", "QUOTA_EXCEEDED": "quota exceeded", "SERVICE_UNAVAILABLE": "service unavailable"}
 	body, err := json.Marshal(struct {
 		Code      string `json:"code"`
 		Message   string `json:"message"`
@@ -275,14 +292,10 @@ func (g *Gateway) process(hardContext context.Context, q gatewayRequest) (output
 		} else {
 			var data any
 			var readErr error
-			if q.scope == PlayLiveScope {
-				if !g.playReady() {
-					readErr = ErrPlayUnavailable
-				} else {
-					data, readErr = g.play.Start(ctx, PlayRequest{ClientID: view.ID, OwnerDeptID: view.OwnerDeptID, DataScope: view.DataScope, DeviceID: q.deviceID, ChannelID: q.channelID, ClientIP: q.source})
-				}
-			} else {
+			if isResourceRead(q.scope) {
 				data, readErr = g.readMetadata(ctx, metadata)
+			} else {
+				data, readErr = g.dispatchCatalog(ctx, q, view.ID, metadata)
 			}
 			if readErr == nil && ctx.Err() == nil {
 				response = encodeGateway(q.requestID, 200, "OK", data)
@@ -320,10 +333,13 @@ func (g *Gateway) readMetadata(ctx context.Context, metadata metadataInput) (any
 		return g.catalog.Dispatch(ctx, metadata.scope, catalogruntime.Invocation{
 			Method: metadataMethod(metadata.scope),
 			Path:   metadataPath(metadata),
+			Query:  metadata.query,
 			Value: adapters.Request{
 				ResourceScope: resource.DepartmentScope{OwnerDeptID: metadata.owner, DataScope: metadata.dataScope},
 				DeviceID:      metadata.deviceID,
 				ChannelID:     metadata.channelID,
+				Cursor:        metadata.cursor,
+				Query:         metadata.query,
 				List: adapters.ListOptions{
 					Page: metadata.page, PageSize: metadata.size,
 					Keyword: metadata.keyword, Status: metadata.status,
@@ -338,14 +354,12 @@ func (g *Gateway) readMetadata(ctx context.Context, metadata metadataInput) (any
 }
 
 func metadataMethod(scope string) string {
-	switch scope {
-	case "device:list", "device:detail", "device:status", "channel:list", "channel:detail", "channel:status":
-		return "GET"
-	case PlayLiveScope:
-		return "POST"
-	default:
-		return ""
+	for _, operation := range contracts.Operations() {
+		if operation.Scope == scope {
+			return operation.Method
+		}
 	}
+	return ""
 }
 
 func metadataPath(metadata metadataInput) string {
@@ -367,31 +381,31 @@ func (g *Gateway) RejectedSummary() audit.RejectedSnapshot {
 }
 
 func metadataFailure(id string, err error) gatewayResponse {
-	if errors.Is(err, resource.ErrResourceNotFound) {
+	if errors.Is(err, resource.ErrResourceNotFound) || errors.Is(err, adapters.ErrNotFound) {
 		return gatewayError(id, 404, "RESOURCE_NOT_FOUND")
+	}
+	if errors.Is(err, adapters.ErrInvalidRequest) {
+		return gatewayError(id, 400, "INVALID_REQUEST")
+	}
+	if errors.Is(err, adapters.ErrCapabilityNotSupported) {
+		return gatewayError(id, 409, "CAPABILITY_NOT_SUPPORTED")
+	}
+	if errors.Is(err, adapters.ErrDeviceOffline) {
+		return gatewayError(id, 409, "DEVICE_OFFLINE")
+	}
+	if errors.Is(err, adapters.ErrConflict) {
+		return gatewayError(id, 409, "CONFLICT")
 	}
 	return gatewayError(id, 503, "SERVICE_UNAVAILABLE")
 }
 
 func metadataPattern(scope string) string {
-	switch scope {
-	case "device:list":
-		return "/openapi/v1/devices"
-	case "device:detail":
-		return "/openapi/v1/devices/:deviceId"
-	case "device:status":
-		return "/openapi/v1/devices/:deviceId/status"
-	case "channel:list":
-		return "/openapi/v1/devices/:deviceId/channels"
-	case "channel:detail":
-		return "/openapi/v1/devices/:deviceId/channels/:channelId"
-	case "channel:status":
-		return "/openapi/v1/devices/:deviceId/channels/:channelId/status"
-	case PlayLiveScope:
-		return playPattern(scope)
-	default:
-		return ""
+	for _, operation := range contracts.Operations() {
+		if operation.Scope == scope {
+			return operation.GinPath
+		}
 	}
+	return ""
 }
 func metadataRouteMatches(q gatewayRequest) bool {
 	pattern := metadataPattern(q.scope)
@@ -399,6 +413,9 @@ func metadataRouteMatches(q gatewayRequest) bool {
 		return false
 	}
 	path := strings.ReplaceAll(strings.ReplaceAll(pattern, ":deviceId", q.deviceID), ":channelId", q.channelID)
+	for name, value := range q.params {
+		path = strings.ReplaceAll(path, ":"+name, value)
+	}
 	rawPath, rawQuery, _ := strings.Cut(q.rawURI, "?")
 	return path == q.path && rawPath == q.path && rawQuery == q.rawQuery
 }

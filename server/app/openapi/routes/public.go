@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"uvplatform.com/uvp-gb28181/app/openapi/auth"
+	"uvplatform.com/uvp-gb28181/app/openapi/contracts"
 )
 
 // InstallPublicBoundary must run before CORS/business logging/timeouts. The
@@ -30,18 +31,9 @@ func InstallPublicBoundary(root *gin.Engine, gateway *auth.Gateway, trustedProxi
 	})
 	private.NoRoute(func(c *gin.Context) { publicError(c, 404, "RESOURCE_NOT_FOUND", "resource not found") })
 	private.NoMethod(func(c *gin.Context) { publicError(c, 405, "INVALID_REQUEST", "invalid request") })
-	private.GET("/openapi/v1/devices", gateway.Handler("device:list"))
-	private.GET("/openapi/v1/devices/:deviceId", gateway.Handler("device:detail"))
-	private.GET("/openapi/v1/devices/:deviceId/status", gateway.Handler("device:status"))
-	private.GET("/openapi/v1/devices/:deviceId/channels", gateway.Handler("channel:list"))
-	private.GET("/openapi/v1/devices/:deviceId/channels/:channelId", gateway.Handler("channel:detail"))
-	private.GET("/openapi/v1/devices/:deviceId/channels/:channelId/status", gateway.Handler("channel:status"))
-	private.POST("/openapi/v1/devices/:deviceId/channels/:channelId/live", gateway.Handler(auth.PlayLiveScope))
-	private.GET("/openapi/v1/devices/:deviceId/channels/:channelId/ptz/presets", gateway.Handler("ptz:preset:list"))
-	private.POST("/openapi/v1/devices/:deviceId/channels/:channelId/ptz/presets", gateway.Handler("ptz:preset:save"))
-	private.POST("/openapi/v1/devices/:deviceId/channels/:channelId/ptz/presets/:presetId/call", gateway.Handler("ptz:preset:call"))
-	private.DELETE("/openapi/v1/devices/:deviceId/channels/:channelId/ptz/presets/:presetId", gateway.Handler("ptz:preset:delete"))
-	private.GET("/openapi/v1/devices/:deviceId/channels/:channelId/ptz/operations/:operationId", gateway.Handler("ptz:operation:read"))
+	if err := registerPublicOperations(private, gateway); err != nil {
+		return err
+	}
 	root.Use(func(c *gin.Context) {
 		path := c.Request.URL.Path
 		if path == "/openapi" || strings.HasPrefix(path, "/openapi/") {
@@ -53,6 +45,18 @@ func InstallPublicBoundary(root *gin.Engine, gateway *auth.Gateway, trustedProxi
 	})
 	return nil
 }
+
+func registerPublicOperations(private *gin.Engine, gateway *auth.Gateway) error {
+	operations := contracts.Operations()
+	if err := contracts.Validate(operations); err != nil {
+		return err
+	}
+	for _, operation := range operations {
+		private.Handle(operation.Method, operation.GinPath, gateway.Handler(operation.Scope))
+	}
+	return nil
+}
+
 func publicError(c *gin.Context, status int, code, message string) {
 	c.JSON(status, gin.H{"code": code, "message": message, "requestId": "", "data": nil})
 }

@@ -54,6 +54,98 @@ type AdapterRegistry struct {
 	entries map[AdapterRef]Adapter
 }
 
+// AdapterBindingSet keeps service-bound adapters replaceable across SIP
+// runtime generations while the catalog registry itself stays immutable.
+// Forwarders are registered at HTTP startup; they resolve the current domain
+// adapter on each call and fail closed when the SIP runtime is unavailable.
+type AdapterBindingSet struct {
+	mu      sync.RWMutex
+	entries map[string]Adapter
+}
+
+func NewAdapterBindingSet() *AdapterBindingSet {
+	return &AdapterBindingSet{entries: make(map[string]Adapter)}
+}
+
+// Bind atomically adds or replaces one generation's adapter registrations.
+// Every registration is validated before any binding becomes visible.
+func (s *AdapterBindingSet) Bind(registrations []AdapterRegistration) error {
+	if s == nil {
+		return ErrAdapterRegistryUnavailable
+	}
+	pending := make(map[string]Adapter, len(registrations))
+	for _, registration := range registrations {
+		key := strings.TrimSpace(registration.Key)
+		version := strings.TrimSpace(registration.ContractVersion)
+		if !validToken(key, 64) || !validToken(version, 32) || registration.Adapter == nil {
+			return ErrInvalidAdapterRegistration
+		}
+		if _, exists := pending[key]; exists {
+			return ErrAdapterAlreadyRegistered
+		}
+		pending[key] = registration.Adapter
+	}
+	s.mu.Lock()
+	if s.entries == nil {
+		s.entries = make(map[string]Adapter)
+	}
+	for key, adapter := range pending {
+		s.entries[key] = adapter
+	}
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *AdapterBindingSet) Clear() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.entries = make(map[string]Adapter)
+	s.mu.Unlock()
+}
+
+// Forwarders returns stable code-owned wrappers for the supplied keys. A
+// missing service binding remains a registered but unavailable capability;
+// editable catalog data can never supply the implementation.
+func (s *AdapterBindingSet) Forwarders(keys []string) map[string]Adapter {
+	result := make(map[string]Adapter, len(keys))
+	for _, key := range keys {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		result[key] = adapterForwarder{set: s, key: key}
+	}
+	return result
+}
+
+func (s *AdapterBindingSet) resolve(key string) Adapter {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	adapter := s.entries[key]
+	s.mu.RUnlock()
+	return adapter
+}
+
+type adapterForwarder struct {
+	set *AdapterBindingSet
+	key string
+}
+
+func (f adapterForwarder) Execute(ctx context.Context, invocation Invocation) (any, error) {
+	if f.set == nil {
+		return nil, ErrAdapterNotFound
+	}
+	adapter := f.set.resolve(f.key)
+	if adapter == nil {
+		return nil, ErrAdapterNotFound
+	}
+	return adapter.Execute(ctx, invocation)
+}
+
 func NewAdapterRegistry() *AdapterRegistry {
 	return &AdapterRegistry{entries: make(map[AdapterRef]Adapter)}
 }

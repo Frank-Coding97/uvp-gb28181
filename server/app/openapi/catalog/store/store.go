@@ -18,6 +18,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	catalogruntime "uvplatform.com/uvp-gb28181/app/openapi/catalog/runtime"
+	"uvplatform.com/uvp-gb28181/app/openapi/contracts"
 	openapimodels "uvplatform.com/uvp-gb28181/app/openapi/models"
 )
 
@@ -381,7 +382,9 @@ func (r *Repository) Publish(ctx context.Context, draft catalogruntime.Draft, op
 		for index := range items {
 			items[index].ReleaseID = release.ID
 			items[index].CreatedAt = now
-			if createErr := tx.WithContext(ctx).Create(&items[index]).Error; createErr != nil {
+		}
+		if len(items) > 0 {
+			if createErr := tx.WithContext(ctx).CreateInBatches(&items, 100).Error; createErr != nil {
 				return classifyWriteError((openapimodels.ReleaseItem{}).TableName(), createErr)
 			}
 		}
@@ -733,6 +736,19 @@ func makeReleaseItem(source sourceOperation, draft catalogruntime.Operation) (op
 	if risk == "" {
 		risk = strings.TrimSpace(capability.RiskLevel)
 	}
+	contract, hasContract := contractOperationByScope(strings.TrimSpace(draft.Scope))
+	description := strings.TrimSpace(capability.Description)
+	protocolVersions := []string{}
+	standardRefs := []string{}
+	requiresConfirmation := false
+	if hasContract {
+		if contractDescription := strings.TrimSpace(contract.Description); contractDescription != "" {
+			description = contractDescription
+		}
+		protocolVersions = append(protocolVersions, contract.ProtocolVersions...)
+		standardRefs = append(standardRefs, contract.StandardRefs...)
+		requiresConfirmation = contract.RequiresConfirmation
+	}
 	item := openapimodels.ReleaseItem{
 		CapabilityID:           int64Pointer(capability.ID),
 		OperationID:            int64Pointer(operation.ID),
@@ -771,6 +787,10 @@ func makeReleaseItem(source sourceOperation, draft catalogruntime.Operation) (op
 		ResourceType:           item.ResourceType,
 		RiskLevel:              item.RiskLevel,
 		IdempotencyMode:        item.IdempotencyMode,
+		Description:            description,
+		ProtocolVersions:       protocolVersions,
+		StandardRefs:           standardRefs,
+		RequiresConfirmation:   requiresConfirmation,
 		RequestSchema:          item.RequestSchema,
 		ResponseSchema:         item.ResponseSchema,
 		SysAPIID:               pointerValue(item.SysAPIID),
@@ -786,28 +806,41 @@ func makeReleaseItem(source sourceOperation, draft catalogruntime.Operation) (op
 	return item, nil
 }
 
+func contractOperationByScope(scope string) (contracts.Operation, bool) {
+	for _, operation := range contracts.Operations() {
+		if operation.Scope == scope {
+			return operation, true
+		}
+	}
+	return contracts.Operation{}, false
+}
+
 type releaseItemSnapshot struct {
-	CapabilityID           int64  `json:"capabilityId"`
-	OperationID            int64  `json:"operationId"`
-	GroupCode              string `json:"groupCode"`
-	GroupName              string `json:"groupName"`
-	CapabilityCode         string `json:"capabilityCode"`
-	CapabilityName         string `json:"capabilityName"`
-	OperationName          string `json:"operationName"`
-	Scope                  string `json:"scope"`
-	Method                 string `json:"method"`
-	ExternalPath           string `json:"externalPath"`
-	AdapterKey             string `json:"adapterKey"`
-	AdapterContractVersion string `json:"adapterContractVersion"`
-	ResourceType           string `json:"resourceType"`
-	RiskLevel              string `json:"riskLevel"`
-	IdempotencyMode        string `json:"idempotencyMode"`
-	RequestSchema          string `json:"requestSchema"`
-	ResponseSchema         string `json:"responseSchema"`
-	SysAPIID               int64  `json:"sysApiId,omitempty"`
-	SysAPIPath             string `json:"sysApiPath"`
-	SysAPIMethod           string `json:"sysApiMethod"`
-	Sort                   int    `json:"sort"`
+	CapabilityID           int64    `json:"capabilityId"`
+	OperationID            int64    `json:"operationId"`
+	GroupCode              string   `json:"groupCode"`
+	GroupName              string   `json:"groupName"`
+	CapabilityCode         string   `json:"capabilityCode"`
+	CapabilityName         string   `json:"capabilityName"`
+	OperationName          string   `json:"operationName"`
+	Scope                  string   `json:"scope"`
+	Method                 string   `json:"method"`
+	ExternalPath           string   `json:"externalPath"`
+	AdapterKey             string   `json:"adapterKey"`
+	AdapterContractVersion string   `json:"adapterContractVersion"`
+	ResourceType           string   `json:"resourceType"`
+	RiskLevel              string   `json:"riskLevel"`
+	IdempotencyMode        string   `json:"idempotencyMode"`
+	Description            string   `json:"description"`
+	ProtocolVersions       []string `json:"protocolVersions"`
+	StandardRefs           []string `json:"standardRefs"`
+	RequiresConfirmation   bool     `json:"requiresConfirmation"`
+	RequestSchema          string   `json:"requestSchema"`
+	ResponseSchema         string   `json:"responseSchema"`
+	SysAPIID               int64    `json:"sysApiId,omitempty"`
+	SysAPIPath             string   `json:"sysApiPath"`
+	SysAPIMethod           string   `json:"sysApiMethod"`
+	Sort                   int      `json:"sort"`
 }
 
 func decodeSnapshot(raw string) (releaseItemSnapshot, error) {

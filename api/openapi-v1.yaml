@@ -23,6 +23,7 @@ x-uvp-signature-contract:
     - X-UVP-Nonce
     - X-UVP-Signature
   queryAllowlist:
+    - cursor
     - keyword
     - page
     - pageSize
@@ -106,6 +107,8 @@ paths:
       operationId: listDevices
       summary: List devices owned by the authenticated machine client
       x-uvp-scope: device:list
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
       x-uvp-enabled: true
       security:
         - uvpHmac: []
@@ -152,6 +155,10 @@ paths:
           description: Capability denied
           headers: *noStoreHeader
           content: *errorContent
+        '422': &capabilityNotSupportedResponse
+          description: Device or protocol capability is not supported
+          headers: *noStoreHeader
+          content: *errorContent
         '404': &resourceNotFoundResponse
           description: Resource not found
           headers: *noStoreHeader
@@ -182,6 +189,8 @@ paths:
       operationId: getDevice
       summary: Get one device owned by the authenticated machine client
       x-uvp-scope: device:detail
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
       x-uvp-enabled: true
       security:
         - uvpHmac: []
@@ -217,6 +226,8 @@ paths:
       operationId: getDeviceStatus
       summary: Get the status of one owned device
       x-uvp-scope: device:status
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
       x-uvp-enabled: true
       security:
         - uvpHmac: []
@@ -252,6 +263,8 @@ paths:
       operationId: listChannels
       summary: List channels of one owned device
       x-uvp-scope: channel:list
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
       x-uvp-enabled: true
       security:
         - uvpHmac: []
@@ -291,6 +304,8 @@ paths:
       operationId: getChannel
       summary: Get one channel of one owned device
       x-uvp-scope: channel:detail
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
       x-uvp-enabled: true
       security:
         - uvpHmac: []
@@ -327,6 +342,8 @@ paths:
       operationId: getChannelStatus
       summary: Get the status of one owned channel
       x-uvp-scope: channel:status
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
       x-uvp-enabled: true
       security:
         - uvpHmac: []
@@ -358,12 +375,98 @@ paths:
         '405': *methodNotAllowedResponse
         '429': *rateLimitedResponse
         '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/control-capabilities:
+    get:
+      operationId: getChannelControlCapabilities
+      summary: Get explicitly reported control capabilities for one owned channel
+      description: Capability state is supported, unsupported, or unknown. Unknown means the device did not explicitly report the capability; it must not be treated as supported.
+      x-uvp-scope: channel:capabilities
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["平台基于设备上报能力的三态解析"]
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+      responses:
+        '200':
+          description: Three-state channel control capabilities
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControlCapabilitiesResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/storage-cards:
+    get:
+      operationId: getChannelStorageCards
+      summary: Read cached storage card status for one owned channel
+      description: Reads the latest platform cache without sending a device command. freshness is unknown when no observation exists, fresh within one minute, and stale otherwise. observedAt is the most recent observation time; individual cards retain their own observation times.
+      x-uvp-scope: channel:storage-cards
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["平台缓存的设备存储状态；结果带 freshness/observedAt"]
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+      responses:
+        '200':
+          description: Cached storage card observations
+          headers:
+            Cache-Control:
+              required: true
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageCardSnapshotResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
   /openapi/v1/devices/{deviceId}/channels/{channelId}/live:
     post:
       operationId: startLivePlayback
       summary: Start or reuse live playback for one owned channel
       description: The platform reuses an existing live stream when available. This operation has no request body; fixed playback-address behavior remains governed by GB28181 service configuration.
       x-uvp-scope: play:live
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2016 9.2", "GB/T 28181-2022 9.2"]
       x-uvp-enabled: true
       x-uvp-body: empty
       security:
@@ -405,6 +508,10 @@ paths:
       operationId: listPTZPresets
       summary: List PTZ presets for one owned channel
       x-uvp-scope: ptz:preset:list
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2016 A.2.4.8", "GB/T 28181-2022 A.2.4.8"]
       x-uvp-enabled: true
       security:
         - uvpHmac: []
@@ -432,9 +539,13 @@ paths:
       operationId: savePTZPreset
       summary: Save a PTZ preset on one owned channel
       x-uvp-scope: ptz:preset:save
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2016 A.2.3.1.2", "GB/T 28181-2022 A.2.3.1.2"]
       x-uvp-enabled: true
       x-uvp-content-type: application/json
-      x-uvp-idempotency: header
+      x-uvp-idempotency-header: Idempotency-Key
       security:
         - uvpHmac: []
       parameters:
@@ -470,9 +581,13 @@ paths:
       operationId: callPTZPreset
       summary: Call a PTZ preset on one owned channel
       x-uvp-scope: ptz:preset:call
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2016 A.2.3.1.2", "GB/T 28181-2022 A.2.3.1.2"]
       x-uvp-enabled: true
       x-uvp-content-type: application/json
-      x-uvp-idempotency: header
+      x-uvp-idempotency-header: Idempotency-Key
       security:
         - uvpHmac: []
       parameters:
@@ -506,9 +621,13 @@ paths:
       operationId: deletePTZPreset
       summary: Delete a PTZ preset on one owned channel
       x-uvp-scope: ptz:preset:delete
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2016 A.2.3.1.2", "GB/T 28181-2022 A.2.3.1.2"]
       x-uvp-enabled: true
       x-uvp-content-type: application/json
-      x-uvp-idempotency: header
+      x-uvp-idempotency-header: Idempotency-Key
       security:
         - uvpHmac: []
       parameters:
@@ -542,6 +661,10 @@ paths:
       operationId: getPTZOperation
       summary: Get one PTZ operation for the same owned channel
       x-uvp-scope: ptz:operation:read
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["Platform operation lifecycle"]
       x-uvp-enabled: true
       security:
         - uvpHmac: []
@@ -566,6 +689,2149 @@ paths:
         '405': *methodNotAllowedResponse
         '429': *rateLimitedResponse
         '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/alarms:
+    get:
+      operationId: listDeviceAlarms
+      summary: List persisted alarms for one owned device
+      x-uvp-scope: device:alarms
+      x-uvp-enabled: true
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Persisted alarm page for the owned device
+          headers: {Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/DeviceAlarmPageResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/status-events:
+    get:
+      operationId: listDeviceStatusEvents
+      summary: Continue reading device status events with an opaque cursor
+      x-uvp-scope: device:status-events
+      x-uvp-enabled: true
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Status event page and next cursor
+          headers: {Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/DeviceStatusEventPageResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/subscriptions:
+    post:
+      operationId: deviceSubscriptionCreate
+      summary: Create a client-owned subscription to persisted device events
+      x-uvp-scope: device:subscription:create
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 9.11"]
+      x-uvp-content-type: application/json
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DeviceSubscriptionCreateRequest'}
+      responses:
+        '200':
+          description: Client-owned device event subscription
+          headers: *noStoreHeader
+          content: {application/json: {schema: {$ref: '#/components/schemas/DeviceSubscriptionResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/subscriptions/{subscriptionId}:
+    get:
+      operationId: deviceSubscriptionRead
+      summary: Read a subscription owned by the authenticated client
+      x-uvp-scope: device:subscription:read
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 9.11"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters: &deviceSubscriptionPathParameters
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/SubscriptionId'
+      responses:
+        '200':
+          description: Client-owned device event subscription
+          headers: *noStoreHeader
+          content: {application/json: {schema: {$ref: '#/components/schemas/DeviceSubscriptionResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+    delete:
+      operationId: deviceSubscriptionCancel
+      summary: Cancel this client's logical event subscription
+      description: The platform's shared SIP subscription remains managed by the platform and other clients.
+      x-uvp-scope: device:subscription:cancel
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 9.11"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters: *deviceSubscriptionPathParameters
+      responses:
+        '200':
+          description: Cancelled client-owned device event subscription
+          headers: *noStoreHeader
+          content: {application/json: {schema: {$ref: '#/components/schemas/DeviceSubscriptionResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/subscriptions/{subscriptionId}/renew:
+    post:
+      operationId: deviceSubscriptionRenew
+      summary: Renew an active device event subscription
+      x-uvp-scope: device:subscription:renew
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 9.11"]
+      x-uvp-content-type: application/json
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters: *deviceSubscriptionPathParameters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EmptyObject'}
+      responses:
+        '200':
+          description: Renewed client-owned device event subscription
+          headers: *noStoreHeader
+          content: {application/json: {schema: {$ref: '#/components/schemas/DeviceSubscriptionResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/subscriptions/{subscriptionId}/events:
+    get:
+      operationId: deviceEventsRead
+      summary: Continue reading persisted events with a signed opaque cursor
+      x-uvp-scope: device:events:read
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 9.11"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/SubscriptionId'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Event page for the active client-owned subscription
+          headers: *noStoreHeader
+          content: {application/json: {schema: {$ref: '#/components/schemas/DeviceEventPageResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/positions:
+    get:
+      operationId: devicePositionRead
+      summary: Read the latest platform-collected positions for a device
+      x-uvp-scope: device:position:read
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 7, 9.11, 附录 A"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+      responses:
+        '200':
+          description: Latest stored mobile positions, or an empty list when none are available
+          headers: *noStoreHeader
+          content: {application/json: {schema: {$ref: '#/components/schemas/DevicePositionPageResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/positions/history:
+    get:
+      operationId: devicePositionHistoryRead
+      summary: Continue reading persisted mobile position history
+      x-uvp-scope: device:position:history:read
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 7, 9.11, 附录 A"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Historical position page and next cursor
+          headers: *noStoreHeader
+          content: {application/json: {schema: {$ref: '#/components/schemas/DeviceEventPageResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/device-configs/refresh:
+    post:
+      operationId: deviceConfigRefresh
+      summary: Query supported device configuration blocks
+      description: An omitted configTypes selects profile-specific defaults. GB/T 28181-2016 queries BasicParam; 2022 queries the implemented channel-level configuration blocks, with BasicParam requested separately.
+      x-uvp-scope: device:config:refresh
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: required
+      x-uvp-idempotency-header: Idempotency-Key
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2016 附录 A（DeviceConfig）", "GB/T 28181-2022 附录 A（MANSCDP 配置命令）"]
+      x-uvp-content-type: application/json
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters: &deviceConfigWriteParameters
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DeviceConfigRefreshRequest'}
+      responses:
+        '200':
+          description: Configuration query submitted to the device
+          headers: *noStoreHeader
+          content: {application/json: {schema: {$ref: '#/components/schemas/DeviceConfigOperationResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '409': *conflictResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/device-configs:
+    get:
+      operationId: deviceConfigRead
+      summary: Read the latest stored device configuration snapshot
+      x-uvp-scope: device:config:read
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2016 附录 A（DeviceConfig）", "GB/T 28181-2022 附录 A（MANSCDP 配置命令）"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters: &deviceConfigReadParameters
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+      responses:
+        '200':
+          description: Stored configuration blocks with freshness metadata; snapshot upload credentials are omitted
+          headers: *noStoreHeader
+          content: {application/json: {schema: {$ref: '#/components/schemas/DeviceConfigSnapshotResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+    put:
+      operationId: deviceConfigApply
+      summary: Apply validated configuration blocks to a device
+      description: The API rejects read-only blocks and SnapShot upload URL/session fields. Use the dedicated capture session API for capture uploads.
+      x-uvp-scope: device:config:apply
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: required
+      x-uvp-idempotency-header: Idempotency-Key
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2016 附录 A（DeviceConfig）", "GB/T 28181-2022 附录 A（MANSCDP 配置命令）"]
+      x-uvp-content-type: application/json
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters: *deviceConfigWriteParameters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DeviceConfigApplyRequest'}
+      responses:
+        '200':
+          description: Configuration command result and read-back reconciliation state
+          headers: *noStoreHeader
+          content: {application/json: {schema: {$ref: '#/components/schemas/DeviceConfigOperationResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '409': *conflictResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/video-params/refresh:
+    post:
+      operationId: videoParamsRefresh
+      summary: Query GB/T 28181-2022 video stream parameters
+      x-uvp-scope: channel:video-params:refresh
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: required
+      x-uvp-idempotency-header: Idempotency-Key
+      x-uvp-protocol-versions: ["2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 附录 A（VideoParamAttribute）"]
+      x-uvp-content-type: application/json
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters: *deviceConfigWriteParameters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EmptyObject'}
+      responses:
+        '200':
+          description: Video parameter query submitted to the device
+          headers: *noStoreHeader
+          content: {application/json: {schema: {$ref: '#/components/schemas/DeviceConfigOperationResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '409': *conflictResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/video-params:
+    get:
+      operationId: videoParamsRead
+      summary: Read the latest stored GB/T 28181-2022 video parameters
+      x-uvp-scope: channel:video-params:read
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 附录 A（VideoParamAttribute）"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters: *deviceConfigReadParameters
+      responses:
+        '200':
+          description: Stored video stream parameters with freshness metadata
+          headers: *noStoreHeader
+          content: {application/json: {schema: {$ref: '#/components/schemas/VideoParamsSnapshotResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+    put:
+      operationId: videoParamsApply
+      summary: Apply GB/T 28181-2022 video stream parameters
+      x-uvp-scope: channel:video-params:apply
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: required
+      x-uvp-idempotency-header: Idempotency-Key
+      x-uvp-protocol-versions: ["2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 附录 A（VideoParamAttribute）"]
+      x-uvp-content-type: application/json
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters: *deviceConfigWriteParameters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/VideoParamsApplyRequest'}
+      responses:
+        '200':
+          description: Video parameter command result and read-back reconciliation state
+          headers: *noStoreHeader
+          content: {application/json: {schema: {$ref: '#/components/schemas/DeviceConfigOperationResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '409': *conflictResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/config-operations/{operationId}:
+    get:
+      operationId: deviceConfigOperationRead
+      summary: Read a configuration operation owned by the authenticated client
+      x-uvp-scope: device:config:operation:read
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["平台配置操作生命周期"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters: &deviceConfigOperationReadParameters
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/OperationId'
+      responses:
+        '200':
+          description: Configuration operation state for the addressed device and channel
+          headers: *noStoreHeader
+          content: {application/json: {schema: {$ref: '#/components/schemas/DeviceConfigOperationResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/precise-status:
+    get:
+      operationId: getPrecisePTZStatus
+      summary: Read the latest cached precise PTZ status and observation time
+      x-uvp-scope: channel:precise-status
+      x-uvp-enabled: true
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["平台缓存的设备状态；结果带 freshness/observedAt"]
+      security:
+        - uvpHmac: []
+      parameters: &channelReadParameters
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+      responses:
+        '200':
+          description: Cached precise PTZ state
+          headers: {Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/PreciseStatusSnapshotResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/cruise/tracks:
+    get:
+      operationId: listPTZCruiseTracks
+      summary: Read cached PTZ cruise tracks and freshness
+      x-uvp-scope: ptz:cruise:read
+      x-uvp-enabled: true
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["平台缓存的巡航轨迹"]
+      security:
+        - uvpHmac: []
+      parameters: *channelReadParameters
+      responses:
+        '200':
+          description: Cached cruise tracks
+          headers: {Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/CruiseTrackSnapshotResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+    post:
+      operationId: createPTZCruiseTrack
+      summary: Create a PTZ cruise track with an ordered batch of device controls
+      description: If replaceExisting is true, confirmed must also be true. A successful response means the platform sent the listed commands; it does not confirm device execution.
+      x-uvp-scope: ptz:cruise:track:create
+      x-uvp-enabled: true
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2016 7, 9.3, 附录 A", "GB/T 28181-2022 7, 9.3, 附录 A"]
+      x-uvp-content-type: application/json
+      x-uvp-idempotency-header: Idempotency-Key
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CruiseTrackCreateRequest'}
+      responses:
+        '200':
+          description: Ordered commands and per-step platform send results; device execution remains unconfirmed
+          headers: {Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/CruiseTrackCreateResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '409': *conflictResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/cruise/tracks/{trackId}:
+    get:
+      operationId: getPTZCruiseTrack
+      summary: Read one cached PTZ cruise track and its freshness
+      description: Returns the platform cache only and does not issue a device query.
+      x-uvp-scope: ptz:cruise:track:read
+      x-uvp-enabled: true
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["平台缓存读取，不触发设备查询"]
+      security:
+        - uvpHmac: []
+      parameters: &ptzCruiseTrackReadParameters
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/TrackId'
+      responses:
+        '200':
+          description: Cached cruise track and freshness
+          headers: {Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/CruiseTrackReadResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/target-track:
+    get:
+      operationId: getTargetTrackIntent
+      summary: Read the latest target-track intent and reported capability
+      x-uvp-scope: channel:target-track:read
+      x-uvp-enabled: true
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2022"]
+      x-uvp-standard-refs: ["平台最近一次目标跟踪意图；设备不提供执行确认"]
+      security:
+        - uvpHmac: []
+      parameters: *channelReadParameters
+      responses:
+        '200':
+          description: Target-track intent and capability snapshot
+          headers: {Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/TargetTrackSnapshotResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/move:
+    post:
+      operationId: movePTZ
+      summary: Move a PTZ head or lens on one owned channel
+      x-uvp-scope: ptz:move
+      x-uvp-enabled: true
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 7, 9.3, 附录 A"]
+      x-uvp-content-type: application/json
+      x-uvp-idempotency-header: Idempotency-Key
+      security:
+        - uvpHmac: []
+      parameters: &ptzControlParameters
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PTZMoveRequest'}
+      responses:
+        '200':
+          description: PTZ command sent; device execution is unconfirmed for one-way commands
+          headers: {Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/PTZControlOperationResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '409': *conflictResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/precise:
+    post:
+      operationId: controlPrecisePTZ
+      summary: Send precise PTZ coordinates to a supported GB/T 28181-2022 device
+      x-uvp-scope: ptz:precise
+      x-uvp-enabled: true
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 7, 9.3, 附录 A"]
+      x-uvp-content-type: application/json
+      x-uvp-idempotency-header: Idempotency-Key
+      security:
+        - uvpHmac: []
+      parameters: *ptzControlParameters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PTZPreciseRequest'}
+      responses:
+        '200':
+          description: PTZ command sent; device execution is unconfirmed
+          headers: {Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/PTZControlOperationResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '422': *capabilityNotSupportedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '409': *conflictResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/extended:
+    post:
+      operationId: controlExtendedPTZ
+      summary: Control supported scan or cruise-point functions on one channel
+      x-uvp-scope: ptz:extended
+      x-uvp-enabled: true
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 7, 9.3, 附录 A"]
+      x-uvp-content-type: application/json
+      x-uvp-idempotency-header: Idempotency-Key
+      security:
+        - uvpHmac: []
+      parameters: *ptzControlParameters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PTZExtendedRequest'}
+      responses:
+        '200':
+          description: PTZ command sent; device execution is unconfirmed
+          headers: {Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/PTZControlOperationResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '409': *conflictResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/wiper:
+    post:
+      operationId: controlPTZWiper
+      summary: Turn a channel wiper on or off
+      x-uvp-scope: ptz:wiper
+      x-uvp-enabled: true
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 7, 9.3, 附录 A"]
+      x-uvp-content-type: application/json
+      x-uvp-idempotency-header: Idempotency-Key
+      security:
+        - uvpHmac: []
+      parameters: *ptzControlParameters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PTZWiperRequest'}
+      responses:
+        '200':
+          description: Wiper command sent; device execution is unconfirmed
+          headers: {Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/PTZControlOperationResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '409': *conflictResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/home-position:
+    get:
+      operationId: getPTZHomePosition
+      summary: Read cached home-position state and verification source
+      x-uvp-scope: ptz:home-position:read
+      x-uvp-enabled: true
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["平台缓存的看守位设置与核验状态"]
+      security:
+        - uvpHmac: []
+      parameters: *channelReadParameters
+      responses:
+        '200':
+          description: Cached home-position state
+          headers: {Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/HomePositionSnapshotResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+    post:
+      operationId: setPTZHomePosition
+      summary: Set or disable a channel home position
+      x-uvp-scope: ptz:home-position:set
+      x-uvp-enabled: true
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 7, 9.3, 附录 A"]
+      x-uvp-content-type: application/json
+      x-uvp-idempotency-header: Idempotency-Key
+      security:
+        - uvpHmac: []
+      parameters: *ptzControlParameters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PTZHomePositionRequest'}
+      responses:
+        '200':
+          description: Home-position request and device response state
+          headers: {Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/PTZControlOperationResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '409': *conflictResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/cruise/control:
+    post:
+      operationId: controlPTZCruise
+      summary: Start, stop, or delete a cruise path on one owned channel
+      x-uvp-scope: ptz:cruise:control
+      x-uvp-enabled: true
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 7, 9.3, 附录 A"]
+      x-uvp-content-type: application/json
+      x-uvp-idempotency-header: Idempotency-Key
+      security:
+        - uvpHmac: []
+      parameters: *ptzControlParameters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PTZCruiseControlRequest'}
+      responses:
+        '200':
+          description: Cruise command sent; device execution is unconfirmed
+          headers: {Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/PTZControlOperationResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '409': *conflictResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/target-track:
+    post:
+      operationId: setPTZTargetTrack
+      summary: Send a target-tracking command to a supporting GB/T 28181-2022 device
+      x-uvp-scope: ptz:target-track
+      x-uvp-enabled: true
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 7, 9.3, 附录 A"]
+      x-uvp-content-type: application/json
+      x-uvp-idempotency-header: Idempotency-Key
+      security:
+        - uvpHmac: []
+      parameters: *ptzControlParameters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PTZTargetTrackRequest'}
+      responses:
+        '200':
+          description: Command sent; the device does not acknowledge target-track execution
+          headers: {Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/PTZTargetTrackResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '422': *capabilityNotSupportedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '409': *conflictResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/recording/start:
+    post:
+      operationId: channelRecordingStart
+      summary: "启动设备录像"
+      description: "按设备上报能力向指定通道发送录像开始命令。"
+      x-uvp-scope: device:recording:start
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 7, 9.3, 附录 A"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      x-uvp-content-type: application/json
+      x-uvp-idempotency-header: Idempotency-Key
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"type":"object","additionalProperties":false}
+      responses:
+        '200':
+          description: "启动设备录像结果"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAPIChannelRecordingStartResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+        '409':
+          description: Idempotency key conflicts with an earlier command or request
+          headers: *noStoreHeader
+          content: *errorContent
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/recording/stop:
+    post:
+      operationId: channelRecordingStop
+      summary: "停止设备录像"
+      description: "按设备上报能力向指定通道发送录像停止命令。"
+      x-uvp-scope: device:recording:stop
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 7, 9.3, 附录 A"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      x-uvp-content-type: application/json
+      x-uvp-idempotency-header: Idempotency-Key
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"type":"object","additionalProperties":false}
+      responses:
+        '200':
+          description: "停止设备录像结果"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAPIChannelRecordingStopResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+        '409':
+          description: Idempotency key conflicts with an earlier command or request
+          headers: *noStoreHeader
+          content: *errorContent
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/alarms/guard:
+    post:
+      operationId: channelAlarmGuardSet
+      summary: "设备报警布防"
+      description: "向指定设备通道发送报警布防命令并返回平台操作状态。"
+      x-uvp-scope: device:alarm:guard:set
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 7, 9.3, 附录 A"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      x-uvp-content-type: application/json
+      x-uvp-idempotency-header: Idempotency-Key
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"type":"object","additionalProperties":false}
+      responses:
+        '200':
+          description: "设备报警布防结果"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAPIChannelAlarmGuardSetResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+        '409':
+          description: Idempotency key conflicts with an earlier command or request
+          headers: *noStoreHeader
+          content: *errorContent
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/alarms/guard/reset:
+    post:
+      operationId: channelAlarmGuardReset
+      summary: "设备报警撤防"
+      description: "向指定设备通道发送报警撤防命令并返回平台操作状态。"
+      x-uvp-scope: device:alarm:guard:reset
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 7, 9.3, 附录 A"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      x-uvp-content-type: application/json
+      x-uvp-idempotency-header: Idempotency-Key
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"type":"object","additionalProperties":false}
+      responses:
+        '200':
+          description: "设备报警撤防结果"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAPIChannelAlarmGuardResetResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+        '409':
+          description: Idempotency key conflicts with an earlier command or request
+          headers: *noStoreHeader
+          content: *errorContent
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/alarms/reset:
+    post:
+      operationId: channelAlarmReset
+      summary: "设备报警复位"
+      description: "向指定设备报警目标发送复位命令；结果按设备协议应答语义报告。"
+      x-uvp-scope: device:alarm:reset
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 7, 9.3, 附录 A"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      x-uvp-content-type: application/json
+      x-uvp-idempotency-header: Idempotency-Key
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"type":"object","additionalProperties":false,"properties":{"alarmMethod":{"type":"string"},"alarmType":{"type":"string"}}}
+      responses:
+        '200':
+          description: "设备报警复位结果"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAPIChannelAlarmResetResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+        '409':
+          description: Idempotency key conflicts with an earlier command or request
+          headers: *noStoreHeader
+          content: *errorContent
+  /openapi/v1/devices/{deviceId}/maintenance/reboot:
+    post:
+      operationId: deviceMaintenanceReboot
+      summary: "设备重启"
+      description: "对客户端可见设备执行远程重启；必须显式确认并返回可查询操作状态。"
+      x-uvp-scope: device:maintenance:reboot
+      x-uvp-risk: destructive
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 7, 9.3, 附录 A"]
+      x-uvp-requires-confirmation: true
+      x-uvp-enabled: true
+      x-uvp-content-type: application/json
+      x-uvp-idempotency-header: Idempotency-Key
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"type":"object","required":["confirmed"],"additionalProperties":false,"properties":{"confirmed":{"const":true}}}
+      responses:
+        '200':
+          description: "设备重启结果"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAPIDeviceMaintenanceRebootResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+        '409':
+          description: Idempotency key conflicts with an earlier command or request
+          headers: *noStoreHeader
+          content: *errorContent
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/storage-cards/format:
+    post:
+      operationId: channelStorageCardFormat
+      summary: "存储卡格式化"
+      description: "格式化指定设备存储卡并清除其录像；必须提供卡编号和显式确认。"
+      x-uvp-scope: channel:storage-card:format
+      x-uvp-risk: destructive
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 7, 9.3, 附录 A.2.3.1.13"]
+      x-uvp-requires-confirmation: true
+      x-uvp-enabled: true
+      x-uvp-content-type: application/json
+      x-uvp-idempotency-header: Idempotency-Key
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"type":"object","required":["confirmed","cardIndex"],"additionalProperties":false,"properties":{"confirmed":{"const":true},"cardIndex":{"type":"integer","minimum":0}}}
+      responses:
+        '200':
+          description: "存储卡格式化结果"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAPIChannelStorageCardFormatResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+        '409':
+          description: Idempotency key conflicts with an earlier command or request
+          headers: *noStoreHeader
+          content: *errorContent
+  /openapi/v1/devices/{deviceId}/maintenance/operations/{operationId}:
+    get:
+      operationId: deviceMaintenanceOperationRead
+      summary: "维护操作状态"
+      description: "按设备和客户端归属读取重启、录像控制、报警控制或格式化操作结果。"
+      x-uvp-scope: device:maintenance:operation:read
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["平台操作状态；设备确认字段依协议语义返回"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/OperationId'
+      responses:
+        '200':
+          description: "维护操作状态结果"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAPIDeviceMaintenanceOperationReadResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/talk-sessions:
+    post:
+      operationId: deviceTalkCreate
+      summary: Create device talk session
+      x-uvp-scope: device:talk:create
+      x-uvp-risk: media
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 9.12"]
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      x-uvp-content-type: application/json
+      x-uvp-idempotency-header: Idempotency-Key
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false}
+      responses:
+        '200':
+          description: Operation result
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VoiceSessionResponse'}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/talk-sessions/{sessionId}:
+    get:
+      operationId: deviceTalkRead
+      summary: Read device talk session
+      x-uvp-scope: device:talk:read
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 9.12"]
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: Operation result
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VoiceSessionResponse'}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/talk-sessions/{sessionId}/end:
+    post:
+      operationId: deviceTalkEnd
+      summary: End device talk session
+      x-uvp-scope: device:talk:end
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 9.12"]
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      x-uvp-content-type: application/json
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false}
+      responses:
+        '200':
+          description: Operation result
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VoiceSessionResponse'}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/broadcast-sessions:
+    post:
+      operationId: deviceBroadcastCreate
+      summary: Create device broadcast session
+      x-uvp-scope: device:broadcast:create
+      x-uvp-risk: media
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 9.12"]
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      x-uvp-content-type: application/json
+      x-uvp-idempotency-header: Idempotency-Key
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false}
+      responses:
+        '200':
+          description: Operation result
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VoiceSessionResponse'}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/broadcast-sessions/{sessionId}:
+    get:
+      operationId: deviceBroadcastRead
+      summary: Read device broadcast session
+      x-uvp-scope: device:broadcast:read
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 9.12"]
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: Operation result
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VoiceSessionResponse'}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/broadcast-sessions/{sessionId}/end:
+    post:
+      operationId: deviceBroadcastEnd
+      summary: End device broadcast session
+      x-uvp-scope: device:broadcast:end
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 9.12"]
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      x-uvp-content-type: application/json
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false}
+      responses:
+        '200':
+          description: Operation result
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VoiceSessionResponse'}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/talk-sessions/{sessionId}/media:
+    post:
+      operationId: deviceTalkMedia
+      summary: Submit device talk media offer
+      description: "Submit a signed SDP offer through the platform proxy. The media node URL and one-use publish credential are never returned."
+      x-uvp-scope: device:talk:media
+      x-uvp-risk: media
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["平台 WHIP 媒体代理扩展"]
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      x-uvp-content-type: application/json
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [sdp]
+              properties:
+                sdp: {type: string, minLength: 4, maxLength: 60000, description: SDP offer}
+      responses:
+        '200':
+          description: SDP answer from the media node
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VoiceMediaAnswerResponse'}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/broadcast-sessions/{sessionId}/media:
+    post:
+      operationId: deviceBroadcastMedia
+      summary: Submit device broadcast media offer
+      description: "Submit a signed SDP offer through the platform proxy. The media node URL and one-use publish credential are never returned."
+      x-uvp-scope: device:broadcast:media
+      x-uvp-risk: media
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["平台 WHIP 媒体代理扩展"]
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      x-uvp-content-type: application/json
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [sdp]
+              properties:
+                sdp: {type: string, minLength: 4, maxLength: 60000, description: SDP offer}
+      responses:
+        '200':
+          description: SDP answer from the media node
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VoiceMediaAnswerResponse'}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+
+  /openapi/v1/devices/{deviceId}/firmware-upgrades:
+    post:
+      operationId: deviceFirmwareUpgradeCreate
+      summary: "设备固件升级"
+      description: "对 GB/T 28181-2022 设备升级已批准且匹配的固件；必须显式确认，并通过 operationId 查询结果。SIP 2xx 只表示升级命令已发送。"
+      x-uvp-scope: device:firmware-upgrade:execute
+      x-uvp-risk: destructive
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 9.13, 附录 A.2.3.1.12、A.2.5.9"]
+      x-uvp-requires-confirmation: true
+      x-uvp-enabled: true
+      x-uvp-content-type: application/json
+      x-uvp-idempotency-header: Idempotency-Key
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"type":"object","required":["confirmed","firmwareId"],"additionalProperties":false,"properties":{"confirmed":{"const":true},"firmwareId":{"type":"string","minLength":1,"maxLength":64,"pattern":"^[A-Za-z0-9_-]+$"}}}
+      responses:
+        '200':
+          description: "设备固件升级操作已受理或复用"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAPIDeviceFirmwareUpgradeResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+        '409':
+          description: Firmware compatibility, device state, or idempotency conflict
+          headers: *noStoreHeader
+          content: *errorContent
+  /openapi/v1/devices/{deviceId}/firmware-upgrades/{operationId}:
+    get:
+      operationId: deviceFirmwareUpgradeRead
+      summary: "设备固件升级结果"
+      description: "按设备、部门和客户端归属读取固件升级状态；SIP 信令已发送不代表设备已接受或升级成功。"
+      x-uvp-scope: device:firmware-upgrade:read
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 9.13, 附录 A.2.3.1.12、A.2.5.9"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/OperationId'
+      responses:
+        '200':
+          description: "设备固件升级状态"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAPIDeviceFirmwareUpgradeResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/recordings/search:
+    post:
+      operationId: deviceRecordQuery
+      summary: "检索设备录像"
+      description: "按设备通道和时间段检索录像；返回多响应聚合状态及短期客户端隔离游标。"
+      x-uvp-scope: device:record-query
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: optional
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2016 9.7", "GB/T 28181-2022 9.7"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      x-uvp-content-type: application/json
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"type":"object","required":["startTime","endTime"],"additionalProperties":false,"properties":{"startTime":{"type":"string","format":"date-time"},"endTime":{"type":"string","format":"date-time"},"type":{"type":"string","enum":["all","manual","alarm"]},"secrecy":{"type":"integer","minimum":0,"maximum":5},"recorderId":{"type":"string","maxLength":20}}}
+      responses:
+        '200':
+          description: "检索设备录像结果"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAPIDeviceRecordQueryResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/playback-sessions:
+    post:
+      operationId: devicePlaybackCreate
+      summary: "创建设备录像回放"
+      description: "根据本客户端最近检索到的录像记录创建回放会话；信令成功不表示媒体首帧已到达。"
+      x-uvp-scope: device:playback-create
+      x-uvp-risk: media
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 7, 9.8, 附录 B、G、L"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      x-uvp-content-type: application/json
+      x-uvp-idempotency-header: Idempotency-Key
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"type":"object","required":["recordKey","playFrom"],"additionalProperties":false,"properties":{"recordKey":{"type":"string","minLength":1},"playFrom":{"type":"string","format":"date-time"}}}
+      responses:
+        '200':
+          description: "创建设备录像回放结果"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAPIDevicePlaybackCreateResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+        '409':
+          description: Idempotency key conflicts with an earlier command or request
+          headers: *noStoreHeader
+          content: *errorContent
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/playback-sessions/{sessionId}:
+    get:
+      operationId: devicePlaybackRead
+      summary: "读取设备回放会话"
+      description: "读取当前客户端创建且仍在保留期内的设备录像回放状态。"
+      x-uvp-scope: device:playback-read
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 7, 9.8, 附录 B"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: "读取设备回放会话结果"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAPIDevicePlaybackReadResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/playback-sessions/{sessionId}/actions:
+    post:
+      operationId: devicePlaybackAction
+      summary: "控制设备录像回放"
+      description: "对当前客户端拥有的回放会话执行暂停、恢复、定位或倍速操作。"
+      x-uvp-scope: device:playback-action
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 7, 9.8, 附录 B"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      x-uvp-content-type: application/json
+      x-uvp-idempotency-header: Idempotency-Key
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"type":"object","required":["action"],"additionalProperties":false,"properties":{"action":{"type":"string","enum":["pause","resume","seek","scale"]},"positionSeconds":{"type":"number","minimum":0},"scale":{"type":"number"}}}
+      responses:
+        '200':
+          description: "控制设备录像回放结果"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAPIDevicePlaybackActionResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+        '409':
+          description: Idempotency key conflicts with an earlier command or request
+          headers: *noStoreHeader
+          content: *errorContent
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/playback-sessions/{sessionId}/stop:
+    post:
+      operationId: devicePlaybackStop
+      summary: "结束设备录像回放"
+      description: "结束当前客户端拥有的回放会话并释放媒体资源。"
+      x-uvp-scope: device:playback-stop
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 7, 9.8, 附录 B"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      x-uvp-content-type: application/json
+      x-uvp-idempotency-header: Idempotency-Key
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {"type":"object","additionalProperties":false}
+      responses:
+        '200':
+          description: "结束设备录像回放结果"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAPIDevicePlaybackStopResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+        '409':
+          description: Idempotency key conflicts with an earlier command or request
+          headers: *noStoreHeader
+          content: *errorContent
+
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/download-sessions:
+    post:
+      operationId: deviceDownloadCreate
+      summary: "创建设备录像下载"
+      description: "创建当前客户端拥有的设备录像下载会话；返回媒体会话状态，不伪造文件进度或下载地址。"
+      x-uvp-scope: device:download-create
+      x-uvp-risk: media
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 7, 9.9", "GB/T 28181-2022 附录 B、G、L"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      x-uvp-content-type: application/json
+      x-uvp-idempotency-header: Idempotency-Key
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [recordKey, playFrom, downloadSpeed], additionalProperties: false, properties: {recordKey: {type: string, minLength: 1}, playFrom: {type: string, format: date-time}, downloadSpeed: {type: integer, enum: [1, 2, 4, 8]}}}
+      responses:
+        '200':
+          description: "设备录像下载会话"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema: {type: object, required: [code, message, requestId, data], properties: {code: {type: string, enum: [OK]}, message: {type: string, enum: [success]}, requestId: {type: string}, data: {type: object, required: [sessionId, status, mode, protocolVersion], properties: {sessionId: {type: string}, status: {type: string}, mode: {const: download}, protocolVersion: {type: string}}}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '409':
+          description: Idempotency key conflicts with an earlier command or request
+          headers: *noStoreHeader
+          content: *errorContent
+        '422': *invalidRequestResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/download-sessions/{sessionId}:
+    get:
+      operationId: deviceDownloadRead
+      summary: "读取设备录像下载"
+      description: "读取当前客户端创建的设备录像下载会话状态。"
+      x-uvp-scope: device:download-read
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 7, 9.9", "GB/T 28181-2022 附录 B、G"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - name: sessionId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: "设备录像下载状态"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema: {type: object, required: [code, message, requestId, data], properties: {code: {type: string, enum: [OK]}, message: {type: string, enum: [success]}, requestId: {type: string}, data: {type: object, required: [sessionId, status, mode, protocolVersion], properties: {sessionId: {type: string}, status: {type: string}, mode: {const: download}, protocolVersion: {type: string}}}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+    delete:
+      operationId: deviceDownloadCancel
+      summary: "取消设备录像下载"
+      description: "取消当前客户端拥有的设备录像下载会话并释放媒体资源。"
+      x-uvp-scope: device:download-cancel
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 7, 9.9, 附录 B"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      x-uvp-idempotency-header: Idempotency-Key
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - name: sessionId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: "设备录像下载取消结果"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema: {type: object, required: [code, message, requestId, data], properties: {code: {type: string, enum: [OK]}, message: {type: string, enum: [success]}, requestId: {type: string}, data: {type: object, required: [sessionId, status], properties: {sessionId: {type: string}, status: {const: stopped}}}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '409':
+          description: Idempotency key conflicts with an earlier command or request
+          headers: *noStoreHeader
+          content: *errorContent
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+
 components:
   securitySchemes:
     uvpHmac:
@@ -628,6 +2894,22 @@ components:
       schema:
         type: string
         pattern: '^[0-9]{20}$'
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+    TrackId:
+      name: trackId
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+        maximum: 255
     PresetId:
       name: presetId
       in: path
@@ -643,6 +2925,13 @@ components:
         type: string
         minLength: 1
         maxLength: 64
+    SubscriptionId:
+      name: subscriptionId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -673,6 +2962,14 @@ components:
         minimum: 1
         maximum: 100
         default: 20
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque cursor returned by the previous page; omit it to start from the beginning.
+      schema:
+        type: string
+        maxLength: 256
     Keyword:
       name: keyword
       in: query
@@ -690,6 +2987,523 @@ components:
         type: string
         enum: [online, offline, unknown]
   schemas:
+    EmptyObject:
+      type: object
+      additionalProperties: false
+    DeviceConfigRefreshRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        configTypes:
+          type: array
+          minItems: 1
+          maxItems: 9
+          uniqueItems: true
+          description: Omit to query profile-specific defaults; GB/T 28181-2016 defaults to BasicParam, while 2022 defaults to implemented channel-level types. Request BasicParam separately on 2022 devices.
+          items:
+            type: string
+            enum: [BasicParam, VideoParamOpt, VideoRecordPlan, VideoAlarmRecord, PictureMask, FrameMirror, AlarmReport, OSDConfig, SnapShotConfig]
+    DeviceConfigApplyRequest:
+      type: object
+      additionalProperties: false
+      required: [blocks]
+      properties:
+        blocks: {$ref: '#/components/schemas/DeviceConfigBlocksRequest'}
+    DeviceConfigBlocksRequest:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      description: Only writable configuration blocks are accepted. VideoParamOpt is read-only; snapShot is managed by the capture-session API.
+      properties:
+        basicParam: {$ref: '#/components/schemas/BasicParamWriteBlock'}
+        videoRecordPlan: {$ref: '#/components/schemas/VideoRecordPlanWriteBlock'}
+        videoAlarmRecord: {$ref: '#/components/schemas/VideoAlarmRecordWriteBlock'}
+        pictureMask: {$ref: '#/components/schemas/PictureMaskWriteBlock'}
+        frameMirror: {$ref: '#/components/schemas/FrameMirrorWriteBlock'}
+        alarmReport: {$ref: '#/components/schemas/AlarmReportWriteBlock'}
+        osdConfig: {$ref: '#/components/schemas/OSDConfigWriteBlock'}
+    BasicParamWriteBlock:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        name: {type: string, minLength: 1}
+        expiration: {type: integer, minimum: 1, maximum: 86400}
+        heartBeatInterval: {type: integer, minimum: 1, maximum: 86400}
+        heartBeatCount: {type: integer, minimum: 1, maximum: 1000}
+    VideoRecordPlanWriteBlock:
+      type: object
+      additionalProperties: false
+      required: [recordEnable, schedules, streamNumber]
+      properties:
+        recordEnable: {type: integer, enum: [0, 1]}
+        schedules:
+          type: array
+          maxItems: 7
+          items:
+            type: object
+            additionalProperties: false
+            required: [weekDayNum, segments]
+            properties:
+              weekDayNum: {type: integer, minimum: 1, maximum: 7}
+              segments:
+                type: array
+                maxItems: 8
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [startHour, startMin, startSec, stopHour, stopMin, stopSec]
+                  properties:
+                    startHour: {type: integer, minimum: 0, maximum: 23}
+                    startMin: {type: integer, minimum: 0, maximum: 59}
+                    startSec: {type: integer, minimum: 0, maximum: 59}
+                    stopHour: {type: integer, minimum: 0, maximum: 23}
+                    stopMin: {type: integer, minimum: 0, maximum: 59}
+                    stopSec: {type: integer, minimum: 0, maximum: 59}
+        streamNumber: {type: integer, minimum: 0}
+    VideoAlarmRecordWriteBlock:
+      type: object
+      additionalProperties: false
+      required: [recordEnable, streamNumber]
+      properties:
+        recordEnable: {type: integer, enum: [0, 1]}
+        recordTime: {type: integer, minimum: 0, maximum: 86400}
+        preRecordTime: {type: integer, minimum: 0, maximum: 86400}
+        streamNumber: {type: integer, minimum: 0}
+    PictureMaskWriteBlock:
+      type: object
+      additionalProperties: false
+      required: [on, regions]
+      properties:
+        on: {type: integer, enum: [0, 1]}
+        regions:
+          type: array
+          maxItems: 4
+          items:
+            type: object
+            additionalProperties: false
+            required: [seq, left, top, right, bottom]
+            properties:
+              seq: {type: integer, minimum: 1, maximum: 4}
+              left: {type: integer, minimum: 0}
+              top: {type: integer, minimum: 0}
+              right: {type: integer, minimum: 0}
+              bottom: {type: integer, minimum: 0}
+    FrameMirrorWriteBlock:
+      type: object
+      additionalProperties: false
+      required: [value]
+      properties:
+        value: {type: integer, enum: [0, 1, 2, 3]}
+    AlarmReportWriteBlock:
+      type: object
+      additionalProperties: false
+      required: [motionDetection, fieldDetection]
+      properties:
+        motionDetection: {type: integer, enum: [0, 1]}
+        fieldDetection: {type: integer, enum: [0, 1]}
+    OSDConfigWriteBlock:
+      type: object
+      additionalProperties: false
+      required: [length, width, timeX, timeY, timeEnable, textEnable, items]
+      properties:
+        length: {type: integer, minimum: 1}
+        width: {type: integer, minimum: 1}
+        timeX: {type: integer, minimum: 0}
+        timeY: {type: integer, minimum: 0}
+        timeEnable: {type: integer, enum: [0, 1]}
+        timeType: {type: integer, enum: [0, 1]}
+        textEnable: {type: integer, enum: [0, 1]}
+        items:
+          type: array
+          maxItems: 8
+          items:
+            type: object
+            additionalProperties: false
+            required: [text, x, y]
+            properties:
+              text: {type: string, maxLength: 32}
+              x: {type: integer, minimum: 0}
+              y: {type: integer, minimum: 0}
+    VideoParamsApplyRequest:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 8
+          items: {$ref: '#/components/schemas/VideoParamItem'}
+    VideoParamItem:
+      type: object
+      additionalProperties: false
+      required: [streamNumber, videoFormat, resolution, frameRate, bitRateType]
+      description: videoBitRate is required for fixed bit rate (bitRateType 1) and omitted for variable bit rate (bitRateType 2).
+      properties:
+        streamNumber: {type: integer, minimum: 0}
+        videoFormat: {type: string, enum: ["1", "2", "3", "4", "5"]}
+        resolution: {type: string, description: Appendix G resolution code 1 to 6 or a WxH value}
+        frameRate: {type: string, pattern: '^(0|[1-9][0-9]?)$'}
+        bitRateType: {type: string, enum: ["1", "2"]}
+        videoBitRate: {type: string, pattern: '^[1-9][0-9]{0,5}$'}
+    DeviceConfigReconciliation:
+      type: object
+      additionalProperties: false
+      required: [state]
+      properties:
+        state: {type: string}
+        operationId: {type: string}
+        status: {type: string}
+        responseHasData: {type: boolean, nullable: true}
+        errorCode: {type: string}
+        completedAt: {type: string, format: date-time, nullable: true}
+    DeviceConfigOperationView:
+      type: object
+      additionalProperties: false
+      required: [operationId, action, status, sn, protocolVersion, deviceAcknowledged, reconciliation]
+      properties:
+        operationId: {type: string}
+        action: {type: string}
+        status: {type: string}
+        sn: {type: integer}
+        protocolVersion: {type: string, enum: ["2016", "2022"]}
+        deviceAcknowledged: {type: boolean}
+        deviceResult: {type: string}
+        errorCode: {type: string}
+        responseAt: {type: string, format: date-time, nullable: true}
+        responseHasData: {type: boolean, nullable: true}
+        reconciliation: {$ref: '#/components/schemas/DeviceConfigReconciliation'}
+    DeviceConfigOperationResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/DeviceConfigOperationView'}
+    DeviceConfigEntry:
+      type: object
+      additionalProperties: false
+      required: [configType, targetCode, targetKind, config, freshness, observedAt]
+      properties:
+        configType: {type: string}
+        targetCode: {type: string, pattern: '^[0-9]{20}$'}
+        targetKind: {type: string, enum: [device, channel]}
+        config: {type: object, additionalProperties: true}
+        freshness: {type: string, enum: [fresh, stale]}
+        observedAt: {type: string, format: date-time}
+    DeviceConfigSnapshot:
+      type: object
+      additionalProperties: false
+      required: [deviceId, channelId, protocolVersion, freshness, items]
+      properties:
+        deviceId: {type: string, pattern: '^[0-9]{20}$'}
+        channelId: {type: string, pattern: '^[0-9]{20}$'}
+        protocolVersion: {type: string, enum: ["2016", "2022"]}
+        freshness: {type: string, enum: [fresh, stale, unknown]}
+        observedAt: {type: string, format: date-time, nullable: true}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/DeviceConfigEntry'}
+    DeviceConfigSnapshotResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/DeviceConfigSnapshot'}
+    VideoParamsSnapshot:
+      type: object
+      additionalProperties: false
+      required: [deviceId, channelId, protocolVersion, freshness, items]
+      properties:
+        deviceId: {type: string, pattern: '^[0-9]{20}$'}
+        channelId: {type: string, pattern: '^[0-9]{20}$'}
+        protocolVersion: {type: string, enum: ["2022"]}
+        freshness: {type: string, enum: [fresh, stale, unknown]}
+        observedAt: {type: string, format: date-time, nullable: true}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/VideoParamItem'}
+    VideoParamsSnapshotResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/VideoParamsSnapshot'}
+    DeviceSubscriptionCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [alarm, device_status, mobile_position]}
+        expiresSeconds: {type: integer, minimum: 60, maximum: 86400}
+        intervalSeconds: {type: integer, minimum: 0, maximum: 86400}
+    DeviceSubscriptionView:
+      type: object
+      additionalProperties: false
+      required: [id, deviceId, kind, enabled, status, expiresAt, expiresSeconds, createdAt, updatedAt]
+      properties:
+        id: {type: string, format: uuid}
+        deviceId: {type: string, pattern: '^[0-9]{20}$'}
+        kind: {type: string, enum: [alarm, device_status, mobile_position]}
+        enabled: {type: boolean}
+        status: {type: string, enum: [enabled, cancelled, expired]}
+        expiresAt: {type: string, format: date-time}
+        expiresSeconds: {type: integer, minimum: 60, maximum: 86400}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    DeviceSubscriptionResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/DeviceSubscriptionView'}
+    DevicePosition:
+      type: object
+      additionalProperties: false
+      required: [sourceCode, eventTime, receivedAt, longitude, latitude]
+      properties:
+        sourceCode: {type: string}
+        eventTime: {type: string, format: date-time}
+        receivedAt: {type: string, format: date-time}
+        longitude: {type: number, format: double}
+        latitude: {type: number, format: double}
+        speed: {type: number, format: double, nullable: true}
+        direction: {type: number, format: double, nullable: true}
+        altitude: {type: number, format: double, nullable: true}
+    DeviceEvent:
+      type: object
+      additionalProperties: false
+      required: [id, kind, occurredAt, receivedAt]
+      properties:
+        id: {type: string}
+        kind: {type: string, enum: [alarm, device_status, mobile_position]}
+        sourceCode: {type: string}
+        occurredAt: {type: string, format: date-time}
+        receivedAt: {type: string, format: date-time}
+        alarm: {type: object, additionalProperties: true, nullable: true}
+        status: {type: object, additionalProperties: true, nullable: true}
+        position: {$ref: '#/components/schemas/DevicePosition'}
+    DeviceEventPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor, hasMore]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/DeviceEvent'}
+        nextCursor: {type: string}
+        hasMore: {type: boolean}
+    DeviceEventPageResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/DeviceEventPage'}
+    DevicePositionPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/DevicePosition'}
+    DevicePositionPageResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/DevicePositionPage'}
+    OpenAPIChannelRecordingStartResult:
+      {"type":"object","required":["operationId","status","responseRequired","deviceAcknowledged"],"additionalProperties":true}
+    OpenAPIChannelRecordingStartResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/OpenAPIChannelRecordingStartResult'}
+    OpenAPIChannelRecordingStopResult:
+      {"type":"object","required":["operationId","status","responseRequired","deviceAcknowledged"],"additionalProperties":true}
+    OpenAPIChannelRecordingStopResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/OpenAPIChannelRecordingStopResult'}
+    OpenAPIChannelAlarmGuardSetResult:
+      {"type":"object","required":["operationId","status","responseRequired","deviceAcknowledged"],"additionalProperties":true}
+    OpenAPIChannelAlarmGuardSetResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/OpenAPIChannelAlarmGuardSetResult'}
+    OpenAPIChannelAlarmGuardResetResult:
+      {"type":"object","required":["operationId","status","responseRequired","deviceAcknowledged"],"additionalProperties":true}
+    OpenAPIChannelAlarmGuardResetResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/OpenAPIChannelAlarmGuardResetResult'}
+    OpenAPIChannelAlarmResetResult:
+      {"type":"object","required":["operationId","status","responseRequired","deviceAcknowledged"],"additionalProperties":true}
+    OpenAPIChannelAlarmResetResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/OpenAPIChannelAlarmResetResult'}
+    OpenAPIDeviceMaintenanceRebootResult:
+      {"type":"object","required":["operationId","status","responseRequired","deviceAcknowledged","deduplicated"],"additionalProperties":true}
+    OpenAPIDeviceMaintenanceRebootResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/OpenAPIDeviceMaintenanceRebootResult'}
+    OpenAPIChannelStorageCardFormatResult:
+      {"type":"object","required":["operationId","status","responseRequired","deviceAcknowledged"],"additionalProperties":true}
+    OpenAPIChannelStorageCardFormatResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/OpenAPIChannelStorageCardFormatResult'}
+    OpenAPIDeviceMaintenanceOperationReadResult:
+      {"type":"object","required":["operationId","status","deviceAcknowledged"],"additionalProperties":true}
+    OpenAPIDeviceMaintenanceOperationReadResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/OpenAPIDeviceMaintenanceOperationReadResult'}
+    OpenAPIDeviceFirmwareUpgradeResult:
+      type: object
+      additionalProperties: false
+      required: [operationId, status, submissionStatus, deviceStatus, firmware, currentFirmware, manufacturer, sipStatus, errorCode, failedReason, createdAt]
+      properties:
+        operationId: {type: string, minLength: 1, maxLength: 64}
+        status: {type: string, enum: [queued, sent, accepted, succeeded, failed, rejected, unknown]}
+        submissionStatus: {type: string, enum: [pending, sent, rejected, unknown]}
+        deviceStatus: {type: string, enum: [pending, accepted, succeeded, failed, rejected, unknown]}
+        firmware: {type: string}
+        currentFirmware: {type: string}
+        manufacturer: {type: string}
+        sipStatus: {type: integer, minimum: 0}
+        errorCode: {type: string}
+        failedReason: {type: string}
+        createdAt: {type: string, format: date-time}
+        sentAt: {type: string, format: date-time, nullable: true}
+        acceptedAt: {type: string, format: date-time, nullable: true}
+        completedAt: {type: string, format: date-time, nullable: true}
+        deadlineAt: {type: string, format: date-time, nullable: true}
+        deduplicated: {type: boolean}
+    OpenAPIDeviceFirmwareUpgradeResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/OpenAPIDeviceFirmwareUpgradeResult'}
+    OpenAPIDeviceRecordQueryResult:
+      {"type":"object","required":["items","totalRecords","pageSize","protocolVersion","status","incomplete"],"additionalProperties":true}
+    OpenAPIDeviceRecordQueryResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/OpenAPIDeviceRecordQueryResult'}
+    OpenAPIDevicePlaybackCreateResult:
+      {"type":"object","required":["sessionId","status","mode","protocolVersion"],"additionalProperties":true}
+    OpenAPIDevicePlaybackCreateResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/OpenAPIDevicePlaybackCreateResult'}
+    OpenAPIDevicePlaybackReadResult:
+      {"type":"object","required":["sessionId","status","mode","protocolVersion"],"additionalProperties":true}
+    OpenAPIDevicePlaybackReadResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/OpenAPIDevicePlaybackReadResult'}
+    OpenAPIDevicePlaybackActionResult:
+      {"type":"object","required":["sessionId","status","mode","protocolVersion"],"additionalProperties":true}
+    OpenAPIDevicePlaybackActionResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/OpenAPIDevicePlaybackActionResult'}
+    OpenAPIDevicePlaybackStopResult:
+      {"type":"object","required":["sessionId","status"],"additionalProperties":true}
+    OpenAPIDevicePlaybackStopResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/OpenAPIDevicePlaybackStopResult'}
     ErrorResponse:
       type: object
       additionalProperties: false
@@ -697,7 +3511,7 @@ components:
       properties:
         code:
           type: string
-          enum: [INVALID_REQUEST, AUTHENTICATION_FAILED, REQUEST_EXPIRED, REQUEST_REPLAYED, CAPABILITY_DENIED, RESOURCE_NOT_FOUND, CONFLICT, RATE_LIMITED, QUOTA_EXCEEDED, SERVICE_UNAVAILABLE]
+          enum: [INVALID_REQUEST, AUTHENTICATION_FAILED, REQUEST_EXPIRED, REQUEST_REPLAYED, CAPABILITY_DENIED, CAPABILITY_NOT_SUPPORTED, DEVICE_OFFLINE, RESOURCE_NOT_FOUND, CONFLICT, RATE_LIMITED, QUOTA_EXCEEDED, SERVICE_UNAVAILABLE]
         message:
           type: string
         requestId:
@@ -828,6 +3642,66 @@ components:
         message: {type: string, enum: [success]}
         requestId: {type: string}
         data: {$ref: '#/components/schemas/ChannelStatus'}
+    ControlCapability:
+      type: object
+      additionalProperties: false
+      required: [state, reason]
+      properties:
+        state: {type: string, enum: [supported, unsupported, unknown]}
+        reason: {type: string}
+    ControlCapabilities:
+      type: object
+      additionalProperties: false
+      required: [basicPtz, iFrame, record, guard, alarmReset, teleBoot, dragZoom, targetTrack]
+      properties:
+        basicPtz: {$ref: '#/components/schemas/ControlCapability'}
+        iFrame: {$ref: '#/components/schemas/ControlCapability'}
+        record: {$ref: '#/components/schemas/ControlCapability'}
+        guard: {$ref: '#/components/schemas/ControlCapability'}
+        alarmReset: {$ref: '#/components/schemas/ControlCapability'}
+        teleBoot: {$ref: '#/components/schemas/ControlCapability'}
+        dragZoom: {$ref: '#/components/schemas/ControlCapability'}
+        targetTrack: {$ref: '#/components/schemas/ControlCapability'}
+    ControlCapabilitiesResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/ControlCapabilities'}
+    StorageCard:
+      type: object
+      additionalProperties: false
+      required: [cardId, hddName, status, capacityMb, freeSpaceMb, observedAt]
+      properties:
+        cardId: {type: integer}
+        hddName: {type: string}
+        status: {type: string, enum: [ok, formatting, unformatted, idle, error, unknown]}
+        formatProgress: {type: integer, minimum: 0, maximum: 100}
+        capacityMb: {type: integer}
+        freeSpaceMb: {type: integer}
+        observedAt: {type: string, format: date-time}
+    StorageCardSnapshot:
+      type: object
+      additionalProperties: false
+      required: [items, freshness]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/StorageCard'}
+        freshness: {type: string, enum: [fresh, stale, unknown]}
+        observedAt: {type: string, format: date-time}
+    StorageCardSnapshotResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/StorageCardSnapshot'}
     LivePlaybackResponse:
       type: object
       additionalProperties: false
@@ -845,6 +3719,377 @@ components:
             status: {type: string}
             reused: {type: boolean}
             urls: {type: object, additionalProperties: true}
+    DeviceAlarm:
+      type: object
+      additionalProperties: false
+      required: [id, receivedAt, sourceCode, alarmTypeParam, description]
+      properties:
+        id: {type: string}
+        receivedAt: {type: string, format: date-time}
+        alarmTime: {type: string, format: date-time, nullable: true}
+        channelCode: {type: string, nullable: true}
+        sourceCode: {type: string}
+        priority: {type: integer, nullable: true}
+        method: {type: integer, nullable: true}
+        alarmType: {type: integer, nullable: true}
+        alarmTypeParam: {type: string}
+        description: {type: string}
+        longitude: {type: number, nullable: true}
+        latitude: {type: number, nullable: true}
+    DeviceAlarmPage:
+      type: object
+      additionalProperties: false
+      required: [items, page, pageSize, total]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/DeviceAlarm'}}
+        page: {type: integer, minimum: 1}
+        pageSize: {type: integer, minimum: 1, maximum: 100}
+        total: {type: integer, format: int64, minimum: 0}
+    DeviceAlarmPageResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/DeviceAlarmPage'}
+    DeviceStatusEvent:
+      type: object
+      additionalProperties: false
+      required: [id, deviceCode, eventType, eventName, toStatus, occurredAt, source]
+      properties:
+        id: {type: string}
+        deviceCode: {type: string, pattern: '^[0-9]{20}$'}
+        eventType: {type: string}
+        eventName: {type: string}
+        fromStatus: {type: integer, nullable: true}
+        toStatus: {type: integer}
+        occurredAt: {type: string, format: date-time}
+        source: {type: string}
+        registerExpires: {type: integer, nullable: true}
+        keepaliveInterval: {type: integer, nullable: true}
+    DeviceStatusEventPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor, hasMore]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/DeviceStatusEvent'}}
+        nextCursor: {type: string}
+        hasMore: {type: boolean}
+    DeviceStatusEventPageResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/DeviceStatusEventPage'}
+    PreciseStatus:
+      type: object
+      additionalProperties: false
+      properties:
+        pan: {type: number, nullable: true}
+        tilt: {type: number, nullable: true}
+        zoom: {type: number, nullable: true}
+        focus: {type: number, nullable: true}
+        iris: {type: number, nullable: true}
+        deviceTime: {type: string, format: date-time, nullable: true}
+    PreciseStatusSnapshot:
+      type: object
+      additionalProperties: false
+      required: [state, freshness]
+      properties:
+        state: {$ref: '#/components/schemas/PreciseStatus', nullable: true}
+        freshness: {type: string, enum: [fresh, stale, unknown]}
+        observedAt: {type: string, format: date-time}
+    PreciseStatusSnapshotResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/PreciseStatusSnapshot'}
+    HomePosition:
+      type: object
+      additionalProperties: false
+      required: [enabled, confirmedAt, source, verification]
+      properties:
+        enabled: {type: boolean}
+        resetTime: {type: integer, nullable: true}
+        presetId: {type: integer, nullable: true}
+        confirmedAt: {type: string, format: date-time}
+        source: {type: string}
+        verification: {type: string}
+    HomePositionSnapshot:
+      type: object
+      additionalProperties: false
+      required: [homePosition, freshness]
+      properties:
+        homePosition: {$ref: '#/components/schemas/HomePosition', nullable: true}
+        freshness: {type: string, enum: [fresh, stale, unknown]}
+        observedAt: {type: string, format: date-time}
+    HomePositionSnapshotResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/HomePositionSnapshot'}
+    CruisePoint:
+      type: object
+      additionalProperties: false
+      required: [presetIndex, stayTime, speed]
+      properties:
+        presetIndex: {type: integer}
+        stayTime: {type: integer}
+        speed: {type: integer}
+    CruiseTrackDetail:
+      type: object
+      additionalProperties: false
+      required: [cruisePoints]
+      properties:
+        sumNum: {type: integer}
+        cruisePoints: {type: array, items: {$ref: '#/components/schemas/CruisePoint'}}
+    CruiseTrack:
+      type: object
+      additionalProperties: false
+      required: [trackId, name, source]
+      properties:
+        trackId: {type: integer, minimum: 0, maximum: 255}
+        name: {type: string}
+        enabled: {type: boolean, nullable: true}
+        detail: {$ref: '#/components/schemas/CruiseTrackDetail'}
+        source: {type: string}
+        deviceTime: {type: string, format: date-time, nullable: true}
+        observedAt: {type: string, format: date-time, nullable: true}
+    CruiseTrackSnapshot:
+      type: object
+      additionalProperties: false
+      required: [items, freshness]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/CruiseTrack'}}
+        freshness: {type: string, enum: [fresh, stale, unknown]}
+        observedAt: {type: string, format: date-time, nullable: true}
+    CruiseTrackSnapshotResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/CruiseTrackSnapshot'}
+    CruiseTrackCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [trackId, stops]
+      description: If replaceExisting is true, confirmed must also be true. Zero speed or dwell omits that command and keeps the device setting.
+      properties:
+        trackId: {type: integer, minimum: 0, maximum: 255}
+        name: {type: string, maxLength: 255}
+        speed: {type: integer, minimum: 0, maximum: 4095, default: 0}
+        dwellSec: {type: integer, minimum: 0, maximum: 4095, default: 0}
+        stops:
+          type: array
+          minItems: 1
+          maxItems: 32
+          items:
+            type: object
+            additionalProperties: false
+            required: [presetId]
+            properties:
+              presetId: {type: integer, minimum: 1, maximum: 255}
+        replaceExisting: {type: boolean, default: false}
+        confirmed: {type: boolean}
+    CruiseTrackCreateStep:
+      type: object
+      additionalProperties: true
+      required: [step, status]
+      properties:
+        step: {type: string, enum: [clear, add_stop, set_speed, set_dwell]}
+        operationId: {type: string}
+        status: {type: string}
+        presetId: {type: integer}
+        index: {type: integer}
+        speed: {type: integer}
+        dwellSec: {type: integer}
+    CruiseTrackCreateResult:
+      type: object
+      additionalProperties: false
+      required: [trackId, name, result, deviceAcknowledged, totalStops, completedStops, steps]
+      properties:
+        trackId: {type: integer, minimum: 0, maximum: 255}
+        name: {type: string}
+        result: {type: string, enum: [sent_result_unconfirmed, partial_failure]}
+        deviceAcknowledged: {type: boolean, enum: [false]}
+        totalStops: {type: integer}
+        completedStops: {type: integer}
+        failedStep: {type: string}
+        steps: {type: array, items: {$ref: '#/components/schemas/CruiseTrackCreateStep'}}
+    CruiseTrackCreateResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/CruiseTrackCreateResult'}
+    CruiseTrackReadResult:
+      type: object
+      additionalProperties: false
+      required: [track, freshness]
+      properties:
+        track: {$ref: '#/components/schemas/CruiseTrack'}
+        freshness: {type: string, enum: [fresh, stale, unknown]}
+        observedAt: {type: string, format: date-time, nullable: true}
+    CruiseTrackReadResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/CruiseTrackReadResult'}
+    TargetTrackSnapshot:
+      type: object
+      additionalProperties: false
+      required: [deviceAcknowledged, responseRequired, targetCode, capability]
+      properties:
+        intent: {type: object, nullable: true, additionalProperties: true}
+        deviceAcknowledged: {type: boolean, enum: [false]}
+        responseRequired: {type: boolean, enum: [false]}
+        targetCode: {type: string, pattern: '^[0-9]{20}$'}
+        capability: {$ref: '#/components/schemas/ControlCapability'}
+    TargetTrackSnapshotResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/TargetTrackSnapshot'}
+    PTZMoveRequest:
+      type: object
+      additionalProperties: false
+      required: [action, speed]
+      properties:
+        action:
+          type: string
+          enum: [stop, left, right, up, down, left_up, right_up, left_down, right_down, zoom_in, zoom_out, focus_far, focus_near, iris_open, iris_close, lens_stop]
+        speed: {type: integer, minimum: 0, maximum: 255}
+    PTZPreciseRequest:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      description: At least one coordinate is required; only GB/T 28181-2022 devices supporting precise control are accepted.
+      properties:
+        pan: {type: number, minimum: -360, maximum: 360}
+        tilt: {type: number, minimum: -180, maximum: 180}
+        zoom: {type: number, minimum: 0, maximum: 100000}
+    PTZExtendedRequest:
+      type: object
+      additionalProperties: false
+      required: [action, id]
+      properties:
+        action:
+          type: string
+          enum: [scan_start, scan_stop, scan_set_left, scan_set_right, scan_set_speed, cruise_add_stop, cruise_delete_stop, cruise_set_speed, cruise_set_dwell]
+        id: {type: integer, minimum: 0, maximum: 255}
+        presetId: {type: integer, minimum: 0, maximum: 255}
+        value: {type: integer, minimum: 1, maximum: 4095}
+    PTZWiperRequest:
+      type: object
+      additionalProperties: false
+      required: [action]
+      properties:
+        action: {type: string, enum: [on, off]}
+    PTZHomePositionRequest:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      description: When enabled is true, resetTime and presetId are required; when false, both must be omitted.
+      properties:
+        enabled: {type: boolean}
+        resetTime: {type: integer, minimum: 10, maximum: 3600}
+        presetId: {type: integer, minimum: 0, maximum: 255}
+    PTZCruiseControlRequest:
+      type: object
+      additionalProperties: false
+      required: [action, trackId]
+      properties:
+        action: {type: string, enum: [start, stop, delete]}
+        trackId: {type: integer, minimum: 0, maximum: 255}
+    PTZTargetTrackArea:
+      type: object
+      additionalProperties: false
+      required: [length, width, midPointX, midPointY, lengthX, lengthY]
+      description: Coordinates are relative to the panoramic video window.
+      properties:
+        length: {type: integer, minimum: 1}
+        width: {type: integer, minimum: 1}
+        midPointX: {type: integer, minimum: 0}
+        midPointY: {type: integer, minimum: 0}
+        lengthX: {type: integer, minimum: 1}
+        lengthY: {type: integer, minimum: 1}
+    PTZTargetTrackRequest:
+      type: object
+      additionalProperties: false
+      required: [mode]
+      description: Manual mode requires area; stop mode must omit area. deviceId2 must be another visible channel of this device when supplied.
+      properties:
+        mode: {type: string, enum: [auto, manual, stop]}
+        deviceId2: {type: string, pattern: '^[0-9]{20}$'}
+        area: {$ref: '#/components/schemas/PTZTargetTrackArea'}
+    PTZControlOperation:
+      type: object
+      additionalProperties: false
+      required: [operationId, status, action, sn, result, deviceAcknowledged]
+      properties:
+        operationId: {type: string}
+        status: {type: string}
+        action: {type: string}
+        sn: {type: integer, format: int32}
+        result: {type: string, enum: [sent_result_unconfirmed, pending_device_response, device_accepted, device_rejected, result_unknown]}
+        deviceAcknowledged: {type: boolean}
+    PTZControlOperationResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/PTZControlOperation'}
+    PTZTargetTrackOperation:
+      type: object
+      additionalProperties: false
+      required: [operationId, status, action, sn, result, responseRequired, deviceAcknowledged]
+      properties:
+        operationId: {type: string}
+        status: {type: string}
+        action: {type: string}
+        sn: {type: integer, format: int32}
+        result: {type: string, enum: [sent_result_unconfirmed]}
+        responseRequired: {type: boolean, enum: [false]}
+        deviceAcknowledged: {type: boolean, enum: [false]}
+    PTZTargetTrackResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/PTZTargetTrackOperation'}
     PTZPresetRequest:
       type: object
       additionalProperties: false
@@ -900,3 +4145,59 @@ components:
         message: {type: string, enum: [success]}
         requestId: {type: string}
         data: {$ref: '#/components/schemas/PTZOperation'}
+    VoiceSession:
+      type: object
+      additionalProperties: false
+      required: [sessionId, mode, state, expiresAt]
+      properties:
+        sessionId: {type: string, minLength: 1, maxLength: 64}
+        mode: {type: string, enum: [talk, broadcast]}
+        state: {type: string, enum: [reserved, publishing, inviting, active, stopping, ended, failed, expired]}
+        expiresAt: {type: string, format: date-time}
+        startedAt: {type: string, format: date-time, nullable: true}
+        endedAt: {type: string, format: date-time, nullable: true}
+        media: {$ref: '#/components/schemas/VoiceMediaResource'}
+    VoiceMediaResource:
+      type: object
+      additionalProperties: false
+      required: [path, protocol, contentType]
+      properties:
+        path: {type: string}
+        protocol: {type: string, enum: [whip]}
+        contentType: {type: string, enum: [application/sdp]}
+        iceServers:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [urls]
+            properties:
+              urls:
+                type: array
+                minItems: 1
+                items: {type: string}
+              username: {type: string}
+              credential: {type: string}
+    VoiceSessionResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data: {$ref: '#/components/schemas/VoiceSession'}
+    VoiceMediaAnswerResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data:
+          type: object
+          additionalProperties: false
+          required: [sdp]
+          properties:
+            sdp: {type: string, description: SDP answer}

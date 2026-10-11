@@ -2,7 +2,8 @@
 import { computed, ref, watch } from "vue";
 import type { OpenAPICapability, OpenAPICapabilityGroup } from "@/api/gb28181-openapi";
 
-type RiskFilter = "all" | "read" | "media" | "control";
+type RiskCategory = "read" | "media" | "control" | "destructive" | "unknown";
+type RiskFilter = "all" | RiskCategory;
 type GrantFilter = "all" | "enabled" | "disabled";
 
 const props = defineProps<{
@@ -22,20 +23,6 @@ const activeGroup = ref("all");
 const riskFilter = ref<RiskFilter>("all");
 const grantFilter = ref<GrantFilter>("all");
 const selectedScopes = ref<string[]>([]);
-
-const capabilityDescriptions: Record<string, string> = {
-  "device:list": "查询数据范围内可见的设备列表。",
-  "device:detail": "读取指定设备的基础信息。",
-  "device:status": "读取指定设备的在线和状态信息。",
-  "channel:list": "查询指定设备下的数据通道。",
-  "channel:detail": "读取指定通道的基础信息。",
-  "channel:status": "读取指定通道的设备状态。",
-  "ptz:preset:list": "读取指定通道已经配置的预置位。",
-  "ptz:preset:save": "新增或更新指定通道的预置位。",
-  "ptz:preset:call": "让指定通道转到已有预置位。",
-  "ptz:preset:delete": "删除指定通道的预置位。",
-  "ptz:operation:read": "查询云台控制操作的执行结果。"
-};
 
 const allCapabilities = computed(() =>
   props.groups.flatMap(group =>
@@ -57,7 +44,13 @@ const changedCapabilities = computed(() =>
   )
 );
 const highRiskChanges = computed(() =>
-  changedCapabilities.value.filter(capability => ["media", "control"].includes(capability.risk))
+  changedCapabilities.value.filter(capability => ["media", "control"].includes(riskCategory(capability.risk)))
+);
+const destructiveChanges = computed(() =>
+  changedCapabilities.value.filter(capability => riskCategory(capability.risk) === "destructive")
+);
+const unknownRiskChanges = computed(() =>
+  changedCapabilities.value.filter(capability => riskCategory(capability.risk) === "unknown")
 );
 
 const groupSummaries = computed(() => [
@@ -79,12 +72,20 @@ const filteredCapabilities = computed(() => {
   const keyword = query.value.trim().toLowerCase();
   return allCapabilities.value.filter(capability => {
     if (activeGroup.value !== "all" && capability.groupCode !== activeGroup.value) return false;
-    if (riskFilter.value !== "all" && capability.risk !== riskFilter.value) return false;
+    if (riskFilter.value !== "all" && riskCategory(capability.risk) !== riskFilter.value) return false;
     const enabled = selected.value.has(capability.scope);
     if (grantFilter.value === "enabled" && !enabled) return false;
     if (grantFilter.value === "disabled" && enabled) return false;
     if (!keyword) return true;
-    return [capability.name, capability.scope, capability.externalPath, capability.method]
+    return [
+      capability.name,
+      capability.description,
+      capability.scope,
+      capability.externalPath,
+      capability.method,
+      ...(capability.protocolVersions || []),
+      ...(capability.standardRefs || [])
+    ]
       .join(" ")
       .toLowerCase()
       .includes(keyword);
@@ -140,16 +141,51 @@ function selectGroup(code: string) {
   activeGroup.value = code;
 }
 
+function riskCategory(risk: string): RiskCategory {
+  return risk === "read" || risk === "media" || risk === "control" || risk === "destructive" ? risk : "unknown";
+}
+
 function riskLabel(risk: string) {
-  return risk === "control" ? "控制" : risk === "media" ? "媒体" : "只读";
+  const labels: Record<RiskCategory, string> = {
+    read: "只读",
+    media: "媒体",
+    control: "控制",
+    destructive: "破坏性",
+    unknown: "风险未知"
+  };
+  return labels[riskCategory(risk)];
 }
 
 function riskColor(risk: string) {
-  return risk === "control" ? "red" : risk === "media" ? "orange" : "green";
+  const colors: Record<RiskCategory, string> = {
+    read: "green",
+    media: "orange",
+    control: "red",
+    destructive: "red",
+    unknown: "gray"
+  };
+  return colors[riskCategory(risk)];
 }
 
 function capabilityDescription(capability: OpenAPICapability) {
-  return capabilityDescriptions[capability.scope] || "允许接入方调用该项 OpenAPI 能力。";
+  return capability.description?.trim() || "服务端尚未提供描述。";
+}
+
+function protocolLabel(capability: OpenAPICapability) {
+  return (capability.protocolVersions || [])
+    .map(version => (version.startsWith("GB/T ") ? version : `GB/T 28181-${version}`))
+    .join("、");
+}
+
+function idempotencyLabel(capability: OpenAPICapability) {
+  const mode = capability.idempotencyMode || (capability.idempotencyRequired ? "required" : "none");
+  if (mode === "required") return "要求 Idempotency-Key";
+  if (mode === "optional") return "支持 Idempotency-Key";
+  return mode === "none" ? "" : "幂等策略未知";
+}
+
+function confirmationLabel(capability: OpenAPICapability) {
+  return capability.requiresConfirmation ? "调用时必须提交 confirmed=true" : "";
 }
 
 function resetDraft() {
@@ -170,6 +206,13 @@ defineExpose({
   addedScopes,
   removedScopes,
   filteredCapabilities,
+  riskCategory,
+  riskLabel,
+  riskColor,
+  capabilityDescription,
+  protocolLabel,
+  idempotencyLabel,
+  confirmationLabel,
   dirty,
   toggleScope,
   toggleGroup,
@@ -195,6 +238,8 @@ defineExpose({
           <a-option value="read">只读</a-option>
           <a-option value="media">媒体</a-option>
           <a-option value="control">控制</a-option>
+          <a-option value="destructive">破坏性</a-option>
+          <a-option value="unknown">风险未知</a-option>
         </a-select>
         <a-checkbox
           :model-value="grantFilter === 'enabled'"
@@ -246,6 +291,12 @@ defineExpose({
               <template #cell="{ record }">
                 <div class="capability-workbench__capability-name">{{ record.name }}</div>
                 <div class="capability-workbench__description">{{ capabilityDescription(record) }}</div>
+                <div v-if="protocolLabel(record)" class="capability-workbench__metadata">
+                  协议版本：{{ protocolLabel(record) }}
+                </div>
+                <div v-if="record.standardRefs?.length" class="capability-workbench__metadata">
+                  标准依据：{{ record.standardRefs.join("；") }}
+                </div>
               </template>
             </a-table-column>
             <a-table-column title="Scope" :width="170">
@@ -264,7 +315,12 @@ defineExpose({
             <a-table-column title="风险" :width="100" align="center">
               <template #cell="{ record }">
                 <a-tag size="small" :color="riskColor(record.risk)">{{ riskLabel(record.risk) }}</a-tag>
-                <div v-if="record.idempotencyRequired" class="capability-workbench__idempotency">要求幂等键</div>
+                <div v-if="idempotencyLabel(record)" class="capability-workbench__idempotency">
+                  {{ idempotencyLabel(record) }}
+                </div>
+                <div v-if="confirmationLabel(record)" class="capability-workbench__confirmation">
+                  {{ confirmationLabel(record) }}
+                </div>
               </template>
             </a-table-column>
             <a-table-column title="授权" :width="90" align="center" fixed="right">
@@ -298,6 +354,12 @@ defineExpose({
           </div>
           <a-alert v-if="highRiskChanges.length" type="warning">
             包含 {{ highRiskChanges.length }} 项媒体或控制能力变更，请确认接入方影响。
+          </a-alert>
+          <a-alert v-if="destructiveChanges.length" type="error">
+            包含 {{ destructiveChanges.length }} 项破坏性能力授权变更，调用可能造成不可逆的数据或设备状态变化。
+          </a-alert>
+          <a-alert v-if="unknownRiskChanges.length" type="warning">
+            包含 {{ unknownRiskChanges.length }} 项风险未知的能力；请先核实其风险定义再授权。
           </a-alert>
           <a-alert v-if="!editable" type="info">当前客户端状态或账号权限不允许修改能力。</a-alert>
         </div>
@@ -412,10 +474,16 @@ defineExpose({
 }
 
 .capability-workbench__description,
-.capability-workbench__idempotency {
+.capability-workbench__idempotency,
+.capability-workbench__metadata,
+.capability-workbench__confirmation {
   margin-top: 4px;
   font-size: 12px;
   color: var(--color-text-2);
+}
+
+.capability-workbench__confirmation {
+  color: rgb(var(--danger-6));
 }
 
 .capability-workbench__endpoint {

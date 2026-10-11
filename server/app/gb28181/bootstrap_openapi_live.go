@@ -9,15 +9,41 @@ import (
 
 	gbzlm "uvplatform.com/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
+	catalogruntime "uvplatform.com/uvp-gb28181/app/openapi/catalog/runtime"
+	"uvplatform.com/uvp-gb28181/app/openapi/contracts"
 	openapiplay "uvplatform.com/uvp-gb28181/app/openapi/play"
 	openapiptz "uvplatform.com/uvp-gb28181/app/openapi/ptz"
 )
 
 var openAPIPTZRoot = openapiptz.NewRuntimeRoot()
 var openAPIPlayRoot = openapiplay.NewRuntimeRoot()
+var openAPIOperationAdapters = catalogruntime.NewAdapterBindingSet()
 
 func OpenAPIPTZRuntime() *openapiptz.RuntimeRoot   { return openAPIPTZRoot }
 func OpenAPIPlayRuntime() *openapiplay.RuntimeRoot { return openAPIPlayRoot }
+
+// OpenAPIOperationAdapterBindings returns forwarders for non-dedicated
+// operations. The code contract owns the keys; a SIP generation may only bind
+// implementations for those keys and the forwarders remain unavailable until
+// a domain service is ready.
+func OpenAPIOperationAdapterBindings() map[string]catalogruntime.Adapter {
+	keys := make([]string, 0, len(contracts.Operations()))
+	seen := make(map[string]struct{}, len(keys))
+	for _, operation := range contracts.Operations() {
+		if _, exists := seen[operation.AdapterKey]; exists {
+			continue
+		}
+		seen[operation.AdapterKey] = struct{}{}
+		keys = append(keys, operation.AdapterKey)
+	}
+	return openAPIOperationAdapters.Forwarders(keys)
+}
+
+func BindOpenAPIOperationAdapters(registrations []catalogruntime.AdapterRegistration) error {
+	return openAPIOperationAdapters.Bind(registrations)
+}
+
+func ClearOpenAPIOperationAdapters() { openAPIOperationAdapters.Clear() }
 
 type openAPIHookRuntimeIdentityResolver struct {
 	registry *node.Registry

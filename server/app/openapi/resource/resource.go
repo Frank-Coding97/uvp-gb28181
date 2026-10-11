@@ -6,9 +6,12 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"time"
 	"unicode/utf8"
 
 	"gorm.io/gorm"
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
 var (
@@ -83,6 +86,22 @@ type ChannelStatus struct {
 	DeviceID  string `json:"deviceId"`
 	ChannelID string `json:"channelId"`
 	Status    string `json:"status"`
+}
+
+type StorageCard struct {
+	CardID         int       `json:"cardId"`
+	HddName        string    `json:"hddName"`
+	Status         string    `json:"status"`
+	FormatProgress *int      `json:"formatProgress,omitempty"`
+	CapacityMB     int       `json:"capacityMb"`
+	FreeSpaceMB    int       `json:"freeSpaceMb"`
+	ObservedAt     time.Time `json:"observedAt"`
+}
+
+type StorageCardSnapshot struct {
+	Items      []StorageCard `json:"items"`
+	Freshness  string        `json:"freshness"`
+	ObservedAt *time.Time    `json:"observedAt,omitempty"`
 }
 
 type DevicePage struct {
@@ -289,6 +308,77 @@ func (s *Service) GetChannelStatusInScope(ctx context.Context, scope DepartmentS
 		return ChannelStatus{}, err
 	}
 	return ChannelStatus{DeviceID: channel.DeviceID, ChannelID: channel.ChannelID, Status: channel.Status}, nil
+}
+
+func (s *Service) GetChannelControlCapabilitiesInScope(ctx context.Context, scope DepartmentScope, deviceID, channelID string) (manscdp.ControlCapabilities, error) {
+	if !validGBCode(deviceID) || !validGBCode(channelID) {
+		return manscdp.ControlCapabilities{}, ErrResourceNotFound
+	}
+	departmentIDs, err := ResolveDepartmentIDs(ctx, s.db, scope)
+	if err != nil {
+		return manscdp.ControlCapabilities{}, err
+	}
+	query, err := s.channelQuery(ctx, departmentIDs, deviceID, ChannelListOptions{})
+	if err != nil {
+		return manscdp.ControlCapabilities{}, err
+	}
+	var rows []struct {
+		Capabilities *string
+		PTZType      int8
+	}
+	if err := query.Where("c.channel_id = ?", channelID).Select("c.capabilities, c.ptz_type").Limit(2).Find(&rows).Error; err != nil {
+		return manscdp.ControlCapabilities{}, err
+	}
+	if len(rows) != 1 {
+		return manscdp.ControlCapabilities{}, ErrResourceNotFound
+	}
+	return manscdp.ParseControlCapabilities(rows[0].Capabilities, rows[0].PTZType), nil
+}
+
+func (s *Service) GetChannelStorageCardsInScope(ctx context.Context, scope DepartmentScope, deviceID, channelID string) (StorageCardSnapshot, error) {
+	channel, err := s.GetChannelInScope(ctx, scope, deviceID, channelID)
+	if err != nil {
+		return StorageCardSnapshot{}, err
+	}
+	departmentIDs, err := ResolveDepartmentIDs(ctx, s.db, scope)
+	if err != nil {
+		return StorageCardSnapshot{}, err
+	}
+	var device struct{ ID uint }
+	result := s.db.WithContext(ctx).Table("gb_device").Select("id").
+		Where("device_id = ? AND owner_dept_id IN ? AND deleted_at IS NULL", deviceID, departmentIDs).
+		Limit(2).Find(&device)
+	if result.Error != nil {
+		return StorageCardSnapshot{}, result.Error
+	}
+	if result.RowsAffected != 1 {
+		return StorageCardSnapshot{}, ErrResourceNotFound
+	}
+	var rows []gbmodels.GbDeviceStorageCard
+	if err := s.db.WithContext(ctx).Where("device_id = ? AND target_code = ?", device.ID, channel.ChannelID).
+		Order("card_id ASC").Find(&rows).Error; err != nil {
+		return StorageCardSnapshot{}, err
+	}
+	snapshot := StorageCardSnapshot{Items: make([]StorageCard, 0, len(rows)), Freshness: string(gbmodels.PTZFreshnessUnknown)}
+	var latest time.Time
+	for _, row := range rows {
+		snapshot.Items = append(snapshot.Items, StorageCard{
+			CardID: row.CardID, HddName: row.HddName, Status: string(row.Status), FormatProgress: row.FormatProgress,
+			CapacityMB: row.CapacityMB, FreeSpaceMB: row.FreeSpaceMB, ObservedAt: row.ObservedAt,
+		})
+		if row.ObservedAt.After(latest) {
+			latest = row.ObservedAt
+		}
+	}
+	if !latest.IsZero() {
+		snapshot.ObservedAt = &latest
+		freshness := gbmodels.PTZFreshnessFresh
+		if time.Since(latest) > time.Minute {
+			freshness = gbmodels.PTZFreshnessStale
+		}
+		snapshot.Freshness = string(freshness)
+	}
+	return snapshot, nil
 }
 
 func ResolveDepartmentIDs(ctx context.Context, db *gorm.DB, scope DepartmentScope) ([]uint, error) {

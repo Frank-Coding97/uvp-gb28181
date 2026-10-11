@@ -5,23 +5,29 @@ import (
 	"errors"
 	"strings"
 
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 	catalogruntime "uvplatform.com/uvp-gb28181/app/openapi/catalog/runtime"
+	"uvplatform.com/uvp-gb28181/app/openapi/contracts"
 	"uvplatform.com/uvp-gb28181/app/openapi/resource"
 )
 
 const (
-	DeviceListScope         = "device:list"
-	DeviceDetailScope       = "device:detail"
-	DeviceStatusScope       = "device:status"
-	ChannelListScope        = "channel:list"
-	ChannelDetailScope      = "channel:detail"
-	ChannelStatusScope      = "channel:status"
-	DeviceListAdapterKey    = "resource.device.list.v1"
-	DeviceDetailAdapterKey  = "resource.device.detail.v1"
-	DeviceStatusAdapterKey  = "resource.device.status.v1"
-	ChannelListAdapterKey   = "resource.channel.list.v1"
-	ChannelDetailAdapterKey = "resource.channel.detail.v1"
-	ChannelStatusAdapterKey = "resource.channel.status.v1"
+	DeviceListScope               = "device:list"
+	DeviceDetailScope             = "device:detail"
+	DeviceStatusScope             = "device:status"
+	ChannelListScope              = "channel:list"
+	ChannelDetailScope            = "channel:detail"
+	ChannelStatusScope            = "channel:status"
+	ChannelStorageCardsScope      = "channel:storage-cards"
+	DeviceListAdapterKey          = "resource.device.list.v1"
+	DeviceDetailAdapterKey        = "resource.device.detail.v1"
+	DeviceStatusAdapterKey        = "resource.device.status.v1"
+	ChannelListAdapterKey         = "resource.channel.list.v1"
+	ChannelDetailAdapterKey       = "resource.channel.detail.v1"
+	ChannelStatusAdapterKey       = "resource.channel.status.v1"
+	ChannelStorageCardsAdapterKey = "resource.channel.storage-cards.v1"
+	ChannelCapabilitiesScope      = "channel:capabilities"
+	ChannelCapabilitiesAdapterKey = "resource.channel.capabilities.v1"
 )
 
 type resourceOperation uint8
@@ -33,6 +39,8 @@ const (
 	channelList
 	channelDetail
 	channelStatus
+	channelStorageCards
+	channelCapabilities
 )
 
 // ResourceReader is the application-service contract reused by the external
@@ -44,6 +52,8 @@ type ResourceReader interface {
 	ListChannelsInScope(context.Context, resource.DepartmentScope, string, resource.ChannelListOptions) (resource.ChannelPage, error)
 	GetChannelInScope(context.Context, resource.DepartmentScope, string, string) (resource.Channel, error)
 	GetChannelStatusInScope(context.Context, resource.DepartmentScope, string, string) (resource.ChannelStatus, error)
+	GetChannelStorageCardsInScope(context.Context, resource.DepartmentScope, string, string) (resource.StorageCardSnapshot, error)
+	GetChannelControlCapabilitiesInScope(context.Context, resource.DepartmentScope, string, string) (manscdp.ControlCapabilities, error)
 }
 
 type resourceReadAdapter struct {
@@ -68,6 +78,8 @@ func NewDeviceChannelAdapters(reader ResourceReader) []Adapter {
 		&resourceReadAdapter{key: ChannelListAdapterKey, scope: ChannelListScope, operation: channelList, reader: reader},
 		&resourceReadAdapter{key: ChannelDetailAdapterKey, scope: ChannelDetailScope, operation: channelDetail, reader: reader},
 		&resourceReadAdapter{key: ChannelStatusAdapterKey, scope: ChannelStatusScope, operation: channelStatus, reader: reader},
+		&resourceReadAdapter{key: ChannelStorageCardsAdapterKey, scope: ChannelStorageCardsScope, operation: channelStorageCards, reader: reader},
+		&resourceReadAdapter{key: ChannelCapabilitiesAdapterKey, scope: ChannelCapabilitiesScope, operation: channelCapabilities, reader: reader},
 	}
 }
 
@@ -96,14 +108,56 @@ func (adapter *resourceReadAdapter) Execute(ctx context.Context, invocation cata
 	if invocation.Method != "" && strings.ToUpper(invocation.Method) != "GET" {
 		return nil, ErrInvalidRequest
 	}
-	if len(invocation.Body) != 0 || len(invocation.Query) != 0 {
+	if len(invocation.Body) != 0 {
 		return nil, ErrInvalidRequest
 	}
 	request, ok := invocation.Value.(Request)
 	if !ok {
 		return nil, ErrInvalidRequest
 	}
+	if !validResourceQuery(adapter.scope, invocation.Query, request.Query) {
+		return nil, ErrInvalidRequest
+	}
 	return adapter.Dispatch(ctx, request)
+}
+
+func validResourceQuery(scope string, invocationQuery, requestQuery map[string]string) bool {
+	if len(invocationQuery) != len(requestQuery) {
+		return false
+	}
+	for key, value := range invocationQuery {
+		if requestQuery[key] != value {
+			return false
+		}
+	}
+
+	var (
+		allowed map[string]bool
+		found   bool
+	)
+	for _, operation := range contracts.Operations() {
+		if operation.Scope != scope {
+			continue
+		}
+		found = true
+		allowed = make(map[string]bool, len(operation.QueryAllowlist))
+		for _, name := range operation.QueryAllowlist {
+			allowed[name] = true
+		}
+		break
+	}
+	if !found {
+		return false
+	}
+	for key, values := range invocationQuery {
+		if !allowed[key] {
+			return false
+		}
+		if key != "keyword" && values == "" {
+			return false
+		}
+	}
+	return true
 }
 
 func (adapter *resourceReadAdapter) Dispatch(ctx context.Context, request Request) (any, error) {
@@ -134,6 +188,10 @@ func (adapter *resourceReadAdapter) Dispatch(ctx context.Context, request Reques
 		data, err = adapter.reader.GetChannelInScope(ctx, request.ResourceScope, request.DeviceID, request.ChannelID)
 	case channelStatus:
 		data, err = adapter.reader.GetChannelStatusInScope(ctx, request.ResourceScope, request.DeviceID, request.ChannelID)
+	case channelStorageCards:
+		data, err = adapter.reader.GetChannelStorageCardsInScope(ctx, request.ResourceScope, request.DeviceID, request.ChannelID)
+	case channelCapabilities:
+		data, err = adapter.reader.GetChannelControlCapabilitiesInScope(ctx, request.ResourceScope, request.DeviceID, request.ChannelID)
 	default:
 		return nil, ErrUnavailable
 	}

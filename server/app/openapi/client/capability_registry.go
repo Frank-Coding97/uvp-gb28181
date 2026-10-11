@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -11,6 +12,7 @@ import (
 
 	appmodels "uvplatform.com/uvp-gb28181/app/models"
 	catalogstore "uvplatform.com/uvp-gb28181/app/openapi/catalog/store"
+	"uvplatform.com/uvp-gb28181/app/openapi/contracts"
 )
 
 var ErrCapabilityDrift = errors.New("OpenAPI capability registry drift")
@@ -25,13 +27,18 @@ var ErrCapabilityRuntimeUnavailable = errors.New("OpenAPI capability runtime una
 // Internal title, method and group are read from sys_api at catalog build time;
 // the stable scope and public path remain explicitly owned by this registry.
 type Capability struct {
-	Scope               string `json:"scope"`
-	Name                string `json:"name"`
-	Method              string `json:"method"`
-	ExternalPath        string `json:"externalPath"`
-	ResourceType        string `json:"resourceType"`
-	Risk                string `json:"risk"`
-	IdempotencyRequired bool   `json:"idempotencyRequired"`
+	Scope                string   `json:"scope"`
+	Name                 string   `json:"name"`
+	Description          string   `json:"description"`
+	Method               string   `json:"method"`
+	ExternalPath         string   `json:"externalPath"`
+	ResourceType         string   `json:"resourceType"`
+	Risk                 string   `json:"risk"`
+	ProtocolVersions     []string `json:"protocolVersions"`
+	StandardRefs         []string `json:"standardRefs"`
+	RequiresConfirmation bool     `json:"requiresConfirmation"`
+	IdempotencyMode      string   `json:"idempotencyMode"`
+	IdempotencyRequired  bool     `json:"idempotencyRequired"`
 }
 
 type CapabilityGroup struct {
@@ -41,47 +48,67 @@ type CapabilityGroup struct {
 }
 
 type capabilityDefinition struct {
-	scope        string
-	internalPath string
-	method       string
-	externalPath string
-	resourceType string
-	risk         string
-	idempotent   bool
-	groupCode    string
-	sysAPIGroup  string
+	scope                string
+	description          string
+	internalPath         string
+	method               string
+	sysAPIMethod         string
+	externalPath         string
+	resourceType         string
+	risk                 string
+	idempotent           bool
+	idempotencyMode      string
+	protocolVersions     []string
+	standardRefs         []string
+	requiresConfirmation bool
+	groupCode            string
+	sysAPIGroup          string
 }
 
-var capabilityDefinitions = []capabilityDefinition{
-	{scope: "device:list", internalPath: "/api/gb28181/device-mgmt/devices", method: "GET", externalPath: "/openapi/v1/devices", resourceType: "device", risk: "read", groupCode: "device-management"},
-	{scope: "device:detail", internalPath: "/api/gb28181/device-mgmt/device/:id", method: "GET", externalPath: "/openapi/v1/devices/{deviceId}", resourceType: "device", risk: "read", groupCode: "device-management"},
-	{scope: "device:status", internalPath: "/api/gb28181/device-mgmt/device/:id/status-events", method: "GET", externalPath: "/openapi/v1/devices/{deviceId}/status", resourceType: "device", risk: "read", groupCode: "device-management"},
-	{scope: "channel:list", internalPath: "/api/gb28181/device-mgmt/channels", method: "GET", externalPath: "/openapi/v1/devices/{deviceId}/channels", resourceType: "channel", risk: "read", groupCode: "device-management"},
-	{scope: "channel:detail", internalPath: "/api/gb28181/device-mgmt/channel/:id", method: "GET", externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}", resourceType: "channel", risk: "read", groupCode: "device-management"},
-	{scope: "play:live", internalPath: "/api/gb28181/play/:deviceId/:channelId", method: "POST", externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/live", resourceType: "channel", risk: "control", groupCode: "device-control", sysAPIGroup: "设备管理"},
-	// channel:status belongs to the channel control surface, not to the plain
-	// device/channel read surface: sys_api already files
-	// /api/gb28181/device-mgmt/channel/:id/device-status under 「设备控制」
-	// (id 473, next to control-capabilities and device-configs). The static
-	// reader below fails closed on any group mismatch, so this expectation has
-	// to track 接口管理's own grouping instead of a hand-written one.
-	{scope: "channel:status", internalPath: "/api/gb28181/device-mgmt/channel/:id/device-status", method: "GET", externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/status", resourceType: "channel", risk: "read", groupCode: "device-control"},
-	{scope: "ptz:preset:list", internalPath: "/api/gb28181/device-mgmt/channel/:id/ptz/presets", method: "GET", externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets", resourceType: "channel", risk: "read", groupCode: "device-control"},
-	{scope: "ptz:preset:save", internalPath: "/api/gb28181/device-mgmt/channel/:id/ptz/presets", method: "POST", externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets", resourceType: "channel", risk: "control", idempotent: true, groupCode: "device-control"},
-	{scope: "ptz:preset:call", internalPath: "/api/gb28181/device-mgmt/channel/:id/ptz/presets/:presetId/call", method: "POST", externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets/{presetId}/call", resourceType: "channel", risk: "control", idempotent: true, groupCode: "device-control"},
-	{scope: "ptz:preset:delete", internalPath: "/api/gb28181/device-mgmt/channel/:id/ptz/presets/:presetId", method: "DELETE", externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets/{presetId}", resourceType: "channel", risk: "control", idempotent: true, groupCode: "device-control"},
-	{scope: "ptz:operation:read", internalPath: "/api/gb28181/device-mgmt/channel/:id/ptz/operations/:operationId", method: "GET", externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/operations/{operationId}", resourceType: "channel", risk: "read", groupCode: "device-control"},
+var capabilityDefinitions = capabilityDefinitionsFromContracts()
+
+func capabilityDefinitionsFromContracts() []capabilityDefinition {
+	operations := contracts.Operations()
+	definitions := make([]capabilityDefinition, 0, len(operations))
+	for _, operation := range operations {
+		definitions = append(definitions, capabilityDefinition{
+			scope:                operation.Scope,
+			description:          operation.Description,
+			internalPath:         operation.InternalPath,
+			method:               operation.Method,
+			sysAPIMethod:         definitionSysAPIMethod(operation),
+			externalPath:         operation.ExternalPath,
+			resourceType:         operation.ResourceType,
+			risk:                 operation.RiskLevel,
+			idempotent:           operation.IdempotencyMode != contracts.IdempotencyNone,
+			idempotencyMode:      operation.IdempotencyMode,
+			protocolVersions:     append([]string(nil), operation.ProtocolVersions...),
+			standardRefs:         append([]string(nil), operation.StandardRefs...),
+			requiresConfirmation: operation.RequiresConfirmation,
+			groupCode:            operation.GroupCode,
+			sysAPIGroup:          operation.SysAPIGroup,
+		})
+	}
+	return definitions
 }
 
-var capabilityGroupNames = map[string]string{
-	"device-management": "设备管理",
-	"device-control":    "设备控制",
-}
+var capabilityGroupNames = func() map[string]string {
+	groups := make(map[string]string)
+	for _, operation := range contracts.Operations() {
+		groups[operation.GroupCode] = operation.GroupName
+	}
+	return groups
+}()
 
-var capabilityGroupOrder = map[string]int{
-	"device-management": 10,
-	"device-control":    20,
-}
+var capabilityGroupOrder = func() map[string]int {
+	groups := make(map[string]int)
+	for _, operation := range contracts.Operations() {
+		if _, exists := groups[operation.GroupCode]; !exists {
+			groups[operation.GroupCode] = (len(groups) + 1) * 10
+		}
+	}
+	return groups
+}()
 
 var capabilityScopeOrder = func() map[string]int {
 	result := make(map[string]int, len(capabilityDefinitions))
@@ -164,7 +191,7 @@ func staticCapabilityCatalog(ctx context.Context, db *gorm.DB) ([]CapabilityGrou
 	groups := make(map[string]*CapabilityGroup)
 	for _, definition := range capabilityDefinitions {
 		var rows []appmodels.SysApi
-		result := db.WithContext(normalizeCatalogContext(ctx)).Where("path = ? AND method = ? AND deleted_at IS NULL", definition.internalPath, definition.method).Find(&rows)
+		result := db.WithContext(normalizeCatalogContext(ctx)).Where("path = ? AND method = ? AND deleted_at IS NULL", definition.internalPath, definition.sysAPIMethod).Find(&rows)
 		if result.Error != nil || len(rows) != 1 {
 			return nil, ErrCapabilityDrift
 		}
@@ -185,8 +212,10 @@ func staticCapabilityCatalog(ctx context.Context, db *gorm.DB) ([]CapabilityGrou
 		}
 		group.Capabilities = append(group.Capabilities, Capability{
 			Scope: definition.scope, Name: row.Title, Method: definition.method,
-			ExternalPath: definition.externalPath, ResourceType: definition.resourceType,
-			Risk: definition.risk, IdempotencyRequired: definition.idempotent,
+			Description: definition.description, ExternalPath: definition.externalPath, ResourceType: definition.resourceType,
+			Risk: definition.risk, ProtocolVersions: append([]string(nil), definition.protocolVersions...),
+			StandardRefs: append([]string(nil), definition.standardRefs...), RequiresConfirmation: definition.requiresConfirmation,
+			IdempotencyMode: definition.idempotencyMode, IdempotencyRequired: definition.idempotent,
 		})
 	}
 	result := make([]CapabilityGroup, 0, len(groups))
@@ -196,6 +225,13 @@ func staticCapabilityCatalog(ctx context.Context, db *gorm.DB) ([]CapabilityGrou
 	}
 	sortCapabilityGroups(result)
 	return result, nil
+}
+
+func definitionSysAPIMethod(operation contracts.Operation) string {
+	if method := strings.TrimSpace(operation.SysAPIMethod); method != "" {
+		return method
+	}
+	return operation.Method
 }
 
 // activeReleaseSnapshot loads the one durable active release through the
@@ -248,9 +284,16 @@ func capabilityCatalogFromSnapshot(snapshot *catalogstore.ReleaseSnapshot) ([]Ca
 		} else if group.Name != row.GroupName {
 			return nil, ErrCapabilityDrift
 		}
+		metadata, err := decodeCapabilitySnapshotMetadata(row.SnapshotJSON)
+		if err != nil {
+			return nil, ErrCapabilityDrift
+		}
 		group.Capabilities = append(group.Capabilities, Capability{
 			Scope: row.Scope, Name: row.CapabilityName, Method: strings.ToUpper(row.Method),
 			ExternalPath: row.ExternalPath, ResourceType: row.ResourceType, Risk: row.RiskLevel,
+			Description: metadata.Description, ProtocolVersions: metadata.ProtocolVersions,
+			StandardRefs: metadata.StandardRefs, RequiresConfirmation: metadata.RequiresConfirmation,
+			IdempotencyMode:     row.IdempotencyMode,
 			IdempotencyRequired: row.IdempotencyMode != "none",
 		})
 		sortValues[row.Scope] = row.Sort
@@ -262,6 +305,26 @@ func capabilityCatalogFromSnapshot(snapshot *catalogstore.ReleaseSnapshot) ([]Ca
 	}
 	sortCapabilityGroups(resultGroups)
 	return resultGroups, nil
+}
+
+type capabilitySnapshotMetadata struct {
+	Description          string   `json:"description"`
+	ProtocolVersions     []string `json:"protocolVersions"`
+	StandardRefs         []string `json:"standardRefs"`
+	RequiresConfirmation bool     `json:"requiresConfirmation"`
+}
+
+func decodeCapabilitySnapshotMetadata(raw string) (capabilitySnapshotMetadata, error) {
+	var metadata capabilitySnapshotMetadata
+	if strings.TrimSpace(raw) == "" {
+		return metadata, ErrCapabilityDrift
+	}
+	if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+		return metadata, ErrCapabilityDrift
+	}
+	metadata.ProtocolVersions = append([]string(nil), metadata.ProtocolVersions...)
+	metadata.StandardRefs = append([]string(nil), metadata.StandardRefs...)
+	return metadata, nil
 }
 
 func sortCapabilityGroups(groups []CapabilityGroup) {

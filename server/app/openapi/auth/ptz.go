@@ -11,11 +11,20 @@ import (
 )
 
 const (
-	PTZPresetListScope    = "ptz:preset:list"
-	PTZPresetSaveScope    = "ptz:preset:save"
-	PTZPresetCallScope    = "ptz:preset:call"
-	PTZPresetDeleteScope  = "ptz:preset:delete"
-	PTZOperationReadScope = "ptz:operation:read"
+	PTZPresetListScope        = "ptz:preset:list"
+	PTZPresetSaveScope        = "ptz:preset:save"
+	PTZPresetCallScope        = "ptz:preset:call"
+	PTZPresetDeleteScope      = "ptz:preset:delete"
+	PTZOperationReadScope     = "ptz:operation:read"
+	PTZMoveScope              = "ptz:move"
+	PTZPreciseScope           = "ptz:precise"
+	PTZExtendedScope          = "ptz:extended"
+	PTZWiperScope             = "ptz:wiper"
+	PTZHomePositionSetScope   = "ptz:home-position:set"
+	PTZCruiseControlScope     = "ptz:cruise:control"
+	PTZCruiseTrackCreateScope = "ptz:cruise:track:create"
+	PTZCruiseTrackReadScope   = "ptz:cruise:track:read"
+	PTZTargetTrackScope       = "ptz:target-track"
 )
 
 var (
@@ -23,6 +32,7 @@ var (
 	ErrPTZInvalid     = errors.New("invalid OpenAPI PTZ request")
 	ErrPTZNotFound    = errors.New("OpenAPI PTZ resource not found")
 	ErrPTZConflict    = errors.New("OpenAPI PTZ operation conflict")
+	ErrPTZUnsupported = errors.New("OpenAPI PTZ capability not supported")
 )
 
 // PTZRequest is the authenticated, department-bound command passed to the
@@ -36,6 +46,7 @@ type PTZRequest struct {
 	DeviceID       string
 	ChannelID      string
 	PresetID       string
+	TrackID        string
 	OperationID    string
 	IdempotencyKey string
 	Body           []byte
@@ -51,7 +62,9 @@ type PTZDispatcher interface {
 
 func isPTZScope(scope string) bool {
 	switch scope {
-	case PTZPresetListScope, PTZPresetSaveScope, PTZPresetCallScope, PTZPresetDeleteScope, PTZOperationReadScope:
+	case PTZPresetListScope, PTZPresetSaveScope, PTZPresetCallScope, PTZPresetDeleteScope, PTZOperationReadScope,
+		PTZMoveScope, PTZPreciseScope, PTZExtendedScope, PTZWiperScope, PTZHomePositionSetScope, PTZCruiseControlScope,
+		PTZCruiseTrackCreateScope, PTZCruiseTrackReadScope, PTZTargetTrackScope:
 		return true
 	default:
 		return false
@@ -68,13 +81,31 @@ func ptzPattern(scope string) string {
 		return "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/presets/:presetId"
 	case PTZOperationReadScope:
 		return "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/operations/:operationId"
+	case PTZMoveScope:
+		return "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/move"
+	case PTZPreciseScope:
+		return "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/precise"
+	case PTZExtendedScope:
+		return "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/extended"
+	case PTZWiperScope:
+		return "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/wiper"
+	case PTZHomePositionSetScope:
+		return "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/home-position"
+	case PTZCruiseControlScope:
+		return "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/cruise/control"
+	case PTZCruiseTrackCreateScope:
+		return "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/cruise/tracks"
+	case PTZCruiseTrackReadScope:
+		return "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/cruise/tracks/:trackId"
+	case PTZTargetTrackScope:
+		return "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/target-track"
 	default:
 		return ""
 	}
 }
 
 func ptzMethod(scope string) string {
-	if scope == PTZPresetListScope || scope == PTZOperationReadScope {
+	if scope == PTZPresetListScope || scope == PTZOperationReadScope || scope == PTZCruiseTrackReadScope {
 		return http.MethodGet
 	}
 	if scope == PTZPresetDeleteScope {
@@ -88,7 +119,7 @@ func ptzRouteMatches(q gatewayRequest) bool {
 	if pattern == "" || q.pattern != pattern || q.method != ptzMethod(q.scope) || validatePath(q.path) != nil || q.rawQuery != "" {
 		return false
 	}
-	path := strings.NewReplacer(":deviceId", q.deviceID, ":channelId", q.channelID, ":presetId", q.presetID, ":operationId", q.operationID).Replace(pattern)
+	path := strings.NewReplacer(":deviceId", q.deviceID, ":channelId", q.channelID, ":presetId", q.presetID, ":operationId", q.operationID, ":trackId", q.trackID).Replace(pattern)
 	rawPath, _, hasQuery := strings.Cut(q.rawURI, "?")
 	return path == q.path && rawPath == q.path && !hasQuery
 }
@@ -122,6 +153,21 @@ func validatePTZRequest(q gatewayRequest) error {
 	if q.scope == PTZOperationReadScope && (len(q.operationID) == 0 || len(q.operationID) > 64 || !utf8.ValidString(q.operationID)) {
 		return ErrPTZInvalid
 	}
+	if q.scope == PTZCruiseTrackReadScope {
+		if len(q.trackID) == 0 || len(q.trackID) > 3 {
+			return ErrPTZInvalid
+		}
+		trackID := 0
+		for i := range q.trackID {
+			if q.trackID[i] < '0' || q.trackID[i] > '9' {
+				return ErrPTZInvalid
+			}
+			trackID = trackID*10 + int(q.trackID[i]-'0')
+		}
+		if trackID > 255 {
+			return ErrPTZInvalid
+		}
+	}
 	if q.scope == PTZPresetSaveScope {
 		if len(q.body) == 0 || len(q.body) > maxBodyBytes {
 			return ErrPTZInvalid
@@ -142,7 +188,30 @@ func validatePTZRequest(q gatewayRequest) error {
 			}
 		}
 	}
+	if isPTZJSONWriteScope(q.scope) {
+		if len(q.body) == 0 || len(q.body) > maxBodyBytes || validateJSONBody(q.body) != nil {
+			return ErrPTZInvalid
+		}
+		if len(q.idempotencyKey) == 0 || len(q.idempotencyKey) > 128 || !utf8.ValidString(q.idempotencyKey) {
+			return ErrPTZInvalid
+		}
+		for _, r := range q.idempotencyKey {
+			if r < 0x21 || r > 0x7e {
+				return ErrPTZInvalid
+			}
+		}
+	}
 	return nil
+}
+
+func isPTZJSONWriteScope(scope string) bool {
+	switch scope {
+	case PTZMoveScope, PTZPreciseScope, PTZExtendedScope, PTZWiperScope, PTZHomePositionSetScope, PTZCruiseControlScope,
+		PTZCruiseTrackCreateScope, PTZTargetTrackScope:
+		return true
+	default:
+		return false
+	}
 }
 
 func ptzMetadata(q gatewayRequest, viewOwner uint, dataScope int8) (metadataInput, error) {
@@ -161,6 +230,9 @@ func ptzMetadataFailure(id string, err error) gatewayResponse {
 	}
 	if errors.Is(err, ErrPTZConflict) {
 		return gatewayError(id, http.StatusConflict, "CONFLICT")
+	}
+	if errors.Is(err, ErrPTZUnsupported) {
+		return gatewayError(id, http.StatusUnprocessableEntity, "CAPABILITY_NOT_SUPPORTED")
 	}
 	return gatewayError(id, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE")
 }

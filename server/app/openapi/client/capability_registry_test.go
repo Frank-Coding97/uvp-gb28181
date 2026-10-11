@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"sort"
 	"testing"
 	"time"
 
@@ -23,24 +24,36 @@ func TestCapabilityCatalogReusesSysAPITitlesAndGroups(t *testing.T) {
 
 	catalog, err := CapabilityCatalog(context.Background(), db)
 	require.NoError(t, err)
-	require.Len(t, catalog, 2)
-	require.Equal(t, "device-management", catalog[0].Code)
-	require.Equal(t, "设备管理", catalog[0].Name)
-	require.Equal(t, []string{"device:list", "device:detail", "device:status", "channel:list", "channel:detail"}, capabilityScopes(catalog[0]))
-	require.Equal(t, "标题 device:list", catalog[0].Capabilities[0].Name)
-	require.Equal(t, "device-control", catalog[1].Code)
-	require.Equal(t, "设备控制", catalog[1].Name)
-	// 通道状态被归入设备控制:库里的 sys_api.api_group 就是这么分的(id 473,与
-	// control-capabilities / device-configs 同组),而本读取器对任何分组不一致
-	// 都 fail closed。
-	require.Equal(t, []string{"play:live", "channel:status", "ptz:preset:list", "ptz:preset:save", "ptz:preset:call", "ptz:preset:delete", "ptz:operation:read"}, capabilityScopes(catalog[1]))
-	require.Equal(t, "标题 play:live", catalog[1].Capabilities[0].Name)
-	require.NotContains(t, capabilityScopes(catalog[1]), "play:live:apply")
+	wantScopes := make(map[string][]string)
+	for _, definition := range capabilityDefinitions {
+		wantScopes[definition.groupCode] = append(wantScopes[definition.groupCode], definition.scope)
+	}
+	require.Len(t, catalog, len(wantScopes))
+	seenScopes := make(map[string]bool)
+	for _, group := range catalog {
+		require.Equal(t, capabilityGroupNames[group.Code], group.Name)
+		got := capabilityScopes(group)
+		want := append([]string(nil), wantScopes[group.Code]...)
+		sort.Strings(got)
+		sort.Strings(want)
+		require.Equal(t, want, got, group.Code+" scopes")
+		for _, scope := range got {
+			require.False(t, seenScopes[scope], "duplicate scope %s", scope)
+			seenScopes[scope] = true
+		}
+	}
+	for _, group := range catalog {
+		require.Equal(t, "标题 "+group.Capabilities[0].Scope, group.Capabilities[0].Name)
+	}
+	require.Contains(t, seenScopes, "device:download-create")
+	require.Contains(t, seenScopes, "device:download-read")
+	require.Contains(t, seenScopes, "device:download-cancel")
+	require.NotContains(t, seenScopes, "play:live:apply")
 }
 
 // Publishing a release must not change what the platform says it can do. The
 // release reader and the legacy static registry are two implementations of the
-// same 12-scope surface, so a freshly published release has to read back
+// same code-owned capability surface, so a freshly published release has to read back
 // group-for-group and field-for-field identical to the sys_api-only path.
 // Anything else means the same deployment describes a different contract
 // depending on whether the catalog tables are migrated.
@@ -79,12 +92,18 @@ func newStaticRegistryDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&appmodels.SysApi{}))
 	rows := make([]appmodels.SysApi, 0, len(capabilityDefinitions))
+	seen := make(map[string]struct{}, len(capabilityDefinitions))
 	for index, definition := range capabilityDefinitions {
+		key := definition.internalPath + "\x00" + definition.sysAPIMethod
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
 		rows = append(rows, appmodels.SysApi{
 			BaseModel: appmodels.BaseModel{ID: uint(index + 1)},
 			Title:     "标题 " + definition.scope,
 			Path:      definition.internalPath,
-			Method:    definition.method,
+			Method:    definition.sysAPIMethod,
 			ApiGroup:  expectedSysAPIGroup(definition),
 		})
 	}
@@ -117,6 +136,15 @@ func TestCapabilityCatalogFailsClosedWhenInternalAssetDrifts(t *testing.T) {
 	require.ErrorIs(t, err, ErrCapabilityDrift)
 }
 
+func TestDecodeCapabilitySnapshotMetadataAcceptsHistoricalSnapshot(t *testing.T) {
+	metadata, err := decodeCapabilitySnapshotMetadata(`{"scope":"device:list","method":"GET"}`)
+	require.NoError(t, err)
+	require.Empty(t, metadata.Description)
+	require.Empty(t, metadata.ProtocolVersions)
+	require.Empty(t, metadata.StandardRefs)
+	require.False(t, metadata.RequiresConfirmation)
+}
+
 func TestCapabilityCatalogUsesActiveReleaseSnapshotWhenAvailable(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
@@ -126,7 +154,7 @@ func TestCapabilityCatalogUsesActiveReleaseSnapshotWhenAvailable(t *testing.T) {
 	require.NoError(t, db.Create(&release).Error)
 	items := []openapimodels.ReleaseItem{
 		{ReleaseID: release.ID, GroupCode: "device-management", GroupName: "设备管理", CapabilityCode: "device.list", CapabilityName: "设备列表快照", Scope: "device:list", Method: "GET", ExternalPath: "/openapi/v1/devices", AdapterKey: "resource.device.list.v1", AdapterContractVersion: "v1", ResourceType: "device", RiskLevel: "read", IdempotencyMode: "none", RequestSchema: "{}", ResponseSchema: "{}", CreatedAt: now},
-		{ReleaseID: release.ID, GroupCode: "device-management", GroupName: "设备管理", CapabilityCode: "channel.list", CapabilityName: "通道列表快照", Scope: "channel:list", Method: "GET", ExternalPath: "/openapi/v1/devices/{deviceId}/channels", AdapterKey: "resource.channel.list.v1", AdapterContractVersion: "v1", ResourceType: "channel", RiskLevel: "read", IdempotencyMode: "none", RequestSchema: "{}", ResponseSchema: "{}", CreatedAt: now},
+		{ReleaseID: release.ID, GroupCode: "device-management", GroupName: "设备管理", CapabilityCode: "channel.list", CapabilityName: "通道列表快照", Scope: "channel:list", Method: "GET", ExternalPath: "/openapi/v1/devices/{deviceId}/channels", AdapterKey: "resource.channel.list.v1", AdapterContractVersion: "v1", ResourceType: "channel", RiskLevel: "read", IdempotencyMode: "required", RequestSchema: "{}", ResponseSchema: "{}", CreatedAt: now},
 	}
 	for index := range items {
 		items[index].SnapshotJSON = testReleaseItemSnapshotJSON(items[index])
@@ -142,6 +170,11 @@ func TestCapabilityCatalogUsesActiveReleaseSnapshotWhenAvailable(t *testing.T) {
 	require.Len(t, catalog, 1)
 	require.Equal(t, "设备管理", catalog[0].Name)
 	require.Equal(t, []string{"device:list", "channel:list"}, []string{catalog[0].Capabilities[0].Scope, catalog[0].Capabilities[1].Scope})
+	require.Equal(t, "快照说明：device:list", catalog[0].Capabilities[0].Description)
+	require.Equal(t, []string{"2022"}, catalog[0].Capabilities[0].ProtocolVersions)
+	require.Equal(t, []string{"GB/T 28181-2022 test reference"}, catalog[0].Capabilities[0].StandardRefs)
+	require.True(t, catalog[0].Capabilities[1].RequiresConfirmation)
+	require.Equal(t, "required", catalog[0].Capabilities[1].IdempotencyMode)
 
 	scopes, err := SupportedScopesFromDB(context.Background(), db)
 	require.NoError(t, err)
@@ -274,27 +307,31 @@ func newActiveCapabilityCatalogDB(t *testing.T) *gorm.DB {
 }
 
 type testReleaseItemSnapshot struct {
-	CapabilityID           int64  `json:"capabilityId"`
-	OperationID            int64  `json:"operationId"`
-	GroupCode              string `json:"groupCode"`
-	GroupName              string `json:"groupName"`
-	CapabilityCode         string `json:"capabilityCode"`
-	CapabilityName         string `json:"capabilityName"`
-	OperationName          string `json:"operationName"`
-	Scope                  string `json:"scope"`
-	Method                 string `json:"method"`
-	ExternalPath           string `json:"externalPath"`
-	AdapterKey             string `json:"adapterKey"`
-	AdapterContractVersion string `json:"adapterContractVersion"`
-	ResourceType           string `json:"resourceType"`
-	RiskLevel              string `json:"riskLevel"`
-	IdempotencyMode        string `json:"idempotencyMode"`
-	RequestSchema          string `json:"requestSchema"`
-	ResponseSchema         string `json:"responseSchema"`
-	SysAPIID               int64  `json:"sysApiId,omitempty"`
-	SysAPIPath             string `json:"sysApiPath"`
-	SysAPIMethod           string `json:"sysApiMethod"`
-	Sort                   int    `json:"sort"`
+	CapabilityID           int64    `json:"capabilityId"`
+	OperationID            int64    `json:"operationId"`
+	GroupCode              string   `json:"groupCode"`
+	GroupName              string   `json:"groupName"`
+	CapabilityCode         string   `json:"capabilityCode"`
+	CapabilityName         string   `json:"capabilityName"`
+	OperationName          string   `json:"operationName"`
+	Scope                  string   `json:"scope"`
+	Method                 string   `json:"method"`
+	ExternalPath           string   `json:"externalPath"`
+	AdapterKey             string   `json:"adapterKey"`
+	AdapterContractVersion string   `json:"adapterContractVersion"`
+	ResourceType           string   `json:"resourceType"`
+	RiskLevel              string   `json:"riskLevel"`
+	IdempotencyMode        string   `json:"idempotencyMode"`
+	Description            string   `json:"description"`
+	ProtocolVersions       []string `json:"protocolVersions"`
+	StandardRefs           []string `json:"standardRefs"`
+	RequiresConfirmation   bool     `json:"requiresConfirmation"`
+	RequestSchema          string   `json:"requestSchema"`
+	ResponseSchema         string   `json:"responseSchema"`
+	SysAPIID               int64    `json:"sysApiId,omitempty"`
+	SysAPIPath             string   `json:"sysApiPath"`
+	SysAPIMethod           string   `json:"sysApiMethod"`
+	Sort                   int      `json:"sort"`
 }
 
 func testReleaseItemSnapshotJSON(item openapimodels.ReleaseItem) string {
@@ -305,6 +342,8 @@ func testReleaseItemSnapshotJSON(item openapimodels.ReleaseItem) string {
 		Method: item.Method, ExternalPath: item.ExternalPath, AdapterKey: item.AdapterKey,
 		AdapterContractVersion: item.AdapterContractVersion, ResourceType: item.ResourceType,
 		RiskLevel: item.RiskLevel, IdempotencyMode: item.IdempotencyMode, RequestSchema: item.RequestSchema,
+		Description: "快照说明：" + item.Scope, ProtocolVersions: []string{"2022"},
+		StandardRefs: []string{"GB/T 28181-2022 test reference"}, RequiresConfirmation: item.Scope == "channel:list",
 		ResponseSchema: item.ResponseSchema, SysAPIID: pointerValueForTest(item.SysAPIID), SysAPIPath: item.SysAPIPath,
 		SysAPIMethod: item.SysAPIMethod, Sort: item.Sort,
 	})

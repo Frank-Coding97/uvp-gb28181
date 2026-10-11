@@ -14,6 +14,8 @@ import (
 	"uvplatform.com/uvp-gb28181/app/openapi/catalog/bootstrap"
 	catalogruntime "uvplatform.com/uvp-gb28181/app/openapi/catalog/runtime"
 	"uvplatform.com/uvp-gb28181/app/openapi/catalog/store"
+	"uvplatform.com/uvp-gb28181/app/openapi/contracts"
+	"uvplatform.com/uvp-gb28181/app/openapi/devicequery"
 	openapimodels "uvplatform.com/uvp-gb28181/app/openapi/models"
 	"uvplatform.com/uvp-gb28181/app/openapi/resource"
 	"uvplatform.com/uvp-gb28181/app/utils/logging"
@@ -35,11 +37,11 @@ var catalogRuntimeSchemaModels = []any{
 // both states deliberately return an empty runtime and no error. Once an
 // active release exists, every hydration error is returned so startup cannot
 // silently expose a different contract than the persisted release.
-func InitializeCatalogRuntime(ctx context.Context, db *gorm.DB) (*catalogruntime.CatalogRuntime, error) {
+func InitializeCatalogRuntime(ctx context.Context, db *gorm.DB, bindings ...map[string]catalogruntime.Adapter) (*catalogruntime.CatalogRuntime, error) {
 	if db == nil {
 		return nil, store.ErrCatalogRepositoryUnavailable
 	}
-	runtime, err := newCatalogRuntime(db)
+	runtime, err := newCatalogRuntime(db, bindings...)
 	if err != nil {
 		return nil, err
 	}
@@ -126,6 +128,8 @@ func PublishCatalog(ctx context.Context, db *gorm.DB) (bootstrap.PublishOutcome,
 // migrated".
 func catalogPublishFailureReason(err error) string {
 	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "catalog_publish_timeout"
 	case errors.Is(err, store.ErrCatalogTableMissing):
 		return "catalog_schema_incomplete"
 	case errors.Is(err, bootstrap.ErrBootstrapConflict):
@@ -147,17 +151,59 @@ func catalogPublishFailureReason(err error) string {
 // device/channel adapters carry the read surface; the delegated-plane
 // declarations carry the ptz:* scopes, which the gateway dispatches through
 // PTZDispatcher rather than through CatalogRuntime.Dispatch.
-func newCatalogRuntime(db *gorm.DB) (*catalogruntime.CatalogRuntime, error) {
+func newCatalogRuntime(db *gorm.DB, bindings ...map[string]catalogruntime.Adapter) (*catalogruntime.CatalogRuntime, error) {
 	registry := catalogruntime.NewAdapterRegistry()
 	reader := resource.New(db)
 	registrations := adapters.NewDeviceChannelAdapterRegistrations(reader)
-	registrations = append(registrations, adapters.NewDelegatedPlaneRegistrations()...)
+	registrations = append(registrations, adapters.NewDeviceQueryAdapterRegistrations(devicequery.New(db))...)
+	bound := make(map[string]catalogruntime.Adapter)
+	for _, group := range bindings {
+		for key, adapter := range group {
+			if adapter != nil {
+				bound[key] = adapter
+			}
+		}
+	}
+	// Device configuration adapters are part of the fixed code-owned runtime
+	// surface. Their live service is supplied by the SIP generation through
+	// the same stable forwarders as the other non-dedicated device operations.
+	configRegistrations := adapters.NewDeviceConfigAdapterRegistrations(nil)
+	for _, registration := range configRegistrations {
+		if forwarder := bound[registration.Key]; forwarder != nil {
+			registration.Adapter = forwarder
+		}
+		registrations = append(registrations, registration)
+	}
+	registrations = append(registrations, adapters.NewDelegatedPlaneRegistrations(bound)...)
+	registered := make(map[string]struct{}, len(registrations))
+	for _, registration := range registrations {
+		registered[registration.Key] = struct{}{}
+	}
+	for _, operation := range contracts.Operations() {
+		if _, exists := registered[operation.AdapterKey]; exists {
+			continue
+		}
+		adapter := bound[operation.AdapterKey]
+		if adapter == nil {
+			adapter = unavailableCatalogAdapter{}
+		}
+		registrations = append(registrations, catalogruntime.AdapterRegistration{
+			Key: operation.AdapterKey, ContractVersion: operation.AdapterVersion, Adapter: adapter,
+		})
+		registered[operation.AdapterKey] = struct{}{}
+	}
 	for _, registration := range registrations {
 		if err := registry.Register(registration); err != nil {
 			return nil, err
 		}
 	}
 	return catalogruntime.NewCatalogRuntime(registry, catalogSysAPIResolver{db: db}), nil
+}
+
+type unavailableCatalogAdapter struct{}
+
+func (unavailableCatalogAdapter) Execute(context.Context, catalogruntime.Invocation) (any, error) {
+	return nil, adapters.ErrUnavailable
 }
 
 func catalogRuntimeSchemaInstalled(db *gorm.DB) (bool, error) {
@@ -211,6 +257,41 @@ func (resolver catalogSysAPIResolver) Resolve(ctx context.Context, path, method 
 	asset.Path = row.Path
 	asset.Method = row.Method
 	return asset, nil
+}
+
+func (resolver catalogSysAPIResolver) ResolveBatch(ctx context.Context, requested []catalogruntime.SysAPIAsset) ([]catalogruntime.SysAPIAsset, error) {
+	if resolver.db == nil {
+		return nil, gorm.ErrInvalidDB
+	}
+	paths := make([]string, 0, len(requested))
+	for _, asset := range requested {
+		if asset.Path != "" {
+			paths = append(paths, asset.Path)
+		}
+	}
+	var rows []appmodels.SysApi
+	if len(paths) > 0 {
+		if err := resolver.db.WithContext(normalizeCatalogRuntimeContext(ctx)).Where("path IN ? AND deleted_at IS NULL", paths).Order("id ASC").Find(&rows).Error; err != nil {
+			return nil, err
+		}
+	}
+	type key struct{ path, method string }
+	known := make(map[key]appmodels.SysApi, len(rows))
+	for _, row := range rows {
+		k := key{row.Path, row.Method}
+		if _, ok := known[k]; !ok {
+			known[k] = row
+		}
+	}
+	assets := make([]catalogruntime.SysAPIAsset, len(requested))
+	for index, asset := range requested {
+		row, found := known[key{asset.Path, asset.Method}]
+		assets[index] = catalogruntime.SysAPIAsset{Path: asset.Path, Method: asset.Method, Deleted: !found || row.ID == 0}
+		if found {
+			assets[index].ID = row.ID
+		}
+	}
+	return assets, nil
 }
 
 func normalizeCatalogRuntimeContext(ctx context.Context) context.Context {

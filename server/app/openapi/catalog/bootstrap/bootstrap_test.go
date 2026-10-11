@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	appmodels "uvplatform.com/uvp-gb28181/app/models"
-	"uvplatform.com/uvp-gb28181/app/openapi/adapters"
+	"uvplatform.com/uvp-gb28181/app/openapi/contracts"
 	openapimodels "uvplatform.com/uvp-gb28181/app/openapi/models"
 )
 
@@ -24,13 +24,13 @@ func TestEnsureCoreCatalogIsIdempotentAndKeepsSysAPIAsMetadata(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(CoreCatalogScopes()), first.OperationsCreated)
 	require.Equal(t, len(CoreCatalogScopes()), first.CapabilitiesCreated)
-	require.Equal(t, 2, first.GroupsCreated)
+	require.Equal(t, len(coreGroups), first.GroupsCreated)
 	second, err := EnsureCoreCatalog(context.Background(), db, 8)
 	require.NoError(t, err)
 	require.Zero(t, second.OperationsCreated)
 	var groups int64
 	require.NoError(t, db.Model(&openapimodels.CapabilityGroup{}).Count(&groups).Error)
-	require.Equal(t, int64(3), groups)
+	require.Equal(t, int64(len(coreGroups)+1), groups)
 	var retired openapimodels.CapabilityGroup
 	require.NoError(t, db.Where("code = ?", "playback").First(&retired).Error)
 	require.Equal(t, openapimodels.CatalogStatusDisabled, retired.Status)
@@ -69,34 +69,20 @@ func TestEnsureCoreCatalogRetiresRemovedPlaybackCapability(t *testing.T) {
 	require.Equal(t, openapimodels.CatalogStatusDisabled, retired.Status)
 }
 
-// The seeded rows are the published contract. If they disagree with the legacy
-// registry that app/openapi/client serves, one platform describes two different
-// contracts depending on whether the catalog tables are migrated. The static
-// registry is the compatibility source of truth for risk and idempotency, so
-// every value is pinned here.
+// The seeded rows are a projection of the code-owned operation registry. This
+// fixture covers the whole surface so adding a capability cannot silently omit
+// it from the editable catalog or change its adapter/risk/idempotency metadata.
 func TestEnsureCoreCatalogSeedsTheWholeCodeOwnedSurface(t *testing.T) {
 	db := newPublishTestDB(t)
 	_, err := EnsureCoreCatalog(context.Background(), db, SystemActorID)
 	require.NoError(t, err)
 
-	expected := map[string]struct {
-		risk        string
-		idempotency string
-		adapterKey  string
-	}{
-		"play:live":          {risk: "control", idempotency: "none", adapterKey: adapters.PlayLiveAdapterKey},
-		"device:list":        {risk: "read", idempotency: "none", adapterKey: adapters.DeviceListAdapterKey},
-		"device:detail":      {risk: "read", idempotency: "none", adapterKey: adapters.DeviceDetailAdapterKey},
-		"device:status":      {risk: "read", idempotency: "none", adapterKey: adapters.DeviceStatusAdapterKey},
-		"channel:list":       {risk: "read", idempotency: "none", adapterKey: adapters.ChannelListAdapterKey},
-		"channel:detail":     {risk: "read", idempotency: "none", adapterKey: adapters.ChannelDetailAdapterKey},
-		"channel:status":     {risk: "read", idempotency: "none", adapterKey: adapters.ChannelStatusAdapterKey},
-		"ptz:preset:list":    {risk: "read", idempotency: "none", adapterKey: adapters.PTZPresetListAdapterKey},
-		"ptz:preset:save":    {risk: "control", idempotency: "required", adapterKey: adapters.PTZPresetSaveAdapterKey},
-		"ptz:preset:call":    {risk: "control", idempotency: "required", adapterKey: adapters.PTZPresetCallAdapterKey},
-		"ptz:preset:delete":  {risk: "control", idempotency: "required", adapterKey: adapters.PTZPresetDeleteAdapterKey},
-		"ptz:operation:read": {risk: "read", idempotency: "none", adapterKey: adapters.PTZOperationReadAdapterKey},
+	expected := make(map[string]contracts.Operation)
+	for _, operation := range contracts.Operations() {
+		expected[operation.Scope] = operation
 	}
+	require.Contains(t, expected, "device:firmware-upgrade:execute")
+	require.Contains(t, expected, "device:firmware-upgrade:read")
 	require.Len(t, expected, len(CoreCatalogScopes()))
 
 	var operations []openapimodels.Operation
@@ -107,11 +93,28 @@ func TestEnsureCoreCatalogSeedsTheWholeCodeOwnedSurface(t *testing.T) {
 		require.NoError(t, db.Where("id = ?", operation.CapabilityID).First(&capability).Error)
 		want, ok := expected[capability.Scope]
 		require.True(t, ok, "意外的 scope %s", capability.Scope)
-		require.Equal(t, want.adapterKey, operation.AdapterKey, capability.Scope)
-		require.Equal(t, want.risk, operation.RiskLevel, capability.Scope)
-		require.Equal(t, want.risk, capability.RiskLevel, capability.Scope)
-		require.Equal(t, want.idempotency, operation.IdempotencyMode, capability.Scope)
+		require.Equal(t, want.AdapterKey, operation.AdapterKey, capability.Scope)
+		require.Equal(t, want.RiskLevel, operation.RiskLevel, capability.Scope)
+		require.Equal(t, want.RiskLevel, capability.RiskLevel, capability.Scope)
+		require.Equal(t, want.IdempotencyMode, operation.IdempotencyMode, capability.Scope)
+		require.Equal(t, want.Method, operation.Method, capability.Scope)
+		require.Equal(t, want.ExternalPath, operation.ExternalPath, capability.Scope)
 		delete(expected, capability.Scope)
 	}
 	require.Empty(t, expected, "有 scope 没被播种")
+}
+
+func TestEnsureCoreCatalogPreservesExistingPresetDeleteIdentity(t *testing.T) {
+	db := newPublishTestDB(t)
+	group := openapimodels.CapabilityGroup{Code: "device-control", Name: "设备控制", Status: openapimodels.CatalogStatusActive, RowVersion: 1}
+	require.NoError(t, db.Create(&group).Error)
+	capability := openapimodels.Capability{GroupID: group.ID, Code: "ptz.preset.delete", Scope: "ptz:preset:delete", Name: "删除预置位", Status: openapimodels.CatalogStatusActive, RowVersion: 1}
+	require.NoError(t, db.Create(&capability).Error)
+	operation := openapimodels.Operation{CapabilityID: capability.ID, Code: "ptz.preset.delete", Name: capability.Name, Method: "DELETE", ExternalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets/{presetId}", AdapterKey: "delegated.ptz.preset-delete.v1", AdapterContractVersion: "v1", Status: openapimodels.CatalogStatusActive, RequestSchema: "{}", ResponseSchema: "{}"}
+	require.NoError(t, db.Create(&operation).Error)
+	result, err := EnsureCoreCatalog(context.Background(), db, SystemActorID)
+	require.NoError(t, err, "existing stable operation code must be reused without reserving its route again")
+	require.Equal(t, len(CoreCatalogScopes())-1, result.OperationsCreated)
+	require.NoError(t, db.First(&operation, operation.ID).Error)
+	require.Equal(t, "ptz.preset.delete", operation.Code)
 }

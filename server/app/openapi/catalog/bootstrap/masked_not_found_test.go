@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	"uvplatform.com/uvp-gb28181/app/utils/gormhelper"
 	openapimodels "uvplatform.com/uvp-gb28181/app/openapi/models"
+	"uvplatform.com/uvp-gb28181/app/utils/gormhelper"
 )
 
 // ⛔⛔⛔ 现场根因（220 绿色包，2026-10-09 19:06/ 19:10）
@@ -66,14 +66,14 @@ func TestBootstrapAgainstMaskedNotFoundCallback(t *testing.T) {
 	// 修复的核心承诺：带生产回调的空库上，seed 必须成功。
 	result, err := EnsureCoreCatalog(context.Background(), db, SystemActorID)
 	require.NoError(t, err, "带生产回调的库上 seed 仍失败 ⇒ 现场 panic 未解决")
-	require.Equal(t, 2, result.GroupsCreated)
-	require.Equal(t, 12, result.CapabilitiesCreated)
-	require.Equal(t, 12, result.OperationsCreated)
+	require.Equal(t, len(coreGroups), result.GroupsCreated)
+	require.Equal(t, len(CoreCatalogScopes()), result.CapabilitiesCreated)
+	require.Equal(t, len(CoreCatalogScopes()), result.OperationsCreated)
 
 	// 且必须真的落库、带非零主键。
 	var groups []openapimodels.CapabilityGroup
 	require.NoError(t, db.Find(&groups).Error)
-	require.Len(t, groups, 2)
+	require.Len(t, groups, len(coreGroups))
 	for _, g := range groups {
 		require.NotZero(t, g.ID)
 		require.NotEmpty(t, g.Code)

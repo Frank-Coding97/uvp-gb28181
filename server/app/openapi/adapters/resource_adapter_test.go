@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 	appmodels "uvplatform.com/uvp-gb28181/app/models"
 	catalogruntime "uvplatform.com/uvp-gb28181/app/openapi/catalog/runtime"
@@ -34,6 +35,8 @@ type resourceReaderStub struct {
 	listChannels     func(context.Context, resource.DepartmentScope, string, resource.ChannelListOptions) (resource.ChannelPage, error)
 	getChannel       func(context.Context, resource.DepartmentScope, string, string) (resource.Channel, error)
 	getChannelStatus func(context.Context, resource.DepartmentScope, string, string) (resource.ChannelStatus, error)
+	getStorageCards  func(context.Context, resource.DepartmentScope, string, string) (resource.StorageCardSnapshot, error)
+	getCapabilities  func(context.Context, resource.DepartmentScope, string, string) (manscdp.ControlCapabilities, error)
 }
 
 func (stub *resourceReaderStub) ListDevicesInScope(ctx context.Context, scope resource.DepartmentScope, options resource.DeviceListOptions) (resource.DevicePage, error) {
@@ -76,6 +79,20 @@ func (stub *resourceReaderStub) GetChannelStatusInScope(ctx context.Context, sco
 		return resource.ChannelStatus{}, errors.New("unexpected GetChannelStatusInScope")
 	}
 	return stub.getChannelStatus(ctx, scope, deviceID, channelID)
+}
+
+func (stub *resourceReaderStub) GetChannelStorageCardsInScope(ctx context.Context, scope resource.DepartmentScope, deviceID, channelID string) (resource.StorageCardSnapshot, error) {
+	if stub.getStorageCards == nil {
+		return resource.StorageCardSnapshot{}, errors.New("unexpected GetChannelStorageCardsInScope")
+	}
+	return stub.getStorageCards(ctx, scope, deviceID, channelID)
+}
+
+func (stub *resourceReaderStub) GetChannelControlCapabilitiesInScope(ctx context.Context, scope resource.DepartmentScope, deviceID, channelID string) (manscdp.ControlCapabilities, error) {
+	if stub.getCapabilities == nil {
+		return manscdp.ControlCapabilities{}, errors.New("unexpected GetChannelControlCapabilitiesInScope")
+	}
+	return stub.getCapabilities(ctx, scope, deviceID, channelID)
 }
 
 func resourceAdapterFor(t *testing.T, reader ResourceReader, key string) Adapter {
@@ -156,6 +173,78 @@ func TestDeviceChannelAdaptersPreserveTrustedScopeAndStableIdentifiers(t *testin
 
 	assert.Equal(t, DeviceListAdapterKey, adapter.Key())
 	assert.Equal(t, http.StatusOK, HTTPStatus(nil))
+}
+
+func TestResourceReadAdapterAcceptsOnlyContractedListQuery(t *testing.T) {
+	var gotOptions resource.DeviceListOptions
+	reader := &resourceReaderStub{listDevices: func(_ context.Context, _ resource.DepartmentScope, options resource.DeviceListOptions) (resource.DevicePage, error) {
+		gotOptions = options
+		return resource.DevicePage{Items: []resource.Device{}}, nil
+	}}
+	adapter := resourceAdapterFor(t, reader, DeviceListAdapterKey)
+	request := Request{
+		ResourceScope: resource.DepartmentScope{OwnerDeptID: adapterOwnerDeptID, DataScope: resource.DataScopeDepartment},
+		Query:         map[string]string{"page": "2", "keyword": "camera"},
+		List:          ListOptions{Page: 2, PageSize: 20, Keyword: "camera"},
+	}
+	_, err := adapter.Execute(context.Background(), catalogruntime.Invocation{
+		Scope: DeviceListScope, Method: http.MethodGet, Path: "/openapi/v1/devices", Query: request.Query, Value: request,
+	})
+	require.NoError(t, err)
+	require.Equal(t, resource.DeviceListOptions{Page: 2, PageSize: 20, Keyword: "camera"}, gotOptions)
+
+	_, err = adapter.Execute(context.Background(), catalogruntime.Invocation{
+		Scope: DeviceListScope, Method: http.MethodGet, Path: "/openapi/v1/devices",
+		Query: map[string]string{"page": "1", "keyword": "camera"}, Value: request,
+	})
+	require.ErrorIs(t, err, ErrInvalidRequest)
+
+	request.Query = map[string]string{"page": "2", "admin": "true"}
+	_, err = adapter.Execute(context.Background(), catalogruntime.Invocation{
+		Scope: DeviceListScope, Method: http.MethodGet, Path: "/openapi/v1/devices", Query: request.Query, Value: request,
+	})
+	require.ErrorIs(t, err, ErrInvalidRequest)
+}
+
+func TestChannelCapabilitiesAdapterPreservesScopeAndThreeStateData(t *testing.T) {
+	var gotScope resource.DepartmentScope
+	var gotDeviceID, gotChannelID string
+	expected := manscdp.ControlCapabilities{
+		BasicPTZ:    manscdp.ControlCapability{State: manscdp.CapabilitySupported, Reason: "device reported PTZ"},
+		TargetTrack: manscdp.ControlCapability{State: manscdp.CapabilityUnknown, Reason: "not reported"},
+	}
+	reader := &resourceReaderStub{
+		getCapabilities: func(_ context.Context, scope resource.DepartmentScope, deviceID, channelID string) (manscdp.ControlCapabilities, error) {
+			gotScope, gotDeviceID, gotChannelID = scope, deviceID, channelID
+			return expected, nil
+		},
+	}
+	adapter := resourceAdapterFor(t, reader, ChannelCapabilitiesAdapterKey)
+	scope := resource.DepartmentScope{OwnerDeptID: adapterOwnerDeptID, DataScope: resource.DataScopeDepartmentAndChildren}
+
+	data, err := adapter.Execute(context.Background(), catalogruntime.Invocation{
+		Scope:  ChannelCapabilitiesScope,
+		Method: http.MethodGet,
+		Params: map[string]string{"deviceId": adapterDeviceID, "channelId": adapterChannelID},
+		Value:  Request{ResourceScope: scope, DeviceID: adapterDeviceID, ChannelID: adapterChannelID},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, scope, gotScope)
+	assert.Equal(t, adapterDeviceID, gotDeviceID)
+	assert.Equal(t, adapterChannelID, gotChannelID)
+	assert.Equal(t, expected, data)
+
+	called := false
+	blocked := &resourceReaderStub{getCapabilities: func(context.Context, resource.DepartmentScope, string, string) (manscdp.ControlCapabilities, error) {
+		called = true
+		return expected, nil
+	}}
+	_, err = resourceAdapterFor(t, blocked, ChannelCapabilitiesAdapterKey).Dispatch(context.Background(), Request{
+		ResourceScope: resource.DepartmentScope{OwnerDeptID: adapterOwnerDeptID, DataScope: 2},
+		DeviceID:      adapterDeviceID, ChannelID: adapterChannelID,
+	})
+	require.ErrorIs(t, err, ErrInvalidRequest)
+	assert.False(t, called, "invalid client scope must fail before domain dispatch")
 }
 
 func TestDeviceChannelAdaptersPassOnlyStableChannelTarget(t *testing.T) {
@@ -316,4 +405,33 @@ func TestDeviceChannelAdaptersMapRuntimePanicsToUnavailable(t *testing.T) {
 	})
 	require.ErrorIs(t, err, ErrUnavailable)
 	require.Equal(t, http.StatusServiceUnavailable, HTTPStatus(err))
+}
+
+func TestStorageCardAdapterPassesOnlyValidatedResourceScope(t *testing.T) {
+	calls := 0
+	expected := resource.StorageCardSnapshot{Items: []resource.StorageCard{}, Freshness: "unknown"}
+	reader := &resourceReaderStub{getStorageCards: func(_ context.Context, scope resource.DepartmentScope, deviceID, channelID string) (resource.StorageCardSnapshot, error) {
+		calls++
+		require.Equal(t, resource.DepartmentScope{OwnerDeptID: adapterOwnerDeptID, DataScope: resource.DataScopeDepartmentAndChildren}, scope)
+		require.Equal(t, adapterDeviceID, deviceID)
+		require.Equal(t, adapterChannelID, channelID)
+		return expected, nil
+	}}
+	adapter := resourceAdapterFor(t, reader, ChannelStorageCardsAdapterKey)
+	request := Request{ResourceScope: resource.DepartmentScope{OwnerDeptID: adapterOwnerDeptID, DataScope: resource.DataScopeDepartmentAndChildren}, DeviceID: adapterDeviceID, ChannelID: adapterChannelID}
+	data, err := adapter.Execute(context.Background(), catalogruntime.Invocation{Scope: ChannelStorageCardsScope, Method: "GET", Value: request})
+	require.NoError(t, err)
+	require.Equal(t, expected, data)
+	for _, invocation := range []catalogruntime.Invocation{
+		{Scope: ChannelStorageCardsScope, Method: "POST", Value: request},
+		{Scope: ChannelStorageCardsScope, Method: "GET", Query: map[string]string{"refresh": "true"}, Value: request},
+		{Scope: ChannelStorageCardsScope, Method: "GET", Body: []byte(`{}`), Value: request},
+	} {
+		_, err = adapter.Execute(context.Background(), invocation)
+		require.ErrorIs(t, err, ErrInvalidRequest)
+	}
+	request.ResourceScope.OwnerDeptID = 0
+	_, err = adapter.Dispatch(context.Background(), request)
+	require.ErrorIs(t, err, ErrNotFound)
+	require.Equal(t, 1, calls)
 }

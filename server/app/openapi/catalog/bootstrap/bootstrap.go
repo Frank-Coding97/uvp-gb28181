@@ -4,10 +4,10 @@
 // release does not cover that surface yet, the publication that closes the gap
 // (publish.go).
 //
-// The surface is exactly the 12 scopes the legacy registry in
-// app/openapi/client exposes. Six are dispatched by the catalog runtime, five by
-// the dedicated PTZ gateway plane; both kinds have to be published all
-// the same, because client.ScopePublished reads the release and nothing else.
+// The surface is the code-owned operation registry shared with the public
+// routes, runtime adapters, compatibility scope registry, and OpenAPI document.
+// Every operation must be published because client.ScopePublished reads the
+// release and nothing else.
 //
 // Publishing stays deliberate: startup repairs additively, with the sole
 // pre-release exception of explicitly retired scopes, and `-publish-catalog`
@@ -27,6 +27,7 @@ import (
 
 	appmodels "uvplatform.com/uvp-gb28181/app/models"
 	"uvplatform.com/uvp-gb28181/app/openapi/adapters"
+	"uvplatform.com/uvp-gb28181/app/openapi/contracts"
 	openapimodels "uvplatform.com/uvp-gb28181/app/openapi/models"
 )
 
@@ -66,114 +67,68 @@ type readDefinition struct {
 	name            string
 	internalPath    string
 	method          string
+	sysAPIMethod    string
 	externalPath    string
 	adapterKey      string
 	resourceType    string
 	risk            string
 	idempotencyMode string
+	requestSchema   string
+	responseSchema  string
 }
 
-var coreGroups = []groupDefinition{
-	{code: "device-management", name: "设备管理", sort: 10},
-	{code: "device-control", name: "设备控制", sort: 20},
+// These projections preserve the bootstrap lifecycle and its catalog/runtime
+// split while keeping operation identity in the shared contracts registry.
+var coreGroups = catalogGroupsFromContracts()
+var coreReadDefinitions = catalogDefinitionsFromContracts(false)
+var coreDelegatedDefinitions = catalogDefinitionsFromContracts(true)
+
+func catalogGroupsFromContracts() []groupDefinition {
+	groups := make([]groupDefinition, 0)
+	seen := make(map[string]bool)
+	for _, operation := range contracts.Operations() {
+		if seen[operation.GroupCode] {
+			continue
+		}
+		seen[operation.GroupCode] = true
+		groups = append(groups, groupDefinition{
+			code: operation.GroupCode,
+			name: operation.GroupName,
+			sort: (len(groups) + 1) * 10,
+		})
+	}
+	return groups
 }
 
-// coreReadDefinitions is the device/channel read surface. It is dispatched by
-// the catalog runtime: every adapter key here is registered by
-// adapters.NewDeviceChannelAdapterRegistrations and reached through
-// CatalogRuntime.Dispatch.
-var coreReadDefinitions = []readDefinition{
-	{
-		groupCode: "device-management", code: "device.list", scope: "device:list", name: "设备列表",
-		internalPath: "/api/gb28181/device-mgmt/devices", method: "GET", externalPath: "/openapi/v1/devices",
-		adapterKey: adapters.DeviceListAdapterKey, resourceType: "device",
-	},
-	{
-		groupCode: "device-management", code: "device.detail", scope: "device:detail", name: "设备详情",
-		internalPath: "/api/gb28181/device-mgmt/device/:id", method: "GET", externalPath: "/openapi/v1/devices/{deviceId}",
-		adapterKey: adapters.DeviceDetailAdapterKey, resourceType: "device",
-	},
-	{
-		groupCode: "device-management", code: "device.status", scope: "device:status", name: "设备状态",
-		internalPath: "/api/gb28181/device-mgmt/device/:id/status-events", method: "GET", externalPath: "/openapi/v1/devices/{deviceId}/status",
-		adapterKey: adapters.DeviceStatusAdapterKey, resourceType: "device",
-	},
-	{
-		groupCode: "device-management", code: "channel.list", scope: "channel:list", name: "通道列表",
-		internalPath: "/api/gb28181/device-mgmt/channels", method: "GET", externalPath: "/openapi/v1/devices/{deviceId}/channels",
-		adapterKey: adapters.ChannelListAdapterKey, resourceType: "channel",
-	},
-	{
-		groupCode: "device-management", code: "channel.detail", scope: "channel:detail", name: "通道详情",
-		internalPath: "/api/gb28181/device-mgmt/channel/:id", method: "GET", externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}",
-		adapterKey: adapters.ChannelDetailAdapterKey, resourceType: "channel",
-	},
-	// channel.status is seeded into device-control, matching both
-	// sys_api.api_group for this route (「设备控制」) and the legacy registry in
-	// app/openapi/client. A published release must not regroup a capability
-	// differently from the compatibility path it replaces.
-	{
-		groupCode: "device-control", code: "channel.status", scope: "channel:status", name: "通道状态",
-		internalPath: "/api/gb28181/device-mgmt/channel/:id/device-status", method: "GET", externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/status",
-		adapterKey: adapters.ChannelStatusAdapterKey, resourceType: "channel",
-	},
-}
-
-// coreDelegatedDefinitions is the PTZ surface. It is *not* dispatched by
-// the catalog runtime: handlePTZ consumes these scopes before the metadata
-// dispatcher, and its executable behaviour is PTZDispatcher. It is seeded
-// anyway because the active release
-// is what client.ScopePublished consults — a scope missing from the release can
-// never be granted, whatever its dispatch plane is.
-//
-// risk and idempotencyMode mirror the legacy registry in app/openapi/client
-// exactly (ptz reads = read, ptz writes = control; the three preset writes
-// require an Idempotency-Key). A published release that disagrees
-// with the compatibility path would make the same platform describe two
-// different contracts depending on whether the catalog tables are migrated.
-var coreDelegatedDefinitions = []readDefinition{
-	{
-		groupCode: "device-control", code: "play.live", scope: "play:live", name: "发起实时点播",
-		internalPath: "/api/gb28181/play/:deviceId/:channelId", method: "POST",
-		externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/live",
-		adapterKey:   adapters.PlayLiveAdapterKey, resourceType: "channel", risk: "control",
-	},
-	{
-		groupCode: "device-control", code: "ptz.preset.list", scope: "ptz:preset:list", name: "预置位列表",
-		internalPath: "/api/gb28181/device-mgmt/channel/:id/ptz/presets", method: "GET",
-		externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets",
-		adapterKey:   adapters.PTZPresetListAdapterKey, resourceType: "channel", risk: "read",
-	},
-	{
-		groupCode: "device-control", code: "ptz.preset.save", scope: "ptz:preset:save", name: "保存预置位",
-		internalPath: "/api/gb28181/device-mgmt/channel/:id/ptz/presets", method: "POST",
-		externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets",
-		adapterKey:   adapters.PTZPresetSaveAdapterKey, resourceType: "channel", risk: "control", idempotencyMode: "required",
-	},
-	{
-		groupCode: "device-control", code: "ptz.preset.call", scope: "ptz:preset:call", name: "调用预置位",
-		internalPath: "/api/gb28181/device-mgmt/channel/:id/ptz/presets/:presetId/call", method: "POST",
-		externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets/{presetId}/call",
-		adapterKey:   adapters.PTZPresetCallAdapterKey, resourceType: "channel", risk: "control", idempotencyMode: "required",
-	},
-	{
-		groupCode: "device-control", code: "ptz.preset.delete", scope: "ptz:preset:delete", name: "删除预置位",
-		internalPath: "/api/gb28181/device-mgmt/channel/:id/ptz/presets/:presetId", method: "DELETE",
-		externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets/{presetId}",
-		adapterKey:   adapters.PTZPresetDeleteAdapterKey, resourceType: "channel", risk: "control", idempotencyMode: "required",
-	},
-	{
-		groupCode: "device-control", code: "ptz.operation.read", scope: "ptz:operation:read", name: "云台操作结果",
-		internalPath: "/api/gb28181/device-mgmt/channel/:id/ptz/operations/:operationId", method: "GET",
-		externalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/operations/{operationId}",
-		adapterKey:   adapters.PTZOperationReadAdapterKey, resourceType: "channel", risk: "read",
-	},
+func catalogDefinitionsFromContracts(delegated bool) []readDefinition {
+	definitions := make([]readDefinition, 0)
+	for _, operation := range contracts.Operations() {
+		isDelegated := strings.HasPrefix(operation.AdapterKey, "delegated.")
+		if isDelegated != delegated {
+			continue
+		}
+		definitions = append(definitions, readDefinition{
+			groupCode:       operation.GroupCode,
+			code:            operation.Code,
+			scope:           operation.Scope,
+			name:            operation.Name,
+			internalPath:    operation.InternalPath,
+			method:          operation.Method,
+			sysAPIMethod:    definitionSysAPIMethod(operation),
+			externalPath:    operation.ExternalPath,
+			adapterKey:      operation.AdapterKey,
+			resourceType:    operation.ResourceType,
+			risk:            operation.RiskLevel,
+			idempotencyMode: operation.IdempotencyMode,
+			requestSchema:   operation.RequestSchema,
+			responseSchema:  operation.ResponseSchema,
+		})
+	}
+	return definitions
 }
 
 // coreCatalogDefinitions is the complete code-owned catalog surface, which is
-// also the complete external scope surface. It is the single list that
-// publication, the "is this release still complete" check and the tests all
-// agree on.
+// also the complete external scope surface.
 func coreCatalogDefinitions() []readDefinition {
 	definitions := make([]readDefinition, 0, len(coreReadDefinitions)+len(coreDelegatedDefinitions))
 	definitions = append(definitions, coreReadDefinitions...)
@@ -211,9 +166,13 @@ func EnsureCoreCatalog(ctx context.Context, db *gorm.DB, actorID int64) (Bootstr
 	createdBy := uint(actorID)
 
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		lookup, err := loadSeedLookup(ctx, tx)
+		if err != nil {
+			return err
+		}
 		groups := make(map[string]openapimodels.CapabilityGroup, len(coreGroups))
 		for _, definition := range coreGroups {
-			group, created, err := ensureGroup(ctx, tx, definition, createdBy)
+			group, created, err := ensureGroup(ctx, tx, definition, createdBy, lookup)
 			if err != nil {
 				return err
 			}
@@ -234,11 +193,11 @@ func EnsureCoreCatalog(ctx context.Context, db *gorm.DB, actorID int64) (Bootstr
 			if !ok || group.ID == 0 {
 				return fmt.Errorf("%w: group %q is missing", ErrBootstrapConflict, definition.groupCode)
 			}
-			sysAPI, err := findSysAPI(ctx, tx, definition.internalPath, definition.method)
+			sysAPI, err := findSysAPI(ctx, tx, definition.internalPath, definition.sysAPIMethod, lookup)
 			if err != nil {
 				return err
 			}
-			capability, created, err := ensureCapability(ctx, tx, group, definition, sysAPI, createdBy)
+			capability, created, err := ensureCapability(ctx, tx, group, definition, sysAPI, createdBy, lookup)
 			if err != nil {
 				return err
 			}
@@ -246,7 +205,7 @@ func EnsureCoreCatalog(ctx context.Context, db *gorm.DB, actorID int64) (Bootstr
 				result.CapabilitiesCreated++
 			}
 
-			created, err = ensureOperation(ctx, tx, capability, definition, sysAPI, createdBy)
+			created, err = ensureOperation(ctx, tx, capability, definition, sysAPI, createdBy, lookup)
 			if err != nil {
 				return err
 			}
@@ -356,24 +315,29 @@ func retireRemovedPlaybackCapability(ctx context.Context, tx *gorm.DB, updatedBy
 // ⇒ `First` 查不到行时 **query.Error 是 nil**（不是 gorm.ErrRecordNotFound）。
 // 于是按 Error 判断的旧写法会：
 //
-//	1) 认为"查到了"→ 返回**零值 group**（ID=0、Code=""）且 created=false；
-//	2) 永远跳到下面 Create 之前就return ⇒ 分组根本没被创建；
-//	3) 零值 group 存进 groups map ⇒ bootstrap.go:234 `group.ID == 0` 命中
-//	　 ⇒ `catalog_seed_conflict: group %q is missing`
-//	　 ⇒ panic: OpenAPI initialization failed ⇒ **整个后端退出、平台不可用**。
+//  1. 认为"查到了"→ 返回**零值 group**（ID=0、Code=""）且 created=false；
+//  2. 永远跳到下面 Create 之前就return ⇒ 分组根本没被创建；
+//  3. 零值 group 存进 groups map ⇒ bootstrap.go:234 `group.ID == 0` 命中
+//     ⇒ `catalog_seed_conflict: group %q is missing`
+//     ⇒ panic: OpenAPI initialization failed ⇒ **整个后端退出、平台不可用**。
 //
 // ⛔ 为什么这个坑只咬绿色包：本地测试惯用裸 gorm.Open，**没有注册**上述回调，
 // First 正常返回 ErrRecordNotFound，代码按预期工作 —— 于是"单测全绿、
 // 客户机启动即panic"。判据必须选**与掩码无关**的那个：
 // `query.RowsAffected > 0` 表示真的取到了行。
-func ensureGroup(ctx context.Context, tx *gorm.DB, definition groupDefinition, createdBy uint) (openapimodels.CapabilityGroup, bool, error) {
+func ensureGroup(ctx context.Context, tx *gorm.DB, definition groupDefinition, createdBy uint, lookups ...*seedLookup) (openapimodels.CapabilityGroup, bool, error) {
 	var group openapimodels.CapabilityGroup
-	query := tx.WithContext(ctx).Unscoped().Where("code = ?", definition.code).First(&group)
-	switch {
-	case query.Error != nil && !errors.Is(query.Error, gorm.ErrRecordNotFound):
-		// 真正的查询失败（连接断了、表不存在等）。
-		return openapimodels.CapabilityGroup{}, false, query.Error
-	case query.RowsAffected > 0:
+	found := false
+	if len(lookups) > 0 {
+		group, found = lookups[0].groups[definition.code]
+	} else {
+		query := tx.WithContext(ctx).Unscoped().Where("code = ?", definition.code).First(&group)
+		if query.Error != nil && !errors.Is(query.Error, gorm.ErrRecordNotFound) {
+			return group, false, query.Error
+		}
+		found = query.RowsAffected > 0
+	}
+	if found {
 		// 真的取到了行。RowsAffected 在掩码与不掩码下语义一致。
 		if group.ID <= 0 {
 			// 有行但主键为 0：宁可报错，也不用零值继续。
@@ -406,13 +370,19 @@ func ensureGroup(ctx context.Context, tx *gorm.DB, definition groupDefinition, c
 
 // ensureCapability 与 ensureGroup 同理：判据必须是 RowsAffected，不是 Error。
 // 原因（MaskNotDataError 全局掩码）见 ensureGroup 的注释。
-func ensureCapability(ctx context.Context, tx *gorm.DB, group openapimodels.CapabilityGroup, definition readDefinition, sysAPI *appmodels.SysApi, createdBy uint) (openapimodels.Capability, bool, error) {
+func ensureCapability(ctx context.Context, tx *gorm.DB, group openapimodels.CapabilityGroup, definition readDefinition, sysAPI *appmodels.SysApi, createdBy uint, lookups ...*seedLookup) (openapimodels.Capability, bool, error) {
 	var capability openapimodels.Capability
-	query := tx.WithContext(ctx).Unscoped().Where("scope = ?", definition.scope).First(&capability)
-	switch {
-	case query.Error != nil && !errors.Is(query.Error, gorm.ErrRecordNotFound):
-		return openapimodels.Capability{}, false, query.Error
-	case query.RowsAffected > 0:
+	found := false
+	if len(lookups) > 0 {
+		capability, found = lookups[0].capabilities[definition.scope]
+	} else {
+		query := tx.WithContext(ctx).Unscoped().Where("scope = ?", definition.scope).First(&capability)
+		if query.Error != nil && !errors.Is(query.Error, gorm.ErrRecordNotFound) {
+			return capability, false, query.Error
+		}
+		found = query.RowsAffected > 0
+	}
+	if found {
 		if capability.ID <= 0 {
 			return openapimodels.Capability{}, false,
 				fmt.Errorf("%w: capability scope %q has no primary key", ErrBootstrapConflict, definition.scope)
@@ -430,7 +400,7 @@ func ensureCapability(ctx context.Context, tx *gorm.DB, group openapimodels.Capa
 	capability = openapimodels.Capability{
 		GroupID: group.ID, Code: definition.code, Scope: definition.scope, Name: name,
 		ResourceType: definition.resourceType, RiskLevel: definitionRisk(definition), Status: openapimodels.CatalogStatusDraft,
-		SysAPIID: sysAPIID(sysAPI), SysAPIPath: definition.internalPath, SysAPIMethod: definition.method,
+		SysAPIID: sysAPIID(sysAPI), SysAPIPath: definition.internalPath, SysAPIMethod: definition.sysAPIMethod,
 		RowVersion: 1, CreatedBy: createdBy, UpdatedBy: createdBy,
 	}
 	if err := tx.WithContext(ctx).Create(&capability).Error; err != nil {
@@ -444,13 +414,19 @@ func ensureCapability(ctx context.Context, tx *gorm.DB, group openapimodels.Capa
 }
 
 // ensureOperation 同 ensureGroup/ensureCapability：判据用 RowsAffected。
-func ensureOperation(ctx context.Context, tx *gorm.DB, capability openapimodels.Capability, definition readDefinition, sysAPI *appmodels.SysApi, createdBy uint) (bool, error) {
+func ensureOperation(ctx context.Context, tx *gorm.DB, capability openapimodels.Capability, definition readDefinition, sysAPI *appmodels.SysApi, createdBy uint, lookups ...*seedLookup) (bool, error) {
 	var operation openapimodels.Operation
-	query := tx.WithContext(ctx).Unscoped().Where("capability_id = ? AND code = ?", capability.ID, definition.code).First(&operation)
-	switch {
-	case query.Error != nil && !errors.Is(query.Error, gorm.ErrRecordNotFound):
-		return false, query.Error
-	case query.RowsAffected > 0:
+	found := false
+	if len(lookups) > 0 {
+		operation, found = lookups[0].operations[operationSeedKey{capability.ID, definition.code}]
+	} else {
+		query := tx.WithContext(ctx).Unscoped().Where("capability_id = ? AND code = ?", capability.ID, definition.code).First(&operation)
+		if query.Error != nil && !errors.Is(query.Error, gorm.ErrRecordNotFound) {
+			return false, query.Error
+		}
+		found = query.RowsAffected > 0
+	}
+	if found {
 		if operation.ID <= 0 {
 			return false, fmt.Errorf("%w: operation %q has no primary key", ErrBootstrapConflict, definition.code)
 		}
@@ -468,11 +444,16 @@ func ensureOperation(ctx context.Context, tx *gorm.DB, capability openapimodels.
 	// 当成"存在"，而它的 ID=0 / CapabilityID=0 / Code="" 全部不等于本operation
 	// ⇒ 每次 seed 都会误报 "route is already reserved"，全新安装直接失败。
 	var routeOwner openapimodels.Operation
-	routeQuery := tx.WithContext(ctx).Unscoped().Where("method = ? AND external_path = ?", definition.method, definition.externalPath).First(&routeOwner)
-	switch {
-	case routeQuery.Error != nil && !errors.Is(routeQuery.Error, gorm.ErrRecordNotFound):
-		return false, routeQuery.Error
-	case routeQuery.RowsAffected > 0:
+	if len(lookups) > 0 {
+		routeOwner, found = lookups[0].routes[routeSeedKey{definition.method, definition.externalPath}]
+	} else {
+		routeQuery := tx.WithContext(ctx).Unscoped().Where("method = ? AND external_path = ?", definition.method, definition.externalPath).First(&routeOwner)
+		if routeQuery.Error != nil && !errors.Is(routeQuery.Error, gorm.ErrRecordNotFound) {
+			return false, routeQuery.Error
+		}
+		found = routeQuery.RowsAffected > 0
+	}
+	if found {
 		if routeOwner.DeletedAt != nil || routeOwner.CapabilityID != capability.ID || routeOwner.Code != definition.code {
 			return false, fmt.Errorf("%w: route %s %s is already reserved", ErrBootstrapConflict, definition.method, definition.externalPath)
 		}
@@ -484,8 +465,8 @@ func ensureOperation(ctx context.Context, tx *gorm.DB, capability openapimodels.
 		Method: definition.method, ExternalPath: definition.externalPath,
 		AdapterKey: definition.adapterKey, AdapterContractVersion: adapterContractVersion(definition),
 		ResourceType: definition.resourceType, RiskLevel: definitionRisk(definition), IdempotencyMode: definitionIdempotencyMode(definition),
-		RequestSchema: "{}", ResponseSchema: "{}", SysAPIID: sysAPIID(sysAPI),
-		SysAPIPath: definition.internalPath, SysAPIMethod: definition.method,
+		RequestSchema: definition.requestSchema, ResponseSchema: definition.responseSchema, SysAPIID: sysAPIID(sysAPI),
+		SysAPIPath: definition.internalPath, SysAPIMethod: definition.sysAPIMethod,
 		Status: openapimodels.CatalogStatusDraft, CreatedBy: createdBy, UpdatedBy: createdBy,
 	}
 	if err := tx.WithContext(ctx).Create(&operation).Error; err != nil {
@@ -493,6 +474,9 @@ func ensureOperation(ctx context.Context, tx *gorm.DB, capability openapimodels.
 	}
 	if operation.ID <= 0 {
 		return false, fmt.Errorf("%w: operation %q was created without a primary key", ErrBootstrapConflict, definition.code)
+	}
+	if len(lookups) > 0 {
+		lookups[0].routes[routeSeedKey{definition.method, definition.externalPath}] = operation
 	}
 	return true, nil
 }
@@ -536,7 +520,14 @@ func adapterContractVersion(definition readDefinition) string {
 // 都会绑上 sys_api_id=0 / path="" / method="" —— 元数据全错且不会报错。
 //
 // 判据同样是 RowsAffected。
-func findSysAPI(ctx context.Context, tx *gorm.DB, path, method string) (*appmodels.SysApi, error) {
+func findSysAPI(ctx context.Context, tx *gorm.DB, path, method string, lookups ...*seedLookup) (*appmodels.SysApi, error) {
+	if len(lookups) > 0 {
+		row, ok := lookups[0].apis[routeSeedKey{method, path}]
+		if !ok || row.ID == 0 {
+			return nil, nil
+		}
+		return &row, nil
+	}
 	var row appmodels.SysApi
 	query := tx.WithContext(ctx).
 		Where("path = ? AND method = ? AND deleted_at IS NULL", path, method).
@@ -550,6 +541,13 @@ func findSysAPI(ctx context.Context, tx *gorm.DB, path, method string) (*appmode
 		return nil, nil
 	}
 	return &row, nil
+}
+
+func definitionSysAPIMethod(operation contracts.Operation) string {
+	if method := strings.TrimSpace(operation.SysAPIMethod); method != "" {
+		return method
+	}
+	return operation.Method
 }
 
 func sysAPIID(row *appmodels.SysApi) *int64 {

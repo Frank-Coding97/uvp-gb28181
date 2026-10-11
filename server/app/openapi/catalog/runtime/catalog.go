@@ -67,6 +67,12 @@ type SysAPIResolver interface {
 	Resolve(context.Context, string, string) (SysAPIAsset, error)
 }
 
+// BatchSysAPIResolver returns assets in request order so metadata validation
+// can avoid a remote round trip for each operation.
+type BatchSysAPIResolver interface {
+	ResolveBatch(context.Context, []SysAPIAsset) ([]SysAPIAsset, error)
+}
+
 type Operation struct {
 	Scope           string `json:"scope"`
 	Name            string `json:"name,omitempty"`
@@ -500,13 +506,35 @@ func (r *CatalogRuntime) Dispatch(ctx context.Context, scope string, invocation 
 
 func (r *CatalogRuntime) validate(ctx context.Context, draft Draft, active *Release, tombstones, orphans map[string]struct{}) ValidationReport {
 	report := ValidateDraftStructure(draft, sortedSet(tombstones), sortedSet(orphans))
-	for _, operation := range draft.Operations {
+	batchResolver, batched := r.resolver.(BatchSysAPIResolver)
+	var assets []SysAPIAsset
+	var batchErr error
+	if batched {
+		requests := make([]SysAPIAsset, len(draft.Operations))
+		for index, operation := range draft.Operations {
+			requests[index] = SysAPIAsset{Path: operation.SysAPIPath, Method: strings.ToUpper(strings.TrimSpace(operation.SysAPIMethod))}
+		}
+		assets, batchErr = batchResolver.ResolveBatch(ctx, requests)
+		if batchErr == nil && len(assets) != len(requests) {
+			batchErr = errors.New("sys_api metadata batch is incomplete")
+		}
+	}
+	for index, operation := range draft.Operations {
 		scope := strings.TrimSpace(operation.Scope)
 		if r.registry == nil || !validToken(strings.TrimSpace(operation.AdapterKey), 64) || !validToken(strings.TrimSpace(operation.ContractVersion), 32) || !r.registry.Has(operation.AdapterKey, operation.ContractVersion) {
 			report.Errors = append(report.Errors, issue(IssueCodeAdapterUnavailable, scope, SeverityError, "adapter key and contract version are not registered"))
 		}
 		if r.resolver != nil && strings.TrimSpace(operation.SysAPIPath) != "" {
-			asset, resolveErr := r.resolver.Resolve(ctx, operation.SysAPIPath, strings.ToUpper(strings.TrimSpace(operation.SysAPIMethod)))
+			var asset SysAPIAsset
+			var resolveErr error
+			if batched {
+				resolveErr = batchErr
+				if batchErr == nil {
+					asset = assets[index]
+				}
+			} else {
+				asset, resolveErr = r.resolver.Resolve(ctx, operation.SysAPIPath, strings.ToUpper(strings.TrimSpace(operation.SysAPIMethod)))
+			}
 			expectedMethod := strings.ToUpper(strings.TrimSpace(operation.SysAPIMethod))
 			if resolveErr != nil || asset.Deleted || asset.Path != operation.SysAPIPath || strings.ToUpper(asset.Method) != expectedMethod {
 				report.Warnings = append(report.Warnings, issue(IssueCodeSysAPIDrift, scope, SeverityWarning, "sys_api asset drift is recorded; published adapter remains dispatchable"))

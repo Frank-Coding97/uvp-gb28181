@@ -12,14 +12,15 @@ import (
 	"reflect"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 	"uvplatform.com/uvp-gb28181/app/openapi/client"
+	"uvplatform.com/uvp-gb28181/app/openapi/contracts"
 	"uvplatform.com/uvp-gb28181/app/openapi/resource"
 	"uvplatform.com/uvp-gb28181/app/openapi/routes"
 )
@@ -101,6 +102,11 @@ type contractRequestLimits struct {
 type contractOperation struct {
 	OperationID   string                      `yaml:"operationId"`
 	Scope         string                      `yaml:"x-uvp-scope"`
+	Risk          string                      `yaml:"x-uvp-risk"`
+	Idempotency   string                      `yaml:"x-uvp-idempotency-mode"`
+	Protocol      []string                    `yaml:"x-uvp-protocol-versions"`
+	StandardRefs  []string                    `yaml:"x-uvp-standard-refs"`
+	Confirmation  bool                        `yaml:"x-uvp-requires-confirmation"`
 	Enabled       *bool                       `yaml:"x-uvp-enabled"`
 	CurrentStatus *int                        `yaml:"x-uvp-current-status"`
 	TTLSeconds    *int                        `yaml:"x-uvp-expires-ttl-seconds"`
@@ -152,7 +158,7 @@ type contractSchema struct {
 	Type                 string                    `yaml:"type"`
 	Format               string                    `yaml:"format"`
 	Pattern              string                    `yaml:"pattern"`
-	Enum                 []string                  `yaml:"enum"`
+	Enum                 []any                     `yaml:"enum"`
 	Required             []string                  `yaml:"required"`
 	Properties           map[string]contractSchema `yaml:"properties"`
 	Items                *contractSchema           `yaml:"items"`
@@ -161,30 +167,43 @@ type contractSchema struct {
 	MaxLength            *int                      `yaml:"maxLength"`
 	Minimum              *int                      `yaml:"minimum"`
 	Maximum              *int                      `yaml:"maximum"`
+	MinProperties        *int                      `yaml:"minProperties"`
 	Default              any                       `yaml:"default"`
 	Nullable             bool                      `yaml:"nullable"`
 }
 
 type contractRoute struct {
-	method string
-	path   string
-	scope  string
+	method               string
+	path                 string
+	requestSchema        string
+	scope                string
+	risk                 string
+	idempotency          string
+	protocolVersions     []string
+	standardRefs         []string
+	requiresConfirmation bool
+	queryAllowlist       []string
 }
 
-var publicContractRoutes = []contractRoute{
-	{method: "get", path: "/openapi/v1/devices", scope: "device:list"},
-	{method: "get", path: "/openapi/v1/devices/{deviceId}", scope: "device:detail"},
-	{method: "get", path: "/openapi/v1/devices/{deviceId}/status", scope: "device:status"},
-	{method: "get", path: "/openapi/v1/devices/{deviceId}/channels", scope: "channel:list"},
-	{method: "get", path: "/openapi/v1/devices/{deviceId}/channels/{channelId}", scope: "channel:detail"},
-	{method: "get", path: "/openapi/v1/devices/{deviceId}/channels/{channelId}/status", scope: "channel:status"},
-	{method: "post", path: "/openapi/v1/devices/{deviceId}/channels/{channelId}/live", scope: "play:live"},
-	{method: "get", path: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets", scope: "ptz:preset:list"},
-	{method: "post", path: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets", scope: "ptz:preset:save"},
-	{method: "post", path: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets/{presetId}/call", scope: "ptz:preset:call"},
-	{method: "delete", path: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets/{presetId}", scope: "ptz:preset:delete"},
-	{method: "get", path: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/operations/{operationId}", scope: "ptz:operation:read"},
-}
+var publicContractRoutes = func() []contractRoute {
+	operations := contracts.Operations()
+	routes := make([]contractRoute, 0, len(operations))
+	for _, operation := range operations {
+		routes = append(routes, contractRoute{
+			method:               strings.ToLower(operation.Method),
+			path:                 operation.ExternalPath,
+			requestSchema:        operation.RequestSchema,
+			scope:                operation.Scope,
+			risk:                 operation.RiskLevel,
+			idempotency:          operation.IdempotencyMode,
+			protocolVersions:     append([]string(nil), operation.ProtocolVersions...),
+			standardRefs:         append([]string(nil), operation.StandardRefs...),
+			requiresConfirmation: operation.RequiresConfirmation,
+			queryAllowlist:       append([]string(nil), operation.QueryAllowlist...),
+		})
+	}
+	return routes
+}()
 
 var requiredSignatureHeaders = []string{
 	"X-UVP-Sign-Version",
@@ -195,6 +214,7 @@ var requiredSignatureHeaders = []string{
 }
 
 func TestOpenAPIContract(t *testing.T) {
+	require.NoError(t, contracts.Validate(contracts.Operations()))
 	doc := loadOpenAPIContract(t)
 	require.Equal(t, "3.0.3", doc.OpenAPI)
 	require.NotEmpty(t, doc.Info.Title)
@@ -207,7 +227,7 @@ func TestOpenAPIContract(t *testing.T) {
 	require.Contains(t, secretHandling, "browser")
 	require.Equal(t, "HMAC-SHA256", doc.SignatureContract.Algorithm)
 	require.Equal(t, requiredSignatureHeaders, doc.SignatureContract.RequiredHeaders)
-	require.Equal(t, []string{"keyword", "page", "pageSize", "status"}, doc.SignatureContract.QueryAllowlist)
+	require.Equal(t, []string{"cursor", "keyword", "page", "pageSize", "status"}, doc.SignatureContract.QueryAllowlist)
 	require.Contains(t, strings.ToLower(doc.SignatureContract.PathRule), "ascii")
 	require.Contains(t, strings.ToLower(doc.SignatureContract.PathRule), "encoded")
 	require.Contains(t, strings.ToLower(doc.SignatureContract.QueryRule), "rfc3986")
@@ -267,7 +287,7 @@ func TestOpenAPIContract(t *testing.T) {
 	require.Contains(t, doc.Components.SecuritySchemes, "uvpHmac")
 	require.Equal(t, contractSecurity{Type: "apiKey", In: "header", Name: "X-UVP-Signature"}, doc.Components.SecuritySchemes["uvpHmac"])
 	errorSchema := resolveSchema(t, doc, contractSchema{Ref: "#/components/schemas/ErrorResponse"})
-	require.Equal(t, []string{"INVALID_REQUEST", "AUTHENTICATION_FAILED", "REQUEST_EXPIRED", "REQUEST_REPLAYED", "CAPABILITY_DENIED", "RESOURCE_NOT_FOUND", "CONFLICT", "RATE_LIMITED", "QUOTA_EXCEEDED", "SERVICE_UNAVAILABLE"}, errorSchema.Properties["code"].Enum)
+	require.Equal(t, []any{"INVALID_REQUEST", "AUTHENTICATION_FAILED", "REQUEST_EXPIRED", "REQUEST_REPLAYED", "CAPABILITY_DENIED", "CAPABILITY_NOT_SUPPORTED", "DEVICE_OFFLINE", "RESOURCE_NOT_FOUND", "CONFLICT", "RATE_LIMITED", "QUOTA_EXCEEDED", "SERVICE_UNAVAILABLE"}, errorSchema.Properties["code"].Enum)
 	require.True(t, errorSchema.Properties["data"].Nullable)
 
 	gotScopes := make([]string, 0, len(publicContractRoutes))
@@ -287,8 +307,31 @@ func TestOpenAPIContract(t *testing.T) {
 	require.Equal(t, wantScopes, gotScopes, "contract scopes must equal the published capability catalog")
 
 	checkPublicDTOs(t, doc)
-	checkPublicRouteAST(t, doc)
+	checkPublicRouteAST(t)
 	checkInstalledBoundary(t, doc)
+}
+
+func TestDeviceCaptureIsNotPublishedWhileRuntimeDependenciesAreIncomplete(t *testing.T) {
+	doc := loadOpenAPIContract(t)
+	for _, scope := range []string{
+		"channel:snapshot:create",
+		"channel:snapshot:read",
+		"channel:snapshot:image:read",
+	} {
+		for _, operation := range contracts.Operations() {
+			require.NotEqual(t, scope, operation.Scope, "capture scopes stay unpublished until the runtime is wired")
+		}
+		for _, published := range client.SupportedScopes() {
+			require.NotEqual(t, scope, published, "capture scopes must not enter the capability registry")
+		}
+	}
+	for _, path := range []string{
+		"/openapi/v1/devices/{deviceId}/channels/{channelId}/snapshots",
+		"/openapi/v1/devices/{deviceId}/channels/{channelId}/snapshots/{sessionId}",
+		"/openapi/v1/devices/{deviceId}/channels/{channelId}/snapshots/{sessionId}/images/{fileName}",
+	} {
+		require.NotContains(t, doc.Paths, path, "unwired capture endpoints must not be documented as available")
+	}
 }
 
 func loadOpenAPIContract(t *testing.T) openAPIContract {
@@ -305,6 +348,11 @@ func loadOpenAPIContract(t *testing.T) openAPIContract {
 
 func checkOperationContract(t *testing.T, doc openAPIContract, route contractRoute, operation contractOperation) {
 	t.Helper()
+	require.Equal(t, route.risk, operation.Risk, route.scope+" risk")
+	require.Equal(t, route.idempotency, operation.Idempotency, route.scope+" idempotency")
+	require.Equal(t, route.protocolVersions, operation.Protocol, route.scope+" protocol versions")
+	require.Equal(t, route.standardRefs, operation.StandardRefs, route.scope+" standard references")
+	require.Equal(t, route.requiresConfirmation, operation.Confirmation, route.scope+" confirmation")
 	parameters := make(map[string]contractParameter)
 	for _, ref := range operation.Parameters {
 		parameter := contractParameter{Name: ref.Name, In: ref.In, Required: ref.Required, Schema: ref.Schema}
@@ -327,7 +375,7 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 		schema := resolveSchema(t, doc, parameter.Schema)
 		switch name {
 		case "X-UVP-Sign-Version":
-			require.Equal(t, []string{"1"}, schema.Enum)
+			require.Equal(t, []any{"1"}, schema.Enum)
 		case "X-UVP-Access-Key":
 			require.Equal(t, "^uvp_[0-9a-f]{32}$", schema.Pattern)
 		case "X-UVP-Timestamp":
@@ -339,9 +387,9 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 			require.Equal(t, "^[0-9a-f]{64}$", schema.Pattern)
 		}
 	}
-	if route.scope == "ptz:preset:save" || route.scope == "ptz:preset:call" || route.scope == "ptz:preset:delete" {
+	if route.idempotency == "required" {
 		parameter, ok := parameters["Idempotency-Key"]
-		require.True(t, ok, "PTZ control operation must require Idempotency-Key")
+		require.Truef(t, ok, "%s must require Idempotency-Key", route.scope)
 		require.Equal(t, "header", parameter.In)
 		require.True(t, parameter.Required)
 		schema := resolveSchema(t, doc, parameter.Schema)
@@ -349,7 +397,7 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 		require.Equal(t, 1, *schema.MinLength)
 		require.Equal(t, 128, *schema.MaxLength)
 	}
-	requestBodyRequired := (route.method == "post" && route.scope != "play:live") || route.scope == "ptz:preset:delete"
+	requestBodyRequired := (route.method == "post" && route.scope != "play:live") || route.method == "put" || route.scope == "ptz:preset:delete"
 	if requestBodyRequired {
 		require.Equal(t, "application/json", operation.ContentType)
 		require.NotNil(t, operation.RequestBody)
@@ -363,8 +411,18 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 			require.Equal(t, "integer", bodySchema.Properties["presetId"].Type)
 			require.Equal(t, 1, *bodySchema.Properties["presetId"].Minimum)
 			require.Equal(t, 255, *bodySchema.Properties["presetId"].Maximum)
+		} else if route.scope == "ptz:precise" {
+			require.NotNil(t, bodySchema.MinProperties)
+			require.Equal(t, 1, *bodySchema.MinProperties)
+			require.Contains(t, bodySchema.Properties, "pan")
+			require.Contains(t, bodySchema.Properties, "tilt")
+			require.Contains(t, bodySchema.Properties, "zoom")
+		} else if ptzControlScope(route.scope) && route.scope != "ptz:preset:call" && route.scope != "ptz:preset:delete" {
+			require.NotEmpty(t, bodySchema.Required, route.scope)
 		} else {
-			require.Empty(t, bodySchema.Required)
+			var expected contractSchema
+			require.NoError(t, json.Unmarshal([]byte(route.requestSchema), &expected))
+			require.Equal(t, expected.Required, bodySchema.Required, route.scope+" request fields")
 		}
 		require.NotNil(t, bodySchema.AdditionalProperties)
 		require.False(t, *bodySchema.AdditionalProperties)
@@ -380,10 +438,8 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 		}
 	}
 	sort.Strings(queryNames)
-	wantQuery := []string(nil)
-	if route.scope == "device:list" || route.scope == "channel:list" {
-		wantQuery = []string{"keyword", "page", "pageSize", "status"}
-	}
+	wantQuery := append([]string(nil), route.queryAllowlist...)
+	sort.Strings(wantQuery)
 	require.Equal(t, wantQuery, queryNames)
 	for _, name := range queryNames {
 		parameter := parameters[name]
@@ -407,8 +463,11 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 			require.Equal(t, 100, *schema.Maximum)
 			require.Contains(t, parameter.Description, "empty value is rejected")
 		case "status":
-			require.Equal(t, []string{"online", "offline", "unknown"}, schema.Enum)
+			require.Equal(t, []any{"online", "offline", "unknown"}, schema.Enum)
 			require.Contains(t, parameter.Description, "empty value is rejected")
+		case "cursor":
+			require.Equal(t, "string", schema.Type)
+			require.False(t, parameter.Required)
 		}
 	}
 	for _, name := range []string{"deviceId", "channelId"} {
@@ -434,6 +493,9 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 	}
 	require.Contains(t, operation.Responses["401"].Description, "REQUEST_REPLAYED")
 	statuses := []string{"200", "400", "401", "403", "404", "405", "429", "503"}
+	if route.scope == "ptz:precise" || route.scope == "ptz:target-track" {
+		statuses = append(statuses, "422")
+	}
 	if conflictScope(route.scope) {
 		statuses = append(statuses, "409")
 	}
@@ -442,7 +504,7 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 		require.Truef(t, ok, "%s %s missing response %s", route.method, route.path, status)
 		cacheControl, ok := response.Headers["Cache-Control"]
 		require.True(t, ok)
-		require.Equal(t, []string{"no-store"}, cacheControl.Schema.Enum)
+		require.Equal(t, []any{"no-store"}, cacheControl.Schema.Enum)
 		if status == "405" {
 			require.Empty(t, response.Content, "HEAD/405 must not promise a response body")
 			continue
@@ -459,9 +521,12 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 	}
 	successSchema := resolveResponseSchema(t, doc, operation.Responses["200"])
 	require.Equal(t, "object", successSchema.Type)
-	require.Equal(t, []string{"OK"}, successSchema.Properties["code"].Enum)
-	require.Equal(t, []string{"success"}, successSchema.Properties["message"].Enum)
+	require.Equal(t, []any{"OK"}, successSchema.Properties["code"].Enum)
+	require.Equal(t, []any{"success"}, successSchema.Properties["message"].Enum)
 	errorStatuses := []string{"400", "401", "403", "404", "429", "503"}
+	if route.scope == "ptz:precise" || route.scope == "ptz:target-track" {
+		errorStatuses = append(errorStatuses, "422")
+	}
 	if conflictScope(route.scope) {
 		errorStatuses = append(errorStatuses, "409")
 	}
@@ -474,11 +539,25 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 }
 
 func ptzControlScope(scope string) bool {
-	return scope == "ptz:preset:save" || scope == "ptz:preset:call" || scope == "ptz:preset:delete"
+	switch scope {
+	case "ptz:preset:save", "ptz:preset:call", "ptz:preset:delete", "ptz:move", "ptz:precise", "ptz:extended", "ptz:wiper", "ptz:home-position:set", "ptz:cruise:control", "ptz:cruise:track:create", "ptz:target-track":
+		return true
+	default:
+		return false
+	}
 }
 
 func conflictScope(scope string) bool {
-	return scope == "play:live" || ptzControlScope(scope)
+	switch scope {
+	case "play:live", "device:recording:start", "device:recording:stop",
+		"device:alarm:guard:set", "device:alarm:guard:reset", "device:alarm:reset",
+		"device:maintenance:reboot", "channel:storage-card:format", "device:firmware-upgrade:execute",
+		"device:playback-create", "device:playback-action", "device:playback-stop", "device:download-create", "device:download-cancel",
+		"device:config:refresh", "device:config:apply", "channel:video-params:refresh", "channel:video-params:apply":
+		return true
+	default:
+		return ptzControlScope(scope)
+	}
 }
 
 func resolveResponseSchema(t *testing.T, doc openAPIContract, response contractResponse) contractSchema {
@@ -528,6 +607,10 @@ func checkPublicDTOs(t *testing.T, doc openAPIContract) {
 		{name: "Channel", typeOf: reflect.TypeOf(resource.Channel{})},
 		{name: "ChannelPage", typeOf: reflect.TypeOf(resource.ChannelPage{})},
 		{name: "ChannelStatus", typeOf: reflect.TypeOf(resource.ChannelStatus{})},
+		{name: "StorageCard", typeOf: reflect.TypeOf(resource.StorageCard{})},
+		{name: "StorageCardSnapshot", typeOf: reflect.TypeOf(resource.StorageCardSnapshot{})},
+		{name: "ControlCapability", typeOf: reflect.TypeOf(manscdp.ControlCapability{})},
+		{name: "ControlCapabilities", typeOf: reflect.TypeOf(manscdp.ControlCapabilities{})},
 	} {
 		schema := resolveSchema(t, doc, contractSchema{Ref: "#/components/schemas/" + dto.name})
 		require.Equal(t, jsonFieldNames(dto.typeOf), propertyNames(schema.Properties), dto.name+" properties drifted from the public DTO")
@@ -538,8 +621,10 @@ func checkPublicDTOs(t *testing.T, doc openAPIContract) {
 	for _, name := range []string{"Device", "Channel", "DeviceStatus", "ChannelStatus"} {
 		schema := resolveSchema(t, doc, contractSchema{Ref: "#/components/schemas/" + name})
 		status := schema.Properties["status"]
-		require.Equal(t, []string{"online", "offline", "unknown"}, status.Enum, name+" status enum drifted")
+		require.Equal(t, []any{"online", "offline", "unknown"}, status.Enum, name+" status enum drifted")
 	}
+	capability := resolveSchema(t, doc, contractSchema{Ref: "#/components/schemas/ControlCapability"})
+	require.Equal(t, []any{"supported", "unsupported", "unknown"}, capability.Properties["state"].Enum)
 }
 
 func jsonFieldNames(typeOf reflect.Type) map[string]struct{} {
@@ -561,13 +646,7 @@ func propertyNames(properties map[string]contractSchema) map[string]struct{} {
 	return names
 }
 
-type publicRouteRegistration struct {
-	method string
-	path   string
-	scope  string
-}
-
-func checkPublicRouteAST(t *testing.T, doc openAPIContract) {
+func checkPublicRouteAST(t *testing.T) {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
 	require.True(t, ok)
@@ -576,27 +655,24 @@ func checkPublicRouteAST(t *testing.T, doc openAPIContract) {
 	parsed, err := parser.ParseFile(fset, routeFile, nil, 0)
 	require.NoError(t, err, "parse real public route registrar")
 
-	registrations := make([]publicRouteRegistration, 0, len(doc.Paths))
+	registrarFound := false
 	ast.Inspect(parsed, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
 		if !ok {
 			return true
 		}
 		selector, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok || (selector.Sel.Name != "GET" && selector.Sel.Name != "POST" && selector.Sel.Name != "DELETE") {
+		if !ok || selector.Sel.Name != "Handle" {
 			return true
 		}
 		receiver, ok := selector.X.(*ast.Ident)
-		if !ok || receiver.Name != "private" || len(call.Args) < 2 {
+		if !ok || receiver.Name != "private" {
 			return true
 		}
-		pathLiteral, ok := call.Args[0].(*ast.BasicLit)
-		if !ok || pathLiteral.Kind != token.STRING {
+		if len(call.Args) != 3 || !isOperationSelector(call.Args[0], "Method") || !isOperationSelector(call.Args[1], "GinPath") {
 			return true
 		}
-		path, err := strconv.Unquote(pathLiteral.Value)
-		require.NoError(t, err)
-		handler, ok := call.Args[len(call.Args)-1].(*ast.CallExpr)
+		handler, ok := call.Args[2].(*ast.CallExpr)
 		if !ok {
 			return true
 		}
@@ -605,49 +681,22 @@ func checkPublicRouteAST(t *testing.T, doc openAPIContract) {
 			return true
 		}
 		gateway, ok := handlerSelector.X.(*ast.Ident)
-		if !ok || gateway.Name != "gateway" || len(handler.Args) != 1 {
+		if !ok || gateway.Name != "gateway" || len(handler.Args) != 1 || !isOperationSelector(handler.Args[0], "Scope") {
 			return true
 		}
-		var scope string
-		switch scopeExpr := handler.Args[0].(type) {
-		case *ast.BasicLit:
-			if scopeExpr.Kind != token.STRING {
-				return true
-			}
-			var err error
-			scope, err = strconv.Unquote(scopeExpr.Value)
-			require.NoError(t, err)
-		case *ast.SelectorExpr:
-			packageName, ok := scopeExpr.X.(*ast.Ident)
-			if !ok || packageName.Name != "auth" || scopeExpr.Sel.Name != "PlayLiveScope" {
-				return true
-			}
-			scope = "play:live"
-		default:
-			return true
-		}
-		registrations = append(registrations, publicRouteRegistration{
-			method: strings.ToLower(selector.Sel.Name),
-			path:   path,
-			scope:  scope,
-		})
+		registrarFound = true
 		return true
 	})
+	require.True(t, registrarFound, "public registrar must bind method, path, and scope from one code-owned operation")
+}
 
-	require.Len(t, registrations, len(publicContractRoutes), "real public registrar route count drifted from the contract")
-	seen := make(map[string]struct{}, len(registrations))
-	for _, registration := range registrations {
-		path := strings.NewReplacer(":deviceId", "{deviceId}", ":channelId", "{channelId}", ":presetId", "{presetId}", ":operationId", "{operationId}").Replace(registration.path)
-		key := registration.method + " " + path
-		_, duplicate := seen[key]
-		require.Falsef(t, duplicate, "duplicate real public route %s", key)
-		seen[key] = struct{}{}
-		operations, ok := doc.Paths[path]
-		require.Truef(t, ok, "real public route %s is absent from the contract", key)
-		operation, ok := operations[registration.method]
-		require.Truef(t, ok, "real public route %s has no contract operation", key)
-		require.Equal(t, registration.scope, operation.Scope, "real public route scope drifted for %s", key)
+func isOperationSelector(expression ast.Expr, field string) bool {
+	selector, ok := expression.(*ast.SelectorExpr)
+	if !ok || selector.Sel.Name != field {
+		return false
 	}
+	operation, ok := selector.X.(*ast.Ident)
+	return ok && operation.Name == "operation"
 }
 
 func checkInstalledBoundary(t *testing.T, doc openAPIContract) {
@@ -659,7 +708,11 @@ func checkInstalledBoundary(t *testing.T, doc openAPIContract) {
 		path := strings.ReplaceAll(route.path, "{deviceId}", "34020000001320000001")
 		path = strings.ReplaceAll(path, "{channelId}", "34020000001320000002")
 		path = strings.ReplaceAll(path, "{presetId}", "3")
+		path = strings.ReplaceAll(path, "{trackId}", "3")
 		path = strings.ReplaceAll(path, "{operationId}", "op-test")
+		path = strings.ReplaceAll(path, "{subscriptionId}", "550e8400-e29b-41d4-a716-446655440000")
+		path = strings.ReplaceAll(path, "{sessionId}", "550e8400-e29b-41d4-a716-446655440000")
+		path = strings.ReplaceAll(path, "{fileName}", "snapshot.jpg")
 		request := httptest.NewRequest(strings.ToUpper(route.method), path, nil)
 		response := httptest.NewRecorder()
 		root.ServeHTTP(response, request)

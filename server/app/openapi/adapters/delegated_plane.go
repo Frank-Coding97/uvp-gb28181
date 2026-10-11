@@ -86,7 +86,7 @@ func (adapter *delegatedPlaneAdapter) Execute(_ context.Context, invocation cata
 // absent still fails closed — handleMedia/handlePTZ answer 503 before dispatch,
 // which is the accurate answer ("the capability exists, its plane is not
 // available") rather than a misleading 403 capability denial.
-func NewDelegatedPlaneRegistrations() []catalogruntime.AdapterRegistration {
+func NewDelegatedPlaneRegistrations(bindings ...map[string]catalogruntime.Adapter) []catalogruntime.AdapterRegistration {
 	adapters := []*delegatedPlaneAdapter{
 		{key: PlayLiveAdapterKey, plane: DelegatedPlayPlane},
 		{key: PTZPresetListAdapterKey, plane: DelegatedPTZPlane},
@@ -94,13 +94,26 @@ func NewDelegatedPlaneRegistrations() []catalogruntime.AdapterRegistration {
 		{key: PTZPresetCallAdapterKey, plane: DelegatedPTZPlane},
 		{key: PTZPresetDeleteAdapterKey, plane: DelegatedPTZPlane},
 		{key: PTZOperationReadAdapterKey, plane: DelegatedPTZPlane},
+		{key: PTZMoveAdapterKey, plane: DelegatedPTZPlane},
+		{key: PTZPreciseAdapterKey, plane: DelegatedPTZPlane},
+		{key: PTZExtendedAdapterKey, plane: DelegatedPTZPlane},
+		{key: PTZWiperAdapterKey, plane: DelegatedPTZPlane},
+		{key: PTZHomePositionSetAdapterKey, plane: DelegatedPTZPlane},
+		{key: PTZCruiseControlAdapterKey, plane: DelegatedPTZPlane},
+		{key: PTZCruiseTrackCreateAdapterKey, plane: DelegatedPTZPlane},
+		{key: PTZCruiseTrackReadAdapterKey, plane: DelegatedPTZPlane},
+		{key: PTZTargetTrackAdapterKey, plane: DelegatedPTZPlane},
 	}
 	registrations := make([]catalogruntime.AdapterRegistration, 0, len(adapters))
 	for _, adapter := range adapters {
+		var executable catalogruntime.Adapter = adapter
+		if len(bindings) == 1 && bindings[0][adapter.key] != nil {
+			executable = bindings[0][adapter.key]
+		}
 		registrations = append(registrations, catalogruntime.AdapterRegistration{
 			Key:             adapter.Key(),
 			ContractVersion: DelegatedPlaneContractVersion,
-			Adapter:         adapter,
+			Adapter:         executable,
 		})
 	}
 	return registrations

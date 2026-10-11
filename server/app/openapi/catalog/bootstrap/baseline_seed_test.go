@@ -49,7 +49,7 @@ func TestEnsureCoreCatalogAgainstGreenPackageBaseline(t *testing.T) {
 		Status string
 	}
 	require.NoError(t, db.Table("sys_openapi_capability_group").Select("id, code, status").Scan(&rows).Error)
-	require.Len(t, rows, 2)
+	require.Len(t, rows, len(coreGroups))
 	for _, r := range rows {
 		require.NotZero(t, r.ID, "分组 %s 的主键为 0 ⇒下一行group.ID==0 会报 seed_conflict", r.Code)
 		t.Logf("group id=%d code=%s status=%s", r.ID, r.Code, r.Status)

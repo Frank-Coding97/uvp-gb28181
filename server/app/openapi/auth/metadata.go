@@ -16,6 +16,8 @@ type metadataInput struct {
 	owner                                       uint
 	dataScope                                   int8
 	scope, deviceID, channelID, keyword, status string
+	cursor                                      string
+	query                                       map[string]string
 	page, size                                  int
 }
 
@@ -36,21 +38,28 @@ func parseMetadata(q gatewayRequest, owner uint, dataScopes ...int8) (metadataIn
 	if len(dataScopes) == 1 {
 		dataScope = dataScopes[0]
 	}
-	m := metadataInput{owner: owner, dataScope: dataScope, scope: q.scope, deviceID: q.deviceID, channelID: q.channelID, page: 1, size: 20}
+	m := metadataInput{owner: owner, dataScope: dataScope, scope: q.scope, deviceID: q.deviceID, channelID: q.channelID, page: 1, size: 20, query: make(map[string]string)}
 	values, err := url.ParseQuery(q.rawQuery)
 	if err != nil {
 		return m, err
 	}
-	list := q.scope == "device:list" || q.scope == "channel:list"
+	operation, ok := contractOperation(q.scope)
+	allowed := make(map[string]bool)
+	if ok {
+		for _, name := range operation.QueryAllowlist {
+			allowed[name] = true
+		}
+	}
 	for key, items := range values {
-		if !list || len(items) != 1 || (key != "page" && key != "pageSize" && key != "keyword" && key != "status") {
+		if !allowed[key] || len(items) != 1 {
 			return m, ErrDenied
 		}
 		if key != "keyword" && items[0] == "" {
 			return m, ErrDenied
 		}
+		m.query[key] = items[0]
 	}
-	for key, target := range map[string]*int{"page": &m.page, "pageSize": &m.size} {
+	for key, target := range map[string]*int{"page": &m.page, "pageSize": &m.size, "limit": &m.size} {
 		if value := values.Get(key); value != "" {
 			for _, r := range value {
 				if r < '0' || r > '9' {
@@ -68,6 +77,10 @@ func parseMetadata(q gatewayRequest, owner uint, dataScopes ...int8) (metadataIn
 		return m, ErrDenied
 	}
 	m.keyword, m.status = values.Get("keyword"), values.Get("status")
+	m.cursor = values.Get("cursor")
+	if !utf8.ValidString(m.cursor) || len(m.cursor) > 512 {
+		return m, ErrDenied
+	}
 	if !utf8.ValidString(m.keyword) || utf8.RuneCountInString(m.keyword) > 100 {
 		return m, ErrDenied
 	}
@@ -114,6 +127,10 @@ func readMetadata(ctx context.Context, db *gorm.DB, m metadataInput) (any, error
 		return svc.GetChannelInScope(ctx, scope, m.deviceID, m.channelID)
 	case "channel:status":
 		return svc.GetChannelStatusInScope(ctx, scope, m.deviceID, m.channelID)
+	case "channel:storage-cards":
+		return svc.GetChannelStorageCardsInScope(ctx, scope, m.deviceID, m.channelID)
+	case "channel:capabilities":
+		return svc.GetChannelControlCapabilitiesInScope(ctx, scope, m.deviceID, m.channelID)
 	default:
 		return nil, ErrDenied
 	}

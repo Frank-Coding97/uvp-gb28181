@@ -28,7 +28,7 @@ func TestEnsurePublishedCatalogPublishesOnceAndNeverReSeeds(t *testing.T) {
 	require.Equal(t, len(CoreCatalogScopes()), first.ItemCount)
 	require.Equal(t, len(CoreCatalogScopes()), first.Seeded.OperationsCreated)
 	require.Equal(t, len(CoreCatalogScopes()), first.Seeded.CapabilitiesCreated)
-	require.Equal(t, 2, first.Seeded.GroupsCreated)
+	require.Equal(t, len(coreGroups), first.Seeded.GroupsCreated)
 	require.Empty(t, first.CoreScopesMissing)
 
 	var state openapimodels.RuntimeState
