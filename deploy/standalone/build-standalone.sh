@@ -495,6 +495,13 @@ log "复制后端资源（SQLite 建库脚本 + 静态资源）"
 cp -a "$SERVER_DIR/resource/database/sqlitebaseline" "$PKG/resource/baseline"
 [ -d "$SERVER_DIR/resource/public" ] && cp -a "$SERVER_DIR/resource/public/." "$PKG/resource/public/" || true
 
+# ---- IP 归属地数据库（可选资源，缺失时运行时自动走远程或显示未知）----
+if [ -d "$SERVER_DIR/resource/ipdb" ]; then
+  mkdir -p "$PKG/resource/ipdb"
+  cp -a "$SERVER_DIR/resource/ipdb/." "$PKG/resource/ipdb/"
+  log "  ip2region 数据库已随包（resource/ipdb/）"
+fi
+
 # ---- admin 默认头像（种子资源）----
 # ⛔⛔ 为什么不能直接用 server/resource/public/uploads：那个目录被 gitignore
 #   （server/.gitignore 的 `/resource/public/uploads`）——它是**运行时产物**。

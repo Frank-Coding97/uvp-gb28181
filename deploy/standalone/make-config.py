@@ -18,6 +18,7 @@
    根本看不出「你连了个不存在的 MySQL」（记忆里记录过这个坑）。
 2. ``cachetype: redis`` + redis 指向 **127.0.0.1**（包内自带，不连开发机）
 3. ``httpserver.port`` 与Redis 端口从命令行传进来，默认 8280 / 6379
+4. ``httpserver.trustedproxies`` 信任本机反向代理链，避免在线用户记录为 127.0.0.1
 """
 
 from __future__ import annotations
@@ -33,6 +34,10 @@ INIT_SWITCHES = (
     "isinitglobalgormsqlserver",
     "isinitglobalgormsqlite",
 )
+
+# 绿色包的后端只通过本机 Nginx 接收请求；外层代理可能运行在任意私有网段。
+# 后端只监听本机，因此信任 RFC1918 代理网段不会把后端直接暴露给公网。
+TRUSTED_PROXIES = ["127.0.0.1", "::1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
 
 
 def set_scalar(text: str, key_path: str, value: str) -> str:
@@ -129,6 +134,12 @@ def build(source: Path, target: Path, http_port: str, redis_port: str,
 
     # 3) HTTP 端口
     text = set_in_section(text, "httpserver", "port", f":{http_port}")
+    text = set_in_section(
+        text,
+        "httpserver",
+        "trustedproxies",
+        '["127.0.0.1", "::1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]',
+    )
 
     # 4) ZLM 身份：secret 与节点标识都**固定写死**，不留占位符。
     #

@@ -26,7 +26,7 @@
       bin\      只放我们自己编的程序（uvp-server.exe / uvp-setup.exe）
       vendor\   第三方运行时，每个组件自成一体（redis / nginx / zlm）
       config\   config.yml（后端读）+ config.env（只走环境变量，ctl 注入子进程）
-      data\     uvp.db + redis AOF + secrets\
+      data\     uvp.db + redis AOF + process-authority\
       logs\ run\ resource\
       顶层只允许：uvp-gb28181-ctl.ps1、start.cmd / stop.cmd / status.cmd、
                   README.md、version.json
@@ -164,14 +164,24 @@ function New-RandomBase64Url {
 }
 
 # ------------------------------------------------------------------ 常量 ----
-# ⛔ 必须与 deploy/standalone/PORTS.md、两个平台的 ctl 默认值**完全一致**：
-#   51000-51064 连续无空洞，一条防火墙规则即可覆盖。
-$HttpsPort       = 51000   # nginx HTTPS（浏览器入口）
-$PlainHttpPort   = 51001   # nginx HTTP（跳 HTTPS + 明文 API，供设备扫码）
-$HttpPort        = 51002   # 后端 HTTP
-$RedisPort       = 51003   # Redis（仅回环）
-$SipPort         = 51064   # SIP 信令（由平台引导页录入，不在端口预检内）
-$ZlmRtpRange     = '51014-51063'
+# ⛔⛔ 端口段与 Linux 版（51000-51064，见 deploy/standalone/PORTS.md）**刻意不同**：
+#   Windows 版用 **15500-15564**。原因不是审美，是被 Windows 逼的 ——
+#   系统有一段「动态端口范围」（默认 49152-65535，实测本机被改成 50000-55000），
+#   落进去的端口会被**保留**，任何程序 bind 都直接 WSAEACCES「拒绝访问」，
+#   而且是静默的：ZLM 的 TCP 绑得上、RTP 的 UDP 绑不上 ⇒ 起来 1 秒就自杀；
+#   SIP 的 UDP 同样绑不上 ⇒ 设备永远注册不上。
+#   排查命令：netsh int ipv4 show excludedportrange protocol=udp
+#   ⭐ 段起点为什么是 15500 而不是 15000：**深信服终端软件**
+#     （SangforPromoteService.exe，政企内网机很常见）常驻监听 127.0.0.1:15000，
+#     默认端口撞上它就"开箱即挂"，所以整段上移到 15500 避开这一带。
+#   ⚠️ 这四个值与 uvp-gb28181-ctl.ps1 的 $PortDefault 必须**完全一致**，
+#      否则出包时注入的端口与运行期脚本用的端口会对不上（出包阶段有交叉校验）。
+$HttpsPort       = 15500   # nginx HTTPS（浏览器入口）
+$PlainHttpPort   = 15501   # nginx HTTP（跳 HTTPS + 明文 API，供设备扫码）
+$HttpPort        = 15502   # 后端 HTTP
+$RedisPort       = 15503   # Redis（仅回环）
+$SipPort         = 15564   # SIP 信令（由平台引导页录入，不在端口预检内）
+$ZlmRtpRange     = '15514-15563'
 
 # ZLM 身份固定值：与 Linux 版**逐字相同**（config.ini 与 config.yml 必须对得上，
 # 否则平台调 ZLM 全被拒，而 ZLM 进程本身看起来完全正常）。
@@ -294,7 +304,7 @@ if ($SkipBuild) {
     } finally { Pop-Location }
     Ok "uvp-server.exe $(Format-Size (Get-Item $ServerExeOut).Length) · uvp-setup.exe $(Format-Size (Get-Item $SetupExeOut).Length)"
 
-    Log '阶段 1/4 · 构建前端产物（SIP 默认端口 51064 构建期注入）'
+    Log "阶段 1/4 · 构建前端产物（SIP 默认端口 $SipPort 构建期注入）"
     $viteJs = Join-Path $WebDir 'node_modules\vite\bin\vite.js'
     if (-not (Test-Path -LiteralPath $viteJs)) {
         Fail "找不到 $viteJs —— 先在 web\ 下执行 pnpm install"
@@ -322,7 +332,7 @@ if ($SkipBuild) {
     }
     if (-not (Test-Path -LiteralPath $DistIndex)) { Fail "前端构建后仍没有 $DistIndex" }
     # ⛔⛔ 读回断言：注入没生效必须**当场报错**。否则包照常出、引导页预填的还是 5061，
-    #   而"SIP 在 51064"只存在于文档里，现场根本发现不了。
+    #   而"SIP 在 $SipPort"只存在于文档里，现场根本发现不了。
     $hit = Get-ChildItem -LiteralPath $distDir -Recurse -File -ErrorAction SilentlyContinue |
         Select-String -Pattern $SipPort -SimpleMatch -List -ErrorAction SilentlyContinue
     if (-not $hit) {
@@ -471,6 +481,13 @@ Copy-Tree -Source $SqliteDir -Destination (Join-Path $Pkg 'resource\baseline')
 Copy-Item -LiteralPath $VersionJson -Destination (Join-Path $Pkg 'version.json') -Force
 Det 'resource\baseline\（baseline.sql 等）· version.json'
 
+# ---- IP 归属地数据库（可选资源，缺失时运行时自动走远程或显示未知）----
+$ipdbDir = Join-Path $ServerDir 'resource\ipdb'
+if (Test-Path -LiteralPath $ipdbDir) {
+    Copy-Tree -Source $ipdbDir -Destination (Join-Path $Pkg 'resource\ipdb')
+    Det 'resource\ipdb\（ip2region 数据库）'
+}
+
 # ---- 出包前断言：**库里有头像路径 ⇒ 包里必须有那个文件** ----
 #   这类"数据库说有、磁盘上没有"的组合最坑：nginx 的 SPA 回落会把 index.html 返回给
 #   图片请求 ⇒ HTTP 200 而内容是 HTML，浏览器静默显示不出图，**没有任何一行报错**。
@@ -614,6 +631,37 @@ foreach ($item in @(
     if (-not (Test-Path -LiteralPath (Join-Path $Pkg $item.P))) { Fail "包内缺少 $($item.N)：$($item.P)" }
 }
 Ok '关键文件齐备'
+
+# ------------------------------------------------------------------
+# 端口默认值交叉校验：出包脚本（本文件）与**包内 ctl.ps1** 必须逐值一致。
+#
+# ⛔ 不一致会得到一种最难查的「半死」状态：包内 config.env / nginx.conf / ZLM ini 用的是
+#   **出包时**那套端口，而 ctl.ps1 运行期按**自己的默认值**做端口预检和存活探测
+#   ⇒ 预检的端口 ≠ 真正监听的端口，「端口预检通过 ✓」就成了一句废话，
+#     而且日志里每行都自洽、看不出矛盾。
+#   ⭐ 本检查就是为 2026-10-10「51000 段整体平移成 15500 段」这一改加的门禁：
+#     两个文件里的端口是**两份独立字面量**，靠人肉同步迟早漏一边。
+# ------------------------------------------------------------------
+$ctlText = Get-Content -LiteralPath (Join-Path $Pkg 'uvp-gb28181-ctl.ps1') -Raw -Encoding UTF8
+$portMismatch = @()
+foreach ($p in @(
+        @{ Key = 'HTTPS';      Want = $HttpsPort },
+        @{ Key = 'NGINX_HTTP'; Want = $PlainHttpPort },
+        @{ Key = 'HTTP';       Want = $HttpPort },
+        @{ Key = 'REDIS';      Want = $RedisPort }
+    )) {
+    if ($ctlText -notmatch ("(?m)^\s*" + $p.Key + "\s*=\s*" + $p.Want + "\b")) {
+        $portMismatch += "$($p.Key)（出包脚本写 $($p.Want)）"
+    }
+}
+if ($ctlText -notmatch [regex]::Escape($ZlmRtpRange)) { $portMismatch += "ZLM RTP 段（出包脚本写 $ZlmRtpRange）" }
+if ($ctlText -notmatch ("\$" + "SipPort\s*=\s*" + $SipPort + "\b")) { $portMismatch += "SIP（出包脚本写 $SipPort）" }
+if ($portMismatch.Count -gt 0) {
+    Fail ("出包脚本与包内 uvp-gb28181-ctl.ps1 的端口默认值不一致：" + ($portMismatch -join '、') +
+          "`n      两个文件里的端口是两份独立字面量，改端口段时必须**同时**改。" +
+          "`n      否则 ctl 的端口预检/存活探测查的端口与实际监听的端口不是同一个，报错全是误导。")
+}
+Ok '端口默认值：出包脚本 ↔ 包内 ctl.ps1 一致'
 
 # config.yml 解析后断言 ZLM 身份真的进去了（字符串出现过≠生效）。
 $zlmCheck = @'

@@ -107,6 +107,34 @@ function Write-Utf8NoBom {
     [System.IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding $false))
 }
 
+# 跑一个原生命令，返回合并后的输出（stdout+stderr），**且绝不因它写 stderr 而中断脚本**。
+#
+# ⛔⛔ 为什么不能简单地写 `& cmd *> $null` 或 `& cmd 2>&1 | Out-Null`：
+#   PS 5.1 里原生命令的 stderr **只要被重定向**就会被包装成 ErrorRecord，而本脚本开头是
+#   `$ErrorActionPreference = 'Stop'` ⇒ 它被升格成**终止性异常**，脚本当场中断。
+#   `2>&1 | Out-Null` 也救不了 —— 合并后的 ErrorRecord 照样归 ErrorActionPreference 管
+#   （这一点实测确认过，别以为加了 `2>&1` 就没事）。
+#   对照：**不加任何重定向**的原生命令，stderr 直通控制台、不生成 ErrorRecord，
+#   所以下面 uvp-setup 那几处调用能正常走到 `$LASTEXITCODE` 判断。
+#   实测代价：stop 一上来就死在 `nginx -s quit` 上，连"管理页面已停止"都打不出来，
+#   退出码却是 1，看起来像"停止功能坏了"。⇒ 唯一可靠的做法是**临时降级**再执行。
+function Invoke-NativeText {
+    param([string]$Exe, [string[]]$Arguments = @())
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        return (& $Exe @Arguments 2>&1 | Out-String)
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
+# 同上，但**丢弃输出**。停止路径上的 taskkill / nginx -s quit / redis shutdown 用它。
+function Invoke-NativeQuiet {
+    param([string]$Exe, [string[]]$Arguments = @())
+    $null = Invoke-NativeText -Exe $Exe -Arguments $Arguments
+}
+
 # 给原生命令行参数加引号。
 #
 # ⛔⛔ `Start-Process -ArgumentList` **不会**自动给含空格的参数加引号（它只是把数组
@@ -120,27 +148,50 @@ function Quote-NativeArg {
 }
 
 # ---------------------------------------------------------------- 端口规划 ----
-# ⛔ 必须与 deploy/standalone/PORTS.md、Linux 版 ctl 的默认值**完全一致**：
-#   51000-51064 连续无空洞，防火墙一条规则即可覆盖。
+# ⛔⛔ Windows 版用 **15500-15564**，与 Linux 版（51000-51064，见
+#   deploy/standalone/PORTS.md）**刻意不一致** —— 这不是笔误，是被 Windows 逼出来的：
+#
+#   Windows 有一段「动态端口范围」（默认为 49152-65535，本机实测被改成了
+#   50000-55000）。落在这段里的端口会被系统**预留**，任何程序去 bind 都直接返回
+#   WSAEACCES(拒绝访问) —— 而且是**静默**的：
+#     · ZLM 的 TCP 端口绑得上，一到 RTP 的 UDP 端口就 `bind sock6 permission denied`
+#       ⇒ 进程起来 1 秒后自杀；
+#     · SIP 的 UDP 端口同样绑不上 ⇒ 客户设备永远注册不上，而平台侧看不出任何错。
+#   判断方法（管理员 CMD）：netsh int ipv4 show excludedportrange protocol=udp
+#   ⇒ 打印出来的保留段里若含 50000-51064，那一整段就全废了。
+#   ⚠️ 只有**不带 `*` 号**的那些段才真的挡住 bind；带 `*` 的（Administered）只影响
+#     系统临时端口分配，手工 bind 照样能成——实测确认过，别拿它当"已经安全"的证据。
+#
+#   ⛔ 为什么是 15500 而不是 15000（本文件第一版选的就是 15000）：
+#     **深信服终端软件**（SangforPromoteService.exe，政企内网机很常见）常驻监听
+#     `127.0.0.1:15000` ⇒ 绿色包默认端口正好撞上它，装在那种机器上**开箱即挂**。
+#     ⇒ 整段再上移 500，避开这一带。⚠️ 端口预检能拦住（会明确报"TCP 15500 被谁占"），
+#       但"开箱即用"不该依赖用户先改配置。
+#
+#   ⇒ Windows 版整体挪到 **15500-15564**（在动态段之外，且避开常见软件占用）。
+#     代价：与 Linux 版端口不同，**跨平台迁移要改 config\config.env**，
+#     README 里有对照表。
+#
+# 结构仍是连续无空洞的 65 个端口，一条防火墙规则即可覆盖：
 $PortDefault = @{
-    HTTP           = 51002   # 后端 HTTP
-    REDIS          = 51003   # Redis（仅回环）
-    HTTPS          = 51000   # nginx HTTPS（浏览器入口）
-    NGINX_HTTP     = 51001   # nginx HTTP（跳 HTTPS + 明文 API）
-    ZLM_HTTP       = 51004
-    ZLM_SSL        = 51007
-    ZLM_RTSP       = 51005
-    ZLM_RTMP       = 51006
-    ZLM_RTC        = 51008
-    ZLM_SIGNALING  = 51009
-    ZLM_SIGNALING_SSL = 51010
-    ZLM_SRT        = 51011
-    ZLM_ONVIF      = 51012
-    ZLM_ICE        = 51013
-    ZLM_RTP_PROXY  = 51014
+    HTTP           = 15502   # 后端 HTTP
+    REDIS          = 15503   # Redis（仅回环）
+    HTTPS          = 15500   # nginx HTTPS（浏览器入口）
+    NGINX_HTTP     = 15501   # nginx HTTP（跳 HTTPS + 明文 API）
+    ZLM_HTTP       = 15504
+    ZLM_SSL        = 15507
+    ZLM_RTSP       = 15505
+    ZLM_RTMP       = 15506
+    ZLM_RTC        = 15508
+    ZLM_SIGNALING  = 15509
+    ZLM_SIGNALING_SSL = 15510
+    ZLM_SRT        = 15511
+    ZLM_ONVIF      = 15512
+    ZLM_ICE        = 15513
+    ZLM_RTP_PROXY  = 15514
 }
-$ZlmRtpRange = '51014-51063'
-$SipPort     = 51064
+$ZlmRtpRange = '15514-15563'
+$SipPort     = 15564
 
 # 用户可改的只有这 4 个（与 Linux 版一致）：其余由这几个派生。
 $PortEnvKeys = @{
@@ -238,6 +289,72 @@ function Get-PidFromFile {
     return 0
 }
 
+# 端口的「真·可绑定性」探测 —— 这是端口占用扫描**看不见**的一类故障。
+#
+# ⛔⛔ 为什么光有 Get-NetTCPConnection / Get-NetUDPEndpoint 不够：
+#   它们只能列出「**已经有进程占着**」的端口。而 Windows 另有一段「动态端口范围」
+#   （默认 49152-65535，实测本机被改成了 50000-55000），落进这段的端口会被系统
+#   **预留**（excluded port range）：
+#     · 没有任何进程占用 ⇒ 占用扫描完全看不见；
+#     · 任何程序去 bind 都直接 WSAEACCES「拒绝访问」。
+#   后果（2026-10-10 实测，Windows 包的第一个产品级阻塞）：
+#     ZLM 的 TCP 端口（HTTP/RTSP/RTMP）全绑得上，一到 RTP 的 UDP 就
+#     `bind_sock6 | Bind socket failed: permission denied` ⇒ **进程起来 1 秒后自杀**；
+#     SIP 的 UDP 端口同样绑不上 ⇒ 客户设备永远注册不上，而平台侧看不出任何错。
+#   ⛔ 这种故障**换机器、重启系统都可能照样存在**（Hyper-V / WSL / Docker / 某些
+#     安全软件会抢占并保留整段），所以必须能提前查出来、并说清怎么绕。
+#
+# 返回值：ok（能绑） / reserved（被系统保留，AccessDenied） / busy（被进程占用） / error
+function Get-PortBindState {
+    param([int]$Port, [ValidateSet('UDP', 'TCP')][string]$Protocol = 'UDP')
+    $sock = $null
+    try {
+        # ⛔ 用 `[类型]::new(...)` 而不是 `New-Object -ArgumentList`：后者要靠反射去猜
+        #   构造函数重载，碰上「三个枚举参数」这种签名有猜错的可能（报一堆找不到重载），
+        #   而 PowerShell 5.1 已经支持 `::new()`，没有理由冒这个险。
+        $af = [System.Net.Sockets.AddressFamily]::InterNetworkV6
+        $sockType = if ($Protocol -eq 'UDP') {
+            [System.Net.Sockets.SocketType]::Dgram
+        } else {
+            [System.Net.Sockets.SocketType]::Stream
+        }
+        $proto = if ($Protocol -eq 'UDP') {
+            [System.Net.Sockets.ProtocolType]::Udp
+        } else {
+            [System.Net.Sockets.ProtocolType]::Tcp
+        }
+        # ⛔ 必须探 **IPv6 双栈**（`::`）：ZLM 起监听就是 `:::15514`，
+        #   只探 127.0.0.1 会漏掉「IPv6 侧被保留」的情况。
+        $sock = [System.Net.Sockets.Socket]::new($af, $sockType, $proto)
+        $sock.Bind([System.Net.IPEndPoint]::new([System.Net.IPAddress]::IPv6Any, $Port))
+        return 'ok'
+    } catch [System.Net.Sockets.SocketException] {
+        if ($_.Exception.SocketErrorCode -eq [System.Net.Sockets.SocketError]::AccessDenied) {
+            return 'reserved'
+        }
+        return 'busy'
+    } catch {
+        return 'error'
+    } finally {
+        if ($sock) { try { $sock.Close() } catch { } }
+    }
+}
+
+# 日志里有没有 ZLM「绑不上端口」的特征串。
+# ⛔ ZLM 是**先绑 TCP 再绑 UDP**，UDP 一失败就整体退出 —— 所以 Wait-Port 探到 TCP
+#   已经通的那一刻，进程其实已经在死了。光看端口会得出完全错误的结论。
+function Test-ZlmBindFailure {
+    param([string]$LogPath)
+    if (-not (Test-Path -LiteralPath $LogPath)) { return $false }
+    $tail = (Get-Content -LiteralPath $LogPath -Tail 80 -ErrorAction SilentlyContinue) -join "`n"
+    # 硬特征串（ZLM 源码里的固定文案，出现即说明是绑定失败）
+    if ($tail -match 'bind_sock|Bind socket failed|Start server failed|Unknown system error') { return $true }
+    # ⚠️ `permission denied` 单看不够 —— 别的地方也可能出现这个词（例如访问某个文件被拒）。
+    #   这里要求它**与 bind/listen/socket 出现在同一行**，才算端口绑定失败。
+    if ($tail -match '(?i)(bind|listen|socket)[^\r\n]{0,120}permission denied') { return $true }
+    return $false
+}
+
 function Test-PidAlive {
     param([int]$ProcessId)
     if ($ProcessId -le 0) { return $false }
@@ -268,8 +385,25 @@ function Start-Child {
     )
     $out = $LogPath
     $err = "$LogPath.err"
-    $proc = Start-Process -FilePath $Exe -ArgumentList $Arguments -WorkingDirectory $WorkDir `
-        -WindowStyle Hidden -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+    # ⛔⛔ `Start-Process -ArgumentList` 收到**空数组**会直接抛
+    #   ParameterBindingValidationException：
+    #   "The argument is null, empty, or an element of the argument collection contains a null value."
+    #   —— 而**后端恰恰是无参数启动的**（调用点传 `-Arguments @()`），所以这条在首次启动
+    #   必然命中，症状极具误导性：ZLM / nginx / Redis 全绿，一到后端整个脚本就终止、
+    #   退出码 1，**却不打任何 `[uvp][ERROR]` 行**（因为异常在 Fail 之前就抛了）。
+    #   ⇒ 无参数时干脆**不传** -ArgumentList（改用 splat 组装）。
+    #     数组里混进 $null 元素报的是同一句话，这里一并过滤掉。
+    $argList = @($Arguments | Where-Object { $null -ne $_ })
+    $sp = @{
+        FilePath               = $Exe
+        WorkingDirectory       = $WorkDir
+        WindowStyle            = 'Hidden'
+        PassThru               = $true
+        RedirectStandardOutput = $out
+        RedirectStandardError  = $err
+    }
+    if ($argList.Count -gt 0) { $sp['ArgumentList'] = $argList }
+    $proc = Start-Process @sp
     if ($PidPath) { Set-Content -LiteralPath $PidPath -Value $proc.Id -Encoding ASCII }
     return $proc
 }
@@ -280,13 +414,16 @@ function Stop-ProcessTree {
     if (-not (Test-PidAlive -ProcessId $ProcessId)) { return }
     # ⛔ 先礼貌后强杀：Windows 没有 SIGTERM，Stop-Process 就是 TerminateProcess；
     #   用 taskkill /T 是为了把子进程（Cygwin 版 redis 的子 shell 等）一起带走。
-    & taskkill.exe /PID $ProcessId /T *> $null
+    # ⛔⛔ 必须走 Invoke-NativeQuiet（它内部临时降 ErrorActionPreference）——
+    #   直接 `& taskkill ... *> $null` 或 `2>&1 | Out-Null` 都会让 taskkill 写往 stderr 的
+    #   「没有找到进程」被升格成终止性异常，详见 Invoke-NativeQuiet 的注释。
+    Invoke-NativeQuiet -Exe 'taskkill.exe' -Arguments @('/PID', "$ProcessId", '/T')
     $deadline = (Get-Date).AddMilliseconds($GraceMs)
     while ((Get-Date) -lt $deadline) {
         if (-not (Test-PidAlive -ProcessId $ProcessId)) { return }
         Start-Sleep -Milliseconds 200
     }
-    & taskkill.exe /PID $ProcessId /T /F *> $null
+    Invoke-NativeQuiet -Exe 'taskkill.exe' -Arguments @('/PID', "$ProcessId", '/T', '/F')
 }
 
 # 按可执行文件路径兜底找进程（pid 文件丢了的时候用）
@@ -371,11 +508,20 @@ function Write-PortPlan {
     Write-UvpDet ("  {0} 流媒体（ZLM）          {1}-{2} / RTP {3} / SIP {4}" -f '·', $Ports.ZLM_HTTP, $Ports.ZLM_ICE, $ZlmRtpRange, $SipPort)
     Write-Host ''
     $tcp = "$($Ports.HTTPS)-$SipPort"
+    # ⛔ 不要把这段写成字面量：端口段一平移，文档就与脚本对不上（本文件已踩过）。
+    # ⛔⛔ RTP 段的**起点**必须从 `$ZlmRtpRange` 里拆出来，绝不能再接一个 `-$SipPort`：
+    #   `$ZlmRtpRange` 本身已经带连字符（`15514-15563`），拼出来会变成
+    #   `15514-15563-15564` —— **不是合法的端口范围**，客户照抄这条
+    #   New-NetFirewallRule 会直接报参数错。（原字面量 `51014-51064` 用的是
+    #   「RTP 起点 → SIP 端口」合并成一段的写法，这里要还原同样的语义。）
+    #   ⭐ 这个 bug 实测出现过一次（2026-10-10 验收输出里捞出来的），所以留个记号。
+    $rtpStart = $ZlmRtpRange.Split('-')[0]
+    $udp = "$($Ports.ZLM_SRT),$($Ports.ZLM_ICE),$rtpStart-$SipPort"
     Write-UvpDet '防火墙放行命令（管理员 PowerShell，只需执行一次）：'
     Write-UvpDet ("  New-NetFirewallRule -DisplayName 'UVP' -Direction Inbound -Action Allow " +
                   "-Protocol TCP -LocalPort $tcp")
     Write-UvpDet ("  New-NetFirewallRule -DisplayName 'UVP-UDP' -Direction Inbound -Action Allow " +
-                  "-Protocol UDP -LocalPort 51011,51013,51014-51064")
+                  "-Protocol UDP -LocalPort $udp")
 }
 
 function Write-StartSummary {
@@ -412,7 +558,7 @@ function Test-Preconditions {
         Fail "本包只支持 64 位 Windows（当前 PROCESSOR_ARCHITECTURE=$arch）。"
     }
     Write-UvpOk "架构检查通过（$arch）"
-    Write-UvpDet '（提示：SIP 端口 51064 由平台内的引导页录入，不在本预检范围内）'
+    Write-UvpDet "（提示：SIP 端口 $SipPort 由平台内的引导页录入，不在本预检范围内）"
 }
 
 function Test-PortsFree {
@@ -431,7 +577,7 @@ function Test-PortsFree {
         $tcpPorts.Add($p)
         $udpPorts.Add($p)
     }
-    # ⛔ SIP（51064）**不在预检内**：它的端口由平台引导页录入（存 gb_sip_config 表），
+    # ⛔ SIP（$SipPort）**不在预检内**：它的端口由平台引导页录入（存 gb_sip_config 表），
     #   包内无从得知客户要填哪个，Linux 版同样把它排除。
 
     $tcpSet = @{}
@@ -465,7 +611,50 @@ function Test-PortsFree {
         Fail ("以下端口已被占用，请先释放（或先执行本目录的 stop.cmd 停掉本平台）：`n        - " +
               (($conflicts | Select-Object -First 12) -join "`n        - "))
     }
-    Write-UvpOk "端口预检通过（TCP $($Ports.HTTPS)-$SipPort + UDP 51011/51013/51014-$SipPort）"
+
+    # ------------------------------------------------------------------
+    # 第二道：**真·绑定探测** —— 专抓「被 Windows 保留」的端口。
+    #
+    # ⛔⛔ 上面那轮扫描只看得到「有进程占着」，看不到「被系统预留」。而被预留的端口
+    #   bind 必然 WSAEACCES，足以让 ZLM 秒退、SIP 永远注册不上 —— 且表现是
+    #   「预检通过 ✓ / 服务已启动 ✓ / 一秒后 status 说不在了」，排查要绕很远。
+    #   ⇒ 这里对计划用到的每个端口**逐个真绑一次**（IPv6 双栈，与 ZLM 一致），
+    #     只把 reserved 这一类拦下来（busy 已由上一轮报告过）。
+    #   ⚠️ 探测顺序固定（先 TCP 后 UDP、端口升序），失败信息可复现。
+    # ------------------------------------------------------------------
+    $reserved = @()
+    foreach ($p in ($udpPorts | Sort-Object -Unique)) {
+        if ((Get-PortBindState -Port $p -Protocol 'UDP') -eq 'reserved') { $reserved += "UDP $p" }
+    }
+    foreach ($p in ($tcpPorts | Sort-Object -Unique)) {
+        if ((Get-PortBindState -Port $p -Protocol 'TCP') -eq 'reserved') { $reserved += "TCP $p" }
+    }
+    if ($reserved.Count -gt 0) {
+        $shown = $reserved | Select-Object -First 8
+        Fail ("以下端口被 **Windows 系统保留**，任何程序都绑不上（不是被别的软件占用）：`n        - " +
+              (($shown) -join "`n        - ") + "`n" +
+              "      原因：本机的「动态端口范围」覆盖了这一段。查看当前保留区（管理员 CMD）：`n" +
+              "        netsh int ipv4 show excludedportrange protocol=udp`n" +
+              "        netsh int ipv4 show excludedportrange protocol=tcp`n" +
+              "      ⇒ 把 config\config.env 里的端口段挪出保留区（见包内 README 第四节），`n" +
+              "        再执行 stop.cmd → start.cmd。")
+    }
+    Write-UvpOk ("端口预检通过（TCP $($Ports.HTTPS)-$SipPort + UDP " +
+                 "$($Ports.ZLM_SRT)/$($Ports.ZLM_ICE)/$($ZlmRtpRange.Split('-')[0])-$SipPort，均实测可绑定）")
+
+    # --------------------------------------------------------------
+    # SIP 端口：只**告警**、不拦启动。
+    # ⛔ 为什么不当失败：SIP 的最终端口由引导页录入（存 gb_sip_config 表），包内只知道
+    #   默认值；客户完全可能填别的端口 ⇒ 拿默认值判失败会误伤。
+    # ⭐ 但为什么还要查：默认值就是引导页的**预填值**，它若被系统保留，管理员点保存
+    #   必然 bind 失败（SIP 用 UDP+TCP 双栈，两个都得能绑），而那条报错离"端口被保留"
+    #   很远，现场很可能一路查到设备侧去。
+    # --------------------------------------------------------------
+    if ((Get-PortBindState -Port $SipPort -Protocol 'UDP') -eq 'reserved' -or
+        (Get-PortBindState -Port $SipPort -Protocol 'TCP') -eq 'reserved') {
+        Write-UvpWarn ("默认 SIP 端口 $SipPort 被 **Windows 系统保留**，绑定必失败 ——" +
+                       "引导页里请改成一个可用的端口（否则国标设备永远注册不上）。")
+    }
 }
 
 # ---------------------------------------------------------------- 阶段 2 ---- ----
@@ -586,11 +775,59 @@ function Start-Redis {
     $ok = $false
     for ($i = 0; $i -lt 40; $i++) {
         Start-Sleep -Milliseconds 250
-        $pong = & $RedisCli -p $Ports.REDIS ping 2>$null
+        # ⛔ 别用 `2>$null`：那同样会把 native stderr 包成 ErrorRecord，在本脚本的
+        #   `$ErrorActionPreference = 'Stop'` 下直接中断（redis 还没起完时必然踩）。
+        #   ⇒ 走 Invoke-NativeText（内部临时降级后合并输出）；连不上时 redis-cli 的
+        #     报错文本里不会出现 PONG，所以判断语义与原来完全一致。
+        $pong = Invoke-NativeText -Exe $RedisCli -Arguments @('-p', [string]$Ports.REDIS, 'ping')
         if ($pong -match 'PONG') { $ok = $true; break }
     }
     if (-not $ok) { Fail "Redis 启动失败，详见 $log" }
     Write-UvpOk "Redis 已启动（127.0.0.1:$($Ports.REDIS)，AOF 落盘 $redisDataDir）"
+}
+
+# 把「进程权威目录」的 ACL 收紧到只剩受信账户，并**断开权限继承**。
+#
+# ⛔⛔ 为什么必须在启动前做：后端 `app/openapi/processauthority/local_lock_windows.go` 的
+#   `secureLocalFile()` 会遍历目录/锁文件的 DACL，**只要发现任何一个非受信 SID
+#   （受信 = 当前用户 / SYSTEM / Administrators）持有写权限就直接拒绝**。
+#   而 Windows 对**数据盘根目录**的默认 ACL 是
+#     `NT AUTHORITY\Authenticated Users:(M)`（修改，含写/删）
+#   —— 新建的子目录会**继承**它。⇒ 客户把绿色包解压到 `D:\` / `E:\` / `F:\` 这类盘上
+#   （最自然的做法），后端 **100% 起不来**。故障表现极其隐晦（2026-10-10 实测）：
+#     · 进程静默退出，stderr 只有一行不含 message 的 `{"event":"startup.failed","phase":"logging"}` 之后再无输出；
+#     · 应用日志里只有 `phase=process_authority reason=state_unavailable`；
+#     · 而此刻**配置 / 日志 / 数据库 / casbin / 调度器都已经就绪**，倒在最后一步，
+#       连"是不是权限问题"都看不出来（真正的 `ErrLocalAuthorityUnavailable` 被
+#       ErrorClass 刻意省略了 message）。
+#   ⇒ 启动时主动断开继承、只保留 {当前用户, SYSTEM, Administrators}。
+#
+# ⚠️ 用**当前用户 SID**（`*S-1-5-…`）而不是 `%USERDOMAIN%\%USERNAME%`：
+#   工作组机器上 `%USERDOMAIN%` 是 `WORKGROUP`，拼出来的账户名不存在，icacls 会报
+#   `No mapping between account names and security IDs was done`（错误 1332）—— 实测踩过。
+# ⚠️ `-S-1-5-18` = SYSTEM，`-S-1-5-32-544` = Administrators；用 SID 是为了不依赖系统语言。
+function Initialize-ProcessAuthorityDir {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) {
+        New-Item -ItemType Directory -Force -Path $Path | Out-Null
+    }
+    try {
+        $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    } catch {
+        Write-UvpWarn "取不到当前用户 SID，跳过进程权威目录的权限收紧（后端可能拒绝启动）：$($_.Exception.Message)"
+        return
+    }
+    $ace = '*' + $sid + ':(OI)(CI)F'
+    # /T 是为了照顾"上一次启动已留下继承旧的 ACL 的文件"；/C 让个别失败不中断整体。
+    $out = Invoke-NativeText -Exe 'icacls.exe' -Arguments @(
+        $Path, '/inheritance:r',
+        '/grant:r', $ace,
+        '/grant:r', '*S-1-5-18:(OI)(CI)F',
+        '/grant:r', '*S-1-5-32-544:(OI)(CI)F',
+        '/T', '/C')
+    if ($out -match 'Failed processing\s+[1-9]') {
+        Write-UvpWarn "进程权威目录权限收紧部分失败，后端可能拒绝启动（$Path）"
+    }
 }
 
 function Start-Backend {
@@ -603,6 +840,24 @@ function Start-Backend {
     if ($envMap.ContainsKey('UVP_OPENAPI_MASTER_KEY')) {
         $env:UVP_OPENAPI_MASTER_KEY = $envMap['UVP_OPENAPI_MASTER_KEY']
     }
+    # ⛔⛔ 进程权威目录必须**显式指到包内**，绝不能让它走平台默认值。
+    #   后端 `processauthority.PrepareStateDir()` 的解析顺序是：
+    #     ① config.yml 的 `processauthority.state_dir`（非空则**原样返回**，不创建、不绝对化）
+    #     ② 环境变量 `UVP_PROCESS_AUTHORITY_DIR`   ← 本行走这条
+    #     ③ 平台默认：Windows = `%LOCALAPPDATA%\UVP-GB28181\process-authority`
+    #   走 ③ 有两个真实代价（2026-10-10 实测首例）：
+    #     a) **非交互会话（服务 / ssh / 计划任务）下 LOCALAPPDATA 可能取不到** ⇒ 后端报
+    #        `phase=process_authority reason=state_unavailable` 退出。最坑的是时机：
+    #        **配置、日志、数据库、casbin、调度器全都已经就绪**，倒在最后一步，
+    #        而 stderr 只有一行不含 message 的 startup.failed JSON，日志里也只有
+    #        `phase=process_authority`（真正的 errors.New("LOCALAPPDATA is unavailable")
+    #        被 ErrorClass 刻意省略）—— 排查要绕很远。
+    #     b) 绿色包不再自包含：状态落到用户 AppData，卸载/迁移会漏掉，与 Linux 版
+    #        （数据都在包内）行为也不一致。
+    #   ⚠️ 为什么不写进 config.yml：出包时不知道客户的解压路径，写不了绝对路径；
+    #     而 PrepareStateDir 对**显式值不做绝对化**，塞相对路径会埋雷。⇒ 只能运行时注入。
+    $env:UVP_PROCESS_AUTHORITY_DIR = Join-Path $DataDir 'process-authority'
+    Initialize-ProcessAuthorityDir -Path $env:UVP_PROCESS_AUTHORITY_DIR
     $log = Join-Path $LogsDir 'backend.log'
     # ⛔ 工作目录必须是包根：后端按 cwd 解析 config/config.yml 与 ./data/uvp.db。
     Start-Child -Name 'backend' -Exe $ServerExe -WorkDir $Root -LogPath $log -PidPath $BackendPidFile -Arguments @() | Out-Null
@@ -627,6 +882,27 @@ function Start-Zlm {
     Start-Child -Name 'zlm' -Exe $ZlmExe -WorkDir $ZlmDir -LogPath $log -PidPath $ZlmPidFile -Arguments $args | Out-Null
     if (-not (Wait-Port -Port $Ports.ZLM_HTTP -Tries 100 -SleepMs 200 -LogPath $log)) {
         Fail "流媒体服务（ZLM）启动失败，详见 $log"
+    }
+    # ⛔⛔ 「TCP 端口通了」**不等于启动成功** —— 必须再等一拍，看它有没有立刻自杀。
+    #   ZLM 的启动顺序是「先绑 TCP（HTTP/RTSP/RTMP 都绑得上）→ 再绑 RTP/SRT/ICE 的 UDP」，
+    #   UDP 一失败就整体退出，全程 < 1 秒。而 Wait-Port 只探 TCP ⇒ 它返回 true 的那一刻
+    #   进程其实已经在死了，ctl 却打出「✓ 流媒体服务已启动」，**1 秒后 status 就说不在了**。
+    #   （2026-10-10 实测原话：「报成功却不在了」。）
+    #   三条独立判据，命中任意一条即判失败（并把线索直接给出来，别让现场猜）：
+    #     ① 进程没了 —— pid 文件里那个 pid 已经不存活
+    #     ② TCP 端口重新连不上
+    #     ③ 日志里出现 ZLM 自己的端口绑定失败特征串
+    Start-Sleep -Milliseconds 1200
+    $zlmPid = Get-PidFromFile -Path $ZlmPidFile
+    $why = @()
+    if (-not (Test-PidAlive -ProcessId $zlmPid)) { $why += '进程已退出' }
+    if (-not (Test-TcpPort -Port $Ports.ZLM_HTTP)) { $why += "TCP $($Ports.ZLM_HTTP) 已不再监听" }
+    if (Test-ZlmBindFailure -LogPath $log) { $why += '日志中出现端口绑定失败' }
+    if ($why.Count -gt 0) {
+        Fail ("流媒体服务（ZLM）启动后立即退出（$($why -join '；')），详见 $log`n" +
+              "      最常见原因：RTP / SIP 那一段 **UDP 端口被 Windows 保留**——不是被别的软件占用。`n" +
+              "      查：netsh int ipv4 show excludedportrange protocol=udp`n" +
+              "      处理：把 config\config.env 的端口段挪出保留区（见包内 README 第四节），再 stop → start。")
     }
     Write-UvpOk "流媒体服务已启动（ZLM HTTP $($Ports.ZLM_HTTP)）"
 }
@@ -692,7 +968,14 @@ function Invoke-Stop {
     # ⛔ 必须带 -p（否则 nginx 找不到 pid 文件，报 OpenEvent("Global\ngx_quit_…") failed (2)），
     #   且 -p 的值要去掉结尾反斜杠再加引号（见 Quote-NativeArg）。
     if (Test-Path -LiteralPath $NginxExe) {
-        & $NginxExe -p (Quote-NativeArg $NginxDir) -c (Quote-NativeArg $NginxConf) -s quit *> $null
+        # ⛔⛔ 必须走 Invoke-NativeQuiet（内部临时降 ErrorActionPreference），
+        #   不能写 `*> $null` 也不能写 `2>&1 | Out-Null` —— 后者实测**仍然会**把 nginx
+        #   写往 stderr 的内容（如 OpenEvent failed / 配置告警）升格为终止性异常：
+        #   stop 一上来就中断，连"管理页面（nginx）已停止"都打不出来，退出码却是 1。
+        #   失败也不要紧 —— 紧随其后的 Get-PidByExe + Stop-ProcessTree 会按可执行文件
+        #   路径兜底强杀。
+        Invoke-NativeQuiet -Exe $NginxExe -Arguments @(
+            '-p', (Quote-NativeArg $NginxDir), '-c', (Quote-NativeArg $NginxConf), '-s', 'quit')
     }
     Start-Sleep -Milliseconds 600
     foreach ($pidValue in (Get-PidByExe -ExePath $NginxExe)) { Stop-ProcessTree -ProcessId $pidValue }
@@ -708,7 +991,7 @@ function Invoke-Stop {
     #   必须写成 `(函数名 -参数 值)`；写成前者是**解析期语法错误**，不是运行期报错。
     $redisPort = [int](PortEnvDefaultSafe -EnvMap $envMap)
     if ((Test-Path -LiteralPath $RedisCli) -and (Test-TcpPort -Port $redisPort)) {
-        & $RedisCli -p $redisPort shutdown *> $null
+        Invoke-NativeQuiet -Exe $RedisCli -Arguments @('-p', "$redisPort", 'shutdown')
         Start-Sleep -Milliseconds 400
     }
     Stop-Component -Label 'Redis' -PidPath $RedisPidFile -ExePath $RedisExe

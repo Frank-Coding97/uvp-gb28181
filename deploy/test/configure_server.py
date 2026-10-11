@@ -14,7 +14,7 @@ CONFIG_PATH = BASE / "config" / "config.yml"
 TRACE_BACKEND_ENV_PATH = BASE / "config" / "sip-trace-backend.env"
 DATABASE_NAME = "uvp_gb28181"
 DATABASE_USER = "uvp_gb28181"
-TRUSTED_PROXIES = ["127.0.0.1", "::1", "172.18.0.3"]
+TRUSTED_PROXIES = ["127.0.0.1", "::1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
 LOG_FILEPATH = "./resource/logs/uvp-gb28181.log"
 
 

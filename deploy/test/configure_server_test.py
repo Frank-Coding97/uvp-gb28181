@@ -24,7 +24,7 @@ class ConfigureServerTests(unittest.TestCase):
 
         self.assertEqual(
             rendered,
-            'httpserver:\n  trustedproxies: ["127.0.0.1", "::1", "172.18.0.3"]\n',
+            'httpserver:\n  trustedproxies: ["127.0.0.1", "::1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]\n',
         )
 
     def test_logging_profiles_are_explicit_and_independent_of_appdebug(self) -> None:
