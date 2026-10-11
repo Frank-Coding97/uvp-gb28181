@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"net"
 	"sort"
-	"strings"
+
+	"uvplatform.com/uvp-gb28181/app/gb28181/netif"
 )
 
 const wildcardIPv4 = "0.0.0.0"
@@ -159,17 +160,10 @@ func compareIPv4(left, right string) int {
 	return 0
 }
 
+// isVirtualInterface 判定一张网卡是否虚拟/容器/VPN 类。
+// ⛔ 实现只有一处：app/gb28181/netif.IsVirtualName。
+// sip/server.go 挑 SIP Contact Host（firstLocalIPv4）复用同一判据，
+// 两处曾经各写一份靠注释提醒同步，现在统一委托，别再在本地另加清单。
 func isVirtualInterface(name string) bool {
-	name = strings.ToLower(name)
-	virtualPrefixes := []string{
-		"br-", "bridge", "cali", "cni", "docker", "flannel", "kube",
-		"podman", "tap", "tailscale", "tun", "utun", "vboxnet", "veth",
-		"virbr", "vmnet", "wg",
-	}
-	for _, prefix := range virtualPrefixes {
-		if strings.HasPrefix(name, prefix) {
-			return true
-		}
-	}
-	return false
+	return netif.IsVirtualName(name)
 }

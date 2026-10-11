@@ -9,7 +9,7 @@ import (
 )
 
 func TestMediaNetworkDefaultsPersistAndClear(t *testing.T) {
-	svc := NewSIPConfigService(newConfigTestDB(t))
+	svc := newSIPConfigService(t, newConfigTestDB(t))
 	password := "K9#nT2xQ"
 	req := validSaveRequest(&password)
 	req.HookIP = "192.168.1.20"
@@ -22,15 +22,82 @@ func TestMediaNetworkDefaultsPersistAndClear(t *testing.T) {
 	require.Equal(t, req.HookIP, got.HookIP)
 	require.Equal(t, req.SDPIP, got.SDPIP)
 	require.Equal(t, req.StreamIP, got.StreamIP)
-	// SDP IP 是必填项，编辑时不可清空；Hook/Stream 仍是可选的。
-	req.HookIP, req.StreamIP, req.Password = "", "", nil
+	// 选中具体真实网卡时三项都可清空：留空即跟随该网卡（运行时推断，库里存空）。
+	req.HookIP, req.StreamIP, req.SDPIP, req.Password = "", "", "", nil
 	_, err = svc.Save(context.Background(), req)
 	require.NoError(t, err)
 	got, err = svc.Get(context.Background())
 	require.NoError(t, err)
 	require.Empty(t, got.HookIP)
 	require.Empty(t, got.StreamIP)
-	require.Equal(t, "sdp.example.com", got.SDPIP)
+	require.Empty(t, got.SDPIP)
+}
+
+// 选中 0.0.0.0（所有网卡）时推断不出唯一的兜底地址 ⇒ 三项都必须手填。
+func TestMediaNetworkDefaultsRequiredForWildcardListenAddress(t *testing.T) {
+	svc := newSIPConfigService(t, newConfigTestDB(t))
+	password := "K9#nT2xQ"
+	req := validSaveRequest(&password)
+	req.ListenIP = wildcardIPv4
+	req.AdvertiseIP = ""
+	// 三项都填上：0.0.0.0 下它们必须手填，所以这才能存进去。
+	req.HookIP, req.SDPIP, req.StreamIP = "192.168.1.10", "192.168.1.10", "192.168.1.10"
+
+	_, err := svc.Save(context.Background(), req)
+	require.NoError(t, err)
+
+	for _, clear := range []struct{ name, field string }{
+		{"hook", "hookIp"},
+		{"sdp", "sdpIp"},
+		{"stream", "streamIp"},
+	} {
+		t.Run(clear.name, func(t *testing.T) {
+			next := req
+			next.Password = nil
+			switch clear.field {
+			case "hookIp":
+				next.HookIP = ""
+			case "sdpIp":
+				next.SDPIP = ""
+			case "streamIp":
+				next.StreamIP = ""
+			}
+			err := func() error {
+				_, err := svc.Save(context.Background(), next)
+				return err
+			}()
+			var validation *ValidationError
+			require.ErrorAs(t, err, &validation)
+			require.Contains(t, validation.Fields, clear.field)
+		})
+	}
+}
+
+// 虚拟网卡上的地址设备侧访问不到，托底等于埋雷 ⇒ 与 0.0.0.0 同样必须手填。
+func TestMediaNetworkDefaultsRequiredForVirtualListenAddress(t *testing.T) {
+	db := newConfigTestDB(t)
+	svc := NewSIPConfigService(db).WithInterfaces(virtualOnlyProvider(t))
+	password := "K9#nT2xQ"
+	req := validSaveRequest(&password)
+	req.ListenIP = "192.168.56.1"
+	req.AdvertiseIP = "192.168.56.1"
+
+	// 三项填齐可存。
+	req.HookIP, req.SDPIP, req.StreamIP = "192.168.56.1", "192.168.56.1", "192.168.56.1"
+	_, err := svc.Save(context.Background(), req)
+	require.NoError(t, err)
+
+	// 清空 Hook 即被拒（该网卡地址不可信）。
+	req.HookIP, req.SDPIP, req.StreamIP, req.Password = "", "", "", nil
+	err = func() error {
+		_, err := svc.Save(context.Background(), req)
+		return err
+	}()
+	var validation *ValidationError
+	require.ErrorAs(t, err, &validation)
+	require.Contains(t, validation.Fields, "hookIp")
+	require.Contains(t, validation.Fields, "sdpIp")
+	require.Contains(t, validation.Fields, "streamIp")
 }
 
 func TestMediaNetworkDefaultsValidation(t *testing.T) {
@@ -52,7 +119,7 @@ func TestMediaNetworkDefaultsValidation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req := validSaveRequest(nil)
 			req.HookIP, req.StreamIP = tc.hook, tc.stream
-			err := ValidateSIPConfigRequest(req, true)
+			err := ValidateSIPConfigRequest(req, true, MediaAddressRequirement{SDPIP: true})
 			if tc.invalid == "" {
 				require.NoError(t, err)
 				return
@@ -95,7 +162,7 @@ func TestSDPIPValidation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req := validSaveRequest(nil)
 			req.SDPIP = tc.sdpIP
-			err := ValidateSIPConfigRequest(req, true)
+			err := ValidateSIPConfigRequest(req, true, MediaAddressRequirement{SDPIP: true})
 			if !tc.invalid {
 				require.NoError(t, err)
 				return
@@ -109,7 +176,7 @@ func TestSDPIPValidation(t *testing.T) {
 
 // 保存后的值必须原样读回：SDP IP 决定设备往哪推流，被改写等于点播静默失效。
 func TestSDPIPRoundTripsUnchanged(t *testing.T) {
-	svc := NewSIPConfigService(newConfigTestDB(t))
+	svc := newSIPConfigService(t, newConfigTestDB(t))
 	password := "K9#nT2xQ"
 	req := validSaveRequest(&password)
 	req.SDPIP = "  192.168.1.10  "

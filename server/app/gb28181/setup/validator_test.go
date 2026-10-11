@@ -9,8 +9,9 @@ import (
 func TestValidateSIPConfigRequest_ValidLANWildcard(t *testing.T) {
 	password := "Sec12345Aa!!"
 	request := validSaveRequest(&password)
+	request.ListenIP = wildcardIPv4
 	request.AdvertiseIP = ""
-	err := ValidateSIPConfigRequest(request, false)
+	err := ValidateSIPConfigRequest(request, false, MediaAddressRequirement{SDPIP: true})
 	require.NoError(t, err)
 }
 
@@ -20,12 +21,12 @@ func TestValidateSIPConfigRequest_EmptyAdvertiseOnlyAllowedForLANWildcard(t *tes
 	concreteLAN := validSaveRequest(&password)
 	concreteLAN.ListenIP = "192.168.1.10"
 	concreteLAN.AdvertiseIP = ""
-	require.Error(t, ValidateSIPConfigRequest(concreteLAN, false))
+	require.Error(t, ValidateSIPConfigRequest(concreteLAN, false, MediaAddressRequirement{SDPIP: true}))
 
 	public := validSaveRequest(&password)
 	public.DeploymentMode = DeploymentPublic
 	public.AdvertiseIP = ""
-	require.Error(t, ValidateSIPConfigRequest(public, false))
+	require.Error(t, ValidateSIPConfigRequest(public, false, MediaAddressRequirement{SDPIP: true}))
 }
 
 func TestValidateSIPConfigRequest_FieldErrors(t *testing.T) {
@@ -53,7 +54,7 @@ func TestValidateSIPConfigRequest_FieldErrors(t *testing.T) {
 			password := "Sec12345Aa!!"
 			req := validSaveRequest(&password)
 			tt.mutate(&req)
-			err := ValidateSIPConfigRequest(req, false)
+			err := ValidateSIPConfigRequest(req, false, MediaAddressRequirement{SDPIP: true})
 			var validationErr *ValidationError
 			require.ErrorAs(t, err, &validationErr)
 			require.Contains(t, validationErr.Fields, tt.field)
@@ -63,12 +64,12 @@ func TestValidateSIPConfigRequest_FieldErrors(t *testing.T) {
 
 func TestValidateSIPConfigRequest_PasswordEditingSemantics(t *testing.T) {
 	req := validSaveRequest(nil)
-	require.Error(t, ValidateSIPConfigRequest(req, false))
-	require.NoError(t, ValidateSIPConfigRequest(req, true))
+	require.Error(t, ValidateSIPConfigRequest(req, false, MediaAddressRequirement{SDPIP: true}))
+	require.NoError(t, ValidateSIPConfigRequest(req, true, MediaAddressRequirement{SDPIP: true}))
 
 	empty := ""
 	req.Password = &empty
-	err := ValidateSIPConfigRequest(req, true)
+	err := ValidateSIPConfigRequest(req, true, MediaAddressRequirement{SDPIP: true})
 	var validationErr *ValidationError
 	require.ErrorAs(t, err, &validationErr)
 	require.Contains(t, validationErr.Fields, "password")
@@ -113,6 +114,6 @@ func TestValidateSIPConfigRequest_PortBoundaries(t *testing.T) {
 	for _, port := range []int{1, 65535} {
 		req := validSaveRequest(&password)
 		req.Port = port
-		require.NoError(t, ValidateSIPConfigRequest(req, false))
+		require.NoError(t, ValidateSIPConfigRequest(req, false, MediaAddressRequirement{SDPIP: true}))
 	}
 }

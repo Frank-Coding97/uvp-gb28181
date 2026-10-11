@@ -42,11 +42,21 @@ type SIPConfigView struct {
 }
 
 type SIPConfigService struct {
-	db *gorm.DB
+	db         *gorm.DB
+	interfaces InterfaceProvider
 }
 
 func NewSIPConfigService(db *gorm.DB) *SIPConfigService {
-	return &SIPConfigService{db: db}
+	return &SIPConfigService{db: db, interfaces: SystemInterfaceProvider{}}
+}
+
+// WithInterfaces 注入网卡枚举实现：controller 传自己那份 provider（与向导页同源），
+// 测试传 fake —— 判定「选中的是不是虚拟网卡」要枚举本机网卡，不能靠机器环境决定用例结果。
+func (s *SIPConfigService) WithInterfaces(provider InterfaceProvider) *SIPConfigService {
+	if provider != nil {
+		s.interfaces = provider
+	}
+	return s
 }
 
 func (s *SIPConfigService) Get(ctx context.Context) (*SIPConfigView, error) {
@@ -66,7 +76,11 @@ func (s *SIPConfigService) Save(ctx context.Context, req SaveSIPConfigRequest) (
 		if err != nil {
 			return err
 		}
-		if err := ValidateSIPConfigRequest(req, current != nil && current.Password != ""); err != nil {
+		// 三个媒体地址「是否必填」取决于当前选中的监听网卡：真实网卡可留空
+		// （运行时自动跟随该网卡），虚拟网卡 / 0.0.0.0 必须手填。判据唯一实现在
+		// ResolveMediaAddressPolicy，⛔ 别在这里另写一份条件。
+		policy := ResolveMediaAddressPolicy(req.DeploymentMode, req.ListenIP, req.AdvertiseIP, s.interfaces)
+		if err := ValidateSIPConfigRequest(req, current != nil && current.Password != "", policy.Requirements()); err != nil {
 			return err
 		}
 

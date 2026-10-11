@@ -1,8 +1,17 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { Eye, EyeOff } from "lucide-vue-next";
+import SCounterSuffix from "@/components/s-counter-suffix/index.vue";
+import SPasswordRules from "@/components/s-password-rules/index.vue";
 import type { SipSetupForm } from "../useSipSetup";
-import { deriveDomain, evaluatePasswordStrength, validatePort, validateServerId } from "../sipSetupRules";
+import {
+  buildSipPasswordRules,
+  deriveDomain,
+  evaluatePasswordStrength,
+  validateDomain,
+  validatePort,
+  validateServerId
+} from "../sipSetupRules";
 
 const props = defineProps<{ form: SipSetupForm; hasExistingPassword: boolean }>();
 const emit = defineEmits<{ update: [patch: Partial<SipSetupForm>] }>();
@@ -10,7 +19,7 @@ const emit = defineEmits<{ update: [patch: Partial<SipSetupForm>] }>();
 // 引导页首次配置默认明文,方便用户核对.
 const passwordVisible = ref(true);
 // 用离焦触发的 "触碰过" 标记 —— 避免用户还没输就报"必填".
-const touched = ref({ serverId: false, port: false, password: false });
+const touched = ref({ serverId: false, domain: false, port: false, password: false });
 
 function updateServerId(value: string) {
   emit("update", { serverId: value });
@@ -33,10 +42,14 @@ watch(
 );
 
 const serverIdError = computed(() => (touched.value.serverId ? validateServerId(props.form.serverId) : ""));
+const domainError = computed(() => (touched.value.domain ? validateDomain(props.form.domain) : ""));
 const portError = computed(() => (touched.value.port ? validatePort(props.form.port) : ""));
 
 // 密码强度实时计算 + 视觉指示
 const passwordStrength = computed(() => evaluatePasswordStrength(props.form.password));
+// 格式提示清单与上面的强度分级**同源**(sipSetupRules 内部共用一份 facts),不会出现
+// "清单全打勾、下一步却点不动"。
+const sipPasswordRules = computed(() => buildSipPasswordRules(props.form.password));
 const passwordError = computed(() => {
   if (!touched.value.password) return "";
   if (!props.form.password) {
@@ -70,21 +83,25 @@ const passwordError = computed(() => {
           @blur="touched.serverId = true"
         >
           <template #suffix>
-            <span class="input-counter" :class="{ 'is-complete': form.serverId.length === 20 }"
-              >{{ form.serverId.length }}/20</span
-            >
+            <s-counter-suffix :value="form.serverId.length" :total="20" />
           </template>
         </a-input>
       </a-form-item>
     </div>
 
-    <a-form-item label="SIP 域">
+    <a-form-item label="SIP 域" :validate-status="domainError ? 'error' : ''" :help="domainError">
       <a-input
         :model-value="form.domain"
+        :max-length="10"
         allow-clear
-        placeholder="默认取平台 ID 前 10 位,也可手动修改"
+        placeholder="10 位数字编码,默认取平台 ID 前 10 位"
         @update:model-value="emit('update', { domain: $event })"
-      />
+        @blur="touched.domain = true"
+      >
+        <template #suffix>
+          <s-counter-suffix :value="form.domain.length" :total="10" />
+        </template>
+      </a-input>
       <template #extra>默认取平台 ID 前 10 位,可手动修改为 10 位数字。</template>
     </a-form-item>
 
@@ -94,46 +111,40 @@ const passwordError = computed(() => {
       :validate-status="passwordError ? 'error' : ''"
       :help="passwordError"
     >
-      <a-input
-        :model-value="form.password"
-        :type="passwordVisible ? 'text' : 'password'"
-        :placeholder="hasExistingPassword ? '留空保留原密码;设置新密码需 ≥ 8 位' : '至少 8 位,含大小写 / 数字 / 特殊字符 3 类'"
-        allow-clear
-        @update:model-value="emit('update', { password: $event })"
-        @blur="touched.password = true"
-      >
-        <template #suffix>
-          <a-button
-            type="text"
-            shape="circle"
-            :title="passwordVisible ? '隐藏密码' : '显示密码'"
-            @click="passwordVisible = !passwordVisible"
-          >
-            <EyeOff v-if="passwordVisible" :size="16" />
-            <Eye v-else :size="16" />
-          </a-button>
-        </template>
-      </a-input>
+      <!-- ⛔ 必须包一层 width:100% 容器:a-form-item 的内容区是 flex row,
+           输入框与下方的「提示 + 格式清单」直接并列会被排成左右两块(InitialPasswordDialog 踩过)。 -->
+      <div class="identity-form__password-field">
+        <a-input
+          :model-value="form.password"
+          :type="passwordVisible ? 'text' : 'password'"
+          :placeholder="hasExistingPassword ? '留空保留原密码;设置新密码需 ≥ 8 位' : '至少 8 位,含大小写 / 数字 / 特殊字符 3 类'"
+          allow-clear
+          @update:model-value="emit('update', { password: $event })"
+          @blur="touched.password = true"
+        >
+          <template #suffix>
+            <a-button
+              type="text"
+              shape="circle"
+              :title="passwordVisible ? '隐藏密码' : '显示密码'"
+              @click="passwordVisible = !passwordVisible"
+            >
+              <EyeOff v-if="passwordVisible" :size="16" />
+              <Eye v-else :size="16" />
+            </a-button>
+          </template>
+        </a-input>
 
-      <!-- 强度指示条 -->
-      <div v-if="form.password" class="pw-strength" :class="`pw-strength--l${passwordStrength.level}`">
-        <div class="pw-strength__bars">
-          <span :class="{ 'is-active': passwordStrength.level >= 1 }" />
-          <span :class="{ 'is-active': passwordStrength.level >= 2 }" />
-          <span :class="{ 'is-active': passwordStrength.level >= 3 }" />
-        </div>
-        <span class="pw-strength__label">强度: {{ passwordStrength.label }}</span>
-      </div>
-
-      <template #extra>
-        <span v-if="!form.password && !hasExistingPassword">
+        <span v-if="!form.password && !hasExistingPassword" class="identity-form__password-note">
           国标 SIP 注册接口暴露在公网易被暴力破解,本平台强制用户设置强密码。
         </span>
-        <span v-else-if="!form.password && hasExistingPassword"> 留空保留原密码。如需修改,新密码需满足强度规则。 </span>
-        <span v-else class="pw-strength__hint">
-          要求:长度 ≥ 8,包含大写、小写、数字、特殊字符中的至少 3 类,不使用常见弱口令。
+        <span v-else-if="!form.password && hasExistingPassword" class="identity-form__password-note">
+          留空保留原密码。如需修改,新密码需满足强度规则。
         </span>
-      </template>
+
+        <!-- 格式提示:强度条 + 逐条规则打对号,与「修改初始密码」弹窗同一套观感(共享组件)。 -->
+        <s-password-rules :rules="sipPasswordRules" :filled="Boolean(form.password)" testid="sip-password-rule-list" />
+      </div>
     </a-form-item>
   </a-form>
 </template>
@@ -150,75 +161,19 @@ const passwordError = computed(() => {
   gap: 14px;
 }
 
-/* 密码强度指示 */
-.pw-strength {
-  display: flex;
-  gap: 10px;
-  align-items: center;
+/* 密码强度条 / 规则清单的样式在共享组件 s-password-rules 内,此处不再重复定义。 */
+
+.identity-form__password-field {
+  width: 100%;
+  min-width: 0;
+}
+
+.identity-form__password-note {
+  display: block;
   margin-top: 6px;
-}
-
-.pw-strength__bars {
-  display: grid;
-  flex: 1;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 4px;
-  max-width: 200px;
-}
-
-.pw-strength__bars span {
-  height: 4px;
-  background: var(--uvp-shell-muted, #eef4f8);
-  border-radius: 2px;
-  transition: background 200ms ease;
-}
-
-.pw-strength--l1 .pw-strength__bars span.is-active {
-  background: var(--uvp-danger, #d14343);
-}
-
-.pw-strength--l2 .pw-strength__bars span.is-active {
-  background: #d97706;
-}
-
-.pw-strength--l3 .pw-strength__bars span.is-active {
-  background: #059669;
-}
-
-.pw-strength__label {
   font-size: 12px;
-  font-weight: 600;
-}
-
-.pw-strength--l1 .pw-strength__label {
-  color: var(--uvp-danger, #d14343);
-}
-
-.pw-strength--l2 .pw-strength__label {
-  color: #d97706;
-}
-
-.pw-strength--l3 .pw-strength__label {
-  color: #059669;
-}
-
-.pw-strength__hint {
-  font-size: 12px;
+  line-height: 18px;
   color: var(--uvp-text-tertiary);
-}
-
-.input-counter {
-  padding: 0 4px;
-  font-family: SFMono-Regular, Consolas, Menlo, monospace;
-  font-size: 12px;
-  color: var(--uvp-text-tertiary);
-  letter-spacing: 0.5px;
-  transition: color 160ms ease;
-}
-
-.input-counter.is-complete {
-  font-weight: 600;
-  color: #059669;
 }
 
 @media (width <= 640px) {

@@ -152,12 +152,17 @@ describe("useSipSetup", () => {
     });
 
     it("prefills the packed default when the build injects VITE_DEFAULT_SIP_PORT", () => {
-      vi.stubEnv("VITE_DEFAULT_SIP_PORT", "51064");
-      expect(useSipSetup(fakeApi()).form.port).toBe(51064);
+      // 两个绿色包各用一套端口段（Linux 51000-51064 / Windows 15500-15564，
+      // 见 useSipSetup.ts 顶部注释）—— 这里只需证明"注入什么就原样预填什么"，
+      // 两套段位都要过，免得有人把某一套当成通用值写进代码。
+      for (const packed of ["51064", "15564"]) {
+        vi.stubEnv("VITE_DEFAULT_SIP_PORT", packed);
+        expect(useSipSetup(fakeApi()).form.port).toBe(Number(packed));
+      }
     });
 
     it("falls back to 5061 when the injected value is missing or invalid", () => {
-      for (const bad of ["", "not-a-number", "0", "70000", "51064.5"]) {
+      for (const bad of ["", "not-a-number", "0", "70000", "15564.5"]) {
         vi.stubEnv("VITE_DEFAULT_SIP_PORT", bad);
         expect(useSipSetup(fakeApi()).form.port).toBe(5061);
       }

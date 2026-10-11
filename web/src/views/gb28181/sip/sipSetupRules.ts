@@ -110,10 +110,17 @@ export interface PasswordStrength {
   reason: string; // 空字符串表示合规
 }
 
-export function evaluatePasswordStrength(password: string): PasswordStrength {
-  if (!password) return { level: 0, label: "未填写", reason: "长度至少 8 位" };
-  if (password.length < 8) return { level: 1, label: "太短", reason: "长度至少 8 位" };
+// 一次算清所有"事实",强度分级与「格式提示清单」共用 ——
+// ⛔ 两者各算一套就会漂移(清单全打勾、按钮却点不动)。
+interface SipPasswordFacts {
+  filled: boolean;
+  longEnough: boolean;
+  categories: number; // 大写/小写/数字/特殊 命中几类
+  weak: boolean;
+  sequential: boolean;
+}
 
+function sipPasswordFacts(password: string): SipPasswordFacts {
   let hasUpper = false,
     hasLower = false,
     hasDigit = false,
@@ -125,23 +132,63 @@ export function evaluatePasswordStrength(password: string): PasswordStrength {
     else if (code >= 48 && code <= 57) hasDigit = true;
     else if (code > 32 && code < 127) hasSpecial = true;
   }
-  const categories = [hasUpper, hasLower, hasDigit, hasSpecial].filter(Boolean).length;
+  return {
+    filled: password.length > 0,
+    longEnough: password.length >= 8,
+    categories: [hasUpper, hasLower, hasDigit, hasSpecial].filter(Boolean).length,
+    weak: WEAK_PASSWORDS.has(password),
+    sequential: isSequential(password)
+  };
+}
 
-  if (categories < 3) {
+export function evaluatePasswordStrength(password: string): PasswordStrength {
+  if (!password) return { level: 0, label: "未填写", reason: "长度至少 8 位" };
+  const facts = sipPasswordFacts(password);
+  if (!facts.longEnough) return { level: 1, label: "太短", reason: "长度至少 8 位" };
+
+  if (facts.categories < 3) {
     return { level: 1, label: "弱", reason: "需含大写字母、小写字母、数字、特殊字符中至少 3 类" };
   }
-  if (WEAK_PASSWORDS.has(password)) {
+  if (facts.weak) {
     return { level: 1, label: "弱", reason: "该密码在常见弱口令列表中,易被暴力破解" };
   }
-  if (isSequential(password)) {
+  if (facts.sequential) {
     return { level: 1, label: "弱", reason: "密码过于规律,请使用更随机的组合" };
   }
   // 满足所有强规则:进一步区分强/中,给用户视觉反馈.
   // 达到 4 类字符 + 长度 >=16 判"强";否则判"中"(依然合规,只是可以更好).
-  if (categories === 4 && password.length >= 16) {
+  if (facts.categories === 4 && password.length >= 16) {
     return { level: 3, label: "强", reason: "" };
   }
   return { level: 2, label: "合格", reason: "" };
+}
+
+export interface SipPasswordRule {
+  /** 稳定标识,渲染成 data-rule,同时用作 v-for 的 :key。 */
+  key: "length" | "categories" | "weak" | "sequence";
+  label: string;
+  satisfied: boolean;
+}
+
+/**
+ * SIP 接入密码的「格式提示」清单 —— 与 `evaluatePasswordStrength` 共用同一份 facts,
+ * 也和后端 `setup/validator.go checkPasswordStrength` 的分支一一对应。
+ *
+ * ⚠️ 密码框为空时**一律不点亮**(`filled && rule`):否则"不是弱口令"这种反向规则
+ *    会在空框上先给一个绿对号,看起来像已经赢了。
+ */
+export function buildSipPasswordRules(password: string): SipPasswordRule[] {
+  const facts = sipPasswordFacts(password);
+  return [
+    { key: "length", label: "最少 8 位", satisfied: facts.filled && facts.longEnough },
+    {
+      key: "categories",
+      label: "包含大写字母、小写字母、数字、特殊字符中的至少 3 类",
+      satisfied: facts.filled && facts.categories >= 3
+    },
+    { key: "weak", label: "不使用常见弱口令(如 12345678 / admin123)", satisfied: facts.filled && !facts.weak },
+    { key: "sequence", label: "不是连续顺序字符(如 abcdefgh)", satisfied: facts.filled && !facts.sequential }
+  ];
 }
 
 // 密码是否满足最低合规(能保存).合规 = level >= 2.
@@ -164,6 +211,13 @@ export interface FieldErrors {
 export function validateServerId(value: string): string {
   if (!value) return "必填";
   if (!/^\d{20}$/.test(value)) return "必须为 20 位数字";
+  return "";
+}
+
+// 与后端 validator.go 的 `len(req.Domain) != 10 || !asciiDigits` 一一对应.
+export function validateDomain(value: string): string {
+  if (!value) return "必填";
+  if (!/^\d{10}$/.test(value)) return "必须为 10 位数字";
   return "";
 }
 

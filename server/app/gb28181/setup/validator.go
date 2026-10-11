@@ -17,7 +17,12 @@ func (e *ValidationError) Error() string {
 
 func (e *ValidationError) Unwrap() error { return e.cause }
 
-func ValidateSIPConfigRequest(req SaveSIPConfigRequest, hasExistingPassword bool) error {
+// ValidateSIPConfigRequest 校验一次 SIP 配置保存请求。
+//
+// requirement 由调用方给出（见 MediaAddressPolicy.Requirements）：三个媒体地址
+// 是否必填取决于**当前选中的监听网卡**——真实网卡可留空（运行时自动跟随该网卡），
+// 虚拟网卡 / 0.0.0.0 必须手填。⛔ 别把它简化成常量：那会让前端允许留空、后端照样拒。
+func ValidateSIPConfigRequest(req SaveSIPConfigRequest, hasExistingPassword bool, requirement MediaAddressRequirement) error {
 	fields := make(map[string]string)
 	if !req.DeploymentMode.Valid() {
 		fields["deploymentMode"] = "must be lan or public"
@@ -29,21 +34,36 @@ func ValidateSIPConfigRequest(req SaveSIPConfigRequest, hasExistingPassword bool
 	if !allowDynamicAdvertise && !validIPv4(req.AdvertiseIP, false) {
 		fields["advertiseIp"] = "must be a concrete non-loopback IPv4 address"
 	}
-	if req.HookIP != "" && !validMediaIP(req.HookIP) {
+	// Hook IP：留空是否可接受见 requirement；填了就必须是具体 IP（不是域名、不是通配）。
+	if strings.TrimSpace(req.HookIP) == "" {
+		if requirement.HookIP {
+			fields["hookIp"] = "is required:当前监听网卡无法自动推断出可用地址,请手填 ZLMediaKit 能回调到的地址"
+		}
+	} else if !validMediaIP(req.HookIP) {
 		fields["hookIp"] = "must be a concrete IP address"
 	}
-	// SDP IP是设备往回推RTP 的目标地址,必填且必须是设备可达的具体地址。
+	// SDP IP是设备往回推RTP 的目标地址。留空**只在能推断出兜底地址时**才允许
+	// （局域网跟随选中网卡、公网跟随公网接入 IP），且填了值就必须是设备可达的具体地址。
 	//
-	// ⛔⛔ 为什么这里必须拒绝回环/未指定地址,而不是像 stream_ip 那样"留空沿用现有策略":
+	// ⛔⛔ 为什么非空值必须拒绝回环/未指定地址,而不是像 stream_ip 那样"留空沿用现有策略":
 	// 该字段失效的表征是**信令全成功但没有画面** —— INVITE 被接受、SDP 正常协商、
 	// 10 秒后 play_timeout、ZLM 侧零 RTP 包。现场根本看不出是配置问题。
 	// 所以宁可保存时报错,也不让用户走到那一步。参考 wvp-GB28181-pro:
 	// 它的 sdp-ip 兜底是 `media.ip`(裸机 127.0.0.1 / Docker 容器名),
 	// 两种部署下都不可用 —— 差别只是"填了才对",填错的表现和我们一样静默。
-	if reason := sdpIPRejectionReason(req.SDPIP); reason != "" {
+	if strings.TrimSpace(req.SDPIP) == "" {
+		if requirement.SDPIP {
+			fields["sdpIp"] = sdpIPRejectionReason("")
+		}
+	} else if reason := sdpIPRejectionReason(req.SDPIP); reason != "" {
 		fields["sdpIp"] = reason
 	}
-	if req.StreamIP != "" && !validMediaHost(req.StreamIP) {
+	// Stream IP：留空是否可接受见 requirement；填了就必须是 IP 或域名。
+	if strings.TrimSpace(req.StreamIP) == "" {
+		if requirement.StreamIP {
+			fields["streamIp"] = "is required:当前监听网卡无法自动推断出可用地址,请手填播放地址"
+		}
+	} else if !validMediaHost(req.StreamIP) {
 		fields["streamIp"] = "must be an IP address or domain without scheme, port or path"
 	}
 	if req.Port < 1 || req.Port > 65535 {

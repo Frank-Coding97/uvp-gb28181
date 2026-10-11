@@ -15,14 +15,20 @@ import type { BaseResult } from "@/api/types";
 // 引导页默认 SIP 端口。
 //
 // ⛔⛔ 为什么默认值必须允许"按包覆盖"，而不是写死一个数字：
-//   绿色安装包把**所有**端口压进一整段连续高位端口（51000-51064，
-//   见 deploy/standalone/PORTS.md），但 SIP 端口**不经过 config.env** ——
+//   绿色安装包把**所有**端口压进一整段连续端口，但 **SIP 端口不经过 config.env** ——
 //   它是管理员首次登录引导页时录入、存进 gb_sip_config 表的
 //   （2026-07-20 起 SIP 明文配置从 YAML 移到了 DB）。
 //   ⇒ 若这里写死 5061，绿色包首次打开向导就预填一个**段外**端口，
 //     与"整段连续、防火墙一条规则"的规划自相矛盾。
-//   ⇒ 出包时由 build-standalone.sh 注入 VITE_DEFAULT_SIP_PORT；
+//   ⇒ 出包时由 build-standalone.sh / build-standalone.ps1 注入 VITE_DEFAULT_SIP_PORT；
 //     其它构建形态不带该变量 ⇒ 回落 5061，行为完全不变（互不影响）。
+//   ⛔ 段位**按平台不同**，别把其中一套当通用值写进文档或断言：
+//     · Linux 绿色包：51000-51064（SIP = 51064，见 deploy/standalone/PORTS.md）
+//     · Windows 绿色包：15500-15564（SIP = 15564）—— 两条原因：① Windows 的
+//       "动态端口范围"会把落进去的端口整段保留、bind 直接拒绝访问（ZLM 的 UDP 一绑
+//       就失败、SIP 永远注册不上），所以避开 50000 那段；② 起步段原选 15000，被
+//       深信服终端软件占用（SangforPromoteService 监 127.0.0.1:15000），再上移 500。
+//       见 deploy/standalone-windows/README.md 第三节。
 const FALLBACK_SIP_PORT = 5061;
 
 function defaultSipPort(): number {

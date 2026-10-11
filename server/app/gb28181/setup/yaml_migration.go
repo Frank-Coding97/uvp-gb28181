@@ -72,16 +72,20 @@ func MigrateYAMLToDB(ctx context.Context, db *gorm.DB, yaml YAMLSIPSource) (bool
 	if candidate.AdvertiseIP == "" && candidate.ListenIP != "" && candidate.ListenIP != wildcardIPv4 {
 		candidate.AdvertiseIP = candidate.ListenIP
 	}
-	// SDP IP 是必填项,但 legacy YAML 段里没有这个键 —— 依次从 ZLM 的
-	// sdpip / receivehost / playbackhost 推导。推导不出可用值时
-	// ValidateSIPConfigRequest 会拒绝,于是不 seed、用户走引导页补填,
-	// 而不是把一个 127.0.0.1 静默固化进库(那会让点播永远没有画面)。
+	// SDP IP 在 legacy YAML 段里没有这个键 —— 依次从 ZLM 的
+	// sdpip / receivehost / playbackhost 推导。推导不出可用值就不 seed、
+	// 用户走引导页补填,而不是把一个 127.0.0.1 静默固化进库(那会让点播永远没有画面)。
 	candidate.SDPIP = legacySDPIP(yaml)
 	pw := yaml.GetString("gb28181.sip.password")
 	candidate.Password = &pw
 
-	// 用正式 validator 判合法,不合法就不 seed(用户改天配好会主动登录走引导页)
-	if err := ValidateSIPConfigRequest(candidate, false); err != nil {
+	// 用正式 validator 判合法,不合法就不 seed(用户改天配好会主动登录走引导页)。
+	//
+	// ⛔⛔ 这里刻意走**严格口径**（SDP 必填），不复用「按当前网卡推断」的宽松策略：
+	// 迁移发生在启动期,此时用户还没走过引导页 —— 拿本机网卡地址替他静默固化一个值,
+	// 不如让他走引导页显式确认。放宽这条会改掉既有契约
+	// TestMigrateYAMLToDB_SkipsWhenNoUsableSDPIP。
+	if err := ValidateSIPConfigRequest(candidate, false, MediaAddressRequirement{SDPIP: true}); err != nil {
 		return false, nil
 	}
 

@@ -117,6 +117,80 @@ func TestEnumerateNetworkAddressesMarksVirtualInterfaceFamiliesAsMore(t *testing
 	}
 }
 
+// Windows 上的虚拟网卡名是"友好名"（VMware Network Adapter VMnet1 / VirtualBox Host-Only Network …），
+// 不以 vmnet/vboxnet 这类设备族前缀开头。历史上纯前缀匹配一个都认不出来，
+// 于是装了 VMware/VirtualBox 的 Windows 机器会把虚拟网卡标成「推荐」，默认选中它。
+func TestEnumerateNetworkAddressesRecognizesWindowsVirtualAdapters(t *testing.T) {
+	provider := fakeInterfaceProvider{
+		interfaces: []net.Interface{
+			{Index: 1, Name: "VMware Network Adapter VMnet1", Flags: net.FlagUp},
+			{Index: 2, Name: "VirtualBox Host-Only Network", Flags: net.FlagUp},
+			{Index: 3, Name: "vEthernet (Default Switch)", Flags: net.FlagUp},
+			{Index: 4, Name: "Ethernet", Flags: net.FlagUp},
+		},
+		addresses: map[int][]net.Addr{
+			1: {mustCIDR(t, "192.168.11.1/24")},
+			2: {mustCIDR(t, "192.168.56.1/24")},
+			3: {mustCIDR(t, "172.20.0.1/20")},
+			4: {mustCIDR(t, "192.168.10.52/24")},
+		},
+	}
+
+	got, err := EnumerateNetworkAddresses(provider)
+	require.NoError(t, err)
+	require.Len(t, got, 5)
+
+	byInterface := addressesByInterface(got)
+	for _, name := range []string{
+		"VMware Network Adapter VMnet1",
+		"VirtualBox Host-Only Network",
+		"vEthernet (Default Switch)",
+	} {
+		assert.True(t, byInterface[name].Virtual, name)
+		assert.False(t, byInterface[name].Recommended, name)
+		assert.True(t, byInterface[name].More, name)
+	}
+
+	// 唯一的物理网卡必须成为推荐项，并被排到最前（前端默认选中的就是它）。
+	assert.False(t, byInterface["Ethernet"].Virtual)
+	assert.True(t, byInterface["Ethernet"].Recommended)
+	assert.Equal(t, "Ethernet", got[1].InterfaceName)
+	assert.Equal(t, "192.168.10.52", got[1].IP)
+}
+
+// ⛔ 反向契约：KVM / Proxmox 宿主机上 br0 / vmbr0 是把物理网卡桥接出去、承载 LAN IP 的那张网卡，
+// 设备能访问到它 —— 必须保持「非虚拟 + 推荐」。
+// （2026-10-11 一度把它们加进虚拟清单，会把 firstLocalIPv4 的广播兜底搞坏，当天已撤回。）
+func TestEnumerateNetworkAddressesKeepsLinuxBridgesRecommended(t *testing.T) {
+	provider := fakeInterfaceProvider{
+		interfaces: []net.Interface{
+			{Index: 1, Name: "vmbr0", Flags: net.FlagUp},
+			{Index: 2, Name: "br0", Flags: net.FlagUp},
+			{Index: 3, Name: "virbr0", Flags: net.FlagUp},
+		},
+		addresses: map[int][]net.Addr{
+			1: {mustCIDR(t, "10.0.0.5/24")},
+			2: {mustCIDR(t, "192.168.10.10/24")},
+			3: {mustCIDR(t, "192.168.122.1/24")},
+		},
+	}
+
+	got, err := EnumerateNetworkAddresses(provider)
+	require.NoError(t, err)
+
+	byInterface := addressesByInterface(got)
+	for _, name := range []string{"vmbr0", "br0"} {
+		assert.False(t, byInterface[name].Virtual, name)
+		assert.True(t, byInterface[name].Recommended, name)
+	}
+	// libvirt 的 NAT 网桥设备路由不到，仍然算虚拟。
+	assert.True(t, byInterface["virbr0"].Virtual)
+	assert.False(t, byInterface["virbr0"].Recommended)
+	// 推荐项按 IP 升序：10.0.0.5(vmbr0) 在前。
+	assert.Equal(t, "10.0.0.5", got[1].IP)
+	assert.Equal(t, "vmbr0", got[1].InterfaceName)
+}
+
 func TestEnumerateNetworkAddressesOmitsIPv6(t *testing.T) {
 	provider := fakeInterfaceProvider{
 		interfaces: []net.Interface{{Index: 1, Name: "en0", Flags: net.FlagUp}},

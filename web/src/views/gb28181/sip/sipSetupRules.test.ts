@@ -9,7 +9,10 @@ import {
   identityCanContinue,
   networkCanContinue,
   networkOptions,
-  passwordAcceptable
+  passwordAcceptable,
+  buildSipPasswordRules,
+  validateDomain,
+  validateServerId
 } from "./sipSetupRules";
 
 const items: SipNetworkAddress[] = [
@@ -123,5 +126,48 @@ describe("SIP password strength", () => {
     expect(passwordAcceptable("weak123", false)).toBe(false);
     expect(passwordAcceptable("", true)).toBe(true); // 编辑态保留原密码
     expect(passwordAcceptable("", false)).toBe(false); // 首次配置必填
+  });
+});
+
+// 与后端 setup/validator.go 的 20 位 serverId / 10 位 domain 同口径.
+describe("SIP identity field validation", () => {
+  it("requires exactly 10 digits for the SIP domain", () => {
+    expect(validateDomain("4401000000")).toBe("");
+    expect(validateDomain("")).toBe("必填");
+    expect(validateDomain("440100000")).toBe("必须为 10 位数字");
+    expect(validateDomain("44010000000")).toBe("必须为 10 位数字");
+    expect(validateDomain("44010000ab")).toBe("必须为 10 位数字");
+  });
+
+  it("requires exactly 20 digits for the SIP platform ID", () => {
+    expect(validateServerId("34020000002000000001")).toBe("");
+    expect(validateServerId("")).toBe("必填");
+    expect(validateServerId("3402000000200000000")).toBe("必须为 20 位数字");
+  });
+});
+
+// 「密码格式提示」清单与强度分级必须**同源**：清单全打勾 ⇔ passwordAcceptable 通过。
+// 反向断言(会让下面这条失败)就是漂移 bug —— 出现过"清单全绿、下一步却点不动"的话术。
+describe("SIP password format checklist", () => {
+  const states = (password: string) => buildSipPasswordRules(password).map(rule => rule.satisfied);
+
+  it("leaves every rule unticked on an empty password", () => {
+    expect(states("")).toEqual([false, false, false, false]);
+  });
+
+  it("ticks each rule as the password gets stronger", () => {
+    // 长度够 + 4 类字符,但 8 位纯数字既是弱口令又是顺序序列
+    expect(states("12345678")).toEqual([true, false, false, false]);
+    // 8 位全小写:类别不够,且 abcdefgh 是顺序序列
+    expect(states("abcdefgh")).toEqual([true, false, true, false]);
+    expect(states("Ab1!abcd")).toEqual([true, true, true, true]);
+  });
+
+  it("never disagrees with passwordAcceptable", () => {
+    const samples = ["", "abc", "Ab1!", "12345678", "abcdefgh", "admin123", "Ab1!abcd", "Xk7#mQ2p", "MyP@ssw0rdX1"];
+    for (const sample of samples) {
+      const allTicked = buildSipPasswordRules(sample).every(rule => rule.satisfied);
+      expect(allTicked).toBe(passwordAcceptable(sample, false));
+    }
   });
 });

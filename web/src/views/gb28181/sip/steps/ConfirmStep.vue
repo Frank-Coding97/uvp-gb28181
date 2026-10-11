@@ -5,6 +5,7 @@ import { Check, Copy, Rocket, Server } from "lucide-vue-next";
 import type { SipNetworkInterfaces } from "@/api/gb28181";
 import type { SipSetupForm } from "../useSipSetup";
 import { activeSipAddresses } from "../sipSetupRules";
+import { resolveMediaAddressPolicy, type MediaAddressRule } from "../mediaNetworkAddress";
 import { writeTextToClipboard } from "@/utils/app";
 
 const props = defineProps<{
@@ -51,9 +52,28 @@ const fields = computed(() => [
   { key: "password", label: "SIP 密码", value: passwordDisplay.value }
 ]);
 
+// 留空的媒体地址在运行时会被自动推断 —— 确认页必须把它显示成"实际会用哪个地址"，
+// 否则用户以为"没填就是没有"，核对环节形同虚设。
+const mediaPolicy = computed(() =>
+  resolveMediaAddressPolicy({
+    deploymentMode: props.form.deploymentMode,
+    listenIp: props.form.listenIp,
+    advertiseIp: props.form.advertiseIp,
+    networkItems: props.network?.items
+  })
+);
+
+function mediaField(key: string, label: string, raw: string, rule: MediaAddressRule) {
+  const typed = raw.trim();
+  if (typed) return { key, label, value: typed };
+  if (rule.optional) return { key, label, value: rule.fallback, text: `自动使用 ${rule.fallback}` };
+  return { key, label, value: "" };
+}
+
 const mediaFields = computed(() => [
-  { key: "hook-ip", label: "Hook IP（平台默认）", value: props.form.hookIp || "-" },
-  { key: "stream-ip", label: "Stream IP（平台默认）", value: props.form.streamIp || "-" }
+  mediaField("hook-ip", "Hook IP（平台默认）", props.form.hookIp, mediaPolicy.value.hookIp),
+  mediaField("sdp-ip", "SDP IP（平台默认）", props.form.sdpIp, mediaPolicy.value.sdpIp),
+  mediaField("stream-ip", "Stream IP（平台默认）", props.form.streamIp, mediaPolicy.value.streamIp)
 ]);
 </script>
 
@@ -115,9 +135,9 @@ const mediaFields = computed(() => [
         <div v-for="field in mediaFields" :key="field.key" class="confirm-row">
           <span class="confirm-row__label">{{ field.label }}</span>
           <div class="confirm-row__body">
-            <code class="confirm-value">{{ field.value }}</code>
+            <code class="confirm-value">{{ field.text ?? field.value }}</code>
             <button
-              v-if="field.value !== '-'"
+              v-if="field.value"
               type="button"
               class="confirm-copy"
               :class="{ 'is-copied': copiedKey === field.key }"

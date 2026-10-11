@@ -2,7 +2,13 @@
 import { computed, watch } from "vue";
 import type { SipNetworkAddress, SipNetworkInterfaces } from "@/api/gb28181";
 import type { SipSetupForm } from "../useSipSetup";
-import { validateOptionalHookIp, validateOptionalStreamIp, validateRequiredSdpIp } from "../mediaNetworkAddress";
+import {
+  isVirtualListenIp,
+  resolveMediaAddressPolicy,
+  validateHookIp,
+  validateSdpIp,
+  validateStreamIp
+} from "../mediaNetworkAddress";
 
 const props = defineProps<{ form: SipSetupForm; network: SipNetworkInterfaces | null }>();
 const emit = defineEmits<{ update: [patch: Partial<SipSetupForm>] }>();
@@ -57,9 +63,45 @@ function onAdvertiseInputChange(value: string) {
 
 // 选中当前 nicIp: 局域网 listen 是权威(advertise 从属);公网 listen 是权威.
 const currentNic = computed(() => props.form.listenIp);
-const hookIpError = computed(() => validateOptionalHookIp(props.form.hookIp));
-const sdpIpError = computed(() => validateRequiredSdpIp(props.form.sdpIp));
-const streamIpError = computed(() => validateOptionalStreamIp(props.form.streamIp));
+
+// 三个媒体地址的填写规则跟着「当前选中的网卡」走:
+//   真实网卡 ⇒ 可留空(留空即用该网卡地址);虚拟网卡 / 0.0.0.0 ⇒ 必须手填。
+// ⛔ 判据与后端 setup.ResolveMediaAddressPolicy 同源,别在这里另写一套。
+const mediaPolicy = computed(() =>
+  resolveMediaAddressPolicy({
+    deploymentMode: props.form.deploymentMode,
+    listenIp: props.form.listenIp,
+    advertiseIp: props.form.advertiseIp,
+    networkItems: props.network?.items
+  })
+);
+const hookIpError = computed(() => validateHookIp(props.form.hookIp, mediaPolicy.value.hookIp));
+const sdpIpError = computed(() => validateSdpIp(props.form.sdpIp, mediaPolicy.value.sdpIp));
+const streamIpError = computed(() => validateStreamIp(props.form.streamIp, mediaPolicy.value.streamIp));
+
+type MediaAddressField = "hookIp" | "sdpIp" | "streamIp";
+
+/** 监听网卡本身推断不出来的原因（用于「为什么突然必填」的解释）。 */
+const listenReason = computed(() => {
+  if (props.form.listenIp === "0.0.0.0") return "当前监听地址是 0.0.0.0（所有网卡），无法自动推断出可用地址";
+  if (isVirtualListenIp(props.form.listenIp, props.network?.items)) return "当前选中的是虚拟网卡，它的地址设备侧访问不到";
+  return "当前监听网卡无法自动推断出可用地址";
+});
+
+function ruleHelp(field: MediaAddressField): string {
+  const rule = mediaPolicy.value[field];
+  if (rule.optional) return `可留空；留空时自动使用 ${rule.fallback}`;
+  // 公网模式下 SDP / Stream 与网卡无关，缺的是对外地址。
+  if (field !== "hookIp" && props.form.deploymentMode === "public") {
+    return "请先填写「公网接入 IP」：设备在公网侧，只能访问该地址";
+  }
+  return `${listenReason.value}，必须手填`;
+}
+
+function placeholderFor(field: MediaAddressField, formatHint: string): string {
+  const rule = mediaPolicy.value[field];
+  return rule.optional ? `可留空，默认 ${rule.fallback}` : `必填：${formatHint}`;
+}
 
 function updateHookIp(value: string) {
   emit("update", { hookIp: value });
@@ -81,7 +123,15 @@ watch(
     if (!count || !mode) return;
     const stillValid = nicOptions.value.some(item => item.ip === nic);
     if (stillValid) return;
-    const recommended = usableNics.value.find(item => item.recommended) || usableNics.value[0];
+    // 默认选中优先序:推荐且非虚拟 > 非虚拟 > 推荐 > 列表首项。
+    // ⛔ "非虚拟"必须比"推荐"更靠前:后端判据靠网卡名猜,认不出某些虚拟网卡是常态
+    //    (历史上 Windows 友好名整批漏过),此时若信它的 recommended,就会默认选中虚拟网卡;
+    //    而前后端版本不同步(只更了一端)时同样会走到这条路。
+    const recommended =
+      usableNics.value.find(item => item.recommended && !item.virtual) ||
+      usableNics.value.find(item => !item.virtual) ||
+      usableNics.value.find(item => item.recommended) ||
+      usableNics.value[0];
     if (!recommended) return;
     onNicChange(recommended.ip);
   },
@@ -125,14 +175,16 @@ watch(
         <div class="media-address-grid">
           <a-form-item
             label="Hook IP"
+            :required="!mediaPolicy.hookIp.optional"
             :validate-status="hookIpError ? 'error' : undefined"
-            :help="hookIpError || '留空沿用现有地址策略。'"
+            :help="hookIpError || ruleHelp('hookIp')"
           >
             <a-input
+              data-testid="media-hook-ip"
               :model-value="form.hookIp"
               allow-clear
               :max-length="45"
-              placeholder="具体 IPv4 或 IPv6"
+              :placeholder="placeholderFor('hookIp', '具体 IPv4 或 IPv6')"
               @update:model-value="updateHookIp"
             />
             <template #extra>ZLMediaKit 回调平台时使用的地址；媒体节点可单独覆盖。</template>
@@ -140,15 +192,16 @@ watch(
 
           <a-form-item
             label="SDP IP"
-            required
+            :required="!mediaPolicy.sdpIp.optional"
             :validate-status="sdpIpError ? 'error' : undefined"
-            :help="sdpIpError || '设备按此地址把视频流推回平台，必须是设备能访问到的地址。'"
+            :help="sdpIpError || ruleHelp('sdpIp')"
           >
             <a-input
+              data-testid="media-sdp-ip"
               :model-value="form.sdpIp"
               allow-clear
               :max-length="253"
-              placeholder="设备可访问的 IP 或域名"
+              :placeholder="placeholderFor('sdpIp', '设备可访问的 IP 或域名')"
               @update:model-value="updateSdpIp"
             />
             <template #extra>写入点播 INVITE 的 SDP 地址（设备据此回推 RTP 流）；不能填 127.0.0.1，媒体节点可单独覆盖。</template>
@@ -156,14 +209,16 @@ watch(
 
           <a-form-item
             label="Stream IP"
+            :required="!mediaPolicy.streamIp.optional"
             :validate-status="streamIpError ? 'error' : undefined"
-            :help="streamIpError || '留空沿用现有地址策略。'"
+            :help="streamIpError || ruleHelp('streamIp')"
           >
             <a-input
+              data-testid="media-stream-ip"
               :model-value="form.streamIp"
               allow-clear
               :max-length="253"
-              placeholder="播放地址（可留空）"
+              :placeholder="placeholderFor('streamIp', '播放地址（IP 或域名）')"
               @update:model-value="updateStreamIp"
             />
             <template #extra>浏览器播放媒体时使用的主机名，不含协议、端口或路径；媒体节点可单独覆盖。</template>

@@ -2,6 +2,7 @@ package setup
 
 import (
 	"context"
+	"net"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -17,10 +18,24 @@ func newConfigTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+// newSIPConfigService 注入「只有一张真实网卡」的 provider。
+//
+// ⛔ 别在用例里直接用 NewSIPConfigService 的默认 provider：三个媒体地址是否必填
+// 取决于选中的是不是虚拟网卡，用真机网卡会让结果随跑测机器而变。
+func newSIPConfigService(t *testing.T, db *gorm.DB) *SIPConfigService {
+	t.Helper()
+	return NewSIPConfigService(db).WithInterfaces(fakeInterfaceProvider{
+		interfaces: []net.Interface{{Index: 1, Name: "en0", Flags: net.FlagUp}},
+		addresses:  map[int][]net.Addr{1: {mustCIDR(t, "192.168.1.10/24")}},
+	})
+}
+
+// validSaveRequest 的 ListenIP 刻意用**具体真实网卡**：这是新规则下的「最小合法请求」
+// （三个媒体地址都允许留空）。需要通配地址 0.0.0.0 的用例自己覆盖 ListenIP。
 func validSaveRequest(password *string) SaveSIPConfigRequest {
 	return SaveSIPConfigRequest{
 		DeploymentMode: DeploymentLAN,
-		ListenIP:       "0.0.0.0",
+		ListenIP:       "192.168.1.10",
 		AdvertiseIP:    "192.168.1.10",
 		SDPIP:          "192.168.1.10",
 		Port:           5061,
@@ -32,7 +47,7 @@ func validSaveRequest(password *string) SaveSIPConfigRequest {
 
 func TestSIPConfigService_SaveNewConfig(t *testing.T) {
 	db := newConfigTestDB(t)
-	svc := NewSIPConfigService(db)
+	svc := newSIPConfigService(t, db)
 	password := "Sec12345Aa!!"
 
 	view, err := svc.Save(context.Background(), validSaveRequest(&password))
@@ -48,7 +63,7 @@ func TestSIPConfigService_SaveNewConfig(t *testing.T) {
 
 func TestSIPConfigService_CustomDomainAndEightCharacterPassword(t *testing.T) {
 	db := newConfigTestDB(t)
-	svc := NewSIPConfigService(db)
+	svc := newSIPConfigService(t, db)
 	password := "K9#nT2xQ"
 	req := validSaveRequest(&password)
 	req.Domain = "4401000000"
@@ -62,7 +77,7 @@ func TestSIPConfigService_CustomDomainAndEightCharacterPassword(t *testing.T) {
 
 func TestSIPConfigService_EditPreservesPassword(t *testing.T) {
 	db := newConfigTestDB(t)
-	svc := NewSIPConfigService(db)
+	svc := newSIPConfigService(t, db)
 	password := "Sec12345Aa!!"
 	_, err := svc.Save(context.Background(), validSaveRequest(&password))
 	require.NoError(t, err)
@@ -80,7 +95,7 @@ func TestSIPConfigService_EditPreservesPassword(t *testing.T) {
 
 func TestSIPConfigService_NewConfigRequiresPassword(t *testing.T) {
 	db := newConfigTestDB(t)
-	_, err := NewSIPConfigService(db).Save(context.Background(), validSaveRequest(nil))
+	_, err := newSIPConfigService(t, db).Save(context.Background(), validSaveRequest(nil))
 	require.ErrorIs(t, err, ErrSIPPasswordRequired)
 
 	var count int64
@@ -91,7 +106,7 @@ func TestSIPConfigService_NewConfigRequiresPassword(t *testing.T) {
 func TestSIPConfigService_ViewDoesNotExposePassword(t *testing.T) {
 	db := newConfigTestDB(t)
 	password := "Sec12345Aa!!"
-	svc := NewSIPConfigService(db)
+	svc := newSIPConfigService(t, db)
 	_, err := svc.Save(context.Background(), validSaveRequest(&password))
 	require.NoError(t, err)
 
