@@ -40,6 +40,14 @@ const selectedKey = computed(() => props.modelValue.selectedKey[props.modelValue
 const expandedKeys = computed(() => props.modelValue.expandedKeys[props.modelValue.view]);
 const normalizedKeyword = computed(() => props.modelValue.treeKeyword.trim().toLocaleLowerCase());
 
+// ⛔ 业务组织视图只展示设备**实际上报**的业务分组（国标附录 J），没上报的设备不属于本视图，
+// 所以「空」是正常状态而非故障 —— 文案必须说清楚，否则会被当成加载失败。
+const emptyHint = computed(() => {
+  if (normalizedKeyword.value) return "暂无匹配目录";
+  if (props.modelValue.view === "business") return "当前设备未上报业务分组";
+  return "暂无目录数据";
+});
+
 function nodeMatches(node: DirectoryNode, keyword: string) {
   return node.name.toLocaleLowerCase().includes(keyword) || (node.code || "").toLocaleLowerCase().includes(keyword);
 }
@@ -280,7 +288,7 @@ onMounted(() => load(props.modelValue.view));
             </template>
           </a-dropdown>
         </div>
-        <div v-if="!loading && visibleRows.length === 0" class="directory-empty">暂无匹配目录</div>
+        <div v-if="!loading && visibleRows.length === 0" class="directory-empty">{{ emptyHint }}</div>
       </div>
     </a-spin>
   </aside>

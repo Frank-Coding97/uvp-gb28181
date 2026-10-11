@@ -7,7 +7,9 @@ import (
 )
 
 func TestParseFilter(t *testing.T) {
-	for _, input := range [][3]string{{"national", "", ""}, {"", "national:unknown", ""}, {"national", "national:area:bad", ""}, {"custom", "custom:group:x", ""}, {"custom", "custom:ungrouped:x", ""}, {"custom", "custom:ungrouped", "9"}} {
+	// ⛔ business:unknown:* 已随「未归属业务组织」兜底节点一起下线(2026-10-11 产品决策)：
+	// 旧选中态若还传这个 key 必须判非法，而不是静默返回全量设备。
+	for _, input := range [][3]string{{"national", "", ""}, {"", "national:unknown", ""}, {"national", "national:area:bad", ""}, {"business", "business:unknown:4", ""}, {"custom", "custom:group:x", ""}, {"custom", "custom:ungrouped:x", ""}, {"custom", "custom:ungrouped", "9"}} {
 		_, err := ParseFilter(input[0], input[1], input[2])
 		require.True(t, errors.Is(err, ErrDirectoryFilterInvalid))
 	}

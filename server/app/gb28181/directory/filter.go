@@ -16,7 +16,6 @@ const (
 	FilterNationalCatalog FilterKind = "national_catalog"
 	FilterBusinessCatalog FilterKind = "business_catalog"
 	FilterBusinessDevice  FilterKind = "business_device"
-	FilterBusinessUnknown FilterKind = "business_unknown"
 	FilterCustomGroup     FilterKind = "custom_group"
 	FilterCustomUngrouped FilterKind = "custom_ungrouped"
 )
@@ -85,13 +84,6 @@ func ParseFilter(view, key, legacyNodeID string) (*Filter, error) {
 			return nil, ErrDirectoryFilterInvalid
 		}
 		f.NodeID = uint(id)
-	case view == "business" && strings.HasPrefix(key, "business:unknown:"):
-		f.Kind = FilterBusinessUnknown
-		id, err := strconv.ParseUint(strings.TrimPrefix(key, "business:unknown:"), 10, 64)
-		if err != nil {
-			return nil, ErrDirectoryFilterInvalid
-		}
-		f.OwnerDeptID, f.OwnerDeptScoped = uint(id), true
 	case view == "custom" && key == "custom:ungrouped":
 		f.Kind = FilterCustomUngrouped
 	case view == "custom" && strings.HasPrefix(key, "custom:ungrouped:"):

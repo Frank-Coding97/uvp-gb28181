@@ -21,7 +21,7 @@ func TestDirectoryControllerViews(t *testing.T) {
 	app.Response = response.NewResponseHandler()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbCatalogNode{}, &gbmodels.GbCustomGroup{}, &gbmodels.GbCustomGroupDevice{}, &civilcode.SysCivilCode{}, &basemodels.SysDepartment{}))
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbCatalogNode{}, &gbmodels.GbChannel{}, &gbmodels.GbAlarmResource{}, &gbmodels.GbCustomGroup{}, &gbmodels.GbCustomGroupDevice{}, &civilcode.SysCivilCode{}, &basemodels.SysDepartment{}))
 	require.NoError(t, db.Create(&civilcode.SysCivilCode{Code: "370000", ShortName: "山东省", Level: 1}).Error)
 	require.NoError(t, db.Create(&basemodels.SysDepartment{BaseModel: basemodels.BaseModel{ID: 10}, Name: "研发部"}).Error)
 	require.NoError(t, db.Create(&gbmodels.GbDevice{DeviceID: "37000000001180000001", OwnerDeptID: 10}).Error)
