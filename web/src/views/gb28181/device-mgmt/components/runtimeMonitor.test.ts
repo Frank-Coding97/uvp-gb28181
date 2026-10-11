@@ -291,7 +291,8 @@ describe("runtime monitor components", () => {
     expect(refreshButton.attributes("type")).toBe("primary");
     await wrapper.get("button[aria-label='查看 channel-1 的观看连接']").trigger("click");
     expect(wrapper.text()).toContain("10.0.0.8:4567");
-    expect(wrapper.find("button[aria-label^='强退']").exists()).toBe(false);
+    // ⭐ 权限改造（2026-10-11）：强退入口保留可见但置灰（连接可踢但当前账号无强退权限）。
+    expect(wrapper.get("button[aria-label^='强退']").attributes("disabled")).toBeDefined();
     expect(trafficApi.kickCurrentViewer).not.toHaveBeenCalled();
   });
 

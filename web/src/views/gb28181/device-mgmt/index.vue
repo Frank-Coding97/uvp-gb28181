@@ -80,7 +80,7 @@ import {
 import { getDictItemsByDictCodeAPI, type SystemDictItem } from "@/api/dictionary";
 import { usePlaybackConsoleStore } from "@/store/modules/playback-console";
 import { useThemeConfig } from "@/store/modules/theme-config";
-import { useUserStoreHook } from "@/store/modules/user";
+import { hasPermission } from "@/hooks/usePermission";
 import { storeToRefs } from "pinia";
 import SubscriptionDialog from "./SubscriptionDialog.vue";
 import DeviceRebootDialog from "./DeviceRebootDialog.vue";
@@ -262,8 +262,6 @@ const mapFirstRender = ref(false);
 const mapError = ref("");
 const mapCursorLongitude = ref(116.3974);
 const mapCursorLatitude = ref(39.9093);
-const permissions = computed(() => useUserStoreHook().account.permissions ?? []);
-const hasPermission = (permission: string) => permissions.value.includes("*:*:*") || permissions.value.includes(permission);
 const canViewDevices = computed(() => hasPermission("gb28181:device:view"));
 const canStartPlayback = computed(() => hasPermission("gb28181:play:start"));
 const canQueryDeviceRecords = computed(() => hasPermission("gb28181:device-record:query"));
@@ -2364,7 +2362,7 @@ onUnmounted(() => {
                 <a-option value="offline">离线</a-option>
               </a-select>
               <button
-                v-if="canViewDevices"
+                :disabled="!canViewDevices"
                 class="btn-ghost refresh-control uvp-page-action-btn uvp-refresh-btn"
                 data-testid="refresh-control"
                 type="button"
@@ -2376,7 +2374,7 @@ onUnmounted(() => {
                 刷新 <span class="refresh-countdown">{{ autoRefreshCountdown }}s</span>
               </button>
               <button
-                v-if="canAddDevice"
+                :disabled="!canAddDevice"
                 class="btn-primary create-device-btn uvp-page-action-btn uvp-create-btn"
                 type="button"
                 @click="openCreateDeviceModal"
@@ -2437,28 +2435,27 @@ onUnmounted(() => {
           </div>
           <div class="batch-ops">
             <button
-              v-if="canManageGroups && groupBatchActions.canAdd"
+              v-if="groupBatchActions.canAdd"
               class="btn-group"
               type="button"
-              :disabled="memberMutationLoading"
+              :disabled="memberMutationLoading || !canManageGroups"
               @click="addToGroupVisible = true"
             >
               <FolderPlus :size="14" /> 添加到分组
             </button>
             <button
-              v-if="canManageGroups && groupBatchActions.removeGroupId"
+              v-if="groupBatchActions.removeGroupId"
               class="btn-group"
               type="button"
-              :disabled="memberMutationLoading"
+              :disabled="memberMutationLoading || !canManageGroups"
               @click="removeSelectedFromCurrentGroup"
             >
               <FolderMinus :size="14" /> 从当前分组移除
             </button>
             <button
-              v-if="(assetKind === 'device' && canDeleteDevice) || (assetKind === 'channel' && canDeleteChannel)"
               class="btn-danger"
               type="button"
-              :disabled="deleting"
+              :disabled="deleting || (assetKind === 'device' ? !canDeleteDevice : !canDeleteChannel)"
               @click="handleBatchDelete"
             >
               批量删除
@@ -2638,7 +2635,7 @@ onUnmounted(() => {
                 <template #cell="{ record }">
                   <div class="uvp-table-actions">
                     <a-link
-                      v-if="canStartPlayback"
+                      :disabled="!canStartPlayback"
                       class="uvp-table-action uvp-table-action--preview"
                       @click="playChannel(record)"
                     >
@@ -2646,7 +2643,7 @@ onUnmounted(() => {
                       <span>播放</span>
                     </a-link>
                     <a-link
-                      v-if="canQueryDeviceRecords"
+                      :disabled="!canQueryDeviceRecords"
                       class="uvp-table-action uvp-table-action--record"
                       @click="openRecordQuery(record)"
                     >
@@ -2654,7 +2651,7 @@ onUnmounted(() => {
                       <span>录像</span>
                     </a-link>
                     <a-link
-                      v-if="canUseDeviceControl || canSnapshotDevice || canViewDeviceFacts"
+                      :disabled="!canUseDeviceControl && !canSnapshotDevice && !canViewDeviceFacts"
                       class="uvp-table-action uvp-table-action--more"
                       @click="openChannelOperations(record)"
                     >
@@ -2662,9 +2659,10 @@ onUnmounted(() => {
                       <span>操作</span>
                     </a-link>
                     <a-link
-                      v-if="canStopPlayback && isChannelPlaying(record)"
+                      v-if="isChannelPlaying(record)"
                       class="uvp-table-action uvp-table-action--stop"
                       :loading="stoppingChannels.has(record.id)"
+                      :disabled="!canStopPlayback"
                       @click="handleStopChannel(record)"
                     >
                       <template #icon><Square :size="13" /></template>
@@ -2675,7 +2673,7 @@ onUnmounted(() => {
                       <span>详情</span>
                     </a-link>
                     <a-link
-                      v-if="canEditChannel"
+                      :disabled="!canEditChannel"
                       class="uvp-table-action uvp-table-action--edit"
                       @click="openEditChannelModal(record)"
                     >
@@ -2683,9 +2681,8 @@ onUnmounted(() => {
                       <span>编辑</span>
                     </a-link>
                     <a-link
-                      v-if="canDeleteChannel"
                       class="uvp-table-action uvp-table-action--delete"
-                      :disabled="deleting"
+                      :disabled="deleting || !canDeleteChannel"
                       @click="handleDeleteChannel(record)"
                     >
                       <template #icon><Trash2 :size="13" /></template>
@@ -2718,9 +2715,10 @@ onUnmounted(() => {
                     <div class="device-name">
                       <span class="pri text-ellipsis">{{ deviceNameText(record) }}</span>
                       <button
-                        v-if="canViewMaintenance && maintenanceActivity.label(record.id)"
+                        v-if="maintenanceActivity.label(record.id)"
                         class="maintenance-task-link"
                         type="button"
+                        :disabled="!canViewMaintenance"
                         @click.stop="openKnownMaintenance(record)"
                       >
                         {{ maintenanceActivity.label(record.id) }} · 查看
@@ -2812,9 +2810,8 @@ onUnmounted(() => {
                       <span>通道</span>
                     </a-link>
                     <a-link
-                      v-if="canRefreshCatalog"
                       class="uvp-table-action uvp-table-action--sync uvp-refresh-link"
-                      :disabled="refreshingCatalog[record.id] || !record.online"
+                      :disabled="refreshingCatalog[record.id] || !record.online || !canRefreshCatalog"
                       :title="record.online ? '刷新通道目录' : '设备离线,无法刷新'"
                       @click="handleRefreshDeviceCatalog(record)"
                     >
@@ -2824,7 +2821,7 @@ onUnmounted(() => {
                       <span>刷新</span>
                     </a-link>
                     <a-link
-                      v-if="canManageSubscriptions"
+                      :disabled="!canManageSubscriptions"
                       class="uvp-table-action uvp-table-action--subscribe"
                       @click.stop="openSubscriptionManager(record)"
                     >
@@ -2836,7 +2833,7 @@ onUnmounted(() => {
                       <span>详情</span>
                     </a-link>
                     <a-link
-                      v-if="canEditDevice"
+                      :disabled="!canEditDevice"
                       class="uvp-table-action uvp-table-action--edit"
                       @click="openEditDeviceModal(record)"
                     >
@@ -2844,17 +2841,16 @@ onUnmounted(() => {
                       <span>编辑</span>
                     </a-link>
                     <a-link
-                      v-if="canDeleteDevice"
                       class="uvp-table-action uvp-table-action--delete"
-                      :disabled="deleting"
+                      :disabled="deleting || !canDeleteDevice"
                       @click="handleDeleteDevice(record)"
                     >
                       <template #icon><Trash2 :size="13" /></template>
                       <span>删除</span>
                     </a-link>
                     <!-- 「更多」只剩设备维护(固件升级/维护记录/重启),详情·编辑·删除已平铺到操作列 -->
-                    <a-dropdown v-if="canViewMaintenance" trigger="click" position="br">
-                      <a-link class="uvp-table-action uvp-table-action--more">
+                    <a-dropdown trigger="click" position="br">
+                      <a-link class="uvp-table-action uvp-table-action--more" :disabled="!canViewMaintenance">
                         <span>维护</span>
                         <MoreHorizontal :size="13" />
                       </a-link>
@@ -2958,9 +2954,10 @@ onUnmounted(() => {
                   </div>
                 </div>
                 <button
-                  v-if="canViewMaintenance && maintenanceActivity.label(item.id)"
+                  v-if="maintenanceActivity.label(item.id)"
                   class="maintenance-task-link"
                   type="button"
+                  :disabled="!canViewMaintenance"
                   @click.stop="openKnownMaintenance(item)"
                 >
                   {{ maintenanceActivity.label(item.id) }} · 查看
@@ -2974,50 +2971,55 @@ onUnmounted(() => {
                   <a-tooltip content="查看详情" position="top">
                     <button class="icon-btn small framed" type="button" @click.stop="openDevice(item)"><Eye :size="13" /></button>
                   </a-tooltip>
-                  <a-tooltip
-                    v-if="canRefreshCatalog"
-                    :content="item.online ? '刷新通道目录' : '设备离线,无法刷新'"
-                    position="top"
-                  >
+                  <a-tooltip :content="item.online ? '刷新通道目录' : '设备离线,无法刷新'" position="top">
                     <button
                       class="icon-btn small framed info uvp-refresh-btn"
                       :class="{ loading: refreshingCatalog[item.id] }"
                       type="button"
-                      :disabled="refreshingCatalog[item.id] || !item.online"
+                      :disabled="refreshingCatalog[item.id] || !item.online || !canRefreshCatalog"
                       @click.stop="handleRefreshDeviceCatalog(item)"
                     >
                       <Loader2 v-if="refreshingCatalog[item.id]" :size="13" class="spin" />
                       <RefreshCcw v-else :size="13" />
                     </button>
                   </a-tooltip>
-                  <a-tooltip v-if="canManageSubscriptions" content="订阅管理" position="top">
-                    <button class="icon-btn small framed subscription" type="button" @click.stop="openSubscriptionManager(item)">
+                  <a-tooltip content="订阅管理" position="top">
+                    <button
+                      class="icon-btn small framed subscription"
+                      type="button"
+                      :disabled="!canManageSubscriptions"
+                      @click.stop="openSubscriptionManager(item)"
+                    >
                       <Bell :size="13" />
                     </button>
                   </a-tooltip>
-                  <a-tooltip v-if="canEditDevice" content="编辑设备" position="top">
-                    <button class="icon-btn small framed warning" type="button" @click.stop="openEditDeviceModal(item)">
+                  <a-tooltip content="编辑设备" position="top">
+                    <button
+                      class="icon-btn small framed warning"
+                      type="button"
+                      :disabled="!canEditDevice"
+                      @click.stop="openEditDeviceModal(item)"
+                    >
                       <Pencil :size="13" />
                     </button>
                   </a-tooltip>
-                  <a-tooltip v-if="canDeleteDevice" content="删除设备" position="top">
+                  <a-tooltip content="删除设备" position="top">
                     <button
                       class="icon-btn small framed danger"
                       type="button"
-                      :disabled="deleting"
+                      :disabled="deleting || !canDeleteDevice"
                       @click.stop="handleDeleteDevice(item)"
                     >
                       <Trash2 :size="13" />
                     </button>
                   </a-tooltip>
                   <a-dropdown
-                    v-if="canViewMaintenance"
                     trigger="click"
                     position="br"
                     :popup-max-height="false"
                     content-class="device-card-maintenance-dropdown"
                   >
-                    <button class="icon-btn small framed" type="button" aria-label="更多设备操作">
+                    <button class="icon-btn small framed" type="button" aria-label="更多设备操作" :disabled="!canViewMaintenance">
                       <MoreHorizontal :size="13" />
                     </button>
                     <template #content>
@@ -3170,59 +3172,63 @@ onUnmounted(() => {
                     <span class="channel-card-status" :class="{ online: item.status === 1 }">{{
                       deviceStatusLabel(item.status === 1)
                     }}</span>
-                    <a-tooltip v-if="canStartPlayback" content="点播" position="top">
-                      <button class="icon-btn small framed primary" type="button" @click.stop="playChannel(item)">
+                    <a-tooltip content="点播" position="top">
+                      <button
+                        class="icon-btn small framed primary"
+                        type="button"
+                        :disabled="!canStartPlayback"
+                        @click.stop="playChannel(item)"
+                      >
                         <Play :size="13" />
                       </button>
                     </a-tooltip>
-                    <a-tooltip v-if="canQueryDeviceRecords" content="查询设备录像" position="top">
+                    <a-tooltip content="查询设备录像" position="top">
                       <button
                         class="icon-btn small framed record-query-entry"
                         type="button"
                         aria-label="查询设备录像"
+                        :disabled="!canQueryDeviceRecords"
                         @click.stop="openRecordQuery(item)"
                         @dblclick.stop
                       >
                         <History :size="13" />
                       </button>
                     </a-tooltip>
-                    <a-tooltip
-                      v-if="canUseDeviceControl || canSnapshotDevice || canViewDeviceFacts"
-                      content="通道操作"
-                      position="top"
-                    >
+                    <a-tooltip content="通道操作" position="top">
                       <button
                         class="icon-btn small framed"
                         type="button"
                         aria-label="通道操作"
+                        :disabled="!canUseDeviceControl && !canSnapshotDevice && !canViewDeviceFacts"
                         @click.stop="openChannelOperations(item)"
                       >
                         <Joystick :size="13" />
                       </button>
                     </a-tooltip>
-                    <a-tooltip
-                      v-if="canStopPlayback && isChannelPlaying(item)"
-                      content="强制停止当前直播(会断开其他观看者)"
-                      position="top"
-                    >
+                    <a-tooltip v-if="isChannelPlaying(item)" content="强制停止当前直播(会断开其他观看者)" position="top">
                       <button
                         class="icon-btn small framed stop"
                         type="button"
-                        :disabled="stoppingChannels.has(item.id)"
+                        :disabled="stoppingChannels.has(item.id) || !canStopPlayback"
                         @click.stop="handleStopChannel(item)"
                       >
                         <Square :size="13" />
                       </button>
                     </a-tooltip>
-                    <a-tooltip v-if="canEditChannel" content="编辑通道" position="top"
-                      ><button class="icon-btn small framed warning" type="button" @click.stop="openEditChannelModal(item)">
+                    <a-tooltip content="编辑通道" position="top"
+                      ><button
+                        class="icon-btn small framed warning"
+                        type="button"
+                        :disabled="!canEditChannel"
+                        @click.stop="openEditChannelModal(item)"
+                      >
                         <Pencil :size="13" /></button
                     ></a-tooltip>
-                    <a-tooltip v-if="canDeleteChannel" content="删除通道" position="top"
+                    <a-tooltip content="删除通道" position="top"
                       ><button
                         class="icon-btn small framed danger"
                         type="button"
-                        :disabled="deleting"
+                        :disabled="deleting || !canDeleteChannel"
                         @click.stop="handleDeleteChannel(item)"
                       >
                         <Trash2 :size="13" /></button
@@ -3374,7 +3380,7 @@ onUnmounted(() => {
             </div>
           </section>
           <div class="drawer-foot">
-            <a-button v-if="canEditChannel" type="primary" @click="openEditChannelModal(channelDetail)">
+            <a-button :disabled="!canEditChannel" type="primary" @click="openEditChannelModal(channelDetail)">
               <template #icon><Pencil :size="14" /></template>
               <template #default>编辑通道</template>
             </a-button>
@@ -3598,10 +3604,10 @@ onUnmounted(() => {
           <span>{{ channelOperationTarget.channelId }} · {{ channelOperationTarget.deviceId }}</span>
         </div>
         <a-radio-group v-model="channelOperationTab" type="button" class="channel-operation-tabs">
-          <a-radio v-if="canUseDeviceControl" value="control">即时控制</a-radio>
-          <a-radio v-if="canSnapshotDevice" value="snapshot">抓拍</a-radio>
-          <a-radio v-if="canViewDeviceFacts" value="status">设备状态</a-radio>
-          <a-radio v-if="canViewDeviceFacts" value="storage">存储卡</a-radio>
+          <a-radio :disabled="!canUseDeviceControl" value="control">即时控制</a-radio>
+          <a-radio :disabled="!canSnapshotDevice" value="snapshot">抓拍</a-radio>
+          <a-radio :disabled="!canViewDeviceFacts" value="status">设备状态</a-radio>
+          <a-radio :disabled="!canViewDeviceFacts" value="storage">存储卡</a-radio>
         </a-radio-group>
         <DeviceControlPanel
           v-if="channelOperationTab === 'control' && canUseDeviceControl"

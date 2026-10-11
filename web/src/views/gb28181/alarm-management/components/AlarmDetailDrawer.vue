@@ -39,11 +39,10 @@
               ><code>{{ detail.sourceCode || "—" }}</code>
             </div>
             <a-button
-              v-if="canDelete"
               data-testid="detail-delete"
               status="danger"
               :loading="deleting"
-              :disabled="deleting"
+              :disabled="deleting || !canDelete"
               @click="emit('delete', detail)"
             >
               <template #icon><Trash2 :size="14" /></template>

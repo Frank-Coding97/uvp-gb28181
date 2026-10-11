@@ -989,7 +989,7 @@ describe("device record playback workspace", () => {
     expect(wrapper.find('[data-testid="record-cache-progress"]').exists()).toBe(true);
   });
 
-  it("keeps playback controls for the visitor but hides every device-record download entry", async () => {
+  it("keeps playback controls for the visitor but greys out every device-record download entry", async () => {
     account.permissions = ["gb28181:device-record:query", "gb28181:device-record:play"];
     const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
     await flushPromises();
@@ -998,8 +998,12 @@ describe("device record playback workspace", () => {
     expect(wrapper.find('[data-testid="playback-primary-action"]').exists()).toBe(true);
     expect(wrapper.find('[aria-label="停止"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="playback-scale"]').exists()).toBe(true);
-    expect(wrapper.find('[data-testid="playback-download"]').exists()).toBe(false);
-    expect(wrapper.find('[data-testid="record-segment-download-0"]').exists()).toBe(false);
+    // ⭐ 权限改造（2026-10-11）：下载入口**保留可见但置灰**，不再从页面消失，
+    //    这样访客知道平台有"缓存到服务器"能力，但点不动。
+    expect(wrapper.get('[data-testid="playback-download"]').attributes("disabled")).toBeDefined();
+    await wrapper.get('[data-testid="record-query-submit"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[data-testid="record-segment-download-0"]').attributes("disabled")).toBeDefined();
   });
 
   it("offers an independent download entry on every record segment", async () => {

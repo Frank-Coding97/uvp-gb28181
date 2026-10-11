@@ -7,7 +7,7 @@ import { useRouter } from "vue-router";
 import { disableZLMNode, enableZLMNode, listZLMNodes, type ZLMNode } from "@/api/gb28181-zlm";
 import type { MediaNodeCatalogNode, MediaScope } from "@/store/modules/media-workbench";
 import { useZLMContextStore } from "@/store/modules/zlm-context";
-import { useUserStoreHook } from "@/store/modules/user";
+import { hasPermission } from "@/hooks/usePermission";
 import NodeForm from "../../NodeForm.vue";
 import ZLMNodeActionDialog from "../../ZLMNodeActionDialog.vue";
 import LifecycleDot from "../../components/LifecycleDot.vue";
@@ -44,7 +44,6 @@ const emit = defineEmits<{
 
 const router = useRouter();
 const context = useZLMContextStore();
-const userStore = useUserStoreHook();
 const legacyNodes = ref<ZLMNode[]>([]);
 const legacyLoading = ref(false);
 const legacyError = ref<unknown>(null);
@@ -69,8 +68,6 @@ const refreshCountdown = ref(AUTO_REFRESH_SECONDS);
 let requestGeneration = 0;
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
-const hasPermission = (permission: string) =>
-  userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
 const canManage = computed(() => hasPermission("gb28181:zlm:node:manage"));
 const sourceNodes = computed<readonly ZLMNode[]>(() =>
   props.nodes === undefined ? legacyNodes.value : (props.nodes as readonly ZLMNode[])
@@ -305,7 +302,7 @@ function relativeTime(value?: string) {
           @click="handleManualRefresh"
           ><template #icon><icon-refresh /></template>{{ refreshButtonLabel }}</a-button
         >
-        <a-button v-if="canManage" class="uvp-page-action-btn uvp-create-btn" type="primary" @click="openCreate"
+        <a-button :disabled="!canManage" class="uvp-page-action-btn uvp-create-btn" type="primary" @click="openCreate"
           ><template #icon><icon-plus /></template>添加节点</a-button
         >
       </template>
@@ -383,11 +380,11 @@ function relativeTime(value?: string) {
                 <a-link class="uvp-table-action uvp-table-action--detail" @click="openServiceConfig(record)"
                   ><template #icon><Settings :size="13" /></template>服务配置</a-link
                 >
-                <a-link v-if="canManage" class="uvp-table-action uvp-table-action--edit" @click="openEdit(record)"
+                <a-link :disabled="!canManage" class="uvp-table-action uvp-table-action--edit" @click="openEdit(record)"
                   ><template #icon><Pencil :size="13" /></template>编辑</a-link
                 >
                 <a-link
-                  v-if="canManage"
+                  :disabled="!canManage"
                   :class="[
                     'uvp-table-action',
                     record.enabled === false ? 'uvp-table-action--execute' : 'uvp-table-action--scope'
@@ -398,7 +395,10 @@ function relativeTime(value?: string) {
                     ><CirclePower v-if="record.enabled === false" :size="13" /><PowerOff v-else :size="13" /></template
                   >{{ record.enabled === false ? "启用" : "停用" }}</a-link
                 >
-                <a-link v-if="canManage" class="uvp-table-action uvp-table-action--delete" @click="openAction(record, 'delete')"
+                <a-link
+                  :disabled="!canManage"
+                  class="uvp-table-action uvp-table-action--delete"
+                  @click="openAction(record, 'delete')"
                   ><template #icon><Trash2 :size="13" /></template>删除</a-link
                 >
               </div></template

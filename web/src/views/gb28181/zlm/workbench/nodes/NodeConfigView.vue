@@ -4,7 +4,7 @@ import { Message, Modal } from "@arco-design/web-vue";
 import { RotateCw, ServerCog, ShieldAlert } from "lucide-vue-next";
 
 import { getZLMNodeRestartStatus, restartZLMNode, type ZLMRestartOperation, type ZLMRestartStatus } from "@/api/gb28181-zlm";
-import { useUserStoreHook } from "@/store/modules/user";
+import { hasPermission } from "@/hooks/usePermission";
 import NodeConfigPanel from "../../components/NodeConfigPanel.vue";
 import { zlmErrorPresentation } from "../../components/zlmFormatters";
 
@@ -26,7 +26,6 @@ const emit = defineEmits<{
   dirtyChange: [dirty: boolean];
 }>();
 
-const userStore = useUserStoreHook();
 const active = toRef(props, "active");
 const configDirty = ref(false);
 const pollingNotice = ref("");
@@ -38,8 +37,6 @@ let configTimer: ReturnType<typeof setInterval> | null = null;
 let restartTimer: ReturnType<typeof setTimeout> | null = null;
 let restartGeneration = 0;
 
-const hasPermission = (permission: string) =>
-  userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
 const canRestart = computed(() => hasPermission("gb28181:zlm:restart"));
 const restartView = computed(() => restartStatusPresentation(restartOperation.value?.status ?? null));
 
@@ -224,10 +221,9 @@ onBeforeUnmount(() => {
         </div>
       </slot>
       <a-button
-        v-if="canRestart"
         status="danger"
         :loading="restartPolling"
-        :disabled="!active || configDirty || restartPolling"
+        :disabled="!active || configDirty || restartPolling || !canRestart"
         @click="requestRestart"
         ><template #icon><RotateCw :size="15" /></template>重启当前节点</a-button
       >

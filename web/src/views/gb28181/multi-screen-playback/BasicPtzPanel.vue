@@ -19,7 +19,7 @@ import {
   ZoomOut
 } from "@lucide/vue";
 import { controlPtz, fetchServiceConfig, getControlCapabilities } from "@/api/gb28181";
-import { useUserStoreHook } from "@/store/modules/user";
+import { hasPermission } from "@/hooks/usePermission";
 import type { ChannelVO } from "../device-mgmt/api";
 import { DEFAULT_PTZ_SPEED_LEVEL, levelToProtocolSpeed, normalizePtzSpeedLevel } from "../ptzSpeed";
 
@@ -30,9 +30,6 @@ const emit = defineEmits<{
   actionChange: [value: { channelId: number; action: string } | null];
 }>();
 
-const userStore = useUserStoreHook();
-const permissions = computed(() => userStore.account.permissions ?? []);
-const hasPermission = (permission: string) => permissions.value.includes("*:*:*") || permissions.value.includes(permission);
 const canViewPtz = computed(() => hasPermission("gb28181:ptz:view"));
 const canControlPtz = computed(() => hasPermission("gb28181:ptz:control"));
 const canReadSpeed = computed(() => hasPermission("gb28181:sip:config:view"));

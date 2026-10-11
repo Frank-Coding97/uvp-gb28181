@@ -98,13 +98,17 @@ describe("ZLMNodeActionDialog forced purge", () => {
     expect(wrapper.emitted("done")).toEqual([[{ action: "delete" }]]);
   });
 
-  it("does not offer forced purge for non-delete actions", async () => {
+  it("keeps forced purge visible but disabled for non-delete actions", async () => {
     await rejectPreflight("maintenance");
     const wrapper = mountDialog("maintenance");
     await flushPromises();
 
     expect(wrapper.text()).toContain("未执行任何管理动作");
-    expect(wrapper.find("[data-test='purge-entry']").exists()).toBe(false);
+    // ⭐ 权限改造（2026-10-11）：按钮不再从 DOM 里消失，改为保留占位并置灰
+    //    （与权限门禁同一口径 —— 能力可见、但不可用，避免用户看不到平台有什么功能）。
+    const purgeEntry = wrapper.find("[data-test='purge-entry']");
+    expect(purgeEntry.exists()).toBe(true);
+    expect(purgeEntry.attributes("disabled")).toBeDefined();
     expect(mocks.purgeNode).not.toHaveBeenCalled();
   });
 

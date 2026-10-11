@@ -242,7 +242,7 @@ describe("device management toolbar layout", () => {
   it("distinguishes subscription management from the primary channel action", () => {
     expect(source).toContain('class="icon-btn small framed primary" type="button" @click.stop="showDeviceChannels(item)"');
     expect(source).toContain(
-      'class="icon-btn small framed subscription" type="button" @click.stop="openSubscriptionManager(item)"'
+      'class="icon-btn small framed subscription" type="button" :disabled="!canManageSubscriptions" @click.stop="openSubscriptionManager(item)"'
     );
     expect(source).toContain(".icon-btn.framed.subscription {");
   });

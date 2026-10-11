@@ -346,13 +346,14 @@ describe("CloudRecordings", () => {
     expect(api.listReconciliations).not.toHaveBeenCalled();
   });
 
-  it("keeps playback available but hides and rejects download for view-only users", async () => {
+  it("keeps playback available but greys out and rejects download for view-only users", async () => {
     account.permissions = ["gb28181:recording:view"];
     const wrapper = mount(CloudRecordings, { global: { stubs } });
     await flushPromises();
 
     expect(wrapper.find("[data-testid='play-9007199254740993']").exists()).toBe(true);
-    expect(wrapper.find("[data-testid='download-9007199254740993']").exists()).toBe(false);
+    // ⭐ 权限改造（2026-10-11）：无下载权限时入口保留可见但置灰（功能可见性），点击不会触发下载。
+    expect(wrapper.get("[data-testid='download-9007199254740993']").attributes("disabled")).toBeDefined();
 
     await wrapper.get("[data-testid='play-9007199254740993']").trigger("click");
     expect(enqueueDownload).not.toHaveBeenCalled();

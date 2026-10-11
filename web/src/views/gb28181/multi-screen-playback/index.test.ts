@@ -131,7 +131,9 @@ describe("multi-screen playback page", () => {
 
     expect(wrapper.find("[data-test=play-all]").exists()).toBe(true);
     expect(wrapper.find("[data-test=polling-settings]").exists()).toBe(true);
-    expect(wrapper.find("[data-test=my-favorites]").exists()).toBe(false);
+    // ⭐ 权限改造（2026-10-11）：收藏入口保留可见但置灰，不再从工具栏消失。
+    expect(wrapper.find("[data-test=my-favorites]").exists()).toBe(true);
+    expect(wrapper.get("[data-test=my-favorites]").attributes("disabled")).toBeDefined();
     expect(wrapper.find(".basic-ptz").exists()).toBe(false);
 
     api.listChannels.mockResolvedValue({

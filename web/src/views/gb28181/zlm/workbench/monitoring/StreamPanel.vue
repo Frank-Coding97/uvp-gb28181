@@ -16,7 +16,7 @@ import {
   type ZLMStreamViewerPage
 } from "@/api/gb28181-zlm-runtime";
 import type { MediaScope } from "@/store/modules/media-workbench";
-import { useUserStoreHook } from "@/store/modules/user";
+import { hasPermission } from "@/hooks/usePermission";
 
 import { formatZLMByteRate, formatZLMBytes, formatZLMDuration, zlmErrorPresentation } from "../../components/zlmFormatters";
 import { useZLMRuntimePolling } from "../../composables/useZLMRuntimePolling";
@@ -39,7 +39,6 @@ const props = withDefaults(
   }
 );
 
-const userStore = useUserStoreHook();
 const filters = reactive<MonitoringStreamFilters>(createStreamFilters(props.initialQuery));
 const page = ref(1);
 const pageSize = ref(10);
@@ -74,8 +73,6 @@ const rows = computed<StreamTableRow[]>(() =>
 );
 const errorPresentation = computed(() => zlmErrorPresentation(loadError.value));
 const detailErrorPresentation = computed(() => zlmErrorPresentation(detailError.value));
-const hasPermission = (permission: string) =>
-  userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
 const canForceClose = computed(() => hasPermission("gb28181:zlm:stream:force-close"));
 const readOnly = computed(() => !canForceClose.value);
 const pollingPaused = computed(() => !props.autoRefresh || detailVisible.value || closeVisible.value);
@@ -444,7 +441,7 @@ defineExpose({ refresh: requestRefresh });
                 ><div class="uvp-table-actions stream-row-actions">
                   <a-link class="uvp-table-action uvp-table-action--detail" @click="openDetail(record)"
                     ><template #icon><Eye :size="13" /></template>详情</a-link
-                  ><a-link v-if="canForceClose" class="uvp-table-action uvp-table-action--delete" @click="openClose(record)"
+                  ><a-link :disabled="!canForceClose" class="uvp-table-action uvp-table-action--delete" @click="openClose(record)"
                     ><template #icon><PowerOff :size="13" /></template>强关</a-link
                   >
                 </div></template

@@ -159,7 +159,8 @@ describe("DirectoryPanel", () => {
     const switchedState = wrapper.emitted("update:modelValue")?.at(-1)?.[0] as DirectoryState;
     await wrapper.setProps({ modelValue: switchedState });
     await flushPromises();
-    expect(wrapper.find("[data-action='create-root']").exists()).toBe(false);
+    // ⭐ 权限改造（2026-10-11）：新建根分组入口保留可见但置灰，不再从工具栏消失。
+    expect(wrapper.get("[data-action='create-root']").attributes("disabled")).toBeDefined();
     expect(wrapper.find("[data-action='rename']").exists()).toBe(false);
   });
 

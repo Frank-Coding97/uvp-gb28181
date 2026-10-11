@@ -15,7 +15,7 @@ import { Message, Modal } from "@arco-design/web-vue";
 import { copyTextToClipboard } from "@/utils/app";
 import { formatToken, getAccessToken } from "@/utils/auth";
 import type { PlaybackConsoleDisplayMode } from "@/store/modules/playback-console";
-import { useUserStoreHook } from "@/store/modules/user";
+import { hasPermission } from "@/hooks/usePermission";
 import PlayWindow from "./PlayWindow.vue";
 import PlayConsoleTabs from "./play-console/PlayConsoleTabs.vue";
 import PlayConsoleDetailWorkspace from "./play-console/PlayConsoleDetailWorkspace.vue";
@@ -303,9 +303,6 @@ function isCurrentChannelContext(channelId: number, token: number, contextKey: s
 
 /* ────────────────────────── Tab 切换 ────────────────────────── */
 
-const userStore = useUserStoreHook();
-const permissions = computed(() => userStore.account.permissions ?? []);
-const hasPermission = (permission: string) => permissions.value.includes("*:*:*") || permissions.value.includes(permission);
 const canStartPlayback = computed(() => hasPermission("gb28181:play:start"));
 const canMonitorPlayback = computed(() => hasPermission("gb28181:play:monitor"));
 const canDiagnosePlayback = computed(() => hasPermission("gb28181:play:diagnose"));

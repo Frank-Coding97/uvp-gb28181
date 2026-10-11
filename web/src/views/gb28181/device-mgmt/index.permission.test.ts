@@ -6,9 +6,10 @@ const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/device-mgm
 
 describe("device-mgmt guest permission boundary", () => {
   it("defines the read, playback, recording and runtime permission gates", () => {
-    expect(source).toContain(
-      'const hasPermission = (permission: string) => permissions.value.includes("*:*:*") || permissions.value.includes(permission);'
-    );
+    // ⭐ 权限收敛（2026-10-11）：本地那份 `hasPermission` 实现已删除，
+    //    改为复用全平台唯一入口 `@/hooks/usePermission` —— 断言点随之从
+    //    「页内自己实现通配规则」改成「页内引用了统一入口」。
+    expect(source).toContain('import { hasPermission } from "@/hooks/usePermission"');
     for (const permission of [
       "canViewDevices",
       "canStartPlayback",
@@ -64,21 +65,27 @@ describe("device-mgmt guest permission boundary", () => {
     }
   });
 
-  it("does not expose guest write controls or runtime monitoring", () => {
+  it("greys out guest write controls instead of removing them, while dialogs stay hidden", () => {
+    // ⭐ 权限改造（2026-10-11，产品要求「让用户看得到平台有什么功能」）：
+    //    按钮 / 链接 / 表单控件一律「可见但置灰」，不再从模板里消失。
+    //    本用例原先的反向断言（`v-if="canXxx"`）已随之翻转为 `:disabled` 形态。
     for (const gate of [
-      'v-if="canAddDevice"',
-      'v-if="canRefreshCatalog"',
-      'v-if="canManageSubscriptions"',
-      'v-if="canEditDevice"',
-      'v-if="canDeleteDevice"',
-      'v-if="canEditChannel"',
-      'v-if="canEditTransport"',
-      'v-if="canUpdateRecording"',
-      'v-if="canStopPlayback && isChannelPlaying',
-      'v-if="canViewTraffic"'
+      ':disabled="!canAddDevice"',
+      "!canRefreshCatalog",
+      ':disabled="!canManageSubscriptions"',
+      ':disabled="!canEditDevice"',
+      ':disabled="deleting || !canDeleteDevice"',
+      ':disabled="!canEditChannel"',
+      "!canEditTransport",
+      "!canUpdateRecording",
+      "!canStopPlayback"
     ]) {
       expect(source).toContain(gate);
     }
+    // ⛔ 弹窗 / 整块内容没有「禁用」形态，继续隐藏：新增设备弹窗、运行监控弹窗，
+    //    以及本来就带 v-else 只读兜底的展示元素（状态带 / 内联状态）。
+    expect(source).toContain('v-if="canAddDevice"');
+    expect(source).toContain('v-if="canViewTraffic"');
     expect(source).toContain('v-else class="device-status-ribbon device-status-readonly"');
     expect(source).toContain('v-else class="status-inline status-readonly"');
   });

@@ -17,7 +17,7 @@ import {
 } from "@/api/gb28181-zlm-ingress";
 import type { ZLMOwnershipPreflight } from "@/api/gb28181-zlm-runtime";
 import type { MediaNodeCatalogNode, MediaScope } from "@/store/modules/media-workbench";
-import { useUserStoreHook } from "@/store/modules/user";
+import { hasPermission } from "@/hooks/usePermission";
 
 import RTPServerForm from "../../RTPServerForm.vue";
 import ZLMDangerActionDialog from "../../components/ZLMDangerActionDialog.vue";
@@ -42,7 +42,6 @@ const props = withDefaults(
   }
 );
 
-const userStore = useUserStoreHook();
 const nodeId = computed<number | null>(() => (props.scope === "all" ? null : props.scope));
 const canPoll = computed(() => props.active && props.scope !== "all");
 const scopeBlocked = computed(() => props.scope === "all");
@@ -67,8 +66,6 @@ const closing = ref(false);
 
 const rows = computed(() => pageData.value?.list ?? []);
 const capability = computed<ZLMCapabilityState>(() => pageData.value?.capability ?? observedCapability.value);
-const hasPermission = (permission: string) =>
-  userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
 const canManage = computed(() => hasPermission("gb28181:zlm:rtp:manage"));
 const canForce = computed(() => hasPermission("gb28181:zlm:rtp:force-close"));
 const paused = computed(() => formVisible.value || closeVisible.value);
@@ -321,11 +318,10 @@ function changePageSize(next: number) {
                     @click="openClose(record, false)"
                     >关闭</a-button
                   ><a-button
-                    v-if="canForce"
                     size="small"
                     status="danger"
                     type="outline"
-                    :disabled="!props.active || capability !== 'supported' || record.released || scopeBlocked"
+                    :disabled="!props.active || capability !== 'supported' || record.released || scopeBlocked || !canForce"
                     @click="openClose(record, true)"
                     >强制</a-button
                   ></a-space

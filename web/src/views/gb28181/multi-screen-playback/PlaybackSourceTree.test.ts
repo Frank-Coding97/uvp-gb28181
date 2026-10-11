@@ -148,14 +148,17 @@ describe("PlaybackSourceTree", () => {
     expect(wrapper.emitted("select")?.[0]?.[0]).toMatchObject({ id: 11, name: "东门" });
   });
 
-  it("does not load or expose persistent favorites for a guest", async () => {
+  it("does not load persistent favorites for a guest, only greys the entry", async () => {
     account.permissions = ["gb28181:device:view", "gb28181:play:start"];
     const wrapper = mountTree();
     await flushPromises();
 
     expect(wrapper.find("[data-test=source-view-favorites]").exists()).toBe(false);
     expect(favoritesApi.listChannelFavoriteGroups).not.toHaveBeenCalled();
-    expect(wrapper.find(".favorite-toggle").exists()).toBe(false);
+    // ⭐ 权限改造（2026-10-11）：收藏入口不再从模板里消失，改为 `:disabled="!canManageFavorites"`
+    //    （访客默认不展开设备，DOM 里不一定有行，所以这里钉模板契约而不是 DOM）。
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/multi-screen-playback/PlaybackSourceTree.vue"), "utf8");
+    expect(source).toContain(':disabled="!canManageFavorites"');
     expect(wrapper.find(".favorite-dialog-backdrop").exists()).toBe(false);
     wrapper.unmount();
   });

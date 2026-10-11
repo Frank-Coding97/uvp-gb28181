@@ -232,7 +232,9 @@ async function confirm(payload: { fingerprint: string }) {
       <div v-if="!purgeConfirming">
         <a-button @click="close">取消</a-button>
         <a-button type="primary" @click="loadPreflight">重新预检</a-button>
-        <a-button v-if="canPurge" status="danger" data-test="purge-entry" @click="purgeConfirming = true">强制移除</a-button>
+        <a-button :disabled="!canPurge" status="danger" data-test="purge-entry" @click="purgeConfirming = true"
+          >强制移除</a-button
+        >
       </div>
       <template v-if="canPurge">
         <p v-if="!purgeConfirming" class="purge-hint">节点不可达时后端读不到它上面的流和会话，普通删除无法完成影响确认。</p>

@@ -47,7 +47,7 @@ import { positionToTime } from "./timeline";
 import RecordTimeline, { type TimelineLocateEvent } from "./components/RecordTimeline.vue";
 import PlayWindow from "../components/PlayWindow.vue";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
-import { useUserStoreHook } from "@/store/modules/user";
+import { hasPermission } from "@/hooks/usePermission";
 import { Message } from "@arco-design/web-vue";
 import { createRecordCacheTask } from "@/api/recordCache";
 import RecordCacheProgressDialog from "./RecordCacheProgressDialog.vue";
@@ -63,7 +63,6 @@ import { useDeviceStatusLabel } from "../useDeviceStatusDict";
 
 const route = useRoute();
 const router = useRouter();
-const userStore = useUserStoreHook();
 /** 设备在线状态文案（`device_status` 字典）。 */
 const deviceStatusLabel = useDeviceStatusLabel();
 const channelId = computed(() => Number(route.params.channelId || 31));
@@ -122,8 +121,6 @@ const timeRange = computed<[string, string]>({
 });
 const isPlaying = computed(() => playback.value.status === "playing");
 const isPlaybackLoading = computed(() => ["creating", "buffering", "stopping"].includes(playback.value.status));
-const hasPermission = (permission: string) =>
-  userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
 const canQuery = computed(() => hasPermission("gb28181:device-record:query"));
 const canPlayPermission = computed(() => hasPermission("gb28181:device-record:play"));
 const canDownload = computed(() => hasPermission("gb28181:device-record:download"));
@@ -804,12 +801,11 @@ onUnmounted(() => {
                 <a-option v-for="scale in playbackScaleOptions" :key="scale" :value="scale">{{ scale }}x</a-option>
               </a-select>
               <a-button
-                v-if="canDownload"
                 data-testid="playback-download"
                 class="control-icon"
                 aria-label="缓存到服务器"
                 title="缓存到服务器"
-                :disabled="!selectedRecord || downloadPending"
+                :disabled="!selectedRecord || downloadPending || !canDownload"
                 @click="queueDownload()"
               >
                 <template #icon>
@@ -871,13 +867,12 @@ onUnmounted(() => {
                   </span>
                 </button>
                 <a-button
-                  v-if="canDownload"
                   :data-testid="`record-segment-download-${index}`"
                   class="icon-command segment-download"
                   type="text"
                   :aria-label="`缓存 ${record.name || `录像段 ${index + 1}`} 到服务器`"
                   :title="`缓存 ${record.name || `录像段 ${index + 1}`} 到服务器`"
-                  :disabled="downloadPending"
+                  :disabled="downloadPending || !canDownload"
                   @click="queueDownload(record)"
                 >
                   <template #icon><Download :size="15" /></template>

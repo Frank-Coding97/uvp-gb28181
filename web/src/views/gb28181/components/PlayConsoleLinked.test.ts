@@ -5317,7 +5317,11 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(wrapper.find("[data-testid='linked-detail-ptz']").exists()).toBe(false);
     expect(wrapper.find("[data-testid='linked-detail-picture']").exists()).toBe(false);
     expect(wrapper.find("[data-testid='probe-start']").exists()).toBe(false);
-    expect(wrapper.find(".protocol-copy-btn").exists()).toBe(false);
+    // ⭐ 权限改造（2026-10-11）：无分享权限时「复制地址」按钮不再从 DOM 里消失，
+    //    而是保留占位并置灰（可见但不可点）—— 让用户知道平台有这个能力。
+    const copyBtn = wrapper.find(".protocol-copy-btn");
+    expect(copyBtn.exists()).toBe(true);
+    expect(copyBtn.attributes("disabled")).toBeDefined();
     expect(api.getControlCapabilities).not.toHaveBeenCalled();
     expect(api.getHomePosition).not.toHaveBeenCalled();
     expect(api.getChannelVideoParams).not.toHaveBeenCalled();

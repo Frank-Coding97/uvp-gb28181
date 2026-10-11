@@ -26,9 +26,10 @@
             ><template #icon><RefreshCw :size="15" /></template>刷新</a-button
           >
           <a-button
-            v-if="activeView === 'plans' && canMaintain"
+            v-if="activeView === 'plans'"
             class="uvp-page-action-btn uvp-create-btn"
             type="primary"
+            :disabled="!canMaintain"
             @click="openCreate"
             ><template #icon><Plus :size="15" /></template>新建计划</a-button
           >
@@ -101,24 +102,22 @@
               <a-table-column title="已应用通道" :width="126" align="center">
                 <template #cell="{ record }">
                   <a-link
-                    v-if="canAssign"
                     class="channel-count-link"
                     :title="`查看并管理 ${record.channelCount} 个已应用通道`"
+                    :disabled="!canAssign"
                     @click="openAssign(record)"
                     >{{ record.channelCount }} 个</a-link
                   >
-                  <span v-else>{{ record.channelCount }} 个</span>
                 </template>
               </a-table-column>
               <a-table-column title="状态" :width="110" align="center">
                 <template #cell="{ record }">
                   <a-switch
-                    v-if="canMaintain"
                     v-model="record.enabled"
+                    :disabled="!canMaintain"
                     :aria-label="`${record.name}${record.enabled ? '停用' : '启用'}`"
                     @change="notifyPlanStatusChange(record)"
                   />
-                  <a-badge v-else :status="record.enabled ? 'success' : 'normal'" :text="record.enabled ? '已启用' : '已停用'" />
                 </template>
               </a-table-column>
               <a-table-column title="最近更新" :width="172" data-index="updatedAt" />
@@ -128,17 +127,17 @@
                     <a-link class="uvp-table-action uvp-table-action--detail" @click="openDetail(record)"
                       ><template #icon><Eye :size="13" /></template>查看</a-link
                     >
-                    <a-link v-if="canMaintain" class="uvp-table-action uvp-table-action--edit" @click="openEdit(record)"
+                    <a-link class="uvp-table-action uvp-table-action--edit" :disabled="!canMaintain" @click="openEdit(record)"
                       ><template #icon><Pencil :size="13" /></template>编辑</a-link
                     >
-                    <a-link v-if="canAssign" class="uvp-table-action uvp-table-action--assign" @click="openAssign(record)"
+                    <a-link class="uvp-table-action uvp-table-action--assign" :disabled="!canAssign" @click="openAssign(record)"
                       ><template #icon><Link2 :size="13" /></template>分配通道</a-link
                     >
                     <a-popconfirm
-                      v-if="canMaintain"
                       content="确认删除该录像计划？已分配通道的计划将拒绝删除。"
+                      :disabled="!canMaintain"
                       @ok="removePlan(record)"
-                      ><a-link class="uvp-table-action uvp-table-action--delete"
+                      ><a-link class="uvp-table-action uvp-table-action--delete" :disabled="!canMaintain"
                         ><template #icon><Trash2 :size="13" /></template>删除</a-link
                       ></a-popconfirm
                     >
@@ -389,7 +388,7 @@ import RecordingScheduleDrawer from "./components/RecordingScheduleDrawer.vue";
 import RecordingScheduleEditorDialog from "./components/RecordingScheduleEditorDialog.vue";
 import ChannelAssignmentDialog from "./components/ChannelAssignmentDialog.vue";
 import type { RecordingSchedule, ScheduleChannel, ScheduleDay } from "./types";
-import { useUserStoreHook } from "@/store/modules/user";
+import { hasPermission } from "@/hooks/usePermission";
 import { useDeviceStatusLabel } from "../useDeviceStatusDict";
 
 const props = withDefaults(
@@ -422,9 +421,6 @@ const recordingContextNodeId = computed(() => {
   const value = safeContext(props.nodeId, 20);
   return /^\d+$/.test(value) ? value : "";
 });
-const userStore = useUserStoreHook();
-const permissions = computed(() => userStore.account.permissions || []);
-const hasPermission = (permission: string) => permissions.value.includes("*:*:*") || permissions.value.includes(permission);
 const canView = computed(() => hasPermission("gb28181:recording-plan:view"));
 const canMaintain = computed(() => hasPermission("gb28181:recording-plan:maintain"));
 const canAssign = computed(() => hasPermission("gb28181:recording-plan:assign"));

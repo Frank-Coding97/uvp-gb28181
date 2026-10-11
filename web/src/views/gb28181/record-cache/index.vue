@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import { Message, Modal } from "@arco-design/web-vue";
 import { CircleStop, Download, Layers, RefreshCw, RotateCcw, Search, Star, Trash2 } from "@lucide/vue";
-import { useUserStoreHook } from "@/store/modules/user";
+import { hasPermission } from "@/hooks/usePermission";
 import {
   cancelRecordCacheTask,
   createRecordCacheDownload,
@@ -20,9 +20,6 @@ import {
   type RecordCacheTask
 } from "@/api/recordCache";
 
-const userStore = useUserStoreHook();
-const hasPermission = (permission: string) =>
-  userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
 const canCancel = computed(() => hasPermission("gb28181:record-cache:cancel"));
 const canDownload = computed(() => hasPermission("gb28181:record-cache:download"));
 const canDelete = computed(() => hasPermission("gb28181:record-cache:delete"));
@@ -564,10 +561,9 @@ onMounted(() => {
                         必须带文字；收藏态**换文案**（收藏 ↔ 取消收藏）而不只是变色 ——
                         只变色的话，"点一下会取消"这件事得靠 tooltip 才知道。 -->
                 <a-link
-                  v-if="canFavorite"
                   class="uvp-table-action uvp-table-action--favorite"
                   :class="{ 'is-on': record.favorite }"
-                  :disabled="favoritePendingId === record.taskId"
+                  :disabled="favoritePendingId === record.taskId || !canFavorite"
                   :title="record.favorite ? '已收藏，不会被自动清理' : '收藏后不会被自动清理'"
                   @click="toggleFavorite(record)"
                 >
@@ -582,20 +578,20 @@ onMounted(() => {
                      （`@arco-design/web-vue/es/link/link.d.ts`），cloud-recordings 的「停止录像」
                      就是这么写的。 -->
                 <a-link
-                  v-if="isRecordCacheTaskStoppable(record.state) && canCancel"
+                  v-if="isRecordCacheTaskStoppable(record.state)"
                   class="uvp-table-action uvp-table-action--stop"
                   :loading="pendingTaskId === record.taskId"
-                  :disabled="pendingTaskId === record.taskId"
+                  :disabled="pendingTaskId === record.taskId || !canCancel"
                   @click="cancelTask(record)"
                 >
                   <template #icon><CircleStop :size="13" /></template>
                   <span>取消</span>
                 </a-link>
-                <template v-else-if="record.state === 'succeeded' && canDownload">
+                <template v-else-if="record.state === 'succeeded'">
                   <a-link
                     class="uvp-table-action uvp-table-action--download"
                     :loading="downloadingKey === record.taskId"
-                    :disabled="downloadingKey === record.taskId"
+                    :disabled="downloadingKey === record.taskId || !canDownload"
                     @click="downloadTask(record)"
                   >
                     <template #icon><Download :size="13" /></template>
@@ -622,8 +618,9 @@ onMounted(() => {
                   </a-dropdown>
                 </template>
                 <a-link
-                  v-if="canDelete && !isRecordCacheTaskStoppable(record.state)"
+                  v-if="!isRecordCacheTaskStoppable(record.state)"
                   class="uvp-table-action uvp-table-action--delete"
+                  :disabled="!canDelete"
                   @click="confirmDelete(record)"
                 >
                   <template #icon><Trash2 :size="13" /></template>

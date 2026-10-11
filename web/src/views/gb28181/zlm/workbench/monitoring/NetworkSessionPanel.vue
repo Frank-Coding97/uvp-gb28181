@@ -344,12 +344,13 @@ defineExpose({ refresh });
               ><a-table-column title="类型" data-index="typeId" /><a-table-column title="操作" :width="150"
                 ><template #cell="{ record }"
                   ><a-button
-                    v-if="canKickViewer(record, hasKickPermission)"
+                    v-if="record.kickable"
                     size="small"
                     status="danger"
+                    :disabled="!hasKickPermission"
                     @click="openKick(record)"
                     >踢除</a-button
-                  ><span v-else class="muted">{{ record.kickable ? "无权限" : "不可踢除" }}</span></template
+                  ><span v-else class="muted">不可踢除</span></template
                 ></a-table-column
               ></template
             ><template #empty

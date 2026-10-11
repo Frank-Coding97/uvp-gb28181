@@ -18,7 +18,7 @@ import {
   type ZLMRecordingResult
 } from "@/api/gb28181-zlm-runtime";
 import { useZLMContextStore } from "@/store/modules/zlm-context";
-import { useUserStoreHook } from "@/store/modules/user";
+import { hasPermission } from "@/hooks/usePermission";
 import ZLMDangerActionDialog from "@/views/gb28181/zlm/components/ZLMDangerActionDialog.vue";
 import ZLMNodeContextBar from "@/views/gb28181/zlm/components/ZLMNodeContextBar.vue";
 import {
@@ -35,7 +35,6 @@ type RecordingAction = "start" | "stop" | "force-stop";
 
 const router = useRouter();
 const context = useZLMContextStore();
-const userStore = useUserStoreHook();
 const nodes = ref<ZLMNode[]>([]);
 const nodesLoading = ref(false);
 const loadError = ref("");
@@ -62,8 +61,6 @@ let generation = 0;
 const selectedNodeId = computed(() => context.selectedNodeId);
 const contextNodes = computed(() => nodes.value.map(node => ({ id: node.id, name: node.name, state: node.state })));
 const selectedNodeName = computed(() => context.selectedNode?.name ?? `节点 #${selectedNodeId.value ?? "—"}`);
-const hasPermission = (permission: string) =>
-  userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
 const canControl = computed(() => hasPermission("gb28181:recording:control"));
 const canForceStop = computed(() => hasPermission("gb28181:recording:force-stop"));
 const canViewPlans = computed(() => hasPermission("gb28181:recording-plan:view"));
@@ -259,7 +256,7 @@ defineExpose({ refresh });
         <h2>录制运行控制</h2>
         <p>按完整媒体身份控制单个节点的 MP4 / HLS recorder；所有状态均以后端回读为准。</p>
       </div>
-      <a-button v-if="canViewPlans" :disabled="!selectedNodeId || !form.stream.trim()" @click="openSchedules"
+      <a-button :disabled="!selectedNodeId || !form.stream.trim() || !canViewPlans" @click="openSchedules"
         ><template #icon><CalendarClock :size="15" /></template>查看录像计划</a-button
       >
     </header>
@@ -350,14 +347,14 @@ defineExpose({ refresh });
       </div>
       <div class="runtime-actions">
         <a-button
-          v-if="canControl"
+          :disabled="!canControl"
           type="primary"
           :loading="preflightLoading && preparedAction === 'start'"
           @click="prepare('start')"
           >预检并启动</a-button
         >
         <a-button
-          v-if="canControl"
+          :disabled="!canControl"
           status="danger"
           :loading="preflightLoading && preparedAction === 'stop'"
           @click="prepare('stop')"

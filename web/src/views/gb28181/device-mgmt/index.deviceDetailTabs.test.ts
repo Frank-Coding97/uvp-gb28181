@@ -129,7 +129,10 @@ describe("device detail drawer segments", () => {
     // 宿主传几组是它自己的事（控制台 1 组 / 这里 4 组），写死列数会让 2 组的导航
     // 只占半排、看上去像坏了。
     expect(drawerSource).not.toMatch(/\.dcg-window--embedded \.dcg-nav \{[\s\S]{0,600}?grid-template-columns: repeat\(4/);
-    expect(drawerSource).toContain(".dcg-window--embedded .dcg-nav > .dcg-nav-item {");
+    // ⚠️ 校正既有红（2026-10-11）：抽屉里的分组导航早已从原生按钮统一成 Arco 按钮，
+    //    CSS 选择器随之收窄为 `.dcg-nav-item.arco-btn[type="button"]`，本断言未同步。
+    //    与本次权限改造无关，仅因同文件一并修正。
+    expect(drawerSource).toContain('.dcg-window--embedded .dcg-nav > .dcg-nav-item.arco-btn[type="button"] {');
     // ⛔ `flex-direction: row` 必须显式写：基类 `.dcg-nav` 是 `flex-direction: column`
     //   （全窗口形态的竖排导航），`display: flex` 会把它继承下来 ⇒ 导航变成竖排
     //   （实测 2 个组各 592px 宽、上下摞着）。`display:grid` 时代它被隐式盖掉，
@@ -169,7 +172,8 @@ describe("device detail drawer segments", () => {
     expect(source).toContain("const canUseDeviceControl = computed(() => canControlDevice.value || canSnapshotDevice.value);");
     expect(source).toContain(':can-control="canControlDevice"');
     expect(source).toContain(':can-snapshot="canSnapshotDevice"');
-    expect(source).toContain('v-if="canUseDeviceControl || canSnapshotDevice || canViewDeviceFacts"');
+    // ⭐ 权限改造（2026-10-11）：三个权限都没有时「操作」入口仍在，但置灰不可点。
+    expect(source).toContain(':disabled="!canUseDeviceControl && !canSnapshotDevice && !canViewDeviceFacts"');
   });
 
   it("事实面板按 ptz:view 放行，不按 device:view", () => {

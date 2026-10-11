@@ -49,13 +49,12 @@
               重置
             </a-button>
             <a-button
-              v-if="canClear"
               data-testid="alarm-clear-all"
               class="alarm-clear-all-btn"
               type="primary"
               status="warning"
               :loading="clearDeleting"
-              :disabled="clearDeleting"
+              :disabled="clearDeleting || !canClear"
               @click="requestClearAll"
             >
               <template #icon><Eraser :size="15" /></template>
@@ -64,7 +63,7 @@
           </template>
         </s-layout-search>
 
-        <div v-if="canDelete && selectedRowKeys.length" class="alarm-batch-bar">
+        <div v-if="selectedRowKeys.length" class="alarm-batch-bar">
           <span class="alarm-batch-bar__info"
             >已选 <strong>{{ selectedRowKeys.length }}</strong> 条</span
           >
@@ -73,7 +72,7 @@
               data-testid="batch-delete"
               status="danger"
               :loading="batchDeleting"
-              :disabled="batchDeleting"
+              :disabled="batchDeleting || !canDelete"
               @click="requestBatchDelete"
             >
               <template #icon><Trash2 :size="14" /></template>
@@ -153,12 +152,12 @@
                       <template #icon><Eye :size="13" /></template>
                       <span>详情</span>
                     </a-link>
-                    <a-tooltip v-if="canDelete" content="物理删除告警，不可恢复">
+                    <a-tooltip content="物理删除告警，不可恢复">
                       <a-link
                         class="uvp-table-action uvp-table-action--delete"
                         :data-testid="`single-delete-${record.id}`"
                         :loading="deletingIds.has(record.id)"
-                        :disabled="deletingIds.has(record.id)"
+                        :disabled="deletingIds.has(record.id) || !canDelete"
                         role="button"
                         tabindex="0"
                         :aria-label="`物理删除告警 ${record.id}`"

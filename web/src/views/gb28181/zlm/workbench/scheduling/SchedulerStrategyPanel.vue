@@ -127,10 +127,9 @@ defineExpose({ refresh });
         >
         <button type="button" class="refresh-button" :disabled="loading || !active" @click="refresh">刷新</button>
         <button
-          v-if="canManage"
           type="button"
           class="primary-button"
-          :disabled="saving || loading || !selected || selected === current || !active"
+          :disabled="saving || loading || !selected || selected === current || !active || !canManage"
           @click="handleSave"
         >
           {{ saving ? "保存中…" : "保存策略" }}

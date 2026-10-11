@@ -60,7 +60,7 @@
                 <template #icon><RefreshCw :size="15" /></template>
                 刷新 <span class="refresh-countdown">{{ autoRefreshCountdown }}s</span>
               </a-button>
-              <a-button v-if="canManage" class="uvp-page-action-btn uvp-create-btn" type="primary" @click="openCreate">
+              <a-button class="uvp-page-action-btn uvp-create-btn" type="primary" :disabled="!canManage" @click="openCreate">
                 <template #icon><Plus :size="15" /></template>
                 新增上级
               </a-button>
@@ -157,23 +157,22 @@
             <a-table-column title="操作" :width="290" align="center" :fixed="isMobile ? '' : 'right'">
               <template #cell="{ record }">
                 <div class="uvp-table-actions cascade-actions">
-                  <a-link v-if="canManage" class="uvp-table-action uvp-table-action--edit" @click="openEdit(record)"
+                  <a-link class="uvp-table-action uvp-table-action--edit" :disabled="!canManage" @click="openEdit(record)"
                     ><Settings2 :size="14" />编辑</a-link
                   >
-                  <a-link v-if="canShare" class="uvp-table-action uvp-table-action--assign" @click="openShare(record)"
+                  <a-link class="uvp-table-action uvp-table-action--assign" :disabled="!canShare" @click="openShare(record)"
                     ><Share2 :size="14" />共享</a-link
                   >
                   <a-tooltip content="把当前共享给该上级的设备/通道目录主动报送一遍">
                     <a-link
-                      v-if="canShare"
                       class="uvp-table-action uvp-table-action--sync"
-                      :disabled="!record.enabled"
+                      :disabled="!canShare || !record.enabled"
                       :loading="actionId === record.id"
                       @click="pushCatalog(record)"
                       ><Send :size="14" />推送</a-link
                     >
                   </a-tooltip>
-                  <a-link v-if="canManage" class="uvp-table-action uvp-table-action--delete" @click="confirmDelete(record)"
+                  <a-link class="uvp-table-action uvp-table-action--delete" :disabled="!canManage" @click="confirmDelete(record)"
                     ><Trash2 :size="14" />删除</a-link
                   >
                 </div>
@@ -556,7 +555,7 @@ import {
   type ChannelVO,
   type DeviceVO
 } from "../device-mgmt/api";
-import { useUserStoreHook } from "@/store/modules/user";
+import { hasPermission } from "@/hooks/usePermission";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import SCounterSuffix from "@/components/s-counter-suffix/index.vue";
 import SNumberField from "@/components/s-number-field/index.vue";
@@ -583,10 +582,7 @@ import { useDeviceStatusLabel } from "../useDeviceStatusDict";
 type ChannelOption = (GbChannel | ChannelVO) & { sourceDeviceId: number };
 type ShareDevice = GbDevice & Partial<DeviceVO>;
 
-const userStore = useUserStoreHook();
 const { isMobile } = useDevicesSize();
-const hasPermission = (permission: string) =>
-  userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
 const canView = computed(() => hasPermission("gb28181:cascade:view"));
 const canManage = computed(() => hasPermission("gb28181:cascade:manage"));
 const canEnable = computed(() => hasPermission("gb28181:cascade:enable"));

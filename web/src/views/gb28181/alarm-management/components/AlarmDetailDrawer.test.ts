@@ -69,7 +69,8 @@ describe("AlarmDetailDrawer", () => {
     expect(wrapper.text()).toContain("sha256:abc");
     expect(wrapper.text()).toContain("<Notify><Description>有人 & 移动</Description></Notify>");
     expect(wrapper.find("script").exists()).toBe(false);
-    expect(wrapper.find("[data-testid='detail-delete']").exists()).toBe(false);
+    // ⭐ 权限改造（2026-10-11）：无删除权限时按钮保留可见但置灰。
+    expect(wrapper.get("[data-testid='detail-delete']").attributes("disabled")).toBeDefined();
     expect(wrapper.get("[data-testid='alarm-detail-drawer']").attributes("data-esc-to-close")).toBe("true");
   });
 
@@ -115,7 +116,10 @@ describe("AlarmDetailDrawer", () => {
   it("emits the same single-delete intent only when delete permission is present", async () => {
     const withoutPermission = mountDrawer();
     await flushPromises();
-    expect(withoutPermission.find("[data-testid='detail-delete']").exists()).toBe(false);
+    // ⭐ 权限改造（2026-10-11）：无删除权限时按钮保留可见但置灰。
+    //    注意 `a-button` 在测试里是 stub，会无条件转发 click，所以这里只钉 DOM 契约（`disabled` 属性）；
+    //    "点不动" 由 Arco 组件自身保证，另有 `requestSingleDelete` 的权限早退做双保险。
+    expect(withoutPermission.get("[data-testid='detail-delete']").attributes("disabled")).toBeDefined();
 
     const wrapper = mount(AlarmDetailDrawer, {
       props: { visible: true, alarmId: "9007199254740993", canDelete: true },

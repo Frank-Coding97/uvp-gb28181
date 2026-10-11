@@ -13,13 +13,13 @@
         <button class="secondary" :disabled="refreshing" @click="refreshData">
           <RefreshCw :size="15" :class="{ spin: refreshing }" />刷新
         </button>
-        <button v-if="!editing && canEditLayout" class="btn-primary primary" @click="startEditing">
+        <button v-if="!editing" class="btn-primary primary" :disabled="!canEditLayout" @click="startEditing">
           <Pencil :size="15" />编辑仪表盘
         </button>
         <template v-if="editing">
-          <button v-if="canResetLayout" class="secondary" @click="resetLayout"><RotateCcw :size="15" />恢复默认</button>
+          <button :disabled="!canResetLayout" class="secondary" @click="resetLayout"><RotateCcw :size="15" />恢复默认</button>
           <button class="secondary" @click="cancelEditing">取消</button>
-          <button v-if="canSaveLayout" class="btn-primary primary" :disabled="saving" @click="saveLayout">
+          <button class="btn-primary primary" :disabled="saving || !canSaveLayout" @click="saveLayout">
             <Save :size="15" />{{ saving ? "保存中" : "保存布局" }}
           </button>
         </template>
@@ -287,7 +287,7 @@ import {
 } from "./dashboardCardDrilldown";
 import { buildMediaRuntimeLedger, type MediaRuntimeLedgerKind } from "./dashboardDrilldownState";
 import { useDashboardDrilldown } from "./useDashboardDrilldown";
-import { useUserStoreHook } from "@/store/modules/user";
+import { hasPermission } from "@/hooks/usePermission";
 
 defineOptions({ name: "Home" });
 const gridElement = ref<HTMLElement | null>(null);
@@ -320,8 +320,6 @@ let grid: DashboardGridHandle | null = null,
   timer: ReturnType<typeof setInterval> | null = null,
   clockTimer: ReturnType<typeof setInterval> | null = null;
 
-const permissions = computed(() => useUserStoreHook().account.permissions ?? []);
-const hasPermission = (permission: string) => permissions.value.includes("*:*:*") || permissions.value.includes(permission);
 const canEditLayout = computed(() => hasPermission("gb28181:home:layout:save") || hasPermission("gb28181:home:layout:reset"));
 const canSaveLayout = computed(() => hasPermission("gb28181:home:layout:save"));
 const canResetLayout = computed(() => hasPermission("gb28181:home:layout:reset"));

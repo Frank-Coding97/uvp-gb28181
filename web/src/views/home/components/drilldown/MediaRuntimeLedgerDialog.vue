@@ -12,7 +12,7 @@ import {
   type ZLMOwnershipPreflight,
   type ZLMStreamViewer
 } from "@/api/gb28181-zlm-runtime";
-import { useUserStoreHook } from "@/store/modules/user";
+import { hasPermission } from "@/hooks/usePermission";
 import SNumberField from "@/components/s-number-field/index.vue";
 import ZLMDangerActionDialog from "@/views/gb28181/zlm/components/ZLMDangerActionDialog.vue";
 import { formatZLMByteRate, formatZLMDuration, zlmErrorPresentation } from "@/views/gb28181/zlm/components/zlmFormatters";
@@ -27,7 +27,6 @@ interface ViewerLedgerRow extends ZLMStreamViewer {
 
 const props = defineProps<{ visible: boolean; kind: MediaRuntimeLedgerKind; ledger: MediaRuntimeLedger }>();
 const emit = defineEmits<{ close: []; kind: [value: MediaRuntimeLedgerKind]; refresh: [] }>();
-const userStore = useUserStoreHook();
 const query = ref("");
 const stopTarget = ref<MediaBusinessStream | null>(null);
 const stopping = ref(false);
@@ -121,8 +120,6 @@ const viewerPagination = computed(() => ({
   showPageSize: true,
   pageSizeOptions: [10, 20, 50, 100]
 }));
-const hasPermission = (permission: string) =>
-  userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
 const canForce = computed(() => hasPermission("gb28181:zlm:rtp:force-close"));
 const canKick = computed(() => hasPermission("gb28181:zlm:session:kick"));
 const forceImpacts = computed(
@@ -503,7 +500,7 @@ function changeNetworkPageSize(value: number) {
                   ><template #icon><CircleStop :size="13" /></template><span>停止点播</span></a-link
                 >
                 <a-link
-                  v-if="canForce"
+                  :disabled="!canForce"
                   class="uvp-table-action uvp-table-action--delete"
                   status="danger"
                   @click="openForce(record)"

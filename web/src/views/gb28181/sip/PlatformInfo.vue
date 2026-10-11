@@ -143,7 +143,13 @@ onMounted(refresh);
               <template #icon><Copy :size="15" /></template>
               复制 SIP 接入信息
             </a-button>
-            <a-button v-if="canEdit && status?.config" class="uvp-page-action-btn" type="primary" @click="wizardVisible = true">
+            <a-button
+              v-if="status?.config"
+              class="uvp-page-action-btn"
+              type="primary"
+              :disabled="!canEdit"
+              @click="wizardVisible = true"
+            >
               <template #icon><Settings2 :size="16" /></template>
               编辑配置
             </a-button>
@@ -158,7 +164,7 @@ onMounted(refresh);
         <a-spin :loading="loading" class="sip-platform-wrapper">
           <!-- 未配置态 -->
           <a-empty v-if="status && status.configStatus === 'unconfigured'" description="尚未配置 SIP 服务" class="sip-empty">
-            <a-button v-if="canEdit" type="primary" @click="wizardVisible = true">开始配置</a-button>
+            <a-button :disabled="!canEdit" type="primary" @click="wizardVisible = true">开始配置</a-button>
           </a-empty>
 
           <!-- 已配置:双栏布局 -->

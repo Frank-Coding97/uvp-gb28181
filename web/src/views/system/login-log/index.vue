@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { Eraser, Eye, KeyRound, RotateCcw, Search, Trash2 } from "lucide-vue-next";
 import { Modal } from "@arco-design/web-vue";
 import { formatTime } from "@/globals";
-import { useUserStoreHook } from "@/store/modules/user";
+import { hasPermission } from "@/hooks/usePermission";
 import {
   clearLoginLogsAPI,
   deleteLoginLogsAPI,
@@ -51,11 +51,9 @@ const selectedRowKeys = ref<number[]>([]);
 const deleting = ref(false);
 const clearing = ref(false);
 const unlockingId = ref<number | null>(null);
-const permissions = computed(() => useUserStoreHook().account.permissions || []);
-const can = (permission: string) => permissions.value.includes("*:*:*") || permissions.value.includes(permission);
-const canDelete = computed(() => can("system:login-log:delete"));
-const canClear = computed(() => can("system:login-log:clear"));
-const canUnlock = computed(() => can("system:login-log:unlock"));
+const canDelete = computed(() => hasPermission("system:login-log:delete"));
+const canClear = computed(() => hasPermission("system:login-log:clear"));
+const canUnlock = computed(() => hasPermission("system:login-log:unlock"));
 const rowSelection = computed(() => (canDelete.value ? { type: "checkbox" as const, showCheckedAll: true } : undefined));
 
 const tableScroll = computed(() => ({ x: "100%", minWidth: 1060, ...(logs.value.length ? { y: "100%" } : {}) }));
@@ -290,7 +288,7 @@ defineExpose({
           <a-button @click="reset"
             ><template #icon><RotateCcw :size="16" /></template>重置</a-button
           >
-          <a-button v-if="canClear" class="login-log-clear-button" status="danger" :loading="clearing" @click="requestClear"
+          <a-button :disabled="!canClear" class="login-log-clear-button" status="danger" :loading="clearing" @click="requestClear"
             ><template #icon><Eraser :size="16" /></template>清空日志</a-button
           >
         </template>
@@ -348,9 +346,10 @@ defineExpose({
                   <a-link class="uvp-table-action uvp-table-action--detail" @click="viewDetail(record)"
                     ><template #icon><Eye :size="13" /></template><span>详情</span></a-link
                   ><a-link
-                    v-if="canUnlock && record.result === 'failure' && record.failureReason === 'account_locked' && record.userId"
+                    v-if="record.result === 'failure' && record.failureReason === 'account_locked' && record.userId"
                     class="uvp-table-action uvp-table-action--unlock"
                     :loading="unlockingId === record.id"
+                    :disabled="!canUnlock"
                     @click="requestUnlock(record)"
                     ><template #icon><KeyRound :size="13" /></template><span>解锁</span></a-link
                   >

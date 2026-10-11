@@ -15,7 +15,7 @@ import {
 } from "@/api/gb28181-zlm-ingress";
 import type { ZLMOwnershipPreflight } from "@/api/gb28181-zlm-runtime";
 import type { MediaNodeCatalogNode, MediaScope } from "@/store/modules/media-workbench";
-import { useUserStoreHook } from "@/store/modules/user";
+import { hasPermission } from "@/hooks/usePermission";
 
 import FFmpegSourceForm from "../../FFmpegSourceForm.vue";
 import ZLMDangerActionDialog from "../../components/ZLMDangerActionDialog.vue";
@@ -40,7 +40,6 @@ const props = withDefaults(
   }
 );
 
-const userStore = useUserStoreHook();
 const nodeId = computed<number | null>(() => (props.scope === "all" ? null : props.scope));
 const canPoll = computed(() => props.active && props.scope !== "all");
 const scopeBlocked = computed(() => props.scope === "all");
@@ -65,8 +64,6 @@ const deleting = ref(false);
 const rows = computed(() => pageData.value?.list ?? []);
 const capability = computed<ZLMCapabilityState>(() => pageData.value?.capability ?? observedCapability.value);
 const templates = computed(() => pageData.value?.templates ?? []);
-const hasPermission = (permission: string) =>
-  userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
 const canManage = computed(() => hasPermission("gb28181:zlm:ffmpeg:manage"));
 const createDecision = computed(() =>
   ffmpegCreateDecision(capability.value, templates.value, canManage.value && !scopeBlocked.value)

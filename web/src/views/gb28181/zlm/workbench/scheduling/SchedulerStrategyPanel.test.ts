@@ -120,7 +120,9 @@ describe("SchedulerStrategyPanel", () => {
     await flushPromises();
 
     expect(wrapper.find(".permission-state").exists()).toBe(true);
-    expect(wrapper.find(".primary-button").exists()).toBe(false);
+    // ⭐ 权限改造（2026-10-11）：保存按钮保留可见但置灰，不再消失。
+    expect(wrapper.find(".primary-button").exists()).toBe(true);
+    expect(wrapper.get(".primary-button").attributes("disabled")).toBeDefined();
     wrapper.unmount();
   });
 });

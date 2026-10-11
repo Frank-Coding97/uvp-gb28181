@@ -497,11 +497,12 @@ describe("record cache workspace", () => {
     expect(api.listRecordCacheTasks.mock.calls.length).toBe(before + 1);
   });
 
-  it("没有收藏权限时星标不出现在表格里", async () => {
+  it("没有收藏权限时星标出现但置灰", async () => {
     account.permissions = ["gb28181:record-cache:view"];
     const wrapper = mount(RecordCachePage, { global: { stubs } });
     await flushPromises();
-    expect(wrapper.find(".uvp-table-action--favorite").exists()).toBe(false);
+    // ⭐ 权限改造（2026-10-11）：无收藏权限时星标保留可见但置灰，不再从表格里消失。
+    expect(wrapper.get(".uvp-table-action--favorite").attributes("disabled")).toBeDefined();
   });
 
   it("只有存在未完成任务时才开启轮询，卸载时停掉定时器", async () => {
@@ -673,13 +674,27 @@ describe("record cache workspace", () => {
     expect(messages.error).toHaveBeenCalledWith("下载失败");
   });
 
-  it("没有取消/删除权限时对应按钮不出现在操作列", async () => {
+  it("没有取消/删除权限时对应按钮置灰而不是消失", async () => {
     account.permissions = ["gb28181:record-cache:view"];
-    const wrapper = mount(RecordCachePage, { global: { stubs } });
+    // ⭐ 权限改造（2026-10-11）：操作入口保留可见但置灰（测试里 a-link 桩渲染成 <button>）。
+    //    运行中的任务只出现「取消」；「删除」由任务状态决定（不属于权限维度）。
+    const running = mount(RecordCachePage, { global: { stubs } });
     await flushPromises();
+    const cancel = running.findAll("button").find(candidate => candidate.text().trim() === "取消");
+    expect(cancel).toBeTruthy();
+    expect(cancel!.attributes("disabled")).toBeDefined();
+    expect(running.findAll("button").some(candidate => candidate.text().trim() === "删除")).toBe(false);
+    running.unmount();
 
-    expect(wrapper.findAll("button").some(candidate => candidate.text().trim() === "取消")).toBe(false);
-    expect(wrapper.findAll("button").some(candidate => candidate.text().trim() === "删除")).toBe(false);
+    // 已完成的任务才出现「删除」；无权限时同样置灰。
+    api.listRecordCacheTasks.mockResolvedValue(page([task({ state: "succeeded", progress: 1 })]));
+    api.getRecordCacheTask.mockResolvedValue({ code: 0, data: task({ state: "succeeded", progress: 1 }) });
+    const done = mount(RecordCachePage, { global: { stubs } });
+    await flushPromises();
+    const remove = done.findAll("button").find(candidate => candidate.text().trim() === "删除");
+    expect(remove).toBeTruthy();
+    expect(remove!.attributes("disabled")).toBeDefined();
+    done.unmount();
   });
 
   it("没有任务时给出引导文案", async () => {

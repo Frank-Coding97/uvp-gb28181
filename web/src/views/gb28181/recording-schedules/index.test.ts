@@ -73,7 +73,8 @@ describe("recording schedule prototype", () => {
       source.indexOf('<a-table-column title="状态"'),
       source.indexOf('<a-table-column title="最近更新"')
     );
-    expect(statusColumn.replace(/\s+/g, " ")).toContain('<a-switch v-if="canMaintain" v-model="record.enabled"');
+    // ⭐ 权限改造（2026-10-11）：无 `plan:maintain` 时开关保持可见但置灰，不再隐藏。
+    expect(statusColumn.replace(/\s+/g, " ")).toContain('<a-switch v-model="record.enabled" :disabled="!canMaintain"');
     expect(statusColumn.replace(/\s+/g, " ")).toContain('@change="notifyPlanStatusChange(record)"');
     expect(statusColumn).not.toContain("<a-tag");
     expect(source).toContain("function notifyPlanStatusChange");

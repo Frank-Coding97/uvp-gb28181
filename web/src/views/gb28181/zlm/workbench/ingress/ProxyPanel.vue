@@ -21,7 +21,7 @@ import {
   type ZLMPushProxyCreateRequest
 } from "@/api/gb28181-zlm-ingress";
 import type { MediaNodeCatalogNode, MediaScope } from "@/store/modules/media-workbench";
-import { useUserStoreHook } from "@/store/modules/user";
+import { hasPermission } from "@/hooks/usePermission";
 
 import ProxyForm from "../../ProxyForm.vue";
 import ZLMDangerActionDialog from "../../components/ZLMDangerActionDialog.vue";
@@ -57,7 +57,6 @@ const props = withDefaults(
   }
 );
 
-const userStore = useUserStoreHook();
 const activeTab = ref<ProxyTab>(props.kind);
 const pages = reactive({ pull: { page: 1, pageSize: 10 }, push: { page: 1, pageSize: 10 } });
 const data = reactive<{ pull: ZLMProxyPage | null; push: ZLMProxyPage | null }>({ pull: null, push: null });
@@ -84,8 +83,6 @@ const scopeBlocked = computed(() => props.scope === "all");
 const selectedNodeName = computed(
   () => props.nodes.find(node => node.id === nodeId.value)?.name ?? `节点 #${nodeId.value ?? "—"}`
 );
-const hasPermission = (permission: string) =>
-  userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
 const canManage = computed(() => hasPermission("gb28181:zlm:proxy:manage"));
 const paused = computed(() => formVisible.value || deleteVisible.value);
 const errorPresentation = computed(() => zlmErrorPresentation(loadError.value));

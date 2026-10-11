@@ -71,11 +71,16 @@ describe("editable realtime dashboard layout", () => {
   });
 
   it("guards dashboard layout entry points and write functions by permission", () => {
-    expect(source).toContain("useUserStoreHook");
-    expect(source).toContain('v-if="!editing && canEditLayout"');
+    // ⭐ 权限收敛（2026-10-11）：判定入口统一到 `@/hooks/usePermission`，
+    //    home.vue 不再自己读 store —— 断言点从「读 store」改成「走统一入口」。
+    expect(source).toContain('import { hasPermission } from "@/hooks/usePermission"');
+    // ⭐ 权限改造（2026-10-11）：入口按钮**不再隐藏**，改为「可见但置灰」——
+    //    隐藏会让用户不知道平台还有这些功能。函数体内的权限早退仍然保留（下方三条）。
+    expect(source).toContain('v-if="!editing"');
+    expect(source).toContain(':disabled="!canEditLayout"');
     expect(source).toContain('<template v-if="editing">');
-    expect(source).toContain('v-if="canResetLayout"');
-    expect(source).toContain('v-if="canSaveLayout"');
+    expect(source).toContain(':disabled="!canResetLayout"');
+    expect(source).toContain(':disabled="saving || !canSaveLayout"');
     expect(source).toContain("if (!canEditLayout.value) return;");
     expect(source).toContain("if (!canSaveLayout.value) return;");
     expect(source).toContain("if (!canResetLayout.value) return;");
@@ -93,13 +98,16 @@ describe("editable realtime dashboard layout", () => {
 
   it("reuses the shared primary button treatment for dashboard editing actions", () => {
     expect(source).toMatch(
-      /<button\s+v-if="!editing && canEditLayout"\s+class="btn-primary primary"[^>]*>[\s\S]*?编辑仪表盘[\s\S]*?<\/button>/s
+      /<button\s+v-if="!editing"\s+class="btn-primary primary"\s+:disabled="!canEditLayout"[^>]*>[\s\S]*?编辑仪表盘[\s\S]*?<\/button>/s
     );
     expect(source).toMatch(
-      /<button\s+v-if="canSaveLayout"\s+class="btn-primary primary"[^>]*>[\s\S]*?保存布局[\s\S]*?<\/button>/s
+      /<button\s+class="btn-primary primary"\s+:disabled="saving \|\| !canSaveLayout"[^>]*>[\s\S]*?保存布局[\s\S]*?<\/button>/s
     );
+    // ⚠️ 校正既有红（2026-10-11）：源码早已从 `#fff + --uvp-brand` 换成实心底色语义 token
+    //    `--uvp-solid-text` / `--uvp-solid-bg`（暗色下 `--uvp-brand` 是文字色，白字压上去对比度不足），
+    //    此处断言未同步。与本次权限改造无关，仅因同文件一并修正。
     expect(source).toMatch(
-      /\.primary\s*\{[^}]*color:\s*#(?:fff|ffffff);[^}]*background:\s*var\(--uvp-brand\);[^}]*border:\s*0;/s
+      /\.primary\s*\{[^}]*color:\s*var\(--uvp-solid-text\);[^}]*background:\s*var\(--uvp-solid-bg\);[^}]*border:\s*0;/s
     );
     expect(source).toMatch(/\.actions\s+\.primary\s*\{[^}]*font-weight:\s*600;/s);
   });

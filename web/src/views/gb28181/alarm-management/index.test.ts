@@ -186,7 +186,8 @@ describe("AlarmManagement", () => {
     await flushPromises();
     expect(wrapper.find(".alarm-batch-bar").exists()).toBe(false);
     expect(wrapper.find("[data-testid='batch-delete']").exists()).toBe(false);
-    expect(wrapper.find("[data-testid='alarm-clear-all']").exists()).toBe(false);
+    // ⭐ 权限改造（2026-10-11）：一键清理按钮保留可见但置灰，不再从工具栏消失。
+    expect(wrapper.get("[data-testid='alarm-clear-all']").attributes("disabled")).toBeDefined();
     expect(wrapper.get("[data-testid='alarm-table']").attributes("data-has-row-selection")).toBe("false");
   });
 
@@ -195,7 +196,8 @@ describe("AlarmManagement", () => {
     const wrapper = mountPage();
     await flushPromises();
     expect(wrapper.get("[data-testid='alarm-table']").attributes("data-has-row-selection")).toBe("true");
-    expect(wrapper.find("[data-testid='alarm-clear-all']").exists()).toBe(false);
+    // ⭐ 权限改造：没有 alarm:clear 时「一键清理」置灰而非消失，权限边界仍由按钮状态体现。
+    expect(wrapper.get("[data-testid='alarm-clear-all']").attributes("disabled")).toBeDefined();
   });
 
   it("batch deletes selected rows after confirmation", async () => {
@@ -233,7 +235,11 @@ describe("AlarmManagement", () => {
 
     expect(wrapper.find("[data-testid='alarm-clear-all']").exists()).toBe(true);
     expect(wrapper.get("[data-testid='alarm-table']").attributes("data-has-row-selection")).toBe("false");
-    expect(wrapper.find("[data-testid='single-delete-9007199254740993']").exists()).toBe(false);
+    // ⭐ 权限改造：没有 alarm:delete 时行内「删除」链接保留可见但置灰；点它也弹不出确认框。
+    const deleteEntry = wrapper.get("[data-testid='single-delete-9007199254740993']");
+    expect(deleteEntry.attributes("disabled")).toBeDefined();
+    await deleteEntry.trigger("click");
+    expect(modal.warning).not.toHaveBeenCalled();
 
     await wrapper.get("[data-testid='alarm-clear-all']").trigger("click");
     await modal.warning.mock.calls[0][0].onOk();
@@ -314,7 +320,11 @@ describe("AlarmManagement", () => {
   it("single delete requires permission, warns physical deletion and locks duplicate requests", async () => {
     const viewOnly = mountPage();
     await flushPromises();
-    expect(viewOnly.find("[data-testid='single-delete-9007199254740993']").exists()).toBe(false);
+    // ⭐ 权限改造：无 alarm:delete 时删除链接保留可见但置灰；点它不会发起物理删除。
+    const viewOnlyEntry = viewOnly.get("[data-testid='single-delete-9007199254740993']");
+    expect(viewOnlyEntry.attributes("disabled")).toBeDefined();
+    await viewOnlyEntry.trigger("click");
+    expect(modal.warning).not.toHaveBeenCalled();
 
     account.permissions = ["gb28181:alarm:view", "gb28181:alarm:delete"];
     let resolveDelete!: (value: unknown) => void;

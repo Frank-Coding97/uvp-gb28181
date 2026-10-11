@@ -153,12 +153,13 @@ onMounted(() => load(props.modelValue.view));
     <div class="directory-head">
       <div class="directory-title"><FolderTree :size="14" /><span>设备目录</span></div>
       <div class="directory-actions">
-        <a-tooltip v-if="canManage && modelValue.view === 'custom'" content="新建根分组">
+        <a-tooltip v-if="modelValue.view === 'custom'" content="新建根分组">
           <button
             data-action="create-root"
             class="icon-button"
             type="button"
             aria-label="新建根分组"
+            :disabled="!canManage"
             @click="emit('create', null)"
           >
             <FolderPlus :size="14" />

@@ -405,7 +405,7 @@ onMounted(() => {
                 <template #title="node">
                   <div class="dept-tree-node">
                     <span class="dept-tree-node__name">{{ node.name }}</span>
-                    <a-link v-if="canAssign" class="dept-tree-node__assign" @click.stop="openDeptAssign(node)">
+                    <a-link :disabled="!canAssign" class="dept-tree-node__assign" @click.stop="openDeptAssign(node)">
                       分配本部门设备
                     </a-link>
                   </div>
@@ -585,11 +585,19 @@ onMounted(() => {
                 <a-table-column title="操作" :width="190" align="center" fixed="right" cell-class="operation-column">
                   <template #cell="{ record }">
                     <div class="device-operation-actions">
-                      <a-link v-if="canAssign" class="uvp-table-action uvp-table-action--assign" @click="openRowAssign(record)">
+                      <a-link
+                        :disabled="!canAssign"
+                        class="uvp-table-action uvp-table-action--assign"
+                        @click="openRowAssign(record)"
+                      >
                         <template #icon><UserRoundCog :size="13" /></template>
                         调整归属
                       </a-link>
-                      <a-link v-if="canShare" class="uvp-table-action uvp-table-action--permission" @click="openRowShare(record)">
+                      <a-link
+                        :disabled="!canShare"
+                        class="uvp-table-action uvp-table-action--permission"
+                        @click="openRowShare(record)"
+                      >
                         <template #icon><Share2 :size="13" /></template>
                         共享管理
                       </a-link>
@@ -608,11 +616,11 @@ onMounted(() => {
             <!-- 勾选批量操作条 -->
             <div v-if="selectedCount > 0" class="batch-bar">
               <span class="batch-bar__count">已选 {{ selectedCount }} 台</span>
-              <button v-if="canAssign" class="btn-primary batch-bar__btn" type="button" @click="openBatchAssign">
+              <button :disabled="!canAssign" class="btn-primary batch-bar__btn" type="button" @click="openBatchAssign">
                 <UserRoundCog :size="14" />
                 批量调整归属
               </button>
-              <button v-if="canShare" class="btn-ghost batch-bar__btn" type="button" @click="openBatchShare">
+              <button :disabled="!canShare" class="btn-ghost batch-bar__btn" type="button" @click="openBatchShare">
                 <Share2 :size="14" />
                 共享管理
               </button>

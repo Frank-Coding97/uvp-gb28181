@@ -32,7 +32,7 @@ import {
   type ChannelFavoriteGroup as ApiFavoriteGroup,
   type ChannelFavoriteInput
 } from "@/api/gb28181";
-import { useUserStoreHook } from "@/store/modules/user";
+import { hasPermission } from "@/hooks/usePermission";
 import { useDeviceStatusLabel } from "../useDeviceStatusDict";
 
 /** 在线状态文案（`device_status` 字典）。 */
@@ -81,9 +81,6 @@ const emit = defineEmits<{
   "update:view": [view: SourceView];
 }>();
 
-const userStore = useUserStoreHook();
-const permissions = computed(() => userStore.account.permissions ?? []);
-const hasPermission = (permission: string) => permissions.value.includes("*:*:*") || permissions.value.includes(permission);
 const canViewDevices = computed(() => hasPermission("gb28181:device:view"));
 const canManageFavorites = computed(() => hasPermission("gb28181:channel-favorite:manage"));
 const view = ref<SourceView>(props.view === "favorites" && !canManageFavorites.value ? "devices" : props.view || "devices");
@@ -795,43 +792,59 @@ defineExpose({ openFavoriteDialogForChannels });
             />
           </button>
           <button
-            v-if="canManageFavorites && node.kind === 'channel' && node.channel && !isChannelFavorite(node.channel)"
+            v-if="node.kind === 'channel' && node.channel && !isChannelFavorite(node.channel)"
             class="favorite-toggle"
             type="button"
             aria-label="收藏通道"
             title="收藏通道"
+            :disabled="!canManageFavorites"
             @click.stop="openFavoriteDialog(node)"
           >
             <Star :size="14" aria-hidden="true" />
           </button>
           <a-popconfirm
-            v-if="canManageFavorites && node.kind === 'channel' && node.favoriteGroupId"
+            v-if="node.kind === 'channel' && node.favoriteGroupId"
             :content="`确认移除“${node.channel ? displayChannelName(node.channel) : ''}”吗？`"
             type="warning"
             @ok="removeFavoriteChannel(node)"
           >
-            <button class="favorite-remove" type="button" aria-label="移除收藏通道" title="移除收藏通道" @click.stop>
+            <button
+              class="favorite-remove"
+              type="button"
+              aria-label="移除收藏通道"
+              title="移除收藏通道"
+              :disabled="!canManageFavorites"
+              @click.stop
+            >
               <Trash2 :size="13" aria-hidden="true" />
             </button>
           </a-popconfirm>
           <button
-            v-if="canManageFavorites && node.kind === 'favorite-group' && node.favoriteGroup"
+            v-if="node.kind === 'favorite-group' && node.favoriteGroup"
             class="favorite-play"
             type="button"
             :data-test="`favorite-group-play-${node.favoriteGroup.id}`"
             aria-label="播放收藏组"
             title="播放收藏组"
+            :disabled="!canManageFavorites"
             @click.stop="emit('selectGroup', node.favoriteGroup)"
           >
             <Play :size="14" aria-hidden="true" />
           </button>
           <a-popconfirm
-            v-if="canManageFavorites && node.kind === 'favorite-group' && node.favoriteGroup"
+            v-if="node.kind === 'favorite-group' && node.favoriteGroup"
             :content="`确认删除收藏组“${node.favoriteGroup.name}”吗？`"
             type="warning"
             @ok="removeFavoriteGroup(node)"
           >
-            <button class="favorite-remove" type="button" aria-label="删除收藏组" title="删除收藏组" @click.stop>
+            <button
+              class="favorite-remove"
+              type="button"
+              aria-label="删除收藏组"
+              title="删除收藏组"
+              :disabled="!canManageFavorites"
+              @click.stop
+            >
               <Trash2 :size="13" aria-hidden="true" />
             </button>
           </a-popconfirm>

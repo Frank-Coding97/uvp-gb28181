@@ -16,7 +16,7 @@ import {
 import { reportPlaybackClientEvent, startPlay, type PlaybackClientFact, type PlayResult } from "@/api/gb28181";
 import { Message } from "@arco-design/web-vue";
 import { usePlaybackConsoleStore } from "@/store/modules/playback-console";
-import { useUserStoreHook } from "@/store/modules/user";
+import { hasPermission } from "@/hooks/usePermission";
 import PlayWindow from "../components/PlayWindow.vue";
 import BasicPtzPanel from "./BasicPtzPanel.vue";
 import PlaybackSourceTree from "./PlaybackSourceTree.vue";
@@ -47,9 +47,6 @@ interface FavoriteChannelGroup {
 const layout = ref<LayoutSize>(4);
 const focusedIndex = ref<number | null>(null);
 const playbackConsole = usePlaybackConsoleStore();
-const userStore = useUserStoreHook();
-const permissions = computed(() => userStore.account.permissions ?? []);
-const hasPermission = (permission: string) => permissions.value.includes("*:*:*") || permissions.value.includes(permission);
 const canViewDevices = computed(() => hasPermission("gb28181:device:view"));
 const canStartPlayback = computed(() => hasPermission("gb28181:play:start"));
 const canManageFavorites = computed(() => hasPermission("gb28181:channel-favorite:manage"));
@@ -569,7 +566,7 @@ onBeforeUnmount(() => {
           <span class="toolbar-divider" aria-hidden="true" />
           <div class="playback-actions" role="group" aria-label="批量播放控制">
             <button
-              v-if="canManageFavorites"
+              :disabled="!canManageFavorites"
               type="button"
               data-test="my-favorites"
               aria-label="收藏当前播放通道"

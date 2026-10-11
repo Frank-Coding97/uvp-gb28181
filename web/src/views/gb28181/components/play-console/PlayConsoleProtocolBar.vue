@@ -45,7 +45,7 @@ const emit = defineEmits<{
             <strong>{{ option.label }}:</strong>
             <span class="protocol-url" :title="protocolUrls[option.value] || ''">{{ protocolUrls[option.value] }}</span>
             <a-button
-              v-if="canSharePlayback"
+              :disabled="!canSharePlayback"
               type="text"
               size="mini"
               shape="square"

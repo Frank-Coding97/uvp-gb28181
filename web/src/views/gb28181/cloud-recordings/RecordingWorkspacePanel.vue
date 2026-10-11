@@ -64,10 +64,11 @@
               {{ reconciliationSummary.text }}
             </span>
             <a-button
-              v-if="activeView === 'files' && canReconcile"
+              v-if="activeView === 'files'"
               class="recording-reconcile-button"
               data-testid="recording-reconcile"
               :loading="reconciling"
+              :disabled="!canReconcile"
               @click="reconcile"
             >
               <template #icon><ScanSearch :size="15" /></template>
@@ -254,7 +255,7 @@
                             <span>播放</span>
                           </a-link>
                           <a-link
-                            v-if="canDownload"
+                            :disabled="!canDownload"
                             :data-testid="`download-${record.id}`"
                             class="uvp-table-action uvp-table-action--download"
                             @click="download(record)"
@@ -264,11 +265,10 @@
                           </a-link>
                         </template>
                         <a-link
-                          v-if="canDelete"
                           :data-testid="`delete-${record.id}`"
                           class="uvp-table-action uvp-table-action--delete"
                           :loading="deletingIds.has(record.id)"
-                          :disabled="deletingIds.has(record.id)"
+                          :disabled="deletingIds.has(record.id) || !canDelete"
                           @click="requestDelete(record)"
                         >
                           <template #icon><Trash2 :data-testid="`delete-icon-${record.id}`" :size="13" /></template>
@@ -376,7 +376,7 @@ import {
 import { Modal } from "@arco-design/web-vue";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import useGlobalProperties from "@/hooks/useGlobalProperties";
-import { useUserStoreHook } from "@/store/modules/user";
+import { hasPermission } from "@/hooks/usePermission";
 import { boundedPageRows, boundedPageSize } from "@/views/gb28181/zlm/workbench/boundedData";
 import RecordingDetailDrawer from "./components/RecordingDetailDrawer.vue";
 import RecordingPlayerDialog from "./components/RecordingPlayerDialog.vue";
@@ -426,11 +426,8 @@ const emit = defineEmits<{
   stats: [value: { filesTotal?: number | null; activeTotal?: number | null }];
 }>();
 
-const userStore = useUserStoreHook();
 const proxy = useGlobalProperties();
 const { isMobile } = useDevicesSize();
-const hasPermission = (permission: string) =>
-  userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
 const canView = computed(() => hasPermission("gb28181:recording:view"));
 const canReconcile = computed(() => hasPermission("gb28181:recording:reconcile"));
 const canDownload = computed(() => hasPermission("gb28181:recording:download"));

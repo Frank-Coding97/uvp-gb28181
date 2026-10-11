@@ -232,11 +232,12 @@ onBeforeUnmount(() => {
                 <span>观看来源</span><strong>{{ viewer.remote }}</strong>
               </div>
               <span class="viewer-online"><i></i>观看中</span>
-              <a-tooltip v-if="canKick && viewer.kickable" content="强退此连接" position="top">
+              <a-tooltip v-if="viewer.kickable" content="强退此连接" position="top">
                 <a-button
                   status="danger"
                   type="primary"
                   size="small"
+                  :disabled="!canKick"
                   :loading="kicking.has(viewer.id)"
                   :aria-label="`强退 ${viewer.remote} 的观看连接`"
                   @click="kick(viewer)"

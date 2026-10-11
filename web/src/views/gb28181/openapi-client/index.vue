@@ -16,6 +16,7 @@ import {
   ScrollText
 } from "lucide-vue-next";
 import { useUserStoreHook } from "@/store/modules/user";
+import { hasPermission } from "@/hooks/usePermission";
 import {
   OPENAPI_CLIENT_DATA_SCOPE_OPTIONS,
   createOpenAPIClient,
@@ -41,7 +42,6 @@ type StatusAction = "enable" | "disable" | "revoke";
 const userStore = useUserStoreHook();
 const router = useRouter();
 const permissions = computed(() => userStore.account?.permissions || []);
-const hasPermission = (permission: string) => permissions.value.includes("*:*:*") || permissions.value.includes(permission);
 const canRead = computed(() => hasPermission("gb28181:openapi:client:read"));
 const canCreate = computed(() => hasPermission("gb28181:openapi:client:create"));
 const canGrant = computed(() => hasPermission("gb28181:openapi:client:grant"));
@@ -503,7 +503,7 @@ defineExpose({
                 <template #icon><RefreshCw :size="16" /></template>刷新
               </a-button>
             </a-tooltip>
-            <a-button v-if="canCreate" type="primary" @click="openCreate"
+            <a-button type="primary" :disabled="!canCreate" @click="openCreate"
               ><template #icon><Plus :size="16" /></template>新建客户端</a-button
             >
           </template>
@@ -572,11 +572,12 @@ defineExpose({
             <a-table-column title="操作" :width="290" align="center" fixed="right">
               <template #cell="{ record }">
                 <div class="openapi-client-table__actions">
-                  <a-tooltip v-if="canRead" content="查看概览" position="top">
+                  <a-tooltip content="查看概览" position="top">
                     <a-button
                       type="text"
                       class="uvp-table-action openapi-client-table__overview"
                       aria-label="查看概览"
+                      :disabled="!canRead"
                       @click="openOverview(record)"
                     >
                       <template #icon><Eye :size="15" /></template>
@@ -584,44 +585,48 @@ defineExpose({
                     </a-button>
                   </a-tooltip>
                   <a-button
-                    v-if="canGrant"
                     type="text"
                     class="uvp-table-action uvp-table-action--permission"
+                    :disabled="!canGrant"
                     @click="openWorkspace(record, 'capabilities')"
                     ><template #icon><ShieldCheck :size="15" /></template>配置能力</a-button
                   >
                   <a-button
-                    v-if="canRead && canAudit"
                     type="text"
                     class="uvp-table-action openapi-client-table__audit"
+                    :disabled="!canRead || !canAudit"
                     @click="openWorkspace(record, 'logs')"
                     ><template #icon><ScrollText :size="15" /></template>调用记录</a-button
                   >
                   <a-button
-                    v-if="canRotate && record.status !== 'revoked'"
+                    v-if="record.status !== 'revoked'"
                     type="text"
                     class="uvp-table-action openapi-client-table__rotate"
+                    :disabled="!canRotate"
                     @click="requestRotate(record)"
                     ><template #icon><KeyRound :size="15" /></template>轮换 SK</a-button
                   >
                   <a-button
-                    v-if="canStatus && record.status === 'active'"
+                    v-if="record.status === 'active'"
                     type="text"
                     class="uvp-table-action openapi-client-table__disable"
+                    :disabled="!canStatus"
                     @click="requestStatus('disable', record)"
                     ><template #icon><ShieldOff :size="15" /></template>停用</a-button
                   >
                   <a-button
-                    v-if="canStatus && record.status === 'disabled'"
+                    v-if="record.status === 'disabled'"
                     type="text"
                     class="uvp-table-action openapi-client-table__enable"
+                    :disabled="!canStatus"
                     @click="requestStatus('enable', record)"
                     ><template #icon><CircleCheck :size="15" /></template>启用</a-button
                   >
                   <a-button
-                    v-if="canStatus && record.status !== 'revoked'"
+                    v-if="record.status !== 'revoked'"
                     type="text"
                     class="uvp-table-action openapi-client-table__danger"
+                    :disabled="!canStatus"
                     @click="requestStatus('revoke', record)"
                     ><template #icon><Ban :size="15" /></template>撤销</a-button
                   >
