@@ -436,6 +436,18 @@ body[arco-theme="dark"] .arco-switch[disabled].arco-switch-checked {
   }
 }
 
+/* 权限不足 / 业务禁用：**任何**被禁用的原生按钮都要有可见的置灰反馈。
+   ⭐ 权限改造后按钮不再隐藏而是置灰，必须保证"看得见也看得出点不动"，
+      否则比隐藏更糟 —— 用户会反复点一个毫无反馈的按钮。
+   ⛔ 排除 `.arco-btn`：Arco 按钮的禁用视觉由 `.arco-btn-disabled` 负责
+      （见下方 `.btn-primary` 段与 `dark-primary-buttons.test.ts` 的契约），
+      在这里再压 `opacity` 会和深色皮肤抢优先级。 */
+button:disabled:not(.arco-btn),
+button[disabled]:not(.arco-btn) {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 // 按钮(btn-primary / btn-ghost)
 .btn-primary,
 .btn-ghost {
@@ -532,6 +544,12 @@ body[arco-theme="dark"] {
   &:active {
     background: color-mix(in srgb, var(--uvp-brand) 14%, var(--uvp-brand-soft));
     transform: scale(0.96);
+  }
+
+  // 与 `.btn-primary` 对称：禁用态明确置灰 + 禁止光标（权限不足与业务禁用共用）。
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
   }
 }
 

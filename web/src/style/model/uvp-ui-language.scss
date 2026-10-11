@@ -1104,6 +1104,22 @@ body[arco-theme="dark"] .uvp-data-table .uvp-table-action.arco-link-disabled:hov
   background: transparent;
 }
 
+/* 权限不足的按钮 / 链接：由 `v-hasPerm` 指令打标
+   （见 `directives/modules/permission/has-perm.ts`）。
+   ⭐ 这里是**兜底**，保证任何元素 —— 含非 Arco 的裸 `<button>` / `<a>` —— 都能置灰且点不动；
+       Arco 组件自身的禁用视觉仍由上面的 `.arco-btn-disabled` / `.arco-link-disabled` 负责。
+   ⛔ 不用 `display:none` / 删节点：权限不足要「看得见但点不动」，删掉等于抹掉功能可见性。 */
+.uvp-perm-disabled {
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
+/* 深色主题下 Arco 的 link 禁用色随 `--color-link-light-3` 偏暗，
+   统一压到与表格只读态同一档文字色，避免"两套皮肤"。 */
+body[arco-theme="dark"] .uvp-perm-disabled.arco-link-disabled {
+  color: var(--uvp-text-tertiary);
+}
+
 .uvp-data-table .arco-link.arco-link-status-normal:hover {
   color: var(--uvp-brand-strong);
 }
