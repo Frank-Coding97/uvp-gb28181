@@ -33,7 +33,7 @@ func initialPasswordFixture(t *testing.T) (*gorm.DB, *gin.Engine, *service.AuthS
 		app.GormDbMysql, app.ConfigYml, app.Response, app.ZapLog = oldDB, oldConfig, oldResponse, oldLog
 	})
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yml"), []byte("gormv2:\n  usedbtype: mysql\nsafe:\n  minpasswordlength: 8\n  requirespecialchar: true\nserver:\n  demoaccount:\n    enabled: true\n    defaultusername: admin\n    defaultpassword: old-password!\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yml"), []byte("gormv2:\n  usedbtype: mysql\nsafe:\n  minpasswordlength: 8\n  requirespecialchar: true\nserver:\n  demoaccount:\n    enabled: true\n    defaultusername: admin\n    defaultpassword: Old-password!\n"), 0600))
 	app.ConfigYml = ymlconfig.CreateYamlFactory(dir)
 	app.Response, app.ZapLog = response.NewResponseHandler(), zap.NewNop()
 	// 使用临时文件数据库，避免 SQLite 内存库在 GORM 连接池切换连接后看不到表。
@@ -41,7 +41,7 @@ func initialPasswordFixture(t *testing.T) (*gorm.DB, *gin.Engine, *service.AuthS
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&models.User{}, &models.SysUserSession{}))
 	app.GormDbMysql = db
-	hash, err := passwordhelper.HashPassword("old-password!")
+	hash, err := passwordhelper.HashPassword("Old-password!")
 	require.NoError(t, err)
 	require.NoError(t, db.Create(&models.User{BaseModel: models.BaseModel{ID: 1}, Username: "admin", Password: hash, Status: 1, MustChangePassword: true}).Error)
 	sessions := service.NewAuthSessionService(db)
@@ -67,11 +67,13 @@ func TestInitialPasswordChangeValidationAndSessionRevocation(t *testing.T) {
 		status                  int
 	}{
 		{"empty", "", "", 400},
-		{"mismatch", "new-password!", "other-password!", 400},
-		{"same", "old-password!", "old-password!", 400},
-		{"short", "a!", "a!", 400},
-		{"no special", "newpassword", "newpassword", 400},
-		{"success", "new-password!", "new-password!", 200},
+		{"mismatch", "New-password!", "Other-password!", 400},
+		{"same", "Old-password!", "Old-password!", 400},
+		{"short", "Ab1!", "Ab1!", 400},
+		{"no upper", "new-password!", "new-password!", 400},
+		{"no lower", "NEW-PASSWORD!", "NEW-PASSWORD!", 400},
+		{"no special", "Newpassword", "Newpassword", 400},
+		{"success", "New-password!", "New-password!", 200},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db, router, sessions := initialPasswordFixture(t)
@@ -87,7 +89,7 @@ func TestInitialPasswordChangeValidationAndSessionRevocation(t *testing.T) {
 			if tc.status == 200 {
 				require.False(t, stored.MustChangePassword)
 				require.NoError(t, passwordhelper.ComparePassword(stored.Password, tc.password))
-				require.Error(t, passwordhelper.ComparePassword(stored.Password, "old-password!"))
+				require.Error(t, passwordhelper.ComparePassword(stored.Password, "Old-password!"))
 				for _, sid := range []string{"sid-one", "sid-two"} {
 					require.Error(t, sessions.ValidateSession(context.Background(), sid, 1))
 				}
@@ -96,7 +98,7 @@ func TestInitialPasswordChangeValidationAndSessionRevocation(t *testing.T) {
 				var session models.SysUserSession
 				require.NoError(t, db.Where("sid = ?", "sid-one").First(&session).Error)
 				require.Nil(t, session.RevokedAt)
-				require.NoError(t, passwordhelper.ComparePassword(stored.Password, "old-password!"))
+				require.NoError(t, passwordhelper.ComparePassword(stored.Password, "Old-password!"))
 			}
 		})
 	}
@@ -142,7 +144,7 @@ func TestInitialPasswordGateAndHintsFollowPersistedState(t *testing.T) {
 func TestInitialPasswordChangeRollsBackWhenSessionRevocationFails(t *testing.T) {
 	db, router, _ := initialPasswordFixture(t)
 	require.NoError(t, db.Migrator().DropTable(&models.SysUserSession{}))
-	req := httptest.NewRequest(http.MethodPut, "/api/users/changeInitialPassword", bytes.NewBufferString(`{"password":"new-password!","confirmPassword":"new-password!"}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/users/changeInitialPassword", bytes.NewBufferString(`{"password":"New-password!","confirmPassword":"New-password!"}`))
 	req.Header.Set("Content-Type", "application/json")
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
@@ -150,18 +152,18 @@ func TestInitialPasswordChangeRollsBackWhenSessionRevocationFails(t *testing.T) 
 	var stored models.User
 	require.NoError(t, db.First(&stored, 1).Error)
 	require.True(t, stored.MustChangePassword)
-	require.NoError(t, passwordhelper.ComparePassword(stored.Password, "old-password!"))
+	require.NoError(t, passwordhelper.ComparePassword(stored.Password, "Old-password!"))
 }
 
 func TestInitialPasswordEndpointRejectsAlreadyCompletedSetup(t *testing.T) {
 	db, router, _ := initialPasswordFixture(t)
 	require.NoError(t, db.Model(&models.User{}).Where("id = 1").Update("must_change_password", false).Error)
-	req := httptest.NewRequest(http.MethodPut, "/api/users/changeInitialPassword", bytes.NewBufferString(`{"password":"new-password!","confirmPassword":"new-password!"}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/users/changeInitialPassword", bytes.NewBufferString(`{"password":"New-password!","confirmPassword":"New-password!"}`))
 	req.Header.Set("Content-Type", "application/json")
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 	require.Equal(t, http.StatusBadRequest, res.Code)
 	var stored models.User
 	require.NoError(t, db.First(&stored, 1).Error)
-	require.NoError(t, passwordhelper.ComparePassword(stored.Password, "old-password!"))
+	require.NoError(t, passwordhelper.ComparePassword(stored.Password, "Old-password!"))
 }

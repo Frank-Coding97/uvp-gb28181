@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,8 +13,14 @@ import (
 	"gorm.io/gorm"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 	"uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/service/iplocation"
 	"uvplatform.com/uvp-gb28181/app/utils/tokenhelper"
 )
+
+var defaultIPLocation = struct {
+	sync.Once
+	resolver *iplocation.Resolver
+}{}
 
 var (
 	ErrSessionUnavailable = errors.New("session unavailable")
@@ -49,6 +56,12 @@ type LoginMetadata struct {
 
 // LoginMetadataFrom normalizes the request metadata shared by login and captcha audit paths.
 func LoginMetadataFrom(clientIP, rawUA string) LoginMetadata {
+	return LoginMetadataWithContext(context.Background(), clientIP, rawUA)
+}
+
+// LoginMetadataWithContext resolves the location while keeping all lookup failures
+// local to metadata construction. It never returns an error to the login flow.
+func LoginMetadataWithContext(ctx context.Context, clientIP, rawUA string) LoginMetadata {
 	ua := useragent.New(rawUA)
 	browser, _ := ua.Browser()
 	if browser == "" {
@@ -58,11 +71,19 @@ func LoginMetadataFrom(clientIP, rawUA string) LoginMetadata {
 	if osName == "" {
 		osName = "未知"
 	}
-	location := "未知"
-	if ip := net.ParseIP(clientIP); ip != nil && (ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast()) {
-		location = "内网"
-	}
+	location := resolveIPLocation(ctx, clientIP)
 	return LoginMetadata{ClientIP: clientIP, LoginLocation: location, UserAgent: rawUA, Browser: browser, OS: osName}
+}
+
+func resolveIPLocation(ctx context.Context, clientIP string) string {
+	if ip := net.ParseIP(clientIP); ip != nil && (ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast()) {
+		return iplocation.Private
+	}
+	defaultIPLocation.Do(func() { defaultIPLocation.resolver = iplocation.DefaultResolver() })
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return defaultIPLocation.resolver.Resolve(ctx, clientIP)
 }
 
 func NewAuthSessionService(db *gorm.DB) *AuthSessionService {

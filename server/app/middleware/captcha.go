@@ -86,7 +86,7 @@ func CaptchaMiddleware() gin.HandlerFunc {
 }
 
 func recordCaptchaFailure(c *gin.Context, username string) {
-	metadata := service.LoginMetadataFrom(c.ClientIP(), c.Request.UserAgent())
+	metadata := service.LoginMetadataWithContext(c.Request.Context(), c.ClientIP(), c.Request.UserAgent())
 	service.RecordLoginAttempt(c.Request.Context(), app.LoginLogRecorder, app.LoginLogEvent{
 		Username: username, Result: service.LoginResultFailure, FailureReason: service.LoginFailureCaptchaInvalid,
 		IP: metadata.ClientIP, Location: metadata.LoginLocation, UserAgent: metadata.UserAgent,

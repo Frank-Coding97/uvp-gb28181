@@ -200,6 +200,9 @@
                   :placeholder="formType == 0 ? '请输入密码' : '输入新密码，留空则不修改'"
                   allow-clear
                 />
+                <template #extra>
+                  <div>{{ passwordPolicyHint }}</div>
+                </template>
               </a-form-item>
             </a-col>
             <a-col :span="12">
@@ -262,7 +265,11 @@ import { formatTime } from "@/globals";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import { useStatusLabel } from "@/hooks/useDictOptions";
 import { Building2, ChevronDown, Folder, FolderOpen } from "@lucide/vue";
+import { storeToRefs } from "pinia";
+import { useSysConfigStore } from "@/store/modules/sys-config";
+import { buildPasswordPolicyRules, firstPasswordPolicyError } from "@/utils/password-policy";
 const { isMobile } = useDevicesSize();
+const { safeConfig } = storeToRefs(useSysConfigStore());
 const layoutMode = computed(() => {
   let info = {
     mobile: {
@@ -367,28 +374,35 @@ const baseRules: Record<string, any> = {
   ]
 };
 
+// 密码规则提示（与校验同源，避免文案和判定不一致）
+const passwordPolicyOptions = computed(() => ({
+  minLength: safeConfig.value.minPasswordLength,
+  requireSpecialChar: safeConfig.value.requireSpecialChar
+}));
+const passwordPolicyHint = computed(
+  () =>
+    `密码需：${buildPasswordPolicyRules("", passwordPolicyOptions.value)
+      .map(rule => rule.label)
+      .join("、")}`
+);
+
 // 动态计算规则
 const dynamicRules = computed(() => {
   const rules: Record<string, any> = { ...baseRules };
 
-  // 根据表单类型设置密码规则
-  if (formType.value === 0) {
-    // 新增时密码必填
-    rules.password = [
-      {
-        required: true,
-        message: "请输入密码"
+  // 新增时密码必填；编辑时留空表示不修改密码。
+  // ⛔ 密码复杂度与「修改初始密码」弹窗、后端 PasswordValidatorMiddleware 共用同一套规则，
+  //    只有一处实现（@/utils/password-policy），别在这里另写一份正则。
+  rules.password = [
+    { required: formType.value === 0, message: "请输入密码" },
+    {
+      validator: (value: unknown, callback: (error?: string) => void) => {
+        const password = typeof value === "string" ? value : "";
+        if (!password) return callback();
+        callback(firstPasswordPolicyError(password, passwordPolicyOptions.value) || undefined);
       }
-    ];
-  } else {
-    // 编辑时密码非必填
-    rules.password = [
-      {
-        required: false,
-        message: "请输入密码"
-      }
-    ];
-  }
+    }
+  ];
 
   return rules;
 });
