@@ -240,10 +240,17 @@ describe("device management toolbar layout", () => {
   });
 
   it("distinguishes subscription management from the primary channel action", () => {
-    expect(source).toContain('class="icon-btn small framed primary" type="button" @click.stop="showDeviceChannels(item)"');
-    expect(source).toContain(
-      'class="icon-btn small framed subscription" type="button" :disabled="!canManageSubscriptions" @click.stop="openSubscriptionManager(item)"'
+    // ⭐ 权限改造（2026-10-11）：订阅按钮由「无权限时隐藏」改为「置灰禁用」，
+    //    属性变长 ⇒ 门禁的 prettier 会把它拆成多行。改用 hasMarkup 只钉 token 与顺序、不钉排版。
+    expect(hasMarkup(source, 'class="icon-btn small framed primary" type="button" @click.stop="showDeviceChannels(item)"')).toBe(
+      true
     );
+    expect(
+      hasMarkup(
+        source,
+        'class="icon-btn small framed subscription" type="button" :disabled="!canManageSubscriptions" @click.stop="openSubscriptionManager(item)"'
+      )
+    ).toBe(true);
     expect(source).toContain(".icon-btn.framed.subscription {");
   });
 

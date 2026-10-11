@@ -2,16 +2,20 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { hasMarkup } from "@/test/source-assert";
+
 const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/sip/PlatformInfo.vue"), "utf8");
 
 describe("SIP platform deployment card", () => {
   it("keeps only copy and edit actions in the top toolbar", () => {
-    expect(source).toContain('<a-button v-if="config" class="uvp-page-action-btn sip-copy-btn" @click="copyAll">');
+    // ⭐ 权限改造（2026-10-11）：编辑按钮由「无权限时隐藏」改为「置灰禁用」，
+    //    属性变长后门禁的 prettier 会把它拆成多行 ⇒ 改用 hasMarkup 只钉 token 与顺序、不钉排版。
+    expect(hasMarkup(source, '<a-button v-if="config" class="uvp-page-action-btn sip-copy-btn" @click="copyAll">')).toBe(true);
     expect(source).not.toContain('class="uvp-page-action-btn uvp-refresh-btn"');
     expect(source).not.toContain("刷新状态");
     expect(source).not.toContain("RefreshCw");
     expect(source).not.toContain('shape="circle"');
-    expect(source).toContain('class="uvp-page-action-btn" type="primary"');
+    expect(hasMarkup(source, 'class="uvp-page-action-btn" type="primary"')).toBe(true);
   });
 
   it("gives the copy action a distinct teal treatment", () => {
