@@ -614,6 +614,31 @@ port_holder() {
   printf '某个进程（看名字：sudo ss %s -p | grep %s）' "$flag" "$port"
   return 0
 }
+# ------------------------------------------------------ 外部命令能力探测 ----
+
+# has_pgrep 探测本机有没有 pgrep（由 procps / procps-ng 提供）。
+#
+# ⛔⛔ 为什么必须探测：绿色包的契约是「目标机零预装」，而**最小化容器镜像
+#   （python:*-slim / alpine 等）默认不带 procps ⇒ 没有 pgrep**。
+#   偏偏 zlm_healthy / nginx_healthy 的最后一步是 `pgrep -f <绝对路径>` 判活，
+#   stop 的「按路径兜底清理」也用它。命令不存在时退出码 127、输出为空 ⇒
+#   判活**恒为「没起来」**，与事实矛盾：2026-10-12 实测，容器里 ZLM 明明在
+#   51004 监听（`ss -lntp` 可见），脚本却报「ZLM 未能在预期时间内监听端口
+#   51004」。⇒ 缺 pgrep 时必须**降级**，绝不能当成「进程不存在」。
+has_pgrep() { command -v pgrep >/dev/null 2>&1; }
+
+# warn_no_pgrep_once 缺 pgrep 时提示**一次**（轮询里会被反复调用，不能刷屏）。
+# 降级后果要讲清楚，否则用户以为判活还是准的，下次真出问题会被带偏。
+_no_pgrep_warned=""
+warn_no_pgrep_once() {
+  [ -z "$_no_pgrep_warned" ] || return 0
+  _no_pgrep_warned=1
+  log "⚠️  本机没有 pgrep（未装 procps/procps-ng），进程判活已降级为「只看端口」。
+     · 影响：同机若有别的程序占用同一端口，可能被误判成本包服务在跑；
+       stop 时「按可执行路径清理遗留进程」的兜底也不可用。
+     · 建议：apt install procps（Debian/Ubuntu）或 yum install procps-ng（RHEL/CentOS/麒麟）。"
+}
+
 # ---------------------------------------------------------- 进程兜底查找 ----
 
 # stop_by_pidfile 先按 pid 文件停；**停不掉时按可执行文件绝对路径兜底**。
@@ -658,6 +683,12 @@ stop_by_pidfile() {
   #   而症状又是「stop 说停了、进程还在」。
   #   ⇒ 去掉 ^ 锚定；安全性靠绝对路径本身足够独特来保证。
   if [ -n "$exe_path" ] && [ -x "$exe_path" ]; then
+    # 缺 pgrep 时「按路径兜底」无从谈起（命令本身就不在）⇒ 明确提示一次再退，
+    # 别让 pid 文件丢失的遗留进程悄无声息地活到下次 start 撞端口。
+    if ! has_pgrep; then
+      warn_no_pgrep_once
+      return 0
+    fi
     local found
     # ⛔⛔ 必须带 `|| true`：**"没找到进程"是这里的正常情况**（服务本来就没跑），
     #   而 pgrep 无匹配时退出码是 1，`var="$(cmd)"` 这条赋值语句的退出码
@@ -1074,6 +1105,11 @@ nginx_healthy() {
     return 1
   }
   exec 3<&- 3>&-
+  # ⛔ 同 zlm_healthy：缺 pgrep 时不能判「进程不存在」，退化为只看端口。
+  if ! has_pgrep; then
+    warn_no_pgrep_once
+    return 0
+  fi
   # 按可执行文件**绝对路径**匹配：按名字会命中同机其它 nginx
   # （这台机器上就Docker 里跑了 27 天的 nginx）。
   pgrep -f "$NGINX_BIN" >/dev/null 2>&1
@@ -1436,6 +1472,12 @@ zlm_healthy() {
     return 1
   }
   exec 3<&- 3>&-
+  # ⛔ 缺 pgrep（容器无 procps）时这一步会恒失败 ⇒ 不能当成「进程不存在」，
+  #   只能相信端口（理由见 has_pgrep 注释）。提示一次后放行。
+  if ! has_pgrep; then
+    warn_no_pgrep_once
+    return 0
+  fi
   # ⛔ 端口被谁占着也要分清：机器上可能跑着别的 MediaServer（容器内的、
   #   用相对路径 -c ../conf/config.ini 启动），按可执行文件**绝对路径**匹配
   #   只会命中本包启动的。
