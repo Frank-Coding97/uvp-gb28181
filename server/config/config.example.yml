@@ -59,6 +59,8 @@ processauthority:
   # 显式配置的目录仍必须预先存在、非符号链接、运行用户所有。
   # Unix 0700；Windows 仅运行账户/SYSTEM/Administrators 可访问。
   # 不放在 current/releases、公开 uploads、日志或临时目录；升级保留目录和锁文件。
+  # 所在文件系统只认 ext4/xfs/btrfs/f2fs，以及 overlayfs（容器根，绿色包装进容器时用）；
+  # 网络盘、内存盘会被拒绝启动（错误码 reason=state_unavailable）。
   state_dir: "" # 例如 /opt/uvp-gb28181/data/process-authority
 openapi:
   enabled: false # 首版单 API 进程；启动时决定，默认关闭；媒体申请仍受独立门禁
