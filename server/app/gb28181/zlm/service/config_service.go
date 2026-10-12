@@ -11,8 +11,16 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 )
+
+// portRangeConfigKey 多端口收流范围在 ZLM 配置里的键。
+//
+// 它是**唯一真源**:节点登记值(meta_node.rtp_port_start/end)只是镜像,解析规则见
+// node.ParseRTPPortRange。下发成功后必须把镜像对齐(见 reconcileRTPPortRange)。
+const portRangeConfigKey = "rtp_proxy.port_range"
 
 var ErrManagedConfigKey = errors.New("platform-managed ZLM config key")
 
@@ -83,7 +91,7 @@ var configCatalog = []ConfigGroup{
 			{Key: "rtsp.port", Default: "554", Mode: ConfigModeRestartRequired, RestartRequired: true, Comment: "RTSP 端口，0 表示禁用"},
 			{Key: "rtsp.sslport", Default: "0", Mode: ConfigModeRestartRequired, RestartRequired: true, Comment: "RTSPS 端口，0 表示禁用"},
 			{Key: "rtp_proxy.port", Default: "10000", Mode: ConfigModeRestartRequired, RestartRequired: true, Comment: "RTP 单端口监听，0 表示禁用；修改后需重启节点并同步节点登记的单端口端口号"},
-			{Key: "rtp_proxy.port_range", Default: "30000-35000", Mode: ConfigModeRestartRequired, RestartRequired: true, Comment: "RTP 多端口收流范围；修改后还需同步节点登记的 RTP 收流范围"},
+			{Key: portRangeConfigKey, Default: "30000-35000", Mode: ConfigModeRestartRequired, RestartRequired: true, Comment: "RTP 多端口收流范围；改完平台会自动同步节点登记的收流范围，需重启节点生效"},
 			{Key: "shell.port", Default: "9000", Mode: ConfigModeRestartRequired, RestartRequired: true, Comment: "telnet 调试端口，0 表示禁用"},
 		},
 	},
@@ -298,11 +306,19 @@ type ZLMConfigClient interface {
 type ConfigService struct {
 	registry *node.Registry
 	client   ZLMConfigClient
+	logger   *zap.Logger
 }
 
 // NewConfigService 构造
 func NewConfigService(reg *node.Registry, cli ZLMConfigClient) *ConfigService {
-	return &ConfigService{registry: reg, client: cli}
+	return &ConfigService{registry: reg, client: cli, logger: zap.NewNop()}
+}
+
+// SetLogger 装配日志(nil 安全)。未装配时静默,便于测试直接构造。
+func (s *ConfigService) SetLogger(logger *zap.Logger) {
+	if logger != nil {
+		s.logger = logger.Named("zlm.config")
+	}
 }
 
 // GetGrouped 取节点当前 ZLM 配置,按产品化分组返回(含 hot_reloadable 元数据)
@@ -442,10 +458,43 @@ func (s *ConfigService) Update(ctx context.Context, nodeID int64, req UpdateConf
 				resp.Applied = append(resp.Applied, key)
 			}
 		}
+		if _, ok := hotParams[portRangeConfigKey]; ok {
+			s.reconcileRTPPortRange(ctx, n, actual)
+		}
 		sort.Strings(resp.Applied)
 		sort.Strings(resp.RequiresRestart)
 	}
 	return resp, nil
+}
+
+// reconcileRTPPortRange 把 ZLM 回读到的收流范围写回节点登记值(镜像对齐真源)。
+//
+// 为什么放在下发流程里:范围的真源是 ZLM 的 `[rtp_proxy] port_range`,而平台登记的
+// rtp_port_start/end 只用于算端口容量(capacity.go 的 PortUsage)。不改的话,登记值
+// 与实际段不一致时会一直按错的范围判"是否接近满" —— 登记的段更大时调度永不判满,
+// 直到 ZLM 端口真的耗光、推流开始失败。
+//
+// 失败只记 warn、不把整个请求判失败:ZLM 侧已经改成功,报错只会诱导用户重复下发。
+func (s *ConfigService) reconcileRTPPortRange(ctx context.Context, n *node.Node, actual map[string]string) {
+	start, end, ok := node.ParseRTPPortRange(actual[portRangeConfigKey])
+	if !ok {
+		return
+	}
+	changed, err := s.registry.ReconcileRTPPortRange(ctx, n.ID, start, end)
+	switch {
+	case err != nil:
+		s.logger.Warn("GB28181 ZLM 收流范围对账失败",
+			zap.String("event", "zlm.node.rtp_range_reconcile_failed"),
+			zap.Int64("node_id", n.ID),
+			zap.String("reason", err.Error()))
+	case changed:
+		s.logger.Info("GB28181 ZLM 收流范围已同步到节点登记值",
+			zap.String("event", "zlm.node.rtp_range_reconciled"),
+			zap.Int64("node_id", n.ID),
+			zap.Int("rtp_port_start", start),
+			zap.Int("rtp_port_end", end),
+			zap.String("source", "config_apply"))
+	}
 }
 
 func visibleConfigValues(actual, keys map[string]string) map[string]string {
@@ -524,14 +573,10 @@ func validateConfigValue(key, value, mediaServerUUID string) error {
 
 func validateNetworkPortConfig(key, value string) error {
 	if key == "rtp_proxy.port_range" {
-		parts := strings.Split(value, "-")
-		if len(parts) != 2 {
+		// 解析规则只有一份(node.ParseRTPPortRange)—— 这里若自己再写一遍,
+		// 就会出现"下发能过、读值解析不过"(或反过来)的静默漂移。
+		if _, _, ok := node.ParseRTPPortRange(value); !ok {
 			return fmt.Errorf("%w: %s 必须为起始端口-结束端口，例如 30000-35000", ErrInvalidConfigValue, key)
-		}
-		start, startErr := strconv.Atoi(parts[0])
-		end, endErr := strconv.Atoi(parts[1])
-		if startErr != nil || endErr != nil || start < 1 || end > 65535 || start > end {
-			return fmt.Errorf("%w: %s 必须为 1-65535 内的有效端口范围", ErrInvalidConfigValue, key)
 		}
 		return nil
 	}

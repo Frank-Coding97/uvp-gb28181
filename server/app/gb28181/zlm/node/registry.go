@@ -14,6 +14,9 @@ var (
 	// snapshot. The caller must reload before retrying; no in-memory state is
 	// changed when this is returned.
 	ErrRevisionConflict = errors.New("node revision conflict")
+	// ErrInvalidRTPPortRange 表示调用方给了不可能来自 ZLM 的收流范围
+	// (0 / 负数 / start > end / end > 65535)。登记值宁可留旧值也不写脏数据。
+	ErrInvalidRTPPortRange = errors.New("invalid rtp port range")
 )
 
 // Repo 持久化抽象
@@ -255,6 +258,39 @@ func (r *Registry) Update(ctx context.Context, n Node) error {
 		r.admissionBlocked[n.ID] = false
 	}
 	return nil
+}
+
+// ReconcileRTPPortRange 用 ZLM 实际配置的收流范围校正节点登记值。
+//
+// 为什么必须有这一步：登记的 rtp_port_start/end 是**镜像**，真源是 ZLM 的
+// `[rtp_proxy] port_range`（见 ParseRTPPortRange）。两份数据一旦漂移，平台就按
+// 错的范围算端口容量（capacity.go 的 PortUsage）——登记 30000-35000 而 ZLM 实际
+// 只开 49 个端口时，调度会一直以为节点很空，直到端口真的耗光、推流开始失败。
+//
+// 返回 changed 表示是否真的落了库：范围没变时不写（避免无意义地抬 revision，
+// 那会把并发的统计/心跳写挤掉一次）。范围非法直接拒绝，不写脏数据。
+func (r *Registry) ReconcileRTPPortRange(ctx context.Context, id int64, start, end int) (bool, error) {
+	if start < 1 || end > 65535 || start > end {
+		return false, ErrInvalidRTPPortRange
+	}
+
+	r.mu.RLock()
+	cur, ok := r.nodes[id]
+	r.mu.RUnlock()
+	if !ok {
+		return false, ErrNotFound
+	}
+	if cur.RTPPortStart == start && cur.RTPPortEnd == end {
+		return false, nil
+	}
+
+	next := cloneNode(*cur)
+	next.RTPPortStart = start
+	next.RTPPortEnd = end
+	if err := r.Update(ctx, next); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // Delete 删 DB + 删内存

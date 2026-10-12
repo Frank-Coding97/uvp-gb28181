@@ -19,6 +19,14 @@ type ServerConfig struct {
 	RTPProxyPort int // rtp_proxy.port(单端口收流)
 	ONVIFPort    int // onvif.port
 
+	// RTPPortRangeStart/End 对应 rtp_proxy.port_range(多端口收流的动态段)。
+	//
+	// 这是**平台登记值的真源**:读到它就该回写 meta_node.rtp_port_start/end
+	// (见 ParseRTPPortRange 顶部注释)。0 表示 ZLM 没返回该键或值不可解析 ——
+	// 调用方必须显式判断,不许把 0 当端口用。
+	RTPPortRangeStart int
+	RTPPortRangeEnd   int
+
 	// WebRTC(rtc.*)段。与 rtp_proxy.port_range 无关:后者是 GB28181 设备推流的收流段,
 	// 这里是浏览器 WebRTC 媒体面走的端口。
 	RTCUDPPort int // rtc.port,WebRTC 媒体 UDP 单端口(默认 8000);所有 rtc 客户端共用这一个
@@ -40,6 +48,10 @@ type ServerConfig struct {
 //
 // 只解析当前需要的字段;无法解析的字段静默跳过(用 0 兜底,调用方判断)。
 func ParseServerConfig(m map[string]string) ServerConfig {
+	rangeStart, rangeEnd, rangeOK := ParseRTPPortRange(m["rtp_proxy.port_range"])
+	if !rangeOK {
+		rangeStart, rangeEnd = 0, 0
+	}
 	return ServerConfig{
 		HTTPPort:     atoiOrZero(m["http.port"]),
 		HTTPSPort:    atoiOrZero(m["http.sslport"]),
@@ -49,6 +61,9 @@ func ParseServerConfig(m map[string]string) ServerConfig {
 		RTMPSPort:    atoiOrZero(m["rtmp.sslport"]),
 		RTPProxyPort: atoiOrZero(m["rtp_proxy.port"]),
 		ONVIFPort:    atoiOrZero(m["onvif.port"]),
+
+		RTPPortRangeStart: rangeStart,
+		RTPPortRangeEnd:   rangeEnd,
 
 		RTCUDPPort:    atoiOrZero(m["rtc.port"]),
 		RTCTCPPort:    atoiOrZero(m["rtc.tcpPort"]),

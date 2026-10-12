@@ -139,8 +139,11 @@ async function handleSave() {
       const impact = ["网络端口保存后需重启媒体节点生效。"];
       if ("http.port" in changes) impact.push("修改 http.port 后还需同步节点登记的 API 端口。");
       if ("rtp_proxy.port" in changes) impact.push("修改单端口监听后需同步节点登记的收流端口；重启将影响该节点的现有播放。");
+      // 平台会在保存后自动把节点登记的 RTP 收流范围对齐到这里的实际值（见后端
+      // config_service.reconcileRTPPortRange），所以不再提示"还需手工同步登记范围"；
+      // 剩下真正需要人做的就是防火墙放行。
       if ("rtp_proxy.port_range" in changes)
-        impact.push("修改 rtp_proxy.port_range 后还需同步节点登记的 RTP 收流范围及防火墙映射。");
+        impact.push("平台会自动同步节点登记的 RTP 收流范围，无需手工改动；请确认防火墙已按新范围放行。");
       const confirmed = await new Promise<boolean>(resolve => {
         Modal.warning({
           title: "修改网络端口配置",

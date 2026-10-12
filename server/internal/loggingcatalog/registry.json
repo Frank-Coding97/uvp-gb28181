@@ -975,6 +975,12 @@
     "zlm.node.retire_state_persist_failed": [
       "node_id"
     ],
+    "zlm.node.rtp_range_reconcile_failed": [
+      "node_id"
+    ],
+    "zlm.node.rtp_range_reconciled": [
+      "node_id"
+    ],
     "zlm.probe.activation_failed": [
       "node_id"
     ],
@@ -1162,6 +1168,8 @@
     "role",
     "role_id",
     "route",
+    "rtp_port_end",
+    "rtp_port_start",
     "saved",
     "scanned",
     "schema",

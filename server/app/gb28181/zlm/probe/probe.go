@@ -52,19 +52,39 @@ type ClientFactory func(n *node.Node) Client
 // 节点行的 UUID**。因此它是"这台端点是不是这个节点"的唯一权威答案。
 const mediaServerIDKey = "general.mediaServerId"
 
+// portRangeKey 收流范围在 ZLM 配置里的键(真源)。平台登记值只是它的镜像,
+// 解析规则见 node.ParseRTPPortRange。
+const portRangeKey = "rtp_proxy.port_range"
+
 // Registry probe 只依赖 List + MarkActive(便于打桩,同时避免直接依赖具体 *node.Registry)
 type Registry interface {
 	List() []*node.Node
 	MarkActive(ctx context.Context, id int64) error
 }
 
+// RangeReconciler 可选能力:探活确认身份之后,用端点自报的收流范围校正节点登记值。
+//
+// 为什么挂在探活上:启动探活是**唯一一次**"平台主动、且已经拿到端点完整配置"的时刻。
+// 登记值(meta_node.rtp_port_start/end)只是镜像,真源是 ZLM 的 `[rtp_proxy] port_range`;
+// 首启时 ZLM 还没起来、或客户手改了 ini,镜像就会长期偏离真值,而容量/近满判定都按
+// 镜像算(capacity.go)。挂在这里 ⇒ 每次重启平台自愈一次。
+//
+// 未装配(nil)时行为与历史完全一致 —— 老测试与老集成不受影响。
+type RangeReconciler interface {
+	ReconcileRTPPortRange(ctx context.Context, id int64, start, end int) (bool, error)
+}
+
 // Prober 启动探活器
 type Prober struct {
-	reg     Registry
-	factory ClientFactory
-	timeout time.Duration
-	logger  *zap.Logger
+	reg       Registry
+	factory   ClientFactory
+	timeout   time.Duration
+	logger    *zap.Logger
+	reconcile RangeReconciler
 }
+
+// SetRangeReconciler 装配收流范围对账(可选;nil 表示不做,保持历史行为)。
+func (p *Prober) SetRangeReconciler(r RangeReconciler) { p.reconcile = r }
 
 // Result 单节点探活结果(供测试断言 + summary 聚合)
 type Result struct {
@@ -77,6 +97,8 @@ type Result struct {
 	Skipped     bool // 未激活:maintenance 节点,或端点自报身份不是本节点
 	DurationMS  int64
 	Err         error
+	// RTPRangeReconciled 表示本次探活把登记的收流范围按端点实际值改了库。
+	RTPRangeReconciled bool
 }
 
 // New 构造 Prober
@@ -184,6 +206,32 @@ func (p *Prober) Run(ctx context.Context) []Result {
 			r.Pass = true
 			r.StateAfter = node.StateActive
 			atomic.AddInt64(&passCount, 1)
+
+			// 收流范围对账:登记的 rtp_port_start/end 只是镜像,真源是这个端点自己的
+			// `[rtp_proxy] port_range`。探活既然已经把整份配置拿回来了,就顺手把镜像
+			// 纠回来 —— 否则首启时 ZLM 还没起来、或客户手改过 ini 的实例,会一直按
+			// 旧范围算端口容量(capacity.go),调度以为节点还很空,直到端口真的耗光。
+			// 失败只记 warn:不改变探活结论(节点确实是活的),下次重启还会再对一次。
+			if p.reconcile != nil {
+				if start, end, ok := node.ParseRTPPortRange(config[portRangeKey]); ok {
+					changed, recErr := p.reconcile.ReconcileRTPPortRange(ctx, target.ID, start, end)
+					switch {
+					case recErr != nil:
+						p.logger.Warn("GB28181 ZLM 收流范围对账失败",
+							zap.String("event", "zlm.node.rtp_range_reconcile_failed"),
+							zap.Int64("node_id", target.ID),
+							zap.String("reason", recErr.Error()))
+					case changed:
+						r.RTPRangeReconciled = true
+						p.logger.Info("GB28181 ZLM 收流范围已按端点实际值校正",
+							zap.String("event", "zlm.node.rtp_range_reconciled"),
+							zap.Int64("node_id", target.ID),
+							zap.Int("rtp_port_start", start),
+							zap.Int("rtp_port_end", end),
+							zap.String("source", "startup_probe"))
+					}
+				}
+			}
 
 			if r.StateBefore == node.StateOffline {
 				p.logger.Info("GB28181 ZLM 节点启动探活翻转 offline→active", zap.String("event", "zlm.probe.node_active"),

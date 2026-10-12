@@ -71,3 +71,28 @@ func TestParseServerConfig_PreservesMediaPorts(t *testing.T) {
 	require.Equal(t, 30000, cfg.RTPProxyPort)
 	require.Equal(t, 18000, cfg.ONVIFPort)
 }
+
+// 收流范围是**平台登记值的真源**：探活/首启拿到的这份配置决定
+// meta_node.rtp_port_start/end 该是多少（见 rtp_range.go）。
+func TestParseServerConfig_PreservesRTPPortRange(t *testing.T) {
+	cfg := node.ParseServerConfig(map[string]string{"rtp_proxy.port_range": "51014-51063"})
+
+	require.Equal(t, 51014, cfg.RTPPortRangeStart)
+	require.Equal(t, 51063, cfg.RTPPortRangeEnd)
+}
+
+// 读不到 / 读不懂时必须留 0（"没有值"），不许猜一个默认段 ——
+// 猜出来的值会被写进登记表，然后按它算端口容量。
+func TestParseServerConfig_UnusableRTPPortRangeStaysZero(t *testing.T) {
+	for _, value := range []string{"", "0-0", "51063-51014", "1-65536", "30000", "abc-def", "51014-51063 "} {
+		t.Run(value, func(t *testing.T) {
+			cfg := node.ParseServerConfig(map[string]string{"rtp_proxy.port_range": value})
+			require.Zero(t, cfg.RTPPortRangeStart)
+			require.Zero(t, cfg.RTPPortRangeEnd)
+		})
+	}
+
+	cfg := node.ParseServerConfig(map[string]string{"http.port": "18080"})
+	require.Zero(t, cfg.RTPPortRangeStart, "键缺失同样是 0")
+	require.Zero(t, cfg.RTPPortRangeEnd)
+}

@@ -529,6 +529,7 @@ func startControlPlane(cfg gbconfig.Config, authority *processauthority.Authorit
 		gbroutes.SetHookRetiredObserver(retiredCoordinator)
 
 		cfgSvc := gbzlmsvc.NewConfigService(zlmRegistry, adapter)
+		cfgSvc.SetLogger(app.ZapLog)
 		gbroutes.SetZLMNodeController(gbcontrollers.NewZLMNodeController(nodeSvc))
 		gbroutes.SetZLMConfigController(gbcontrollers.NewZLMConfigController(cfgSvc))
 		setupZLMManagementCore(nodeSvc, restartCoordinator)
@@ -1755,40 +1756,19 @@ func setupZLMRegistry(cfg gbconfig.Config) {
 	}
 	if len(reg.List()) == 0 && cfg.ZLM.Host != "" {
 		// 空表 + yaml 有配置 → seed 第一节点(单节点过渡)
-		//
-		// ⛔⛔ 节点身份标识**优先取配置的固定值**，为空才随机。
-		//   随机的后果不是"多点随机"这么简单：它会被 apply.go 通过
-		//   setServerConfig **持久化进 ZLM 的 config.ini**
-		//   （ZLM 把 setServerConfig 的结果写回自己的配置文件），
-		//   于是随机值一旦落盘就固化下来 —— 此后即便改了配置，
-		//   ZLM 那侧也不会跟着变，hook 归属校验就再也对不上。
-		//   绿色包/交付场景必须给固定值（见 ZLMConfig.MediaServerID 注释）。
-		uuidStr := strings.TrimSpace(cfg.ZLM.MediaServerID)
-		if uuidStr == "" {
-			uuidStr = uuid.NewString()
-		}
-		seeded, err := reg.Add(ctx, node.Node{
-			Name:            "zlm-default",
-			Host:            cfg.ZLM.Host,
-			ReceiveHost:     cfg.ZLM.ReceiveHost,
-			PlaybackHost:    cfg.ZLM.PlaybackHost,
-			APIPort:         cfg.ZLM.HTTPPort,
-			APISecret:       cfg.ZLM.Secret,
-			MediaServerUUID: uuidStr,
-			Weight:          50,
-			State:           node.StateActive,
-			RTPPortStart:    30000,
-			RTPPortEnd:      35000,
-		})
+		seeded, err := seedDefaultNode(ctx, reg, cfg, defaultZLMConfigRead)
 		if err != nil {
 			app.ZapLog.Warn("GB28181 ZLM 默认节点 seed 失败",
 				zap.String("event", "zlm.node.default_seed_failed"), zap.Error(err))
 		} else {
 			app.Log(ctx).Named("zlm.node").Info("GB28181 ZLM 已 seed 默认节点",
 				zap.String("event", "zlm.node.default_seeded"),
-				zap.Int64("node_id", seeded.ID),
-				zap.String("uuid", uuidStr),
-				zap.String("endpoint", (node.Node{Host: cfg.ZLM.Host, APIPort: cfg.ZLM.HTTPPort}).HTTPEndpoint()))
+				zap.Int64("node_id", seeded.Node.ID),
+				zap.String("uuid", seeded.Node.MediaServerUUID),
+				zap.String("endpoint", seeded.Node.HTTPEndpoint()),
+				zap.Int("rtp_port_start", seeded.RTPPortStart),
+				zap.Int("rtp_port_end", seeded.RTPPortEnd),
+				zap.String("source", seeded.RangeSource))
 		}
 	}
 	zlmRegistry = reg
@@ -1802,6 +1782,94 @@ func setupZLMRegistry(cfg gbconfig.Config) {
 	startupProbeDone = runStartupProbe(reg)
 }
 
+// seedDefaultNode 空表 + yaml 有配置时登记"默认节点"(单节点过渡)。
+//
+// 收流范围尽量取端点实际配置 —— 真源是 ZLM 自己的 `[rtp_proxy] port_range`
+// (见 node.ParseRTPPortRange 顶部注释):平台登记值只用来算端口容量,登记段比实际段
+// 大时调度会一直以为节点很空,直到 ZLM 端口真的耗光、推流开始失败。所以首启就尽量
+// 问一次 ZLM,而不是写死出厂默认。
+//
+// ⛔ 但**首启时 ZLM 完全可能还没起来**(绿色包重启、平台与 ZLM 分开启动都常见),
+// 所以这一步必须 best-effort + 短超时:探不到就回退出厂默认,并把 RangeSource 标成
+// default 让现场一眼看出这条记录是"猜的"。永久偏差由启动探活兜底 —— 探活成功后会
+// 用端点实际配置再纠正一次(probe.Prober 的 RangeReconciler)。
+func seedDefaultNode(ctx context.Context, reg *node.Registry, cfg gbconfig.Config, read zlmConfigReader) (seedOutcome, error) {
+	// ⛔⛔ 节点身份标识**优先取配置的固定值**，为空才随机。
+	//   随机的后果不是"多点随机"这么简单：它会被 apply.go 通过
+	//   setServerConfig **持久化进 ZLM 的 config.ini**
+	//   （ZLM 把 setServerConfig 的结果写回自己的配置文件），
+	//   于是随机值一旦落盘就固化下来 —— 此后即便改了配置，
+	//   ZLM 那侧也不会跟着变，hook 归属校验就再也对不上。
+	//   绿色包/交付场景必须给固定值（见 ZLMConfig.MediaServerID 注释）。
+	uuidStr := strings.TrimSpace(cfg.ZLM.MediaServerID)
+	if uuidStr == "" {
+		uuidStr = uuid.NewString()
+	}
+	start, end, source := resolveSeedRTPRangeWith(ctx, cfg, read)
+	added, err := reg.Add(ctx, node.Node{
+		Name:            "zlm-default",
+		Host:            cfg.ZLM.Host,
+		ReceiveHost:     cfg.ZLM.ReceiveHost,
+		PlaybackHost:    cfg.ZLM.PlaybackHost,
+		APIPort:         cfg.ZLM.HTTPPort,
+		APISecret:       cfg.ZLM.Secret,
+		MediaServerUUID: uuidStr,
+		Weight:          50,
+		State:           node.StateActive,
+		RTPPortStart:    start,
+		RTPPortEnd:      end,
+	})
+	if err != nil {
+		return seedOutcome{}, err
+	}
+	return seedOutcome{Node: added, RTPPortStart: start, RTPPortEnd: end, RangeSource: source}, nil
+}
+
+// seedOutcome 默认节点 seed 的结果。
+//
+// 把"收流范围是探到的还是猜的"显式带出来:日志要能一眼看出这条记录可不可信,
+// 测试也要能断言"探测成功时登记的是端点实际段，而不是写死的出厂默认"。
+type seedOutcome struct {
+	Node         *node.Node
+	RTPPortStart int
+	RTPPortEnd   int
+	RangeSource  string // "probe" = 端点实际配置;"default" = 回退出厂默认
+}
+
+// defaultZLMConfigRead 生产读法:直接问目标 ZLM 要整份配置。
+func defaultZLMConfigRead(ctx context.Context, target *node.Node) (map[string]string, error) {
+	return gbzlm.NewClientForNode(target).GetServerConfig(ctx)
+}
+
+// zlmConfigReader 读一台 ZLM 的完整配置(生产:defaultZLMConfigRead;测试:打桩)。
+// 抽成参数是为了让"探测失败必须回退"这条分支可被确定性测到,而不是靠连不通的地址。
+type zlmConfigReader func(ctx context.Context, target *node.Node) (map[string]string, error)
+
+func resolveSeedRTPRangeWith(ctx context.Context, cfg gbconfig.Config, read zlmConfigReader) (start, end int, source string) {
+	start, end = seedRTPRangeFallback()
+	source = "default"
+	probeCtx, cancel := context.WithTimeout(ctx, seedRTPRangeProbeTimeout)
+	defer cancel()
+	candidate := node.Node{Host: cfg.ZLM.Host, APIPort: cfg.ZLM.HTTPPort, APISecret: cfg.ZLM.Secret}
+	config, err := read(probeCtx, &candidate)
+	if err != nil {
+		return start, end, "default"
+	}
+	if detected := node.ParseServerConfig(config); detected.RTPPortRangeStart > 0 {
+		return detected.RTPPortRangeStart, detected.RTPPortRangeEnd, "probe"
+	}
+	return start, end, "default"
+}
+
+// seedRTPRangeFallback ZLM 出厂默认收流段(30000-35000)。探测不到时按它登记,
+// 与本次改动之前的行为一致 —— 不许把 0 写进库(那会让容量计算直接归零)。
+func seedRTPRangeFallback() (int, int) { return 30000, 35000 }
+
+// seedRTPRangeProbeTimeout 首启探测收流范围的上限。
+//
+// ⛔ 必须短:ZLM 比平台晚起是常态,seed 不能因此拖住整个启动流程。
+const seedRTPRangeProbeTimeout = 2 * time.Second
+
 // runStartupProbe 对 Registry 中所有节点跑一次主动探活。
 //
 // 独立 goroutine 内执行,3 秒超时,不阻塞 bootstrap。
@@ -1811,6 +1879,8 @@ func runStartupProbe(reg *node.Registry) <-chan struct{} {
 	done := make(chan struct{})
 	factory := func(n *node.Node) gbzlmprobe.Client { return gbzlm.NewClientForNode(n) }
 	prober := gbzlmprobe.New(reg, factory, 3*time.Second, app.ZapLog)
+	// 探活已把端点整份配置拿回来了，顺手把登记的收流范围对齐到真源（见 seedDefaultNode）。
+	prober.SetRangeReconciler(reg)
 	go func() {
 		defer close(done)
 		// 独立 background ctx:探活是一次性任务,不跟 heartbeat 生命周期绑定
