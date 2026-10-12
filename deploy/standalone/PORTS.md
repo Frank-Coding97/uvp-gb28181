@@ -85,7 +85,9 @@
 #  51005      ZLM RTSP               （设备拉流播放）
 #  51006      ZLM RTMP
 #  51007      ZLM HTTP SSL           （ZLM 自身 HTTPS）
-#  51008      ZLM WebRTC 媒体
+#  51008      ZLM WebRTC 媒体        ⚠️ UDP+TCP **两个键**：`[rtc] port` + `[rtc] tcpPort`
+#                                     （同号、不同协议栈，不冲突；只改 port 会漏掉 tcpPort，
+#                                      它留在 ZLM 默认 8000 上 —— 见下方「为什么 8000 会咬人」）
 #  51009      ZLM WebRTC 信令 WS     ⚠️ 键名是 signalingPort，不叫 port
 #  51010      ZLM WebRTC 信令 WSS
 #  51011      ZLM SRT
@@ -113,6 +115,22 @@
 #                支持扫码的设备不用手工填。
 #              ❗ 它**不在 `uvp-gb28181-ctl.sh` 的端口预检清单内**（脚本无从预知向导里最终填了什么）；
 #                若该端口被占，保存引导页时会直接报 bind 失败。
+#
+# ---------------- ⛔ 为什么 8000 会咬人（2026-10-12 客户 Ubuntu 16 实机）----------------
+# ZLM 的 WebRTC 媒体是 **UDP + TCP 两套监听**，对应 config.ini 里两个键：
+#     `[rtc] port`     → UDP（同步器一直有改）
+#     `[rtc] tcpPort`  → TCP（**同步器长期漏掉**，一直留在 ZLM 出厂默认 8000）
+# 后果：8000 是极常见的冲突端口。只要目标机上被别的程序占着，ZLM 启动时
+#   `rtcSrv_tcp->start(8000)` 就抛异常 ⇒ 只打一行
+#   `Start server failed: Listen on :: 8000 failed: address already in use`，
+#   然后**直接退出**（ZLMediaKit server/main.cpp 的 catch 分支）。
+#   而这条原因行会被 ZLM 退出时那几十行 `~EventPoller` 析构日志挤出
+#   `tail -20` 的窗口 ⇒ 用户只看到本包的兜底提示，
+#   极易误判成"缺依赖 / 缺 ffmpeg 库"（客户就是这么找上来的）。
+# 修法：把 tcpPort 一起同步到 **51008**（与 `port` 同号、UDP/TCP 各占一个协议栈，
+#   不占新端口，也和 icePort/iceTcpPort=51013 的做法一致）。
+# 自检：本包跑起来后 `ss -lntp | grep :8000` **应该没有输出**；
+#   若有输出，说明 config.ini 的 tcpPort 又漏同步了。
 #
 # ---------------- ② 平台内部（防火墙不用开）----------------
 # 同机进程之间通信，走回环；开到外网等于把内部接口暴露

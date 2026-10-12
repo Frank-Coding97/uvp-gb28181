@@ -60,3 +60,66 @@ test('missing enableTurn warns but does not block startup (a dead switch must no
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stderr, /enableTurn/);
 });
+
+// ---------------------------------------------------------------------------
+// [rtc] tcpPort —— WebRTC over TCP 的媒体端口
+//
+// ⛔ 真实 config.ini 里 [rtc] 有**两个**媒体键：port(UDP) 与 tcpPort(TCP)。
+//   同步器长期只改 port ⇒ tcpPort 一直留在 ZLM 出厂默认 **8000**（规划段外）。
+//   8000 是极常见的冲突端口，目标机上被占住时 ZLM 启动即退出
+//   （`Start server failed: Listen on :: 8000 failed: address already in use`），
+//   而原因行又会被退出时那几十行 `~EventPoller` 析构日志挤出 tail 窗口 ——
+//   客户 2026-10-12 就是这么误判成"缺依赖"的。
+// ---------------------------------------------------------------------------
+// 防呆网：拿包内 vendor/zlm/config.ini 的**出厂端口**当夹具（含 CRLF 行尾、
+// 含 [rtc] 的 port/tcpPort 两个键），同步一遍后**每一个**监听端口键都必须落在
+// 规划段 51000-51064 内（0 = 关，放行）。以后再漏任何一个键，这条会直接变红。
+const FACTORY_PORTS_FIXTURE = [
+  '[api]', 'apiDebug=1', // 非端口键，用来确认不会被误伤
+  '[http]', 'port=80', 'sslport=443',
+  '[rtmp]', 'port=1935', 'sslport=0',
+  '[rtp_proxy]', 'port=10000', 'port_range=30000-35000',
+  '[rtc]', 'signalingPort=3000', 'signalingSslPort=3001',
+  'icePort=3478', 'iceTcpPort=3478', 'enableTurn=1',
+  'port=8000', 'tcpPort=8000', 'port_range=49152-65535',
+  '[srt]', 'port=9000',
+  '[rtsp]', 'port=554', 'sslport=0',
+  '[onvif]', 'port=3702',
+  '[shell]', 'port=0',
+].join('\r\n') + '\r\n';
+
+test('[rtc] tcpPort is rewritten into the planned range (it used to stay at ZLM default 8000)', () => {
+  const result = sync(script, FACTORY_PORTS_FIXTURE);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.ini, /^port=51008$/m);
+  assert.match(result.ini, /^tcpPort=51008$/m);
+  assert.doesNotMatch(result.ini, /=\s*8000\s*$/m, '还有键值停在 8000（ZLM 出厂默认）上');
+});
+
+test('old synchronizer leaves [rtc] tcpPort at 8000 — the port that collides on customer Linux', () => {
+  const old = execFileSync('git', ['show', 'a86e5782:deploy/standalone/uvp-ctl.sh'], { encoding: 'utf8' });
+  const result = sync(old, FACTORY_PORTS_FIXTURE, PORTS_ARGS);
+  assert.equal(result.status, 0);
+  assert.match(result.ini, /^tcpPort=8000$/m);
+});
+
+test('every ZLM listen port lands inside the planned 51000-51064 range', () => {
+  const result = sync(script, FACTORY_PORTS_FIXTURE);
+  assert.equal(result.status, 0, result.stderr);
+
+  const offenders = [];
+  let section = '';
+  for (const line of result.ini.split(/\r?\n/)) {
+    const head = line.match(/^\[(\w+)\]$/);
+    if (head) { section = head[1]; continue; }
+    const kv = line.match(/^(\w+)\s*=\s*(.+?)\s*$/);
+    if (!kv) continue;
+    const [, key, value] = kv;
+    if (!/port/i.test(key) || /range/i.test(key)) continue; // port_range 是区间，另算
+    if (value === '0') continue;                            // 0 = 该协议不启用
+    const n = Number(value);
+    if (!Number.isInteger(n)) continue;
+    if (n < 51000 || n > 51064) offenders.push(`${section}.${key}=${value}`);
+  }
+  assert.deepEqual(offenders, [], `这些端口跑到规划段外了：${offenders.join(', ')}`);
+});

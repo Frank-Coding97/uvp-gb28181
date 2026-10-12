@@ -1290,6 +1290,19 @@ targets = {
     "rtsp":   {"port": rtsp_port, "sslport": "0"},      # sslport=0 = 不启用
     "rtmp":   {"port": rtmp_port, "sslport": "0"},
     "rtc":    {"port": rtc_port,
+               # ⛔⛔ WebRTC over TCP 的媒体端口同样**不叫 port**（叫 tcpPort）。
+               #   `[rtc] port` 走 UDP、`tcpPort` 走 TCP —— 两个都得写，
+               #   和下面 icePort/iceTcpPort 同理（**同号、不同协议栈，不冲突**）。
+               #   ⛔⛔ 漏了它的后果（2026-10-12 客户 Ubuntu 16 实机踩到）：
+               #     tcpPort 一直留在 ZLM 出厂默认 **8000**（规划段外），
+               #     而 8000 是极常见的冲突端口 ⇒ 目标机上被别的服务占住时，
+               #     ZLM 启动时 `rtcSrv_tcp->start(8000)` 抛异常，只打一行
+               #     `Start server failed: Listen on :: 8000 failed: address already in use`
+               #     就**直接退出**（见 ZLMediaKit server/main.cpp 的 catch 分支），
+               #     用户看到的是本包那句笼统兜底提示 ⇒ 极易误判成"缺依赖"。
+               #   铁证：本包在开发机上跑起来后 `ss -lntp` 里有一条 `*:8000`
+               #   —— 它就是 config.ini 里唯一一处 8000，即这个键没被同步。
+               "tcpPort": rtc_port,
                # ⛔⛔ WebRTC 的信令端口**键名不叫 port**（叫 signalingPort），
                #   所以按"段名 + 键名 port"去匹配是抓不到它们的 ——
                #   实测漏掉后 ZLM 报 `Listen on :: 3001 failed: address already in use`：
