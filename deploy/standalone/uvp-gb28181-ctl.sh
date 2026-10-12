@@ -618,25 +618,62 @@ port_holder() {
 
 # has_pgrep 探测本机有没有 pgrep（由 procps / procps-ng 提供）。
 #
-# ⛔⛔ 为什么必须探测：绿色包的契约是「目标机零预装」，而**最小化容器镜像
+# ⛔⛔ 为什么必须探测：绿色包契约是「目标机零预装」，而**最小化容器镜像
 #   （python:*-slim / alpine 等）默认不带 procps ⇒ 没有 pgrep**。
-#   偏偏 zlm_healthy / nginx_healthy 的最后一步是 `pgrep -f <绝对路径>` 判活，
-#   stop 的「按路径兜底清理」也用它。命令不存在时退出码 127、输出为空 ⇒
-#   判活**恒为「没起来」**，与事实矛盾：2026-10-12 实测，容器里 ZLM 明明在
-#   51004 监听（`ss -lntp` 可见），脚本却报「ZLM 未能在预期时间内监听端口
-#   51004」。⇒ 缺 pgrep 时必须**降级**，绝不能当成「进程不存在」。
+#   2026-10-12 实测：容器里 ZLM 明明在 51004 监听（`ss -lntp` 可见），
+#   脚本却报「ZLM 未能在预期时间内监听端口 51004」；紧接着 stop 报「已停止」
+#   而 ZLM 还在跑 —— 两件怪事同源：判活与「找进程」都只靠 pgrep。
+#   ⇒ pgrep 只是**择优路径**：缺了也能用 /proc 扫描拿到同样结论
+#     （见 proc_pids_by_exe），所以缺 pgrep **不影响功能**，只影响速度。
 has_pgrep() { command -v pgrep >/dev/null 2>&1; }
 
-# warn_no_pgrep_once 缺 pgrep 时提示**一次**（轮询里会被反复调用，不能刷屏）。
-# 降级后果要讲清楚，否则用户以为判活还是准的，下次真出问题会被带偏。
-_no_pgrep_warned=""
-warn_no_pgrep_once() {
-  [ -z "$_no_pgrep_warned" ] || return 0
-  _no_pgrep_warned=1
-  log "⚠️  本机没有 pgrep（未装 procps/procps-ng），进程判活已降级为「只看端口」。
-     · 影响：同机若有别的程序占用同一端口，可能被误判成本包服务在跑；
-       stop 时「按可执行路径清理遗留进程」的兜底也不可用。
-     · 建议：apt install procps（Debian/Ubuntu）或 yum install procps-ng（RHEL/CentOS/麒麟）。"
+# proc_pids_by_exe 按**可执行文件绝对路径**列出本包进程的 pid（每行一个）。
+#
+# ⛔ 为什么不能只有 pgrep 一条路：ZLM 会**daemon 化**（自己 fork，pidfile 里
+#   记的那个父进程 pid 随即失效），此时 stop 只能靠「按绝对路径找进程」兜底；
+#   而没装 procps 的目标机/容器里根本没有 pgrep ⇒ 兜底整体失效 ⇒
+#   **stop 说「已停止」、ZLM 却还在监听**，下次 start 反被端口预检拦下。
+#   /proc 由内核提供、不需要任何外部命令，正好把这条路补上。
+#   有 pgrep 时仍优先用 pgrep（一次调用，胜过遍历整个 /proc）。
+proc_pids_by_exe() {
+  local exe="$1" d pid arg
+  if has_pgrep; then
+    pgrep -f "$exe" 2>/dev/null || true
+    return 0
+  fi
+  for d in /proc/[0-9]*; do
+    pid="${d#/proc/}"
+    if [ "$pid" = "$$" ]; then continue; fi
+    if [ -r "$d/cmdline" ]; then
+      # cmdline 是 NUL 分隔的 argv；用 bash 内建 read -d '' 逐段比对，
+      # 全程不调外部命令（tr/grep 在精简系统里也不保证存在）。
+      while IFS= read -r -d '' arg; do
+        case "$arg" in
+          *"$exe"*) printf '%s\n' "$pid"; break ;;
+        esac
+      done < "$d/cmdline" || true
+    fi
+  done
+  return 0
+}
+
+# proc_alive_by_exe 该绝对路径的进程是否存在（判活用）。
+proc_alive_by_exe() {
+  local pids
+  pids="$(proc_pids_by_exe "$1")"
+  [ -n "$pids" ]
+}
+
+# note_no_pgrep_once 缺 pgrep 时提示**一次**（轮询里会被反复调用，不能刷屏）。
+# 这是「告知」不是「告警」：功能不受影响，只是走了 /proc 慢路径。
+_no_pgrep_noted=""
+note_no_pgrep_once() {
+  if has_pgrep; then return 0; fi
+  [ -z "$_no_pgrep_noted" ] || return 0
+  _no_pgrep_noted=1
+  log "ℹ️  本机没有 pgrep（未装 procps/procps-ng），已改用 /proc 扫描识别本包进程。
+     · 功能不受影响，仅在进程数极多的机器上略微变慢。
+     · 想走更快的路径可安装：apt install procps（Debian/Ubuntu）或 yum install procps-ng（RHEL/CentOS/麒麟）。"
 }
 
 # ---------------------------------------------------------- 进程兜底查找 ----
@@ -683,30 +720,32 @@ stop_by_pidfile() {
   #   而症状又是「stop 说停了、进程还在」。
   #   ⇒ 去掉 ^ 锚定；安全性靠绝对路径本身足够独特来保证。
   if [ -n "$exe_path" ] && [ -x "$exe_path" ]; then
-    # 缺 pgrep 时「按路径兜底」无从谈起（命令本身就不在）⇒ 明确提示一次再退，
-    # 别让 pid 文件丢失的遗留进程悄无声息地活到下次 start 撞端口。
-    if ! has_pgrep; then
-      warn_no_pgrep_once
-      return 0
-    fi
     local found
-    # ⛔⛔ 必须带 `|| true`：**"没找到进程"是这里的正常情况**（服务本来就没跑），
+    # ⛔⛔ 这里**不能**依赖 pgrep 是否存在：ZLM daemon 化后 pidfile 里的 pid 失效，
+    #   按路径找进程就是唯一的希望；而目标机（容器/精简系统）没装 procps 时没有
+    #   pgrep ⇒ 原实现直接「找不到就走人」⇒ stop 报「已停止」而进程还活着，
+    #   下次 start 反被端口预检拦下（2026-10-12 容器实测）。
+    #   proc_pids_by_exe 在缺 pgrep 时改读 /proc，两种环境都能拿到结果。
+    # ⛔ 必须带 `|| true`：**"没找到进程"是这里的正常情况**（服务本来就没跑），
     #   而 pgrep 无匹配时退出码是 1，`var="$(cmd)"` 这条赋值语句的退出码
     #   就等于 cmd 的⇒ `set -e` 直接把整个脚本杀掉。
     #   实测症状：stop **零输出、退出码 1**，而且恰好停在"兜底什么都没找到"这条路
     #   —— 也就是说**越是该静默的情况，它越会崩**。
-    #   （管道里 tr 是成功的，但赋值语句取的是整条管道的退出码，
-    #     shellpipefail 又让 pgrep 的 1 冒上来。）
-    found="$(pgrep -f "${exe_path}" 2>/dev/null | tr '\n' ' ' || true)"
-    if [ -n "${found// /}" ]; then
-      log "${label} 的 pid 文件缺失，按可执行路径找到遗留进程（${found}），正在停止"
-      # shellcheck disable=SC2086  # 上面已用 tr 转成空格分隔的列表
+    found="$(proc_pids_by_exe "${exe_path}" || true)"
+    if [ -n "${found//$'\n'/ }" ]; then
+      log "${label} 的 pid 文件缺失，按可执行路径找到遗留进程（${found//$'\n'/ }），正在停止"
+      # shellcheck disable=SC2086  # found 是换行分隔的 pid 列表，需按 IFS 分词
       kill -TERM $found 2>/dev/null || true
       for _ in $(seq 1 40); do
-        pgrep -f "${exe_path}" >/dev/null 2>&1 || break
+        proc_alive_by_exe "${exe_path}" || break
         sleep 0.25
       done
-      pgrep -f "${exe_path}" >/dev/null 2>&1 && kill -KILL $(pgrep -f "${exe_path}") 2>/dev/null || true
+      local still
+      still="$(proc_pids_by_exe "${exe_path}" || true)"
+      if [ -n "$still" ]; then
+        # shellcheck disable=SC2086  # 同上，仍是换行分隔的 pid 列表
+        kill -KILL $still 2>/dev/null || true
+      fi
     fi
   fi
 }
@@ -1105,14 +1144,10 @@ nginx_healthy() {
     return 1
   }
   exec 3<&- 3>&-
-  # ⛔ 同 zlm_healthy：缺 pgrep 时不能判「进程不存在」，退化为只看端口。
-  if ! has_pgrep; then
-    warn_no_pgrep_once
-    return 0
-  fi
   # 按可执行文件**绝对路径**匹配：按名字会命中同机其它 nginx
-  # （这台机器上就Docker 里跑了 27 天的 nginx）。
-  pgrep -f "$NGINX_BIN" >/dev/null 2>&1
+  # （这台机器上就Docker 里跑了 27 天的 nginx）。缺 pgrep 时自动走 /proc。
+  note_no_pgrep_once
+  proc_alive_by_exe "$NGINX_BIN"
 }
 
 start_nginx() {
@@ -1472,16 +1507,11 @@ zlm_healthy() {
     return 1
   }
   exec 3<&- 3>&-
-  # ⛔ 缺 pgrep（容器无 procps）时这一步会恒失败 ⇒ 不能当成「进程不存在」，
-  #   只能相信端口（理由见 has_pgrep 注释）。提示一次后放行。
-  if ! has_pgrep; then
-    warn_no_pgrep_once
-    return 0
-  fi
   # ⛔ 端口被谁占着也要分清：机器上可能跑着别的 MediaServer（容器内的、
   #   用相对路径 -c ../conf/config.ini 启动），按可执行文件**绝对路径**匹配
-  #   只会命中本包启动的。
-  pgrep -f "$ZLM_BIN" >/dev/null 2>&1
+  #   只会命中本包启动的。缺 pgrep 时 proc_pids_by_exe 自动改走 /proc。
+  note_no_pgrep_once
+  proc_alive_by_exe "$ZLM_BIN"
 }
 
 start_zlm() {
