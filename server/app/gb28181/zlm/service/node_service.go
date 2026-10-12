@@ -147,20 +147,26 @@ type CreateNodeReq struct {
 
 // NodeProbeServerConfig 是新增向导可安全回显的 ZLM 配置子集。
 // 原始配置包含 api.secret 等敏感字段，不得直接穿透到控制器。
+//
+// RTPPortRangeStart/End 是 `[rtp_proxy] port_range` 的**实测值**（0 = ZLM 未返回或不可解析）。
+// 新增向导拿它只读回显：多端口收流范围的真源在 ZLM，平台这边的登记值只是镜像，
+// 平台也从不给 ZLM 下发这个键 —— 所以向导里那个输入框本来就不该可编辑。
 type NodeProbeServerConfig struct {
-	HTTPPort     int  `json:"httpPort"`
-	HTTPSPort    int  `json:"httpsPort"`
-	RTSPPort     int  `json:"rtspPort"`
-	RTSPSPort    int  `json:"rtspsPort"`
-	RTMPPort     int  `json:"rtmpPort"`
-	RTMPSPort    int  `json:"rtmpsPort"`
-	RTPProxyPort int  `json:"rtpProxyPort"`
-	ONVIFPort    int  `json:"onvifPort"`
-	RTSPEnabled  bool `json:"rtspEnabled"`
-	RTMPEnabled  bool `json:"rtmpEnabled"`
-	HLSEnabled   bool `json:"hlsEnabled"`
-	TSEnabled    bool `json:"tsEnabled"`
-	FMP4Enabled  bool `json:"fmp4Enabled"`
+	HTTPPort          int  `json:"httpPort"`
+	HTTPSPort         int  `json:"httpsPort"`
+	RTSPPort          int  `json:"rtspPort"`
+	RTSPSPort         int  `json:"rtspsPort"`
+	RTMPPort          int  `json:"rtmpPort"`
+	RTMPSPort         int  `json:"rtmpsPort"`
+	RTPProxyPort      int  `json:"rtpProxyPort"`
+	ONVIFPort         int  `json:"onvifPort"`
+	RTPPortRangeStart int  `json:"rtpPortRangeStart"`
+	RTPPortRangeEnd   int  `json:"rtpPortRangeEnd"`
+	RTSPEnabled       bool `json:"rtspEnabled"`
+	RTMPEnabled       bool `json:"rtmpEnabled"`
+	HLSEnabled        bool `json:"hlsEnabled"`
+	TSEnabled         bool `json:"tsEnabled"`
+	FMP4Enabled       bool `json:"fmp4Enabled"`
 }
 
 // NodeProbeResult 是候选节点的只读探测结果，不代表节点已经登记。
@@ -560,6 +566,7 @@ func (s *NodeService) ProbeCreate(ctx context.Context, req CreateNodeReq) (*Node
 			RTSPPort: detected.RTSPPort, RTSPSPort: detected.RTSPSPort,
 			RTMPPort: detected.RTMPPort, RTMPSPort: detected.RTMPSPort,
 			RTPProxyPort: detected.RTPProxyPort, ONVIFPort: detected.ONVIFPort,
+			RTPPortRangeStart: detected.RTPPortRangeStart, RTPPortRangeEnd: detected.RTPPortRangeEnd,
 			RTSPEnabled: detected.RTSPEnabled, RTMPEnabled: detected.RTMPEnabled,
 			HLSEnabled: detected.HLSEnabled, TSEnabled: detected.TSEnabled,
 			FMP4Enabled: detected.FMP4Enabled,

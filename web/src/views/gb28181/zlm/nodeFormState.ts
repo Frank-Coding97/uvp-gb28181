@@ -45,6 +45,27 @@ function integerError(value: string, label: string, min: number, max: number) {
   return "";
 }
 
+/**
+ * 解析 ZLM `[rtp_proxy] port_range` 的原始串（形如 `51014-51063`）。
+ *
+ * ⛔ 判据必须与后端 `node.ParseRTPPortRange` 保持在**同一套**上，否则会出现
+ * 「界面上读得出来、后端解析不了」这类只有真机才暴露的静默漂移。
+ * 所以这里**不 trim、不宽松**：两侧都必须是非空纯数字，且 1 ≤ start ≤ end ≤ 65535，
+ * 与后端逐条对齐（后端也不做 trim）。
+ * ✅ 解析不出来一律返回 `null` —— 调用方必须回落到已登记的端口值，
+ * 绝不能把 0 / NaN 当端口往表单里塞。
+ */
+export function parseRTPPortRange(value?: string): { start: number; end: number } | null {
+  if (!value) return null;
+  const match = /^(\d+)-(\d+)$/.exec(value);
+  if (!match) return null;
+  const start = Number(match[1]);
+  const end = Number(match[2]);
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)) return null;
+  if (start < 1 || end > 65535 || start > end) return null;
+  return { start, end };
+}
+
 export function validateNodeForm(form: NodeFormState, editing: boolean): NodeFormErrors {
   const errors: NodeFormErrors = {};
   if (editing && !form.name.trim()) errors.name = "请输入节点名";

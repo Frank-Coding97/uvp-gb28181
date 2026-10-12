@@ -76,6 +76,9 @@ export interface ZLMNodeProbeResult {
     rtmpsPort: number;
     rtpProxyPort: number;
     onvifPort: number;
+    /** `[rtp_proxy] port_range` 的实测值；0 = ZLM 未返回或不可解析，只读回显时必须回落登记值。 */
+    rtpPortRangeStart: number;
+    rtpPortRangeEnd: number;
     rtspEnabled: boolean;
     rtmpEnabled: boolean;
     hlsEnabled: boolean;

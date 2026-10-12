@@ -15,6 +15,7 @@ import {
   buildNodeRequest,
   clearNodeSecret,
   createNodeFormState,
+  parseRTPPortRange,
   validateNodeForm,
   type NodeFormErrors,
   type NodeFormState
@@ -48,6 +49,21 @@ const protocolItems = computed(() => {
   ];
 });
 
+/**
+ * 用 ZLM 的**实测值**覆盖表单里的登记镜像。
+ *
+ * 契约：多端口收流范围的真源在 ZLM 的 `[rtp_proxy] port_range`，
+ * `meta_node.rtp_port_start/end` 只是镜像，平台也从不下发这个键 ——
+ * 所以表单里这两个框只读，值只能来自这里。
+ * ⛔ 实测值读不到 / 不可解析时**什么都不做**：保留 `createNodeFormState` 灌进来的登记值，
+ * 绝不写 0 或空串（那会让校验拦下一个用户根本改不了的字段）。
+ */
+function applyRTPPortRange(start?: number, end?: number) {
+  if (!start || !end || start < 1 || end > 65535 || start > end) return;
+  form.value.rtpPortStart = String(start);
+  form.value.rtpPortEnd = String(end);
+}
+
 watch(
   () => [props.visible, props.node] as const,
   async ([visible], _previous, onCleanup) => {
@@ -65,8 +81,10 @@ watch(
         const response = await getZLMNodeConfig(props.node.id);
         if (cancelled) return;
         if (response.code !== 0 || !response.data) throw new Error("读取节点配置失败");
-        const item = response.data.groups.flatMap(group => group.items).find(item => item.key === "rtp_proxy.port");
-        form.value.rtpProxyPort = item?.value ?? "";
+        const items = response.data.groups.flatMap(group => group.items);
+        form.value.rtpProxyPort = items.find(item => item.key === "rtp_proxy.port")?.value ?? "";
+        const range = parseRTPPortRange(items.find(item => item.key === "rtp_proxy.port_range")?.value);
+        if (range) applyRTPPortRange(range.start, range.end);
       } catch (error) {
         if (!cancelled) Message.error(`读取实际收流端口失败：${zlmErrorPresentation(error).label}`);
       }
@@ -107,6 +125,8 @@ async function handleProbe() {
     if (response.code !== 0 || !response.data) throw new Error(response.message || "读取 ZL 信息失败");
     probeResult.value = response.data;
     form.value.rtpProxyPort = String(response.data.serverConfig.rtpProxyPort);
+    // 新增节点也照实测值走：这两个框是只读的，拿不到实测值就会把写死的默认值当范围登记进库。
+    applyRTPPortRange(response.data.serverConfig.rtpPortRangeStart, response.data.serverConfig.rtpPortRangeEnd);
     currentStep.value = 2;
   } catch (error) {
     Message.error(zlmErrorPresentation(error).label);
@@ -292,52 +312,43 @@ async function handleSubmit() {
           :help="errors.rtpPortStart || errors.rtpPortEnd"
         >
           <a-space class="port-range">
-            <a-input
-              v-model="form.rtpPortStart"
-              allow-clear
-              inputmode="numeric"
-              :max-length="5"
-              aria-label="RTP 起始端口"
-              @blur="validateField('rtpPortStart')"
-            />
+            <a-input v-model="form.rtpPortStart" readonly aria-label="RTP 起始端口" @blur="validateField('rtpPortStart')" />
             <span class="form-tip-inline">至</span>
-            <a-input
-              v-model="form.rtpPortEnd"
-              allow-clear
-              inputmode="numeric"
-              :max-length="5"
-              aria-label="RTP 结束端口"
-              @blur="validateField('rtpPortEnd')"
-            />
+            <a-input v-model="form.rtpPortEnd" readonly aria-label="RTP 结束端口" @blur="validateField('rtpPortEnd')" />
           </a-space>
-          <div class="form-tip">范围 1024-65535，结束端口必须大于起始端口。</div>
+          <div class="form-tip">
+            从 ZLM 实时读取，只读显示。修改收流范围请前往节点“服务配置”的 rtp_proxy.port_range（需重启节点生效）；
+            平台会在节点启动探测与服务配置保存时自动对齐这里的登记值。
+          </div>
         </a-form-item>
       </template>
 
       <div class="form-section-title">媒体网络地址覆盖</div>
-      <a-form-item label="Hook IP 覆盖" :validate-status="errors.hookIp ? 'error' : undefined" :help="errors.hookIp">
-        <a-input
-          v-model="form.hookIp"
-          allow-clear
-          :max-length="45"
-          placeholder="具体 IPv4 或 IPv6"
-          @blur="validateField('hookIp')"
-        />
-        <div class="form-tip">留空使用平台默认 Hook IP；平台默认未配置时沿用原地址策略。</div>
-      </a-form-item>
+      <div class="node-form-grid">
+        <a-form-item label="Hook IP 覆盖" :validate-status="errors.hookIp ? 'error' : undefined" :help="errors.hookIp">
+          <a-input
+            v-model="form.hookIp"
+            allow-clear
+            :max-length="45"
+            placeholder="具体 IPv4 或 IPv6"
+            @blur="validateField('hookIp')"
+          />
+          <div class="form-tip">留空使用平台默认 Hook IP；平台默认未配置时沿用原地址策略。</div>
+        </a-form-item>
 
-      <a-form-item label="SDP IP 覆盖" :validate-status="errors.sdpIp ? 'error' : undefined" :help="errors.sdpIp">
-        <a-input
-          v-model="form.sdpIp"
-          allow-clear
-          :max-length="253"
-          placeholder="设备可访问的 IP 或域名"
-          @blur="validateField('sdpIp')"
-        />
-        <div class="form-tip">
-          该节点下发 SDP 时通告的地址（设备据此回推 RTP 流）；留空使用平台默认 SDP IP，不能填 127.0.0.1。
-        </div>
-      </a-form-item>
+        <a-form-item label="SDP IP 覆盖" :validate-status="errors.sdpIp ? 'error' : undefined" :help="errors.sdpIp">
+          <a-input
+            v-model="form.sdpIp"
+            allow-clear
+            :max-length="253"
+            placeholder="设备可访问的 IP 或域名"
+            @blur="validateField('sdpIp')"
+          />
+          <div class="form-tip">
+            该节点下发 SDP 时通告的地址（设备据此回推 RTP 流）；留空使用平台默认 SDP IP，不能填 127.0.0.1。
+          </div>
+        </a-form-item>
+      </div>
 
       <a-form-item
         label="Stream IP 覆盖"

@@ -194,6 +194,7 @@ func TestNodeService_ProbeCreateReadsZLMWithoutPersistingOrReturningSecret(t *te
 		"rtsp.port":             "10554",
 		"rtmp.port":             "11935",
 		"rtp_proxy.port":        "10000",
+		"rtp_proxy.port_range":  "51014-51063",
 		"protocol.enable_rtsp":  "1",
 		"protocol.enable_rtmp":  "1",
 		"protocol.enable_hls":   "0",
@@ -211,6 +212,10 @@ func TestNodeService_ProbeCreateReadsZLMWithoutPersistingOrReturningSecret(t *te
 	require.Equal(t, "existing-zlm-id", preview.MediaServerID)
 	require.Equal(t, 18080, preview.ServerConfig.HTTPPort)
 	require.Equal(t, 10554, preview.ServerConfig.RTSPPort)
+	// 多端口收流范围必须**回传实测值**：新增向导里那个输入框是只读的，
+	// 拿不到实测值就只能回显写死的 30000-35000，登记出来的镜像从一开始就是错的。
+	require.Equal(t, 51014, preview.ServerConfig.RTPPortRangeStart)
+	require.Equal(t, 51063, preview.ServerConfig.RTPPortRangeEnd)
 	require.False(t, preview.ServerConfig.HLSEnabled)
 	require.Empty(t, repo.rows, "预检不得登记节点")
 	require.Equal(t, []string{"GetServerConfig"}, probe.calls, "预检不得下发 ZLM 配置")

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { buildNodeRequest, clearNodeSecret, createNodeFormState, validateNodeForm } from "./nodeFormState";
+import { buildNodeRequest, clearNodeSecret, createNodeFormState, parseRTPPortRange, validateNodeForm } from "./nodeFormState";
 
 const existingNode = {
   id: 7,
@@ -193,5 +193,41 @@ describe("receive port mode", () => {
     expect(buildNodeRequest(form, true)).not.toHaveProperty("rtpPortStart");
     form.rtpReceiveMode = "multi";
     expect(validateNodeForm(form, true)).toHaveProperty("rtpPortStart");
+  });
+});
+
+/**
+ * 多端口收流范围的**唯一解析规则**，与后端 `node.ParseRTPPortRange` 逐条对齐。
+ * ⛔ 两边判据各写一份就会「界面读得出来、后端解析不了」；所以这里的用例要和 Go 侧
+ * `rtp_range_test.go` 的非法表保持一致。
+ */
+describe("RTP port range parsing", () => {
+  it("accepts only a well formed start-end pair", () => {
+    expect(parseRTPPortRange("51014-51063")).toEqual({ start: 51014, end: 51063 });
+    expect(parseRTPPortRange("1024-65535")).toEqual({ start: 1024, end: 65535 });
+    // 起止相等是合法的（单个会话的极端配置），后端也放行。
+    expect(parseRTPPortRange("30000-30000")).toEqual({ start: 30000, end: 30000 });
+  });
+
+  it("rejects everything a caller must not treat as a port", () => {
+    const unusable = [
+      undefined,
+      "",
+      "51014",
+      "51014-",
+      "-51063",
+      "51014-51063-51200",
+      "51014--51063",
+      " 51014-51063",
+      "51014-51063 ",
+      "rtp_proxy.port_range",
+      "0-0",
+      "51299-51200",
+      "30000-70000",
+      "1e4-2e4"
+    ];
+    for (const value of unusable) {
+      expect(parseRTPPortRange(value as string | undefined), `${String(value)} 不应被当成可用范围`).toBeNull();
+    }
   });
 });
