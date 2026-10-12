@@ -180,69 +180,71 @@ async function handleSubmit() {
 
     <a-form v-if="editing || currentStep === 1" :model="form" layout="vertical" @submit-success="handleSubmit">
       <div v-if="!editing" class="form-section-title">必填参数</div>
-      <a-form-item
-        v-if="editing"
-        label="节点名"
-        required
-        :validate-status="errors.name ? 'error' : undefined"
-        :help="errors.name"
-      >
-        <a-input
-          v-model="form.name"
-          allow-clear
-          :max-length="80"
-          show-word-limit
-          placeholder="例如 zlm-bj-1"
-          @blur="validateField('name')"
-        />
-      </a-form-item>
+      <div class="node-form-grid">
+        <a-form-item
+          v-if="editing"
+          label="节点名"
+          required
+          :validate-status="errors.name ? 'error' : undefined"
+          :help="errors.name"
+        >
+          <a-input
+            v-model="form.name"
+            allow-clear
+            :max-length="80"
+            show-word-limit
+            placeholder="例如 zlm-bj-1"
+            @blur="validateField('name')"
+          />
+        </a-form-item>
 
-      <a-form-item
-        :label="editing ? '管理地址（API Host）' : 'IP 地址'"
-        required
-        :validate-status="errors.host ? 'error' : undefined"
-        :help="errors.host"
-      >
-        <a-input
-          v-model="form.host"
-          allow-clear
-          :max-length="255"
-          :placeholder="editing ? '后端访问 ZLM 的 IP 或域名' : '后端可访问的 ZLM IP'"
-          @blur="validateField('host')"
-        />
-        <div v-if="editing" class="form-tip">编辑时允许提交候选地址；后端探测通过前不会覆盖旧连接。</div>
-      </a-form-item>
+        <a-form-item
+          :label="editing ? '管理地址（API Host）' : 'IP 地址'"
+          required
+          :validate-status="errors.host ? 'error' : undefined"
+          :help="errors.host"
+        >
+          <a-input
+            v-model="form.host"
+            allow-clear
+            :max-length="255"
+            :placeholder="editing ? '后端访问 ZLM 的 IP 或域名' : '后端可访问的 ZLM IP'"
+            @blur="validateField('host')"
+          />
+          <div v-if="editing" class="form-tip">编辑时允许提交候选地址；后端探测通过前不会覆盖旧连接。</div>
+        </a-form-item>
 
-      <a-form-item label="API 端口" required :validate-status="errors.apiPort ? 'error' : undefined" :help="errors.apiPort">
-        <a-input
-          v-model="form.apiPort"
-          allow-clear
-          inputmode="numeric"
-          :max-length="5"
-          placeholder="1-65535"
-          @blur="validateField('apiPort')"
-        />
-      </a-form-item>
+        <a-form-item label="API 端口" required :validate-status="errors.apiPort ? 'error' : undefined" :help="errors.apiPort">
+          <a-input
+            v-model="form.apiPort"
+            allow-clear
+            inputmode="numeric"
+            :max-length="5"
+            placeholder="1-65535"
+            @blur="validateField('apiPort')"
+          />
+        </a-form-item>
 
-      <a-form-item
-        :label="editing ? 'API Secret（只写，留空不修改）' : 'API Secret（只写）'"
-        :required="!editing"
-        :validate-status="errors.apiSecret ? 'error' : undefined"
-        :help="errors.apiSecret"
-      >
-        <a-input-password
-          v-model="form.apiSecret"
-          allow-clear
-          :invisible-button="true"
-          autocomplete="new-password"
-          :max-length="512"
-          :placeholder="editing ? '不修改时保持为空' : '填写 ZLM api.secret'"
-          @blur="validateField('apiSecret')"
-        />
-        <div class="form-tip">保存成功后立即从前端表单清空，后续编辑不会加载旧值。</div>
-      </a-form-item>
+        <a-form-item
+          :label="editing ? 'API Secret（只写，留空不修改）' : 'API Secret（只写）'"
+          :required="!editing"
+          :validate-status="errors.apiSecret ? 'error' : undefined"
+          :help="errors.apiSecret"
+        >
+          <a-input-password
+            v-model="form.apiSecret"
+            allow-clear
+            :invisible-button="true"
+            autocomplete="new-password"
+            :max-length="512"
+            :placeholder="editing ? '不修改时保持为空' : '填写 ZLM api.secret'"
+            @blur="validateField('apiSecret')"
+          />
+          <div class="form-tip">保存成功后立即从前端表单清空，后续编辑不会加载旧值。</div>
+        </a-form-item>
+      </div>
 
-      <template v-if="editing">
+      <div v-if="editing" class="node-form-grid">
         <a-form-item label="设备收流地址">
           <a-input v-model="form.receiveHost" allow-clear :max-length="255" placeholder="写入 SDP 的地址，留空跟随管理地址" />
           <div class="form-tip">设备向此地址发送 RTP；公网部署时填写设备可达地址。</div>
@@ -259,7 +261,7 @@ async function handleSubmit() {
           />
           <div class="form-tip">0 表示不参与加权调度；不会在输入时静默修正数值。</div>
         </a-form-item>
-      </template>
+      </div>
       <a-form-item label="收流端口模式">
         <a-space>
           <span :class="{ 'form-tip': form.rtpReceiveMode !== 'single' }">单端口</span>
@@ -461,6 +463,17 @@ async function handleSubmit() {
   font-weight: var(--zlm-fw-semibold);
   color: var(--zlm-text-1);
 }
+
+/* 双列表单：把「一行一个」的长表单折成两列，压掉弹窗的滚动高度。
+   约定（与 ProxyForm.vue 同款）：成对的字段包进 .node-form-grid；
+   需要独占整行的（收流端口模式、RTP 端口范围、分组标题）留在栅格外即可。
+   ⛔ 不要改成「给 a-form 本身加 grid + 逐个标 grid-column」—— 那样新增字段会静默落进别人那一行。 */
+.node-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: var(--zlm-space-4);
+  align-items: start;
+}
 .probe-preview {
   display: grid;
   gap: var(--zlm-space-5);
@@ -538,6 +551,12 @@ async function handleSubmit() {
 :global(.zlm-node-form .arco-input-password:focus-within) {
   border-color: var(--uvp-brand) !important;
   box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
+
+@media (width <= 720px) {
+  .node-form-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (width <= 600px) {
