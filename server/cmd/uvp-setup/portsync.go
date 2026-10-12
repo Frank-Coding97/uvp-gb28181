@@ -320,6 +320,15 @@ func syncZLMIni(path string, z zlmPorts, secret, mediaServerID string) error {
 	if z.rtc > 0 {
 		edits = append(edits,
 			zlmIniEdit{"rtc", "port", strconv.Itoa(z.rtc)},
+			// ⛔⛔ WebRTC 媒体是 UDP + TCP **两套**监听：`port` 走 UDP、`tcpPort` 走 TCP。
+			//   两个都得写（同号、不同协议栈，不冲突；与 icePort/iceTcpPort 同一个道理）。
+			//   只改 port ⇒ tcpPort 留在 ZLM 出厂默认 **8000**（规划段外），
+			//   目标机上 8000 被别的程序占住时，ZLM 启动 `rtcSrv_tcp->start(8000)`
+			//   抛异常、只打一行 `Start server failed: Listen on :: 8000 failed:
+			//   address already in use` 就退出 —— 而原因行还会被退出时那几十行
+			//   `~EventPoller` 析构日志挤出 tail 窗口，现场极易误判成"缺依赖"。
+			//   （2026-10-12 客户 Linux 包实机踩到；Linux 侧同步器同一处也漏，已一并修。）
+			zlmIniEdit{"rtc", "tcpPort", strconv.Itoa(z.rtc)},
 			zlmIniEdit{"rtc", "signalingPort", strconv.Itoa(z.signaling)},
 			zlmIniEdit{"rtc", "signalingSslPort", strconv.Itoa(z.signalingSSL)},
 			zlmIniEdit{"rtc", "icePort", strconv.Itoa(z.ice)},

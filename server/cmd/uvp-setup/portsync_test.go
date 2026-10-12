@@ -170,6 +170,10 @@ func TestSyncZLMIniIsSectionScoped(t *testing.T) {
 		{"http", "sslport", "51007"},
 		{"rtsp", "port", "51005"},
 		{"rtmp", "port", "51006"},
+		// ⛔ WebRTC 媒体是 UDP+TCP 两套监听：port(UDP) 与 tcpPort(TCP) 都必须落到规划段，
+		//   漏掉 tcpPort 会让它留在 ZLM 出厂默认 8000 上（2026-10-12 客户实机踩到）。
+		{"rtc", "port", "51008"},
+		{"rtc", "tcpPort", "51008"},
 		{"rtc", "signalingPort", "51009"},
 		{"rtc", "signalingSslPort", "51010"},
 		{"rtc", "enableTurn", "0"},
