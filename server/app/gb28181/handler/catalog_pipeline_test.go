@@ -195,3 +195,22 @@ func TestHandleCatalogResponse_RefreshesCapabilitiesForEachCompletedBatch(t *tes
 	defer refresher.mu.Unlock()
 	require.Equal(t, []string{deviceID + ":21", deviceID + ":21"}, refresher.calls)
 }
+
+func TestHandleCatalogResponse_CompatibleCodesAndRootIdentity(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &gbmodels.GbCatalogNode{}, &gbmodels.GbChannelMount{}, &gbmodels.GbAnomalyRecord{}))
+	const device = "37010301021320000021"
+	require.NoError(t, db.Create(&gbmodels.GbDevice{DeviceID: device, OwnerDeptID: 10}).Error)
+	SetCatalogPipeline(catalog.New(db))
+	t.Cleanup(func() { SetCatalogPipeline(nil) })
+	body := []byte(`<Response><CmdType>Catalog</CmdType><SN>801</SN><DeviceID>37010301021320000021</DeviceID><SumNum>2</SumNum><DeviceList Num="2"><Item><DeviceID>34020000001410000020</DeviceID><ParentID>37010301021320000021</ParentID><Parental>0</Parental></Item><Item><DeviceID>37010301021320000021</DeviceID><Parental>1</Parental></Item></DeviceList></Response>`)
+	HandleCatalogResponse(context.Background(), body, device, "compatibility-query", "1")
+	var channels []gbmodels.GbChannel
+	require.NoError(t, db.Find(&channels).Error)
+	require.Len(t, channels, 1)
+	require.Equal(t, "34020000001410000020", channels[0].ChannelID)
+	var root gbmodels.GbCatalogNode
+	require.NoError(t, db.Where("code = ?", device).First(&root).Error)
+	require.Equal(t, gbmodels.NodeTypeDevice, root.NodeType)
+}

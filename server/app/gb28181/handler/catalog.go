@@ -300,6 +300,7 @@ func manscdpToCatalogItem(it manscdp.CatalogItem) catalog.CatalogItem {
 		ParentID:        it.ParentID,
 		BusinessGroupID: it.BusinessGroupID,
 		Parental:        it.Parental,
+		ParentalPresent: it.ParentalPresent,
 		PTZType:         it.PTZType,
 		Longitude:       it.Longitude,
 		Latitude:        it.Latitude,

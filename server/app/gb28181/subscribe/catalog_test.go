@@ -237,3 +237,20 @@ func TestCatalogProcessor_KeepsKnownAttributesWhenUpdateCarriesNoInfo(t *testing
 	require.Equal(t, "1920*1080", channel.Resolution, "不带 <Info> 的 UPDATE 不得把 resolution 清空")
 	require.Equal(t, int8(1), channel.UseType, "不带 <Info> 的 UPDATE 不得把 use_type 清零")
 }
+
+func TestCatalogProcessor_CompatibleCodesAndRootIdentity(t *testing.T) {
+	db := newCatalogProcessorDB(t)
+	device := &gbmodels.GbDevice{DeviceID: "37010301021320000021", OwnerDeptID: 10}
+	require.NoError(t, db.Create(device).Error)
+	p := NewCatalogProcessor(catalog.New(db))
+	initial := []byte(`<Notify><CmdType>Catalog</CmdType><SN>701</SN><DeviceID>37010301021320000021</DeviceID><DeviceList Num="2"><Item><DeviceID>37010301021320000021</DeviceID><Parental>1</Parental></Item><Item><DeviceID>34020000001410000020</DeviceID><ParentID>37010301021320000021</ParentID><Parental>0</Parental><Status>ON</Status></Item></DeviceList></Notify>`)
+	require.NoError(t, p.Process(context.Background(), device, Notification{Body: initial}))
+	var channels []gbmodels.GbChannel
+	require.NoError(t, db.Find(&channels).Error)
+	require.Len(t, channels, 1)
+	require.Equal(t, "34020000001410000020", channels[0].ChannelID)
+	update := []byte(`<Notify><CmdType>Catalog</CmdType><SN>702</SN><DeviceID>37010301021320000021</DeviceID><DeviceList Num="1"><Item><DeviceID>37010301021320000021</DeviceID><Event>UPDATE</Event><Status>ON</Status></Item></DeviceList></Notify>`)
+	require.NoError(t, p.Process(context.Background(), device, Notification{Body: update}))
+	require.NoError(t, db.Find(&channels).Error)
+	require.Len(t, channels, 1)
+}

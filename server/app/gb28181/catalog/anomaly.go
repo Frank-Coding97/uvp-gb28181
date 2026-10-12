@@ -42,7 +42,7 @@ func recordAnomaly(
 		OwnerDeptID:    ownerDeptID,
 		CatalogNodeID:  node.ID,
 		RawCode:        cls.RawCode,
-		FallbackType:   gbmodels.FallbackTypeVirtualOrg,
+		FallbackType:   gbmodels.FallbackType(cls.NodeType),
 		Reason:         cls.Reason,
 		Resolved:       false,
 		SourceDeviceID: sourceDevID,

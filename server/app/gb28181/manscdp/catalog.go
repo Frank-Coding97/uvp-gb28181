@@ -83,6 +83,7 @@ type CatalogItem struct {
 	BusinessGroupID string `xml:"BusinessGroupID"`
 	Address         string `xml:"Address"`
 	Parental        int    `xml:"Parental"`
+	ParentalPresent bool   `xml:"-"`
 	RegisterWay     int    `xml:"RegisterWay"`
 	Secrecy         int    `xml:"Secrecy"`
 	// PTZTypeAtItem 兼容把 PTZType 直接写在 Item 层的非合规设备(旧实现只认这里,
@@ -102,6 +103,24 @@ type CatalogItem struct {
 	// ⛔ 刻意不带 xml tag:它由 normalize() 从 <Info> 或 Item 层择一填充,
 	// 让消费方(handler / subscribe / upsert / controllers)无需改动即可拿到标准位置的值。
 	PTZType int `xml:"-"`
+}
+
+// UnmarshalXML distinguishes a video leaf declaration from a sparse status update.
+func (it *CatalogItem) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	type plain CatalogItem
+	*it = CatalogItem{}
+	raw := struct {
+		*plain
+		Parental *int `xml:"Parental"`
+	}{plain: (*plain)(it)}
+	if err := d.DecodeElement(&raw, &start); err != nil {
+		return err
+	}
+	it.ParentalPresent = raw.Parental != nil
+	if raw.Parental != nil {
+		it.Parental = *raw.Parental
+	}
+	return nil
 }
 
 // normalize 把 <Info> 内的属性回填到归一化的对外字段上。

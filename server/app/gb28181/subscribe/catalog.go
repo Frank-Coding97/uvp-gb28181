@@ -155,7 +155,8 @@ func catalogItemFromMANSCDP(item manscdp.CatalogItem) catalog.CatalogItem {
 		Model: item.Model, Owner: item.Owner, CivilCode: item.CivilCode,
 		ParentID: item.ParentID, BusinessGroupID: item.BusinessGroupID,
 		Parental: item.Parental, PTZType: item.PTZType, Longitude: item.Longitude,
-		Latitude: item.Latitude, StatusOn: item.IsOnline(),
+		ParentalPresent: item.ParentalPresent,
+		Latitude:        item.Latitude, StatusOn: item.IsOnline(),
 		Address: item.Address, Secrecy: int8(item.Secrecy), RegisterWay: int8(item.RegisterWay),
 
 		IPAddress:       item.IPAddress,

@@ -42,6 +42,10 @@ func New(db *gorm.DB) *Pipeline {
 // 错误返回:第一个失败的 item 错误;不全部停下(失败的跳过,继续后续)
 // 这种设计让 anomaly 单条不阻塞整批入库
 func (p *Pipeline) Ingest(ctx context.Context, sender Sender, items []CatalogItem) error {
+	return p.ingest(ctx, sender, items, false)
+}
+
+func (p *Pipeline) ingest(ctx context.Context, sender Sender, items []CatalogItem, preserveIdentity bool) error {
 	if len(items) == 0 {
 		return nil
 	}
@@ -53,20 +57,24 @@ func (p *Pipeline) Ingest(ctx context.Context, sender Sender, items []CatalogIte
 	}
 
 	var firstErr error
-	for _, it := range items {
+	ordered, parents := orderCatalogItems(items)
+	for _, it := range ordered {
 		if it.DeviceID == "" {
 			continue
 		}
-		if err := p.ingestOne(ctx, sender, it); err != nil && firstErr == nil {
+		if err := p.ingestOne(ctx, sender, it, parents[it.DeviceID], preserveIdentity); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
 	return firstErr
 }
 
-func (p *Pipeline) ingestOne(ctx context.Context, sender Sender, it CatalogItem) error {
+func (p *Pipeline) ingestOne(ctx context.Context, sender Sender, it CatalogItem, hasChildren, preserveIdentity bool) error {
 	return p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		cls := Classify(it.DeviceID)
+		cls, err := classifyCatalogItem(tx, sender, it, hasChildren, preserveIdentity)
+		if err != nil {
+			return err
+		}
 
 		// 1. 行政区链(优先 item.CivilCode,没有则回退 classify 结果)
 		var civilNode *gbmodels.GbCatalogNode
@@ -84,8 +92,11 @@ func (p *Pipeline) ingestOne(ctx context.Context, sender Sender, it CatalogItem)
 			civilNode = n
 		}
 
-		parentNode, err := resolveBusinessParent(tx, sender, it, civilNode)
+		parentNode, err := resolveBusinessParent(tx, sender, it, cls, civilNode)
 		if err != nil {
+			return err
+		}
+		if err := reconcileCatalogIdentity(tx, sender, it, cls, parentNode); err != nil {
 			return err
 		}
 		return ingestByType(ctx, tx, sender, it, cls, parentNode)
@@ -94,12 +105,12 @@ func (p *Pipeline) ingestOne(ctx context.Context, sender Sender, it CatalogItem)
 
 // resolveBusinessParent 选择业务父节点。2022 ParentID 可为 A/B;目录树只能
 // 选择一个展示父节点,完整关系由资源关系表保留
-func resolveBusinessParent(tx *gorm.DB, sender Sender, it CatalogItem, civilNode *gbmodels.GbCatalogNode) (*gbmodels.GbCatalogNode, error) {
+func resolveBusinessParent(tx *gorm.DB, sender Sender, it CatalogItem, cls Classification, civilNode *gbmodels.GbCatalogNode) (*gbmodels.GbCatalogNode, error) {
 	parentNode := civilNode
 	// 通道同时上报 ParentID(物理设备) 与 BusinessGroupID(业务组织) 时，
 	// 目录展示优先挂到业务组织；设备/组织节点仍优先沿 ParentID 建物理层级。
 	parentCodes := SplitParentIDs(it.ParentID)
-	if Classify(it.DeviceID).NodeType == gbmodels.NodeTypeChannel {
+	if cls.NodeType == gbmodels.NodeTypeChannel {
 		parentCodes = append(SplitParentIDs(it.BusinessGroupID), parentCodes...)
 	} else {
 		parentCodes = append(parentCodes, SplitParentIDs(it.BusinessGroupID)...)
@@ -124,6 +135,9 @@ func resolveBusinessParent(tx *gorm.DB, sender Sender, it CatalogItem, civilNode
 			break
 		}
 		pCls := Classify(parentCode)
+		if parentCode == sender.SourceDeviceID {
+			pCls.NodeType = gbmodels.NodeTypeDevice
+		}
 		switch pCls.NodeType {
 		case gbmodels.NodeTypeBizGroup, gbmodels.NodeTypeVirtualOrg:
 			pn, err := findOrCreateNode(
@@ -211,7 +225,7 @@ func (p *Pipeline) IngestDelta(ctx context.Context, sender Sender, action string
 		return p.Ingest(ctx, sender, []CatalogItem{it})
 	case "UPDATE":
 		// 当前 ingestOne 自带 upsert 行为;UPDATE = ingest
-		return p.Ingest(ctx, sender, []CatalogItem{it})
+		return p.ingest(ctx, sender, []CatalogItem{it}, true)
 	case "DEL", "DELETE":
 		return p.softDelete(ctx, sender, it.DeviceID)
 	case "ON":

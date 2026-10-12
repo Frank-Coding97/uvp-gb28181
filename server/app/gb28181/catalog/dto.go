@@ -16,6 +16,7 @@ type CatalogItem struct {
 	ParentID        string  // 国标 Catalog Item 上报的父编码
 	BusinessGroupID string  // 2022 业务分组归属编码
 	Parental        int     // 是否目录节点
+	ParentalPresent bool    // 区分显式叶子与缺失属性的增量通知
 	PTZType         int     // 云台类型
 	Longitude       float64 // 经度
 	Latitude        float64 // 纬度
