@@ -636,14 +636,24 @@ has_pgrep() { command -v pgrep >/dev/null 2>&1; }
 #   /proc 由内核提供、不需要任何外部命令，正好把这条路补上。
 #   有 pgrep 时仍优先用 pgrep（一次调用，胜过遍历整个 /proc）。
 proc_pids_by_exe() {
-  local exe="$1" d pid arg
+  local exe="$1" d pid arg p
+  # ⛔⛔ 必须排除「调用者自身」：本函数的 argv 文本里可能就写着这个路径
+  #   （例如 `bash -c '<脚本正文>'` 这种调用方式），不排除就会把自己算成
+  #   目标进程 —— 判活恒为真、stop 直接自杀（2026-10-12 在 Linux 上跑契约
+  #   测试时抓到：PIDS 里冒出来的正是测试进程自己的 pid）。
+  #   $$ 是脚本主进程、$BASHPID 是当前（子）shell；命令替换会 fork 子 shell，
+  #   两者 pid 不同，所以两个都要排。
   if has_pgrep; then
-    pgrep -f "$exe" 2>/dev/null || true
+    while IFS= read -r p; do
+      [ -n "$p" ] || continue
+      if [ "$p" = "$$" ] || [ "$p" = "$BASHPID" ]; then continue; fi
+      printf '%s\n' "$p"
+    done < <(pgrep -f "$exe" 2>/dev/null || true)
     return 0
   fi
   for d in /proc/[0-9]*; do
     pid="${d#/proc/}"
-    if [ "$pid" = "$$" ]; then continue; fi
+    if [ "$pid" = "$$" ] || [ "$pid" = "$BASHPID" ]; then continue; fi
     if [ -r "$d/cmdline" ]; then
       # cmdline 是 NUL 分隔的 argv；用 bash 内建 read -d '' 逐段比对，
       # 全程不调外部命令（tr/grep 在精简系统里也不保证存在）。

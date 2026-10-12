@@ -85,6 +85,11 @@ function spawnFake(exePath) {
 
 const FAKE_ZLM = '/fake-pkg/vendor/zlm/MediaServer';
 
+// ⛔ 目标路径必须走**环境变量**传进 harness，不能写进 harness 正文。
+//   否则 `bash -c '<正文>'` 的 argv 里就等于写着这个路径，而 proc_pids_by_exe
+//   是「cmdline 包含该路径」即命中 —— 它会把自己（以及命令替换/进程替换 fork
+//   出来的临时 shell）当成目标进程，用例就会假红。真实调用不存在这个形态
+//   （ctl.sh 是从文件执行的，正文不在 argv 里）。
 function runCtl({ path, zlmPort, nginxPort, zlmBin = '/nonexistent-pkg/vendor/zlm/MediaServer', nginxBin = '/nonexistent-pkg/vendor/nginx/sbin/nginx' }) {
   const body = `
 set -uo pipefail
@@ -93,9 +98,9 @@ ok()   { :; }
 det()  { :; }
 fail() { printf '[fail] %s\\n' "$*" >&2; return 1; }
 ZLM_HTTP_PORT=${zlmPort}
-ZLM_BIN=${zlmBin}
+ZLM_BIN="$UVP_T_ZLM_BIN"
 NGINX_HTTPS_PORT=${nginxPort}
-NGINX_BIN=${nginxBin}
+NGINX_BIN="$UVP_T_NGINX_BIN"
 ${HELPERS}
 ${ZLM}
 ${NGINX}
@@ -105,7 +110,12 @@ nginx_healthy; printf 'NGINX_RC=%s\\n' "$?"
 `;
   return spawnSync(BASH, ['-c', body], {
     encoding: 'utf8',
-    env: { PATH: path, HOME: process.env.HOME ?? '/tmp' },
+    env: {
+      PATH: path,
+      HOME: process.env.HOME ?? '/tmp',
+      UVP_T_ZLM_BIN: zlmBin,
+      UVP_T_NGINX_BIN: nginxBin,
+    },
   });
 }
 
