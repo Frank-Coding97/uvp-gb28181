@@ -1482,16 +1482,35 @@ start_zlm() {
     if [ -f "$ZLM_PID_FILE" ]; then
       local pid; pid="$(cat "$ZLM_PID_FILE")"
       if ! kill -0 "$pid" 2>/dev/null; then
-        log "ZLM 进程已退出，最后 20 行日志："
-        tail -20 "$ZLM_LOG" >&2 || true
         rm -f "$ZLM_PID_FILE"
+        # ⛔⛔ 排障体验（2026-10-12 客户 Ubuntu 16 实机踩到，查了半天）：
+        #   ZLM 启动失败时，会先打一行 `E ... Start server failed: <原因>`
+        #   （ZLMediaKit server/main.cpp 的 catch 分支），**然后 sleep(1)**，
+        #   最后随静态对象析构刷出几十行 `~EventPoller` / `>logWriter` 收尾日志。
+        #   ⇒ 只 `tail -20` 会被那堆析构日志**整整占满**，真正的原因行被挤出窗口，
+        #     用户看到的就只有"一堆 poller 日志 + 一句笼统的兜底话"，无从排障。
+        #   ⇒ 所以先把带错误关键字的行单独挑出来打，再补 tail 兜底。
+        local zlm_err
+        zlm_err="$(grep -nE 'Start server failed|Listen on .*failed|already in use|error while loading shared libraries' "$ZLM_LOG" 2>/dev/null | head -6 || true)"
+        if [ -n "$zlm_err" ]; then
+          log "ZLM 日志里的关键错误行（下面这句才是真正原因）："
+          printf '%s\n' "$zlm_err" >&2
+        fi
+        log "ZLM 最后 20 行日志："
+        tail -20 "$ZLM_LOG" >&2 || true
         # ⛔ 区分两种退出：端口被别人占着 vs 自身起不来。
         #   这两种的处置完全不同（前者要换端口，后者要查库），混为一谈会误导排障。
         if port_in_use_by_other "$ZLM_HTTP_PORT"; then
           fail "ZLM 端口 ${ZLM_HTTP_PORT} 已被**其他进程**占用（多半是另一套 ZLM），
    本包的 ZLM 无法bind 而退出。处理：停掉占用者，或用 UVP_ZLM_HTTP_PORT 换一个端口。"
         fi
-        fail "ZLM 启动失败（详见 ${ZLM_LOG}）。常见原因：lib/ 下缺 ffmpeg 运行时库"
+        # ⛔ 不要在这里断言"就是缺 ffmpeg 库"——那是众多可能之一，写死会把排障带偏
+        #   （客户 2026-10-12 就被这句误导成"缺依赖"）。指向上面那行具体错误即可。
+        fail "ZLM 启动失败（详见 ${ZLM_LOG}）。
+   处理：看上面「关键错误行」——
+     · `Listen on :: <端口> failed: address already in use` ⇒ 该端口被别的程序占了，
+       停掉占用者，或用 UVP_ZLM_*_PORT 换一个端口后重试；
+     · `error while loading shared libraries: xxx` ⇒ 这才是缺运行时库。"
       fi
     fi
     sleep 0.2
