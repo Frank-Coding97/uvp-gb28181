@@ -28,6 +28,8 @@ func newTestRepository(t *testing.T) *GormRepository {
 		&model.GbCascadePlatform{},
 		&model.GbCascadeDeviceProjection{},
 		&model.GbCascadeChannelProjection{},
+		&model.GbCascadeBusinessNode{},
+		&model.GbCascadeBusinessBinding{},
 		&model.GbCascadeMediaSession{},
 	))
 	return NewGormRepository(db)

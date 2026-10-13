@@ -187,3 +187,135 @@ func TestCatalogByteLimitSplitsWithoutLosingTotalOrItems(t *testing.T) {
 	_, err = PlanCatalogResponsesWithinLimit(profile, "34020000002000000001", Snapshot{Items: items}, 100, body, func([]byte) bool { return false })
 	require.ErrorContains(t, err, "TCP")
 }
+
+func TestCatalogBusinessQueriesReturnOnlyTargetSubtreeAndRecountBatches(t *testing.T) {
+	profile := baseprotocol.ProfileFor(baseprotocol.Version2022)
+	const (
+		localID = "34020000002000000001"
+		rootID  = "34020000002150000001"
+		orgA    = "34020000002160000001"
+		orgB    = "34020000002160000002"
+		device  = "34020000001320000001"
+	)
+	queryFor := func(id string, sn int) []byte {
+		body, err := manscdp.BuildCatalogQueryWithProfile(profile, id, sn)
+		require.NoError(t, err)
+		return body
+	}
+	snapshot := Snapshot{PlatformID: 1, SumNum: 99, Items: []CatalogItem{
+		{ID: localID, Kind: CatalogItemPlatform},
+		{ID: rootID, ParentID: localID, Kind: CatalogItemBusinessGroup},
+		{ID: orgA, Kind: CatalogItemVirtualOrganization, BusinessGroupID: rootID},
+		{ID: orgB, ParentID: orgA, Kind: CatalogItemVirtualOrganization, BusinessGroupID: rootID},
+		{ID: device, ParentID: localID, Kind: CatalogItemDevice},
+		{ID: "34020000001320000011", ParentID: device + "/" + orgB, Kind: CatalogItemChannel, BusinessGroupID: rootID},
+		{ID: "34020000001320000012", ParentID: device + "/" + orgA, Kind: CatalogItemChannel, BusinessGroupID: rootID},
+		{ID: "34020000001320000013", ParentID: device, Kind: CatalogItemChannel},
+	}}
+
+	t.Run("system query returns complete platform catalog", func(t *testing.T) {
+		responses, err := PlanCatalogResponses(profile, localID, snapshot, 100, queryFor(localID, 73))
+		require.NoError(t, err)
+		require.Len(t, responses, 1)
+		require.Equal(t, 73, responses[0].SN)
+		require.Equal(t, 8, responses[0].SumNum)
+		var decoded manscdp.CatalogResponse
+		require.NoError(t, manscdp.DecodeProfiledXML(profile, responses[0].Body, &decoded))
+		require.Equal(t, 8, decoded.DeviceList.Num)
+	})
+
+	t.Run("business root query returns only its tree", func(t *testing.T) {
+		responses, err := PlanCatalogResponses(profile, localID, snapshot, 2, queryFor(rootID, 74))
+		require.NoError(t, err)
+		require.Len(t, responses, 3)
+		for _, response := range responses {
+			require.Equal(t, 74, response.SN)
+			require.Equal(t, 5, response.SumNum)
+			var decoded manscdp.CatalogResponse
+			require.NoError(t, manscdp.DecodeProfiledXML(profile, response.Body, &decoded))
+			require.LessOrEqual(t, decoded.DeviceList.Num, 2)
+		}
+		ids := decodeCatalogItemIDs(t, profile, responses)
+		require.Equal(t, []string{rootID, orgA, orgB, "34020000001320000011", "34020000001320000012"}, ids)
+	})
+
+	t.Run("nested organization query includes descendants but not siblings", func(t *testing.T) {
+		responses, err := PlanCatalogResponses(profile, localID, snapshot, 10, queryFor(orgB, 75))
+		require.NoError(t, err)
+		require.Len(t, responses, 1)
+		require.Equal(t, 2, responses[0].SumNum)
+		require.Equal(t, []string{orgB, "34020000001320000011"}, decodeCatalogItemIDs(t, profile, responses))
+	})
+
+	for _, unknown := range []string{"34020000002150000999", "34020000002000000099"} {
+		_, err := PlanCatalogResponses(profile, localID, snapshot, 10, queryFor(unknown, 76))
+		require.ErrorIs(t, err, ErrUnknownCatalogTarget)
+	}
+}
+
+func TestCatalogBusinessGroupIDUsesVersionSpecificXMLLocation(t *testing.T) {
+	const (
+		localID = "34020000002000000001"
+		rootID  = "34020000002150000001"
+		orgID   = "34020000002160000001"
+		device  = "34020000001320000001"
+	)
+	items := []CatalogItem{
+		{ID: localID, Kind: CatalogItemPlatform},
+		{ID: rootID, ParentID: localID, Kind: CatalogItemBusinessGroup},
+		{ID: orgID, Kind: CatalogItemVirtualOrganization, BusinessGroupID: rootID},
+		{ID: device, ParentID: localID, Kind: CatalogItemDevice},
+		{ID: "34020000001320000011", ParentID: device + "/" + orgID, Kind: CatalogItemChannel},
+	}
+	for _, version := range []baseprotocol.Version{baseprotocol.Version2016, baseprotocol.Version2022} {
+		t.Run(string(version), func(t *testing.T) {
+			profile := baseprotocol.ProfileFor(version)
+			body, err := manscdp.BuildCatalogQueryWithProfile(profile, localID, 88)
+			require.NoError(t, err)
+			responses, err := PlanCatalogResponses(profile, localID, Snapshot{Items: items}, 10, body)
+			require.NoError(t, err)
+			var wire struct {
+				DeviceList struct {
+					Items []struct {
+						ID                string `xml:"DeviceID"`
+						ParentID          string `xml:"ParentID"`
+						BusinessGroupID   string `xml:"BusinessGroupID"`
+						InfoBusinessGroup struct {
+							BusinessGroupID string `xml:"BusinessGroupID"`
+						} `xml:"Info"`
+					} `xml:"Item"`
+				} `xml:"DeviceList"`
+			}
+			require.NoError(t, manscdp.DecodeProfiledXML(profile, responses[0].Body, &wire))
+			for _, item := range wire.DeviceList.Items {
+				if item.ID == orgID {
+					if version == baseprotocol.Version2016 {
+						require.Empty(t, item.BusinessGroupID, "2016 must not place BusinessGroupID at Item level")
+						require.Equal(t, rootID, item.InfoBusinessGroup.BusinessGroupID, "2016 places BusinessGroupID inside Info")
+					} else {
+						require.Equal(t, rootID, item.BusinessGroupID, "2022 places BusinessGroupID at Item level")
+						require.Empty(t, item.InfoBusinessGroup.BusinessGroupID, "2022 must not place BusinessGroupID inside Info")
+					}
+				}
+				if item.ID == "34020000001320000011" {
+					require.Equal(t, device+"/"+orgID, item.ParentID)
+					require.Empty(t, item.BusinessGroupID, "the channel's relationship is expressed by ParentID")
+					require.Empty(t, item.InfoBusinessGroup.BusinessGroupID)
+				}
+			}
+		})
+	}
+}
+
+func decodeCatalogItemIDs(t *testing.T, profile baseprotocol.Profile, responses []CatalogResponse) []string {
+	t.Helper()
+	var ids []string
+	for _, response := range responses {
+		var decoded manscdp.CatalogResponse
+		require.NoError(t, manscdp.DecodeProfiledXML(profile, response.Body, &decoded))
+		for _, item := range decoded.DeviceList.Items {
+			ids = append(ids, item.DeviceID)
+		}
+	}
+	return ids
+}

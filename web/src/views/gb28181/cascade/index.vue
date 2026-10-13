@@ -154,9 +154,15 @@
             <a-table-column title="修改时间" :width="180">
               <template #cell="{ record }">{{ formatRelative(record.updatedAt) }}</template>
             </a-table-column>
-            <a-table-column title="操作" :width="290" align="center" :fixed="isMobile ? '' : 'right'">
+            <a-table-column title="操作" :width="385" align="center" :fixed="isMobile ? '' : 'right'">
               <template #cell="{ record }">
                 <div class="uvp-table-actions cascade-actions">
+                  <a-link
+                    class="uvp-table-action uvp-table-action--assign"
+                    :disabled="!canView"
+                    @click="openBusinessGroup(record)"
+                    ><Building2 :size="14" />业务分组</a-link
+                  >
                   <a-link class="uvp-table-action uvp-table-action--edit" :disabled="!canManage" @click="openEdit(record)"
                     ><Settings2 :size="14" />编辑</a-link
                   >
@@ -195,7 +201,12 @@
     >
       <template #title>{{ editing ? "编辑上级平台" : "新增上级平台" }}</template>
       <a-form :model="form" layout="vertical" class="cascade-form">
-        <section class="form-section">
+        <a-steps :current="editorStep" class="cascade-editor-steps">
+          <a-step title="上级平台" /><a-step title="本平台身份" /><a-step title="注册与协议" /><a-step
+            title="目录与发布"
+          /><a-step title="完成确认" />
+        </a-steps>
+        <section v-show="editorStep === 1" class="form-section">
           <header>
             <Building2 :size="17" />
             <h3>上级平台</h3>
@@ -226,10 +237,12 @@
               :validate-status="fieldErrors.upstreamDomain ? 'error' : ''"
               :help="fieldErrors.upstreamDomain"
             >
-              <a-input v-model="form.upstreamDomain" allow-clear @blur="touched.upstreamDomain = true" />
+              <a-input v-model="form.upstreamDomain" maxlength="10" allow-clear @blur="touched.upstreamDomain = true">
+                <template #suffix><s-counter-suffix :value="form.upstreamDomain.length" :total="10" /></template>
+              </a-input>
             </a-form-item>
             <a-form-item label="上级地址" required :validate-status="fieldErrors.host ? 'error' : ''" :help="fieldErrors.host">
-              <a-input v-model="form.host" allow-clear @blur="touched.host = true" />
+              <a-input v-model="form.host" placeholder="请输入 IPv4 或 IPv6 地址" allow-clear @blur="touched.host = true" />
             </a-form-item>
             <a-form-item label="上级端口" required>
               <s-number-field ref="portField" v-model="form.port" :min="1" :max="65535" required />
@@ -240,10 +253,26 @@
                 <a-radio value="TCP">TCP</a-radio>
               </a-radio-group>
             </a-form-item>
+            <a-form-item label="认证用户名">
+              <a-input v-model="form.authUsername" maxlength="20" allow-clear>
+                <template #suffix><s-counter-suffix :value="form.authUsername.length" :total="20" /></template>
+              </a-input>
+            </a-form-item>
+            <a-form-item label="认证密码">
+              <a-alert v-if="editing?.credentialNeedsReset" type="warning"
+                >原认证密码无法读取，请重新填写上级平台提供的密码后保存。</a-alert
+              >
+              <a-input-password
+                v-model="form.password"
+                allow-clear
+                autocomplete="new-password"
+                :placeholder="editing?.hasPassword ? '留空则保持原密码' : '未配置可留空'"
+              />
+            </a-form-item>
           </div>
         </section>
 
-        <section class="form-section">
+        <section v-show="editorStep === 2" class="form-section">
           <header>
             <Fingerprint :size="17" />
             <h3>本平台身份</h3>
@@ -265,7 +294,9 @@
               :validate-status="fieldErrors.localDomain ? 'error' : ''"
               :help="fieldErrors.localDomain"
             >
-              <a-input v-model="form.localDomain" allow-clear @blur="touched.localDomain = true" />
+              <a-input v-model="form.localDomain" maxlength="10" allow-clear @blur="touched.localDomain = true">
+                <template #suffix><s-counter-suffix :value="form.localDomain.length" :total="10" /></template>
+              </a-input>
             </a-form-item>
             <a-form-item
               label="本地 SIP 地址"
@@ -298,23 +329,13 @@
             >
               <a-input v-model="form.mediaAdvertiseIp" allow-clear @blur="touched.mediaAdvertiseIp = true" />
             </a-form-item>
-            <a-form-item label="认证用户名"><a-input v-model="form.authUsername" allow-clear /></a-form-item>
-            <a-form-item label="认证密码">
-              <a-alert v-if="editing?.credentialNeedsReset" type="warning"
-                >原认证密码无法读取，请重新填写上级平台提供的密码后保存。</a-alert
-              >
-              <s-password-field
-                v-model="form.password"
-                :placeholder="editing?.hasPassword ? '留空则保持原密码' : '未配置可留空'"
-              />
-            </a-form-item>
           </div>
         </section>
 
-        <section class="form-section">
+        <section v-show="editorStep === 3" class="form-section">
           <header>
             <SlidersHorizontal :size="17" />
-            <h3>注册与能力</h3>
+            <h3>注册与协议</h3>
           </header>
           <div class="form-grid">
             <a-form-item label="协议版本"
@@ -323,37 +344,215 @@
                 ><a-option value="2022">固定 2022</a-option></a-select
               ></a-form-item
             >
-            <a-form-item label="字符集覆盖"
-              ><a-select v-model="form.charsetOverride" allow-clear
-                ><a-option value="GB2312">GB2312</a-option><a-option value="UTF-8">UTF-8</a-option></a-select
-              ></a-form-item
-            >
+            <a-form-item label="字符集" help="跟随协议版本时：2016 使用 GB2312，2022 使用 GB18030。">
+              <a-select v-model="form.charsetOverride">
+                <a-option value="">跟随协议版本（默认）</a-option>
+                <a-option value="GB2312">GB2312</a-option>
+                <a-option value="GB18030">GB18030</a-option>
+                <a-option value="UTF-8">UTF-8（兼容扩展）</a-option>
+              </a-select>
+            </a-form-item>
             <a-form-item label="注册有效期（秒）"
               ><s-number-field ref="registerExpiresField" v-model="form.registerExpires" :min="60" :max="86400" required
             /></a-form-item>
             <a-form-item label="心跳间隔（秒）"
               ><s-number-field ref="keepaliveIntervalField" v-model="form.keepaliveInterval" :min="5" :max="3600" required
             /></a-form-item>
-            <a-form-item label="目录批量大小"
-              ><s-number-field ref="catalogBatchSizeField" v-model="form.catalogBatchSize" :min="1" :max="1000" required
-            /></a-form-item>
-            <a-form-item label="最大并发流"
-              ><s-number-field ref="maxStreamsField" v-model="form.maxStreams" :min="1" :max="10000" required
+          </div>
+        </section>
+
+        <section v-show="editorStep === 4" class="form-section">
+          <header>
+            <SlidersHorizontal :size="17" />
+            <h3>目录与发布</h3>
+          </header>
+          <div class="form-grid">
+            <a-form-item label="每批目录条数" required>
+              <a-select v-model="form.catalogBatchSize">
+                <a-option
+                  v-if="editing && !CASCADE_CATALOG_BATCH_SIZES.includes(editing.catalogBatchSize)"
+                  :value="editing.catalogBatchSize"
+                  disabled
+                >
+                  {{ editing.catalogBatchSize }} 条（原配置）
+                </a-option>
+                <a-option v-for="size in CASCADE_CATALOG_BATCH_SIZES" :key="size" :value="size">{{ size }} 条</a-option>
+              </a-select>
+            </a-form-item>
+            <a-form-item label="最大并发流" help="0 表示不限制并发流。"
+              ><s-number-field ref="maxStreamsField" v-model="form.maxStreams" :min="0" :max="10000" required
             /></a-form-item>
           </div>
           <div class="switch-grid">
             <label><span>发布平台目录</span><a-switch v-model="form.publishPlatform" /></label>
             <label><span>发布行政区划</span><a-switch v-model="form.publishCivil" /></label>
-            <label><span>发布业务分组</span><a-switch v-model="form.publishGroup" /></label>
+            <label>
+              <span>发布业务分组</span>
+              <a-switch v-model="form.publishGroup" :disabled="!editing" />
+            </label>
             <label><span>允许云台控制</span><a-switch v-model="form.ptzEnabled" /></label>
-            <label><span>保存后启用</span><a-switch v-model="form.enabled" /></label>
+            <label><span>启用级联</span><a-switch v-model="form.enabled" /></label>
           </div>
+          <a-alert v-if="!editing" type="info" class="cascade-publish-group-hint">
+            新增平台请先保存连接配置，再从平台行进入“业务分组”创建根节点；之后编辑平台即可开启发布。
+          </a-alert>
+        </section>
+        <section v-show="editorStep === 5" class="cascade-confirm">
+          <div class="cascade-confirm-heading">
+            <div>
+              <h3>核对平台配置</h3>
+              <p>请核对以下信息，如需调整可返回对应步骤修改。</p>
+            </div>
+            <a-tag :color="form.enabled ? 'green' : 'gray'">{{ form.enabled ? "保存后启用" : "保存后停用" }}</a-tag>
+          </div>
+          <div class="cascade-confirm-grid">
+            <article class="cascade-confirm-card">
+              <header>
+                <h4><Building2 :size="16" />上级平台</h4>
+                <a-link :disabled="saving" @click="editorStep = 1">修改</a-link>
+              </header>
+              <dl>
+                <div>
+                  <dt>平台名称</dt>
+                  <dd>{{ form.name }}</dd>
+                </div>
+                <div>
+                  <dt>上级平台 ID</dt>
+                  <dd class="is-code">{{ form.upstreamServerId }}</dd>
+                </div>
+                <div>
+                  <dt>上级域</dt>
+                  <dd class="is-code">{{ form.upstreamDomain }}</dd>
+                </div>
+                <div>
+                  <dt>上级地址</dt>
+                  <dd class="is-code">{{ form.host }}:{{ form.port }}</dd>
+                </div>
+                <div>
+                  <dt>传输协议</dt>
+                  <dd>{{ form.transport }}</dd>
+                </div>
+                <div>
+                  <dt>认证用户名</dt>
+                  <dd class="is-code">{{ form.authUsername || form.localDeviceId }}</dd>
+                </div>
+                <div>
+                  <dt>认证密码</dt>
+                  <dd>{{ form.password ? "已填写" : editing?.hasPassword ? "保留原密码" : "未配置" }}</dd>
+                </div>
+              </dl>
+            </article>
+            <article class="cascade-confirm-card">
+              <header>
+                <h4><Fingerprint :size="16" />本平台身份</h4>
+                <a-link :disabled="saving" @click="editorStep = 2">修改</a-link>
+              </header>
+              <dl>
+                <div>
+                  <dt>本平台设备 ID</dt>
+                  <dd class="is-code">{{ form.localDeviceId }}</dd>
+                </div>
+                <div>
+                  <dt>本平台域</dt>
+                  <dd class="is-code">{{ form.localDomain }}</dd>
+                </div>
+                <div>
+                  <dt>本地 SIP 地址</dt>
+                  <dd class="is-code">{{ form.localSipIp }}</dd>
+                </div>
+                <div>
+                  <dt>本地 SIP 端口</dt>
+                  <dd>{{ form.localSipPort }}</dd>
+                </div>
+                <div>
+                  <dt>媒体宣告地址</dt>
+                  <dd :class="{ 'is-code': form.mediaAdvertiseIp }">{{ form.mediaAdvertiseIp || "跟随媒体服务配置" }}</dd>
+                </div>
+              </dl>
+            </article>
+            <article class="cascade-confirm-card">
+              <header>
+                <h4><SlidersHorizontal :size="16" />注册与协议</h4>
+                <a-link :disabled="saving" @click="editorStep = 3">修改</a-link>
+              </header>
+              <dl>
+                <div>
+                  <dt>协议版本</dt>
+                  <dd>{{ form.profileOverride === "auto" ? "自动协商" : `GB/T 28181-${form.profileOverride}` }}</dd>
+                </div>
+                <div>
+                  <dt>字符集</dt>
+                  <dd>{{ form.charsetOverride || "跟随协议版本" }}</dd>
+                </div>
+                <div>
+                  <dt>注册有效期</dt>
+                  <dd>{{ form.registerExpires }} 秒</dd>
+                </div>
+                <div>
+                  <dt>心跳间隔</dt>
+                  <dd>{{ form.keepaliveInterval }} 秒</dd>
+                </div>
+              </dl>
+            </article>
+            <article class="cascade-confirm-card">
+              <header>
+                <h4><SlidersHorizontal :size="16" />目录与发布</h4>
+                <a-link :disabled="saving" @click="editorStep = 4">修改</a-link>
+              </header>
+              <dl>
+                <div>
+                  <dt>每批目录条数</dt>
+                  <dd>{{ form.catalogBatchSize }} 条 / 批</dd>
+                </div>
+                <div>
+                  <dt>最大并发流</dt>
+                  <dd>{{ form.maxStreams === 0 ? "不限制" : `${form.maxStreams} 路` }}</dd>
+                </div>
+                <div>
+                  <dt>发布平台目录</dt>
+                  <dd>
+                    <a-tag size="small" :color="form.publishPlatform ? 'blue' : 'gray'">{{
+                      form.publishPlatform ? "发布" : "不发布"
+                    }}</a-tag>
+                  </dd>
+                </div>
+                <div>
+                  <dt>发布行政区划</dt>
+                  <dd>
+                    <a-tag size="small" :color="form.publishCivil ? 'blue' : 'gray'">{{
+                      form.publishCivil ? "发布" : "不发布"
+                    }}</a-tag>
+                  </dd>
+                </div>
+                <div>
+                  <dt>发布业务分组</dt>
+                  <dd>
+                    <a-tag size="small" :color="form.publishGroup ? 'blue' : 'gray'">{{
+                      form.publishGroup ? "发布" : "不发布"
+                    }}</a-tag>
+                  </dd>
+                </div>
+                <div>
+                  <dt>云台控制</dt>
+                  <dd>
+                    <a-tag size="small" :color="form.ptzEnabled ? 'blue' : 'gray'">{{ form.ptzEnabled ? "允许" : "禁止" }}</a-tag>
+                  </dd>
+                </div>
+              </dl>
+            </article>
+          </div>
+          <a-alert :type="form.enabled ? 'success' : 'info'">{{
+            form.enabled ? "保存后启用级联，并向上级发起注册。" : "保存后级联保持停用，不会向上级注册。"
+          }}</a-alert>
+          <p class="cascade-confirm-hint">保存后可在平台列表使用“共享”选择要发布的通道。</p>
         </section>
       </a-form>
       <template #footer>
         <div class="dialog-actions">
           <a-button :disabled="saving" @click="editorVisible = false">取消</a-button>
-          <a-button type="primary" :loading="saving" @click="savePlatform">保存</a-button>
+          <a-button v-if="editorStep > 1" :disabled="saving" @click="editorStep--">上一步</a-button>
+          <a-button v-if="editorStep < 5" type="primary" @click="nextEditorStep">下一步</a-button>
+          <a-button v-else type="primary" :loading="saving" @click="savePlatform">确认保存</a-button>
         </div>
       </template>
     </a-modal>
@@ -506,6 +705,15 @@
         </div>
       </template>
     </a-modal>
+
+    <BusinessGroupManager
+      v-if="businessGroupPlatform"
+      v-model:visible="businessGroupVisible"
+      :platform-id="businessGroupPlatform.id"
+      :platform-name="businessGroupPlatform.name"
+      :local-device-id="businessGroupPlatform.localDeviceId"
+      :can-write="canShare"
+    />
   </div>
 </template>
 
@@ -559,9 +767,10 @@ import { hasPermission } from "@/hooks/usePermission";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import SCounterSuffix from "@/components/s-counter-suffix/index.vue";
 import SNumberField from "@/components/s-number-field/index.vue";
-import SPasswordField from "@/components/s-password-field/index.vue";
+import BusinessGroupManager from "./BusinessGroupManager.vue";
 import { useDictLabelMap } from "@/hooks/useDictOptions";
 import {
+  CASCADE_CATALOG_BATCH_SIZES,
   CASCADE_REGISTER_STATE_LABEL_FALLBACK,
   DICT_CODE_CASCADE_REGISTER_STATE,
   cascadeCycleLabel,
@@ -573,6 +782,7 @@ import {
   pendingSourceChannelIds,
   resolveChannelPTZAllowed,
   validGbId,
+  validateCascadeStep,
   validateCascadePlatform
 } from "./cascadeState";
 
@@ -587,6 +797,12 @@ const canView = computed(() => hasPermission("gb28181:cascade:view"));
 const canManage = computed(() => hasPermission("gb28181:cascade:manage"));
 const canEnable = computed(() => hasPermission("gb28181:cascade:enable"));
 const canShare = computed(() => hasPermission("gb28181:cascade:share"));
+const businessGroupVisible = ref(false);
+const businessGroupPlatform = ref<CascadePlatform | null>(null);
+function openBusinessGroup(platform: CascadePlatform) {
+  businessGroupPlatform.value = platform;
+  businessGroupVisible.value = true;
+}
 /** 下级通道的在线状态文案（`device_status` 字典）。 */
 const deviceStatusLabel = useDeviceStatusLabel();
 /** 上级平台的注册状态文案（`cascade_register_state` 字典；色/说明仍在代码里）。 */
@@ -603,6 +819,19 @@ const errorMessage = ref("");
 const keyword = ref("");
 const statusFilter = ref("all");
 const editorVisible = ref(false);
+const editorStep = ref(1);
+function nextEditorStep() {
+  const errors = validateCascadeStep(form, editorStep.value, editing.value?.catalogBatchSize);
+  const numericError = stepNumberFields(editorStep.value)
+    .map(field => field.value?.error || "")
+    .find(Boolean);
+  if (errors.length || numericError) {
+    touchCascadeStep(editorStep.value);
+    Message.warning(errors[0] || numericError!);
+    return;
+  }
+  editorStep.value++;
+}
 const editing = ref<CascadePlatform | null>(null);
 const form = reactive(defaultCascadePlatform());
 const touched = reactive<Record<string, boolean>>({});
@@ -612,16 +841,23 @@ const portField = ref<NumberFieldInstance | null>(null);
 const localSipPortField = ref<NumberFieldInstance | null>(null);
 const registerExpiresField = ref<NumberFieldInstance | null>(null);
 const keepaliveIntervalField = ref<NumberFieldInstance | null>(null);
-const catalogBatchSizeField = ref<NumberFieldInstance | null>(null);
 const maxStreamsField = ref<NumberFieldInstance | null>(null);
-const numberFields = computed(() => [
-  portField,
-  localSipPortField,
-  registerExpiresField,
-  keepaliveIntervalField,
-  catalogBatchSizeField,
-  maxStreamsField
-]);
+function stepNumberFields(step: number) {
+  if (step === 1) return [portField];
+  if (step === 2) return [localSipPortField];
+  if (step === 3) return [registerExpiresField, keepaliveIntervalField];
+  if (step === 4) return [maxStreamsField];
+  return [];
+}
+function touchCascadeStep(step: number) {
+  const fields =
+    step === 1
+      ? ["name", "upstreamServerId", "upstreamDomain", "host"]
+      : step === 2
+        ? ["localDeviceId", "localDomain", "localSipIp", "mediaAdvertiseIp"]
+        : [];
+  fields.forEach(field => (touched[field] = true));
+}
 const localSipConfig = ref<SipConfigSummary | null>(null);
 const localSipAddresses = ref<SipNetworkAddress[]>([]);
 const networkLoading = ref(false);
@@ -813,6 +1049,7 @@ async function openCreate() {
   editing.value = null;
   Object.keys(touched).forEach(key => delete touched[key]);
   Object.assign(form, defaultCascadePlatform(), cascadeLocalIdentityDefaults(localSipConfig.value || undefined));
+  editorStep.value = 1;
   editorVisible.value = true;
 }
 
@@ -833,7 +1070,7 @@ function openEdit(platform: CascadePlatform) {
     mediaAdvertiseIp: platform.mediaAdvertiseIp || "",
     authUsername: platform.authUsername || platform.localDeviceId,
     profileOverride: platform.profileOverride,
-    charsetOverride: platform.charsetOverride || "GB2312",
+    charsetOverride: platform.charsetOverride || "",
     registerExpires: platform.registerExpires,
     keepaliveInterval: platform.keepaliveInterval,
     transport: platform.transport,
@@ -846,6 +1083,7 @@ function openEdit(platform: CascadePlatform) {
     enabled: platform.enabled,
     password: ""
   });
+  editorStep.value = 1;
   editorVisible.value = true;
 }
 
@@ -856,10 +1094,17 @@ function buildInput(): CascadePlatformInput {
 }
 
 async function savePlatform() {
-  const numberFieldError = numberFields.value.map(field => field.value?.error || "").find(Boolean);
-  if (numberFieldError) {
-    Message.warning(numberFieldError);
-    return;
+  for (let step = 1; step <= 4; step++) {
+    const errors = validateCascadeStep(form, step, editing.value?.catalogBatchSize);
+    const numericError = stepNumberFields(step)
+      .map(field => field.value?.error || "")
+      .find(Boolean);
+    if (errors.length || numericError) {
+      editorStep.value = step;
+      touchCascadeStep(step);
+      Message.warning(errors[0] || numericError!);
+      return;
+    }
   }
   const fieldError = Object.values(
     cascadeFormFieldErrors(form, Object.fromEntries(Object.keys(touched).map(key => [key, true])))
@@ -870,12 +1115,24 @@ async function savePlatform() {
     return;
   }
   const errors = validateCascadePlatform(form);
-  if (errors.length) return Message.warning(errors[0]);
+  if (errors.length) {
+    editorStep.value = errors[0].includes("本平台") || errors[0].includes("本地") ? 2 : 1;
+    Message.warning(errors[0]);
+    return;
+  }
   saving.value = true;
   try {
     if (editing.value) await updateCascadePlatform(editing.value.id, buildInput(), editing.value.configRevision);
     else await createCascadePlatform(buildInput());
-    Message.success(editing.value ? "上级平台已更新" : "上级平台已创建");
+    Message.success(
+      form.enabled
+        ? editing.value
+          ? "上级平台已保存并启用，正在向上级注册"
+          : "上级平台已创建并启用，正在向上级注册"
+        : editing.value
+          ? "上级平台已保存，当前未启用"
+          : "上级平台已创建，当前未启用"
+    );
     editorVisible.value = false;
     await refresh();
   } finally {
@@ -1458,7 +1715,90 @@ onUnmounted(() => {
   justify-content: space-between;
   min-height: 36px;
   padding: 0 10px;
+}
+.cascade-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.cascade-confirm-heading,
+.cascade-confirm-card > header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+.cascade-confirm-heading h3 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--color-text-1);
+}
+.cascade-confirm-heading p,
+.cascade-confirm-hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--color-text-3);
+}
+.cascade-confirm-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.cascade-confirm-card {
+  min-width: 0;
+  padding: 14px 16px;
   background: var(--color-fill-1);
+  border: 1px solid var(--color-border-2);
+  border-radius: 8px;
+}
+.cascade-confirm-card > header {
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--color-border-2);
+}
+.cascade-confirm-card h4 {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0;
+  font-size: 14px;
+  color: var(--color-text-1);
+}
+.cascade-confirm-card h4 svg {
+  color: var(--color-text-3);
+}
+.cascade-confirm-card dl {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+.cascade-confirm-card dl > div {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 8px;
+  font-size: 13px;
+  line-height: 22px;
+}
+.cascade-confirm-card dt {
+  color: var(--color-text-3);
+}
+.cascade-confirm-card dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-text-1);
+}
+.cascade-confirm-card .is-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+@media (max-width: 680px) {
+  .cascade-confirm-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .dialog-actions {
   display: flex;

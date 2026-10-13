@@ -18,6 +18,7 @@ const upstreamPasswordPurpose = "upstream-password"
 
 var (
 	ErrInvalidPlatformConfig = errors.New("invalid cascade platform config")
+	ErrInvalidBusinessGroup  = errors.New("业务分组配置无效")
 	ErrCredentialUnavailable = errors.New("cascade credential sealer unavailable")
 	ErrRuntimeUnavailable    = errors.New("cascade runtime unavailable")
 	// ErrRuntimeSyncFailed 配置已持久化但运行时同步失败:调用方应返回已提交
@@ -35,6 +36,7 @@ type ManagementStore interface {
 	SoftDeletePlatform(context.Context, uint64) error
 	ReplaceProjection(context.Context, uint64, uint64, []repository.DeviceProjectionInput, []repository.ChannelProjectionInput) error
 	ProjectionSnapshot(context.Context, uint64) (*repository.ProjectionSnapshot, error)
+	ReplaceBusinessGroup(context.Context, uint64, uint64, []repository.BusinessNodeInput, []repository.BusinessBindingInput) error
 	ListNonterminalMediaSessions(context.Context, uint64) ([]model.GbCascadeMediaSession, error)
 }
 
@@ -176,6 +178,9 @@ func (s *ManagementService) Create(ctx context.Context, input PlatformConfigInpu
 	if err != nil {
 		return nil, err
 	}
+	if platform.PublishGroup {
+		return nil, fmt.Errorf("%w：请先保存上级平台，再配置业务分组后开启发布", ErrInvalidBusinessGroup)
+	}
 	if platform.Enabled && s.runtime == nil {
 		return nil, ErrRuntimeUnavailable
 	}
@@ -228,6 +233,24 @@ func (s *ManagementService) Update(ctx context.Context, id, expectedRevision uin
 		return nil, err
 	}
 	updated.ID = stored.ID
+	if updated.PublishGroup && (!stored.PublishGroup || updated.LocalDeviceID != stored.LocalDeviceID) {
+		if !validGBID(updated.LocalDeviceID) || updated.LocalDeviceID[10:13] != "200" {
+			return nil, fmt.Errorf("%w：发布业务目录需要类型为 200 的本平台系统 ID", ErrInvalidBusinessGroup)
+		}
+		snapshot, err := s.store.ProjectionSnapshot(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		rootCount := 0
+		for _, node := range snapshot.Nodes {
+			if node.Kind == "group" && node.ParentCode == "" && validGBID(node.Code) && node.Code[10:13] == "215" {
+				rootCount++
+			}
+		}
+		if rootCount != 1 {
+			return nil, fmt.Errorf("%w：请先配置业务分组根，再开启发布", ErrInvalidBusinessGroup)
+		}
+	}
 	updated.SecretNonce = append([]byte(nil), stored.SecretNonce...)
 	updated.SecretCiphertext = append([]byte(nil), stored.SecretCiphertext...)
 	updated.SecretAlg = stored.SecretAlg
@@ -248,6 +271,9 @@ func (s *ManagementService) Update(ctx context.Context, id, expectedRevision uin
 	}
 	result, err := s.store.UpdatePlatformConfig(ctx, updated, expectedRevision)
 	if err != nil {
+		if errors.Is(err, repository.ErrInvalidProjection) && updated.PublishGroup {
+			return nil, fmt.Errorf("%w：%s", ErrInvalidBusinessGroup, strings.TrimPrefix(err.Error(), repository.ErrInvalidProjection.Error()+": "))
+		}
 		return nil, err
 	}
 	if stored.Enabled || result.Enabled {

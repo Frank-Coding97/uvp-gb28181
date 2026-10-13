@@ -271,7 +271,7 @@ func TestDeviceCaptureSessionMigrationNamesMapToTable(t *testing.T) {
 		"2026-10-11-openapi-device-capture-session-sqlite.sql",
 	} {
 		t.Run(name, func(t *testing.T) {
-			require.Equal(t, "sys_openapi_device_capture_session", baselineTableMigrations[name])
+			require.Equal(t, []string{"sys_openapi_device_capture_session"}, baselineTableMigrations[name].tables)
 		})
 	}
 }
@@ -284,7 +284,7 @@ func TestDeviceEventSubscriptionMigrationNamesMapToTable(t *testing.T) {
 		"2026-10-11-openapi-device-event-subscription-sqlite.sql",
 	} {
 		t.Run(name, func(t *testing.T) {
-			require.Equal(t, "sys_openapi_device_subscription", baselineTableMigrations[name])
+			require.Equal(t, []string{"sys_openapi_device_subscription"}, baselineTableMigrations[name].tables)
 		})
 	}
 }

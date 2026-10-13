@@ -65,9 +65,17 @@ func RetireDeletedSources(tx *gorm.DB, sourceDeviceIDs, sourceChannelIDs []uint6
 		return 0, err
 	}
 	channelIDs := make([]uint64, 0, len(channelRows))
+	channelIDsByPlatform := make(map[uint64][]uint64)
 	for _, row := range channelRows {
 		channelIDs = append(channelIDs, row.ID)
+		channelIDsByPlatform[row.PlatformID] = append(channelIDsByPlatform[row.PlatformID], row.SourceChannelID)
 		platforms = append(platforms, row.PlatformID)
+	}
+	for platformID, sourceChannelIDs := range channelIDsByPlatform {
+		if err := tx.Where("platform_id = ? AND source_channel_id IN ?", platformID, sourceChannelIDs).
+			Delete(&model.GbCascadeBusinessBinding{}).Error; err != nil {
+			return 0, err
+		}
 	}
 
 	retired := int64(0)

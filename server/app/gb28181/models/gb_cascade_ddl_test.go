@@ -22,6 +22,8 @@ func TestCascadeModelsAutoMigrateAndUniqueConstraints(t *testing.T) {
 		&cascademodel.GbCascadeDeviceProjection{},
 		&cascademodel.GbCascadeChannelProjection{},
 		&cascademodel.GbCascadeMediaSession{},
+		&cascademodel.GbCascadeBusinessNode{},
+		&cascademodel.GbCascadeBusinessBinding{},
 	))
 
 	for _, model := range []interface{}{
@@ -29,6 +31,8 @@ func TestCascadeModelsAutoMigrateAndUniqueConstraints(t *testing.T) {
 		&cascademodel.GbCascadeDeviceProjection{},
 		&cascademodel.GbCascadeChannelProjection{},
 		&cascademodel.GbCascadeMediaSession{},
+		&cascademodel.GbCascadeBusinessNode{},
+		&cascademodel.GbCascadeBusinessBinding{},
 	} {
 		require.True(t, db.Migrator().HasTable(model))
 	}

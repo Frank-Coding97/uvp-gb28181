@@ -113,15 +113,23 @@ var baselineColumnMigrations = map[string]baselineColumnRequirement{
 
 // baselineTableMigrations lists additive table migrations that must still run
 // when an older full baseline has an empty migration ledger.
-var baselineTableMigrations = map[string]string{
-	"2026-10-11-openapi-device-capture-session.sql":               "sys_openapi_device_capture_session",
-	"2026-10-11-openapi-device-capture-session-postgresql.sql":    "sys_openapi_device_capture_session",
-	"2026-10-11-openapi-device-capture-session-sqlserver.sql":     "sys_openapi_device_capture_session",
-	"2026-10-11-openapi-device-capture-session-sqlite.sql":        "sys_openapi_device_capture_session",
-	"2026-10-11-openapi-device-event-subscription.sql":            "sys_openapi_device_subscription",
-	"2026-10-11-openapi-device-event-subscription-postgresql.sql": "sys_openapi_device_subscription",
-	"2026-10-11-openapi-device-event-subscription-sqlserver.sql":  "sys_openapi_device_subscription",
-	"2026-10-11-openapi-device-event-subscription-sqlite.sql":     "sys_openapi_device_subscription",
+type baselineTableRequirement struct {
+	tables []string
+}
+
+var baselineTableMigrations = map[string]baselineTableRequirement{
+	"2026-10-11-openapi-device-capture-session.sql":               {tables: []string{"sys_openapi_device_capture_session"}},
+	"2026-10-11-openapi-device-capture-session-postgresql.sql":    {tables: []string{"sys_openapi_device_capture_session"}},
+	"2026-10-11-openapi-device-capture-session-sqlserver.sql":     {tables: []string{"sys_openapi_device_capture_session"}},
+	"2026-10-11-openapi-device-capture-session-sqlite.sql":        {tables: []string{"sys_openapi_device_capture_session"}},
+	"2026-10-11-openapi-device-event-subscription.sql":            {tables: []string{"sys_openapi_device_subscription"}},
+	"2026-10-11-openapi-device-event-subscription-postgresql.sql": {tables: []string{"sys_openapi_device_subscription"}},
+	"2026-10-11-openapi-device-event-subscription-sqlserver.sql":  {tables: []string{"sys_openapi_device_subscription"}},
+	"2026-10-11-openapi-device-event-subscription-sqlite.sql":     {tables: []string{"sys_openapi_device_subscription"}},
+	"2026-10-13-cascade-business-group.sql":                       {tables: []string{"gb_cascade_business_node", "gb_cascade_business_binding"}},
+	"2026-10-13-cascade-business-group-postgresql.sql":            {tables: []string{"gb_cascade_business_node", "gb_cascade_business_binding"}},
+	"2026-10-13-cascade-business-group-sqlserver.sql":             {tables: []string{"gb_cascade_business_node", "gb_cascade_business_binding"}},
+	"2026-10-13-cascade-business-group-sqlite.sql":                {tables: []string{"gb_cascade_business_node", "gb_cascade_business_binding"}},
 }
 
 // needsBaselineColumnUpgrade applies only to additive column migrations whose
@@ -163,18 +171,23 @@ func needsBaselineColumnUpgrade(name string, probe schemaProbe) (bool, error) {
 }
 
 func needsBaselineTableUpgrade(name string, probe schemaProbe) (bool, error) {
-	table, ok := baselineTableMigrations[name]
+	requirement, ok := baselineTableMigrations[name]
 	if !ok {
 		return false, nil
 	}
 	if probe.hasTable == nil {
 		return false, fmt.Errorf("表迁移缺少表探测器")
 	}
-	exists, err := probe.hasTable(table)
-	if err != nil {
-		return false, fmt.Errorf("探测 %s 表失败: %w", table, err)
+	for _, table := range requirement.tables {
+		exists, err := probe.hasTable(table)
+		if err != nil {
+			return false, fmt.Errorf("探测 %s 表失败: %w", table, err)
+		}
+		if !exists {
+			return true, nil
+		}
 	}
-	return !exists, nil
+	return false, nil
 }
 
 func needsBaselineUpgrade(name string, probe schemaProbe) (bool, error) {

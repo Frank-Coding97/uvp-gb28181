@@ -1121,8 +1121,15 @@ def build_document(dialect: str, ir: dict, seeds: dict[str, list[dict]],
 
     out: list[str] = []
     server_version = ir["meta"]["source_server_version"]
+    model_derived_tables = ir["meta"].get("model_derived_tables", [])
+    model_derived_note = (
+        "-- Model-derived additions: " + ", ".join(model_derived_tables) + "."
+        if model_derived_tables else None
+    )
     if dialect == "mysql":
         out.append("-- UVP-GB28181 MySQL 8.0 release initialization script")
+        if model_derived_note:
+            out.append(model_derived_note)
         out.append(f"-- Generated from the development schema ({server_version}) by")
         out.append("-- server/resource/database/baseline/generate_sql.py. Do not edit by hand.")
         out.append(f"-- Schema fingerprint: {fingerprint}")
@@ -1136,6 +1143,8 @@ def build_document(dialect: str, ir: dict, seeds: dict[str, list[dict]],
         out.append("SET UNIQUE_CHECKS = 0;")
     elif dialect == "postgresql":
         out.append("-- UVP-GB28181 PostgreSQL release initialization script")
+        if model_derived_note:
+            out.append(model_derived_note)
         out.append("-- Generated from the development schema by")
         out.append("-- server/resource/database/baseline/generate_sql.py. Do not edit by hand.")
         out.append(f"-- Schema fingerprint: {fingerprint}")
@@ -1144,6 +1153,8 @@ def build_document(dialect: str, ir: dict, seeds: dict[str, list[dict]],
         out.append("SET client_min_messages TO WARNING;")
     elif dialect == "sqlserver":
         out.append("-- UVP-GB28181 SQL Server release initialization script")
+        if model_derived_note:
+            out.append(model_derived_note)
         out.append("-- Generated from the development schema by")
         out.append("-- server/resource/database/baseline/generate_sql.py. Do not edit by hand.")
         out.append(f"-- Schema fingerprint: {fingerprint}")
@@ -1161,6 +1172,8 @@ def build_document(dialect: str, ir: dict, seeds: dict[str, list[dict]],
         out.append("SET NOCOUNT ON;")
     else:
         out.append("-- UVP-GB28181 SQLite standalone baseline.")
+        if model_derived_note:
+            out.append(model_derived_note)
         out.append("-- Generated from the development schema by")
         out.append("-- server/resource/database/baseline/generate_sql.py. Do not edit by hand.")
         out.append(f"-- Schema fingerprint: {fingerprint}")

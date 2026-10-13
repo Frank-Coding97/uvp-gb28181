@@ -1,0 +1,40 @@
+CREATE TABLE IF NOT EXISTS gb_cascade_business_node (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  platform_id BIGINT UNSIGNED NOT NULL,
+  code VARCHAR(20) NOT NULL,
+  name VARCHAR(128) NOT NULL,
+  kind VARCHAR(16) NOT NULL,
+  parent_code VARCHAR(20) NOT NULL DEFAULT '',
+  sort INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_cascade_business_node_code (platform_id, code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE IF NOT EXISTS gb_cascade_business_binding (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  platform_id BIGINT UNSIGNED NOT NULL,
+  source_channel_id BIGINT UNSIGNED NOT NULL,
+  node_code VARCHAR(20) NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_cascade_business_binding_channel (platform_id, source_channel_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- business-group endpoint registrations use the existing cascade view/share menu permissions.
+INSERT INTO sys_api (title,path,method,api_group,created_at,updated_at,deleted_at,created_by)
+SELECT '查看级联业务分组','/api/gb28181/cascade/platforms/:id/business-group','GET','国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1
+WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path='/api/gb28181/cascade/platforms/:id/business-group' AND method='GET');
+INSERT INTO sys_api (title,path,method,api_group,created_at,updated_at,deleted_at,created_by)
+SELECT '保存级联业务分组','/api/gb28181/cascade/platforms/:id/business-group','PUT','国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1
+WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path='/api/gb28181/cascade/platforms/:id/business-group' AND method='PUT');
+INSERT INTO sys_menu_api (menu_id,api_id)
+SELECT m.id,a.id FROM sys_menu m JOIN sys_api a ON a.path='/api/gb28181/cascade/platforms/:id/business-group' AND a.method='GET'
+WHERE m.permission='gb28181:cascade:view'
+AND NOT EXISTS (SELECT 1 FROM sys_menu_api ma WHERE ma.menu_id=m.id AND ma.api_id=a.id);
+INSERT INTO sys_menu_api (menu_id,api_id)
+SELECT m.id,a.id FROM sys_menu m JOIN sys_api a ON a.path='/api/gb28181/cascade/platforms/:id/business-group' AND a.method='PUT'
+WHERE m.permission='gb28181:cascade:share'
+AND NOT EXISTS (SELECT 1 FROM sys_menu_api ma WHERE ma.menu_id=m.id AND ma.api_id=a.id);
+INSERT INTO sys_casbin_rule (ptype,v0,v1,v2,v3,v4,v5)
+SELECT 'p','role_1','/api/gb28181/cascade/platforms/:id/business-group','GET','*','',''
+WHERE NOT EXISTS (SELECT 1 FROM sys_casbin_rule WHERE ptype='p' AND v0='role_1' AND v1='/api/gb28181/cascade/platforms/:id/business-group' AND v2='GET');
+INSERT INTO sys_casbin_rule (ptype,v0,v1,v2,v3,v4,v5)
+SELECT 'p','role_1','/api/gb28181/cascade/platforms/:id/business-group','PUT','*','',''
+WHERE NOT EXISTS (SELECT 1 FROM sys_casbin_rule WHERE ptype='p' AND v0='role_1' AND v1='/api/gb28181/cascade/platforms/:id/business-group' AND v2='PUT');

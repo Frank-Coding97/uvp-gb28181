@@ -501,3 +501,5 @@
 {"id": 10294, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/device-mgmt/firmware-repository/:id/download-link", "v2": "POST", "v3": "*", "v4": "", "v5": ""}
 {"id": 10295, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/sip/service-config", "v2": "GET", "v3": "*", "v4": "", "v5": ""}
 {"id": 10296, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/sip/service-config", "v2": "PUT", "v3": "*", "v4": "", "v5": ""}
+{"id": 10297, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/cascade/platforms/:id/business-group", "v2": "GET", "v3": "*", "v4": "", "v5": ""}
+{"id": 10298, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/cascade/platforms/:id/business-group", "v2": "PUT", "v3": "*", "v4": "", "v5": ""}

@@ -1,13 +1,20 @@
 {
-  "_comment": "生成物，请勿手工编辑。由 capture_schema.py 从开发库抽取，由 generate_sql.py 消费。改结构请先在库里改，再重新捕获。",
+  "_comment": "生成物。现有结构由 capture_schema.py 从开发库抽取；model_derived_tables 由服务端 GORM 模型补齐，baseline_only_tables 来自既有发布 SQL。由 generate_sql.py 消费。",
   "meta": {
     "source_database": "uvp_gb28181",
     "source_server_version": "8.0.46",
-    "live_table_count": 112,
-    "included_table_count": 111,
+    "live_table_count": 114,
+    "included_table_count": 113,
     "excluded_table_count": 20,
-    "schema_fingerprint": "6e47b88a7c4f8c668eaf53f2f653ce8beb6410831be4d1abff1f12bb974d05f5",
-    "policy_rev": 1
+    "schema_fingerprint": "3ea6fd315c79548d9c26eabbccca5844cd764877cbc1b89a053b560bf3137e1b",
+    "policy_rev": 1,
+    "model_derived_tables": [
+      "gb_cascade_business_binding",
+      "gb_cascade_business_node"
+    ],
+    "baseline_only_tables": [
+      "sys_openapi_device_capture_session"
+    ]
   },
   "excluded_tables": {
     "gb_migration_dummy": "服务端迁移测试残留（2099-01-01-dummy.sql）",
@@ -889,6 +896,167 @@
           ]
         }
       ],
+      "foreign_keys": [],
+      "checks": [],
+      "seeded": false
+    },
+    {
+      "name": "gb_cascade_business_binding",
+      "comment": "",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": null,
+          "extra": "auto_increment",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "platform_id",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "source_channel_id",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "node_code",
+          "type": "varchar(20)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        }
+      ],
+      "primary_key": [
+        {
+          "name": "id",
+          "prefix": null
+        }
+      ],
+      "uniques": [
+        {
+          "name": "uk_cascade_business_binding_channel",
+          "columns": [
+            {
+              "name": "platform_id",
+              "prefix": null
+            },
+            {
+              "name": "source_channel_id",
+              "prefix": null
+            }
+          ]
+        }
+      ],
+      "indexes": [],
+      "foreign_keys": [],
+      "checks": [],
+      "seeded": false
+    },
+    {
+      "name": "gb_cascade_business_node",
+      "comment": "",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": null,
+          "extra": "auto_increment",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "platform_id",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "code",
+          "type": "varchar(20)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "name",
+          "type": "varchar(128)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "kind",
+          "type": "varchar(16)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "parent_code",
+          "type": "varchar(20)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "sort",
+          "type": "int",
+          "nullable": false,
+          "default": "0",
+          "extra": "",
+          "comment": "",
+          "collation": null
+        }
+      ],
+      "primary_key": [
+        {
+          "name": "id",
+          "prefix": null
+        }
+      ],
+      "uniques": [
+        {
+          "name": "uk_cascade_business_node_code",
+          "columns": [
+            {
+              "name": "platform_id",
+              "prefix": null
+            },
+            {
+              "name": "code",
+              "prefix": null
+            }
+          ]
+        }
+      ],
+      "indexes": [],
       "foreign_keys": [],
       "checks": [],
       "seeded": false
@@ -2191,6 +2359,15 @@
           "collation": "utf8mb4_general_ci"
         },
         {
+          "name": "source_device_id",
+          "type": "varchar(20)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "目录项上报来源设备或下级平台编码",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
           "name": "device_id",
           "type": "bigint unsigned",
           "nullable": true,
@@ -2399,6 +2576,27 @@
               "prefix": null
             }
           ]
+        },
+        {
+          "name": "idx_owner_source_type_code",
+          "columns": [
+            {
+              "name": "owner_dept_id",
+              "prefix": null
+            },
+            {
+              "name": "source_device_id",
+              "prefix": null
+            },
+            {
+              "name": "node_type",
+              "prefix": null
+            },
+            {
+              "name": "code",
+              "prefix": null
+            }
+          ]
         }
       ],
       "foreign_keys": [],
@@ -2492,11 +2690,11 @@
         },
         {
           "name": "parent_id",
-          "type": "varchar(20)",
+          "type": "varchar(512)",
           "nullable": false,
           "default": "",
           "extra": "",
-          "comment": "父节点编码(目录树)",
+          "comment": "父节点编码(目录树,2022 多父值按 / 原样保存)",
           "collation": "utf8mb4_general_ci"
         },
         {

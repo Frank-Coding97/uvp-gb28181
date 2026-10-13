@@ -206,7 +206,7 @@ func cascadeDialogRequest(req *sip.Request, res *sip.Response, method sip.Reques
 
 func newCascadeVideoTestRuntime(t *testing.T, stopFailures ...int) (*cascadeVideoRuntime, *gorm.DB, chan string) {
 	db := cascadeInviteTestDB(t)
-	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &model.GbCascadePlatform{}, &model.GbCascadeDeviceProjection{}, &model.GbCascadeChannelProjection{}, &model.GbCascadeMediaSession{}))
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &model.GbCascadePlatform{}, &model.GbCascadeDeviceProjection{}, &model.GbCascadeChannelProjection{}, &model.GbCascadeBusinessNode{}, &model.GbCascadeBusinessBinding{}, &model.GbCascadeMediaSession{}))
 	device := gbmodels.GbDevice{DeviceID: "37010301021180000007", Status: 1}
 	require.NoError(t, db.Create(&device).Error)
 	channel := gbmodels.GbChannel{DeviceID: device.DeviceID, ChannelID: "34020000001320000010", Status: 1}

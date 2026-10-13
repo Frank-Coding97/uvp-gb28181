@@ -1,5 +1,6 @@
 import type { CascadePlatform, SipConfigSummary } from "@/api/gb28181";
 import type { DictLabelFallback } from "@/hooks/useDictOptions";
+import { isConcreteIp } from "../sip/mediaNetworkAddress";
 
 export interface CascadePresentation {
   label: string;
@@ -9,6 +10,8 @@ export interface CascadePresentation {
 
 /** 字典 code（开发库 `sys_dict` id=19）。 */
 export const DICT_CODE_CASCADE_REGISTER_STATE = "cascade_register_state";
+
+export const CASCADE_CATALOG_BATCH_SIZES = [1, 2, 4, 8, 16, 32, 64];
 
 /**
  * 字典未加载时的兜底，与开发库 `sys_dict_item`（id=141–146）逐字对齐。
@@ -115,14 +118,73 @@ export function validateCascadePlatform(form: {
   const errors: string[] = [];
   if (!form.name.trim()) errors.push("平台名称不能为空");
   if (!validGbId(form.upstreamServerId)) errors.push("上级平台 ID 必须是 20 位数字");
-  if (!form.upstreamDomain.trim()) errors.push("上级域不能为空");
-  if (!validHost(form.host)) errors.push("上级地址格式不正确");
+  if (!/^\d{10}$/.test(form.upstreamDomain)) errors.push("上级域必须是 10 位数字");
+  if (!isConcreteIp(form.host.trim())) errors.push("请输入有效的 IPv4 或 IPv6 地址");
   if (!validPort(form.port)) errors.push("上级端口必须在 1-65535 之间");
   if (!validGbId(form.localDeviceId)) errors.push("本平台设备 ID 必须是 20 位数字");
-  if (!form.localDomain.trim()) errors.push("本平台域不能为空");
+  if (!/^\d{10}$/.test(form.localDomain)) errors.push("本地域必须是 10 位数字");
   if (!validHost(form.localSipIp)) errors.push("本地 SIP 地址格式不正确");
   if (!validPort(form.localSipPort)) errors.push("本地 SIP 端口必须在 1-65535 之间");
   if (form.mediaAdvertiseIp && !validHost(form.mediaAdvertiseIp)) errors.push("媒体宣告地址格式不正确");
+  return errors;
+}
+
+export function validateCascadeStep(
+  form: {
+    name: string;
+    upstreamServerId: string;
+    upstreamDomain: string;
+    host: string;
+    port: number;
+    authUsername: string;
+    localDeviceId: string;
+    localDomain: string;
+    localSipIp: string;
+    localSipPort: number;
+    mediaAdvertiseIp?: string;
+    registerExpires: number;
+    keepaliveInterval: number;
+    catalogBatchSize: number;
+    maxStreams: number;
+  },
+  step: number,
+  existingCatalogBatchSize?: number
+): string[] {
+  const errors: string[] = [];
+  if (step === 1) {
+    if (!form.name.trim()) errors.push("平台名称不能为空");
+    if (!validGbId(form.upstreamServerId)) errors.push("上级平台 ID 必须是 20 位数字");
+    if (!/^\d{10}$/.test(form.upstreamDomain)) errors.push("上级域必须是 10 位数字");
+    if (!isConcreteIp(form.host.trim())) errors.push("请输入有效的 IPv4 或 IPv6 地址");
+    if (!validPort(form.port)) errors.push("上级端口必须在 1-65535 之间");
+    if (form.authUsername && !/^\d{20}$/.test(form.authUsername)) errors.push("认证用户名必须是 20 位数字或留空");
+  } else if (step === 2) {
+    if (!validGbId(form.localDeviceId)) errors.push("本平台设备 ID 必须是 20 位数字");
+    if (!/^\d{10}$/.test(form.localDomain)) errors.push("本地域必须是 10 位数字");
+    if (!validHost(form.localSipIp) || !validPort(form.localSipPort)) errors.push("本地 SIP 地址或端口无效");
+    if (form.mediaAdvertiseIp && !validHost(form.mediaAdvertiseIp)) errors.push("媒体宣告地址格式不正确");
+  } else if (
+    step === 3 &&
+    (!Number.isInteger(form.registerExpires) ||
+      form.registerExpires < 60 ||
+      form.registerExpires > 86400 ||
+      !Number.isInteger(form.keepaliveInterval) ||
+      form.keepaliveInterval < 5 ||
+      form.keepaliveInterval > 3600)
+  ) {
+    errors.push("注册有效期或心跳间隔超出允许范围");
+  } else if (
+    step === 4 &&
+    (!Number.isInteger(form.catalogBatchSize) ||
+      form.catalogBatchSize < 1 ||
+      form.catalogBatchSize > 1000 ||
+      (!CASCADE_CATALOG_BATCH_SIZES.includes(form.catalogBatchSize) && form.catalogBatchSize !== existingCatalogBatchSize) ||
+      !Number.isInteger(form.maxStreams) ||
+      form.maxStreams < 0 ||
+      form.maxStreams > 10000)
+  ) {
+    errors.push("目录批量大小或最大并发流超出允许范围");
+  }
   return errors;
 }
 
@@ -168,7 +230,10 @@ export function cascadeFormFieldErrors(
       !form.upstreamServerId.trim() ? "上级平台 ID 不能为空" : validGbId(form.upstreamServerId) ? "" : "必须是 20 位数字编码"
     ),
     upstreamDomain: errorOf("upstreamDomain", form.upstreamDomain.trim() ? "" : "上级域不能为空"),
-    host: errorOf("host", !form.host.trim() ? "上级地址不能为空" : validHost(form.host) ? "" : "地址格式不正确"),
+    host: errorOf(
+      "host",
+      !form.host.trim() ? "上级地址不能为空" : isConcreteIp(form.host.trim()) ? "" : "请输入有效的 IPv4 或 IPv6 地址"
+    ),
     localDeviceId: errorOf(
       "localDeviceId",
       !form.localDeviceId.trim() ? "本平台设备 ID 不能为空" : validGbId(form.localDeviceId) ? "" : "必须是 20 位数字编码"
@@ -200,16 +265,16 @@ export function defaultCascadePlatform() {
     authUsername: "",
     password: "",
     profileOverride: "auto",
-    charsetOverride: "GB2312",
+    charsetOverride: "",
     registerExpires: 3600,
     keepaliveInterval: 60,
     retryPolicy: "",
     transport: "UDP",
-    catalogBatchSize: 100,
+    catalogBatchSize: 1,
     publishPlatform: false,
     publishCivil: false,
     publishGroup: false,
-    maxStreams: 1,
+    maxStreams: 0,
     ptzEnabled: false,
     enabled: false
   };

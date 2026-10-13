@@ -118,7 +118,7 @@ func TestCascadeControlForwardFailureUsesSingleShape(t *testing.T) {
 func TestCascadeCatalogQueryFailureKeepsCallIDAndPeer(t *testing.T) {
 	observed := observeCascadeLogs(t)
 	db := cascadeInviteTestDB(t)
-	require.NoError(t, db.AutoMigrate(&model.GbCascadePlatform{}))
+	require.NoError(t, db.AutoMigrate(&model.GbCascadePlatform{}, &model.GbCascadeBusinessNode{}, &model.GbCascadeBusinessBinding{}))
 	handler := newCascadeCatalogHandler(repository.NewGormRepository(db), newCascadePlatformClientFactory(nil, nil, time.Second))
 
 	req := sip.NewRequest(sip.MESSAGE, sip.Uri{User: "34020000002000000002", Host: "192.168.10.106"})

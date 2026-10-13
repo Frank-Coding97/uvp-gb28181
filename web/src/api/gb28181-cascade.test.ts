@@ -5,8 +5,10 @@ vi.mock("@/utils/http", () => ({ http: { request } }));
 vi.mock("@/api/utils", () => ({ baseUrlApi: (path: string) => `/api/${path}` }));
 
 import {
+  getCascadeBusinessGroup,
   getCascadeShares,
   listCascadePlatforms,
+  replaceCascadeBusinessGroup,
   replaceCascadeShares,
   setCascadePlatformEnabled,
   updateCascadePlatform
@@ -49,5 +51,20 @@ describe("cascade API contract", () => {
     };
     await replaceCascadeShares(7, data);
     expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/cascade/platforms/7/shares", { data });
+  });
+
+  it("loads and replaces a platform business group with the projection revision", async () => {
+    await getCascadeBusinessGroup(7);
+    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/cascade/platforms/7/business-group");
+
+    const data = {
+      nodes: [
+        { code: "34020000002150000001", name: "运营目录", kind: "group" as const, parentCode: "34020000002000000001", sort: 0 }
+      ],
+      bindings: [{ sourceChannelId: 21, nodeCode: "34020000002150000001" }],
+      expectedProjectionRevision: 12
+    };
+    await replaceCascadeBusinessGroup(7, data);
+    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/cascade/platforms/7/business-group", { data });
   });
 });
