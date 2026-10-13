@@ -4,7 +4,7 @@
       path-mode
       v-model="internalValue"
       :options="options"
-      :style="{width:'320px'}"
+      :style="{ width: '320px' }"
       placeholder="请选择区域"
       allow-clear
       @change="handleChange"
@@ -13,26 +13,26 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, computed } from 'vue'
-import { getAreaData, AreaItem } from '@/api/area'
+import { ref, watch, onMounted, computed } from "vue";
+import { getAreaData, AreaItem } from "@/api/area";
 
 interface Props {
-  modelValue?: string
+  modelValue?: string;
   /** 地区选择级数，默认3级 */
-  level?: number
+  level?: number;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   level: 3
-})
+});
 const emit = defineEmits<{
-  (e: 'update:modelValue', value: string): void
-}>()
+  (e: "update:modelValue", value: string): void;
+}>();
 
 // 内部值：数组格式
-const internalValue = ref<string[]>([])
+const internalValue = ref<string[]>([]);
 // 原始地区选项数据
-const rawData = ref<AreaItem[]>([])
+const rawData = ref<AreaItem[]>([]);
 
 /**
  * 根据指定级数过滤地区数据
@@ -43,59 +43,59 @@ const rawData = ref<AreaItem[]>([])
  */
 function filterAreaByLevel(data: AreaItem[], maxLevel: number, currentLevel: number = 1): AreaItem[] {
   return data.map(item => {
-    const newItem: AreaItem = { ...item }
-    
+    const newItem: AreaItem = { ...item };
+
     if (currentLevel < maxLevel && item.children && item.children.length > 0) {
-      newItem.children = filterAreaByLevel(item.children, maxLevel, currentLevel + 1)
+      newItem.children = filterAreaByLevel(item.children, maxLevel, currentLevel + 1);
     } else {
       // 达到最大级别，移除 children
-      delete newItem.children
+      delete newItem.children;
     }
-    
-    return newItem
-  })
+
+    return newItem;
+  });
 }
 
 // 计算属性：根据 level 过滤后的地区数据
 const options = computed(() => {
-  if (rawData.value.length === 0) return []
-  return filterAreaByLevel(rawData.value, props.level)
-})
+  if (rawData.value.length === 0) return [];
+  return filterAreaByLevel(rawData.value, props.level);
+});
 
 // 获取地区数据
 const loadAreaData = async () => {
   try {
-    const data = await getAreaData()
-    rawData.value = data
+    const data = await getAreaData();
+    rawData.value = data;
   } catch (error) {
-    console.error('加载地区数据失败:', error)
-    rawData.value = []
+    console.error("加载地区数据失败:", error);
+    rawData.value = [];
   }
-}
+};
 
 // 组件挂载时加载数据
 onMounted(() => {
-  loadAreaData()
-})
+  loadAreaData();
+});
 
 // 监听外部传入的字符串值，转换为数组
 watch(
   () => props.modelValue,
-  (newVal) => {
+  newVal => {
     if (newVal) {
-      internalValue.value = newVal.split(',')
+      internalValue.value = newVal.split(",");
     } else {
-      internalValue.value = []
+      internalValue.value = [];
     }
   },
   { immediate: true }
-)
+);
 
 // 值变化时，将数组转换为逗号分隔的字符串
 const handleChange = (value: string[] | undefined) => {
-  const strValue = value && value.length > 0 ? value.join(',') : ''
-  emit('update:modelValue', strValue)
-}
+  const strValue = value && value.length > 0 ? value.join(",") : "";
+  emit("update:modelValue", strValue);
+};
 </script>
 
 <style lang="scss" scoped>

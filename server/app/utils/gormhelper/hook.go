@@ -1,10 +1,10 @@
 package gormhelper
 
 import (
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/global/myerrors"
 	"reflect"
 	"strings"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/myerrors"
 
 	"gorm.io/gorm"
 )
@@ -19,37 +19,28 @@ func MaskNotDataError(gormDB *gorm.DB) {
 // InterceptCreatePramsNotPtrError 拦截 create 函数参数如果是非指针类型的错误,新用户最容犯此错误
 
 func CreateBeforeHook(gormDB *gorm.DB) {
-	if reflect.TypeOf(gormDB.Statement.Dest).Kind() != reflect.Ptr {
+	// CreateInBatches 将指针切片拆成普通切片传给回调；其元素仍可写。
+	kind := reflect.TypeOf(gormDB.Statement.Dest).Kind()
+	if kind != reflect.Pointer && kind != reflect.Slice {
 		app.ZapLog.Warn(myerrors.ErrorsGormDBCreateParamsNotPtr)
 	} else {
-		destValueOf := reflect.ValueOf(gormDB.Statement.Dest).Elem()
+		destValueOf := reflect.Indirect(reflect.ValueOf(gormDB.Statement.Dest))
 		if destValueOf.Type().Kind() == reflect.Slice || destValueOf.Type().Kind() == reflect.Array {
 			inLen := destValueOf.Len()
 			for i := 0; i < inLen; i++ {
 				row := destValueOf.Index(i)
 				if row.Type().Kind() == reflect.Struct {
-					// 检查是否有TenantID字段，如果有则自动设置
-					if b, column := structHasSpecialField("TenantID", row); b {
-						// 从上下文中获取租户ID
-						if tenantID := GetTenantIDFromContext(gormDB.Statement.Context); tenantID > 0 {
-							destValueOf.Index(i).FieldByName(column).Set(reflect.ValueOf(tenantID))
-						}
-					}
 					// 检查是否有CreatedBy字段，如果有则自动设置
 					if b, column := structHasSpecialField("CreatedBy", row); b {
 						// 从上下文中获取用户ID
 						if userID := GetCurrentUserIDFromContext(gormDB.Statement.Context); userID > 0 {
-							destValueOf.Index(i).FieldByName(column).Set(reflect.ValueOf(userID))
+							// column 可能是数据库列名，使用 GORM 字段映射设置当前行。
+							if field := gormDB.Statement.Schema.LookUpField(column); field != nil {
+								gormDB.Error = gormDB.AddError(field.Set(gormDB.Statement.Context, row, userID))
+							}
 						}
 					}
 				} else if row.Type().Kind() == reflect.Map {
-					// 检查是否有TenantID字段，如果有则自动设置
-					if b, column := structHasSpecialField("tenant_id", row); b {
-						// 从上下文中获取租户ID
-						if tenantID := GetTenantIDFromContext(gormDB.Statement.Context); tenantID > 0 {
-							row.SetMapIndex(reflect.ValueOf(column), reflect.ValueOf(tenantID))
-						}
-					}
 					// 检查是否有CreatedBy字段，如果有则自动设置
 					if b, column := structHasSpecialField("created_by", row); b {
 						// 从上下文中获取用户ID
@@ -60,13 +51,6 @@ func CreateBeforeHook(gormDB *gorm.DB) {
 				}
 			}
 		} else if destValueOf.Type().Kind() == reflect.Struct {
-			// 检查是否有TenantID字段，如果有则自动设置
-			if b, column := structHasSpecialField("TenantID", gormDB.Statement.Dest); b {
-				// 从上下文中获取租户ID
-				if tenantID := GetTenantIDFromContext(gormDB.Statement.Context); tenantID > 0 {
-					gormDB.Statement.SetColumn(column, tenantID)
-				}
-			}
 			// 检查是否有CreatedBy字段，如果有则自动设置
 			if b, column := structHasSpecialField("CreatedBy", gormDB.Statement.Dest); b {
 				// 从上下文中获取用户ID
@@ -75,13 +59,6 @@ func CreateBeforeHook(gormDB *gorm.DB) {
 				}
 			}
 		} else if destValueOf.Type().Kind() == reflect.Map {
-			// 检查是否有TenantID字段，如果有则自动设置
-			if b, column := structHasSpecialField("tenant_id", gormDB.Statement.Dest); b {
-				// 从上下文中获取租户ID
-				if tenantID := GetTenantIDFromContext(gormDB.Statement.Context); tenantID > 0 {
-					destValueOf.SetMapIndex(reflect.ValueOf(column), reflect.ValueOf(tenantID))
-				}
-			}
 			// 检查是否有CreatedBy字段，如果有则自动设置
 			if b, column := structHasSpecialField("created_by", gormDB.Statement.Dest); b {
 				// 从上下文中获取用户ID
@@ -102,9 +79,6 @@ func UpdateBeforeHook(gormDB *gorm.DB) {
 	if reflect.TypeOf(gormDB.Statement.Dest).Kind() == reflect.Struct {
 		//_ = gormDB.AddError(errors.New(my_errors.ErrorsGormDBUpdateParamsNotPtr))
 		app.ZapLog.Warn(myerrors.ErrorsGormDBUpdateParamsNotPtr)
-	} else if reflect.TypeOf(gormDB.Statement.Dest).Kind() == reflect.Map {
-		// 如果是调用了 gorm.Update 、updates 函数 , 在参数没有传递指针的情况下，无法触发回调函数
-
 	}
 }
 
@@ -116,14 +90,14 @@ func DeleteBeforeHook(gormDB *gorm.DB) {
 // structHasSpecialField  检查结构体是否有特定字段
 func structHasSpecialField(fieldName string, anyStructPtr interface{}) (bool, string) {
 	var tmp reflect.Type
-	if reflect.TypeOf(anyStructPtr).Kind() == reflect.Ptr && reflect.ValueOf(anyStructPtr).Elem().Kind() == reflect.Map {
+	if reflect.TypeOf(anyStructPtr).Kind() == reflect.Pointer && reflect.ValueOf(anyStructPtr).Elem().Kind() == reflect.Map {
 		destValueOf := reflect.ValueOf(anyStructPtr).Elem()
 		for _, item := range destValueOf.MapKeys() {
 			if item.String() == fieldName {
 				return true, fieldName
 			}
 		}
-	} else if reflect.TypeOf(anyStructPtr).Kind() == reflect.Ptr && reflect.ValueOf(anyStructPtr).Elem().Kind() == reflect.Struct {
+	} else if reflect.TypeOf(anyStructPtr).Kind() == reflect.Pointer && reflect.ValueOf(anyStructPtr).Elem().Kind() == reflect.Struct {
 		destValueOf := reflect.ValueOf(anyStructPtr).Elem()
 		tf := destValueOf.Type()
 		for i := 0; i < tf.NumField(); i++ {

@@ -1,0 +1,165 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - develop
+  pull_request:
+    branches:
+      - develop
+      - main
+permissions:
+  contents: read
+
+concurrency:
+  group: uvp-ci-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: 1.25.6
+  NODE_VERSION: 24.13.0
+  PNPM_VERSION: 10.28.1
+
+jobs:
+  build-test:
+    name: Build and test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: server/go.sum
+
+      - name: Prepare backend test config
+        working-directory: server
+        run: cp config/config.example.yml config/config.yml
+
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.0
+
+      - name: Lint changed backend code
+        working-directory: server
+        env:
+          LINT_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if ! git -C .. diff --quiet "$LINT_BASE" HEAD -- server; then
+            "$(go env GOPATH)/bin/golangci-lint" run --new-from-rev="$LINT_BASE" --timeout 10m
+          fi
+
+      - name: Test backend
+        working-directory: server
+        run: go test ./... -count=1
+
+      - name: Build Linux backend
+        working-directory: server
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: amd64
+        run: go build -trimpath -ldflags="-s -w" -o bin/uvp-gb28181-linux-amd64 main.go
+
+      - name: Build Linux firewall agent
+        working-directory: server
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: amd64
+        run: go build -trimpath -ldflags="-s -w" -o bin/uvp-firewall-agent-linux-amd64 ./cmd/uvp-firewall-agent
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6.0.9
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Check product version consistency
+        run: node scripts/version.mjs check
+
+      - name: Install frontend dependencies
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint changed frontend code
+        working-directory: web
+        env:
+          LINT_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          node scripts/check-form-rules.mjs
+          node --test scripts/check-form-rules.test.mjs
+          source_files=()
+          eslint_files=()
+          style_files=()
+          while IFS= read -r -d '' file; do
+            file="${file#web/}"
+            case "$file" in
+              src/components.d.ts|src/auto-import.d.ts) continue ;;
+              src/*) ;;
+              *) continue ;;
+            esac
+            case "$file" in
+              *.js|*.jsx|*.mjs|*.cjs|*.ts|*.tsx|*.vue|*.scss|*.css|*.less|*.html)
+                source_files+=("$file") ;;
+            esac
+            case "$file" in
+              *.js|*.jsx|*.mjs|*.cjs|*.ts|*.tsx|*.vue) eslint_files+=("$file") ;;
+            esac
+            case "$file" in
+              *.vue|*.scss|*.css|*.less) style_files+=("$file") ;;
+            esac
+          done < <(git -C .. diff --name-only -z --diff-filter=ACMRTUXB "$LINT_BASE" HEAD -- web/src)
+          if ((${#source_files[@]})); then
+            ./node_modules/.bin/prettier --check "${source_files[@]}"
+          fi
+          if ((${#eslint_files[@]})); then
+            ./node_modules/.bin/eslint "${eslint_files[@]}"
+          fi
+          if ((${#style_files[@]})); then
+            ./node_modules/.bin/stylelint "${style_files[@]}"
+          fi
+
+      - name: Type-check and build frontend
+        working-directory: web
+        run: pnpm run build:prod
+
+  mirror-gitee:
+    name: Mirror verified develop to Gitee
+    needs: build-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-24.04
+    env:
+      GITEE_PUSH_URL: ${{ secrets.GITEE_PUSH_URL }}
+
+    steps:
+      - name: Skip until the Gitee mirror credential is configured
+        if: env.GITEE_PUSH_URL == ''
+        run: echo 'GITEE_PUSH_URL is not configured; skipping mirror.'
+
+      - name: Check out the verified revision
+        if: env.GITEE_PUSH_URL != ''
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Fast-forward Gitee develop
+        if: env.GITEE_PUSH_URL != ''
+        run: |
+          set -euo pipefail
+          git remote add gitee "$GITEE_PUSH_URL"
+          git push gitee HEAD:refs/heads/develop

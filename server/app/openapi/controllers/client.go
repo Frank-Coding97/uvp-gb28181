@@ -1,0 +1,484 @@
+package controllers
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
+	"gorm.io/gorm"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/middleware"
+	"uvplatform.com/uvp-gb28181/app/openapi/client"
+	"uvplatform.com/uvp-gb28181/app/openapi/models"
+	"uvplatform.com/uvp-gb28181/app/utils/common"
+	"uvplatform.com/uvp-gb28181/app/utils/datascope"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
+)
+
+type ClientAdminController struct {
+	db          *gorm.DB
+	service     *client.Service
+	permissions client.ManagementPermissionAuthorizer
+}
+
+func NewClientAdminController(db *gorm.DB, service *client.Service, permissions client.ManagementPermissionAuthorizer, _ ...any) *ClientAdminController {
+	return &ClientAdminController{db: db, service: service, permissions: permissions}
+}
+
+// Handler is mounted only by the explicit protected admin registrar. Claims are
+// middleware-owned; payload user/department fields never establish operator scope.
+func (a *ClientAdminController) Handler(action string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+		middleware.MarkSensitiveOperation(c, map[string]any{"resource": "openapi-client", "action": action})
+		actor := common.GetCurrentUserID(c)
+		if actor == 0 {
+			adminDenied(c)
+			return
+		}
+		if a == nil || a.db == nil || a.service == nil || a.permissions == nil {
+			adminError(c, client.ErrDependencyUnavailable)
+			return
+		}
+		access, err := datascope.ResolveOwnerDeptAccessByUserID(c.Request.Context(), a.db, actor)
+		if err != nil {
+			if errors.Is(err, datascope.ErrOwnerDeptAccessDenied) {
+				adminDenied(c)
+			} else {
+				adminError(c, err)
+			}
+			return
+		}
+		if !access.FullAccess && len(access.DeptIDs) == 0 {
+			adminDenied(c)
+			return
+		}
+		allowed, err := a.permissions.Enforce(fmt.Sprintf("user_%d", actor), c.FullPath(), c.Request.Method, "*")
+		if err != nil {
+			adminError(c, err)
+			return
+		}
+		if !allowed {
+			adminDenied(c)
+			return
+		}
+		if action == "list" {
+			a.list(c, access)
+			return
+		}
+		if action != "audits" && c.Request.URL.RawQuery != "" {
+			adminError(c, client.ErrInvalidArgument)
+			return
+		}
+		if action == "capabilities" {
+			scopes, err := client.SupportedScopesFromDB(c.Request.Context(), a.db)
+			if err != nil {
+				adminError(c, err)
+				return
+			}
+			writeOpenAPISuccess(c, scopes)
+			return
+		}
+		if action == "capabilities-catalog" {
+			catalog, err := client.CapabilityCatalog(c.Request.Context(), a.db)
+			if err != nil {
+				adminError(c, err)
+				return
+			}
+			writeOpenAPISuccess(c, gin.H{"groups": catalog})
+			return
+		}
+		if action == "create" {
+			var input struct {
+				Name               string `json:"name"`
+				OwnerDeptID        uint   `json:"ownerDeptId"`
+				DataScope          int8   `json:"dataScope"`
+				RateLimit          int    `json:"rateLimit"`
+				Burst              int    `json:"burst"`
+				ViewerQuota        int    `json:"viewerQuota"`
+				ResponsibleUserID  uint   `json:"responsibleUserId"`
+				ResponsibleOrgName string `json:"responsibleOrgName"`
+				ResponsibleName    string `json:"responsibleName"`
+				ResponsibleContact string `json:"responsibleContact"`
+			}
+			if err := decodeAdminBody(c, &input, "name", "ownerDeptId", "dataScope", "rateLimit", "burst", "viewerQuota", "responsibleUserId", "responsibleOrgName", "responsibleName", "responsibleContact"); err != nil ||
+				utf8.RuneCountInString(input.Name) > 100 || utf8.RuneCountInString(input.ResponsibleOrgName) > 200 ||
+				utf8.RuneCountInString(input.ResponsibleName) > 100 || utf8.RuneCountInString(input.ResponsibleContact) > 100 {
+				adminError(c, client.ErrInvalidArgument)
+				return
+			}
+			if !adminOwns(access, input.OwnerDeptID) {
+				adminError(c, client.ErrNotFound)
+				return
+			}
+			view, secret, err := a.service.Create(c.Request.Context(), client.CreateRequest{
+				Name: input.Name, OwnerDeptID: input.OwnerDeptID, DataScope: input.DataScope, RateLimit: input.RateLimit, Burst: input.Burst, ViewerQuota: input.ViewerQuota, ResponsibleUserID: input.ResponsibleUserID,
+				ResponsibleOrgName: input.ResponsibleOrgName, ResponsibleName: input.ResponsibleName, ResponsibleContact: input.ResponsibleContact, CreatedBy: actor,
+			})
+			if err != nil {
+				adminError(c, err)
+				return
+			}
+			writeOpenAPISuccess(c, gin.H{"client": view, "secretKey": secret})
+			return
+		}
+		id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+		if err != nil || id <= 0 {
+			adminError(c, client.ErrNotFound)
+			return
+		}
+		var view client.ClientView
+		result := a.scopedClients(c, access).Where("id = ?", id).Take(&view)
+		if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			adminError(c, result.Error)
+			return
+		}
+		if result.RowsAffected != 1 {
+			adminError(c, client.ErrNotFound)
+			return
+		}
+		switch action {
+		case "detail":
+			scopes, err := a.service.ListScopes(c.Request.Context(), id)
+			if err != nil {
+				adminError(c, err)
+				return
+			}
+			var ownerDepartment struct {
+				Name string
+			}
+			if err := a.db.WithContext(c.Request.Context()).Table("sys_department").Select("name").Where("id = ?", view.OwnerDeptID).Take(&ownerDepartment).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				adminError(c, err)
+				return
+			} else if ownerDepartment.Name != "" {
+				view.OwnerDeptName = ownerDepartment.Name
+			}
+			writeOpenAPISuccess(c, gin.H{"client": view, "scopes": scopes})
+		case "audits":
+			a.audits(c, id)
+		case "scopes":
+			var input struct {
+				RowVersion int64    `json:"rowVersion"`
+				Scopes     []string `json:"scopes"`
+			}
+			if decodeAdminBody(c, &input, "rowVersion", "scopes") != nil || input.Scopes == nil {
+				adminError(c, client.ErrInvalidArgument)
+				return
+			}
+			updated, err := a.service.SetScopes(c.Request.Context(), id, input.Scopes, input.RowVersion, actor)
+			if err != nil {
+				adminError(c, err)
+				return
+			}
+			writeOpenAPISuccess(c, updated)
+		case "rotate", "enable", "disable", "revoke":
+			var input struct {
+				RowVersion int64 `json:"rowVersion"`
+			}
+			if decodeAdminBody(c, &input, "rowVersion") != nil {
+				adminError(c, client.ErrInvalidArgument)
+				return
+			}
+			if action == "rotate" {
+				updated, secret, err := a.service.RotateSecret(c.Request.Context(), id, input.RowVersion, actor)
+				if err != nil {
+					adminError(c, err)
+					return
+				}
+				writeOpenAPISuccess(c, gin.H{"client": updated, "secretKey": secret})
+				return
+			}
+			status := map[string]string{"enable": models.StatusActive, "disable": models.StatusDisabled, "revoke": models.StatusRevoked}[action]
+			updated, err := a.service.SetStatus(c.Request.Context(), id, status, input.RowVersion, actor)
+			if err != nil {
+				adminError(c, err)
+				return
+			}
+			writeOpenAPISuccess(c, gin.H{"client": updated})
+		default:
+			adminDenied(c)
+		}
+	}
+}
+
+func adminOwns(access datascope.OwnerDeptAccess, id uint) bool {
+	if id == 0 {
+		return false
+	}
+	if access.FullAccess {
+		return true
+	}
+	for _, allowed := range access.DeptIDs {
+		if allowed == id {
+			return true
+		}
+	}
+	return false
+}
+
+const adminClientColumns = "id,ak,name,owner_dept_id,data_scope,responsible_user_id,responsible_org_name,responsible_name,responsible_contact,status,secret_version,auth_epoch,rate_limit,burst,viewer_quota,row_version,created_by,updated_by,created_at,updated_at"
+
+func (a *ClientAdminController) scopedClients(c *gin.Context, access datascope.OwnerDeptAccess) *gorm.DB {
+	query := a.db.WithContext(c.Request.Context()).Model(&models.Client{}).Select(adminClientColumns)
+	if !access.FullAccess {
+		query = query.Where("owner_dept_id IN ?", access.DeptIDs)
+	}
+	return query
+}
+
+type adminOwnerDepartment struct {
+	ID       uint   `json:"id"`
+	Name     string `json:"name"`
+	ParentID *uint  `json:"parentId,omitempty"`
+}
+
+func (a *ClientAdminController) list(c *gin.Context, access datascope.OwnerDeptAccess) {
+	values, err := url.ParseQuery(c.Request.URL.RawQuery)
+	if err != nil {
+		adminError(c, client.ErrInvalidArgument)
+		return
+	}
+	for key, items := range values {
+		if (key != "page" && key != "pageSize" && key != "ownerDeptId" && key != "name" && key != "status") || len(items) != 1 {
+			adminError(c, client.ErrInvalidArgument)
+			return
+		}
+	}
+	var ownerID uint64
+	if values.Has("ownerDeptId") {
+		ownerID, err = strconv.ParseUint(values.Get("ownerDeptId"), 10, strconv.IntSize)
+		if err != nil || ownerID == 0 {
+			adminError(c, client.ErrInvalidArgument)
+			return
+		}
+	}
+	name := strings.TrimSpace(values.Get("name"))
+	if len(name) > 100 {
+		adminError(c, client.ErrInvalidArgument)
+		return
+	}
+	status := values.Get("status")
+	if status != "" && status != models.StatusActive && status != models.StatusDisabled && status != models.StatusRevoked {
+		adminError(c, client.ErrInvalidArgument)
+		return
+	}
+	page, size, err := parsePageValues(values)
+	if err != nil || page-1 > int(^uint(0)>>1)/size {
+		adminError(c, client.ErrInvalidArgument)
+		return
+	}
+	items := []client.ClientView{}
+	departments := []adminOwnerDepartment{}
+	var total int64
+	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		scoped := *a
+		scoped.db = tx
+		query := func() *gorm.DB {
+			q := scoped.scopedClients(c, access)
+			if ownerID != 0 {
+				q = q.Where("owner_dept_id = ?", ownerID)
+			}
+			if name != "" {
+				q = q.Where("name LIKE ?", "%"+name+"%")
+			}
+			if status != "" {
+				q = q.Where("status = ?", status)
+			}
+			return q
+		}
+		if err := query().Select("count(*)").Count(&total).Error; err != nil {
+			return err
+		}
+		if err := query().Order("id ASC").Offset((page - 1) * size).Limit(size).Find(&items).Error; err != nil {
+			return err
+		}
+		if len(items) > 0 {
+			departmentNames := map[uint]string{}
+			var rows []struct {
+				ID   uint   `gorm:"column:id"`
+				Name string `gorm:"column:name"`
+			}
+			departmentIDs := make([]uint, 0, len(items))
+			seen := make(map[uint]struct{}, len(items))
+			for _, item := range items {
+				if _, ok := seen[item.OwnerDeptID]; ok {
+					continue
+				}
+				seen[item.OwnerDeptID] = struct{}{}
+				departmentIDs = append(departmentIDs, item.OwnerDeptID)
+			}
+			if err := tx.Table("sys_department").Select("id, name").Where("id IN ? AND status = ? AND deleted_at IS NULL", departmentIDs, 1).Find(&rows).Error; err != nil {
+				return err
+			}
+			for _, row := range rows {
+				departmentNames[row.ID] = row.Name
+			}
+			for index := range items {
+				items[index].OwnerDeptName = departmentNames[items[index].OwnerDeptID]
+			}
+		}
+		// Options are scoped server-side, independent from the current client
+		// page/filter. Never expose the general unscoped department tree here.
+		options := tx.Table("sys_department").Select("id, name, parent_id").Where("status = ? AND deleted_at IS NULL", 1)
+		if !access.FullAccess {
+			options = options.Where("id IN ?", access.DeptIDs)
+		}
+		return options.Order("id ASC").Find(&departments).Error
+	})
+	if err != nil {
+		adminError(c, err)
+		return
+	}
+	writeOpenAPISuccess(c, gin.H{"items": items, "page": page, "pageSize": size, "total": total, "ownerDepartments": departments})
+}
+
+type adminAuditView struct {
+	RequestID    string    `json:"requestId"`
+	Scope        string    `json:"scope"`
+	ResourceType string    `json:"resourceType"`
+	ResourceID   string    `json:"resourceId"`
+	Result       string    `json:"result"`
+	ReasonClass  string    `json:"reasonClass"`
+	Source       string    `json:"source"`
+	LatencyMS    int64     `json:"latencyMs"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
+func (a *ClientAdminController) audits(c *gin.Context, id int64) {
+	values, err := url.ParseQuery(c.Request.URL.RawQuery)
+	if err != nil {
+		adminError(c, client.ErrInvalidArgument)
+		return
+	}
+	for key, items := range values {
+		if (key != "page" && key != "pageSize" && key != "result") || len(items) != 1 {
+			adminError(c, client.ErrInvalidArgument)
+			return
+		}
+	}
+	page, pageSize, err := parsePageValues(values)
+	if err != nil || page-1 > int(^uint(0)>>1)/pageSize {
+		adminError(c, client.ErrInvalidArgument)
+		return
+	}
+	resultFilter := values.Get("result")
+	if resultFilter != "" && resultFilter != "success" && resultFilter != "failure" {
+		adminError(c, client.ErrInvalidArgument)
+		return
+	}
+	items := []adminAuditView{}
+	query := a.db.WithContext(c.Request.Context()).Model(&models.Audit{}).
+		Where("client_id = ?", id)
+	if resultFilter != "" {
+		query = query.Where("result = ?", resultFilter)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		adminError(c, err)
+		return
+	}
+	err = query.Select("request_id,scope,resource_type,resource_id,result,reason_class,source,latency_ms,created_at").
+		Order("created_at DESC, id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&items).Error
+	if err != nil {
+		adminError(c, err)
+		return
+	}
+	writeOpenAPISuccess(c, gin.H{"items": items, "page": page, "pageSize": pageSize, "total": total})
+}
+
+func decodeAdminBody(c *gin.Context, out any, allowed ...string) error {
+	if c.GetHeader("Content-Type") != "application/json" {
+		return client.ErrInvalidArgument
+	}
+	data, err := io.ReadAll(io.LimitReader(c.Request.Body, 65537))
+	if err != nil || len(data) > 65536 {
+		return client.ErrInvalidArgument
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	start, err := decoder.Token()
+	if err != nil || start != json.Delim('{') {
+		return client.ErrInvalidArgument
+	}
+	fields := make(map[string]bool, len(allowed))
+	for _, key := range allowed {
+		fields[key] = false
+	}
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		key, ok := token.(string)
+		if !ok {
+			return client.ErrInvalidArgument
+		}
+		seen, known := fields[key]
+		if !known || seen {
+			return client.ErrInvalidArgument
+		}
+		fields[key] = true
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return err
+		}
+	}
+	if _, err = decoder.Token(); err != nil {
+		return err
+	}
+	var extra any
+	if decoder.Decode(&extra) != io.EOF {
+		return client.ErrInvalidArgument
+	}
+	return json.Unmarshal(data, out)
+}
+
+func adminDenied(c *gin.Context) {
+	writeOpenAPIError(c, http.StatusForbidden, "CAPABILITY_DENIED", "capability denied")
+}
+
+// adminError maps a management failure to the external contract. Every 5xx
+// branch funnels through adminServerError: a capability-catalog failure has no
+// HTTP shape of its own, so without that log an unpublished catalog, a registry
+// drift and a dependency outage all look identical to the operator
+// ("service unavailable") and the cause can only be found by attaching a probe
+// to the running process.
+func adminError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, client.ErrNotFound), errors.Is(err, client.ErrManagementBoundaryDenied):
+		writeOpenAPIError(c, 404, "RESOURCE_NOT_FOUND", "resource not found")
+	case errors.Is(err, client.ErrInvalidArgument), errors.Is(err, client.ErrUnknownScope), errors.Is(err, client.ErrOwnerDeptImmutable):
+		writeOpenAPIError(c, 400, "INVALID_REQUEST", "invalid request")
+	case errors.Is(err, client.ErrConflict), errors.Is(err, client.ErrRevoked), errors.Is(err, client.ErrClientDisabled):
+		writeOpenAPIError(c, 409, "CONFLICT", "conflict")
+	case errors.Is(err, client.ErrCapabilityRuntimeUnavailable):
+		adminServerError(c, err, "capability_catalog_unavailable", "capability catalog unavailable")
+	case errors.Is(err, client.ErrCapabilityDrift):
+		adminServerError(c, err, "capability_catalog_drift", "capability catalog drift detected")
+	default:
+		adminServerError(c, err, "service_unavailable", "service unavailable")
+	}
+}
+
+// adminServerError reports an internal failure without changing the externally
+// visible 503 shape. `reason` carries the machine-readable cause so an operator
+// can grep the exact class of failure; the message itself deliberately stays
+// outside the log because the sanitize core only keeps error class/type.
+func adminServerError(c *gin.Context, err error, reason, message string) {
+	app.Log(c.Request.Context()).Error("OpenAPI 管理请求失败(服务端)",
+		zap.String("event", "http.operation_failed"),
+		zap.String("route", c.FullPath()), zap.String("method", c.Request.Method),
+		zap.String("source_ip", c.ClientIP()),
+		zap.String("reason", reason),
+		logging.Error(err))
+	writeOpenAPIError(c, http.StatusServiceUnavailable, strings.ToUpper(reason), message)
+}

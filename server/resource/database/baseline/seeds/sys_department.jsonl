@@ -1,0 +1,1 @@
+{"id": 1, "parent_id": 0, "name": "总部", "status": 1, "leader": "", "phone": "", "email": "", "sort": 1, "describe": "", "created_at": {"$ts": "2023-01-15 09:00:00.000000"}, "updated_at": {"$ts": "2025-10-31 17:05:24.000000"}, "deleted_at": null, "created_by": 1}

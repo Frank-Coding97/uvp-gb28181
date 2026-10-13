@@ -37,7 +37,7 @@ pnpm add -D @types/xlsx
 </template>
 
 <script setup lang="ts">
-import SExcelReader from '@/components/s-excel-reader/index.vue';
+import SExcelReader from "@/components/s-excel-reader/index.vue";
 
 interface ExcelSheetData {
   sheetName: string;
@@ -46,18 +46,18 @@ interface ExcelSheetData {
 }
 
 const handleSuccess = (data: ExcelSheetData) => {
-  console.log('读取成功:', data);
+  console.log("读取成功:", data);
   // data.sheetName: 工作表名称
   // data.data: 数据数组（每行是一个对象，键为表头）
   // data.headers: 表头数组
 };
 
 const handleError = (error: Error) => {
-  console.error('读取失败:', error);
+  console.error("读取失败:", error);
 };
 
 const handleLoading = (isLoading: boolean) => {
-  console.log('加载状态:', isLoading);
+  console.log("加载状态:", isLoading);
 };
 </script>
 ```
@@ -66,15 +66,12 @@ const handleLoading = (isLoading: boolean) => {
 
 ```vue
 <template>
-  <s-excel-reader
-    :multiple="true"
-    @success="handleMultipleSuccess"
-  />
+  <s-excel-reader :multiple="true" @success="handleMultipleSuccess" />
 </template>
 
 <script setup lang="ts">
 const handleMultipleSuccess = (data: ExcelSheetData[]) => {
-  console.log('读取成功，共', data.length, '个文件');
+  console.log("读取成功，共", data.length, "个文件");
   data.forEach((sheetData, index) => {
     console.log(`文件 ${index + 1}:`, sheetData);
   });
@@ -93,7 +90,7 @@ const handleMultipleSuccess = (data: ExcelSheetData[]) => {
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref } from "vue";
 
 const excelReaderRef = ref();
 
@@ -102,27 +99,27 @@ const triggerUpload = () => {
 };
 
 const handleSuccess = (data: ExcelSheetData) => {
-  console.log('读取成功:', data);
+  console.log("读取成功:", data);
 };
 </script>
 ```
 
 ## Props
 
-| 参数 | 说明 | 类型 | 默认值 |
-|------|------|------|--------|
-| title | 上传区域标题 | `string` | '点击或拖拽上传 Excel 文件' |
-| description | 上传区域描述 | `string` | '支持 .xlsx、.xls 格式' |
-| multiple | 是否支持多文件上传 | `boolean` | `false` |
-| readAsArray | 是否读取为数组格式（保留） | `boolean` | `false` |
+| 参数        | 说明                       | 类型      | 默认值                      |
+| ----------- | -------------------------- | --------- | --------------------------- |
+| title       | 上传区域标题               | `string`  | '点击或拖拽上传 Excel 文件' |
+| description | 上传区域描述               | `string`  | '支持 .xlsx、.xls 格式'     |
+| multiple    | 是否支持多文件上传         | `boolean` | `false`                     |
+| readAsArray | 是否读取为数组格式（保留） | `boolean` | `false`                     |
 
 ## Events
 
-| 事件名 | 说明 | 回调参数 |
-|--------|------|----------|
+| 事件名  | 说明               | 回调参数                             |
+| ------- | ------------------ | ------------------------------------ |
 | success | 文件读取成功时触发 | `ExcelSheetData \| ExcelSheetData[]` |
-| error | 文件读取失败时触发 | `Error` |
-| loading | 加载状态变化时触发 | `boolean` |
+| error   | 文件读取失败时触发 | `Error`                              |
+| loading | 加载状态变化时触发 | `boolean`                            |
 
 ## 数据结构
 
@@ -130,9 +127,9 @@ const handleSuccess = (data: ExcelSheetData) => {
 
 ```typescript
 interface ExcelSheetData {
-  sheetName: string;        // 工作表名称
-  data: Record<string, any>[];  // 数据数组
-  headers: string[];        // 表头数组
+  sheetName: string; // 工作表名称
+  data: Record<string, any>[]; // 数据数组
+  headers: string[]; // 表头数组
 }
 ```
 
@@ -140,10 +137,10 @@ interface ExcelSheetData {
 
 假设 Excel 文件内容如下：
 
-| 姓名 | 年龄 | 部门 |
-|------|------|------|
-| 张三 | 25 | 技术部 |
-| 李四 | 30 | 产品部 |
+| 姓名 | 年龄 | 部门   |
+| ---- | ---- | ------ |
+| 张三 | 25   | 技术部 |
+| 李四 | 30   | 产品部 |
 
 读取后的数据结构：
 
@@ -166,10 +163,10 @@ interface ExcelSheetData {
 .s-excel-reader {
   // 修改边框颜色
   border-color: var(--color-border-2);
-  
+
   // 修改背景色
   background-color: var(--color-fill-1);
-  
+
   // 修改主色调
   --primary-6: rgb(var(--primary-6));
 }

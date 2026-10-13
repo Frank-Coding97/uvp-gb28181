@@ -24,28 +24,42 @@ func (r *BaseRequest) Bind(c *gin.Context, obj interface{}) (err error) {
 	// GET请求：只处理数组参数、query和uri参数，不处理body
 	if c.Request.Method == "GET" {
 		r.parseArrayParams(c, obj)
-		c.ShouldBindQuery(obj)
-		c.ShouldBindUri(obj)
+		if err := c.ShouldBindQuery(obj); err != nil {
+			return err
+		}
+		if err := c.ShouldBindUri(obj); err != nil {
+			return err
+		}
 		return nil // GET请求通常没有body
 	}
 
 	// 非GET请求：根据Content-Type决定绑定策略
 	if strings.Contains(contentType, "application/json") {
 		// JSON请求：只处理路径参数，body由ShouldBindBodyWith处理 避免消耗request body
-		c.ShouldBindUri(obj)
+		if err := c.ShouldBindUri(obj); err != nil {
+			return err
+		}
 		return c.ShouldBindBodyWith(obj, binding.JSON)
 	} else if strings.Contains(contentType, "application/x-www-form-urlencoded") ||
 		strings.Contains(contentType, "multipart/form-data") {
 		// 表单数据：先解析数组参数，然后处理query和uri，最后处理body
 		r.parseArrayParams(c, obj)
-		c.ShouldBindQuery(obj)
-		c.ShouldBindUri(obj)
+		if err := c.ShouldBindQuery(obj); err != nil {
+			return err
+		}
+		if err := c.ShouldBindUri(obj); err != nil {
+			return err
+		}
 		return c.ShouldBind(obj)
 	} else {
 		// 其他类型的请求：处理数组参数、query和uri参数
 		r.parseArrayParams(c, obj)
-		c.ShouldBindQuery(obj)
-		c.ShouldBindUri(obj)
+		if err := c.ShouldBindQuery(obj); err != nil {
+			return err
+		}
+		if err := c.ShouldBindUri(obj); err != nil {
+			return err
+		}
 		return nil
 	}
 

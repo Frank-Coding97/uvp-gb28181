@@ -11,7 +11,7 @@ export GOOS=linux
 export GOARCH=amd64
 
 OUTPUT_DIR="dist"
-OUTPUT_NAME="gin-fast-linux"
+OUTPUT_NAME="uvp-gb28181-linux"
 
 # 创建输出目录
 if [ ! -d "$OUTPUT_DIR" ]; then

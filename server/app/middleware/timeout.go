@@ -11,6 +11,11 @@ import (
 // 为每个请求设置全局超时时间，防止长时间运行的请求阻塞服务器
 func TimeoutMiddleware(timeout time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// SSE streams own their lifetime and emit application-level heartbeats.
+		if c.Request.URL.Path == "/api/gb28181/logs/stream" || c.Request.URL.Path == "/api/gb28181/logs/stream/" {
+			c.Next()
+			return
+		}
 		// 创建带超时的上下文
 		ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
 		defer cancel()

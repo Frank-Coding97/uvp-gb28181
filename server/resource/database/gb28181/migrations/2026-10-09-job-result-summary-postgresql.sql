@@ -1,0 +1,1 @@
+ALTER TABLE sys_job_results ADD COLUMN IF NOT EXISTS summary TEXT;

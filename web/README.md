@@ -24,20 +24,24 @@ GinFast 是一个功能完备、高颜值、高性能的后台管理模板，致
 
 ## 技术栈
 
-| 类别 | 技术栈 |
-|------|--------|
-| 前端框架 | Vue3 (Composition API) |
-| 构建工具 | Vite 6.x |
-| 编程语言 | TypeScript |
-| 状态管理 | Pinia + pinia-plugin-persistedstate |
-| 路由管理 | Vue Router 4.x |
-| UI 组件库 | Arco Design Vue 2.57.0 |
-| 样式处理 | Sass (sass-embedded), CSS Modules |
-| HTTP 请求 | Axios |
-| 国际化 | vue-i18n 10.0.0-alpha.3 |
-| 代码校验 | ESLint + Stylelint |
-| 格式化 | Prettier |
-| Git 规范 | husky + lint-staged + commitlint |
+| 类别      | 技术栈                              |
+| --------- | ----------------------------------- |
+| 前端框架  | Vue3 (Composition API)              |
+| 构建工具  | Vite 6.x                            |
+| 编程语言  | TypeScript                          |
+| 状态管理  | Pinia + pinia-plugin-persistedstate |
+| 路由管理  | Vue Router 4.x                      |
+| UI 组件库 | Arco Design Vue 2.57.0              |
+| 样式处理  | Sass (sass-embedded), CSS Modules   |
+| HTTP 请求 | Axios                               |
+| 国际化    | vue-i18n 10.0.0-alpha.3             |
+| 代码校验  | ESLint + Stylelint                  |
+| 格式化    | Prettier                            |
+| Git 规范  | husky + lint-staged + commitlint    |
+
+## 开发规范
+
+前端组件选型、业务组件复用和统一封装要求见：[前端开发规范](../docs/frontend-development-guidelines.md)。
 
 ## 功能特性
 
@@ -226,91 +230,94 @@ plugins/
 
 2. **插件API定义**
    在插件目录下创建 `api/` 文件夹，用于定义插件的接口请求：
+
    ```typescript
    // src/plugins/[plugin-name]/api/[plugin-name].ts
-   import { http } from '@/utils/http';
+   import { http } from "@/utils/http";
    import { baseUrlApi } from "@/api/utils";
    import { BaseResult } from "@/api/types";
-   
+
    // 定义数据接口
    export interface ExampleData {
-       id: number;
-       name: string;
-       description: string;
+     id: number;
+     name: string;
+     description: string;
    }
-   
+
    // 定义API请求方法
    export const getExampleList = (params: any) => {
-       return http.request<ExampleListResult>("get", baseUrlApi("plugins/example/list"), { params });
+     return http.request<ExampleListResult>("get", baseUrlApi("plugins/example/list"), { params });
    };
    ```
 
 3. **插件状态管理**
    在插件目录下创建 `store/` 文件夹，使用 Pinia 定义插件的状态管理：
+
    ```typescript
    // src/plugins/[plugin-name]/store/[plugin-name].ts
-   import { defineStore } from 'pinia';
-   import { ref, computed } from 'vue';
-   import { getExampleList } from '../api/example';
-   
-   export const useExamplePluginStore = defineStore('example-plugin', () => {
+   import { defineStore } from "pinia";
+   import { ref, computed } from "vue";
+   import { getExampleList } from "../api/example";
+
+   export const useExamplePluginStore = defineStore("example-plugin", () => {
+     // State
+     const dataList = ref<any[]>([]);
+     const loading = ref<boolean>(false);
+
+     // Getters
+     const getDataList = computed(() => dataList.value);
+     const isLoading = computed(() => loading.value);
+
+     // Actions
+     const fetchDataList = async (params?: any) => {
+       loading.value = true;
+       try {
+         const response = await getExampleList(params);
+         dataList.value = response.data.list || [];
+       } finally {
+         loading.value = false;
+       }
+     };
+
+     return {
        // State
-       const dataList = ref<any[]>([]);
-       const loading = ref<boolean>(false);
-       
+       dataList,
+       loading,
+
        // Getters
-       const getDataList = computed(() => dataList.value);
-       const isLoading = computed(() => loading.value);
-       
+       getDataList,
+       isLoading,
+
        // Actions
-       const fetchDataList = async (params?: any) => {
-           loading.value = true;
-           try {
-               const response = await getExampleList(params);
-               dataList.value = response.data.list || [];
-           } finally {
-               loading.value = false;
-           }
-       };
-       
-       return {
-           // State
-           dataList,
-           loading,
-           
-           // Getters
-           getDataList,
-           isLoading,
-           
-           // Actions
-           fetchDataList
-       };
+       fetchDataList
+     };
    });
    ```
 
 4. **插件页面视图**
    在插件目录下创建 `views/` 文件夹，开发插件的页面组件：
+
    ```vue
    <!-- src/plugins/[plugin-name]/views/[view-name].vue -->
    <template>
-       <div class="example-plugin-container">
-           <a-card title="示例插件列表" :loading="loading">
-               <!-- 页面内容 -->
-           </a-card>
-       </div>
+     <div class="example-plugin-container">
+       <a-card title="示例插件列表" :loading="loading">
+         <!-- 页面内容 -->
+       </a-card>
+     </div>
    </template>
-   
+
    <script setup lang="ts">
-   import { ref, onMounted } from 'vue';
-   import { useExamplePluginStore } from '../store/example';
-   import { storeToRefs } from 'pinia';
-   
+   import { ref, onMounted } from "vue";
+   import { useExamplePluginStore } from "../store/example";
+   import { storeToRefs } from "pinia";
+
    const exampleStore = useExamplePluginStore();
    const { dataList, loading } = storeToRefs(exampleStore);
    const { fetchDataList } = exampleStore;
-   
+
    onMounted(async () => {
-       await fetchDataList();
+     await fetchDataList();
    });
    </script>
    ```
@@ -327,16 +334,19 @@ plugins/
 ### 插件开发最佳实践
 
 1. **命名规范**
+
    - 插件文件夹使用小写字母和连字符分隔，如 `user-management`
    - 插件Store命名使用 `use[PluginName]PluginStore` 格式
    - 插件API文件命名与插件名称保持一致
 
 2. **代码组织**
+
    - 按功能模块组织代码，保持目录结构清晰
    - 重复使用的组件应提取到 `src/components/` 目录
    - 工具函数应提取到 `src/utils/` 目录
 
 3. **类型安全**
+
    - 所有接口数据应定义 TypeScript 接口
    - 使用泛型确保API响应类型安全
    - 避免使用 `any` 类型
@@ -346,9 +356,8 @@ plugins/
    - 合理划分 state、getters、actions
    - 使用 `storeToRefs` 解构响应式状态
 
-
-
 ## 免责声明：
+
 > 1、GIN-FAST仅限自己学习使用，一切商业行为与GIN-FAST无关。
 
 > 2、用户不得利用GIN-FAST从事非法行为，用户应当合法合规的使用，发现用户在使用产品时有任何的非法行为，GIN-FAST有权配合有关机关进行调查或向政府部门举报，GIN-FAST不承担用户因非法行为造成的任何法律责任，一切法律责任由用户自行承担，如因用户使用造成第三方损害的，用户应当依法予以赔偿。
