@@ -259,6 +259,7 @@ CREATE TABLE "gb_catalog_node" (
   "name" VARCHAR(128) NOT NULL,
   "code" VARCHAR(32),
   "civil_code" VARCHAR(6),
+  "source_device_id" VARCHAR(20) NOT NULL DEFAULT '',
   "device_id" BIGINT,
   "channel_id" BIGINT,
   "source" VARCHAR(16) NOT NULL DEFAULT 'catalog',
@@ -296,6 +297,7 @@ CREATE INDEX idx_owner_dept_civil_code ON "gb_catalog_node" ("owner_dept_id", "c
 CREATE INDEX idx_owner_dept_parent ON "gb_catalog_node" ("owner_dept_id", "parent_id");
 CREATE INDEX idx_owner_dept_path ON "gb_catalog_node" ("owner_dept_id", left("path", 128));
 CREATE INDEX idx_owner_dept_type ON "gb_catalog_node" ("owner_dept_id", "node_type");
+CREATE INDEX idx_owner_source_type_code ON "gb_catalog_node" ("owner_dept_id", "source_device_id", "node_type", "code");
 
 DROP TABLE IF EXISTS "gb_channel";
 CREATE TABLE "gb_channel" (
@@ -308,7 +310,7 @@ CREATE TABLE "gb_channel" (
   "model" VARCHAR(255) NOT NULL DEFAULT '',
   "owner" VARCHAR(64) NOT NULL DEFAULT '',
   "civil_code" VARCHAR(32) NOT NULL DEFAULT '',
-  "parent_id" VARCHAR(20) NOT NULL DEFAULT '',
+  "parent_id" VARCHAR(512) NOT NULL DEFAULT '',
   "ptz_type" SMALLINT DEFAULT 0,
   "room_type" SMALLINT NOT NULL DEFAULT 0,
   "supply_light_type" SMALLINT NOT NULL DEFAULT 0,

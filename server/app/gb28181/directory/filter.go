@@ -7,6 +7,7 @@ import (
 )
 
 var ErrDirectoryFilterInvalid = errors.New("directory filter invalid")
+var ErrDepartmentNotFound = errors.New("directory department not found")
 
 type FilterKind string
 
@@ -16,8 +17,11 @@ const (
 	FilterNationalCatalog FilterKind = "national_catalog"
 	FilterBusinessCatalog FilterKind = "business_catalog"
 	FilterBusinessDevice  FilterKind = "business_device"
+	FilterBusinessEmpty   FilterKind = "business_empty"
 	FilterCustomGroup     FilterKind = "custom_group"
 	FilterCustomUngrouped FilterKind = "custom_ungrouped"
+	FilterDepartment      FilterKind = "department"
+	FilterDepartmentEmpty FilterKind = "department_unassigned"
 )
 
 type Filter struct {
@@ -26,6 +30,7 @@ type Filter struct {
 	Kind            FilterKind
 	Code            string
 	GroupID         uint
+	DepartmentID    uint
 	NodeID          uint
 	OwnerDeptID     uint
 	OwnerDeptScoped bool
@@ -47,6 +52,9 @@ func ParseFilter(view, key, legacyNodeID string) (*Filter, error) {
 		return nil, nil
 	}
 	if view == "" || key == "" {
+		if view == "business" && key == "" {
+			return &Filter{View: view, Kind: FilterBusinessEmpty}, nil
+		}
 		return nil, ErrDirectoryFilterInvalid
 	}
 	f := &Filter{View: view, Key: key}
@@ -84,6 +92,15 @@ func ParseFilter(view, key, legacyNodeID string) (*Filter, error) {
 			return nil, ErrDirectoryFilterInvalid
 		}
 		f.NodeID = uint(id)
+	case view == "department" && key == "department:unassigned":
+		f.Kind = FilterDepartmentEmpty
+	case view == "department" && strings.HasPrefix(key, "department:dept:"):
+		f.Kind = FilterDepartment
+		id, err := strconv.ParseUint(strings.TrimPrefix(key, "department:dept:"), 10, 64)
+		if err != nil || id == 0 {
+			return nil, ErrDirectoryFilterInvalid
+		}
+		f.DepartmentID = uint(id)
 	case view == "custom" && key == "custom:ungrouped":
 		f.Kind = FilterCustomUngrouped
 	case view == "custom" && strings.HasPrefix(key, "custom:ungrouped:"):

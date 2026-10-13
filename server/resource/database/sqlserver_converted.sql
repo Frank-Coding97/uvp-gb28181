@@ -312,6 +312,7 @@ BEGIN
     [name] NVARCHAR(128) NOT NULL,
     [code] NVARCHAR(32),
     [civil_code] NVARCHAR(6),
+    [source_device_id] NVARCHAR(20) NOT NULL CONSTRAINT [df_gb_catalog_node_source_device_id] DEFAULT N'',
     [device_id] BIGINT,
     [channel_id] BIGINT,
     [source] NVARCHAR(16) NOT NULL DEFAULT N'catalog',
@@ -343,6 +344,8 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_catalog_
   CREATE INDEX [idx_owner_dept_path] ON [gb_catalog_node] ([owner_dept_id]);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_catalog_node') AND name=N'idx_owner_dept_type')
   CREATE INDEX [idx_owner_dept_type] ON [gb_catalog_node] ([owner_dept_id], [node_type]);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_catalog_node') AND name=N'idx_owner_source_type_code')
+  CREATE INDEX [idx_owner_source_type_code] ON [gb_catalog_node] ([owner_dept_id], [source_device_id], [node_type], [code]);
 
 IF OBJECT_ID(N'gb_channel', N'U') IS NOT NULL DROP TABLE [gb_channel];
 IF OBJECT_ID(N'gb_channel', N'U') IS NULL
@@ -357,7 +360,7 @@ BEGIN
     [model] NVARCHAR(255) NOT NULL DEFAULT N'',
     [owner] NVARCHAR(64) NOT NULL DEFAULT N'',
     [civil_code] NVARCHAR(32) NOT NULL DEFAULT N'',
-    [parent_id] NVARCHAR(20) NOT NULL DEFAULT N'',
+    [parent_id] NVARCHAR(512) NOT NULL DEFAULT N'',
     [ptz_type] TINYINT DEFAULT 0,
     [room_type] TINYINT NOT NULL DEFAULT 0,
     [supply_light_type] TINYINT NOT NULL DEFAULT 0,

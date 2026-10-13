@@ -2,6 +2,7 @@ package directory
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -30,7 +31,9 @@ func newBusinessDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func TestBuildBusinessTreeGroupsPhysicalDevicesWithoutDuplication(t *testing.T) {
+func uintString(id uint) string { return fmt.Sprint(id) }
+
+func TestBuildBusinessTreeDoesNotInsertPhysicalDeviceBetweenBusinessAndChannels(t *testing.T) {
 	db := newBusinessDB(t)
 	devices := []gbmodels.GbDevice{
 		{DeviceID: "34020000001170000001", Name: "NVR", OwnerDeptID: 10, Status: gbmodels.DeviceStatusOnline},
@@ -53,10 +56,11 @@ func TestBuildBusinessTreeGroupsPhysicalDevicesWithoutDuplication(t *testing.T) 
 	// 平台不再补「未归属业务组织」兜底节点 ⇒ 只剩挂到虚拟组织下的 NVR。
 	require.Len(t, tree, 1)
 	require.Equal(t, "重点场所", tree[0].Name)
-	require.Equal(t, 1, tree[0].Count)
+	require.Zero(t, tree[0].Count, "业务计数只统计可展示的通道资源")
 	require.Len(t, tree[0].Children, 1)
 	require.Equal(t, "门岗", tree[0].Children[0].Name)
-	require.Equal(t, 1, tree[0].Children[0].Count)
+	require.Zero(t, tree[0].Children[0].Count)
+	require.Empty(t, tree[0].Children[0].Children, "物理设备不应作为业务目录中的通道叶节点")
 }
 
 // ⛔⛔ 回归锁：国标附录 J 图 J.2 的业务树叶子是摄像机(132 段)，平台把它存成 channel。
@@ -65,7 +69,7 @@ func TestBuildBusinessTreeCountsCameraChannelAsLeaf(t *testing.T) {
 	db := newBusinessDB(t)
 	device := gbmodels.GbDevice{DeviceID: "37010301021180000007", Name: "UVP-Sim", OwnerDeptID: 4, Status: gbmodels.DeviceStatusOnline}
 	require.NoError(t, db.Create(&device).Error)
-	channel := gbmodels.GbChannel{ChannelID: "34020000001320000020", DeviceID: device.DeviceID, Name: "前置摄像头", OwnerDeptID: 4}
+	channel := gbmodels.GbChannel{ChannelID: "34020000001320000020", DeviceID: device.DeviceID, Name: "前置摄像头", OwnerDeptID: 4, Status: gbmodels.ChannelStatusOnline}
 	require.NoError(t, db.Create(&channel).Error)
 
 	group := gbmodels.GbCatalogNode{OwnerDeptID: 4, NodeType: gbmodels.NodeTypeBizGroup, Name: "重点场所", Code: "34020000002150000001", Path: "/", Source: gbmodels.NodeSourceCatalog}
@@ -84,12 +88,70 @@ func TestBuildBusinessTreeCountsCameraChannelAsLeaf(t *testing.T) {
 	require.Equal(t, 1, tree[0].OnlineCount)
 	require.Len(t, tree[0].Children, 1)
 	require.Equal(t, 1, tree[0].Children[0].Count)
+	require.Len(t, tree[0].Children[0].Children, 1)
+	require.Equal(t, "channel", tree[0].Children[0].Children[0].Type)
+	require.Equal(t, "business:catalog:"+uintString(camera.ID), tree[0].Children[0].Children[0].Key)
+	require.Equal(t, channel.ChannelID, tree[0].Children[0].Children[0].Code)
 }
 
-// ⛔ 开发库真实形态：catalog/pipeline.go 的 resolveBusinessParent 在 device 分支建节点时
-// 不回填 device_id，实测 gb_catalog_node.device_id 54 行全为 NULL。
-// 若只认 device_id，计数依旧是 0。
-func TestBuildBusinessTreeResolvesDeviceNodeByCodeWhenDeviceIDMissing(t *testing.T) {
+func TestBuildBusinessTreeIncludesOnlyBusinessContainersAndCatalogChannels(t *testing.T) {
+	db := newBusinessDB(t)
+	device := gbmodels.GbDevice{DeviceID: "37010301021180000007", Name: "NVR", OwnerDeptID: 4, Status: gbmodels.DeviceStatusOnline}
+	require.NoError(t, db.Create(&device).Error)
+	channels := []gbmodels.GbChannel{
+		{ChannelID: "34020000001320000020", DeviceID: device.DeviceID, Name: "归属通道", OwnerDeptID: 4},
+		{ChannelID: "34020000001320000021", DeviceID: device.DeviceID, Name: "未归属通道", OwnerDeptID: 4},
+	}
+	require.NoError(t, db.Create(&channels).Error)
+	group := gbmodels.GbCatalogNode{OwnerDeptID: 4, NodeType: gbmodels.NodeTypeBizGroup, Name: "重点场所", Code: "34020000002150000001", Path: "/", Source: gbmodels.NodeSourceCatalog}
+	require.NoError(t, db.Create(&group).Error)
+	virtual := gbmodels.GbCatalogNode{OwnerDeptID: 4, NodeType: gbmodels.NodeTypeVirtualOrg, Name: "门岗", Code: "34020000002160000001", ParentID: &group.ID, Path: "/", Source: gbmodels.NodeSourceCatalog}
+	require.NoError(t, db.Create(&virtual).Error)
+	channelNode := gbmodels.GbCatalogNode{OwnerDeptID: 4, NodeType: gbmodels.NodeTypeChannel, Name: channels[0].Name, Code: channels[0].ChannelID, ChannelID: &channels[0].ID, ParentID: &virtual.ID, Path: "/", Source: gbmodels.NodeSourceCatalog}
+	require.NoError(t, db.Create(&channelNode).Error)
+	deviceNode := gbmodels.GbCatalogNode{OwnerDeptID: 4, NodeType: gbmodels.NodeTypeDevice, Name: device.Name, Code: device.DeviceID, DeviceID: &device.ID, ParentID: &group.ID, Path: "/", Source: gbmodels.NodeSourceCatalog}
+	require.NoError(t, db.Create(&deviceNode).Error)
+
+	tree, err := BuildBusinessTree(context.Background(), db, 4)
+	require.NoError(t, err)
+	require.Len(t, tree, 1)
+	require.Equal(t, 1, tree[0].Count, "物理父设备本身不计入业务通道数")
+	require.Len(t, tree[0].Children, 1)
+	require.Len(t, tree[0].Children[0].Children, 1, "只展示虚拟目录下关联的通道")
+	require.Equal(t, "channel", tree[0].Children[0].Children[0].Type)
+	require.Equal(t, channelNode.Code, tree[0].Children[0].Children[0].Code)
+}
+
+func TestBuildBusinessTreeOmitsOrphanVirtualOrgAndStaleChannelCatalog(t *testing.T) {
+	db := newBusinessDB(t)
+	device := gbmodels.GbDevice{DeviceID: "37010301021180000007", OwnerDeptID: 4}
+	require.NoError(t, db.Create(&device).Error)
+	channel := gbmodels.GbChannel{ChannelID: "34020000001320000020", DeviceID: device.DeviceID, OwnerDeptID: 4}
+	require.NoError(t, db.Create(&channel).Error)
+
+	group := gbmodels.GbCatalogNode{OwnerDeptID: 4, NodeType: gbmodels.NodeTypeBizGroup, Name: "重点场所", Code: "34020000002150000001", Path: "/"}
+	require.NoError(t, db.Create(&group).Error)
+	virtual := gbmodels.GbCatalogNode{OwnerDeptID: 4, NodeType: gbmodels.NodeTypeVirtualOrg, Name: "门岗", Code: "34020000002160000001", Path: "/", ParentID: &group.ID}
+	require.NoError(t, db.Create(&virtual).Error)
+	stale := gbmodels.GbCatalogNode{OwnerDeptID: 4, NodeType: gbmodels.NodeTypeChannel, Name: "陈旧通道目录", Code: channel.ChannelID, Path: "/", ParentID: &virtual.ID}
+	require.NoError(t, db.Create(&stale).Error)
+
+	orphan := gbmodels.GbCatalogNode{OwnerDeptID: 4, NodeType: gbmodels.NodeTypeVirtualOrg, Name: "异常兜底目录", Code: "34020000002160000002", Path: "/"}
+	require.NoError(t, db.Create(&orphan).Error)
+	orphanChannel := gbmodels.GbCatalogNode{OwnerDeptID: 4, NodeType: gbmodels.NodeTypeChannel, Name: "孤立目录通道", Code: channel.ChannelID, Path: "/", ParentID: &orphan.ID}
+	require.NoError(t, db.Create(&orphanChannel).Error)
+
+	tree, err := BuildBusinessTree(context.Background(), db, 4)
+	require.NoError(t, err)
+	require.Len(t, tree, 1)
+	require.Equal(t, "重点场所", tree[0].Name)
+	require.Equal(t, 0, tree[0].Count, "没有带有效 channel_id 的目录关联时不能靠编码匹配扩展业务通道")
+	require.Len(t, tree[0].Children, 1)
+	require.Equal(t, "门岗", tree[0].Children[0].Name)
+}
+
+// 设备目录项不是业务树叶子；只有有效 channel 目录项才参与业务统计。
+func TestBuildBusinessTreeIgnoresDeviceNodeWithoutChannelLeaf(t *testing.T) {
 	db := newBusinessDB(t)
 	device := gbmodels.GbDevice{DeviceID: "37010301021180000007", Name: "UVP-Sim", OwnerDeptID: 4}
 	require.NoError(t, db.Create(&device).Error)
@@ -102,7 +164,7 @@ func TestBuildBusinessTreeResolvesDeviceNodeByCodeWhenDeviceIDMissing(t *testing
 	tree, err := BuildBusinessTree(context.Background(), db, 4)
 	require.NoError(t, err)
 	require.Len(t, tree, 1)
-	require.Equal(t, 1, tree[0].Count)
+	require.Zero(t, tree[0].Count)
 }
 
 // ⛔⛔ 契约变更锁（2026-10-11 产品决策，老板拍板）：叶没挂在任何业务分组/虚拟组织下时
@@ -127,8 +189,8 @@ func TestBuildBusinessTreeHidesUnattachedLeafWithoutBusinessParent(t *testing.T)
 	require.Empty(t, tree, "设备没上报业务分组 ⇒ 业务组织视图里就不该出现任何节点")
 }
 
-// 同一台设备被业务分组与虚拟组织两级同时引用：两级都要计入，且按物理设备去重。
-func TestBuildBusinessTreeDeduplicatesPhysicalDeviceAcrossNestedContainers(t *testing.T) {
+// 同一台设备的多个通道都属于业务目录时，统计按通道数，而不是按物理设备去重。
+func TestBuildBusinessTreeCountsChannelsAcrossNestedContainers(t *testing.T) {
 	db := newBusinessDB(t)
 	device := gbmodels.GbDevice{DeviceID: "37010301021180000007", OwnerDeptID: 4, Status: gbmodels.DeviceStatusOnline}
 	require.NoError(t, db.Create(&device).Error)
@@ -149,11 +211,10 @@ func TestBuildBusinessTreeDeduplicatesPhysicalDeviceAcrossNestedContainers(t *te
 	tree, err := BuildBusinessTree(context.Background(), db, 4)
 	require.NoError(t, err)
 	require.Len(t, tree, 1)
-	// 两个摄像机同属一台物理设备 ⇒ 业务分组与虚拟组织两级都应该是 1，不是 2。
-	require.Equal(t, 1, tree[0].Count)
-	require.Equal(t, 1, tree[0].OnlineCount)
+	require.Equal(t, 2, tree[0].Count)
+	require.Equal(t, 0, tree[0].OnlineCount, "在线设备的离线通道不能计为在线")
 	require.Len(t, tree[0].Children, 1)
-	require.Equal(t, 1, tree[0].Children[0].Count)
+	require.Equal(t, 2, tree[0].Children[0].Count)
 }
 
 func TestBuildAdministrativeTreeUsesAdministrativeKeys(t *testing.T) {
@@ -164,4 +225,18 @@ func TestBuildAdministrativeTreeUsesAdministrativeKeys(t *testing.T) {
 	require.Len(t, tree, 1)
 	require.Equal(t, "administrative:area:370000", tree[0].Key)
 	require.Equal(t, "administrative:area:370112", tree[0].Children[0].Children[0].Key)
+	require.Len(t, tree[0].Children[0].Children[0].Children, 1)
+	require.Equal(t, "device", tree[0].Children[0].Children[0].Children[0].Type)
+}
+
+func TestBusinessGroupIncludesReportingDeviceName(t *testing.T) {
+	db := newBusinessDB(t)
+	device := gbmodels.GbDevice{DeviceID: "37010301022000000007", Name: "platform", Alias: "下级平台", OwnerDeptID: 4}
+	require.NoError(t, db.Create(&device).Error)
+	group := gbmodels.GbCatalogNode{OwnerDeptID: 4, NodeType: gbmodels.NodeTypeBizGroup, Code: "37010301022150000007", Name: "校园", SourceDeviceID: device.DeviceID, Source: gbmodels.NodeSourceCatalog, Path: "/"}
+	require.NoError(t, db.Create(&group).Error)
+	tree, err := BuildBusinessTree(context.Background(), db, 4)
+	require.NoError(t, err)
+	require.Len(t, tree, 1)
+	require.Equal(t, "下级平台", tree[0].Meta["sourceName"])
 }

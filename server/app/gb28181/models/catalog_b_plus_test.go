@@ -77,6 +77,7 @@ func TestCatalogNode_AutoMigrate(t *testing.T) {
 	assert.True(t, mig.HasIndex(&gbmodels.GbCatalogNode{}, "idx_owner_dept_anomaly"))
 	assert.True(t, mig.HasIndex(&gbmodels.GbCatalogNode{}, "idx_owner_dept_path"))
 	assert.True(t, mig.HasIndex(&gbmodels.GbCatalogNode{}, "idx_owner_dept_type"))
+	assert.True(t, mig.HasIndex(&gbmodels.GbCatalogNode{}, "idx_owner_source_type_code"))
 }
 
 // TestChannelMount_UniqueConstraint A1.1 RED-验证 2:多挂载唯一约束 (channel_id, parent_node_id)

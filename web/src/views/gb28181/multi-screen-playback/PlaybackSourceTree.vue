@@ -38,7 +38,14 @@ import { useDeviceStatusLabel } from "../useDeviceStatusDict";
 /** 在线状态文案（`device_status` 字典）。 */
 const deviceStatusLabel = useDeviceStatusLabel();
 
-type SourceView = "devices" | "national" | "custom" | "favorites";
+type SourceView = "devices" | "administrative" | "department" | "business" | "favorites";
+const preferenceKey = "uvp.gb28181.multi-screen-playback.directory-view";
+function readPreference(): SourceView {
+  try {
+    const saved = window.localStorage.getItem(preferenceKey);
+    return saved === "department" || saved === "business" ? saved : "administrative";
+  } catch { return "administrative"; }
+}
 type SourceNodeKind = "directory" | "device" | "channel" | "favorite-group";
 
 export interface FavoriteChannelGroup {
@@ -83,9 +90,9 @@ const emit = defineEmits<{
 
 const canViewDevices = computed(() => hasPermission("gb28181:device:view"));
 const canManageFavorites = computed(() => hasPermission("gb28181:channel-favorite:manage"));
-const view = ref<SourceView>(props.view === "favorites" && !canManageFavorites.value ? "devices" : props.view || "devices");
-const trees = ref<Record<SourceView, SourceTreeNode[]>>({ devices: [], national: [], custom: [], favorites: [] });
-const loaded = ref<Record<SourceView, boolean>>({ devices: false, national: false, custom: false, favorites: false });
+const view = ref<SourceView>(props.view === "favorites" && !canManageFavorites.value ? "administrative" : props.view || readPreference());
+const trees = ref<Record<SourceView, SourceTreeNode[]>>({ devices: [], administrative: [], department: [], business: [], favorites: [] });
+const loaded = ref<Record<SourceView, boolean>>({ devices: false, administrative: false, department: false, business: false, favorites: false });
 const loading = ref(false);
 const error = ref("");
 const onlineDeviceTotal = ref(0);
@@ -106,8 +113,9 @@ let unmounted = false;
 
 const allViewOptions: Array<{ value: SourceView; label: string; icon: Component }> = [
   { value: "devices", label: "设备树", icon: Cctv },
-  { value: "national", label: "国标目录", icon: MapPin },
-  { value: "custom", label: "自定义目录", icon: Folder },
+  { value: "administrative", label: "行政区划", icon: MapPin },
+  { value: "department", label: "部门目录", icon: Folder },
+  { value: "business", label: "业务分组", icon: Folder },
   { value: "favorites", label: "我的收藏", icon: Star }
 ];
 const viewOptions = computed(() => allViewOptions.filter(option => option.value !== "favorites" || canManageFavorites.value));
@@ -304,6 +312,10 @@ function displayChannelName(channel: ChannelVO) {
 }
 
 function directoryNode(node: DirectoryNode, depth = node.depth): SourceTreeNode {
+  if (node.device) {
+    return { ...deviceNode({ ...node.device, status: node.device.online ? 1 : 0,
+      channelCount: node.count, channelOnlineCount: node.onlineCount } as DeviceVO, node.key, depth), key: node.key };
+  }
   const staticChildren = (node.children || []).map(child => directoryNode(child, depth + 1));
   return {
     key: node.key,
@@ -366,6 +378,11 @@ function responseList<T>(response: any): T[] {
   return response.data?.list || [];
 }
 
+function resourceFilter() {
+  return { assetKind: "channel" as const, ...(appliedDeviceKeyword.value ? { q: appliedDeviceKeyword.value } : {}),
+    ...(deviceStatusFilter.value ? { status: deviceStatusFilter.value } : {}) };
+}
+
 function deviceListParams(page = devicePage.value) {
   const q = appliedDeviceKeyword.value || undefined;
   const status = deviceStatusFilter.value || undefined;
@@ -400,14 +417,12 @@ function preserveNodeState(nextNodes: SourceTreeNode[], previousNodes: SourceTre
     const previous = previousByKey.get(node.key);
     if (!previous || !node.hasChildren) return node;
     node.expanded = previous.expanded;
-    node.loaded = previous.loaded;
+    node.loaded = false;
     if (node.kind === "device" && previous.loaded) {
-      node.children = previous.children;
+      node.children = [];
     } else if (node.kind === "directory") {
       node.staticChildren = preserveNodeState(node.staticChildren, previous.children);
-      const staticKeys = new Set(node.staticChildren.map(child => child.key));
-      const loadedDevices = previous.children.filter(child => child.kind === "device" && !staticKeys.has(child.key));
-      node.children = previous.loaded ? [...node.staticChildren, ...loadedDevices] : node.staticChildren;
+      node.children = node.staticChildren;
     }
     return node;
   });
@@ -439,7 +454,7 @@ async function loadRoot(nextView: SourceView = view.value, force = false, silent
       const nextNodes = devices.map(device => deviceNode(device, "root", 0));
       trees.value.devices = preserveNodeState(nextNodes, trees.value.devices);
     } else {
-      const directories = responseList<DirectoryNode>(await listDirectoryTree(nextView));
+      const directories = responseList<DirectoryNode>(await listDirectoryTree(nextView, resourceFilter()));
       const nextNodes = directories.map(node => directoryNode(node));
       trees.value[nextView] = preserveNodeState(nextNodes, trees.value[nextView]);
     }
@@ -458,24 +473,18 @@ async function loadNodeChildren(node: SourceTreeNode) {
   error.value = "";
   try {
     if (node.kind === "device" && node.deviceId) {
-      const channels = responseList<ChannelVO>(await listChannels({ deviceId: node.deviceId, page: 1, pageSize: 200 }));
+      const channels = responseList<ChannelVO>(await listChannels({ deviceId: node.deviceId, ...resourceFilter(), page: 1, pageSize: 200 }));
       node.children = channels.map(channel => channelNode(channel, node.key, node.depth + 1));
     } else if (node.kind === "directory") {
-      const devices = responseList<DeviceVO>(
-        await listDevices({
-          directoryView: view.value === "national" || view.value === "custom" ? view.value : undefined,
-          directoryKey: node.key,
-          page: 1,
-          pageSize: 200
-        })
-      );
-      const existingKeys = new Set(node.staticChildren.map(child => child.key));
-      node.children = [
-        ...node.staticChildren,
-        ...devices
-          .filter(device => !existingKeys.has(`${node.key}:device:${device.id}`))
-          .map(device => deviceNode(device, node.key, node.depth + 1))
-      ];
+      if (view.value === "business") {
+        const channels = responseList<ChannelVO>(await listChannels({
+          directoryView: "business", directoryKey: node.key, ...resourceFilter(), page: 1, pageSize: 200
+        }));
+        node.children = [...node.staticChildren, ...channels.map(channel => channelNode(channel, node.key, node.depth + 1))];
+      } else {
+        // New directory projections already contain their directly assigned devices.
+        node.children = node.staticChildren;
+      }
     }
     node.loaded = true;
   } catch (reason: any) {
@@ -504,6 +513,9 @@ async function changeView(nextView: SourceView) {
   if (nextView === "favorites" && !canManageFavorites.value) return;
   view.value = nextView;
   emit("update:view", nextView);
+  if (nextView === "administrative" || nextView === "department" || nextView === "business") {
+    try { window.localStorage.setItem(preferenceKey, nextView); } catch { /* Selection still works without storage. */ }
+  }
   await loadRoot(nextView);
 }
 
@@ -516,7 +528,7 @@ function scrollViewTabs(direction: -1 | 1) {
 async function changeDevicePage(page: number) {
   if (!canViewDevices.value || page === devicePage.value) return;
   devicePage.value = page;
-  await loadRoot("devices", true);
+  await loadRoot(view.value, true);
 }
 
 function cancelDeviceSearch() {
@@ -532,7 +544,8 @@ async function applyDeviceSearch() {
   deviceKeyword.value = keyword;
   appliedDeviceKeyword.value = keyword;
   devicePage.value = 1;
-  await loadRoot("devices", true);
+  invalidateResourceViews();
+  await refresh();
 }
 
 function scheduleDeviceSearch() {
@@ -553,7 +566,15 @@ async function changeDeviceStatus(status: "" | "online" | "offline") {
   if (!canViewDevices.value || status === deviceStatusFilter.value) return;
   deviceStatusFilter.value = status;
   devicePage.value = 1;
-  await loadRoot("devices", true);
+  invalidateResourceViews();
+  await refresh();
+}
+
+function invalidateResourceViews() {
+  for (const key of ["devices", "administrative", "department", "business"] as const) {
+    loaded.value[key] = false;
+    trees.value[key] = [];
+  }
 }
 
 async function refresh(silent = false) {
@@ -562,6 +583,14 @@ async function refresh(silent = false) {
   refreshInFlight = true;
   try {
     await loadRoot(view.value, true, silent);
+    const reloadExpanded = async (nodes: SourceTreeNode[]) => {
+      for (const node of nodes) {
+        if (!node.expanded) continue;
+        await loadNodeChildren(node);
+        await reloadExpanded(node.children);
+      }
+    };
+    await reloadExpanded(currentTree.value);
   } finally {
     refreshInFlight = false;
   }
@@ -571,7 +600,7 @@ function nodeIcon(node: SourceTreeNode) {
   if (node.kind === "channel") return Camera;
   if (node.kind === "device") return Cctv;
   if (node.kind === "favorite-group") return Star;
-  return node.key.startsWith("national:") ? MapPin : Folder;
+  return node.key.startsWith("administrative:") || node.key.startsWith("national:") ? MapPin : Folder;
 }
 
 function nodeStatus(node: SourceTreeNode) {
@@ -629,7 +658,7 @@ defineExpose({ openFavoriteDialogForChannels });
       </div>
       <div class="tree-head-actions">
         <button
-          v-if="view === 'devices'"
+          v-if="view !== 'favorites'"
           class="tree-icon-button tree-filter-toggle"
           :class="{ active: hasDeviceFilters }"
           data-test="device-filter-toggle"
@@ -691,7 +720,7 @@ defineExpose({ openFavoriteDialogForChannels });
       </button>
     </div>
 
-    <div v-if="view === 'devices' && filtersOpen" id="device-tree-filters" class="tree-filters" aria-label="设备筛选条件">
+    <div v-if="view !== 'favorites' && filtersOpen" id="device-tree-filters" class="tree-filters" aria-label="设备筛选条件">
       <div class="device-status-filter" role="group" aria-label="设备状态筛选">
         <button
           data-test="device-status-all"

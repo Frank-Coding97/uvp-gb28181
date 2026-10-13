@@ -208,6 +208,7 @@ CREATE TABLE IF NOT EXISTS "gb_catalog_node" (
   "name" TEXT NOT NULL CHECK ("name" IS NULL OR length("name") <= 128),
   "code" TEXT NULL CHECK ("code" IS NULL OR length("code") <= 32),
   "civil_code" TEXT NULL CHECK ("civil_code" IS NULL OR length("civil_code") <= 6),
+  "source_device_id" TEXT NOT NULL CHECK ("source_device_id" IS NULL OR length("source_device_id") <= 20) DEFAULT '',
   "device_id" INTEGER NULL CHECK ("device_id" IS NULL OR (typeof("device_id") = 'integer' AND "device_id" >= 0)),
   "channel_id" INTEGER NULL CHECK ("channel_id" IS NULL OR (typeof("channel_id") = 'integer' AND "channel_id" >= 0)),
   "source" TEXT NOT NULL CHECK ("source" IS NULL OR length("source") <= 16) DEFAULT 'catalog',
@@ -228,6 +229,7 @@ CREATE TABLE IF NOT EXISTS "gb_catalog_node" (
   -- "name": 节点显示名
   -- "code": 节点编码(行政区 6/设备 20/通道 20)
   -- "civil_code": 关联行政区(冗余加速过滤)
+  -- "source_device_id": 目录项上报来源设备或下级平台编码
   -- "device_id": node_type=device 时引用
   -- "channel_id": node_type=channel 主挂载时引用
   -- "source": catalog/manual/auto
@@ -246,7 +248,7 @@ CREATE TABLE IF NOT EXISTS "gb_channel" (
   "model" TEXT NOT NULL CHECK ("model" IS NULL OR length("model") <= 255) DEFAULT '',
   "owner" TEXT NOT NULL CHECK ("owner" IS NULL OR length("owner") <= 64) DEFAULT '',
   "civil_code" TEXT NOT NULL CHECK ("civil_code" IS NULL OR length("civil_code") <= 32) DEFAULT '',
-  "parent_id" TEXT NOT NULL CHECK ("parent_id" IS NULL OR length("parent_id") <= 20) DEFAULT '',
+  "parent_id" TEXT NOT NULL CHECK ("parent_id" IS NULL OR length("parent_id") <= 512) DEFAULT '',
   "ptz_type" INTEGER NULL CHECK ("ptz_type" IS NULL OR typeof("ptz_type") = 'integer') DEFAULT 0,
   "room_type" INTEGER NOT NULL CHECK ("room_type" IS NULL OR typeof("room_type") = 'integer') DEFAULT 0,
   "supply_light_type" INTEGER NOT NULL CHECK ("supply_light_type" IS NULL OR typeof("supply_light_type") = 'integer') DEFAULT 0,
@@ -290,7 +292,7 @@ CREATE TABLE IF NOT EXISTS "gb_channel" (
   -- "model": 型号
   -- "owner": 设备归属
   -- "civil_code": 行政区划
-  -- "parent_id": 父节点编码(目录树)
+  -- "parent_id": 父节点编码(目录树,2022 多父值按 / 原样保存)
   -- "ptz_type": 云台类型 0未知 1球机 2半球 3固定枪机 4遥控枪机 5遥控半球 6多目全景/拼接通道 7多目分割通道(5-7 为 2022 新增)
   -- "room_type": 室内外 0未上报 1室外 2室内(两版编码一致)
   -- "supply_light_type": 补光方式 0未上报 1无补光 2红外 3白光 4激光 9其他
@@ -2329,6 +2331,7 @@ CREATE INDEX IF NOT EXISTS "idx_owner_dept_anomaly" ON "gb_catalog_node" ("owner
 CREATE INDEX IF NOT EXISTS "idx_owner_dept_civil_code" ON "gb_catalog_node" ("owner_dept_id", "civil_code");
 CREATE INDEX IF NOT EXISTS "idx_owner_dept_parent" ON "gb_catalog_node" ("owner_dept_id", "parent_id");
 CREATE INDEX IF NOT EXISTS "idx_owner_dept_type" ON "gb_catalog_node" ("owner_dept_id", "node_type");
+CREATE INDEX IF NOT EXISTS "idx_owner_source_type_code" ON "gb_catalog_node" ("owner_dept_id", "source_device_id", "node_type", "code");
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_device_channel" ON "gb_channel" ("device_id", "channel_id");
 CREATE INDEX IF NOT EXISTS "idx_deleted_at" ON "gb_channel" ("deleted_at");
 CREATE INDEX IF NOT EXISTS "idx_device_id" ON "gb_channel" ("device_id");

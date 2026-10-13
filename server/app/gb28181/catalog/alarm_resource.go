@@ -64,7 +64,7 @@ func upsertAlarmResource(
 	if err := replaceAlarmResourceParents(db.WithContext(ctx), resource.ID, item.ParentID); err != nil {
 		return nil, nil, err
 	}
-	node, err := linkAlarmResourceNode(db.WithContext(ctx), ownerDeptID, cls.NodeType, item, parentNode, resource.ID)
+	node, err := linkAlarmResourceNode(db.WithContext(ctx), ownerDeptID, sourceDeviceCode, cls.NodeType, item, parentNode, resource.ID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -88,14 +88,14 @@ func replaceAlarmResourceParents(db *gorm.DB, resourceID uint, rawParentIDs stri
 }
 
 // linkAlarmResourceNode 找到或创建目录节点并关联到告警资源
-func linkAlarmResourceNode(db *gorm.DB, ownerDeptID uint, nodeType gbmodels.NodeType, item CatalogItem, parentNode *gbmodels.GbCatalogNode, resourceID uint) (*gbmodels.GbCatalogNode, error) {
+func linkAlarmResourceNode(db *gorm.DB, ownerDeptID uint, sourceDeviceCode string, nodeType gbmodels.NodeType, item CatalogItem, parentNode *gbmodels.GbCatalogNode, resourceID uint) (*gbmodels.GbCatalogNode, error) {
 	var parentID *uint
 	parentPath := "/"
 	if parentNode != nil {
 		parentID = &parentNode.ID
 		parentPath = parentNode.Path
 	}
-	node, err := findOrCreateNode(db, ownerDeptID, nodeType, item.DeviceID, parentID, parentPath, fallbackName(item.Name, item.DeviceID))
+	node, err := findOrCreateSourceNode(db, ownerDeptID, sourceDeviceCode, nodeType, item.DeviceID, parentID, parentPath, item.Name)
 	if err != nil {
 		return nil, err
 	}

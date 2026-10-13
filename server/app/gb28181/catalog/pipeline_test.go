@@ -84,6 +84,33 @@ func TestPipeline_IngestWithOwnerDept(t *testing.T) {
 	assert.True(t, channel.AudioEnabled, "新建通道默认应开启音频")
 }
 
+func TestPipeline_DeviceCatalogNodeUsesSenderOwnerWithoutMutatingOtherOwnersDevice(t *testing.T) {
+	db := newPipelineTestDB(t)
+	p := catalog.New(db)
+	deviceID := "37011200001170000021"
+	sender := catalog.Sender{OwnerDeptID: 10, SourceDeviceID: "37011200001170000001"}
+	existing := &gbmodels.GbDevice{
+		DeviceID: deviceID, Name: "其他归属设备", Manufacturer: "原厂商", Model: "原型号", OwnerDeptID: 20,
+	}
+	require.NoError(t, db.Create(existing).Error)
+
+	require.NoError(t, p.Ingest(context.Background(), sender, []catalog.CatalogItem{{
+		DeviceID: deviceID, Name: "新上报名称", Manufacturer: "新厂商", Model: "新型号", CivilCode: "370112",
+	}}))
+
+	var device gbmodels.GbDevice
+	require.NoError(t, db.Where("device_id = ?", deviceID).First(&device).Error)
+	assert.EqualValues(t, 20, device.OwnerDeptID)
+	assert.Equal(t, "其他归属设备", device.Name)
+	assert.Equal(t, "原厂商", device.Manufacturer)
+	assert.Equal(t, "原型号", device.Model)
+
+	var node gbmodels.GbCatalogNode
+	require.NoError(t, db.Where("owner_dept_id = ? AND source_device_id = ? AND node_type = ? AND code = ?",
+		sender.OwnerDeptID, sender.SourceDeviceID, gbmodels.NodeTypeDevice, deviceID).First(&node).Error)
+	assert.EqualValues(t, 10, node.OwnerDeptID)
+}
+
 func TestPipeline_IngestKeepsDeviceParentAndBusinessGroupRelation(t *testing.T) {
 	db := newPipelineTestDB(t)
 	p := catalog.New(db)
@@ -104,6 +131,35 @@ func TestPipeline_IngestKeepsDeviceParentAndBusinessGroupRelation(t *testing.T) 
 	require.NoError(t, db.Where("code = ?", deviceID).First(&deviceNode).Error)
 	assert.Equal(t, deviceNode.ID, *groupNode.ParentID)
 	assert.Equal(t, groupNode.ID, *channelNode.ParentID)
+}
+
+func TestPipeline_IngestPrefersVirtualParentFromParentIDForBusinessChannel(t *testing.T) {
+	db := newPipelineTestDB(t)
+	p := catalog.New(db)
+	deviceID := "37011200001170000001"
+	groupID := "37011200002150000001"
+	virtualID := "37011200002160000001"
+	nestedVirtualID := "37011200002160000002"
+	channelID := "37011200001320000001"
+	sender := catalog.Sender{OwnerDeptID: 10, SourceDeviceID: deviceID}
+	require.NoError(t, p.Ingest(context.Background(), sender, []catalog.CatalogItem{
+		{DeviceID: deviceID, Name: "下级平台", CivilCode: "370112", StatusOn: true},
+		{DeviceID: groupID, Name: "重点场所", CivilCode: "370112", ParentID: deviceID},
+		{DeviceID: virtualID, Name: "门岗", CivilCode: "370112", BusinessGroupID: groupID},
+		{DeviceID: nestedVirtualID, Name: "东门", CivilCode: "370112", ParentID: virtualID, BusinessGroupID: groupID},
+		{DeviceID: channelID, Name: "校门", CivilCode: "370112", ParentID: deviceID + "/" + nestedVirtualID, BusinessGroupID: groupID, StatusOn: true},
+	}))
+	var channelNode gbmodels.GbCatalogNode
+	require.NoError(t, db.Where("code = ?", channelID).First(&channelNode).Error)
+	var virtualNode gbmodels.GbCatalogNode
+	require.NoError(t, db.Where("code = ?", virtualID).First(&virtualNode).Error)
+	var nestedVirtualNode gbmodels.GbCatalogNode
+	require.NoError(t, db.Where("code = ?", nestedVirtualID).First(&nestedVirtualNode).Error)
+	var groupNode gbmodels.GbCatalogNode
+	require.NoError(t, db.Where("code = ?", groupID).First(&groupNode).Error)
+	assert.Equal(t, groupNode.ID, *virtualNode.ParentID, "顶层 216 通过 BusinessGroupID 挂到 215")
+	assert.Equal(t, virtualNode.ID, *nestedVirtualNode.ParentID, "嵌套 216 通过 ParentID 保留目录层级")
+	assert.Equal(t, nestedVirtualNode.ID, *channelNode.ParentID, "复合 ParentID 中的 216 优先于设备编码")
 }
 
 func TestPipeline_IngestUsesConfiguredTransportOnlyForNewChannels(t *testing.T) {
@@ -576,4 +632,185 @@ func TestPipeline_IngestDepthChain(t *testing.T) {
 func TestDepthFromPathHandlesEmptyPath(t *testing.T) {
 	assert.Equal(t, uint8(0), catalog.DepthFromPath(""))
 	assert.Equal(t, uint8(1), catalog.DepthFromPath("/12/"))
+}
+
+func TestPipeline_ChannelMoveRemovesStaleCatalogMounts(t *testing.T) {
+	db := newPipelineTestDB(t)
+	p := catalog.New(db)
+	sender := catalog.Sender{OwnerDeptID: 10, SourceDeviceID: "34020000001170000001"}
+	groupA := "34020000002160000001"
+	groupB := "34020000002160000002"
+	channelID := "34020000001320000001"
+
+	require.NoError(t, p.Ingest(context.Background(), sender, []catalog.CatalogItem{
+		{DeviceID: groupA, Name: "目录 A", CivilCode: "370103"},
+		{DeviceID: groupB, Name: "目录 B", CivilCode: "370103"},
+		{DeviceID: channelID, Name: "通道", CivilCode: "370103", ParentID: groupA, StatusOn: true},
+	}))
+	require.NoError(t, p.IngestDelta(context.Background(), sender, "UPDATE", catalog.CatalogItem{
+		DeviceID: channelID, Name: "通道", BusinessGroupID: groupB, StatusOn: true,
+	}))
+
+	var channel gbmodels.GbChannel
+	require.NoError(t, db.Where("device_id = ? AND channel_id = ?", sender.SourceDeviceID, channelID).First(&channel).Error)
+	var mounts []gbmodels.GbChannelMount
+	require.NoError(t, db.Where("owner_dept_id = ? AND channel_id = ?", sender.OwnerDeptID, channel.ID).Find(&mounts).Error)
+	require.Len(t, mounts, 1, "通道移动后同一来源只保留当前目录挂载")
+
+	var parent gbmodels.GbCatalogNode
+	require.NoError(t, db.Where("id = ?", mounts[0].ParentNodeID).First(&parent).Error)
+	assert.Equal(t, groupB, parent.Code)
+	var node gbmodels.GbCatalogNode
+	require.NoError(t, db.Where("owner_dept_id = ? AND source_device_id = ? AND code = ?", sender.OwnerDeptID, sender.SourceDeviceID, channelID).First(&node).Error)
+	assert.Equal(t, parent.ID, *node.ParentID)
+}
+
+func TestPipeline_SameChannelCodeFromDifferentSourcesIsolated(t *testing.T) {
+	db := newPipelineTestDB(t)
+	p := catalog.New(db)
+	channelID := "34020000001320000001"
+	senderA := catalog.Sender{OwnerDeptID: 10, SourceDeviceID: "34020000001170000001"}
+	senderB := catalog.Sender{OwnerDeptID: 10, SourceDeviceID: "34020000001170000002"}
+	groupA := "34020000002160000001"
+	groupB := "34020000002160000002"
+
+	require.NoError(t, p.Ingest(context.Background(), senderA, []catalog.CatalogItem{
+		{DeviceID: groupA, Name: "来源 A 目录", CivilCode: "370103"},
+		{DeviceID: channelID, Name: "A 通道", CivilCode: "370103", ParentID: groupA, StatusOn: true},
+	}))
+	require.NoError(t, p.Ingest(context.Background(), senderB, []catalog.CatalogItem{
+		{DeviceID: groupB, Name: "来源 B 目录", CivilCode: "370103"},
+		{DeviceID: channelID, Name: "B 通道", CivilCode: "370103", ParentID: groupB, StatusOn: true},
+	}))
+
+	require.NoError(t, p.IngestDelta(context.Background(), senderA, "UPDATE", catalog.CatalogItem{
+		DeviceID: channelID, ParentID: groupA, StatusOn: false,
+	}))
+
+	var channelB gbmodels.GbChannel
+	require.NoError(t, db.Where("device_id = ? AND channel_id = ?", senderB.SourceDeviceID, channelID).First(&channelB).Error)
+	var nodeB gbmodels.GbCatalogNode
+	require.NoError(t, db.Where("owner_dept_id = ? AND source_device_id = ? AND code = ?", senderB.OwnerDeptID, senderB.SourceDeviceID, channelID).First(&nodeB).Error)
+	assert.Equal(t, gbmodels.ChannelStatusOnline, channelB.Status)
+	assert.Equal(t, groupB, catalogNodeCode(t, db, *nodeB.ParentID))
+
+	require.NoError(t, p.IngestDelta(context.Background(), senderA, "DEL", catalog.CatalogItem{DeviceID: channelID}))
+	var remaining int64
+	require.NoError(t, db.Model(&gbmodels.GbCatalogNode{}).
+		Where("owner_dept_id = ? AND source_device_id = ? AND code = ?", senderB.OwnerDeptID, senderB.SourceDeviceID, channelID).
+		Count(&remaining).Error)
+	assert.EqualValues(t, 1, remaining)
+}
+
+func TestPipeline_LateBusinessParentsRepairPathWithoutDuplicates(t *testing.T) {
+	db := newPipelineTestDB(t)
+	p := catalog.New(db)
+	sender := catalog.Sender{OwnerDeptID: 10, SourceDeviceID: "37010301022000000007"}
+	deviceID := sender.SourceDeviceID
+	groupID := "37010301022150000007"
+	virtualID := "37010301022160000008"
+	channelID := "34020000001320000010"
+
+	require.NoError(t, p.Ingest(context.Background(), sender, []catalog.CatalogItem{
+		{DeviceID: channelID, Name: "后置摄像头", CivilCode: "370103", ParentID: virtualID, StatusOn: true},
+	}))
+	require.NoError(t, p.Ingest(context.Background(), sender, []catalog.CatalogItem{
+		{DeviceID: virtualID, Name: "东门", ParentID: groupID, BusinessGroupID: groupID},
+	}))
+	require.NoError(t, p.Ingest(context.Background(), sender, []catalog.CatalogItem{
+		{DeviceID: groupID, Name: "校园安防", ParentID: deviceID, CivilCode: "370103"},
+		{DeviceID: deviceID, Name: "下级平台", CivilCode: "370103"},
+	}))
+
+	for _, code := range []string{deviceID, groupID, virtualID, channelID} {
+		var count int64
+		require.NoError(t, db.Model(&gbmodels.GbCatalogNode{}).
+			Where("owner_dept_id = ? AND source_device_id = ? AND code = ?", sender.OwnerDeptID, sender.SourceDeviceID, code).
+			Count(&count).Error)
+		assert.EqualValues(t, 1, count, "节点 %s 不应因乱序产生重复", code)
+	}
+
+	var deviceNode, groupNode, virtualNode, channelNode gbmodels.GbCatalogNode
+	require.NoError(t, db.Where("owner_dept_id = ? AND source_device_id = ? AND code = ?", sender.OwnerDeptID, sender.SourceDeviceID, deviceID).First(&deviceNode).Error)
+	require.NoError(t, db.Where("owner_dept_id = ? AND source_device_id = ? AND code = ?", sender.OwnerDeptID, sender.SourceDeviceID, groupID).First(&groupNode).Error)
+	require.NoError(t, db.Where("owner_dept_id = ? AND source_device_id = ? AND code = ?", sender.OwnerDeptID, sender.SourceDeviceID, virtualID).First(&virtualNode).Error)
+	require.NoError(t, db.Where("owner_dept_id = ? AND source_device_id = ? AND code = ?", sender.OwnerDeptID, sender.SourceDeviceID, channelID).First(&channelNode).Error)
+	assert.Equal(t, deviceNode.ID, *groupNode.ParentID)
+	assert.Equal(t, groupNode.ID, *virtualNode.ParentID)
+	assert.Equal(t, virtualNode.ID, *channelNode.ParentID)
+	assert.Equal(t, catalog.BuildPath(virtualNode.Path, channelNode.ID), channelNode.Path)
+}
+
+func TestPipeline_StatusOnlyUpdatePreservesDirectoryPlacement(t *testing.T) {
+	db := newPipelineTestDB(t)
+	p := catalog.New(db)
+	sender := catalog.Sender{OwnerDeptID: 10, SourceDeviceID: "34020000001170000001"}
+	groupID := "34020000002160000001"
+	channelID := "34020000001320000001"
+	require.NoError(t, p.Ingest(context.Background(), sender, []catalog.CatalogItem{
+		{DeviceID: groupID, Name: "目录", CivilCode: "370103"},
+		{DeviceID: channelID, Name: "通道", CivilCode: "370103", ParentID: groupID, StatusOn: true},
+	}))
+	var before gbmodels.GbCatalogNode
+	require.NoError(t, db.Where("owner_dept_id = ? AND source_device_id = ? AND code = ?", sender.OwnerDeptID, sender.SourceDeviceID, channelID).First(&before).Error)
+	require.NoError(t, p.IngestDelta(context.Background(), sender, "UPDATE", catalog.CatalogItem{DeviceID: channelID, StatusOn: false}))
+	var after gbmodels.GbCatalogNode
+	require.NoError(t, db.Where("id = ?", before.ID).First(&after).Error)
+	assert.Equal(t, before.ParentID, after.ParentID)
+	assert.Equal(t, before.Path, after.Path)
+	var channel gbmodels.GbChannel
+	require.NoError(t, db.Where("device_id = ? AND channel_id = ?", sender.SourceDeviceID, channelID).First(&channel).Error)
+	assert.Equal(t, groupID, channel.ParentID)
+	assert.Equal(t, gbmodels.ChannelStatusOffline, channel.Status)
+}
+
+func TestPipeline_LegacyDuplicateCatalogNodesAreCollapsedOnRefresh(t *testing.T) {
+	db := newPipelineTestDB(t)
+	p := catalog.New(db)
+	sender := catalog.Sender{OwnerDeptID: 10, SourceDeviceID: "34020000001170000001"}
+	channelID := "34020000001320000001"
+	channel := &gbmodels.GbChannel{OwnerDeptID: 10, DeviceID: sender.SourceDeviceID, ChannelID: channelID, Name: "通道"}
+	require.NoError(t, db.Create(channel).Error)
+	parentA := &gbmodels.GbCatalogNode{OwnerDeptID: 10, NodeType: gbmodels.NodeTypeVirtualOrg, Code: "34020000002160000001", Name: "旧目录 A", Path: "/1/", Source: gbmodels.NodeSourceCatalog, SourceDeviceID: sender.SourceDeviceID}
+	parentB := &gbmodels.GbCatalogNode{OwnerDeptID: 10, NodeType: gbmodels.NodeTypeVirtualOrg, Code: "34020000002160000002", Name: "旧目录 B", Path: "/2/", Source: gbmodels.NodeSourceCatalog, SourceDeviceID: sender.SourceDeviceID}
+	require.NoError(t, db.Create(parentA).Error)
+	require.NoError(t, db.Create(parentB).Error)
+	channelNodeA := &gbmodels.GbCatalogNode{OwnerDeptID: 10, NodeType: gbmodels.NodeTypeChannel, Code: channelID, Name: "通道 A", Path: "/1/3/", ParentID: &parentA.ID, ChannelID: &channel.ID, Source: gbmodels.NodeSourceCatalog, SourceDeviceID: sender.SourceDeviceID}
+	channelNodeB := &gbmodels.GbCatalogNode{OwnerDeptID: 10, NodeType: gbmodels.NodeTypeChannel, Code: channelID, Name: "通道 B", Path: "/2/4/", ParentID: &parentB.ID, ChannelID: &channel.ID, Source: gbmodels.NodeSourceCatalog, SourceDeviceID: sender.SourceDeviceID}
+	require.NoError(t, db.Create(channelNodeA).Error)
+	require.NoError(t, db.Create(channelNodeB).Error)
+	require.NoError(t, db.Create(&gbmodels.GbChannelMount{OwnerDeptID: 10, ChannelID: channel.ID, ParentNodeID: parentA.ID, MountSource: gbmodels.MountSourceCatalog, IsPrimary: true}).Error)
+	require.NoError(t, db.Create(&gbmodels.GbChannelMount{OwnerDeptID: 10, ChannelID: channel.ID, ParentNodeID: parentB.ID, MountSource: gbmodels.MountSourceCatalog}).Error)
+	manualParent := &gbmodels.GbCatalogNode{OwnerDeptID: 10, NodeType: gbmodels.NodeTypeVirtualOrg, Code: "34020000002160000003", Name: "人工目录", Path: "/5/", Source: gbmodels.NodeSourceManual}
+	require.NoError(t, db.Create(manualParent).Error)
+	require.NoError(t, db.Create(&gbmodels.GbChannelMount{OwnerDeptID: 10, ChannelID: channel.ID, ParentNodeID: manualParent.ID, MountSource: gbmodels.MountSourceManual}).Error)
+	manualChannel := &gbmodels.GbCatalogNode{OwnerDeptID: 10, NodeType: gbmodels.NodeTypeChannel, Code: channelID, Name: "人工通道节点", Path: "/5/6/", ParentID: &manualParent.ID, ChannelID: &channel.ID, Source: gbmodels.NodeSourceManual, SourceDeviceID: sender.SourceDeviceID}
+	require.NoError(t, db.Create(manualChannel).Error)
+	otherSource := &gbmodels.GbCatalogNode{OwnerDeptID: 10, NodeType: gbmodels.NodeTypeChannel, Code: channelID, Name: "其他来源通道", Path: "/7/8/", Source: gbmodels.NodeSourceCatalog, SourceDeviceID: "34020000001170000002"}
+	require.NoError(t, db.Create(otherSource).Error)
+
+	require.NoError(t, p.IngestDelta(context.Background(), sender, "UPDATE", catalog.CatalogItem{DeviceID: channelID, ParentID: parentB.Code, Name: "最新通道", StatusOn: true}))
+
+	var sourceNodes []gbmodels.GbCatalogNode
+	require.NoError(t, db.Where("owner_dept_id = ? AND source_device_id = ? AND node_type = ? AND code = ?", 10, sender.SourceDeviceID, gbmodels.NodeTypeChannel, channelID).
+		Where("(source = ? OR source = ?)", gbmodels.NodeSourceCatalog, "").Find(&sourceNodes).Error)
+	require.Len(t, sourceNodes, 1, "重报时应收敛同来源历史重复目录项")
+	assert.Equal(t, parentB.ID, *sourceNodes[0].ParentID)
+	assert.Equal(t, "最新通道", sourceNodes[0].Name)
+	var mounts []gbmodels.GbChannelMount
+	require.NoError(t, db.Where("owner_dept_id = ? AND channel_id = ?", 10, channel.ID).Find(&mounts).Error)
+	require.Len(t, mounts, 2, "保留当前 Catalog 挂载和人工挂载")
+	var manualMountCount int64
+	require.NoError(t, db.Model(&gbmodels.GbChannelMount{}).Where("owner_dept_id = ? AND channel_id = ? AND mount_source = ?", 10, channel.ID, gbmodels.MountSourceManual).Count(&manualMountCount).Error)
+	assert.EqualValues(t, 1, manualMountCount)
+	require.NoError(t, db.Where("id = ?", manualChannel.ID).First(&manualChannel).Error, "人工 Catalog 节点不能被收敛")
+	var otherSourceNode gbmodels.GbCatalogNode
+	require.NoError(t, db.Where("owner_dept_id = ? AND source_device_id = ? AND node_type = ? AND code = ?", 10, otherSource.SourceDeviceID, gbmodels.NodeTypeChannel, channelID).First(&otherSourceNode).Error, "其他来源节点不能被收敛")
+}
+
+func catalogNodeCode(t *testing.T, db *gorm.DB, id uint) string {
+	t.Helper()
+	var node gbmodels.GbCatalogNode
+	require.NoError(t, db.Where("id = ?", id).First(&node).Error)
+	return node.Code
 }

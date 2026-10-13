@@ -71,9 +71,9 @@ type CatalogTrigger interface {
 
 func NewDeviceMgmtController() *DeviceMgmtController {
 	// ⛔ 用app.DB()（按 usedbtype 分发到 MySQL/PG/SQLServer/SQLite），
-//   不能写死 app.GormDbMysql：那样在绿色包的 SQLite 模式下拿到 nil，
-//   设备/告警/地图等页面一律报「DB 未就绪」，而日志里看不出原因。
-return &DeviceMgmtController{db: func() *gorm.DB { return app.DB() }}
+	//   不能写死 app.GormDbMysql：那样在绿色包的 SQLite 模式下拿到 nil，
+	//   设备/告警/地图等页面一律报「DB 未就绪」，而日志里看不出原因。
+	return &DeviceMgmtController{db: func() *gorm.DB { return app.DB() }}
 }
 
 func (dc *DeviceMgmtController) SetDB(p func() *gorm.DB) { dc.db = p }
@@ -333,7 +333,7 @@ func (dc *DeviceMgmtController) ListDevices(c *gin.Context) {
 		scope, err := resolveDirectoryDeviceScope(c, db)
 		if err != nil {
 			status := http.StatusBadRequest
-			if errors.Is(err, gbdirectory.ErrGroupNotFound) {
+			if errors.Is(err, gbdirectory.ErrGroupNotFound) || errors.Is(err, gbdirectory.ErrDepartmentNotFound) {
 				status = http.StatusNotFound
 			}
 			dc.Fail(c, "目录筛选参数错误", err, status)
@@ -610,7 +610,13 @@ func (dc *DeviceMgmtController) ListChannels(c *gin.Context) {
 			dc.Fail(c, "目录筛选参数错误", err, http.StatusBadRequest)
 			return
 		}
-		if len(scope.Codes) == 0 {
+		if scope.ChannelIDs != nil {
+			if len(scope.ChannelIDs) == 0 {
+				q = q.Where("1=0")
+			} else {
+				q = q.Where("id IN ?", scope.ChannelIDs)
+			}
+		} else if len(scope.Codes) == 0 {
 			q = q.Where("1=0")
 		} else {
 			q = q.Where("device_id IN ?", scope.Codes)

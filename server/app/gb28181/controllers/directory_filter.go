@@ -10,11 +10,13 @@ import (
 	"uvplatform.com/uvp-gb28181/app/gb28181/civilcode"
 	gbdirectory "uvplatform.com/uvp-gb28181/app/gb28181/directory"
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	basemodels "uvplatform.com/uvp-gb28181/app/models"
 )
 
 type directoryDeviceScope struct {
-	IDs   []uint
-	Codes []string
+	IDs        []uint
+	Codes      []string
+	ChannelIDs []uint
 }
 
 func resolveDirectoryDeviceScope(c *gin.Context, db *gorm.DB) (*directoryDeviceScope, error) {
@@ -24,6 +26,36 @@ func resolveDirectoryDeviceScope(c *gin.Context, db *gorm.DB) (*directoryDeviceS
 	}
 	var ids []uint
 	switch filter.Kind {
+	case gbdirectory.FilterDepartment:
+		departments, _, err := visibleDirectoryDepartments(c, db)
+		if err != nil {
+			return nil, err
+		}
+		deptIDs, exists := gbdirectory.CollectDepartmentSubtreeIDs(departments, filter.DepartmentID)
+		if !exists {
+			return nil, gbdirectory.ErrDepartmentNotFound
+		}
+		if err := db.WithContext(c.Request.Context()).Model(&gbmodels.GbDevice{}).
+			Scopes(ownerDeptScope(c)).Where("owner_dept_id IN ?", deptIDs).Pluck("id", &ids).Error; err != nil {
+			return nil, err
+		}
+	case gbdirectory.FilterDepartmentEmpty:
+		departmentExists := db.WithContext(c.Request.Context()).Model(&basemodels.SysDepartment{}).
+			Select("1").Where("sys_department.id = gb_device.owner_dept_id")
+		query := db.WithContext(c.Request.Context()).Model(&gbmodels.GbDevice{}).
+			Scopes(ownerDeptScope(c)).Where("owner_dept_id = 0 OR NOT EXISTS (?)", departmentExists)
+		result := &directoryDeviceScope{IDs: []uint{}, Codes: []string{}}
+		if err := query.Pluck("id", &result.IDs).Error; err != nil {
+			return nil, err
+		}
+		if len(result.IDs) > 0 {
+			if err := query.Session(&gorm.Session{}).Where("id IN ?", result.IDs).Distinct().Pluck("device_id", &result.Codes).Error; err != nil {
+				return nil, err
+			}
+		}
+		return result, nil
+	case gbdirectory.FilterBusinessEmpty:
+		return &directoryDeviceScope{IDs: []uint{}, Codes: []string{}, ChannelIDs: []uint{}}, nil
 	case gbdirectory.FilterCustomGroup:
 		var group gbmodels.GbCustomGroup
 		result := db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).Where("id = ?", filter.GroupID).Limit(1).Find(&group)
@@ -62,19 +94,33 @@ func resolveDirectoryDeviceScope(c *gin.Context, db *gorm.DB) (*directoryDeviceS
 		}
 	case gbdirectory.FilterBusinessCatalog:
 		var root gbmodels.GbCatalogNode
-		result := db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).Where("id = ? AND node_type IN ?", filter.NodeID, gbdirectory.BusinessContainerTypes).Limit(1).Find(&root)
+		result := db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).Where("id = ?", filter.NodeID).Limit(1).Find(&root)
 		if result.Error != nil {
 			return nil, result.Error
 		}
-		if result.RowsAffected == 0 {
+		if result.RowsAffected == 0 || (!gbdirectory.IsBusinessContainerType(root.NodeType) && root.NodeType != gbmodels.NodeTypeChannel) {
 			return nil, fmt.Errorf("business catalog node not found")
 		}
-		// 叶 = 设备目录项(设备/摄像机/报警设备)，与 BuildBusinessTree 同一口径：
-		// ⛔ 不能只认 catalog_node.device_id(实测全库为 NULL)，通道/报警资源靠关联表反查。
-		ids, err = gbdirectory.CollectBusinessLeafDeviceIDs(c.Request.Context(), db, ownerDeptScope(c), root.Path)
+		channelIDs, err := gbdirectory.CollectBusinessLeafChannelIDs(c.Request.Context(), db, ownerDeptScope(c), root)
 		if err != nil {
 			return nil, err
 		}
+		resultScope := &directoryDeviceScope{ChannelIDs: channelIDs}
+		if len(channelIDs) > 0 {
+			var channelCodes []string
+			if err := db.WithContext(c.Request.Context()).Model(&gbmodels.GbChannel{}).
+				Scopes(visibleScope(c)).Where("id IN ?", channelIDs).Distinct().Pluck("device_id", &channelCodes).Error; err != nil {
+				return nil, err
+			}
+			resultScope.Codes = channelCodes
+			if len(channelCodes) > 0 {
+				if err := db.WithContext(c.Request.Context()).Model(&gbmodels.GbDevice{}).
+					Scopes(visibleScope(c)).Where("device_id IN ?", channelCodes).Pluck("id", &resultScope.IDs).Error; err != nil {
+					return nil, err
+				}
+			}
+		}
+		return resultScope, nil
 	case gbdirectory.FilterBusinessDevice:
 		var device gbmodels.GbDevice
 		result := db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).Where("id = ?", filter.NodeID).Limit(1).Find(&device)

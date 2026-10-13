@@ -461,8 +461,7 @@ describe("runtime monitor entry contract", () => {
     expect(source).not.toContain("打开通道运行监控");
     expect(source).not.toContain("uvp-table-action--monitor");
     expect(source).not.toContain("runtimeChannelLocked");
-    expect(source).toContain("查看设备${record.deviceId}运行监控");
-    expect(source).toContain("查看设备${item.deviceId}运行监控");
+    expect(source).toContain("openStatusEvents(selectedDevice)");
   });
 
   it("keeps device monitoring lazy, switchable and explicit about its state", () => {

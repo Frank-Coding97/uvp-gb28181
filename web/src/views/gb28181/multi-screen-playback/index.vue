@@ -54,8 +54,8 @@ const canRenderPtz = computed(() => hasPermission("gb28181:ptz:view") || hasPerm
 const monitorAreaRef = ref<HTMLElement | null>(null);
 const isFullscreen = ref(false);
 const pollingVisible = ref(false);
-type SourceView = "devices" | "national" | "custom" | "favorites";
-const sourceView = ref<SourceView>("devices");
+type SourceView = "devices" | "administrative" | "department" | "business" | "favorites";
+const sourceView = ref<SourceView>();
 const sourceTreeRef = ref<{ openFavoriteDialogForChannels?: (channels: ChannelVO[]) => void } | null>(null);
 const pollingDraft = reactive({ enabled: false, intervalSeconds: 30, skipOffline: true });
 const pollingSettings = reactive({ enabled: false, intervalSeconds: 30, skipOffline: true });

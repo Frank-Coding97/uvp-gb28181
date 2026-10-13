@@ -6,10 +6,7 @@ import maplibregl, { LngLatBounds, Marker as MapLibreMarker, type Map as MapLibr
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
   Activity,
-  ArrowLeft,
   BarChart3,
-  Bell,
-  Camera,
   Copy,
   Eye,
   Grid2X2,
@@ -31,15 +28,14 @@ import {
   Video,
   X,
   Plus,
-  FolderPlus,
-  FolderMinus
+  Camera,
+  Bell,
 } from "@lucide/vue";
 import { stopPlay } from "@/api/gb28181";
 import { listZLMNodes, type ZLMNode } from "@/api/gb28181-zlm";
 import {
   batchDeleteChannels,
   batchDeleteDevices,
-  removeDevicesFromGroup,
   createDevice,
   deleteChannel,
   deleteDevice,
@@ -59,8 +55,8 @@ import {
   updateChannelStreamTransport,
   updateChannel,
   updateDevice,
-  type AssetKind,
   type BatchDeleteResult,
+  type AssetKind,
   type ChannelMount,
   type ChannelVO,
   type CatalogRefreshProgress,
@@ -70,6 +66,7 @@ import {
   type UpgradeOperation,
   type DeviceStatusEvent,
   type DeviceSubscription,
+  type DirectoryDevice,
   type DirectoryNode,
   type MapCluster,
   type MapMarker,
@@ -83,10 +80,10 @@ import { useThemeConfig } from "@/store/modules/theme-config";
 import { hasPermission } from "@/hooks/usePermission";
 import { storeToRefs } from "pinia";
 import SubscriptionDialog from "./SubscriptionDialog.vue";
+import DeviceMaintenanceMenu from "./DeviceMaintenanceMenu.vue";
 import DeviceRebootDialog from "./DeviceRebootDialog.vue";
 import DeviceFirmwareUpgradeDialog from "./DeviceFirmwareUpgradeDialog.vue";
 import DeviceMaintenanceRecordsDialog from "./DeviceMaintenanceRecordsDialog.vue";
-import DeviceMaintenanceMenu from "./DeviceMaintenanceMenu.vue";
 import DeviceStatusFactsPanel from "./DeviceStatusFactsPanel.vue";
 import StorageCardStatusPanel from "./StorageCardStatusPanel.vue";
 import CatalogRefreshProgressDialog from "./CatalogRefreshProgressDialog.vue";
@@ -95,8 +92,6 @@ import SnapshotConfigPanel from "./SnapshotConfigPanel.vue";
 import { buildFactChannelOptions } from "./deviceFactChannel";
 import { createMaintenanceActivity, isRebootPending, isUpgradeUnresolved } from "./maintenanceActivity";
 import DirectoryPanel from "./components/DirectoryPanel.vue";
-import CustomGroupEditor, { type CustomGroupEditorMode } from "./components/CustomGroupEditor.vue";
-import AddToGroupDialog from "./components/AddToGroupDialog.vue";
 import TrafficTrend from "./components/TrafficTrend.vue";
 import ViewerTable from "./components/ViewerTable.vue";
 import { cloudRecordingStateMeta, mergeCloudRecordingState } from "./cloudRecordingState";
@@ -105,9 +100,9 @@ import { useChannelAttributeEntries } from "./useChannelAttributeDict";
 import { coordPatchAfterSave, positionSourceText, resolveChannelCoordPayload } from "./channelPositionForm";
 import {
   createDirectoryState,
-  customGroupBatchActions,
   directoryQuery,
   findDirectoryNode,
+  normalizeDirectoryView,
   selectDirectory
 } from "./directoryState";
 import { normalizeProtocolOverride, protocolOverrideAfterSave } from "./protocolOverrideState";
@@ -133,8 +128,18 @@ function initialViewMode(): ViewMode {
 const viewMode = ref<ViewMode>(initialViewMode());
 const router = useRouter();
 const route = useRoute();
-const assetKind = ref<AssetKind>("device");
-const channelEntrySource = ref<"device-drilldown" | "manual">("manual");
+const returnSnapshot = consumeDeviceMgmtReturnSnapshot(typeof route.query.returnKey === "string" ? route.query.returnKey : null);
+const assetKind = ref<AssetKind>(returnSnapshot?.assetKind || (viewMode.value === "map" ? "channel" : "device"));
+const navigationMode = ref<"device" | "directory">("directory");
+const selectedDevice = ref<DeviceVO | null>(null);
+const selectedDeviceSummary = ref<DirectoryDevice | null>(null);
+const selectedDeviceContext = computed(() => selectedDevice.value || selectedDeviceSummary.value);
+let directoryDeviceRequestVersion = 0;
+const channelScope = computed(() =>
+  navigationMode.value === "device"
+    ? { deviceId: deviceIdFilter.value || undefined }
+    : directoryQuery(directoryState.value)
+);
 const keyword = ref("");
 const keywordInput = ref<HTMLInputElement | null>(null);
 const deviceIdFilter = ref("");
@@ -143,20 +148,15 @@ const statusFilter = ref<OnlineStatus | undefined>();
 const deviceStatusLabel = useDeviceStatusLabel();
 const mediaNodeStateLabel = useDictLabel(DICT_CODE_MEDIA_NODE_STATE, MEDIA_NODE_STATE_LABEL_FALLBACK);
 const directoryState = ref(createDirectoryState());
-const selectedDirectories = ref<Record<"national" | "administrative" | "business" | "custom", DirectoryNode | null>>({
-  national: null,
+const selectedDirectories = ref<Record<"administrative" | "department" | "business", DirectoryNode | null>>({
   administrative: null,
+  department: null,
   business: null,
-  custom: null
 });
-const selectedDirectory = computed(() => selectedDirectories.value[directoryState.value.view]);
+const selectedDirectory = computed(() =>
+  navigationMode.value === "directory" ? selectedDirectories.value[directoryState.value.view] : null
+);
 const directoryPanelRef = ref<InstanceType<typeof DirectoryPanel> | null>(null);
-const customTree = ref<DirectoryNode[]>([]);
-const groupEditorVisible = ref(false);
-const groupEditorMode = ref<CustomGroupEditorMode>("create");
-const groupEditorNode = ref<DirectoryNode | null>(null);
-const addToGroupVisible = ref(false);
-const memberMutationLoading = ref(false);
 const drawerVisible = ref(false);
 const subscriptionDialogVisible = ref(false);
 const subscriptionDevice = ref<DeviceVO | null>(null);
@@ -194,29 +194,25 @@ const mapLoading = ref(false);
 const page = ref(1);
 const listPageSize = ref(10);
 const cardPageSize = ref(12);
-const returnSnapshot = consumeDeviceMgmtReturnSnapshot(typeof route.query.returnKey === "string" ? route.query.returnKey : null);
 if (returnSnapshot) {
   viewMode.value = returnSnapshot.viewMode;
-  assetKind.value = returnSnapshot.assetKind;
+  navigationMode.value = returnSnapshot.navigationMode || (returnSnapshot.deviceIdFilter ? "device" : "directory");
   keyword.value = returnSnapshot.keyword;
   deviceIdFilter.value = returnSnapshot.deviceIdFilter;
   statusFilter.value = returnSnapshot.statusFilter;
+  const restoredDirectoryView = normalizeDirectoryView(returnSnapshot.directoryView);
   directoryState.value = {
     ...directoryState.value,
-    view: ["national", "administrative", "business", "custom"].includes(returnSnapshot.directoryView)
-      ? (returnSnapshot.directoryView as any)
-      : "national",
+    view: restoredDirectoryView,
     selectedKey: {
       ...directoryState.value.selectedKey,
-      [(["national", "administrative", "business", "custom"].includes(returnSnapshot.directoryView)
-        ? returnSnapshot.directoryView
-        : "national") as "national" | "administrative" | "business" | "custom"]: returnSnapshot.directorySelectedKey
+      [restoredDirectoryView]:
+        restoredDirectoryView === returnSnapshot.directoryView ? returnSnapshot.directorySelectedKey : null
     }
   };
   page.value = returnSnapshot.page;
   listPageSize.value = returnSnapshot.listPageSize;
   cardPageSize.value = returnSnapshot.cardPageSize;
-  if (returnSnapshot.assetKind === "channel" && returnSnapshot.deviceIdFilter) channelEntrySource.value = "device-drilldown";
 }
 const pageSize = computed({
   get: () => (viewMode.value === "card" ? cardPageSize.value : listPageSize.value),
@@ -266,7 +262,6 @@ const canViewDevices = computed(() => hasPermission("gb28181:device:view"));
 const canStartPlayback = computed(() => hasPermission("gb28181:play:start"));
 const canQueryDeviceRecords = computed(() => hasPermission("gb28181:device-record:query"));
 const canViewTraffic = computed(() => hasPermission("gb28181:traffic:view"));
-const canManageGroups = computed(() => hasPermission("gb28181:device-group:manage"));
 const canViewMaintenance = computed(() => hasPermission("gb28181:device:maintenance:view"));
 const canRebootDevice = computed(() => hasPermission("gb28181:device:reboot"));
 /**
@@ -310,10 +305,10 @@ const mapStyleUrls = {
   light: (import.meta.env.VITE_MAP_STYLE_LIGHT_URL as string | undefined) || defaultLightMapStyleUrl,
   dark: (import.meta.env.VITE_MAP_STYLE_DARK_URL as string | undefined) || `${import.meta.env.BASE_URL}map-styles/uvp-dark.json`
 };
-const onlineDeviceTotal = ref(0);
-const offlineDeviceTotal = ref(0);
 const onlineChannelTotal = ref(0);
 const offlineChannelTotal = ref(0);
+const onlineDeviceTotal = ref(0);
+const offlineDeviceTotal = ref(0);
 const statEntityLabel = computed(() => (assetKind.value === "device" ? "设备" : "通道"));
 const statOnlineTotal = computed(() => (assetKind.value === "device" ? onlineDeviceTotal.value : onlineChannelTotal.value));
 const statOfflineTotal = computed(() => (assetKind.value === "device" ? offlineDeviceTotal.value : offlineChannelTotal.value));
@@ -466,12 +461,9 @@ const viewOptions: Array<{ label: string; value: ViewMode; icon: any }> = [
   { label: "地图", value: "map", icon: MapIcon }
 ];
 const hasFilters = computed(() =>
-  Boolean(
-    keyword.value || deviceIdFilter.value || statusFilter.value || directoryState.value.selectedKey[directoryState.value.view]
-  )
+  Boolean(keyword.value || deviceIdFilter.value || statusFilter.value || selectedDirectory.value)
 );
 const selectedCount = computed(() => selectedRowKeys.value.length);
-const groupBatchActions = computed(() => customGroupBatchActions(assetKind.value, selectedCount.value, selectedDirectory.value));
 const tablePagination = computed(() => ({
   current: page.value,
   pageSize: pageSize.value,
@@ -482,18 +474,20 @@ const tablePagination = computed(() => ({
   pageSizeOptions: [10, 20, 50, 100]
 }));
 
-watch([viewMode, assetKind], async (current, previous) => {
+watch(viewMode, async mode => {
+  ++channelRequestVersion;
+  ++deviceRequestVersion;
+  rowsLoading.value = false;
   selectedRowKeys.value = [];
   page.value = 1;
-  if (viewMode.value === "map") {
+  if (mode === "map") {
+    assetKind.value = "channel";
     await nextTick(ensureMap);
   } else {
     destroyMap();
   }
-  refreshMainData();
-  // 统计实体随 assetKind 变化:统计只拉当前类型,切换后立即刷新,
-  // 否则另一类型的数字要等下一轮 10s 自动刷新才更新
-  if (current[1] !== previous?.[1]) refreshStats();
+  void refreshMainData();
+  void refreshStats();
 });
 watch(viewMode, mode => {
   try {
@@ -520,6 +514,7 @@ watch(darkMode, value => {
 watch(statusFilter, () => {
   page.value = 1;
   refreshMainData();
+  refreshStats();
 });
 watch(keyword, () => {
   if (suppressKeywordSearch) {
@@ -556,6 +551,20 @@ function snapshotImageUrl(channel: Pick<ChannelVO, "snapshotUrl" | "snapshotAt">
 }
 function deviceNameText(item: { alias?: string | null; name?: string | null }) {
   return item.alias?.trim() || item.name?.trim() || "-";
+}
+function channelPercentage(record: DeviceVO): string {
+  if (!record.channelCount) return "0%";
+  return `${((record.channelOnlineCount / record.channelCount) * 100).toFixed(0)}%`;
+}
+function channelStatusClass(record: DeviceVO): string {
+  if (!record.channelCount) return "empty";
+  const percentage = (record.channelOnlineCount / record.channelCount) * 100;
+  if (percentage === 0) return "offline";
+  if (percentage < 50) return "warning";
+  return "healthy";
+}
+function modelVersionText(item: { model?: string; firmware?: string }) {
+  return [item.model, item.firmware].filter(Boolean).join(" / ") || "-";
 }
 function vendorText(item: { manufacturer?: string; model?: string }) {
   return [item.manufacturer, item.model].filter(Boolean).join(" / ") || "未上报";
@@ -599,9 +608,6 @@ function channelAttributeScopeText(scope: "both" | "2016" | "2022") {
   if (scope === "2022") return "仅 2022";
   return "两版共有";
 }
-function modelVersionText(item: { model?: string; firmware?: string }) {
-  return [item.model, item.firmware].filter(Boolean).join(" / ") || "-";
-}
 function protocolVersionText(value?: string | null) {
   if (value === "2022") return "GB/T 28181-2022";
   if (value === "2016") return "GB/T 28181-2016";
@@ -614,16 +620,18 @@ function protocolSourceText(value?: string | null) {
     ] || "未说明"
   );
 }
-// 列表 / 卡片上的「国标版本」提示：生效版本 + 来源 + 设备原始上报值
-// (effectiveVersion 有 default:2016 兜底,单看值分不出"真 2016"还是"没上报",所以把来源一并给出)
 function protocolVersionTooltip(item: {
   effectiveVersion?: string | null;
   effectiveVersionSource?: string | null;
   reportedVersion?: string | null;
 }) {
-  const parts = [protocolVersionText(item.effectiveVersion), protocolSourceText(item.effectiveVersionSource)];
-  if (item.reportedVersion) parts.push(`X-GB-Ver ${item.reportedVersion}`);
-  return parts.join(" · ");
+  return [
+    protocolVersionText(item.effectiveVersion),
+    protocolSourceText(item.effectiveVersionSource),
+    item.reportedVersion ? `X-GB-Ver ${item.reportedVersion}` : ""
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 function copyText(value?: string | null) {
   const text = (value || "").trim();
@@ -664,12 +672,92 @@ function showDeviceChannels(record: DeviceVO) {
   if (!canViewDevices.value) return;
   drawerVisible.value = false;
   setKeywordWithoutSearch("");
-  deviceIdFilter.value = record.deviceId;
-  channelEntrySource.value = "device-drilldown";
-  clearDirectorySelection(false);
   statusFilter.value = undefined;
   assetKind.value = "channel";
+  onDeviceSelect(record);
+}
+function deviceSummary(device: DeviceVO): DirectoryDevice {
+  return {
+    id: device.id,
+    deviceId: device.deviceId,
+    name: device.name,
+    alias: device.alias,
+    online: device.online
+  };
+}
+function clearDirectoryNodeSelection() {
+  const view = directoryState.value.view;
+  directoryState.value = selectDirectory(directoryState.value, null);
+  selectedDirectories.value = { ...selectedDirectories.value, [view]: null };
+}
+function onDeviceSelect(device: DeviceVO | null) {
+  if (!canViewDevices.value) return;
+  ++directoryDeviceRequestVersion;
+  if (device) assetKind.value = "channel";
+  navigationMode.value = device ? "device" : "directory";
+  selectedDevice.value = device;
+  selectedDeviceSummary.value = device ? deviceSummary(device) : null;
+  deviceIdFilter.value = device?.deviceId || "";
+  if (device) clearDirectoryNodeSelection();
+  changeChannelScope();
+}
+async function onDirectoryDeviceSelect(device: DirectoryDevice) {
+  if (!canViewDevices.value) return;
+  assetKind.value = "channel";
+  const requestVersion = ++directoryDeviceRequestVersion;
+  navigationMode.value = "device";
+  selectedDevice.value = null;
+  selectedDeviceSummary.value = device;
+  deviceIdFilter.value = device.deviceId;
+  clearDirectoryNodeSelection();
+  changeChannelScope();
+  try {
+    const response = await getDevice(device.id);
+    if (requestVersion !== directoryDeviceRequestVersion || deviceIdFilter.value !== device.deviceId) return;
+    if (response.code === 0 && response.data && response.data.deviceId === device.deviceId) {
+      selectedDevice.value = response.data;
+      selectedDeviceSummary.value = deviceSummary(response.data);
+    } else {
+      Message.warning("设备详情加载失败，仍可查看该设备通道");
+    }
+  } catch {
+    if (requestVersion === directoryDeviceRequestVersion) Message.warning("设备详情加载失败，仍可查看该设备通道");
+  }
+}
+function changeChannelScope() {
   page.value = 1;
+  selectedRowKeys.value = [];
+  ++channelRequestVersion;
+  ++statsRequestVersion;
+  total.value = 0;
+  onlineChannelTotal.value = 0;
+  offlineChannelTotal.value = 0;
+  channels.value = [];
+  markers.value = [];
+  clusters.value = [];
+  renderMapOverlays();
+  mapAutoFitPending = true;
+  void refreshMainData();
+  void refreshStats();
+}
+async function refreshSelectedDevice() {
+  const device = selectedDevice.value;
+  if (!device) return;
+  try {
+    const response = await getDevice(device.id);
+    if (selectedDevice.value?.id !== device.id) return;
+    if (response.code === 0 && response.data) {
+      selectedDevice.value = response.data;
+      selectedDeviceSummary.value = deviceSummary(response.data);
+    }
+    else onDeviceSelect(null);
+  } catch {
+    /* 保留最后一次有效状态，下一次刷新重试。 */
+  }
+}
+async function onDevicesChanged() {
+  await refreshSelectedDevice();
+  await refreshCurrent();
 }
 
 async function loadPtzTypeDict() {
@@ -686,146 +774,49 @@ async function loadPtzTypeDict() {
 
 function onDirectorySelect(node: DirectoryNode) {
   if (!canViewDevices.value) return;
+  assetKind.value = "channel";
+  navigationMode.value = "directory";
+  ++directoryDeviceRequestVersion;
+  selectedDevice.value = null;
+  selectedDeviceSummary.value = null;
+  deviceIdFilter.value = "";
   selectedDirectories.value = { ...selectedDirectories.value, [directoryState.value.view]: node };
-  page.value = 1;
-  selectedRowKeys.value = [];
-  refreshMainData();
+  changeChannelScope();
 }
 async function onDirectoryViewChange() {
   if (!canViewDevices.value) return;
+  assetKind.value = "channel";
+  ++directoryDeviceRequestVersion;
+  navigationMode.value = "directory";
+  selectedDevice.value = null;
+  selectedDeviceSummary.value = null;
+  deviceIdFilter.value = "";
   page.value = 1;
   selectedRowKeys.value = [];
   await nextTick();
-  refreshMainData();
+  changeChannelScope();
 }
+
 function clearDirectorySelection(refresh = true) {
   const view = directoryState.value.view;
   directoryState.value = selectDirectory(directoryState.value, null);
   selectedDirectories.value = { ...selectedDirectories.value, [view]: null };
   page.value = 1;
   selectedRowKeys.value = [];
-  if (refresh && canViewDevices.value) refreshMainData();
+  if (refresh && canViewDevices.value) changeChannelScope();
 }
-function onDirectoryTreeLoaded(view: "national" | "administrative" | "business" | "custom", tree: DirectoryNode[]) {
-  if (view === "custom") customTree.value = tree;
+function onDirectoryTreeLoaded(view: "administrative" | "department" | "business", tree: DirectoryNode[]) {
   const selectedKey = directoryState.value.selectedKey[view];
   if (selectedKey) {
     selectedDirectories.value = {
       ...selectedDirectories.value,
-      [view]: findDirectoryNode(tree, selectedKey)
+      [view]: findDirectoryNode(tree, selectedKey) || selectedDirectories.value[view]
     };
   }
-}
-function openGroupEditor(mode: CustomGroupEditorMode, node: DirectoryNode | null) {
-  if (!canManageGroups.value) return;
-  groupEditorMode.value = mode;
-  groupEditorNode.value = node;
-  groupEditorVisible.value = true;
-}
-async function onGroupSaved(result: {
-  action: CustomGroupEditorMode;
-  node: DirectoryNode | null;
-  group?: { id: number; name: string };
-  parentKey: string | null;
-  removedDeviceCount?: number;
-}) {
-  if (!canManageGroups.value) return;
-  const currentKey = directoryState.value.selectedKey.custom;
-  if (result.action === "create" && result.group) {
-    const created: DirectoryNode = {
-      key: `custom:group:${result.group.id}`,
-      name: result.group.name,
-      type: "group",
-      readOnly: false,
-      count: 0,
-      onlineCount: 0,
-      depth: (result.node?.depth ?? -1) + 1,
-      children: []
-    };
-    directoryState.value = selectDirectory({ ...directoryState.value, view: "custom" }, created.key);
-    selectedDirectories.value = { ...selectedDirectories.value, custom: created };
-    Message.success("分组创建成功");
-  } else if (result.action === "delete") {
-    if (currentKey === result.node?.key) {
-      directoryState.value = selectDirectory({ ...directoryState.value, view: "custom" }, result.parentKey);
-      selectedDirectories.value = {
-        ...selectedDirectories.value,
-        custom: findDirectoryNode(customTree.value, result.parentKey)
-      };
-    }
-    Message.success(
-      result.removedDeviceCount ? `分组已删除，已解除 ${result.removedDeviceCount} 台设备的分组关系` : "分组已删除"
-    );
-  } else {
-    Message.success(result.action === "rename" ? "分组名称已更新" : "分组已移动");
-  }
-  await directoryPanelRef.value?.refresh();
-  page.value = 1;
-  selectedRowKeys.value = [];
-  refreshMainData();
-}
-async function refreshAfterMemberMutation() {
-  if (!canManageGroups.value) return;
-  selectedRowKeys.value = [];
-  await directoryPanelRef.value?.refresh("custom");
-  refreshMainData();
-}
-async function onDevicesAdded(result: { addedCount: number; skippedCount: number }) {
-  if (!canManageGroups.value) return;
-  Message.success(
-    result.skippedCount
-      ? `已添加 ${result.addedCount} 台，${result.skippedCount} 台已在分组中`
-      : `已添加 ${result.addedCount} 台设备`
-  );
-  await refreshAfterMemberMutation();
-}
-function removeSelectedFromCurrentGroup() {
-  if (!canManageGroups.value) return;
-  const groupId = groupBatchActions.value.removeGroupId;
-  const ids = [...selectedRowKeys.value];
-  if (!groupId || ids.length === 0 || memberMutationLoading.value) return;
-  Modal.warning({
-    title: "从当前分组移除设备?",
-    content: `将移除 ${ids.length} 台设备与当前分组的关系，不会删除设备。`,
-    okText: "确认移除",
-    cancelText: "取消",
-    hideCancel: false,
-    onOk: async () => {
-      memberMutationLoading.value = true;
-      try {
-        const response = await removeDevicesFromGroup(groupId, ids);
-        if (response.code !== 0) throw new Error(response.message || "移除失败");
-        const result = response.data;
-        Message.success(
-          result.skippedCount
-            ? `已移除 ${result.removedCount} 台，${result.skippedCount} 台原本不在当前分组`
-            : `已从当前分组移除 ${result.removedCount} 台设备`
-        );
-        await refreshAfterMemberMutation();
-      } catch (error: any) {
-        Message.error(error?.message || "移除失败，已保留当前选择");
-        throw error;
-      } finally {
-        memberMutationLoading.value = false;
-      }
-    }
-  });
 }
 function setViewMode(mode: ViewMode) {
   viewMode.value = mode;
-  if (mode === "map") {
-    assetKind.value = "channel";
-    mapAutoFitPending = true;
-  }
-}
-function setAssetKind(kind: AssetKind) {
-  if (kind === "device") {
-    deviceIdFilter.value = "";
-    channelEntrySource.value = "manual";
-  } else {
-    channelEntrySource.value = "manual";
-  }
-  assetKind.value = kind;
+  if (mode === "map") mapAutoFitPending = true;
 }
 function cancelKeywordSearch() {
   if (keywordSearchTimer !== null) {
@@ -841,7 +832,8 @@ function setKeywordWithoutSearch(value: string) {
 function onSearch() {
   cancelKeywordSearch();
   page.value = 1;
-  refreshMainData();
+  void refreshMainData();
+  void refreshStats();
 }
 function clearKeyword() {
   setKeywordWithoutSearch("");
@@ -856,23 +848,31 @@ function focusKeyword(event: KeyboardEvent) {
   }
 }
 function clearDeviceFilter() {
-  deviceIdFilter.value = "";
-  page.value = 1;
-  if (assetKind.value === "channel" && channelEntrySource.value === "device-drilldown") {
-    channelEntrySource.value = "manual";
-    assetKind.value = "device";
-  }
-  refreshMainData();
+  onDeviceSelect(null);
 }
 function resetFilters() {
   setKeywordWithoutSearch("");
+  ++directoryDeviceRequestVersion;
+  navigationMode.value = "directory";
+  selectedDevice.value = null;
+  selectedDeviceSummary.value = null;
   deviceIdFilter.value = "";
   statusFilter.value = undefined;
-  if (assetKind.value === "channel" && channelEntrySource.value === "device-drilldown") {
-    channelEntrySource.value = "manual";
-    assetKind.value = "device";
-  }
   clearDirectorySelection();
+  refreshStats();
+}
+function setAssetKind(kind: AssetKind) {
+  if (kind === assetKind.value) return;
+  ++directoryDeviceRequestVersion;
+  navigationMode.value = "directory";
+  selectedDevice.value = null;
+  selectedDeviceSummary.value = null;
+  deviceIdFilter.value = "";
+  page.value = 1;
+  selectedRowKeys.value = [];
+  assetKind.value = kind;
+  void refreshMainData();
+  void refreshStats();
 }
 function onPageChange(next: number) {
   page.value = next;
@@ -1141,34 +1141,38 @@ function attachMapLifecycle() {
   });
 }
 
+let channelRequestVersion = 0;
+let deviceRequestVersion = 0;
 async function loadChannelsData() {
   if (!canViewDevices.value) return;
+  const version = ++channelRequestVersion;
   rowsLoading.value = true;
   try {
     const res = await listChannels({
       q: keyword.value.trim() || undefined,
-      deviceId: deviceIdFilter.value || undefined,
-      ...directoryQuery(directoryState.value),
+      ...channelScope.value,
       status: statusFilter.value,
       page: page.value,
       pageSize: pageSize.value
     });
+    if (version !== channelRequestVersion) return;
     if (res.code === 0) {
       channels.value = res.data?.list || [];
       total.value = res.data?.total || 0;
     }
   } catch (error: any) {
-    Message.error(error?.message || "通道列表加载失败");
+    if (version === channelRequestVersion) Message.error(error?.message || "通道列表加载失败");
   } finally {
-    rowsLoading.value = false;
+    if (version === channelRequestVersion) rowsLoading.value = false;
   }
 }
 
 async function loadDevicesData() {
   if (!canViewDevices.value) return;
+  const version = ++deviceRequestVersion;
   rowsLoading.value = true;
   try {
-    const res = await listDevices({
+    const response = await listDevices({
       q: keyword.value.trim() || undefined,
       ...directoryQuery(directoryState.value),
       status: statusFilter.value,
@@ -1176,14 +1180,15 @@ async function loadDevicesData() {
       pageSize: pageSize.value,
       sort: "heartbeat:desc"
     });
-    if (res.code === 0) {
-      devices.value = res.data?.list || [];
-      total.value = res.data?.total || 0;
+    if (version !== deviceRequestVersion) return;
+    if (response.code === 0) {
+      devices.value = response.data?.list || [];
+      total.value = response.data?.total || 0;
     }
   } catch (error: any) {
-    Message.error(error?.message || "设备列表加载失败");
+    if (version === deviceRequestVersion) Message.error(error?.message || "设备列表加载失败");
   } finally {
-    rowsLoading.value = false;
+    if (version === deviceRequestVersion) rowsLoading.value = false;
   }
 }
 
@@ -1206,7 +1211,7 @@ async function loadMapData() {
     const query = {
       ...(autoFitPending ? {} : mapBoundsParams()),
       q: keyword.value.trim() || undefined,
-      ...directoryQuery(directoryState.value),
+      ...channelScope.value,
       status: statusFilter.value
     };
     const [markerRes, clusterRes] = await Promise.all([
@@ -1231,25 +1236,36 @@ async function loadMapData() {
   }
 }
 
+let statsRequestVersion = 0;
 async function refreshStats() {
   if (!canViewDevices.value) return;
-  // 只拉当前资产类型的统计:UI 只展示当前 assetKind 的在线/离线数字,
-  // 一次轮询不应为另一类型额外执行全量计数查询
+  const version = ++statsRequestVersion;
+  const scope = {
+    q: keyword.value.trim() || undefined,
+    ...(assetKind.value === "device" ? directoryQuery(directoryState.value) : channelScope.value)
+  };
   const isDevice = assetKind.value === "device";
-  const requests = isDevice
-    ? [listDevices({ status: "online", page: 1, pageSize: 1 }), listDevices({ status: "offline", page: 1, pageSize: 1 })]
-    : [listChannels({ status: "online", page: 1, pageSize: 1 }), listChannels({ status: "offline", page: 1, pageSize: 1 })];
-  const [onlineRes, offlineRes] = await Promise.allSettled(requests);
-  // 单个失败不拖累另一个:保留成功侧的结果,失败侧维持旧值
+  const [onlineRes, offlineRes] = await Promise.allSettled(
+    isDevice
+      ? [
+          listDevices({ ...scope, status: "online", page: 1, pageSize: 1 }),
+          listDevices({ ...scope, status: "offline", page: 1, pageSize: 1 })
+        ]
+      : [
+          listChannels({ ...scope, status: "online", page: 1, pageSize: 1 }),
+          listChannels({ ...scope, status: "offline", page: 1, pageSize: 1 })
+        ]
+  );
+  if (version !== statsRequestVersion) return;
   if (onlineRes.status === "fulfilled" && onlineRes.value.code === 0) {
-    const total = onlineRes.value.data?.total || 0;
-    if (isDevice) onlineDeviceTotal.value = total;
-    else onlineChannelTotal.value = total;
+    const value = onlineRes.value.data?.total || 0;
+    if (isDevice) onlineDeviceTotal.value = value;
+    else onlineChannelTotal.value = value;
   }
   if (offlineRes.status === "fulfilled" && offlineRes.value.code === 0) {
-    const total = offlineRes.value.data?.total || 0;
-    if (isDevice) offlineDeviceTotal.value = total;
-    else offlineChannelTotal.value = total;
+    const value = offlineRes.value.data?.total || 0;
+    if (isDevice) offlineDeviceTotal.value = value;
+    else offlineChannelTotal.value = value;
   }
 }
 
@@ -1360,8 +1376,7 @@ function maintenanceBlockReason(action: "reboot" | "upgrade") {
 }
 
 function onMaintenanceDeviceUpdated(updatedDevice: DeviceVO) {
-  const row = devices.value.find(device => device.id === updatedDevice.id);
-  if (row) Object.assign(row, updatedDevice);
+  if (selectedDevice.value?.id === updatedDevice.id) selectedDevice.value = updatedDevice;
   if (deviceDetail.value?.id === updatedDevice.id) deviceDetail.value = updatedDevice;
   if (maintenanceDevice.value?.id === updatedDevice.id) maintenanceDevice.value = updatedDevice;
 }
@@ -1404,7 +1419,7 @@ function openSubscriptionManager(record: DeviceVO) {
 
 async function handleSubscriptionChanged() {
   if (!canManageSubscriptions.value) return;
-  loadDevicesData();
+  void directoryPanelRef.value?.refresh();
   if (!deviceDetail.value || subscriptionDevice.value?.id !== deviceDetail.value.id) return;
   try {
     const res = await listDeviceSubscriptions(deviceDetail.value.id);
@@ -1643,7 +1658,9 @@ function openRecordQuery(record: ChannelVO) {
   const returnKey = saveDeviceMgmtReturnSnapshot({
     version: 1,
     viewMode: viewMode.value,
-    assetKind: assetKind.value,
+    assetKind: "channel",
+    navigationMode: navigationMode.value,
+    selectedDeviceId: selectedDevice.value?.id,
     keyword: keyword.value,
     deviceIdFilter: deviceIdFilter.value,
     statusFilter: statusFilter.value,
@@ -1787,6 +1804,7 @@ async function handleCreateDevice() {
     if (res.code === 0) {
       Message.success("设备已创建");
       createDeviceVisible.value = false;
+      void directoryPanelRef.value?.refresh();
       refreshMainData();
       refreshStats();
     } else {
@@ -1954,6 +1972,14 @@ async function handleEditDevice() {
       originalProtocolOverride = protocolOverrideAfterSave(originalProtocolOverride, editDeviceForm.value.protocolOverride, true);
       originalZLMNodeID = editDeviceForm.value.zlmNodeId;
       Message.success("设备信息已更新");
+      void directoryPanelRef.value?.refresh();
+      if (selectedDevice.value?.deviceId === editingDeviceId.value) {
+        const updated = await getDevice(selectedDevice.value.id);
+        if (updated.code === 0 && updated.data?.deviceId === deviceIdFilter.value) {
+          selectedDevice.value = updated.data;
+          selectedDeviceSummary.value = deviceSummary(updated.data);
+        }
+      }
       editDeviceVisible.value = false;
       refreshMainData();
       // 如果抽屉打开着,同步更新抽屉内容
@@ -2006,6 +2032,8 @@ async function handleDeleteDevice(record: DeviceVO) {
         const res = await deleteDevice(record.id);
         if (res.code === 0) {
           Message.success("设备已删除");
+          if (selectedDevice.value?.id === record.id) onDeviceSelect(null);
+          void onDevicesChanged();
           afterDeleteSuccess();
         } else {
           Message.error(res.message || "删除失败");
@@ -2054,10 +2082,8 @@ async function handleStreamTransportChange(channelId: number, streamTransport: s
     if (res.code === 0) {
       Message.success("流传输模式已更新");
       // 更新本地数据
-      if (assetKind.value === "channel") {
-        const item = channels.value.find(c => c.id === channelId);
-        if (item) item.streamTransport = streamTransport;
-      }
+      const item = channels.value.find(c => c.id === channelId);
+      if (item) item.streamTransport = streamTransport;
     } else {
       Message.error(res.message || "更新失败");
     }
@@ -2074,10 +2100,8 @@ async function handlePtzTypeChange(channelId: number, ptzTypeValue: string) {
     if (res.code === 0) {
       Message.success("摄像头类型已更新");
       // 更新本地数据
-      if (assetKind.value === "channel") {
-        const item = channels.value.find(c => c.id === channelId);
-        if (item) item.ptzType = ptzType;
-      }
+      const item = channels.value.find(c => c.id === channelId);
+      if (item) item.ptzType = ptzType;
     } else {
       Message.error(res.message || "更新失败");
     }
@@ -2092,10 +2116,8 @@ async function handleAudioEnabledChange(channelId: number, audioEnabled: boolean
     const res = await updateChannel(channelId, { audioEnabled });
     if (res.code === 0) {
       Message.success(audioEnabled ? "已开启音频,下次点播生效" : "已关闭音频,下次点播生效");
-      if (assetKind.value === "channel") {
-        const item = channels.value.find(c => c.id === channelId);
-        if (item) item.audioEnabled = audioEnabled;
-      }
+      const item = channels.value.find(c => c.id === channelId);
+      if (item) item.audioEnabled = audioEnabled;
       if (channelDetail.value?.id === channelId) {
         channelDetail.value = { ...channelDetail.value, audioEnabled };
       }
@@ -2113,10 +2135,8 @@ async function handleOnDemandLiveChange(channelId: number, onDemandLive: boolean
     const res = await updateChannel(channelId, { onDemandLive });
     if (res.code === 0) {
       Message.success(onDemandLive ? "已开启按需直播" : "已关闭按需直播");
-      if (assetKind.value === "channel") {
-        const item = channels.value.find(c => c.id === channelId);
-        if (item) item.onDemandLive = onDemandLive;
-      }
+      const item = channels.value.find(c => c.id === channelId);
+      if (item) item.onDemandLive = onDemandLive;
       if (channelDetail.value?.id === channelId) {
         channelDetail.value = { ...channelDetail.value, onDemandLive };
       }
@@ -2186,8 +2206,8 @@ async function handleBatchDelete() {
     onOk: async () => {
       deleting.value = true;
       try {
-        const call = assetKind.value === "device" ? batchDeleteDevices : batchDeleteChannels;
-        const res = await call(ids);
+        const deleteBatch = assetKind.value === "device" ? batchDeleteDevices : batchDeleteChannels;
+        const res = await deleteBatch(ids);
         if (res.code === 0 && res.data) {
           reportBatchResult(res.data, ids.length);
           afterDeleteSuccess();
@@ -2213,7 +2233,7 @@ function startAutoRefresh() {
   refreshCountdownTimer.value = window.setInterval(() => {
     if (autoRefreshCountdown.value <= 1) {
       resetAutoRefreshCountdown();
-      void refreshCurrent();
+      void refreshCurrent(true);
     } else {
       autoRefreshCountdown.value -= 1;
     }
@@ -2227,28 +2247,25 @@ function stopAutoRefresh() {
   }
 }
 
-async function refreshCurrent() {
+async function refreshCurrent(background = false) {
   if (!canViewDevices.value) return;
   resetAutoRefreshCountdown();
-  await Promise.all([refreshMainData(), refreshStats()]);
-}
-
-function channelPercentage(record: DeviceVO): string {
-  if (!record.channelCount || record.channelCount === 0) return "0%";
-  const percentage = (record.channelOnlineCount / record.channelCount) * 100;
-  return `${percentage.toFixed(0)}%`;
-}
-
-function channelStatusClass(record: DeviceVO): string {
-  if (!record.channelCount || record.channelCount === 0) return "empty";
-  const percentage = (record.channelOnlineCount / record.channelCount) * 100;
-  if (percentage === 0) return "offline";
-  if (percentage < 50) return "warning";
-  return "healthy";
+  await Promise.all([refreshMainData(), refreshStats(), refreshSelectedDevice(), background === true ? directoryPanelRef.value?.sync() : directoryPanelRef.value?.refresh()]);
 }
 
 onMounted(async () => {
   window.addEventListener("keydown", focusKeyword);
+  if (returnSnapshot?.selectedDeviceId && navigationMode.value === "device" && canViewDevices.value) {
+    try {
+      const restored = await getDevice(returnSnapshot.selectedDeviceId);
+      if (restored.code === 0 && restored.data && restored.data.deviceId === deviceIdFilter.value) {
+        selectedDevice.value = restored.data;
+        selectedDeviceSummary.value = deviceSummary(restored.data);
+      }
+    } catch {
+      Message.warning("设备信息恢复失败，可从目录树重新选择");
+    }
+  }
   maintenancePoll = setInterval(() => {
     if (!canViewMaintenance.value) return;
     for (const id of Object.keys(maintenanceActivity.devices).map(Number)) {
@@ -2259,13 +2276,15 @@ onMounted(async () => {
   if (viewMode.value === "map") {
     await nextTick(ensureMap);
   }
-  await Promise.all([viewMode.value === "map" ? Promise.resolve() : refreshMainData(), refreshStats()]);
+  await Promise.all([refreshMainData(), refreshStats()]);
   if (canEditChannel.value) await loadPtzTypeDict();
   startAutoRefresh();
 });
 
 onUnmounted(() => {
   ++maintenanceOpenVersion;
+  ++channelRequestVersion;
+  ++statsRequestVersion;
   clearInterval(maintenancePoll);
   closeCatalogRefreshProgress();
   window.removeEventListener("keydown", focusKeyword);
@@ -2307,12 +2326,22 @@ onUnmounted(() => {
               </div>
             </div>
             <div class="toolbar-actions">
-              <div v-if="viewMode !== 'map'" class="segmented asset-kind-switch">
-                <button type="button" :class="{ active: assetKind === 'device' }" @click="setAssetKind('device')">
+              <div v-if="viewMode !== 'map'" class="segmented asset-kind-switch" aria-label="资产类型">
+                <button
+                  type="button"
+                  data-asset-kind="device"
+                  :class="{ active: assetKind === 'device' }"
+                  @click="setAssetKind('device')"
+                >
                   <RadioTower :size="14" aria-hidden="true" />
                   <span>设备</span>
                 </button>
-                <button type="button" :class="{ active: assetKind === 'channel' }" @click="setAssetKind('channel')">
+                <button
+                  type="button"
+                  data-asset-kind="channel"
+                  :class="{ active: assetKind === 'channel' }"
+                  @click="setAssetKind('channel')"
+                >
                   <Video :size="14" aria-hidden="true" />
                   <span>通道</span>
                 </button>
@@ -2337,7 +2366,7 @@ onUnmounted(() => {
                   ref="keywordInput"
                   v-model="keyword"
                   type="text"
-                  aria-label="搜索设备、通道或编码"
+                  aria-label="搜索设备名称或通道名称或编码"
                   placeholder="搜索设备 / 通道 / 编码 ..."
                   @keydown.enter.prevent="onSearch"
                 />
@@ -2367,8 +2396,8 @@ onUnmounted(() => {
                 data-testid="refresh-control"
                 type="button"
                 :title="`自动刷新倒计时 ${autoRefreshCountdown} 秒`"
-                :aria-label="`刷新设备列表，自动刷新倒计时 ${autoRefreshCountdown} 秒`"
-                @click="refreshCurrent"
+                :aria-label="`刷新${assetKind === 'device' ? '设备' : '通道'}列表，自动刷新倒计时 ${autoRefreshCountdown} 秒`"
+                @click="refreshCurrent()"
               >
                 <RefreshCcw :size="14" :class="{ spin: rowsLoading || mapLoading }" />
                 刷新 <span class="refresh-countdown">{{ autoRefreshCountdown }}s</span>
@@ -2388,36 +2417,66 @@ onUnmounted(() => {
 
       <aside class="catalog-pane">
         <DirectoryPanel
+          v-if="canViewDevices"
           ref="directoryPanelRef"
+          :resource-filter="{ assetKind, q: keyword.trim(), status: statusFilter }"
           v-model="directoryState"
-          :can-manage="canManageGroups"
+          :selected-device-id="selectedDevice?.id || selectedDeviceSummary?.id || null"
           @select="onDirectorySelect"
+          @device-select="onDirectoryDeviceSelect"
           @view-change="onDirectoryViewChange"
           @tree-loaded="onDirectoryTreeLoaded"
-          @create="openGroupEditor('create', $event)"
-          @rename="openGroupEditor('rename', $event)"
-          @move="openGroupEditor('move', $event)"
-          @delete="openGroupEditor('delete', $event)"
         />
       </aside>
 
       <main class="content-pane" :class="{ 'content-pane-map': viewMode === 'map' }">
+        <header v-if="selectedDeviceContext" class="channel-workspace-header has-device">
+          <div class="workspace-context-icon"><RadioTower :size="22" /></div>
+          <div class="workspace-context-copy">
+            <span class="workspace-eyebrow">当前设备</span>
+            <div class="workspace-context-title">
+              <h2>{{ displayName(selectedDeviceContext) }}</h2>
+              <span class="status-pill" :class="{ online: selectedDeviceContext.online }"
+                ><span class="status-dot"></span>{{ deviceStatusLabel(selectedDeviceContext.online) }}</span
+              >
+            </div>
+            <p>
+              {{
+                `${selectedDeviceContext.deviceId}${selectedDevice ? ` · ${endpointText(selectedDevice)}` : " · 正在读取设备信息"}`
+              }}
+            </p>
+          </div>
+          <div v-if="selectedDevice" class="device-context-actions" role="group" aria-label="设备操作">
+            <a-button size="small" class="device-action tone-view" @click="openDevice(selectedDevice)"><Eye :size="14" />设备详情</a-button>
+            <a-button size="small" class="device-action tone-view" :disabled="!canRefreshCatalog || !selectedDevice.online"
+              :loading="refreshingCatalog[selectedDevice.id]" @click="handleRefreshDeviceCatalog(selectedDevice)"><RefreshCcw :size="14" />刷新目录</a-button>
+            <a-button size="small" class="device-action tone-view" :disabled="!canViewTraffic" @click="openStatusEvents(selectedDevice)"><Activity :size="14" />运行监控</a-button>
+            <a-dropdown trigger="click" position="br" :popup-max-height="false">
+              <a-button size="small" class="device-action tone-config" aria-label="设备更多操作"><MoreHorizontal :size="14" />更多</a-button>
+              <template #content>
+                <a-doption :disabled="!canManageSubscriptions" @click="openSubscriptionManager(selectedDevice)">订阅管理</a-doption>
+                <a-doption :disabled="!canEditDevice" @click="openEditDeviceModal(selectedDevice)">编辑设备</a-doption>
+                <a-doption :disabled="!canUpgradeDevice || !canViewMaintenance" @click="openDeviceUpgrade(selectedDevice)">固件升级</a-doption>
+                <a-doption :disabled="!canRebootDevice || !canViewMaintenance" @click="openDeviceReboot(selectedDevice)">设备重启</a-doption>
+                <a-doption :disabled="!canViewMaintenance" @click="openMaintenanceRecords(selectedDevice)">维护记录</a-doption>
+                <a-doption :disabled="deleting || !canDeleteDevice" :style="{ color: 'var(--uvp-danger)' }" @click="handleDeleteDevice(selectedDevice)">删除设备</a-doption>
+              </template>
+            </a-dropdown>
+          </div>
+        </header>
+        <button
+          v-if="selectedDevice && maintenanceActivity.label(selectedDevice.id)"
+          class="maintenance-task-link"
+          type="button"
+          :disabled="!canViewMaintenance"
+          @click="openKnownMaintenance(selectedDevice)"
+        >
+          {{ maintenanceActivity.label(selectedDevice.id) }} · 查看
+        </button>
         <div class="filter-chips">
-          <button
-            v-if="deviceIdFilter && channelEntrySource === 'device-drilldown'"
-            class="filter-chip device-drilldown-chip"
-            type="button"
-            aria-label="返回设备列表"
-            @click="clearDeviceFilter"
-          >
-            <span>设备通道: {{ deviceIdFilter }}</span>
-            <ArrowLeft :size="12" aria-hidden="true" />
-          </button>
-          <span v-else-if="deviceIdFilter" class="filter-chip">
-            <span>所属设备: {{ deviceIdFilter }}</span>
-            <button class="close" type="button" aria-label="清除所属设备筛选" @click="clearDeviceFilter">
-              <X :size="12" />
-            </button>
+          <span v-if="deviceIdFilter" class="filter-chip">
+            <span>所属设备: {{ selectedDeviceContext ? displayName(selectedDeviceContext) : deviceIdFilter }}</span>
+            <button class="close" type="button" aria-label="清除所属设备筛选" @click="clearDeviceFilter"><X :size="12" /></button>
           </span>
           <span v-if="statusFilter" class="filter-chip"
             >状态: {{ deviceStatusLabel(statusFilter === "online") }}
@@ -2434,24 +2493,6 @@ onUnmounted(() => {
             <strong>{{ selectedCount }}</strong> 项已选
           </div>
           <div class="batch-ops">
-            <button
-              v-if="groupBatchActions.canAdd"
-              class="btn-group"
-              type="button"
-              :disabled="memberMutationLoading || !canManageGroups"
-              @click="addToGroupVisible = true"
-            >
-              <FolderPlus :size="14" /> 添加到分组
-            </button>
-            <button
-              v-if="groupBatchActions.removeGroupId"
-              class="btn-group"
-              type="button"
-              :disabled="memberMutationLoading || !canManageGroups"
-              @click="removeSelectedFromCurrentGroup"
-            >
-              <FolderMinus :size="14" /> 从当前分组移除
-            </button>
             <button
               class="btn-danger"
               type="button"
@@ -2471,7 +2512,7 @@ onUnmounted(() => {
             :loading="rowsLoading"
             :pagination="tablePagination"
             row-key="id"
-            :scroll="{ x: 2130, y: '85%' }"
+            :scroll="{ x: 2340, y: '85%' }"
             :row-selection="{ type: 'checkbox', showCheckedAll: true }"
             class="uvp-data-table"
             @page-change="onPageChange"
@@ -2492,6 +2533,13 @@ onUnmounted(() => {
                     <div class="text-ellipsis">{{ record.channelId }}</div>
                   </a-tooltip>
                 </template>
+              </a-table-column>
+              <a-table-column title="所属设备" :width="210">
+                <template #cell="{ record }"
+                  ><a-tooltip :content="record.deviceId"
+                    ><span class="mono text-ellipsis">{{ record.deviceId }}</span></a-tooltip
+                  ></template
+                >
               </a-table-column>
               <a-table-column title="快照" :width="120" align="center">
                 <template #cell="{ record }">
@@ -2693,7 +2741,6 @@ onUnmounted(() => {
               </a-table-column>
             </template>
           </a-table>
-
           <a-table
             v-else
             v-model:selected-keys="selectedRowKeys"
@@ -2701,7 +2748,7 @@ onUnmounted(() => {
             :loading="rowsLoading"
             :pagination="tablePagination"
             row-key="id"
-            :scroll="{ x: 2000, y: '85%' }"
+            :scroll="{ x: 2040, y: '85%' }"
             :row-selection="{ type: 'checkbox', showCheckedAll: true }"
             class="uvp-data-table device-data-table"
             @page-change="onPageChange"
@@ -2709,9 +2756,9 @@ onUnmounted(() => {
             @row-dblclick="onDeviceDblclick"
           >
             <template #columns>
-              <a-table-column title="设备名称" :width="150">
+              <a-table-column title="设备名称" :width="170">
                 <template #cell="{ record }">
-                  <a-tooltip :content="deviceNameText(record)" position="top">
+                  <a-tooltip :content="deviceNameText(record)">
                     <div class="device-name">
                       <span class="pri text-ellipsis">{{ deviceNameText(record) }}</span>
                       <button
@@ -2729,35 +2776,27 @@ onUnmounted(() => {
               </a-table-column>
               <a-table-column title="设备编号" :width="190">
                 <template #cell="{ record }">
-                  <a-tooltip :content="record.deviceId" position="top">
-                    <span class="code-main text-ellipsis">{{ record.deviceId }}</span>
-                  </a-tooltip>
+                  <a-tooltip :content="record.deviceId"><span class="code-main text-ellipsis">{{ record.deviceId }}</span></a-tooltip>
                 </template>
               </a-table-column>
               <a-table-column title="厂商" :width="120">
-                <template #cell="{ record }">
-                  <a-tooltip :content="record.manufacturer || '-'" position="top">
-                    <span class="text-ellipsis">{{ record.manufacturer || "-" }}</span>
-                  </a-tooltip>
-                </template>
+                <template #cell="{ record }"><span class="text-ellipsis">{{ record.manufacturer || "-" }}</span></template>
               </a-table-column>
-              <a-table-column title="状态" :width="100" align="center">
+              <a-table-column title="状态" :width="110" align="center">
                 <template #cell="{ record }">
                   <button
                     v-if="canViewTraffic"
                     class="status-inline status-trigger"
                     :class="{ online: record.online }"
                     type="button"
-                    title="运行监控"
                     :aria-label="`查看设备${record.deviceId}运行监控`"
                     @click.stop="openStatusEvents(record)"
                   >
-                    <History class="status-trigger-icon" :size="13" aria-hidden="true" />
-                    <span class="status-trigger-label">{{ deviceStatusLabel(!!record.online) }}</span>
+                    <History :size="13" aria-hidden="true" />
+                    <span>{{ deviceStatusLabel(!!record.online) }}</span>
                   </button>
                   <span v-else class="status-inline status-readonly" :class="{ online: record.online }">
-                    <span class="status-dot"></span>
-                    <span>{{ deviceStatusLabel(!!record.online) }}</span>
+                    <span class="status-dot"></span>{{ deviceStatusLabel(!!record.online) }}
                   </span>
                 </template>
               </a-table-column>
@@ -2771,88 +2810,66 @@ onUnmounted(() => {
                   </div>
                 </template>
               </a-table-column>
-              <a-table-column title="来源地址" :width="220">
-                <template #cell="{ record }">
-                  <a-tooltip :content="endpointText(record)" position="top">
-                    <span class="code-main mono text-ellipsis">{{ endpointText(record) }}</span>
-                  </a-tooltip>
-                </template>
+              <a-table-column title="来源地址" :width="200">
+                <template #cell="{ record }"><span class="code-main mono text-ellipsis">{{ endpointText(record) }}</span></template>
               </a-table-column>
               <a-table-column title="型号 / 版本" :width="160">
-                <template #cell="{ record }">
-                  <a-tooltip :content="modelVersionText(record)" position="top">
-                    <span class="relative text-ellipsis">{{ modelVersionText(record) }}</span>
-                  </a-tooltip>
-                </template>
+                <template #cell="{ record }"><span class="text-ellipsis">{{ modelVersionText(record) }}</span></template>
               </a-table-column>
               <a-table-column title="国标版本" :width="150">
                 <template #cell="{ record }">
-                  <a-tooltip :content="protocolVersionTooltip(record)" position="top">
-                    <span class="relative text-ellipsis">{{ protocolVersionText(record.effectiveVersion) }}</span>
+                  <a-tooltip :content="protocolVersionTooltip(record)">
+                    <span class="text-ellipsis">{{ protocolVersionText(record.effectiveVersion) }}</span>
                   </a-tooltip>
                 </template>
               </a-table-column>
               <a-table-column title="注册时间" :width="170">
-                <template #cell="{ record }">
-                  <span class="relative">{{ dateTime(record.registerTime) }}</span>
-                </template>
+                <template #cell="{ record }">{{ dateTime(record.registerTime) }}</template>
               </a-table-column>
               <a-table-column title="心跳时间" :width="170">
-                <template #cell="{ record }">
-                  <span class="relative" :class="{ warn: !record.online }">{{ dateTime(record.keepaliveTime) }}</span>
-                </template>
+                <template #cell="{ record }"><span :class="{ warn: !record.online }">{{ dateTime(record.keepaliveTime) }}</span></template>
               </a-table-column>
-              <a-table-column title="操作" :width="400" fixed="right">
+              <a-table-column title="操作" :width="420" fixed="right">
                 <template #cell="{ record }">
                   <div class="uvp-table-actions">
                     <a-link class="uvp-table-action uvp-table-action--preview" @click="showDeviceChannels(record)">
-                      <template #icon><Camera :size="13" /></template>
-                      <span>通道</span>
+                      <template #icon><Camera :size="13" /></template><span>通道</span>
                     </a-link>
                     <a-link
-                      class="uvp-table-action uvp-table-action--sync uvp-refresh-link"
+                      class="uvp-table-action uvp-table-action--sync"
                       :disabled="refreshingCatalog[record.id] || !record.online || !canRefreshCatalog"
-                      :title="record.online ? '刷新通道目录' : '设备离线,无法刷新'"
                       @click="handleRefreshDeviceCatalog(record)"
                     >
-                      <template #icon
-                        ><Loader2 v-if="refreshingCatalog[record.id]" :size="13" class="spin" /><RefreshCcw v-else :size="13"
-                      /></template>
+                      <template #icon><Loader2 v-if="refreshingCatalog[record.id]" :size="13" class="spin" /><RefreshCcw v-else :size="13" /></template>
                       <span>刷新</span>
                     </a-link>
                     <a-link
-                      :disabled="!canManageSubscriptions"
                       class="uvp-table-action uvp-table-action--subscribe"
+                      :disabled="!canManageSubscriptions"
                       @click.stop="openSubscriptionManager(record)"
                     >
-                      <template #icon><Bell :size="13" /></template>
-                      <span>订阅</span>
+                      <template #icon><Bell :size="13" /></template><span>订阅</span>
                     </a-link>
                     <a-link class="uvp-table-action uvp-table-action--detail" @click="openDevice(record)">
-                      <template #icon><Eye :size="13" /></template>
-                      <span>详情</span>
+                      <template #icon><Eye :size="13" /></template><span>详情</span>
                     </a-link>
                     <a-link
-                      :disabled="!canEditDevice"
                       class="uvp-table-action uvp-table-action--edit"
+                      :disabled="!canEditDevice"
                       @click="openEditDeviceModal(record)"
                     >
-                      <template #icon><Pencil :size="13" /></template>
-                      <span>编辑</span>
+                      <template #icon><Pencil :size="13" /></template><span>编辑</span>
                     </a-link>
                     <a-link
                       class="uvp-table-action uvp-table-action--delete"
                       :disabled="deleting || !canDeleteDevice"
                       @click="handleDeleteDevice(record)"
                     >
-                      <template #icon><Trash2 :size="13" /></template>
-                      <span>删除</span>
+                      <template #icon><Trash2 :size="13" /></template><span>删除</span>
                     </a-link>
-                    <!-- 「更多」只剩设备维护(固件升级/维护记录/重启),详情·编辑·删除已平铺到操作列 -->
                     <a-dropdown trigger="click" position="br">
                       <a-link class="uvp-table-action uvp-table-action--more" :disabled="!canViewMaintenance">
-                        <span>维护</span>
-                        <MoreHorizontal :size="13" />
+                        <span>维护</span><MoreHorizontal :size="13" />
                       </a-link>
                       <template #content>
                         <DeviceMaintenanceMenu
@@ -2888,12 +2905,8 @@ onUnmounted(() => {
                 <div class="device-card-head">
                   <span class="device-card-icon"><Camera :size="18" /></span>
                   <div class="device-card-title">
-                    <a-tooltip :content="deviceNameText(item)" position="top">
-                      <strong class="text-ellipsis">{{ deviceNameText(item) }}</strong>
-                    </a-tooltip>
-                    <a-tooltip :content="item.deviceId" position="top">
-                      <span class="code text-ellipsis">{{ item.deviceId }}</span>
-                    </a-tooltip>
+                    <a-tooltip :content="deviceNameText(item)" position="top"><strong class="text-ellipsis">{{ deviceNameText(item) }}</strong></a-tooltip>
+                    <a-tooltip :content="item.deviceId" position="top"><span class="code text-ellipsis">{{ item.deviceId }}</span></a-tooltip>
                   </div>
                 </div>
                 <a-tooltip v-if="canViewTraffic" content="运行监控" position="top">
@@ -2911,47 +2924,22 @@ onUnmounted(() => {
                   {{ deviceStatusLabel(!!item.online) }}
                 </span>
                 <div class="device-card-info">
-                  <div>
-                    <span>设备 ID</span
-                    ><a-tooltip :content="item.deviceId" position="top"
-                      ><strong class="mono text-ellipsis">{{ item.deviceId }}</strong></a-tooltip
-                    >
-                  </div>
-                  <div>
-                    <span>厂商</span><strong class="text-ellipsis">{{ item.manufacturer || "未上报" }}</strong>
-                  </div>
-                  <div>
-                    <span>型号</span><strong class="text-ellipsis">{{ item.model || "未上报" }}</strong>
-                  </div>
-                  <div>
-                    <span>国标版本</span
-                    ><a-tooltip :content="protocolVersionTooltip(item)" position="top"
-                      ><strong class="text-ellipsis">{{ protocolVersionText(item.effectiveVersion) }}</strong></a-tooltip
-                    >
-                  </div>
-                  <div>
-                    <span>地址</span
-                    ><a-tooltip :content="endpointText(item)" position="top"
-                      ><strong class="mono text-ellipsis">{{ endpointText(item) }}</strong></a-tooltip
-                    >
-                  </div>
+                  <div><span>设备 ID</span><strong class="mono text-ellipsis">{{ item.deviceId }}</strong></div>
+                  <div><span>厂商</span><strong class="text-ellipsis">{{ item.manufacturer || "未上报" }}</strong></div>
+                  <div><span>型号</span><strong class="text-ellipsis">{{ item.model || "未上报" }}</strong></div>
+                  <div><span>国标版本</span><strong class="text-ellipsis">{{ protocolVersionText(item.effectiveVersion) }}</strong></div>
+                  <div><span>地址</span><strong class="mono text-ellipsis">{{ endpointText(item) }}</strong></div>
                   <div class="device-card-channel">
                     <span>通道数量</span>
                     <div class="device-card-channel-value">
                       <div class="channel-progress">
-                        <div class="progress-bar" :class="channelStatusClass(item)">
-                          <div class="progress-fill" :style="{ width: channelPercentage(item) }"></div>
-                        </div>
+                        <div class="progress-bar" :class="channelStatusClass(item)"><div class="progress-fill" :style="{ width: channelPercentage(item) }"></div></div>
                         <span class="channel-text">{{ item.channelOnlineCount }}/{{ item.channelCount }}</span>
                       </div>
                     </div>
                   </div>
-                  <div>
-                    <span>最近心跳</span><strong :class="{ warn: !item.online }">{{ dateTime(item.keepaliveTime) }}</strong>
-                  </div>
-                  <div>
-                    <span>注册时间</span><strong>{{ dateTime(item.registerTime) }}</strong>
-                  </div>
+                  <div><span>最近心跳</span><strong :class="{ warn: !item.online }">{{ dateTime(item.keepaliveTime) }}</strong></div>
+                  <div><span>注册时间</span><strong>{{ dateTime(item.registerTime) }}</strong></div>
                 </div>
                 <button
                   v-if="maintenanceActivity.label(item.id)"
@@ -2963,65 +2951,18 @@ onUnmounted(() => {
                   {{ maintenanceActivity.label(item.id) }} · 查看
                 </button>
                 <div class="card-actions device-card-actions">
-                  <a-tooltip content="查看通道" position="top">
-                    <button class="icon-btn small framed primary" type="button" @click.stop="showDeviceChannels(item)">
-                      <Camera :size="13" />
-                    </button>
-                  </a-tooltip>
-                  <a-tooltip content="查看详情" position="top">
-                    <button class="icon-btn small framed" type="button" @click.stop="openDevice(item)"><Eye :size="13" /></button>
-                  </a-tooltip>
+                  <a-tooltip content="查看通道" position="top"><button class="icon-btn small framed primary" type="button" @click.stop="showDeviceChannels(item)"><Camera :size="13" /></button></a-tooltip>
+                  <a-tooltip content="查看详情" position="top"><button class="icon-btn small framed" type="button" @click.stop="openDevice(item)"><Eye :size="13" /></button></a-tooltip>
                   <a-tooltip :content="item.online ? '刷新通道目录' : '设备离线,无法刷新'" position="top">
-                    <button
-                      class="icon-btn small framed info uvp-refresh-btn"
-                      :class="{ loading: refreshingCatalog[item.id] }"
-                      type="button"
-                      :disabled="refreshingCatalog[item.id] || !item.online || !canRefreshCatalog"
-                      @click.stop="handleRefreshDeviceCatalog(item)"
-                    >
-                      <Loader2 v-if="refreshingCatalog[item.id]" :size="13" class="spin" />
-                      <RefreshCcw v-else :size="13" />
+                    <button class="icon-btn small framed info uvp-refresh-btn" type="button" :disabled="refreshingCatalog[item.id] || !item.online || !canRefreshCatalog" @click.stop="handleRefreshDeviceCatalog(item)">
+                      <Loader2 v-if="refreshingCatalog[item.id]" :size="13" class="spin" /><RefreshCcw v-else :size="13" />
                     </button>
                   </a-tooltip>
-                  <a-tooltip content="订阅管理" position="top">
-                    <button
-                      class="icon-btn small framed subscription"
-                      type="button"
-                      :disabled="!canManageSubscriptions"
-                      @click.stop="openSubscriptionManager(item)"
-                    >
-                      <Bell :size="13" />
-                    </button>
-                  </a-tooltip>
-                  <a-tooltip content="编辑设备" position="top">
-                    <button
-                      class="icon-btn small framed warning"
-                      type="button"
-                      :disabled="!canEditDevice"
-                      @click.stop="openEditDeviceModal(item)"
-                    >
-                      <Pencil :size="13" />
-                    </button>
-                  </a-tooltip>
-                  <a-tooltip content="删除设备" position="top">
-                    <button
-                      class="icon-btn small framed danger"
-                      type="button"
-                      :disabled="deleting || !canDeleteDevice"
-                      @click.stop="handleDeleteDevice(item)"
-                    >
-                      <Trash2 :size="13" />
-                    </button>
-                  </a-tooltip>
-                  <a-dropdown
-                    trigger="click"
-                    position="br"
-                    :popup-max-height="false"
-                    content-class="device-card-maintenance-dropdown"
-                  >
-                    <button class="icon-btn small framed" type="button" aria-label="更多设备操作" :disabled="!canViewMaintenance">
-                      <MoreHorizontal :size="13" />
-                    </button>
+                  <a-tooltip content="订阅管理" position="top"><button class="icon-btn small framed subscription" type="button" :disabled="!canManageSubscriptions" @click.stop="openSubscriptionManager(item)"><Bell :size="13" /></button></a-tooltip>
+                  <a-tooltip content="编辑设备" position="top"><button class="icon-btn small framed warning" type="button" :disabled="!canEditDevice" @click.stop="openEditDeviceModal(item)"><Pencil :size="13" /></button></a-tooltip>
+                  <a-tooltip content="删除设备" position="top"><button class="icon-btn small framed danger" type="button" :disabled="deleting || !canDeleteDevice" @click.stop="handleDeleteDevice(item)"><Trash2 :size="13" /></button></a-tooltip>
+                  <a-dropdown trigger="click" position="br" :popup-max-height="false">
+                    <button class="icon-btn small framed" type="button" aria-label="更多设备操作" :disabled="!canViewMaintenance"><MoreHorizontal :size="13" /></button>
                     <template #content>
                       <DeviceMaintenanceMenu
                         :can-upgrade="canUpgradeDevice"
@@ -3036,206 +2977,206 @@ onUnmounted(() => {
               </article>
             </template>
             <template v-else>
-              <article
-                v-for="item in channels"
-                :key="item.id"
-                class="device-card channel-summary-card"
-                @dblclick="onChannelDblclick(item, $event)"
-              >
-                <div class="channel-snapshot" :class="{ offline: item.status !== 1 }">
-                  <a-image
-                    v-if="item.snapshotUrl"
-                    :src="snapshotImageUrl(item)"
-                    fit="cover"
-                    :preview="true"
-                    class="channel-snapshot-image"
-                  />
-                  <div v-else class="snapshot-empty">
-                    <Video :size="30" />
-                    <span>暂无快照</span>
-                  </div>
-                  <span v-if="isChannelPlaying(item)" class="channel-snapshot-live-badge">
-                    <span class="live-dot"></span>
-                    <span>直播中</span>
-                  </span>
+            <article
+              v-for="item in channels"
+              :key="item.id"
+              class="device-card channel-summary-card"
+              @dblclick="onChannelDblclick(item, $event)"
+            >
+              <div class="channel-snapshot" :class="{ offline: item.status !== 1 }">
+                <a-image
+                  v-if="item.snapshotUrl"
+                  :src="snapshotImageUrl(item)"
+                  fit="cover"
+                  :preview="true"
+                  class="channel-snapshot-image"
+                />
+                <div v-else class="snapshot-empty">
+                  <Video :size="30" />
+                  <span>暂无快照</span>
                 </div>
-                <div class="channel-card-body">
-                  <a-tooltip :content="displayName(item)" position="top"
-                    ><strong class="channel-card-title text-ellipsis">{{ displayName(item) }}</strong></a-tooltip
-                  >
-                  <div class="channel-card-info">
-                    <div>
-                      <span>通道 ID</span
-                      ><a-tooltip :content="item.channelId" position="top"
-                        ><strong class="mono text-ellipsis">{{ item.channelId }}</strong></a-tooltip
-                      >
-                    </div>
-                    <div>
-                      <span>所属设备</span
-                      ><a-tooltip :content="item.deviceId" position="top"
-                        ><strong class="mono text-ellipsis">{{ item.deviceId }}</strong></a-tooltip
-                      >
-                    </div>
-                    <div>
-                      <span>厂商 / 型号</span><strong class="text-ellipsis">{{ vendorText(item) }}</strong>
-                    </div>
-                    <div>
-                      <span>位置</span><strong>{{ locationText(item) }}</strong>
-                    </div>
-                    <div>
-                      <span>摄像头类型</span>
-                      <template v-if="canEditChannel">
-                        <a-select
-                          :model-value="String(item.ptzType || 0)"
-                          size="small"
-                          class="channel-card-inline-select"
-                          @click.stop
-                          @dblclick.stop
-                          @change="(value: string) => handlePtzTypeChange(item.id, value)"
-                        >
-                          <a-option v-for="opt in ptzTypeOptions" :key="opt.value" :value="opt.value">
-                            {{ opt.name }}
-                          </a-option>
-                        </a-select>
-                      </template>
-                      <strong v-else>{{ cameraTypeText(item.ptzType) }}</strong>
-                    </div>
-                    <div>
-                      <span>流传输模式</span>
-                      <template v-if="canEditTransport">
-                        <a-select
-                          :model-value="item.streamTransport || 'UDP'"
-                          size="small"
-                          class="channel-card-inline-select"
-                          @click.stop
-                          @dblclick.stop
-                          @change="(value: string) => handleStreamTransportChange(item.id, value)"
-                        >
-                          <a-option value="UDP">UDP</a-option>
-                          <a-option value="TCP-Active">TCP-Active</a-option>
-                          <a-option value="TCP-Passive">TCP-Passive</a-option>
-                        </a-select>
-                      </template>
-                      <strong v-else>{{ streamTransportText(item.streamTransport) }}</strong>
-                    </div>
+                <span v-if="isChannelPlaying(item)" class="channel-snapshot-live-badge">
+                  <span class="live-dot"></span>
+                  <span>直播中</span>
+                </span>
+              </div>
+              <div class="channel-card-body">
+                <a-tooltip :content="displayName(item)" position="top"
+                  ><strong class="channel-card-title text-ellipsis">{{ displayName(item) }}</strong></a-tooltip
+                >
+                <div class="channel-card-info">
+                  <div>
+                    <span>通道 ID</span
+                    ><a-tooltip :content="item.channelId" position="top"
+                      ><strong class="mono text-ellipsis">{{ item.channelId }}</strong></a-tooltip
+                    >
                   </div>
-                  <div class="channel-card-switches">
-                    <div class="switch-item">
-                      <span>音频</span>
-                      <template v-if="canEditChannel">
-                        <a-switch
-                          :model-value="item.audioEnabled"
-                          size="small"
-                          checked-text="开"
-                          unchecked-text="关"
-                          @click.stop
-                          @dblclick.stop
-                          @change="(value: boolean) => handleAudioEnabledChange(item.id, value)"
-                        />
-                      </template>
-                      <span v-else>{{ item.audioEnabled ? "开" : "关" }}</span>
-                    </div>
-                    <div class="switch-item">
-                      <span>按需直播</span>
-                      <template v-if="canEditChannel">
-                        <a-switch
-                          :model-value="item.onDemandLive !== false"
-                          size="small"
-                          checked-text="开"
-                          unchecked-text="关"
-                          @click.stop
-                          @dblclick.stop
-                          @change="(value: boolean) => handleOnDemandLiveChange(item.id, value)"
-                        />
-                      </template>
-                      <span v-else>{{ item.onDemandLive !== false ? "开" : "关" }}</span>
-                    </div>
-                    <div class="switch-item">
-                      <a-tooltip :content="recordingMeta(item).tooltip || recordingMeta(item).label" position="top">
-                        <span :class="`tone-${recordingMeta(item).tone}`">云端录像</span>
-                      </a-tooltip>
-                      <template v-if="canUpdateRecording">
-                        <a-switch
-                          :model-value="item.cloudRecordingEnabled"
-                          :loading="recordingMeta(item).loading"
-                          :disabled="recordingMeta(item).loading"
-                          :aria-label="`云端录像:${recordingMeta(item).label}`"
-                          size="small"
-                          @click.stop
-                          @dblclick.stop
-                          @change="(value: boolean) => handleCloudRecordingChange(item.id, value)"
-                        />
-                      </template>
-                    </div>
+                  <div>
+                    <span>所属设备</span
+                    ><a-tooltip :content="item.deviceId" position="top"
+                      ><strong class="mono text-ellipsis">{{ item.deviceId }}</strong></a-tooltip
+                    >
                   </div>
-                  <div class="card-actions channel-card-actions">
-                    <span class="channel-card-status" :class="{ online: item.status === 1 }">{{
-                      deviceStatusLabel(item.status === 1)
-                    }}</span>
-                    <a-tooltip content="点播" position="top">
-                      <button
-                        class="icon-btn small framed primary"
-                        type="button"
-                        :disabled="!canStartPlayback"
-                        @click.stop="playChannel(item)"
-                      >
-                        <Play :size="13" />
-                      </button>
-                    </a-tooltip>
-                    <a-tooltip content="查询设备录像" position="top">
-                      <button
-                        class="icon-btn small framed record-query-entry"
-                        type="button"
-                        aria-label="查询设备录像"
-                        :disabled="!canQueryDeviceRecords"
-                        @click.stop="openRecordQuery(item)"
+                  <div>
+                    <span>厂商 / 型号</span><strong class="text-ellipsis">{{ vendorText(item) }}</strong>
+                  </div>
+                  <div>
+                    <span>位置</span><strong>{{ locationText(item) }}</strong>
+                  </div>
+                  <div>
+                    <span>摄像头类型</span>
+                    <template v-if="canEditChannel">
+                      <a-select
+                        :model-value="String(item.ptzType || 0)"
+                        size="small"
+                        class="channel-card-inline-select"
+                        @click.stop
                         @dblclick.stop
+                        @change="(value: string) => handlePtzTypeChange(item.id, value)"
                       >
-                        <History :size="13" />
-                      </button>
-                    </a-tooltip>
-                    <a-tooltip content="通道操作" position="top">
-                      <button
-                        class="icon-btn small framed"
-                        type="button"
-                        aria-label="通道操作"
-                        :disabled="!canUseDeviceControl && !canSnapshotDevice && !canViewDeviceFacts"
-                        @click.stop="openChannelOperations(item)"
+                        <a-option v-for="opt in ptzTypeOptions" :key="opt.value" :value="opt.value">
+                          {{ opt.name }}
+                        </a-option>
+                      </a-select>
+                    </template>
+                    <strong v-else>{{ cameraTypeText(item.ptzType) }}</strong>
+                  </div>
+                  <div>
+                    <span>流传输模式</span>
+                    <template v-if="canEditTransport">
+                      <a-select
+                        :model-value="item.streamTransport || 'UDP'"
+                        size="small"
+                        class="channel-card-inline-select"
+                        @click.stop
+                        @dblclick.stop
+                        @change="(value: string) => handleStreamTransportChange(item.id, value)"
                       >
-                        <Joystick :size="13" />
-                      </button>
-                    </a-tooltip>
-                    <a-tooltip v-if="isChannelPlaying(item)" content="强制停止当前直播(会断开其他观看者)" position="top">
-                      <button
-                        class="icon-btn small framed stop"
-                        type="button"
-                        :disabled="stoppingChannels.has(item.id) || !canStopPlayback"
-                        @click.stop="handleStopChannel(item)"
-                      >
-                        <Square :size="13" />
-                      </button>
-                    </a-tooltip>
-                    <a-tooltip content="编辑通道" position="top"
-                      ><button
-                        class="icon-btn small framed warning"
-                        type="button"
-                        :disabled="!canEditChannel"
-                        @click.stop="openEditChannelModal(item)"
-                      >
-                        <Pencil :size="13" /></button
-                    ></a-tooltip>
-                    <a-tooltip content="删除通道" position="top"
-                      ><button
-                        class="icon-btn small framed danger"
-                        type="button"
-                        :disabled="deleting || !canDeleteChannel"
-                        @click.stop="handleDeleteChannel(item)"
-                      >
-                        <Trash2 :size="13" /></button
-                    ></a-tooltip>
+                        <a-option value="UDP">UDP</a-option>
+                        <a-option value="TCP-Active">TCP-Active</a-option>
+                        <a-option value="TCP-Passive">TCP-Passive</a-option>
+                      </a-select>
+                    </template>
+                    <strong v-else>{{ streamTransportText(item.streamTransport) }}</strong>
                   </div>
                 </div>
-              </article>
+                <div class="channel-card-switches">
+                  <div class="switch-item">
+                    <span>音频</span>
+                    <template v-if="canEditChannel">
+                      <a-switch
+                        :model-value="item.audioEnabled"
+                        size="small"
+                        checked-text="开"
+                        unchecked-text="关"
+                        @click.stop
+                        @dblclick.stop
+                        @change="(value: boolean) => handleAudioEnabledChange(item.id, value)"
+                      />
+                    </template>
+                    <span v-else>{{ item.audioEnabled ? "开" : "关" }}</span>
+                  </div>
+                  <div class="switch-item">
+                    <span>按需直播</span>
+                    <template v-if="canEditChannel">
+                      <a-switch
+                        :model-value="item.onDemandLive !== false"
+                        size="small"
+                        checked-text="开"
+                        unchecked-text="关"
+                        @click.stop
+                        @dblclick.stop
+                        @change="(value: boolean) => handleOnDemandLiveChange(item.id, value)"
+                      />
+                    </template>
+                    <span v-else>{{ item.onDemandLive !== false ? "开" : "关" }}</span>
+                  </div>
+                  <div class="switch-item">
+                    <a-tooltip :content="recordingMeta(item).tooltip || recordingMeta(item).label" position="top">
+                      <span :class="`tone-${recordingMeta(item).tone}`">云端录像</span>
+                    </a-tooltip>
+                    <template v-if="canUpdateRecording">
+                      <a-switch
+                        :model-value="item.cloudRecordingEnabled"
+                        :loading="recordingMeta(item).loading"
+                        :disabled="recordingMeta(item).loading"
+                        :aria-label="`云端录像:${recordingMeta(item).label}`"
+                        size="small"
+                        @click.stop
+                        @dblclick.stop
+                        @change="(value: boolean) => handleCloudRecordingChange(item.id, value)"
+                      />
+                    </template>
+                  </div>
+                </div>
+                <div class="card-actions channel-card-actions">
+                  <span class="channel-card-status" :class="{ online: item.status === 1 }">{{
+                    deviceStatusLabel(item.status === 1)
+                  }}</span>
+                  <a-tooltip content="点播" position="top">
+                    <button
+                      class="icon-btn small framed primary"
+                      type="button"
+                      :disabled="!canStartPlayback"
+                      @click.stop="playChannel(item)"
+                    >
+                      <Play :size="13" />
+                    </button>
+                  </a-tooltip>
+                  <a-tooltip content="查询设备录像" position="top">
+                    <button
+                      class="icon-btn small framed record-query-entry"
+                      type="button"
+                      aria-label="查询设备录像"
+                      :disabled="!canQueryDeviceRecords"
+                      @click.stop="openRecordQuery(item)"
+                      @dblclick.stop
+                    >
+                      <History :size="13" />
+                    </button>
+                  </a-tooltip>
+                  <a-tooltip content="通道操作" position="top">
+                    <button
+                      class="icon-btn small framed"
+                      type="button"
+                      aria-label="通道操作"
+                      :disabled="!canUseDeviceControl && !canSnapshotDevice && !canViewDeviceFacts"
+                      @click.stop="openChannelOperations(item)"
+                    >
+                      <Joystick :size="13" />
+                    </button>
+                  </a-tooltip>
+                  <a-tooltip v-if="isChannelPlaying(item)" content="强制停止当前直播(会断开其他观看者)" position="top">
+                    <button
+                      class="icon-btn small framed stop"
+                      type="button"
+                      :disabled="stoppingChannels.has(item.id) || !canStopPlayback"
+                      @click.stop="handleStopChannel(item)"
+                    >
+                      <Square :size="13" />
+                    </button>
+                  </a-tooltip>
+                  <a-tooltip content="编辑通道" position="top"
+                    ><button
+                      class="icon-btn small framed warning"
+                      type="button"
+                      :disabled="!canEditChannel"
+                      @click.stop="openEditChannelModal(item)"
+                    >
+                      <Pencil :size="13" /></button
+                  ></a-tooltip>
+                  <a-tooltip content="删除通道" position="top"
+                    ><button
+                      class="icon-btn small framed danger"
+                      type="button"
+                      :disabled="deleting || !canDeleteChannel"
+                      @click.stop="handleDeleteChannel(item)"
+                    >
+                      <Trash2 :size="13" /></button
+                  ></a-tooltip>
+                </div>
+              </div>
+            </article>
             </template>
           </div>
           <a-pagination
@@ -3685,23 +3626,6 @@ onUnmounted(() => {
       @changed="handleSubscriptionChanged"
     />
 
-    <CustomGroupEditor
-      v-if="canManageGroups"
-      v-model:visible="groupEditorVisible"
-      :can-manage="canManageGroups"
-      :mode="groupEditorMode"
-      :node="groupEditorNode"
-      :tree="customTree"
-      @saved="onGroupSaved"
-    />
-
-    <AddToGroupDialog
-      v-if="canManageGroups"
-      v-model:visible="addToGroupVisible"
-      :device-ids="selectedRowKeys"
-      @saved="onDevicesAdded"
-    />
-
     <a-modal
       v-if="canViewTraffic"
       v-model:visible="statusEventVisible"
@@ -4021,6 +3945,120 @@ onUnmounted(() => {
 </template>
 
 <style scoped lang="scss">
+.channel-workspace-header {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 12px;
+  padding: 8px 0 16px;
+  min-width: 0;
+}
+.workspace-context-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 44px;
+  height: 44px;
+  color: var(--uvp-brand);
+  background: var(--uvp-brand-soft);
+  border: 1px solid color-mix(in srgb, var(--uvp-brand) 16%, transparent);
+  border-radius: 12px;
+}
+.workspace-context-copy {
+  flex: 1;
+  min-width: 0;
+}
+.workspace-eyebrow {
+  color: var(--uvp-text-tertiary);
+  font-size: 10px;
+}
+.workspace-context-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.workspace-context-title h2 {
+  margin: 3px 0;
+  overflow: hidden;
+  color: var(--uvp-text-primary);
+  font-size: 17px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-context-title .status-pill {
+  flex-shrink: 0;
+}
+.workspace-context-copy p {
+  margin: 3px 0 0;
+  overflow: hidden;
+  color: var(--uvp-text-tertiary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.device-context-actions {
+  box-sizing: border-box;
+  min-width: 0;
+  display: flex;
+  flex-wrap: nowrap;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+.device-context-actions :deep(.device-action.arco-btn) {
+  --action-color: var(--uvp-brand);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  color: var(--action-color);
+  background: color-mix(in srgb, var(--action-color) 9%, var(--uvp-panel-bg));
+  border: 1px solid color-mix(in srgb, var(--action-color) 26%, var(--uvp-panel-border));
+  border-radius: 7px;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s;
+}
+.device-context-actions :deep(.device-action.tone-config) {
+  --action-color: var(--uvp-brand-cyan);
+}
+.device-context-actions :deep(.device-action.arco-btn:not(.arco-btn-disabled):hover) {
+  background: color-mix(in srgb, var(--action-color) 16%, var(--uvp-panel-bg));
+  border-color: var(--action-color);
+}
+.device-context-actions :deep(.device-action.arco-btn-disabled) {
+  opacity: 0.45;
+}
+.content-pane-map .channel-workspace-header {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--uvp-panel-border);
+  background: var(--uvp-panel-bg);
+}
+@media (max-width: 1180px) {
+  .channel-workspace-header {
+    flex-wrap: wrap;
+  }
+  .device-context-actions {
+    width: 100%;
+    padding-left: 56px;
+  }
+}
+@media (max-width: 720px) {
+  .device-context-actions {
+    gap: 4px;
+    padding-left: 0;
+    overflow-x: auto;
+  }
+  .device-context-actions :deep(.device-action.arco-btn) {
+    flex-shrink: 0;
+    padding: 0 8px;
+  }
+  .workspace-context-title h2 {
+    font-size: 15px;
+  }
+}
+
 .device-mgmt-page {
   display: flex;
   flex-direction: column;
@@ -4306,7 +4344,7 @@ onUnmounted(() => {
   display: grid;
   flex: 1;
   grid-template-rows: auto minmax(0, 1fr);
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: 320px minmax(0, 1fr);
   gap: 0;
   min-height: 0;
 }
@@ -4384,7 +4422,8 @@ onUnmounted(() => {
 .catalog-pane :deep(.directory-panel) {
   width: 100%;
   min-width: 0;
-  height: 100%;
+  flex: 1;
+  height: 0;
   background: transparent;
   border-right: 0;
 }
@@ -6642,7 +6681,7 @@ onUnmounted(() => {
 @media (width <= 1080px) {
   .workspace {
     grid-template-rows: auto minmax(0, 1fr);
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: 260px minmax(0, 1fr);
   }
   .toolbar-actions {
     flex-wrap: wrap;
@@ -6650,6 +6689,18 @@ onUnmounted(() => {
 }
 
 @media (width <= 768px) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 310px minmax(440px, 1fr);
+    overflow: auto;
+  }
+  .catalog-pane {
+    border-right: 0;
+    border-bottom: 1px solid var(--uvp-panel-border);
+  }
+  .content-pane {
+    padding: 12px 8px;
+  }
   .workspace-toolbar-row {
     flex-wrap: wrap;
   }

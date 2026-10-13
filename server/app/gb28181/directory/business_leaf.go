@@ -173,26 +173,54 @@ func BusinessAncestorIDs(byID map[uint]gbmodels.GbCatalogNode, parentID *uint) [
 	return out
 }
 
-// CollectBusinessLeafDeviceIDs 返回 path 前缀子树下所有叶节点归属的物理设备 id(去重)。
-// 用于「点选业务分组后右侧设备列表」的筛选 —— 与 BuildBusinessTree 的计数口径保持一致。
-func CollectBusinessLeafDeviceIDs(ctx context.Context, db *gorm.DB, scope func(*gorm.DB) *gorm.DB, pathPrefix string) ([]uint, error) {
-	q := db.WithContext(ctx).Model(&gbmodels.GbCatalogNode{}).
-		Where("path LIKE ? AND node_type IN ?", pathPrefix+"%", BusinessLeafTypes)
+// CollectBusinessLeafChannelIDs 返回所选业务容器下或所选通道节点对应的通道记录 id。
+// 业务目录筛选只应返回上报归属该业务目录的通道，不能扩展成所属物理设备的全部通道。
+func CollectBusinessLeafChannelIDs(ctx context.Context, db *gorm.DB, scope func(*gorm.DB) *gorm.DB, node gbmodels.GbCatalogNode) ([]uint, error) {
+	var catalogNodes []gbmodels.GbCatalogNode
+	nodeQuery := db.WithContext(ctx).Model(&gbmodels.GbCatalogNode{})
 	if scope != nil {
-		q = scope(q)
+		nodeQuery = scope(nodeQuery)
 	}
-	var nodes []gbmodels.GbCatalogNode
-	if err := q.Find(&nodes).Error; err != nil {
+	if err := nodeQuery.Find(&catalogNodes).Error; err != nil {
 		return nil, err
 	}
-	resolver, err := LoadBusinessLeafResolver(ctx, db, scope)
-	if err != nil {
+	byID := make(map[uint]gbmodels.GbCatalogNode, len(catalogNodes)+1)
+	byID[node.ID] = node
+	for _, catalogNode := range catalogNodes {
+		byID[catalogNode.ID] = catalogNode
+	}
+	var leafNodes []gbmodels.GbCatalogNode
+	if node.NodeType == gbmodels.NodeTypeChannel {
+		if node.ChannelID != nil && hasBusinessGroupAncestor(byID, node.ParentID) {
+			leafNodes = append(leafNodes, node)
+		}
+	} else if IsBusinessContainerType(node.NodeType) {
+		if node.NodeType == gbmodels.NodeTypeVirtualOrg && !hasBusinessGroupAncestor(byID, node.ParentID) {
+			return []uint{}, nil
+		}
+		for _, catalogNode := range catalogNodes {
+			if catalogNode.NodeType == gbmodels.NodeTypeChannel && catalogNode.ChannelID != nil &&
+				hasBusinessGroupAncestor(byID, catalogNode.ParentID) && hasBusinessAncestor(byID, catalogNode.ParentID, node.ID) {
+				leafNodes = append(leafNodes, catalogNode)
+			}
+		}
+	}
+	var channels []gbmodels.GbChannel
+	channelQuery := db.WithContext(ctx).Model(&gbmodels.GbChannel{})
+	if scope != nil {
+		channelQuery = scope(channelQuery)
+	}
+	if err := channelQuery.Find(&channels).Error; err != nil {
 		return nil, err
+	}
+	channelByID := make(map[uint]uint, len(channels))
+	for _, channel := range channels {
+		channelByID[channel.ID] = channel.ID
 	}
 	seen := map[uint]struct{}{}
-	ids := make([]uint, 0, len(nodes))
-	for _, node := range nodes {
-		id, ok := resolver.Resolve(node)
+	ids := make([]uint, 0, len(leafNodes))
+	for _, leaf := range leafNodes {
+		id, ok := channelByID[*leaf.ChannelID]
 		if !ok {
 			continue
 		}
@@ -203,4 +231,13 @@ func CollectBusinessLeafDeviceIDs(ctx context.Context, db *gorm.DB, scope func(*
 		ids = append(ids, id)
 	}
 	return ids, nil
+}
+
+func hasBusinessAncestor(byID map[uint]gbmodels.GbCatalogNode, parentID *uint, ancestorID uint) bool {
+	for _, id := range BusinessAncestorIDs(byID, parentID) {
+		if id == ancestorID {
+			return true
+		}
+	}
+	return false
 }

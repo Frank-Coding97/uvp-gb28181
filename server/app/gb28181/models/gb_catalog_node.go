@@ -32,15 +32,19 @@ const (
 // 承担:多级目录(省/市/区/小区/...) + 节点类型识别 + anomaly 兜底
 // 物化路径 path 字段加速子树查询(LIKE 'path%'),代价是 reparent 需要批改
 type GbCatalogNode struct {
-	ID              uint           `gorm:"primarykey" json:"id"`
-	OwnerDeptID     uint           `gorm:"column:owner_dept_id;index:idx_owner_dept_parent,priority:1;index:idx_owner_dept_path,priority:1;index:idx_owner_dept_type,priority:1;index:idx_owner_dept_anomaly,priority:1;index:idx_owner_dept_civil_code,priority:1" json:"ownerDeptId"`
-	NodeType        NodeType       `gorm:"column:node_type;size:16;not null;index:idx_owner_dept_type,priority:2" json:"nodeType"`
-	ParentID        *uint          `gorm:"column:parent_id;index:idx_owner_dept_parent,priority:2" json:"parentId"`
-	Path            string         `gorm:"column:path;size:512;not null;index:idx_owner_dept_path,priority:2" json:"path"`
-	Depth           uint8          `gorm:"column:depth;not null;default:0" json:"depth"`
-	Name            string         `gorm:"column:name;size:128;not null" json:"name"`
-	Code            string         `gorm:"column:code;size:32;index" json:"code"`
-	CivilCode       string         `gorm:"column:civil_code;size:6;index:idx_owner_dept_civil_code,priority:2" json:"civilCode"`
+	ID          uint     `gorm:"primarykey" json:"id"`
+	OwnerDeptID uint     `gorm:"column:owner_dept_id;index:idx_owner_dept_parent,priority:1;index:idx_owner_dept_path,priority:1;index:idx_owner_dept_type,priority:1;index:idx_owner_dept_anomaly,priority:1;index:idx_owner_dept_civil_code,priority:1;index:idx_owner_source_type_code,priority:1" json:"ownerDeptId"`
+	NodeType    NodeType `gorm:"column:node_type;size:16;not null;index:idx_owner_dept_type,priority:2;index:idx_owner_source_type_code,priority:3" json:"nodeType"`
+	ParentID    *uint    `gorm:"column:parent_id;index:idx_owner_dept_parent,priority:2" json:"parentId"`
+	Path        string   `gorm:"column:path;size:512;not null;index:idx_owner_dept_path,priority:2" json:"path"`
+	Depth       uint8    `gorm:"column:depth;not null;default:0" json:"depth"`
+	Name        string   `gorm:"column:name;size:128;not null" json:"name"`
+	Code        string   `gorm:"column:code;size:32;index;index:idx_owner_source_type_code,priority:4" json:"code"`
+	CivilCode   string   `gorm:"column:civil_code;size:6;index:idx_owner_dept_civil_code,priority:2" json:"civilCode"`
+	// SourceDeviceID 是产生该目录项的上报设备/下级平台编码。
+	// 业务分组、虚拟组织、设备和通道的编码在不同上报来源之间可能重复，
+	// 目录节点必须按来源隔离；行政区节点使用空值并由 owner 共享。
+	SourceDeviceID  string         `gorm:"column:source_device_id;size:20;not null;default:'';index:idx_owner_source_type_code,priority:2" json:"sourceDeviceId"`
 	DeviceID        *uint          `gorm:"column:device_id" json:"deviceId"`
 	ChannelID       *uint          `gorm:"column:channel_id" json:"channelId"`
 	AlarmResourceID *uint          `gorm:"column:alarm_resource_id;index:idx_catalog_alarm_resource" json:"alarmResourceId"`

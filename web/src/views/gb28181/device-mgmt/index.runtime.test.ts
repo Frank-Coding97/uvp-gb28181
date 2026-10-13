@@ -174,8 +174,9 @@ vi.mock("@visactor/vchart", () => ({
   }
 }));
 
+const routeQuery = vi.hoisted(() => ({ returnKey: undefined as string | undefined }));
 vi.mock("vue-router", () => ({
-  useRoute: () => ({ query: {}, params: {}, path: "/gb28181/devices" }),
+  useRoute: () => ({ query: routeQuery, params: {}, path: "/gb28181/devices" }),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   createRouter: () => ({
     install: vi.fn(),
@@ -261,8 +262,30 @@ function mountPage() {
     shallow: true,
     global: {
       stubs: {
+        DirectoryPanel: {
+          name: "DirectoryPanel",
+          props: ["modelValue", "resourceFilter"],
+          emits: ["select", "deviceSelect", "clearSelection", "update:modelValue", "viewChange"],
+          setup(_props: unknown, { emit }: { emit: (event: string, device: unknown) => void }) {
+            return {
+              refresh: vi.fn(),
+              sync: vi.fn(),
+              chooseDevice: () =>
+                emit("deviceSelect", {
+                  id: 31,
+                  name: "园区 NVR",
+                  alias: "",
+                  deviceId: "34020000002000000031",
+                  online: true,
+                  status: 1,
+                  channelCount: 4,
+                  channelOnlineCount: 3
+                })
+            };
+          },
+          template: `<section><button data-testid="select-device-a" @click="chooseDevice">目录内设备 A</button></section>`
+        },
         SubscriptionDialog: true,
-        DirectoryPanel: true,
         CustomGroupEditor: true,
         AddToGroupDialog: true,
         "s-layout-search": passthroughStub,
@@ -274,10 +297,10 @@ function mountPage() {
         "a-form-item": passthroughStub,
         "a-input": passthroughStub,
         "a-input-password": passthroughStub,
-        "a-button": passthroughStub,
+        "a-button": { props: ["disabled"], template: `<button :disabled="disabled"><slot /></button>` },
         "a-select": passthroughStub,
         "a-option": passthroughStub,
-        "a-doption": passthroughStub,
+        "a-doption": { props: ["disabled"], template: `<button :disabled="disabled"><slot /></button>` },
         "a-pagination": passthroughStub,
         "a-tooltip": passthroughStub,
         "a-dropdown": { template: "<div><slot /><slot name='content' /></div>" },
@@ -297,6 +320,7 @@ function mountPage() {
 describe("device-mgmt round-2 修复回归", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    routeQuery.returnKey = undefined;
     user.account.permissions = ["gb28181:device:view"];
     // happy-dom 元素无布局尺寸:容器永远 0 宽会让 ensureMap 无限 rAF 重试
     Object.defineProperty(HTMLElement.prototype, "clientWidth", { get: () => 800, configurable: true });
@@ -305,6 +329,19 @@ describe("device-mgmt round-2 修复回归", () => {
     mapInstances.length = 0;
     markerInstances.length = 0;
     api.listDevices.mockReset().mockResolvedValue(okList());
+    api.getDevice.mockReset().mockResolvedValue({
+      code: 0,
+      data: {
+        id: 31,
+        name: "园区 NVR",
+        alias: "",
+        deviceId: "34020000002000000031",
+        online: true,
+        status: 1,
+        channelCount: 4,
+        channelOnlineCount: 3
+      }
+    });
     api.listChannels.mockReset().mockResolvedValue(okList());
     api.listMapMarkers.mockReset().mockResolvedValue(okList());
     api.listMapClusters.mockReset().mockResolvedValue({ code: 0, message: "", data: { clusters: [] } });
@@ -320,6 +357,41 @@ describe("device-mgmt round-2 修复回归", () => {
     vi.unstubAllGlobals();
   });
 
+  it("列表不显示工作区提示，选择设备后保留设备信息和操作", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    expect(wrapper.find(".channel-workspace-header").exists()).toBe(false);
+    await wrapper.get('[data-asset-kind="channel"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".channel-workspace-header").exists()).toBe(false);
+    await wrapper.get('[data-testid="select-device-a"]').trigger("click");
+    await flushPromises();
+    const header = wrapper.get(".channel-workspace-header");
+    expect(header.text()).toContain("园区 NVR");
+    expect(header.text()).toContain("设备详情");
+    await wrapper.get('[data-asset-kind="device"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".channel-workspace-header").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("keeps frequent device actions visible and secondary actions in the more menu", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get('[data-testid="select-device-a"]').trigger("click");
+    await flushPromises();
+    const actions = wrapper.get(".device-context-actions");
+    expect(actions.findAll(".device-action").map(button => button.text())).toEqual([
+      "设备详情", "刷新目录", "运行监控", "更多"
+    ]);
+    expect(actions.find('[aria-label="设备更多操作"]').exists()).toBe(true);
+    expect(actions.findAll("button:not(.device-action)").map(button => button.text())).toEqual([
+      "订阅管理", "编辑设备", "固件升级", "设备重启", "维护记录", "删除设备"
+    ]);
+    expect(actions.findAll("button").find(button => button.text() === "删除设备")!.attributes("disabled")).toBeDefined();
+    wrapper.unmount();
+  });
+
   it("没有历史偏好时默认选中卡片视图", async () => {
     const wrapper = mountPage();
     await flushPromises();
@@ -327,6 +399,167 @@ describe("device-mgmt round-2 修复回归", () => {
     const cardButton = wrapper.get('[aria-label="卡片视图"]');
     expect(cardButton.attributes("aria-pressed")).toBe("true");
     expect(wrapper.find(".card-view").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("满在线设备的通道进度条使用绿色填充状态", async () => {
+    api.listDevices.mockResolvedValue(
+      okList(1, [
+        {
+          id: 31,
+          deviceId: "34020000002000000031",
+          name: "园区 NVR",
+          online: true,
+          status: 1,
+          channelCount: 2,
+          channelOnlineCount: 2
+        }
+      ])
+    );
+
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const progressBar = wrapper.get(".device-card-channel .progress-bar");
+    expect(progressBar.classes()).toContain("healthy");
+    expect(progressBar.get(".progress-fill").attributes("style")).toContain("width: 100%");
+    wrapper.unmount();
+  });
+
+  it("keeps device and channel lists available while directory selection opens the device channel context", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(wrapper.find(".asset-kind-switch").exists()).toBe(true);
+    expect(wrapper.find('[data-asset-kind="device"]').exists()).toBe(true);
+    expect(api.listDevices).toHaveBeenCalled();
+    await wrapper.get('[data-asset-kind="channel"]').trigger("click");
+    await flushPromises();
+    expect(api.listChannels).toHaveBeenCalled();
+
+    expect(wrapper.find('[data-testid="select-device-a"]').exists()).toBe(true);
+    await wrapper.get('[data-testid="select-device-a"]').trigger("click");
+    await flushPromises();
+    expect(api.listChannels).toHaveBeenLastCalledWith(expect.objectContaining({ deviceId: "34020000002000000031" }));
+    expect(wrapper.text()).toContain("园区 NVR");
+
+    await wrapper.get('[aria-label="清除所属设备筛选"]').trigger("click");
+    await flushPromises();
+    expect(api.listChannels.mock.calls.some(([params]) => !params.deviceId && !params.directoryKey && !params.status)).toBe(true);
+  });
+
+  it("renders channel cards as visible content rather than inert templates", async () => {
+    api.listChannels.mockResolvedValue(
+      okList(1, [{ id: 1, channelId: "channel-a", deviceId: "device-a", name: "入口通道", status: 1 }])
+    );
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get('[data-asset-kind="channel"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.findAll("article.channel-summary-card")).toHaveLength(1);
+    expect(wrapper.get("article.channel-summary-card").text()).toContain("入口通道");
+    expect(wrapper.find(".card-grid > template").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("forwards the selected device to both map endpoints", async () => {
+    window.localStorage.setItem("uvp.gb28181.device-mgmt.view-mode", "map");
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get('[data-testid="select-device-a"]').trigger("click");
+    await flushPromises();
+    expect(api.listMapMarkers).toHaveBeenLastCalledWith(expect.objectContaining({ deviceId: "34020000002000000031" }));
+    expect(api.listMapClusters).toHaveBeenLastCalledWith(expect.objectContaining({ deviceId: "34020000002000000031" }));
+    wrapper.unmount();
+  });
+
+  it("ignores late channel responses after changing device scope", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    let resolveOld!: (value: any) => void;
+    api.listChannels.mockImplementation((params: any) =>
+      params.deviceId && !params.status
+        ? new Promise(resolve => {
+            resolveOld = resolve;
+          })
+        : Promise.resolve(okList(1, [{ id: 2, channelId: "new-channel", name: "全部通道结果" }]))
+    );
+    await wrapper.get('[data-testid="select-device-a"]').trigger("click");
+    await wrapper.get('[aria-label="清除所属设备筛选"]').trigger("click");
+    await flushPromises();
+    resolveOld(okList(1, [{ id: 1, channelId: "old-channel", name: "迟到的设备通道" }]));
+    await flushPromises();
+    expect(wrapper.text()).toContain("全部通道结果");
+    expect(wrapper.text()).not.toContain("迟到的设备通道");
+    wrapper.unmount();
+  });
+
+  it("keeps device and department filtering mutually exclusive", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get('[data-testid="select-device-a"]').trigger("click");
+    await flushPromises();
+    const directory = wrapper.findComponent({ name: "DirectoryPanel" });
+    directory.vm.$emit("update:modelValue", {
+      view: "department",
+      selectedKey: { administrative: null, department: "department:dept:3", business: null }
+    });
+    directory.vm.$emit("select", { key: "department:dept:3", name: "园区", type: "organization", readOnly: true });
+    await flushPromises();
+    expect(api.listChannels).toHaveBeenLastCalledWith(
+      expect.objectContaining({ directoryView: "department", directoryKey: "department:dept:3" })
+    );
+    expect(api.listChannels.mock.calls.at(-1)?.[0].deviceId).toBeUndefined();
+    directory.vm.$emit("deviceSelect", {
+      id: 31,
+      name: "园区 NVR",
+      alias: "",
+      deviceId: "34020000002000000031",
+      online: true
+    });
+    await flushPromises();
+    expect(api.listChannels).toHaveBeenLastCalledWith(expect.objectContaining({ deviceId: "34020000002000000031" }));
+    expect(api.listChannels.mock.calls.at(-1)?.[0].directoryKey).toBeUndefined();
+    await wrapper.get('[aria-label="清除所属设备筛选"]').trigger("click");
+    await flushPromises();
+    expect(api.listChannels.mock.calls.some(([params]) => !params.deviceId && !params.directoryKey && !params.status)).toBe(true);
+    wrapper.unmount();
+  });
+
+  it.each(["national", "custom"] as const)("maps legacy %s return snapshots to administrative", async directoryView => {
+    routeQuery.returnKey = "device-return";
+    window.sessionStorage.setItem(
+      "uvp.device-record-return:device-return",
+      JSON.stringify({
+        version: 1,
+        viewMode: "list",
+        assetKind: "channel",
+        navigationMode: "device",
+        selectedDeviceId: 31,
+        deviceIdFilter: "34020000002000000031",
+        keyword: "入口",
+        directoryView,
+        directorySelectedKey: `${directoryView}:legacy-selection`,
+        page: 2,
+        listPageSize: 20,
+        cardPageSize: 12
+      })
+    );
+    api.getDevice.mockResolvedValue({
+      code: 0,
+      data: { id: 31, deviceId: "34020000002000000031", name: "返回的设备", online: true }
+    });
+    const wrapper = mountPage();
+    await flushPromises();
+    const directory = wrapper.findComponent({ name: "DirectoryPanel" });
+    expect(directory.props("modelValue").view).toBe("administrative");
+    expect(directory.props("modelValue").selectedKey.administrative).toBeNull();
+    expect(api.getDevice).toHaveBeenCalledWith(31);
+    expect(wrapper.text()).toContain("返回的设备");
+    expect(api.listChannels).toHaveBeenCalledWith(
+      expect.objectContaining({ deviceId: "34020000002000000031", q: "入口", page: 2, pageSize: 20 })
+    );
+    expect(wrapper.find(".asset-kind-switch").exists()).toBe(true);
     wrapper.unmount();
   });
 
@@ -340,26 +573,45 @@ describe("device-mgmt round-2 修复回归", () => {
     wrapper.unmount();
   });
 
-  it("#5 统计轮询只拉当前资产类型(设备视图只查设备)", async () => {
+  it("defaults to the device list and refreshes statistics for the active asset type", async () => {
     const wrapper = mountPage();
     await flushPromises();
 
     expect(api.listDevices).toHaveBeenCalledTimes(3); // 主列表 1 + 统计 online/offline 2
-    expect(api.listChannels).not.toHaveBeenCalled(); // 统计不再为通道类型发起全量计数
-    expect(wrapper.text()).toContain("设备");
+    expect(api.listChannels).not.toHaveBeenCalled();
+    expect(wrapper.find(".device-management-entry").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("设备管理");
+    wrapper.unmount();
+  });
+
+  it("includes the current search in online/offline statistics", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get('[data-asset-kind="channel"]').trigger("click");
+    await flushPromises();
+    api.listChannels.mockClear();
+
+    const search = wrapper.get('[aria-label="搜索设备名称或通道名称或编码"]');
+    await search.setValue("门岗");
+    await search.trigger("keydown.enter");
+    await flushPromises();
+
+    expect(api.listChannels).toHaveBeenCalledWith(expect.objectContaining({ status: "online", q: "门岗" }));
+    expect(api.listChannels).toHaveBeenCalledWith(expect.objectContaining({ status: "offline", q: "门岗" }));
     wrapper.unmount();
   });
 
   it("#6 单个统计请求失败不拖累另一个", async () => {
     // 按 status 参数区分,不依赖调用顺序(主列表无 status)
-    api.listDevices.mockImplementation(async (params: { status?: string }) => {
+    api.listChannels.mockImplementation(async (params: { status?: string }) => {
       if (params?.status === "online") throw new Error("online count down");
       if (params?.status === "offline") return okList(7);
       return okList();
     });
-    api.listChannels.mockResolvedValue(okList());
 
     const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get('[data-asset-kind="channel"]').trigger("click");
     await flushPromises();
 
     expect(wrapper.text()).toContain("离线 7");
@@ -400,44 +652,58 @@ describe("device-mgmt round-2 修复回归", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("passes top resource filters to the tree and refreshes it manually", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get('[aria-label="搜索设备名称或通道名称或编码"]').setValue(" Gate ");
+    await wrapper.get('[data-asset-kind="channel"]').trigger("click");
+    await flushPromises();
+    const directory = wrapper.findComponent({ name: "DirectoryPanel" });
+    expect(directory.props("resourceFilter")).toMatchObject({ assetKind: "channel", q: "Gate" });
+    await wrapper.get('[data-testid="refresh-control"]').trigger("click");
+    expect(directory.vm.refresh).toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
   it("shows a 10-second countdown and refreshes the current view automatically", async () => {
     const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get('[data-asset-kind="channel"]').trigger("click");
     await flushPromises();
 
     const refresh = wrapper.get("[data-testid='refresh-control']");
     expect(refresh.text()).toContain("10s");
-    const initialDeviceCalls = api.listDevices.mock.calls.length;
+    const initialChannelCalls = api.listChannels.mock.calls.length;
 
     await vi.advanceTimersByTimeAsync(1000);
     expect(refresh.text()).toContain("9s");
 
     await vi.advanceTimersByTimeAsync(9000);
     await flushPromises();
-    expect(api.listDevices.mock.calls.length).toBeGreaterThan(initialDeviceCalls);
+    expect(api.listChannels.mock.calls.length).toBeGreaterThan(initialChannelCalls);
+    expect(wrapper.findComponent({ name: "DirectoryPanel" }).vm.sync).toHaveBeenCalled();
     expect(refresh.text()).toContain("10s");
     wrapper.unmount();
   });
 
-  it("切换资产类型立即刷新当前类型统计", async () => {
+  it("切换设备立即刷新该设备通道统计", async () => {
     const wrapper = mountPage();
     await flushPromises();
     api.listChannels.mockClear();
 
-    const channelBtn = wrapper.findAll("button").find(btn => btn.text() === "通道");
-    expect(channelBtn).toBeTruthy();
-    await channelBtn!.trigger("click");
+    await wrapper.get('[data-testid="select-device-a"]').trigger("click");
     await flushPromises();
 
     // 主列表 1 次 + 统计 online/offline 2 次
     expect(api.listChannels).toHaveBeenCalledTimes(3);
     wrapper.unmount();
   });
-  it("opens each card action directly and preserves upgrade interlock after closing", async () => {
+  it("opens each device context action directly and preserves upgrade interlock after closing", async () => {
     user.account.permissions = ["*:*:*"];
     window.localStorage.setItem("uvp.gb28181.device-mgmt.view-mode", "card");
     const device = {
       id: 31,
-      deviceId: "34020000001320000001",
+      deviceId: "34020000002000000031",
       name: "北门录像机",
       online: true,
       channelCount: 8,
@@ -449,9 +715,12 @@ describe("device-mgmt round-2 修复回归", () => {
     api.getDevice.mockResolvedValue({ code: 0, data: device });
     const wrapper = mountPage();
     await flushPromises();
-    const menu = wrapper.findComponent({ name: "DeviceMaintenanceMenu" });
-    expect(menu.exists()).toBe(true);
-    menu.vm.$emit("upgrade");
+    await wrapper.get('[data-testid="select-device-a"]').trigger("click");
+    await flushPromises();
+    await wrapper
+      .findAll("button")
+      .find(option => option.text() === "固件升级")!
+      .trigger("click");
     await flushPromises();
     const upgrade = wrapper.findComponent({ name: "DeviceFirmwareUpgradeDialog" });
     expect(upgrade.props("visible")).toBe(true);
@@ -461,7 +730,10 @@ describe("device-mgmt round-2 修复回归", () => {
     api.listFirmwareUpgrades.mockResolvedValue(okList(1, [operation]));
     await flushPromises();
     expect(wrapper.text()).toContain("升级处理中");
-    menu.vm.$emit("reboot");
+    await wrapper
+      .findAll("button")
+      .find(option => option.text() === "设备重启")!
+      .trigger("click");
     await flushPromises();
     const reboot = wrapper.findComponent({ name: "DeviceRebootDialog" });
     expect(reboot.props("visible")).toBe(true);

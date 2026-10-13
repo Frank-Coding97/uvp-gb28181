@@ -1,32 +1,57 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
-import { ChevronRight, Folder, FolderPlus, FolderTree, MapPin, MoreHorizontal, RefreshCcw, Search } from "@lucide/vue";
+import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from "vue";
+import { Camera, ChevronRight, Circle, Folder, FolderTree, MapPin, RefreshCcw, Search } from "@lucide/vue";
 import { Message } from "@arco-design/web-vue";
-import { listDirectoryTree, type DirectoryNode, type DirectoryView } from "../api";
-import { selectDirectory, switchDirectoryView, type DirectoryState } from "../directoryState";
+import { listDirectoryTree, type DirectoryNode, type DirectoryResourceFilter } from "../api";
+import {
+  persistDirectoryViewPreference,
+  selectDirectory,
+  switchDirectoryView,
+  type DirectoryState,
+  type DirectoryView
+} from "../directoryState";
+
+import { mergeDirectorySync, type DirectorySyncResult } from "../directorySync";
 
 const props = defineProps<{
   modelValue: DirectoryState;
-  canManage: boolean;
+  selectedDeviceId: number | null;
+  resourceFilter?: DirectoryResourceFilter;
 }>();
 
 const emit = defineEmits<{
   "update:modelValue": [value: DirectoryState];
   select: [node: DirectoryNode];
+  deviceSelect: [device: NonNullable<DirectoryNode["device"]>];
   viewChange: [view: DirectoryView];
-  create: [parent: DirectoryNode | null];
-  rename: [node: DirectoryNode];
-  move: [node: DirectoryNode];
-  delete: [node: DirectoryNode];
   treeLoaded: [view: DirectoryView, tree: DirectoryNode[]];
 }>();
 
 const loading = ref(false);
-const trees = ref<Record<DirectoryView, DirectoryNode[]>>({ national: [], administrative: [], business: [], custom: [] });
-const loaded = ref<Record<DirectoryView, boolean>>({ national: false, administrative: false, business: false, custom: false });
-const requestTokens: Record<DirectoryView, number> = { national: 0, administrative: 0, business: 0, custom: 0 };
+const trees = ref<Record<DirectoryView, DirectoryNode[]>>({ administrative: [], department: [], business: [] });
+const loaded = ref<Record<DirectoryView, boolean>>({ administrative: false, department: false, business: false });
+const requestTokens: Record<DirectoryView, number> = { administrative: 0, department: 0, business: 0 };
 let loadingToken = 0;
 let activeView = props.modelValue.view;
+const treesInitialized = new Set<DirectoryView>();
+const revisions: Partial<Record<DirectoryView, string>> = {};
+const pending = new Set<DirectoryView>();
+let filterTimer: ReturnType<typeof setTimeout> | undefined;
+let disposed = false;
+watch(() => JSON.stringify(props.resourceFilter || {}), () => {
+  for (const view of Object.keys(requestTokens) as DirectoryView[]) {
+    ++requestTokens[view];
+    loaded.value[view] = false;
+    delete revisions[view];
+  }
+  pending.clear();
+  clearTimeout(filterTimer);
+  filterTimer = setTimeout(() => { filterTimer = undefined; void load(props.modelValue.view, true); }, 300);
+}, { flush: "sync" });
+onBeforeUnmount(() => {
+  disposed = true;
+  clearTimeout(filterTimer);
+});
 
 watch(
   () => props.modelValue.view,
@@ -40,10 +65,10 @@ const selectedKey = computed(() => props.modelValue.selectedKey[props.modelValue
 const expandedKeys = computed(() => props.modelValue.expandedKeys[props.modelValue.view]);
 const normalizedKeyword = computed(() => props.modelValue.treeKeyword.trim().toLocaleLowerCase());
 
-// ⛔ 业务组织视图只展示设备**实际上报**的业务分组（国标附录 J），没上报的设备不属于本视图，
+// ⛔ 业务分组视图只展示设备**实际上报**的业务分组（国标附录 J），没上报的设备不属于本视图，
 // 所以「空」是正常状态而非故障 —— 文案必须说清楚，否则会被当成加载失败。
 const emptyHint = computed(() => {
-  if (normalizedKeyword.value) return "暂无匹配目录";
+  if (normalizedKeyword.value || props.resourceFilter?.q || props.resourceFilter?.status) return "暂无匹配目录或设备";
   if (props.modelValue.view === "business") return "当前设备未上报业务分组";
   return "暂无目录数据";
 });
@@ -93,29 +118,53 @@ function setExpanded(keys: string[]) {
   });
 }
 
-async function load(view: DirectoryView, force = false) {
+async function load(view: DirectoryView, force = false, background = false) {
+  if (disposed || (background && (pending.has(view) || filterTimer))) return;
   if (loaded.value[view] && !force) return;
   const requestToken = ++requestTokens[view];
   const currentLoadingToken = ++loadingToken;
-  loading.value = true;
+  const firstLoad = !loaded.value[view];
+  if (!background || firstLoad) loading.value = true;
+  pending.add(view);
   try {
-    const response = await listDirectoryTree(view);
-    if (requestToken !== requestTokens[view]) return;
+    const response = await listDirectoryTree(view, { ...props.resourceFilter, sync: 1, since: revisions[view] });
+    if (disposed || requestToken !== requestTokens[view]) return;
     if (response.code !== 0) throw new Error(response.message || "目录加载失败");
-    const list = response.data?.list || [];
+    const data = response.data;
+    const list = data?.revision
+      ? mergeDirectorySync(trees.value[view], data as DirectorySyncResult)
+      : data?.list || [];
+    revisions[view] = data?.revision;
     trees.value = { ...trees.value, [view]: list };
     loaded.value = { ...loaded.value, [view]: true };
     emit("treeLoaded", view, list);
-    if (props.modelValue.expandedKeys[view].length === 0) {
+    if (firstLoad && !treesInitialized.has(view) && props.modelValue.expandedKeys[view].length === 0) {
       updateState({
         ...props.modelValue,
         view: activeView,
         expandedKeys: { ...props.modelValue.expandedKeys, [view]: collectExpandableKeys(list) }
       });
     }
+    await nextTick();
+    if (activeView === view && view === "business" && !props.modelValue.selectedKey.business) {
+      const firstResourceGroup = list.find(node => node.count > 0 || node.children?.some(child => child.count > 0));
+      if (firstResourceGroup) {
+        const nextState = selectDirectory({
+          ...props.modelValue, view: "business",
+          expandedKeys: { ...props.modelValue.expandedKeys, business: props.modelValue.expandedKeys.business.length ? props.modelValue.expandedKeys.business : collectExpandableKeys(list) }
+        }, firstResourceGroup.key);
+        updateState(nextState);
+        emit("select", firstResourceGroup);
+      }
+    }
+    treesInitialized.add(view);
   } catch (error: any) {
-    if (requestToken === requestTokens[view]) Message.error(error?.message || "目录加载失败");
+    if (!disposed && requestToken === requestTokens[view]) {
+      delete revisions[view];
+      if (!background) Message.error(error?.message || "目录加载失败");
+    }
   } finally {
+    if (requestToken === requestTokens[view]) pending.delete(view);
     if (currentLoadingToken === loadingToken) loading.value = false;
   }
 }
@@ -123,9 +172,10 @@ async function load(view: DirectoryView, force = false) {
 async function changeView(view: DirectoryView) {
   if (view === props.modelValue.view) return;
   activeView = view;
+  persistDirectoryViewPreference(view);
   updateState(switchDirectoryView(props.modelValue, view));
   emit("viewChange", view);
-  await load(view);
+  await load(view, true);
 }
 
 function toggle(node: DirectoryNode) {
@@ -135,12 +185,12 @@ function toggle(node: DirectoryNode) {
 }
 
 function choose(node: DirectoryNode) {
+  if (node.device) {
+    emit("deviceSelect", node.device);
+    return;
+  }
   updateState(selectDirectory(props.modelValue, node.key));
   emit("select", node);
-}
-
-function actionAllowed(node: DirectoryNode) {
-  return props.canManage && props.modelValue.view === "custom" && node.type === "group" && !node.readOnly;
 }
 
 function nodeTitle(node: DirectoryNode) {
@@ -152,7 +202,9 @@ async function refresh(view: DirectoryView = props.modelValue.view) {
   await load(view, true);
 }
 
-defineExpose({ refresh });
+async function sync() { await load(props.modelValue.view, true, true); }
+
+defineExpose({ refresh, sync });
 onMounted(() => load(props.modelValue.view));
 </script>
 
@@ -161,18 +213,6 @@ onMounted(() => load(props.modelValue.view));
     <div class="directory-head">
       <div class="directory-title"><FolderTree :size="14" /><span>设备目录</span></div>
       <div class="directory-actions">
-        <a-tooltip v-if="modelValue.view === 'custom'" content="新建根分组">
-          <button
-            data-action="create-root"
-            class="icon-button"
-            type="button"
-            aria-label="新建根分组"
-            :disabled="!canManage"
-            @click="emit('create', null)"
-          >
-            <FolderPlus :size="14" />
-          </button>
-        </a-tooltip>
         <a-tooltip content="刷新目录">
           <button class="icon-button uvp-refresh-btn" type="button" aria-label="刷新目录" @click="refresh()">
             <RefreshCcw :size="13" :class="{ spin: loading }" />
@@ -182,17 +222,6 @@ onMounted(() => load(props.modelValue.view));
     </div>
 
     <div class="directory-switch" role="tablist" aria-label="目录类型">
-      <button
-        data-view="national"
-        type="button"
-        role="tab"
-        :aria-selected="modelValue.view === 'national'"
-        :class="{ active: modelValue.view === 'national' }"
-        @click="changeView('national')"
-      >
-        <MapPin :size="13" aria-hidden="true" />
-        <span>综合目录</span>
-      </button>
       <button
         data-view="administrative"
         type="button"
@@ -205,6 +234,17 @@ onMounted(() => load(props.modelValue.view));
         <span>行政区划</span>
       </button>
       <button
+        data-view="department"
+        type="button"
+        role="tab"
+        :aria-selected="modelValue.view === 'department'"
+        :class="{ active: modelValue.view === 'department' }"
+        @click="changeView('department')"
+      >
+        <Folder :size="13" aria-hidden="true" />
+        <span>部门目录</span>
+      </button>
+      <button
         data-view="business"
         type="button"
         role="tab"
@@ -213,18 +253,7 @@ onMounted(() => load(props.modelValue.view));
         @click="changeView('business')"
       >
         <FolderTree :size="13" aria-hidden="true" />
-        <span>业务组织</span>
-      </button>
-      <button
-        data-view="custom"
-        type="button"
-        role="tab"
-        :aria-selected="modelValue.view === 'custom'"
-        :class="{ active: modelValue.view === 'custom' }"
-        @click="changeView('custom')"
-      >
-        <Folder :size="13" aria-hidden="true" />
-        <span>自定义分组</span>
+        <span>业务分组</span>
       </button>
     </div>
 
@@ -247,11 +276,11 @@ onMounted(() => load(props.modelValue.view));
           :key="node.key"
           :data-node-key="node.key"
           class="directory-row"
-          :class="{ active: selectedKey === node.key }"
+          :class="{ active: selectedKey === node.key || selectedDeviceId === node.device?.id, 'directory-row-device': Boolean(node.device) }"
           :style="{ paddingLeft: `${8 + level * 14}px` }"
           :title="nodeTitle(node)"
           role="treeitem"
-          :aria-selected="selectedKey === node.key"
+          :aria-selected="selectedKey === node.key || selectedDeviceId === node.device?.id"
         >
           <button
             class="twist-button"
@@ -263,30 +292,34 @@ onMounted(() => load(props.modelValue.view));
           >
             <ChevronRight :size="12" />
           </button>
-          <button class="directory-node" type="button" @click="choose(node)">
-            <MapPin v-if="node.type === 'area' || node.type === 'unknown'" :size="13" />
-            <Folder v-else :size="13" />
-            <span class="node-name">{{ node.name }}</span>
-            <span
-              class="node-count"
-              :aria-label="`在线设备 ${node.onlineCount} 台，共 ${node.count} 台`"
-              :title="`在线 ${node.onlineCount} / 总数 ${node.count}`"
-            >
-              <span class="node-online-count">{{ node.onlineCount }}</span
-              ><span aria-hidden="true">/</span><span>{{ node.count }}</span>
-            </span>
-          </button>
-          <a-dropdown v-if="actionAllowed(node)" trigger="click" position="br">
-            <button class="more-button" type="button" aria-label="分组操作"><MoreHorizontal :size="14" /></button>
-            <template #content>
-              <a-menu>
-                <a-menu-item @click="emit('create', node)">新建子分组</a-menu-item>
-                <a-menu-item data-action="rename" @click="emit('rename', node)">重命名</a-menu-item>
-                <a-menu-item @click="emit('move', node)">移动</a-menu-item>
-                <a-menu-item @click="emit('delete', node)">删除</a-menu-item>
-              </a-menu>
+          <button class="directory-node" :class="{ 'directory-device-node': node.device }" type="button" @click="choose(node)">
+            <template v-if="node.device">
+              <span class="device-node-icon" :class="{ online: node.device.online }"><Circle :size="8" fill="currentColor" /></span>
+              <span class="device-node-copy">
+                <span class="node-name">{{ node.name }}</span>
+                <span class="device-node-code">{{ node.device.deviceId }}</span>
+              </span>
+              <span class="device-node-status" :class="{ online: node.device.online }">{{ node.device.online ? "在线" : "离线" }}</span>
             </template>
-          </a-dropdown>
+            <template v-else>
+              <MapPin v-if="node.type === 'area' || node.type === 'unknown'" :size="13" />
+              <Camera v-else-if="node.type === 'channel'" :size="13" class="channel-node-icon" />
+              <FolderTree v-else-if="node.type === 'biz_group'" :size="13" />
+              <Folder v-else :size="13" />
+              <span class="node-name">{{ node.name }}</span>
+              <span v-if="node.meta?.sourceName && node.type !== 'channel'" class="node-source">{{ node.meta.sourceName }}</span>
+              <span v-if="node.type === 'channel'" class="channel-status" :class="{ online: node.onlineCount > 0 }"><Circle :size="8" fill="currentColor" />{{ node.onlineCount > 0 ? "在线" : "离线" }}</span>
+              <span
+                v-else
+                class="node-count"
+                :aria-label="modelValue.view === 'business' ? `在线通道 ${node.onlineCount} 个，共 ${node.count} 个` : `在线设备 ${node.onlineCount} 台，共 ${node.count} 台`"
+                :title="`在线 ${node.onlineCount} / 总数 ${node.count}`"
+              >
+                <span class="node-online-count">{{ node.onlineCount }}</span
+                ><span aria-hidden="true">/</span><span>{{ node.count }}</span>
+              </span>
+            </template>
+          </button>
         </div>
         <div v-if="!loading && visibleRows.length === 0" class="directory-empty">{{ emptyHint }}</div>
       </div>
@@ -295,6 +328,10 @@ onMounted(() => load(props.modelValue.view));
 </template>
 
 <style scoped>
+.node-source { max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--color-text-3); }
+.channel-status { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; font-size: 11px; color: #f53f3f; white-space: nowrap; }
+.channel-status.online { color: #00b42a; }
+
 .directory-panel {
   display: flex;
   flex-direction: column;
@@ -331,7 +368,6 @@ onMounted(() => load(props.modelValue.view));
   gap: 2px;
 }
 .icon-button,
-.more-button,
 .twist-button {
   display: inline-grid;
   place-items: center;
@@ -345,14 +381,13 @@ onMounted(() => load(props.modelValue.view));
   border-radius: 5px;
 }
 .icon-button:hover,
-.more-button:hover,
 .twist-button:hover {
   color: var(--uvp-brand);
   background: var(--uvp-sidebar-active-bg);
 }
 .directory-switch {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 2px;
   padding: 2px;
   margin: 10px 12px 8px;
@@ -363,13 +398,13 @@ onMounted(() => load(props.modelValue.view));
 .directory-switch button {
   position: relative;
   display: inline-flex;
-  gap: 4px;
+  gap: 3px;
   align-items: center;
   justify-content: center;
   min-width: 0;
   height: 28px;
-  padding: 0 8px;
-  font-size: 12px;
+  padding: 0 3px;
+  font-size: 11px;
   color: var(--uvp-text-tertiary);
   cursor: pointer;
   background: transparent;
@@ -442,6 +477,9 @@ onMounted(() => load(props.modelValue.view));
   height: 32px;
   border-radius: 5px;
 }
+.directory-row-device {
+  height: 42px;
+}
 .directory-row:hover,
 .directory-row.active {
   color: var(--uvp-text-primary);
@@ -475,6 +513,47 @@ onMounted(() => load(props.modelValue.view));
   flex: 0 0 auto;
   color: var(--uvp-brand);
 }
+.directory-device-node {
+  gap: 7px;
+}
+.device-node-icon {
+  display: inline-grid;
+  flex: 0 0 16px;
+  place-items: center;
+  color: var(--uvp-danger);
+}
+.device-node-icon.online {
+  color: #158052;
+}
+:global(body[arco-theme="dark"] .directory-panel .device-node-icon.online) {
+  color: #86efac;
+}
+.device-node-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  line-height: 1.15;
+}
+.device-node-code {
+  overflow: hidden;
+  font-size: 10px;
+  color: var(--uvp-text-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.device-node-status {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--uvp-text-tertiary);
+}
+.device-node-status.online {
+  color: #158052;
+}
+:global(body[arco-theme="dark"] .directory-panel .device-node-status.online) {
+  color: #86efac;
+}
 .node-name {
   flex: 1;
   min-width: 0;
@@ -497,12 +576,6 @@ onMounted(() => load(props.modelValue.view));
 }
 :global(body[arco-theme="dark"] .directory-panel .node-online-count) {
   color: #86efac;
-}
-.more-button {
-  flex: 0 0 24px;
-  width: 24px;
-  height: 24px;
-  margin-right: 3px;
 }
 .directory-empty {
   display: grid;

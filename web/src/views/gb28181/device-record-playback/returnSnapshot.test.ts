@@ -5,6 +5,8 @@ const snapshot: DeviceMgmtReturnSnapshot = {
   version: 1,
   viewMode: "list",
   assetKind: "channel",
+  navigationMode: "device",
+  selectedDeviceId: 31,
   keyword: "东门",
   deviceIdFilter: "34020000002000000001",
   statusFilter: "online",

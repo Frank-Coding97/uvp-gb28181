@@ -26,9 +26,16 @@ func TestBuildNationalTreeReadableHierarchyAndUnknown(t *testing.T) {
 	require.Equal(t, 1, tree[0].OnlineCount)
 	require.Equal(t, "济南市", tree[0].Children[0].Name)
 	require.Equal(t, "历城区", tree[0].Children[0].Children[0].Name)
+	county := tree[0].Children[0].Children[0]
+	require.Len(t, county.Children, 2)
+	require.Equal(t, "device", county.Children[0].Type)
+	require.Equal(t, "37011200001180000001", county.Children[0].Device.DeviceID)
+	require.Equal(t, "device", county.Children[1].Type)
 	require.Equal(t, "national:unknown", tree[1].Key)
 	require.Equal(t, 1, tree[1].Count)
 	require.True(t, tree[1].ReadOnly)
+	require.Len(t, tree[1].Children, 1)
+	require.Equal(t, "invalid", tree[1].Children[0].Device.DeviceID)
 }
 
 func TestBuildNationalTreeEmpty(t *testing.T) {
@@ -40,13 +47,13 @@ func TestBuildNationalTreeEmpty(t *testing.T) {
 
 func TestBuildNationalTreeKeepsReportedOrganizations(t *testing.T) {
 	db := newPlacementDB(t)
-	device := gbmodels.GbDevice{DeviceID: "37011200001180000001", OwnerDeptID: 10}
+	device := gbmodels.GbDevice{DeviceID: "invalid", OwnerDeptID: 10}
 	require.NoError(t, db.Create(&device).Error)
 	area := gbmodels.GbCatalogNode{OwnerDeptID: 10, NodeType: gbmodels.NodeTypeCivilCode, Path: "/", Name: "行政区 370112", CivilCode: "370112", Source: gbmodels.NodeSourceCatalog}
 	require.NoError(t, db.Create(&area).Error)
 	org := gbmodels.GbCatalogNode{OwnerDeptID: 10, NodeType: gbmodels.NodeTypeBizGroup, ParentID: &area.ID, Path: "/", Name: "园区 A", Source: gbmodels.NodeSourceCatalog}
 	require.NoError(t, db.Create(&org).Error)
-	deviceNode := gbmodels.GbCatalogNode{OwnerDeptID: 10, NodeType: gbmodels.NodeTypeDevice, ParentID: &org.ID, Path: "/", DeviceID: &device.ID, Source: gbmodels.NodeSourceCatalog}
+	deviceNode := gbmodels.GbCatalogNode{OwnerDeptID: 10, NodeType: gbmodels.NodeTypeDevice, Code: device.DeviceID, ParentID: &org.ID, Path: "/", Source: gbmodels.NodeSourceCatalog}
 	require.NoError(t, db.Create(&deviceNode).Error)
 
 	tree, err := BuildNationalTree(context.Background(), db, 10, testCivilLookup())
@@ -56,4 +63,7 @@ func TestBuildNationalTreeKeepsReportedOrganizations(t *testing.T) {
 	require.Equal(t, "园区 A", county.Children[0].Name)
 	require.Equal(t, "organization", county.Children[0].Type)
 	require.Equal(t, 1, county.Children[0].Count)
+	require.Len(t, county.Children[0].Children, 1)
+	require.Equal(t, "device", county.Children[0].Children[0].Type)
+	require.Equal(t, "invalid", county.Children[0].Children[0].Device.DeviceID)
 }

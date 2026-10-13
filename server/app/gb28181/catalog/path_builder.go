@@ -54,7 +54,12 @@ func DepthFromPath(path string) uint8 {
 // 例:civilCode="370112" → 先找/建 "37"(省) → "3701"(市) → "370112"(区县)三级节点
 // 返回最末端节点。注:当前简化实现按 6 位级别(2+2+2)拆分,实际 GB/T 2260
 // 行政区码可能要按字典层级拆,Phase 2 可优化。
-func findOrCreateCivilCodeChain(db *gorm.DB, ownerDeptID uint, civilCode string) (*gbmodels.GbCatalogNode, error) {
+func findOrCreateCivilCodeChain(
+	db *gorm.DB,
+	ownerDeptID uint,
+	civilCode string,
+	cache map[string]*gbmodels.GbCatalogNode,
+) (*gbmodels.GbCatalogNode, error) {
 	if civilCode == "" {
 		return nil, nil
 	}
@@ -72,6 +77,10 @@ func findOrCreateCivilCodeChain(db *gorm.DB, ownerDeptID uint, civilCode string)
 
 	var prev *gbmodels.GbCatalogNode
 	for _, c := range codes {
+		if node := cache[c]; node != nil {
+			prev = node
+			continue
+		}
 		var parentID *uint
 		parentPath := "/"
 		if prev != nil {
@@ -82,6 +91,7 @@ func findOrCreateCivilCodeChain(db *gorm.DB, ownerDeptID uint, civilCode string)
 		if err != nil {
 			return nil, err
 		}
+		cache[c] = node
 		prev = node
 	}
 	return prev, nil
@@ -100,23 +110,54 @@ func findOrCreateNode(
 	parentPath string,
 	name string,
 ) (*gbmodels.GbCatalogNode, error) {
+	return findOrCreateNodeWithSource(db, ownerDeptID, "", nodeType, code, parentID, parentPath, name, false)
+}
+
+// findOrCreateSourceNode 按“归属部门 + 上报来源 + 节点类型 + 编码”复用目录节点。
+// ParentID 是可变关系，不能参与身份查找：父节点晚到或通道移动时应修正同一
+// 节点的父关系和物化路径，而不是再造一个同编码节点。
+func findOrCreateSourceNode(
+	db *gorm.DB,
+	ownerDeptID uint,
+	sourceDeviceID string,
+	nodeType gbmodels.NodeType,
+	code string,
+	parentID *uint,
+	parentPath string,
+	name string,
+) (*gbmodels.GbCatalogNode, error) {
+	return findOrCreateNodeWithSource(db, ownerDeptID, sourceDeviceID, nodeType, code, parentID, parentPath, name, true)
+}
+
+func findOrCreateNodeWithSource(
+	db *gorm.DB,
+	ownerDeptID uint,
+	sourceDeviceID string,
+	nodeType gbmodels.NodeType,
+	code string,
+	parentID *uint,
+	parentPath string,
+	name string,
+	moveByIdentity bool,
+) (*gbmodels.GbCatalogNode, error) {
 	var existed gbmodels.GbCatalogNode
-	q := db.Where("owner_dept_id = ? AND node_type = ? AND code = ?", ownerDeptID, nodeType, code)
-	if parentID != nil {
-		q = q.Where("parent_id = ?", *parentID)
-	} else {
-		q = q.Where("parent_id IS NULL")
+	q := db.Where("owner_dept_id = ? AND node_type = ? AND code = ?", ownerDeptID, nodeType, code).
+		Where("(source = ? OR source = ?)", gbmodels.NodeSourceCatalog, "").
+		Where("source_device_id = ?", strings.TrimSpace(sourceDeviceID))
+	if !moveByIdentity {
+		if parentID != nil {
+			q = q.Where("parent_id = ?", *parentID)
+		} else {
+			q = q.Where("parent_id IS NULL")
+		}
 	}
-	res := q.Limit(1).Find(&existed)
+	res := q.Order("id").Limit(1).Find(&existed)
 	if res.Error != nil {
 		return nil, res.Error
 	}
 	if res.RowsAffected > 0 {
-		if ownerDeptID != 0 && existed.OwnerDeptID == 0 {
-			if err := db.Model(&existed).Update("owner_dept_id", ownerDeptID).Error; err != nil {
-				return nil, err
-			}
-			existed.OwnerDeptID = ownerDeptID
+		if err := updateCatalogNodePlacement(db, &existed, parentID, parentPath, name, sourceDeviceID); err != nil {
+			return nil, err
 		}
 		return &existed, nil
 	}
@@ -130,14 +171,15 @@ func findOrCreateNode(
 	// (历史 bug:之前还多 +1,把行政区链算成 0→2→3 跳级。)
 	depth := DepthFromPath(parentPath)
 	n := &gbmodels.GbCatalogNode{
-		OwnerDeptID: ownerDeptID,
-		NodeType:    nodeType,
-		ParentID:    parentID,
-		Path:        "/", // 创建后用 ID 回填
-		Depth:       depth,
-		Name:        name,
-		Code:        code,
-		Source:      gbmodels.NodeSourceCatalog,
+		OwnerDeptID:    ownerDeptID,
+		NodeType:       nodeType,
+		ParentID:       parentID,
+		Path:           "/", // 创建后用 ID 回填
+		Depth:          depth,
+		Name:           fallbackName(name, code),
+		Code:           code,
+		SourceDeviceID: strings.TrimSpace(sourceDeviceID),
+		Source:         gbmodels.NodeSourceCatalog,
 	}
 	if nodeType == gbmodels.NodeTypeCivilCode {
 		n.CivilCode = code
@@ -151,6 +193,98 @@ func findOrCreateNode(
 		return nil, err
 	}
 	return n, nil
+}
+
+// updateCatalogNodePlacement 更新目录项的可变父关系，并同步所有后代的物化路径。
+// 这一步既覆盖父节点晚到，也覆盖通道/虚拟组织移动；不改变人工节点的 source。
+func updateCatalogNodePlacement(
+	db *gorm.DB,
+	node *gbmodels.GbCatalogNode,
+	parentID *uint,
+	parentPath string,
+	name string,
+	sourceDeviceID string,
+) error {
+	if parentPath == "" {
+		parentPath = "/"
+	}
+	oldPath := node.Path
+	if oldPath == "" {
+		oldPath = "/"
+	}
+	newPath := BuildPath(parentPath, node.ID)
+	newDepth := nodeDepthFromPath(newPath)
+	name = strings.TrimSpace(name)
+	sourceDeviceID = strings.TrimSpace(sourceDeviceID)
+	parentUnchanged := node.ParentID == nil && parentID == nil
+	if node.ParentID != nil && parentID != nil {
+		parentUnchanged = *node.ParentID == *parentID
+	}
+	placementUnchanged := oldPath == newPath && node.Depth == newDepth
+	metadataUnchanged := node.Source == gbmodels.NodeSourceCatalog &&
+		(sourceDeviceID == "" || node.SourceDeviceID == sourceDeviceID) &&
+		(name == "" || node.Name == name)
+	updates := map[string]any{
+		"parent_id": parentID,
+		"path":      newPath,
+		"depth":     newDepth,
+		"source":    gbmodels.NodeSourceCatalog,
+	}
+	if sourceDeviceID != "" {
+		updates["source_device_id"] = strings.TrimSpace(sourceDeviceID)
+	}
+	if strings.TrimSpace(name) != "" {
+		updates["name"] = strings.TrimSpace(name)
+	}
+	if node.OwnerDeptID == 0 {
+		updates["owner_dept_id"] = node.OwnerDeptID
+	}
+	if !parentUnchanged || !placementUnchanged || !metadataUnchanged {
+		if err := db.Model(node).Updates(updates).Error; err != nil {
+			return err
+		}
+	}
+
+	node.ParentID = parentID
+	node.Path = newPath
+	node.Depth = newDepth
+	node.Source = gbmodels.NodeSourceCatalog
+	if name != "" {
+		node.Name = name
+	}
+	if sourceDeviceID != "" {
+		node.SourceDeviceID = sourceDeviceID
+	}
+	if placementUnchanged {
+		return nil
+	}
+
+	var descendants []gbmodels.GbCatalogNode
+	if err := db.Where("owner_dept_id = ? AND id <> ? AND path LIKE ?", node.OwnerDeptID, node.ID, oldPath+"%").Find(&descendants).Error; err != nil {
+		return err
+	}
+	for i := range descendants {
+		descendant := &descendants[i]
+		suffix := strings.TrimPrefix(descendant.Path, oldPath)
+		path := newPath + suffix
+		if err := db.Model(descendant).Updates(map[string]any{
+			"path":  path,
+			"depth": nodeDepthFromPath(path),
+		}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// nodeDepthFromPath 返回目录节点的零基深度；DepthFromPath 返回路径段数，
+// 两者相差一个节点自身段。根节点路径为 /，深度仍为 0。
+func nodeDepthFromPath(path string) uint8 {
+	segments := DepthFromPath(path)
+	if segments == 0 {
+		return 0
+	}
+	return segments - 1
 }
 
 // civilCodeDisplayName 行政区码占位显示名(无字典 lookup 时)

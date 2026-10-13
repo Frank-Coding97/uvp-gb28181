@@ -5,6 +5,8 @@ export interface DeviceMgmtReturnSnapshot {
   version: 1;
   viewMode: DeviceMgmtViewMode;
   assetKind: DeviceMgmtAssetKind;
+  navigationMode?: "device" | "directory";
+  selectedDeviceId?: number;
   keyword: string;
   deviceIdFilter: string;
   statusFilter?: "online" | "offline";

@@ -527,6 +527,42 @@ func TestDeviceMgmt_ListChannels_FilterByDeviceID(t *testing.T) {
 	}
 }
 
+func TestDeviceMgmt_ListChannels_BusinessGroupFiltersChannelsWithinSameDevice(t *testing.T) {
+	r, db := newDeviceMgmtRouter(t)
+	deviceID := "34020000001180000001"
+	channels := []gbmodels.GbChannel{
+		{OwnerDeptID: 10, DeviceID: deviceID, ChannelID: "34020000001320000001", Name: "业务组A通道"},
+		{OwnerDeptID: 10, DeviceID: deviceID, ChannelID: "34020000001320000002", Name: "业务组B通道"},
+		{OwnerDeptID: 10, DeviceID: deviceID, ChannelID: "34020000001320000003", Name: "未归属通道"},
+	}
+	for i := range channels {
+		require.NoError(t, db.Create(&channels[i]).Error)
+	}
+	groupA := gbmodels.GbCatalogNode{OwnerDeptID: 10, NodeType: gbmodels.NodeTypeBizGroup, Name: "业务组A", Code: "34020000002150000001", Path: "/"}
+	groupB := gbmodels.GbCatalogNode{OwnerDeptID: 10, NodeType: gbmodels.NodeTypeBizGroup, Name: "业务组B", Code: "34020000002150000002", Path: "/"}
+	require.NoError(t, db.Create(&groupA).Error)
+	require.NoError(t, db.Create(&groupB).Error)
+	virtualA := gbmodels.GbCatalogNode{OwnerDeptID: 10, NodeType: gbmodels.NodeTypeVirtualOrg, Name: "虚拟目录A", Code: "34020000002160000001", ParentID: &groupA.ID, Path: "/"}
+	virtualB := gbmodels.GbCatalogNode{OwnerDeptID: 10, NodeType: gbmodels.NodeTypeVirtualOrg, Name: "虚拟目录B", Code: "34020000002160000002", ParentID: &groupB.ID, Path: "/"}
+	require.NoError(t, db.Create(&virtualA).Error)
+	require.NoError(t, db.Create(&virtualB).Error)
+	for index, parent := range []*gbmodels.GbCatalogNode{&virtualA, &virtualB} {
+		channel := channels[index]
+		node := gbmodels.GbCatalogNode{OwnerDeptID: 10, NodeType: gbmodels.NodeTypeChannel, Name: channel.Name, Code: channel.ChannelID, ChannelID: &channel.ID, ParentID: &parent.ID, Path: "/"}
+		require.NoError(t, db.Create(&node).Error)
+	}
+
+	w := httptest.NewRecorder()
+	path := "/api/gb28181/device-mgmt/channels?directoryView=business&directoryKey=business:catalog:" + uintStr(groupA.ID)
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+	resp := unmarshal(t, w)
+	data := resp["data"].(map[string]any)
+	assert.EqualValues(t, 1, data["total"], "同一台 NVR 上属于其他业务组及未归属的通道不能混入")
+	list := data["list"].([]any)
+	require.Len(t, list, 1)
+	assert.Equal(t, channels[0].ChannelID, list[0].(map[string]any)["channelId"])
+}
+
 func TestDeviceMgmt_GetChannel(t *testing.T) {
 	r, db := newDeviceMgmtRouter(t)
 	_, chOnID, _ := seedDevicesAndChannels(t, db)
@@ -731,4 +767,27 @@ func TestMap_Clusters_DropsSingleWhenAnotherChannelSharesTheGrid(t *testing.T) {
 	assert.Equal(t, 36.685, c["maxLat"])
 	assert.Equal(t, 117.00, c["minLng"])
 	assert.Equal(t, 117.05, c["maxLng"])
+}
+
+func TestMap_DeviceFilterAppliesToMarkersClustersAndNoCoord(t *testing.T) {
+	r, db := newDeviceMgmtRouter(t)
+	for _, channel := range []gbmodels.GbChannel{
+		{DeviceID: "A", ChannelID: "A1", Name: "A camera", Latitude: 36, Longitude: 117, Status: gbmodels.ChannelStatusOnline},
+		{DeviceID: "B", ChannelID: "B1", Name: "B camera", Latitude: 36, Longitude: 117, Status: gbmodels.ChannelStatusOnline},
+		{DeviceID: "B", ChannelID: "B2", Name: "B no coordinate"},
+	} {
+		require.NoError(t, db.Create(&channel).Error)
+	}
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/gb28181/device-mgmt/map/markers?deviceId=A", nil))
+	data := unmarshal(t, w)["data"].(map[string]any)
+	require.EqualValues(t, 1, data["total"])
+	require.Equal(t, "A1", data["list"].([]any)[0].(map[string]any)["channelId"])
+	clusters := fetchMapClusters(t, r, "deviceId=A&zoom=10")
+	require.Len(t, clusters, 1)
+	require.EqualValues(t, 1, clusters[0]["count"])
+	require.Equal(t, "A1", clusters[0]["single"].(map[string]any)["channelId"])
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/gb28181/device-mgmt/map/no-coord-count?deviceId=A", nil))
+	require.EqualValues(t, 0, unmarshal(t, w)["data"].(map[string]any)["count"])
 }

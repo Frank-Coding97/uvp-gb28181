@@ -40,7 +40,7 @@ type GbChannel struct {
 	Model        string `gorm:"column:model;size:255" json:"model"`
 	Owner        string `gorm:"column:owner;size:64" json:"owner"`
 	CivilCode    string `gorm:"column:civil_code;size:32;comment:行政区划" json:"civilCode"`
-	ParentID     string `gorm:"column:parent_id;size:20;comment:父节点编码" json:"parentId"`
+	ParentID     string `gorm:"column:parent_id;size:512;comment:父节点编码,2022 多父值按 / 原样保存" json:"parentId"`
 	PTZType      int8   `gorm:"column:ptz_type;comment:云台类型 0未知 1球机 2半球 3固定枪机 4遥控枪机 5遥控半球 6多目全景/拼接通道 7多目分割通道(5-7 为 2022 新增)" json:"ptzType"`
 	// ---- 通道属性(GB/T 28181 附录 A / §9.3.1),全部来自 Catalog Item 的 <Info> 容器 ----
 	// ⛔ 0 / '' 表示"设备未上报该属性",不是"该属性为 0" —— 落库侧据此决定是否覆盖。

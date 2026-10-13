@@ -48,11 +48,11 @@ const message = computed(() => {
   return "等待同步中";
 });
 
-const channelCountLabel = computed(() => {
+const catalogItemCountLabel = computed(() => {
   const progress = props.progress;
   const receivedCount = progress?.receivedCount ?? 0;
-  if (progress?.totalCount != null) return `已刷新 ${receivedCount} / ${progress.totalCount} 个通道`;
-  return `已刷新 ${receivedCount} 个通道`;
+  if (progress?.totalCount != null) return `已刷新 ${receivedCount} / ${progress.totalCount} 个目录项`;
+  return `已刷新 ${receivedCount} 个目录项`;
 });
 
 function clearCloseTimer() {
@@ -90,21 +90,52 @@ onBeforeUnmount(clearCloseTimer);
     @cancel="close"
   >
     <div class="catalog-refresh-progress" :aria-label="`${deviceName || deviceId}刷新进度`">
+      <button class="progress-close" type="button" aria-label="关闭刷新进度" title="关闭" @click.stop="close">×</button>
       <a-progress type="circle" :percent="progressRatio" :status="progressStatus" :width="120" />
       <div class="progress-message">{{ message }}</div>
-      <div class="progress-count">{{ channelCountLabel }}</div>
+      <div class="progress-count">{{ catalogItemCountLabel }}</div>
     </div>
   </a-modal>
 </template>
 
 <style scoped>
 .catalog-refresh-progress {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 12px;
   align-items: center;
   padding: 4px 0 8px;
   text-align: center;
+}
+
+.progress-close {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  z-index: 1;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-3);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.progress-close:hover {
+  background: var(--color-fill-2);
+  color: var(--color-text-1);
+}
+
+.progress-close:focus-visible {
+  outline: 2px solid var(--color-primary-6);
+  outline-offset: 2px;
 }
 
 .progress-message {

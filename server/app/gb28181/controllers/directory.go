@@ -2,9 +2,11 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -19,7 +21,8 @@ import (
 
 type DirectoryController struct {
 	controllers.Common
-	db func() *gorm.DB
+	db        func() *gorm.DB
+	syncCache *gbdirectory.SyncCache
 }
 
 func NewDirectoryController(db ...func() *gorm.DB) *DirectoryController {
@@ -27,14 +30,14 @@ func NewDirectoryController(db ...func() *gorm.DB) *DirectoryController {
 	if len(db) > 0 && db[0] != nil {
 		provider = db[0]
 	}
-	return &DirectoryController{db: provider}
+	return &DirectoryController{db: provider, syncCache: gbdirectory.NewSyncCache()}
 }
 
 func (dc *DirectoryController) SetDB(provider func() *gorm.DB) { dc.db = provider }
 
 func (dc *DirectoryController) Tree(c *gin.Context) {
 	view := c.Query("view")
-	if view != "national" && view != "administrative" && view != "business" && view != "custom" {
+	if view != "national" && view != "administrative" && view != "department" && view != "business" && view != "custom" {
 		dc.Fail(c, "目录视图参数错误", nil, http.StatusBadRequest)
 		return
 	}
@@ -43,13 +46,23 @@ func (dc *DirectoryController) Tree(c *gin.Context) {
 		dc.Fail(c, "DB 未就绪", nil, http.StatusServiceUnavailable)
 		return
 	}
-	deptIDs, err := visibleDirectoryDeptIDs(c, db)
-	if err != nil {
-		dc.Fail(c, "读取目录数据范围失败", err, http.StatusInternalServerError)
-		return
-	}
 	var tree []gbdirectory.DirectoryNodeVO
-	if view == "national" || view == "administrative" || view == "business" {
+	var deptIDs []uint
+	var err error
+	if view == "department" {
+		var buildErr error
+		tree, deptIDs, buildErr = buildDepartmentDirectoryTree(c, db)
+		if buildErr != nil {
+			dc.Fail(c, "生成部门目录失败", buildErr, http.StatusInternalServerError)
+			return
+		}
+	} else if view == "national" || view == "administrative" || view == "business" {
+		var scopeErr error
+		deptIDs, scopeErr = visibleDirectoryDeptIDs(c, db)
+		if scopeErr != nil {
+			dc.Fail(c, "读取目录数据范围失败", scopeErr, http.StatusInternalServerError)
+			return
+		}
 		lookup := civilcode.NewService(db)
 		if err := lookup.WarmCache(c.Request.Context()); err != nil {
 			dc.Fail(c, "加载行政区字典失败", err, http.StatusInternalServerError)
@@ -73,6 +86,12 @@ func (dc *DirectoryController) Tree(c *gin.Context) {
 			tree = mergeDirectoryNodes(tree, part)
 		}
 	} else {
+		var scopeErr error
+		deptIDs, scopeErr = visibleDirectoryDeptIDs(c, db)
+		if scopeErr != nil {
+			dc.Fail(c, "读取目录数据范围失败", scopeErr, http.StatusInternalServerError)
+			return
+		}
 		deptNames, nameErr := directoryDeptNames(c.Request.Context(), db, deptIDs)
 		if nameErr != nil {
 			dc.Fail(c, "读取部门名称失败", nameErr, http.StatusInternalServerError)
@@ -94,6 +113,16 @@ func (dc *DirectoryController) Tree(c *gin.Context) {
 	}
 	if tree == nil {
 		tree = []gbdirectory.DirectoryNodeVO{}
+	}
+	tree, err = filterDirectoryResources(c, db, tree)
+	if err != nil {
+		dc.Fail(c, "筛选目录资源失败", err, http.StatusInternalServerError)
+		return
+	}
+	if c.Query("sync") == "1" {
+		scope, _ := json.Marshal([]any{deptIDs, view, c.Query("assetKind"), strings.TrimSpace(c.Query("q")), c.Query("status")})
+		dc.Success(c, dc.syncCache.Sync(string(scope), c.Query("since"), tree))
+		return
 	}
 	dc.Success(c, gin.H{"list": tree})
 }
