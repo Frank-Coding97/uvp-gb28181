@@ -35,6 +35,20 @@ func testClientResponder(t testing.TB, f func(req *sip.Request, w *siptest.Clien
 	return client
 }
 
+// testClientWithOptions 与 testClient 相同，只是允许带 ClientOption。
+func testClientWithOptions(t testing.TB, options ...ClientOption) *Client {
+	t.Helper()
+	ua, _ := NewUA()
+	client, err := NewClient(ua, options...)
+	require.NoError(t, err)
+	client.TxRequester = &siptest.ClientTxRequester{
+		OnRequest: func(req *sip.Request) *sip.Response {
+			return sip.NewResponseFromRequest(req, sip.StatusOK, "OK", nil)
+		},
+	}
+	return client
+}
+
 func TestDialogClientRequestRecordRouteHeaders(t *testing.T) {
 	client := testClient(t, func(req *sip.Request) *sip.Response {
 		return sip.NewResponseFromRequest(req, 200, "OK", nil)
@@ -341,6 +355,114 @@ func TestDialogClientMultiResponses(t *testing.T) {
 		assert.Equal(t, d.InviteRequest.CSeq().SeqNo, sentReq.CSeq().SeqNo)
 	})
 
+}
+
+// TestDialogClientBuildReqUnroutableContactDestination 钉住「Contact 不可路由时
+// 回退到响应来源」这条新维度。
+//
+// 真实报文实测:GB28181 设备的 200 OK 把**平台 SIP 域**当成了 Contact 的 host
+// ( `Contact: <sip:37010000001310000001@3701000000>` )。RFC 3261 §13.2.2.4 要求
+// ACK 的 Request-URI 必须用这个 Contact,而传输层把它当主机名解析 —— 先 IP 解析
+// 失败,再退 DNS SRV `_sip._udp.3701000000`,必然 NXDOMAIN ⇒ ACK 永远发不出去 ⇒
+// 平台判 `发送 ACK 失败`、回滚 RTP 端口,整个点播以 HTTP 400 / 47B「点播失败」收场。
+//
+// 上游 sipgo 在 DialogServerSession.buildReq 里留了同一句 TODO
+// ("check is contact header routable. If not then we should force destination as
+// source address")。这里只补维度、不翻语义:
+//   - Request-URI 必须仍是 Contact(RFC 语义不许动);
+//   - 开关默认关闭,默认行为与上游逐字一致(域名照样由传输层去解析);
+//   - Contact 已经是合法 IP 时开关不生效;
+//   - 有 Record-Route 时路由集优先,绝不回退;
+//   - 响应来源为空时不做任何猜测。
+func TestDialogClientBuildReqUnroutableContactDestination(t *testing.T) {
+	const (
+		deviceChannel   = "34020000001310000001"
+		deviceContactIP = "192.168.10.52"
+		peerSource      = "192.168.10.52:15090"
+		domainContact   = "sip:" + deviceChannel + "@3701000000"
+		ipContact       = "sip:" + deviceChannel + "@192.168.10.52:15090"
+	)
+
+	buildACK := func(t *testing.T, contactHost string, contactPort int, source string, recordRoute []string, fallback bool) *sip.Request {
+		t.Helper()
+		options := []ClientOption{}
+		if fallback {
+			options = append(options, WithClientFallbackToResponseSource(true))
+		}
+		client := testClientWithOptions(t, options...)
+
+		invite := sip.NewRequest(sip.INVITE, sip.Uri{User: deviceChannel, Host: deviceContactIP, Port: 15090})
+		invite.AppendHeader(&sip.ContactHeader{Address: sip.Uri{User: "34020000002000000001", Host: "192.168.10.220", Port: 5060}})
+		invite.SetTransport("UDP")
+		require.NoError(t, clientRequestBuildReq(client, invite))
+
+		response := sip.NewResponseFromRequest(invite, sip.StatusOK, "OK", nil)
+		response.AppendHeader(&sip.ContactHeader{Address: sip.Uri{User: deviceChannel, Host: contactHost, Port: contactPort}})
+		for _, route := range recordRoute {
+			response.AppendHeader(sip.NewHeader("Record-Route", route))
+		}
+		response.SetTransport("UDP")
+		response.SetSource(source)
+
+		session := &DialogClientSession{
+			Dialog: Dialog{InviteRequest: invite, InviteResponse: response},
+			UA:     &DialogUA{Client: client, ContactHDR: *invite.Contact()},
+		}
+		session.Dialog.Init()
+
+		ack := newAckRequestUAC(invite, response, nil)
+		session.buildReq(ack)
+		return ack
+	}
+
+	t.Run("UnroutableContactFallsBackToPeerAddress", func(t *testing.T) {
+		ack := buildACK(t, "3701000000", 0, peerSource, nil, true)
+		require.Equal(t, domainContact, ack.Recipient.String(), "Request-URI 仍是 Contact,不许改")
+		require.Equal(t, peerSource, ack.Destination(), "发送目标必须回退到响应来源")
+	})
+
+	t.Run("DefaultOptionKeepsUpstreamBehaviour", func(t *testing.T) {
+		ack := buildACK(t, "3701000000", 0, peerSource, nil, false)
+		require.Equal(t, domainContact, ack.Recipient.String())
+		require.Equal(t, "3701000000:5060", ack.Destination(), "开关默认关闭时目标仍旧由 Contact 派生")
+	})
+
+	t.Run("AddressLiteralContactIsUntouched", func(t *testing.T) {
+		ack := buildACK(t, deviceContactIP, 15090, peerSource, nil, true)
+		require.Equal(t, ipContact, ack.Recipient.String())
+		require.Equal(t, peerSource, ack.Destination(), "Contact 本身就是 IP 时不改变既有行为")
+	})
+
+	t.Run("RecordRouteWinsOverFallback", func(t *testing.T) {
+		ack := buildACK(t, "3701000000", 0, peerSource, []string{"<sip:proxy.example.com;lr>"}, true)
+		require.Equal(t, "proxy.example.com:5060", ack.Destination(), "有路由集时不得改发送目标")
+	})
+
+	t.Run("EmptyResponseSourceDoesNotGuess", func(t *testing.T) {
+		ack := buildACK(t, "3701000000", 0, "", nil, true)
+		require.Equal(t, "3701000000:5060", ack.Destination(), "来源未知时保持原样,不猜地址")
+	})
+}
+
+func TestDialogHostIsAddressLiteral(t *testing.T) {
+	for _, tc := range []struct {
+		host string
+		want bool
+	}{
+		{"192.168.10.52", true},
+		{"::1", true},
+		{"[fe80::1]", true},
+		{"3701000000", false},
+		{"uas.p2.com", false},
+		{"localhost", false},
+		{"", false},
+		{"  ", false},
+		{"not an ip", false},
+	} {
+		t.Run(tc.host, func(t *testing.T) {
+			require.Equal(t, tc.want, dialogHostIsAddressLiteral(tc.host))
+		})
+	}
 }
 
 func TestDialogClientACKRetransmission(t *testing.T) {

@@ -29,6 +29,11 @@ type Client struct {
 	rport bool
 	log   *slog.Logger
 
+	// fallbackToResponseSource lets a dialog request whose Request-URI host is
+	// not an address literal fall back to the address the INVITE response came
+	// from. Off by default; see WithClientFallbackToResponseSource.
+	fallbackToResponseSource bool
+
 	connAddr sip.Addr
 
 	// TxRequester allows you to use your transaction requester instead default from transaction layer
@@ -88,6 +93,35 @@ func WithClientConnectionAddr(hostPort string) ClientOption {
 func WithClientNAT() ClientOption {
 	return func(s *Client) error {
 		s.rport = true
+		return nil
+	}
+}
+
+// WithClientFallbackToResponseSource lets in-dialog requests (ACK/BYE/INFO)
+// leave for the address the INVITE response actually came from whenever the
+// dialog request's Request-URI host is not an address literal.
+//
+// It is off by default, so a peer that advertises an unresolvable Contact keeps
+// failing at resolution exactly as before. Enable it only for peers whose
+// Contact may carry a name that the transport cannot resolve (RFC 3263 would
+// need an IP literal or a DNS name/SRV record).
+//
+// GB28181 devices are the motivating case: they routinely answer with the
+// platform SIP domain in Contact, e.g.
+//
+//	Contact: <sip:37010000001310000001@3701000000>
+//
+// Here "3701000000" is a 10 digit domain identifier, not a resolvable name, so
+// `_sip._udp.3701000000` SRV lookup always ends in NXDOMAIN and the ACK could
+// never be transmitted — the whole point-to-point play failed with a rolled
+// back RTP port. The Request-URI is still the Contact URI, so RFC 3261
+// §13.2.2.4 dialog semantics are unchanged; only the transport target moves.
+//
+// A Record-Route in the response still wins: this fallback only applies when
+// the route set is empty, i.e. the dialog is directly with the peer.
+func WithClientFallbackToResponseSource(enabled bool) ClientOption {
+	return func(s *Client) error {
+		s.fallbackToResponseSource = enabled
 		return nil
 	}
 }

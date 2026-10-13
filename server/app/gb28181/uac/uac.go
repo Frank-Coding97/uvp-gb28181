@@ -62,10 +62,18 @@ type UAC struct {
 // 设备应答会回到 server 端口但 client dialog 收不到 → WaitAnswer 永久阻塞
 // 让 sipgo 默认共享 server 的 transport;Contact 头我们手动写明 sipIP:sipPort
 func New(ua *sipgo.UserAgent, serverID, domain, advertiseIP string, sipPort int, dynamicAdvertise bool, options ...sipgo.ClientOption) (*UAC, error) {
-	clientOptions := make([]sipgo.ClientOption, 0, 1)
+	clientOptions := make([]sipgo.ClientOption, 0, 2)
 	if !dynamicAdvertise {
 		clientOptions = append(clientOptions, sipgo.WithClientHostname(advertiseIP))
 	}
+	// 国标设备的 200 OK 常把「平台 SIP 域」写进 Contact 的 host
+	// （实测 `Contact: <sip:37010000001310000001@3701000000>`）。RFC 3261
+	// §13.2.2.4 要求 ACK 的 Request-URI 继续用这个 Contact，但发送目标若跟着
+	// 去解析这个域名，ACK/BYE/INFO 必然发不出去（实测点播以 400/47B 收场）。
+	// 开关只影响「目标地址」：Contact 的主机名不是 IP 字面量时改用
+	// INVITE 应答的真实来源地址；有 Record-Route 时路由优先。默认关闭，
+	// 这里为 UAC 显式打开。
+	clientOptions = append(clientOptions, sipgo.WithClientFallbackToResponseSource(true))
 	clientOptions = append(clientOptions, options...)
 	client, err := sipgo.NewClient(ua, clientOptions...)
 	if err != nil {

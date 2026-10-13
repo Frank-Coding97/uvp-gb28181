@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
+	"strings"
 	"sync"
 	"time"
 
@@ -154,6 +156,24 @@ func (s *DialogClientSession) buildReq(req *sip.Request) {
 			}
 		} else if s.UA.RewriteContact {
 			req.SetDestination(s.InviteResponse.Source())
+		} else if s.fallbackToResponseSource() && !dialogHostIsAddressLiteral(req.Recipient.Host) {
+			// No route set, so this dialog talks to the peer directly, but the
+			// Request-URI host cannot be handed to the transport as a network
+			// destination: it would need name resolution (RFC 3263 IP, then DNS
+			// SRV) and is allowed to fail. Upstream sipgo leaves the same gap
+			// open in DialogServerSession.buildReq:
+			//
+			//   TODO check is contact header routable
+			//   If not then we should force destination as source address
+			//
+			// Keep the Request-URI untouched (RFC 3261 §13.2.2.4 requires the
+			// Contact URI there) and only move the transport target to the
+			// address the response actually came from. Without this, GB28181
+			// devices that answer with their platform SIP domain in Contact
+			// never receive ACK/BYE/INFO at all.
+			if source := s.InviteResponse.Source(); source != "" {
+				req.SetDestination(source)
+			}
 		}
 	}
 
@@ -164,6 +184,26 @@ func (s *DialogClientSession) buildReq(req *sip.Request) {
 	s.lastCSeqNo.Store(cseq.SeqNo)
 	// Make sure transport matches original invite
 	req.SetTransport(s.InviteRequest.Transport())
+}
+
+// fallbackToResponseSource reports whether this session may move a dialog
+// request's transport target to the INVITE response source. See
+// WithClientFallbackToResponseSource.
+func (s *DialogClientSession) fallbackToResponseSource() bool {
+	return s.UA != nil && s.UA.Client != nil && s.UA.Client.fallbackToResponseSource
+}
+
+// dialogHostIsAddressLiteral reports whether host can be used as a network
+// destination without any name resolution. Anything else (a bare domain
+// identifier, an FQDN, or the empty host) has to be resolved by the transport
+// layer, which may legitimately fail.
+func dialogHostIsAddressLiteral(host string) bool {
+	host = strings.Trim(strings.TrimSpace(host), "[]")
+	if host == "" {
+		return false
+	}
+	addr, err := netip.ParseAddr(host)
+	return err == nil && addr.IsValid()
 }
 
 // Close must be always called in order to cleanup some internal resources
