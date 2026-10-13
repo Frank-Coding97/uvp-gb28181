@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CASCADE_CATALOG_BATCH_SIZES,
   CASCADE_REGISTER_STATE_LABEL_FALLBACK,
   DICT_CODE_CASCADE_REGISTER_STATE,
   cascadeCycleLabel,
@@ -11,10 +12,94 @@ import {
   defaultCascadePlatform,
   pendingSourceChannelIds,
   resolveChannelPTZAllowed,
+  validateCascadeStep,
   validateCascadePlatform
 } from "./cascadeState";
 
 describe("cascade platform state", () => {
+  it("defaults catalog batches to one and limits new choices to powers of two through 64", () => {
+    expect(defaultCascadePlatform().catalogBatchSize).toBe(1);
+    expect(CASCADE_CATALOG_BATCH_SIZES).toEqual([1, 2, 4, 8, 16, 32, 64]);
+    const form = defaultCascadePlatform();
+    for (const catalogBatchSize of [1, 2, 4, 8, 16, 32, 64]) {
+      expect(validateCascadeStep({ ...form, catalogBatchSize }, 4)).toEqual([]);
+    }
+    for (const catalogBatchSize of [0, -1, 1.5, 3, 65, 100]) {
+      expect(validateCascadeStep({ ...form, catalogBatchSize }, 4)).not.toEqual([]);
+    }
+  });
+
+  it("preserves a saved legacy batch size without allowing other unsupported choices", () => {
+    const form = { ...defaultCascadePlatform(), catalogBatchSize: 100 };
+    expect(validateCascadeStep(form, 4, 100)).toEqual([]);
+    expect(validateCascadeStep({ ...form, catalogBatchSize: 64 }, 4, 100)).toEqual([]);
+    expect(validateCascadeStep({ ...form, catalogBatchSize: 99 }, 4, 100)).not.toEqual([]);
+    expect(validateCascadeStep({ ...form, catalogBatchSize: 0 }, 4, 0)).not.toEqual([]);
+  });
+
+  it("defaults to unlimited streams and accepts zero while rejecting negative limits", () => {
+    const form = defaultCascadePlatform();
+    expect(form.maxStreams).toBe(0);
+    expect(validateCascadeStep({ ...form, maxStreams: 0 }, 4)).toEqual([]);
+    expect(validateCascadeStep({ ...form, maxStreams: 4 }, 4)).toEqual([]);
+    expect(validateCascadeStep({ ...form, maxStreams: -1 }, 4)).not.toEqual([]);
+  });
+
+  it.each(["192.168.10.220", " 192.0.2.1 ", "2001:db8::1", "::1", "::ffff:192.0.2.1"])(
+    "accepts upstream IP address %s in field, step and save validation",
+    host => {
+      const form = { ...defaultCascadePlatform(), host };
+      expect(cascadeFormFieldErrors(form, { host: true }).host).toBe("");
+      expect(validateCascadeStep(form, 1)).not.toContain("请输入有效的 IPv4 或 IPv6 地址");
+      expect(validateCascadePlatform(form)).not.toContain("请输入有效的 IPv4 或 IPv6 地址");
+    }
+  );
+
+  it.each([
+    "999.168.1.1",
+    "192.168.1",
+    "192.168.1.1.1",
+    "01.2.3.4",
+    "sip.example.com",
+    "localhost",
+    "http://192.0.2.1",
+    "192.0.2.1:5060",
+    "2001:db8:::1",
+    "[2001:db8::1]"
+  ])("rejects invalid upstream IP address %s at every validation entry point", host => {
+    const form = { ...defaultCascadePlatform(), host };
+    expect(cascadeFormFieldErrors(form, {}).host).toBe("");
+    expect(cascadeFormFieldErrors(form, { host: true }).host).toBe("请输入有效的 IPv4 或 IPv6 地址");
+    expect(validateCascadeStep(form, 1)).toContain("请输入有效的 IPv4 或 IPv6 地址");
+    expect(validateCascadePlatform(form)).toContain("请输入有效的 IPv4 或 IPv6 地址");
+  });
+
+  it("reports an empty upstream address as required after blur", () => {
+    expect(cascadeFormFieldErrors(defaultCascadePlatform(), { host: true }).host).toBe("上级地址不能为空");
+  });
+
+  it("defaults to the charset of the negotiated protocol without an explicit override", () => {
+    expect(defaultCascadePlatform().charsetOverride).toBe("");
+  });
+
+  it("validates only the current step and enforces configured identity lengths", () => {
+    const form = {
+      ...defaultCascadePlatform(),
+      name: "上级",
+      upstreamServerId: "34020000002000000001",
+      upstreamDomain: "3402000000",
+      host: "192.0.2.1"
+    };
+    expect(validateCascadeStep(form, 1)).toEqual([]);
+    expect(validateCascadeStep({ ...form, authUsername: "" }, 1)).toEqual([]);
+    expect(validateCascadeStep({ ...form, authUsername: "34020000001320000001" }, 1)).toEqual([]);
+    expect(validateCascadeStep(form, 2).length).toBeGreaterThan(0);
+    expect(validateCascadeStep({ ...form, upstreamDomain: "123" }, 1)).toContain("上级域必须是 10 位数字");
+    expect(validateCascadeStep({ ...form, authUsername: "user" }, 1)).toContain("认证用户名必须是 20 位数字或留空");
+    expect(validateCascadeStep({ ...form, registerExpires: 86401 }, 3).length).toBeGreaterThan(0);
+    expect(validateCascadeStep({ ...form, maxStreams: 10001 }, 4).length).toBeGreaterThan(0);
+  });
+
   it("maps runtime facts to product conclusions", () => {
     expect(
       cascadePresentation({ enabled: false, overall: "offline", registration: "unregistered", heartbeat: "unknown" })

@@ -40,6 +40,10 @@ type ProjectionStore interface {
 	ProjectionSnapshot(ctx context.Context, platformID uint64) (*ProjectionSnapshot, error)
 }
 
+type BusinessGroupStore interface {
+	ReplaceBusinessGroup(ctx context.Context, platformID uint64, expectedProjectionRevision uint64, nodes []BusinessNodeInput, bindings []BusinessBindingInput) error
+}
+
 type MediaSessionStore interface {
 	CreateMediaSession(ctx context.Context, session *model.GbCascadeMediaSession) error
 	FindMediaSessionByDialog(ctx context.Context, dialogKey string) (*model.GbCascadeMediaSession, error)
@@ -52,6 +56,7 @@ type MediaSessionStore interface {
 type Repository interface {
 	PlatformStore
 	ProjectionStore
+	BusinessGroupStore
 	MediaSessionStore
 }
 
@@ -103,6 +108,9 @@ func (r *GormRepository) CreatePlatform(ctx context.Context, platform *model.GbC
 	}
 	row.UpdatedAt = now
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if row.PublishGroup {
+			return fmt.Errorf("%w: 新建上级平台时不能直接启用业务分组发布，请先创建平台并配置 215 根节点", ErrInvalidProjection)
+		}
 		// 两个唯一索引都不含 deleted_at,软删的平台行会继续占着"名称"和"接入关系"
 		// 两个键位。先认领遗留行,否则删掉再建同名平台会撞 1062(见 platform_resurrect.go)。
 		retired, err := findRetiredPlatform(tx, &row)
@@ -154,27 +162,83 @@ func (r *GormRepository) UpdatePlatformConfig(ctx context.Context, platform *mod
 	if platform == nil || platform.ID == 0 || expectedRevision == 0 {
 		return nil, ErrRevisionConflict
 	}
-	retired, err := findRetiredPlatform(r.db.WithContext(ctx), platform)
-	if err != nil {
-		return nil, err
-	}
-	if retired != nil {
-		return nil, fmt.Errorf("%w: 目标名称或接入关系仍被已删除的平台 id=%d 占用", ErrRetiredPlatformConflict, retired.ID)
-	}
-	updates := platformConfigUpdates(platform)
-	updates["config_revision"] = gorm.Expr("config_revision + ?", 1)
-	updates["updated_at"] = time.Now().UTC()
-	result := r.db.WithContext(ctx).Model(&model.GbCascadePlatform{}).
-		Where("id = ? AND config_revision = ?", platform.ID, expectedRevision).
-		Updates(updates)
-	if result.Error != nil {
-		return nil, result.Error
-	}
-	if result.RowsAffected == 0 {
-		if _, err := r.FindPlatform(ctx, platform.ID); err != nil {
-			return nil, err
+	var updateErr error
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current model.GbCascadePlatform
+		result := tx.Limit(1).Find(&current, platform.ID)
+		if result.Error != nil {
+			return result.Error
 		}
-		return nil, ErrRevisionConflict
+		if result.RowsAffected == 0 {
+			return ErrPlatformNotFound
+		}
+		if current.ConfigRevision != expectedRevision {
+			return ErrRevisionConflict
+		}
+		retired, err := findRetiredPlatform(tx, platform)
+		if err != nil {
+			return err
+		}
+		if retired != nil {
+			return fmt.Errorf("%w: 目标名称或接入关系仍被已删除的平台 id=%d 占用", ErrRetiredPlatformConflict, retired.ID)
+		}
+		identitiesChanged := current.LocalDeviceID != platform.LocalDeviceID || current.UpstreamServerID != platform.UpstreamServerID
+		validateGroupPublication := platform.PublishGroup && (!current.PublishGroup || identitiesChanged)
+		if validateGroupPublication {
+			if len(platform.LocalDeviceID) < 13 || platform.LocalDeviceID[10:13] != "200" {
+				return fmt.Errorf("%w: 发布业务分组要求本平台设备 ID 的设备类型为 200", ErrInvalidProjection)
+			}
+			var rootCount int64
+			if err := tx.Model(&model.GbCascadeBusinessNode{}).
+				Where("platform_id = ? AND kind = ? AND parent_code = ''", platform.ID, "group").Count(&rootCount).Error; err != nil {
+				return err
+			}
+			if rootCount != 1 {
+				return fmt.Errorf("%w: 发布业务分组前必须配置唯一的 215 根节点", ErrInvalidProjection)
+			}
+		}
+		if identitiesChanged || validateGroupPublication {
+			var storedNodes []model.GbCascadeBusinessNode
+			if err := tx.Where("platform_id = ?", platform.ID).Find(&storedNodes).Error; err != nil {
+				return err
+			}
+			nodes := make([]BusinessNodeInput, 0, len(storedNodes))
+			for _, node := range storedNodes {
+				nodes = append(nodes, BusinessNodeInput{Code: node.Code})
+			}
+			if err := validateBusinessCodesAgainstPlatform(tx, *platform, nodes); err != nil {
+				return err
+			}
+		}
+
+		updates := platformConfigUpdates(platform)
+		updates["config_revision"] = gorm.Expr("config_revision + ?", 1)
+		updates["updated_at"] = time.Now().UTC()
+		query := tx.Model(&model.GbCascadePlatform{}).
+			Where("id = ? AND config_revision = ?", platform.ID, expectedRevision)
+		if current.PublishGroup != platform.PublishGroup || identitiesChanged {
+			// 发布开关和业务树都占用 ProjectionRevision，使"校验根后开启发布"与
+			// "移除/替换根"在数据库中串行化，避免检查通过后根被并发清空。
+			query = query.Where("projection_revision = ?", current.ProjectionRevision)
+			updates["projection_revision"] = gorm.Expr("projection_revision + ?", 1)
+		}
+		write := query.Updates(updates)
+		if write.Error != nil {
+			return write.Error
+		}
+		if write.RowsAffected == 0 {
+			updateErr = ErrRevisionConflict
+			return updateErr
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, ErrRevisionConflict) && updateErr == nil {
+			if _, findErr := r.FindPlatform(ctx, platform.ID); findErr != nil {
+				return nil, findErr
+			}
+		}
+		return nil, err
 	}
 	return r.FindPlatform(ctx, platform.ID)
 }
@@ -229,8 +293,20 @@ func (r *GormRepository) SoftDeletePlatform(ctx context.Context, platformID uint
 			Updates(map[string]any{"active": false, "revision": gorm.Expr("revision + ?", 1), "updated_at": now}).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("platform_id = ?", platformID).Delete(&model.GbCascadeBusinessBinding{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("platform_id = ?", platformID).Delete(&model.GbCascadeBusinessNode{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Model(&model.GbCascadeDeviceProjection{}).Where("platform_id = ? AND active = ?", platformID, true).
 			Updates(map[string]any{"active": false, "revision": gorm.Expr("revision + ?", 1), "updated_at": now}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("platform_id = ?", platformID).Delete(&model.GbCascadeBusinessBinding{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("platform_id = ?", platformID).Delete(&model.GbCascadeBusinessNode{}).Error; err != nil {
 			return err
 		}
 		return tx.Delete(&platform).Error
@@ -315,6 +391,8 @@ type ProjectionSnapshot struct {
 	Platform model.GbCascadePlatform
 	Devices  []model.GbCascadeDeviceProjection
 	Channels []model.GbCascadeChannelProjection
+	Nodes    []model.GbCascadeBusinessNode
+	Bindings []model.GbCascadeBusinessBinding
 	Revision uint64
 }
 
@@ -337,6 +415,9 @@ func (r *GormRepository) ReplaceProjection(ctx context.Context, platformID uint6
 			return err
 		}
 		if err := validateProjectionInputs(devices, channels); err != nil {
+			return err
+		}
+		if err := validateProjectionBusinessCodeCollisions(tx, platformID, devices, channels); err != nil {
 			return err
 		}
 		deviceIDs := make(map[uint64]uint64, len(devices))
@@ -363,6 +444,15 @@ func (r *GormRepository) ReplaceProjection(ctx context.Context, platformID uint6
 		if err := deactivateAbsentChannels(tx, platformID, desiredChannels); err != nil {
 			return err
 		}
+		// 取消共享即解除业务挂载,但不删除平台目录节点;若随后重新共享,旧挂载不会恢复。
+		if err := tx.Where(`platform_id = ? AND NOT EXISTS (
+			SELECT 1 FROM gb_cascade_channel_projection AS channel_projection
+			WHERE channel_projection.platform_id = gb_cascade_business_binding.platform_id
+			AND channel_projection.source_channel_id = gb_cascade_business_binding.source_channel_id
+			AND channel_projection.active = ?
+		)`, platformID, true).Delete(&model.GbCascadeBusinessBinding{}).Error; err != nil {
+			return err
+		}
 		// 提交时做真正的 CAS:revision 条件写回,并发陈旧写者得到 0 行而非覆盖
 		result := tx.Model(&model.GbCascadePlatform{}).
 			Where("id = ? AND projection_revision = ?", platformID, expectedProjectionRevision).
@@ -378,6 +468,28 @@ func (r *GormRepository) ReplaceProjection(ctx context.Context, platformID uint6
 		}
 		return nil
 	})
+}
+
+func validateProjectionBusinessCodeCollisions(tx *gorm.DB, platformID uint64, devices []DeviceProjectionInput, channels []ChannelProjectionInput) error {
+	codes := make([]string, 0, len(devices)+len(channels))
+	for _, device := range devices {
+		codes = append(codes, device.PublishedDeviceID)
+	}
+	for _, channel := range channels {
+		codes = append(codes, channel.PublishedChannelID)
+	}
+	if len(codes) == 0 {
+		return nil
+	}
+	var count int64
+	if err := tx.Model(&model.GbCascadeBusinessNode{}).
+		Where("platform_id = ? AND code IN ?", platformID, codes).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return fmt.Errorf("%w: 共享资源编号与当前业务分组节点编号冲突", ErrInvalidProjection)
+	}
+	return nil
 }
 
 func validateProjectionInputs(devices []DeviceProjectionInput, channels []ChannelProjectionInput) error {
@@ -541,6 +653,12 @@ func (r *GormRepository) ProjectionSnapshot(ctx context.Context, platformID uint
 			return err
 		}
 		if err := tx.Where("platform_id = ? AND active = ?", platformID, true).Order("id").Find(&snapshot.Channels).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("platform_id = ?", platformID).Order("sort, id").Find(&snapshot.Nodes).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("platform_id = ?", platformID).Order("id").Find(&snapshot.Bindings).Error; err != nil {
 			return err
 		}
 		snapshot.Revision = snapshot.Platform.ProjectionRevision

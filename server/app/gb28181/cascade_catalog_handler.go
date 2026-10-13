@@ -134,6 +134,9 @@ func buildCascadeCatalogSnapshot(ctx context.Context, store *repository.GormRepo
 	if err != nil {
 		return catalog.Snapshot{}, err
 	}
+	if platform.PublishGroup && len(projection.Nodes) > 0 {
+		return snapshot, nil
+	}
 	return snapshot.ChannelsOnly(), nil
 }
 

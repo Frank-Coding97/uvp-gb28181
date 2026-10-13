@@ -445,3 +445,5 @@
 {"id": 648, "title": "获取固件下载链接", "path": "/api/gb28181/device-mgmt/firmware-repository/:id/download-link", "method": "POST", "api_group": "设备管理", "created_at": null, "updated_at": null, "deleted_at": null, "created_by": 1}
 {"id": 649, "title": "查询国标服务配置", "path": "/api/gb28181/sip/service-config", "method": "GET", "api_group": "国标平台", "created_at": null, "updated_at": null, "deleted_at": null, "created_by": 1}
 {"id": 650, "title": "保存国标服务配置", "path": "/api/gb28181/sip/service-config", "method": "PUT", "api_group": "国标平台", "created_at": null, "updated_at": null, "deleted_at": null, "created_by": 1}
+{"id": 651, "title": "查看级联业务分组", "path": "/api/gb28181/cascade/platforms/:id/business-group", "method": "GET", "api_group": "国标级联", "created_at": null, "updated_at": null, "deleted_at": null, "created_by": 1}
+{"id": 652, "title": "保存级联业务分组", "path": "/api/gb28181/cascade/platforms/:id/business-group", "method": "PUT", "api_group": "国标级联", "created_at": null, "updated_at": null, "deleted_at": null, "created_by": 1}

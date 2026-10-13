@@ -19,6 +19,7 @@ func TestCascadeRoutesReturn503UntilServiceIsInjected(t *testing.T) {
 		"/api/gb28181/cascade/platforms",
 		"/api/gb28181/cascade/platforms/1",
 		"/api/gb28181/cascade/platforms/1/shares",
+		"/api/gb28181/cascade/platforms/1/business-group",
 	} {
 		recorder := httptest.NewRecorder()
 		request := httptest.NewRequest(http.MethodGet, path, nil)

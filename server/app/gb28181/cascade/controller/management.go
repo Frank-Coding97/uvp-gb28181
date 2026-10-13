@@ -295,7 +295,7 @@ func (c *ManagementController) fail(ctx *gin.Context, err error) {
 	switch {
 	case duplicate:
 		status = http.StatusConflict
-	case errors.Is(err, service.ErrInvalidPlatformConfig), errors.Is(err, repository.ErrInvalidProjection):
+	case errors.Is(err, service.ErrInvalidPlatformConfig), errors.Is(err, service.ErrInvalidBusinessGroup), errors.Is(err, repository.ErrInvalidProjection):
 		status = http.StatusBadRequest
 	case errors.Is(err, repository.ErrPlatformNotFound):
 		status = http.StatusNotFound
@@ -310,6 +310,9 @@ func (c *ManagementController) fail(ctx *gin.Context, err error) {
 	message := "国标级联操作失败"
 	if status == http.StatusBadRequest {
 		message = "请求参数非法"
+	}
+	if errors.Is(err, service.ErrInvalidBusinessGroup) {
+		message = err.Error()
 	}
 	if status == http.StatusNotFound {
 		message = "上级平台不存在"

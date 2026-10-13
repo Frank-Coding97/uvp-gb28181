@@ -20,9 +20,11 @@ var (
 type CatalogItemKind string
 
 const (
-	CatalogItemPlatform CatalogItemKind = "platform"
-	CatalogItemDevice   CatalogItemKind = "device"
-	CatalogItemChannel  CatalogItemKind = "channel"
+	CatalogItemPlatform            CatalogItemKind = "platform"
+	CatalogItemBusinessGroup       CatalogItemKind = "business_group"
+	CatalogItemVirtualOrganization CatalogItemKind = "virtual_organization"
+	CatalogItemDevice              CatalogItemKind = "device"
+	CatalogItemChannel             CatalogItemKind = "channel"
 )
 
 type ResourceStatus string
@@ -43,18 +45,19 @@ type SourceFacts struct {
 // responder. It intentionally excludes source database IDs, source network
 // endpoints, credentials, and arbitrary source fields.
 type CatalogItem struct {
-	ID           string
-	ParentID     string
-	Kind         CatalogItemKind
-	Name         string
-	Manufacturer string
-	Model        string
-	Owner        string
-	CivilCode    string
-	Address      string
-	Parental     int
-	Secrecy      int
-	Status       ResourceStatus
+	ID              string
+	ParentID        string
+	Kind            CatalogItemKind
+	Name            string
+	Manufacturer    string
+	Model           string
+	Owner           string
+	CivilCode       string
+	Address         string
+	BusinessGroupID string
+	Parental        int
+	Secrecy         int
+	Status          ResourceStatus
 }
 
 type PublishedChannelTarget struct {
@@ -101,13 +104,20 @@ func Build(projection repository.ProjectionSnapshot, facts SourceFacts) (Snapsho
 		return Snapshot{}, err
 	}
 
+	groupNodes, bindings, rootCode, err := businessDirectory(projection, devices, channels)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	// Old platforms may have the toggle set before a tree is configured. Keep
+	// their legacy flat catalog until there is a complete tree to publish.
+	publishSystem := projection.Platform.PublishPlatform || (projection.Platform.PublishGroup && len(groupNodes) > 0)
 	snapshot := Snapshot{
 		PlatformID:   platformID,
 		Revision:     projection.Revision,
-		publishedIDs: make(map[string]struct{}, len(devices)+len(channels)+1),
+		publishedIDs: make(map[string]struct{}, len(groupNodes)+len(devices)+len(channels)+1),
 		channels:     make(map[string]PublishedChannelTarget, len(channels)),
 	}
-	if projection.Platform.PublishPlatform {
+	if publishSystem {
 		if err := addPublishedID(snapshot.publishedIDs, projection.Platform.LocalDeviceID); err != nil {
 			return Snapshot{}, err
 		}
@@ -119,10 +129,13 @@ func Build(projection repository.ProjectionSnapshot, facts SourceFacts) (Snapsho
 		})
 	}
 
-	if err := appendDeviceItems(&snapshot, devices, projection.Platform, facts); err != nil {
+	if err := appendBusinessDirectoryItems(&snapshot, groupNodes, rootCode, projection.Platform.LocalDeviceID); err != nil {
 		return Snapshot{}, err
 	}
-	if err := appendChannelItems(&snapshot, platformID, devices, channels, facts); err != nil {
+	if err := appendDeviceItems(&snapshot, devices, projection.Platform, facts, projection.Platform.PublishPlatform || (projection.Platform.PublishGroup && len(groupNodes) > 0)); err != nil {
+		return Snapshot{}, err
+	}
+	if err := appendChannelItems(&snapshot, platformID, devices, channels, facts, bindings); err != nil {
 		return Snapshot{}, err
 	}
 	snapshot.SumNum = len(snapshot.Items)
@@ -130,18 +143,18 @@ func Build(projection repository.ProjectionSnapshot, facts SourceFacts) (Snapsho
 }
 
 // appendDeviceItems 把设备投影转为目录项并按发布 ID 注册
-func appendDeviceItems(snapshot *Snapshot, devices map[uint64]model.GbCascadeDeviceProjection, platform model.GbCascadePlatform, facts SourceFacts) error {
+func appendDeviceItems(snapshot *Snapshot, devices map[uint64]model.GbCascadeDeviceProjection, platform model.GbCascadePlatform, facts SourceFacts, publishSystem bool) error {
 	for _, device := range sortedDevices(devices) {
 		if err := addPublishedID(snapshot.publishedIDs, device.PublishedDeviceID); err != nil {
 			return err
 		}
-		snapshot.Items = append(snapshot.Items, deviceCatalogItem(device, platform.LocalDeviceID, platform.PublishPlatform, facts))
+		snapshot.Items = append(snapshot.Items, deviceCatalogItem(device, platform.LocalDeviceID, publishSystem, facts))
 	}
 	return nil
 }
 
 // appendChannelItems 把通道投影转为目录项与播放目标映射
-func appendChannelItems(snapshot *Snapshot, platformID uint64, devices map[uint64]model.GbCascadeDeviceProjection, channels []model.GbCascadeChannelProjection, facts SourceFacts) error {
+func appendChannelItems(snapshot *Snapshot, platformID uint64, devices map[uint64]model.GbCascadeDeviceProjection, channels []model.GbCascadeChannelProjection, facts SourceFacts, bindings map[uint64]string) error {
 	for _, channel := range channels {
 		if err := addPublishedID(snapshot.publishedIDs, channel.PublishedChannelID); err != nil {
 			return err
@@ -149,25 +162,179 @@ func appendChannelItems(snapshot *Snapshot, platformID uint64, devices map[uint6
 	}
 	for _, channel := range channels {
 		parentID := deviceParentID(channel, devices)
-		if channel.ParentOverride != "" {
+		if nodeCode, assigned := bindings[channel.SourceChannelID]; assigned {
+			parentID += "/" + nodeCode
+		} else if channel.ParentOverride != "" {
 			if _, ok := snapshot.publishedIDs[channel.ParentOverride]; ok {
 				parentID = channel.ParentOverride
 			}
 		}
 		device := devices[channel.DeviceProjectionID]
-		snapshot.Items = append(snapshot.Items, CatalogItem{
+		item := CatalogItem{
 			ID:       channel.PublishedChannelID,
 			ParentID: parentID,
 			Kind:     CatalogItemChannel,
 			Name:     channel.Name,
 			Status:   channelStatus(device, channel, facts),
-		})
+		}
+		snapshot.Items = append(snapshot.Items, item)
 		snapshot.channels[channel.PublishedChannelID] = PublishedChannelTarget{
 			PlatformID:      platformID,
 			SourceDeviceID:  device.SourceDeviceID,
 			SourceChannelID: channel.SourceChannelID,
 			PTZAllowed:      channel.PTZAllowed,
 		}
+	}
+	return nil
+}
+
+func businessDirectory(projection repository.ProjectionSnapshot, devices map[uint64]model.GbCascadeDeviceProjection, channels []model.GbCascadeChannelProjection) ([]model.GbCascadeBusinessNode, map[uint64]string, string, error) {
+	if !projection.Platform.PublishGroup || len(projection.Nodes) == 0 {
+		return nil, map[uint64]string{}, "", nil
+	}
+	const invalid = "business catalog tree"
+	if len(projection.Platform.LocalDeviceID) < 13 || projection.Platform.LocalDeviceID[10:13] != "200" {
+		return nil, nil, "", fmt.Errorf("%w: %s requires a system type 200 local identity", ErrInvalidProjection, invalid)
+	}
+	nodes := append([]model.GbCascadeBusinessNode(nil), projection.Nodes...)
+	byCode := make(map[string]model.GbCascadeBusinessNode, len(nodes))
+	rootCode := ""
+	for _, node := range nodes {
+		if node.PlatformID != projection.Platform.ID || validatePublishedID(node.Code) != nil {
+			return nil, nil, "", fmt.Errorf("%w: %s node identity", ErrInvalidProjection, invalid)
+		}
+		if node.Code == projection.Platform.LocalDeviceID || node.Code == projection.Platform.UpstreamServerID {
+			return nil, nil, "", fmt.Errorf("%w: %s node conflicts with platform identity", ErrInvalidProjection, invalid)
+		}
+		if _, exists := byCode[node.Code]; exists {
+			return nil, nil, "", fmt.Errorf("%w: %s duplicate node", ErrInvalidProjection, invalid)
+		}
+		switch node.Kind {
+		case "group":
+			if len(node.Code) < 13 || node.Code[10:13] != "215" || node.ParentCode != "" || rootCode != "" {
+				return nil, nil, "", fmt.Errorf("%w: %s root", ErrInvalidProjection, invalid)
+			}
+			rootCode = node.Code
+		case "organization":
+			if len(node.Code) < 13 || node.Code[10:13] != "216" || node.ParentCode == "" {
+				return nil, nil, "", fmt.Errorf("%w: %s organization", ErrInvalidProjection, invalid)
+			}
+		default:
+			return nil, nil, "", fmt.Errorf("%w: %s kind", ErrInvalidProjection, invalid)
+		}
+		byCode[node.Code] = node
+	}
+	if rootCode == "" {
+		return nil, nil, "", fmt.Errorf("%w: %s missing root", ErrInvalidProjection, invalid)
+	}
+	for _, node := range nodes {
+		if node.Kind == "organization" {
+			parent, ok := byCode[node.ParentCode]
+			if !ok || (parent.Kind != "group" && parent.Kind != "organization") {
+				return nil, nil, "", fmt.Errorf("%w: %s parent", ErrInvalidProjection, invalid)
+			}
+		}
+	}
+	if err := validateBusinessDirectoryReachability(nodes, rootCode); err != nil {
+		return nil, nil, "", err
+	}
+
+	published := make(map[string]struct{}, len(nodes)+len(devices)+len(channels)+1)
+	if err := addPublishedID(published, projection.Platform.LocalDeviceID); err != nil {
+		return nil, nil, "", err
+	}
+	for _, device := range devices {
+		published[device.PublishedDeviceID] = struct{}{}
+	}
+	for _, channel := range channels {
+		published[channel.PublishedChannelID] = struct{}{}
+	}
+	for _, node := range nodes {
+		if err := addPublishedID(published, node.Code); err != nil {
+			return nil, nil, "", err
+		}
+	}
+
+	activeChannels := make(map[uint64]struct{}, len(channels))
+	for _, channel := range channels {
+		activeChannels[channel.SourceChannelID] = struct{}{}
+	}
+	bindings := make(map[uint64]string, len(projection.Bindings))
+	for _, binding := range projection.Bindings {
+		if binding.PlatformID != projection.Platform.ID {
+			return nil, nil, "", fmt.Errorf("%w: business binding platform", ErrInvalidProjection)
+		}
+		if _, active := activeChannels[binding.SourceChannelID]; !active {
+			continue
+		}
+		node, ok := byCode[binding.NodeCode]
+		if !ok || node.Kind != "organization" {
+			return nil, nil, "", fmt.Errorf("%w: business binding node", ErrInvalidProjection)
+		}
+		if _, duplicate := bindings[binding.SourceChannelID]; duplicate {
+			return nil, nil, "", fmt.Errorf("%w: duplicate business binding", ErrInvalidProjection)
+		}
+		bindings[binding.SourceChannelID] = binding.NodeCode
+	}
+
+	sort.Slice(nodes, func(i, j int) bool {
+		if nodes[i].Kind != nodes[j].Kind {
+			return nodes[i].Kind == "group"
+		}
+		if nodes[i].Sort != nodes[j].Sort {
+			return nodes[i].Sort < nodes[j].Sort
+		}
+		return nodes[i].Code < nodes[j].Code
+	})
+	return nodes, bindings, rootCode, nil
+}
+
+func validateBusinessDirectoryReachability(nodes []model.GbCascadeBusinessNode, rootCode string) error {
+	reachable := map[string]bool{rootCode: true}
+	remaining := len(nodes) - 1
+	for changed := true; changed && remaining > 0; {
+		changed = false
+		for _, node := range nodes {
+			if node.Kind == "organization" && !reachable[node.Code] && reachable[node.ParentCode] {
+				reachable[node.Code] = true
+				remaining--
+				changed = true
+			}
+		}
+	}
+	if remaining != 0 {
+		return fmt.Errorf("%w: business catalog tree has orphan or cycle", ErrInvalidProjection)
+	}
+	return nil
+}
+
+func appendBusinessDirectoryItems(snapshot *Snapshot, nodes []model.GbCascadeBusinessNode, rootCode, localDeviceID string) error {
+	if len(nodes) == 0 {
+		return nil
+	}
+	if err := addPublishedID(snapshot.publishedIDs, rootCode); err != nil {
+		return err
+	}
+	nodesByCode := make(map[string]model.GbCascadeBusinessNode, len(nodes))
+	for _, node := range nodes {
+		if node.Code != rootCode {
+			if err := addPublishedID(snapshot.publishedIDs, node.Code); err != nil {
+				return err
+			}
+		}
+		nodesByCode[node.Code] = node
+	}
+	root := nodesByCode[rootCode]
+	snapshot.Items = append(snapshot.Items, CatalogItem{ID: root.Code, ParentID: localDeviceID, Kind: CatalogItemBusinessGroup, Name: root.Name, Parental: 1, Status: ResourceStatusOnline})
+	for _, node := range nodes {
+		if node.Kind != "organization" {
+			continue
+		}
+		item := CatalogItem{ID: node.Code, Kind: CatalogItemVirtualOrganization, Name: node.Name, BusinessGroupID: rootCode, Parental: 1, Status: ResourceStatusOnline}
+		if parent := nodesByCode[node.ParentCode]; parent.Kind == "organization" {
+			item.ParentID = parent.Code
+		}
+		snapshot.Items = append(snapshot.Items, item)
 	}
 	return nil
 }

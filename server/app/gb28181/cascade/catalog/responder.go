@@ -63,14 +63,15 @@ func PlanCatalogResponsesWithinLimit(profile protocol.Profile, targetID string, 
 	if err != nil {
 		return nil, err
 	}
-	if query.DeviceID != strings.TrimSpace(targetID) {
-		return nil, fmt.Errorf("%w: %q", ErrUnknownCatalogTarget, query.DeviceID)
-	}
 	if batchSize <= 0 {
 		return nil, ErrInvalidCatalogBatch
 	}
 
-	total := len(snapshot.Items)
+	items, err := catalogItemsForQuery(snapshot, targetID, query.DeviceID)
+	if err != nil {
+		return nil, err
+	}
+	total := len(items)
 	if total == 0 {
 		response, err := marshalCatalogResponse(profile, query, nil, 0)
 		if err != nil {
@@ -85,7 +86,7 @@ func PlanCatalogResponsesWithinLimit(profile protocol.Profile, targetID string, 
 		if end > total {
 			end = total
 		}
-		response, err := marshalCatalogResponse(profile, query, snapshot.Items[start:end], total)
+		response, err := marshalCatalogResponse(profile, query, items[start:end], total)
 		if err != nil {
 			return nil, err
 		}
@@ -94,7 +95,7 @@ func PlanCatalogResponsesWithinLimit(profile protocol.Profile, targetID string, 
 				return nil, fmt.Errorf("catalog item exceeds UDP packet limit; configure TCP transport")
 			}
 			end = start + (end-start)/2
-			response, err = marshalCatalogResponse(profile, query, snapshot.Items[start:end], total)
+			response, err = marshalCatalogResponse(profile, query, items[start:end], total)
 			if err != nil {
 				return nil, err
 			}
@@ -103,6 +104,80 @@ func PlanCatalogResponsesWithinLimit(profile protocol.Profile, targetID string, 
 		start = end
 	}
 	return responses, nil
+}
+
+func catalogItemsForQuery(snapshot Snapshot, localDeviceID, requestedID string) ([]CatalogItem, error) {
+	if requestedID == strings.TrimSpace(localDeviceID) {
+		return snapshot.Items, nil
+	}
+	var target *CatalogItem
+	for i := range snapshot.Items {
+		if snapshot.Items[i].ID == requestedID {
+			target = &snapshot.Items[i]
+			break
+		}
+	}
+	if target == nil || (target.Kind != CatalogItemBusinessGroup && target.Kind != CatalogItemVirtualOrganization) {
+		return nil, fmt.Errorf("%w: %q", ErrUnknownCatalogTarget, requestedID)
+	}
+
+	selectedOrganizations := map[string]struct{}{}
+	if target.Kind == CatalogItemVirtualOrganization {
+		selectedOrganizations[target.ID] = struct{}{}
+	} else {
+		for _, item := range snapshot.Items {
+			if item.Kind == CatalogItemVirtualOrganization && item.BusinessGroupID == target.ID {
+				selectedOrganizations[item.ID] = struct{}{}
+			}
+		}
+	}
+	if len(selectedOrganizations) > 0 {
+		for changed := true; changed; {
+			changed = false
+			for _, item := range snapshot.Items {
+				if item.Kind != CatalogItemVirtualOrganization {
+					continue
+				}
+				if _, selected := selectedOrganizations[item.ID]; selected {
+					continue
+				}
+				if containsCatalogParent(selectedOrganizations, item.ParentID) {
+					selectedOrganizations[item.ID] = struct{}{}
+					changed = true
+				}
+			}
+		}
+	}
+
+	items := make([]CatalogItem, 0, len(snapshot.Items))
+	for _, item := range snapshot.Items {
+		include := false
+		if target.Kind == CatalogItemBusinessGroup {
+			_, isOrganization := selectedOrganizations[item.ID]
+			include = item.ID == target.ID || isOrganization
+			if !include && item.Kind == CatalogItemChannel {
+				include = containsCatalogParent(selectedOrganizations, item.ParentID)
+			}
+		} else {
+			_, include = selectedOrganizations[item.ID]
+			if !include && item.Kind == CatalogItemChannel {
+				include = containsCatalogParent(selectedOrganizations, item.ParentID)
+			}
+		}
+		if include {
+			items = append(items, item)
+		}
+	}
+	return items, nil
+}
+
+func containsCatalogParent(ancestors map[string]struct{}, parentID string) bool {
+	for _, part := range strings.Split(parentID, "/") {
+		if _, ok := ancestors[strings.TrimSpace(part)]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // SendCatalogResponses sends response batches in call order. On failure it
@@ -140,17 +215,23 @@ type catalogDeviceListXML struct {
 // It emits only facts present in the platform projection and never turns an
 // unknown PTZ type or coordinate into a fabricated zero value.
 type catalogItemXML struct {
-	DeviceID     string `xml:"DeviceID"`
-	Name         string `xml:"Name"`
-	Manufacturer string `xml:"Manufacturer"`
-	Model        string `xml:"Model"`
-	Owner        string `xml:"Owner"`
-	CivilCode    string `xml:"CivilCode"`
-	Address      string `xml:"Address"`
-	Parental     int    `xml:"Parental"`
-	ParentID     string `xml:"ParentID,omitempty"`
-	Secrecy      int    `xml:"Secrecy"`
-	Status       string `xml:"Status"`
+	DeviceID        string              `xml:"DeviceID"`
+	Name            string              `xml:"Name"`
+	Manufacturer    string              `xml:"Manufacturer"`
+	Model           string              `xml:"Model"`
+	Owner           string              `xml:"Owner"`
+	CivilCode       string              `xml:"CivilCode"`
+	Address         string              `xml:"Address"`
+	Parental        int                 `xml:"Parental"`
+	ParentID        string              `xml:"ParentID,omitempty"`
+	BusinessGroupID string              `xml:"BusinessGroupID,omitempty"`
+	Info            *catalogItemInfoXML `xml:"Info,omitempty"`
+	Secrecy         int                 `xml:"Secrecy"`
+	Status          string              `xml:"Status"`
+}
+
+type catalogItemInfoXML struct {
+	BusinessGroupID string `xml:"BusinessGroupID,omitempty"`
 }
 
 func marshalCatalogResponse(profile protocol.Profile, query manscdp.CatalogQuery, items []CatalogItem, total int) (CatalogResponse, error) {
@@ -163,7 +244,7 @@ func marshalCatalogResponse(profile protocol.Profile, query manscdp.CatalogQuery
 	if len(items) > 0 {
 		response.DeviceList = &catalogDeviceListXML{Num: len(items), Items: make([]catalogItemXML, 0, len(items))}
 		for _, item := range items {
-			response.DeviceList.Items = append(response.DeviceList.Items, catalogItemXML{
+			wireItem := catalogItemXML{
 				DeviceID:     item.ID,
 				Name:         item.Name,
 				Manufacturer: item.Manufacturer,
@@ -175,7 +256,15 @@ func marshalCatalogResponse(profile protocol.Profile, query manscdp.CatalogQuery
 				ParentID:     item.ParentID,
 				Secrecy:      item.Secrecy,
 				Status:       string(item.Status),
-			})
+			}
+			if item.BusinessGroupID != "" {
+				if profile.Version == protocol.Version(protocol.Version2016) {
+					wireItem.Info = &catalogItemInfoXML{BusinessGroupID: item.BusinessGroupID}
+				} else {
+					wireItem.BusinessGroupID = item.BusinessGroupID
+				}
+			}
+			response.DeviceList.Items = append(response.DeviceList.Items, wireItem)
 		}
 	}
 	body, err := manscdp.MarshalProfiledXML(profile, response)

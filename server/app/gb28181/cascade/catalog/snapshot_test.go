@@ -137,3 +137,62 @@ func TestChannelsOnlyOmitsDeviceNodeAndRetainsSourceOwnership(t *testing.T) {
 	require.Equal(t, uint64(10), target.SourceDeviceID)
 	require.Len(t, original.Items, 4)
 }
+
+func TestBuildSnapshotProjectsOnlyBoundBusinessCatalogItems(t *testing.T) {
+	platform := model.GbCascadePlatform{ID: 1, LocalDeviceID: "34020000002000000001", PublishGroup: true, PublishPlatform: false}
+	device := model.GbCascadeDeviceProjection{ID: 10, PlatformID: 1, SourceDeviceID: 100, PublishedDeviceID: "34020000001320000001", Name: "physical", Active: true}
+	assigned := model.GbCascadeChannelProjection{ID: 20, PlatformID: 1, DeviceProjectionID: device.ID, SourceChannelID: 200, PublishedChannelID: "34020000001320000011", Name: "assigned", Active: true}
+	unassigned := model.GbCascadeChannelProjection{ID: 21, PlatformID: 1, DeviceProjectionID: device.ID, SourceChannelID: 201, PublishedChannelID: "34020000001320000012", Name: "unassigned", Active: true}
+	root := model.GbCascadeBusinessNode{ID: 30, PlatformID: 1, Code: "34020000002150000001", Name: "root", Kind: "group", Sort: 1}
+	org := model.GbCascadeBusinessNode{ID: 31, PlatformID: 1, Code: "34020000002160000001", Name: "org", Kind: "organization", ParentCode: root.Code, Sort: 1}
+	snapshot, err := Build(repository.ProjectionSnapshot{
+		Platform: platform, Devices: []model.GbCascadeDeviceProjection{device}, Channels: []model.GbCascadeChannelProjection{assigned, unassigned},
+		Nodes:    []model.GbCascadeBusinessNode{root, org},
+		Bindings: []model.GbCascadeBusinessBinding{{ID: 40, PlatformID: 1, SourceChannelID: assigned.SourceChannelID, NodeCode: org.Code}},
+	}, SourceFacts{})
+	require.NoError(t, err)
+	require.Equal(t, 6, snapshot.SumNum, "group mode includes the system and required physical parent containers")
+	require.Equal(t, []CatalogItem{
+		{ID: platform.LocalDeviceID, Kind: CatalogItemPlatform, Status: ResourceStatusOnline},
+		{ID: root.Code, ParentID: platform.LocalDeviceID, Kind: CatalogItemBusinessGroup, Name: root.Name, Parental: 1, Status: ResourceStatusOnline},
+		{ID: org.Code, Kind: CatalogItemVirtualOrganization, Name: org.Name, BusinessGroupID: root.Code, Parental: 1, Status: ResourceStatusOnline},
+		{ID: device.PublishedDeviceID, ParentID: platform.LocalDeviceID, Kind: CatalogItemDevice, Name: device.Name, Status: ResourceStatusOffline},
+		{ID: assigned.PublishedChannelID, ParentID: device.PublishedDeviceID + "/" + org.Code, Kind: CatalogItemChannel, Name: assigned.Name, Status: ResourceStatusOffline},
+		{ID: unassigned.PublishedChannelID, ParentID: device.PublishedDeviceID, Kind: CatalogItemChannel, Name: unassigned.Name, Status: ResourceStatusOffline},
+	}, snapshot.Items)
+	require.True(t, snapshot.HasPublishedID(root.Code))
+	_, ok := snapshot.LookupPublishedChannel(root.Code)
+	require.False(t, ok, "a business group must not resolve as a playable channel")
+	_, ok = snapshot.LookupPublishedChannel(org.Code)
+	require.False(t, ok, "a virtual organization must not resolve as a playable channel")
+	target, ok := snapshot.LookupPublishedChannel(assigned.PublishedChannelID)
+	require.True(t, ok)
+	require.Equal(t, uint64(200), target.SourceChannelID)
+}
+
+func TestBuildSnapshotKeepsLegacyFlatDirectoryWhenBusinessPublishingOffOrTreeEmpty(t *testing.T) {
+	platform := model.GbCascadePlatform{ID: 1, LocalDeviceID: "34020000002000000001", PublishGroup: true}
+	device := model.GbCascadeDeviceProjection{ID: 10, PlatformID: 1, SourceDeviceID: 100, PublishedDeviceID: "34020000001320000001", Active: true}
+	channel := model.GbCascadeChannelProjection{ID: 20, PlatformID: 1, DeviceProjectionID: device.ID, SourceChannelID: 200, PublishedChannelID: "34020000001320000011", Active: true}
+	projection := repository.ProjectionSnapshot{Platform: platform, Devices: []model.GbCascadeDeviceProjection{device}, Channels: []model.GbCascadeChannelProjection{channel}}
+
+	for _, tc := range []struct {
+		name     string
+		publish  bool
+		nodes    []model.GbCascadeBusinessNode
+		bindings []model.GbCascadeBusinessBinding
+	}{
+		{name: "publish off", publish: false, nodes: []model.GbCascadeBusinessNode{{ID: 1, PlatformID: 1, Code: "34020000002150000001", Kind: "group"}}},
+		{name: "tree empty", publish: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := projection
+			p.Platform.PublishGroup = tc.publish
+			p.Nodes, p.Bindings = tc.nodes, tc.bindings
+			built, err := Build(p, SourceFacts{})
+			require.NoError(t, err)
+			flat := built.ChannelsOnly()
+			require.Equal(t, []CatalogItem{{ID: channel.PublishedChannelID, Kind: CatalogItemChannel, Name: channel.Name, Status: ResourceStatusOffline}}, flat.Items)
+		})
+	}
+}

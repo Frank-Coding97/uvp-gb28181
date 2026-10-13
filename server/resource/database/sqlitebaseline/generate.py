@@ -33,7 +33,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 SOURCE = ROOT.parent / "uvp-gb28181.sql"
 POLICY = ROOT.parent / "baseline" / "policy.json"
-VERSION = "sqlite-baseline-20261013-r2"
+VERSION = "sqlite-baseline-20261013-r3"
 
 
 # --------------------------------------------------------------------------
@@ -561,6 +561,9 @@ def main() -> None:
         "PRAGMA busy_timeout = 5000;",
         "",
     ]
+    model_derived = re.search(r"(?m)^-- Model-derived additions: (.+)$", text)
+    if model_derived:
+        output.insert(2, model_derived.group(0))
     # ⛔⛔ 顺序必须是「全部建表 → 全部索引」。
     #   索引依赖目标表已存在，而表名是排序输出的、索引是按发现顺序输出的 ——
     #   两者顺序不一致就会出现 "no such table: main.xxx"（实测踩过）。

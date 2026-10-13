@@ -362,6 +362,27 @@ export interface CascadeShares {
   channels: CascadeChannelProjection[];
 }
 
+export interface BusinessNode {
+  code: string;
+  name: string;
+  kind: "group" | "organization";
+  parentCode: string;
+  sort: number;
+}
+
+export interface BusinessBinding {
+  sourceChannelId: number;
+  nodeCode: string;
+}
+
+export interface CascadeBusinessGroup {
+  platformId: number;
+  revision: number;
+  nodes: BusinessNode[];
+  bindings: BusinessBinding[];
+  channels: CascadeChannelProjection[];
+}
+
 export interface CascadeListData {
   list: CascadePlatform[];
 }
@@ -405,6 +426,14 @@ export const replaceCascadeShares = (
     expectedProjectionRevision: number;
   }
 ) => http.request<CascadeShares>("put", baseUrlApi(`gb28181/cascade/platforms/${id}/shares`), { data });
+
+export const getCascadeBusinessGroup = (id: number) =>
+  http.request<CascadeBusinessGroup>("get", baseUrlApi(`gb28181/cascade/platforms/${id}/business-group`));
+
+export const replaceCascadeBusinessGroup = (
+  id: number,
+  data: { nodes: BusinessNode[]; bindings: BusinessBinding[]; expectedProjectionRevision: number }
+) => http.request<CascadeBusinessGroup>("put", baseUrlApi(`gb28181/cascade/platforms/${id}/business-group`), { data });
 
 // ===== 多屏播放方案 =====
 

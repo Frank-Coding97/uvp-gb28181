@@ -1,5 +1,6 @@
 -- SQLite baseline for the UVP standalone green package.
 -- Generated from uvp-gb28181.sql; DO NOT EDIT (run generate.py instead).
+-- Model-derived additions: gb_cascade_business_binding, gb_cascade_business_node.
 --
 -- Type mapping: auto_increment(single int pk) -> INTEGER PRIMARY KEY AUTOINCREMENT;
 --   text/blob/json -> TEXT; datetime/date/timestamp -> DATETIME; decimal -> NUMERIC.
@@ -86,6 +87,21 @@ CREATE TABLE IF NOT EXISTS "gb_anomaly_record" (
   -- "resolved": 0=待处理 1=已处理
   -- "resolved_action": 动作摘要
   -- "owner_dept_id": 所属部门ID
+CREATE TABLE IF NOT EXISTS "gb_cascade_business_binding" (
+  "id" INTEGER PRIMARY KEY AUTOINCREMENT CHECK ("id" IS NULL OR (typeof("id") = 'integer' AND "id" >= 0)),
+  "platform_id" INTEGER NOT NULL CHECK ("platform_id" IS NULL OR (typeof("platform_id") = 'integer' AND "platform_id" >= 0)),
+  "source_channel_id" INTEGER NOT NULL CHECK ("source_channel_id" IS NULL OR (typeof("source_channel_id") = 'integer' AND "source_channel_id" >= 0)),
+  "node_code" TEXT NOT NULL CHECK ("node_code" IS NULL OR length("node_code") <= 20)
+);
+CREATE TABLE IF NOT EXISTS "gb_cascade_business_node" (
+  "id" INTEGER PRIMARY KEY AUTOINCREMENT CHECK ("id" IS NULL OR (typeof("id") = 'integer' AND "id" >= 0)),
+  "platform_id" INTEGER NOT NULL CHECK ("platform_id" IS NULL OR (typeof("platform_id") = 'integer' AND "platform_id" >= 0)),
+  "code" TEXT NOT NULL CHECK ("code" IS NULL OR length("code") <= 20),
+  "name" TEXT NOT NULL CHECK ("name" IS NULL OR length("name") <= 128),
+  "kind" TEXT NOT NULL CHECK ("kind" IS NULL OR length("kind") <= 16),
+  "parent_code" TEXT NOT NULL CHECK ("parent_code" IS NULL OR length("parent_code") <= 20) DEFAULT '',
+  "sort" INTEGER NOT NULL CHECK ("sort" IS NULL OR typeof("sort") = 'integer') DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS "gb_cascade_channel_projection" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT CHECK ("id" IS NULL OR (typeof("id") = 'integer' AND "id" >= 0)),
   "platform_id" INTEGER NOT NULL CHECK ("platform_id" IS NULL OR (typeof("platform_id") = 'integer' AND "platform_id" >= 0)),
@@ -2308,6 +2324,8 @@ CREATE INDEX IF NOT EXISTS "idx_alarm_parent_code" ON "gb_alarm_resource_parent"
 CREATE INDEX IF NOT EXISTS "idx_alarm_parent_resource" ON "gb_alarm_resource_parent" ("alarm_resource_id");
 CREATE INDEX IF NOT EXISTS "idx_node" ON "gb_anomaly_record" ("catalog_node_id");
 CREATE INDEX IF NOT EXISTS "idx_owner_dept_resolved" ON "gb_anomaly_record" ("owner_dept_id", "resolved", "created_at");
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_cascade_business_binding_channel" ON "gb_cascade_business_binding" ("platform_id", "source_channel_id");
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_cascade_business_node_code" ON "gb_cascade_business_node" ("platform_id", "code");
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_cascade_channel_published" ON "gb_cascade_channel_projection" ("platform_id", "published_channel_id");
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_cascade_channel_source" ON "gb_cascade_channel_projection" ("platform_id", "source_channel_id");
 CREATE INDEX IF NOT EXISTS "idx_cascade_channel_deleted_at" ON "gb_cascade_channel_projection" ("deleted_at");
@@ -8046,3 +8064,23 @@ INSERT INTO "sys_user_role" ("user_id", "role_id") VALUES
 (1, 1);
 INSERT INTO "sys_users" ("id", "username", "password", "email", "status", "dept_id", "phone", "sex", "nick_name", "avatar", "description", "created_at", "updated_at", "deleted_at", "created_by", "must_change_password") VALUES
 (1, 'admin', '$2a$10$bQef.b.0CL9rFokdAdTMIe0J.z1Ub0avdu7lyr3mnrh9FQacYQTuW', '', 1, 1, '', '', '系统管理员', '/public/uploads/seed/admin.png', '初始系统管理员', '2025-08-18 14:55:05.000000', '2026-10-09 20:03:48.000000', NULL, 0, 1);
+INSERT INTO sys_api (title,path,method,api_group,created_at,updated_at,deleted_at,created_by)
+SELECT '查看级联业务分组','/api/gb28181/cascade/platforms/:id/business-group','GET','国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1
+WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path='/api/gb28181/cascade/platforms/:id/business-group' AND method='GET');
+INSERT INTO sys_api (title,path,method,api_group,created_at,updated_at,deleted_at,created_by)
+SELECT '保存级联业务分组','/api/gb28181/cascade/platforms/:id/business-group','PUT','国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1
+WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path='/api/gb28181/cascade/platforms/:id/business-group' AND method='PUT');
+INSERT INTO sys_menu_api (menu_id,api_id)
+SELECT m.id,a.id FROM sys_menu m JOIN sys_api a ON a.path='/api/gb28181/cascade/platforms/:id/business-group' AND a.method='GET'
+WHERE m.permission='gb28181:cascade:view'
+AND NOT EXISTS (SELECT 1 FROM sys_menu_api ma WHERE ma.menu_id=m.id AND ma.api_id=a.id);
+INSERT INTO sys_menu_api (menu_id,api_id)
+SELECT m.id,a.id FROM sys_menu m JOIN sys_api a ON a.path='/api/gb28181/cascade/platforms/:id/business-group' AND a.method='PUT'
+WHERE m.permission='gb28181:cascade:share'
+AND NOT EXISTS (SELECT 1 FROM sys_menu_api ma WHERE ma.menu_id=m.id AND ma.api_id=a.id);
+INSERT INTO sys_casbin_rule (ptype,v0,v1,v2,v3,v4,v5)
+SELECT 'p','role_1','/api/gb28181/cascade/platforms/:id/business-group','GET','*','',''
+WHERE NOT EXISTS (SELECT 1 FROM sys_casbin_rule WHERE ptype='p' AND v0='role_1' AND v1='/api/gb28181/cascade/platforms/:id/business-group' AND v2='GET');
+INSERT INTO sys_casbin_rule (ptype,v0,v1,v2,v3,v4,v5)
+SELECT 'p','role_1','/api/gb28181/cascade/platforms/:id/business-group','PUT','*','',''
+WHERE NOT EXISTS (SELECT 1 FROM sys_casbin_rule WHERE ptype='p' AND v0='role_1' AND v1='/api/gb28181/cascade/platforms/:id/business-group' AND v2='PUT');

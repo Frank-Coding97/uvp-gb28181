@@ -111,17 +111,37 @@ func TestReleaseFilesDeclareSameColumnsPerTable(t *testing.T) {
 	ir := readIR(t)
 	want := ir.columnSet()
 	require.NotEmpty(t, want)
+	baselineOnly := make(map[string][]string, len(ir.Meta.BaselineOnlyTables))
+	for _, table := range ir.Meta.BaselineOnlyTables {
+		baselineOnly[strings.ToLower(table)] = nil
+	}
+	wantTables := make(map[string][]string, len(want)+len(baselineOnly))
+	for table, columns := range want {
+		wantTables[table] = columns
+	}
+	for table := range baselineOnly {
+		wantTables[table] = nil
+	}
+	baselineColumns := columnsIn(t, releaseFiles[0])
+	for table := range baselineOnly {
+		baselineOnly[table] = baselineColumns[table]
+		require.NotEmptyf(t, baselineOnly[table], "%s 未找到 baseline-only 表的列定义", releaseFiles[0], table)
+	}
 
 	for _, file := range releaseFiles {
 		t.Run(file, func(t *testing.T) {
 			got := columnsIn(t, file)
-			missing, extra := diffKeys(want, got)
+			missing, extra := diffKeys(wantTables, got)
 			require.Emptyf(t, missing, "%s 缺少这些表: %v", file, missing)
 			require.Emptyf(t, extra, "%s 多出这些表: %v", file, extra)
 
 			for _, table := range sortedKeys(want) {
 				require.Equalf(t, want[table], got[table],
 					"%s 的 %s 列与中间表示不一致", file, table)
+			}
+			for table, columns := range baselineOnly {
+				require.Equalf(t, columns, got[table],
+					"%s 的 baseline-only 表 %s 列与其他方言不一致", file, table)
 			}
 		})
 	}
@@ -415,8 +435,9 @@ func TestPostgreSQLSeedTablesGetSequenceWatermarks(t *testing.T) {
 // 生成物的唯一真源：capture_schema.py 从开发库抽取的中间表示。
 type schemaIR struct {
 	Meta struct {
-		IncludedTableCount int    `json:"included_table_count"`
-		SchemaFingerprint  string `json:"schema_fingerprint"`
+		IncludedTableCount int      `json:"included_table_count"`
+		SchemaFingerprint  string   `json:"schema_fingerprint"`
+		BaselineOnlyTables []string `json:"baseline_only_tables"`
 	} `json:"meta"`
 	ExcludedTables map[string]string `json:"excluded_tables"`
 	Tables         []struct {
@@ -499,6 +520,9 @@ func diff(want, got map[string]bool) (missing, extra []string) {
 func TestReleaseFilesMatchIntermediateRepresentation(t *testing.T) {
 	ir := readIR(t)
 	want := irTableSet(ir)
+	for _, table := range ir.Meta.BaselineOnlyTables {
+		want[strings.ToLower(table)] = true
+	}
 
 	for _, file := range releaseFiles {
 		t.Run(file, func(t *testing.T) {
