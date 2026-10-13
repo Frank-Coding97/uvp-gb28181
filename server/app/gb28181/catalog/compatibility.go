@@ -200,7 +200,7 @@ func reconcileCatalogIdentity(tx *gorm.DB, sender Sender, it CatalogItem, cls Cl
 			}
 			continue
 		}
-		if err := tx.Model(&node).Updates(map[string]any{"node_type": cls.NodeType, "channel_id": nil, "device_id": nil, "parent_id": parentID, "path": path, "depth": DepthFromPath(parentPath)}).Error; err != nil {
+		if err := tx.Model(&node).Updates(map[string]any{"source_device_id": strings.TrimSpace(sender.SourceDeviceID), "node_type": cls.NodeType, "channel_id": nil, "device_id": nil, "parent_id": parentID, "path": path, "depth": DepthFromPath(parentPath)}).Error; err != nil {
 			return err
 		}
 	}

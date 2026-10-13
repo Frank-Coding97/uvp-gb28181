@@ -45,26 +45,27 @@ describe("CatalogRefreshProgressDialog", () => {
   it("按 WVP 形态在等待设备回执时显示环形进度", () => {
     const wrapper = mountDialog("waiting");
     expect(wrapper.text()).toContain("等待同步中");
-    expect(wrapper.text()).toContain("已刷新 0 个通道");
+    expect(wrapper.text()).toContain("已刷新 0 个目录项");
     expect(wrapper.find(".stub-modal").attributes("data-modal-class")).toContain("uvp-system-dialog");
     expect(wrapper.find(".stub-progress").attributes("data-type")).toBe("circle");
     expect(wrapper.find(".stub-progress").attributes("data-percent")).toBe("0");
   });
 
-  it("按已接收和总数展示 WVP 风格的同步文案", () => {
-    const wrapper = mountDialog("receiving", { receivedCount: 2, totalCount: 5 });
-    expect(wrapper.text()).toContain("同步中...[2/5]");
-    expect(wrapper.text()).toContain("已刷新 2 / 5 个通道");
-    expect(wrapper.find(".stub-progress").attributes("data-percent")).toBe("0.4");
+  it("将目录响应条目数标为目录项而不是视频通道数", () => {
+    const wrapper = mountDialog("receiving", { receivedCount: 6, totalCount: 6 });
+    expect(wrapper.text()).toContain("同步中...[6/6]");
+    expect(wrapper.text()).toContain("已刷新 6 / 6 个目录项");
+    expect(wrapper.text()).not.toContain("个通道");
+    expect(wrapper.find(".stub-progress").attributes("data-percent")).toBe("1");
   });
 
-  it("完成时仍显示最终通道计数", async () => {
+  it("完成时仍显示最终目录项计数", async () => {
     const wrapper = mountDialog("receiving", { receivedCount: 2, totalCount: 5 });
     // ⛔ 喂给 `a-progress` 的是 0~1 的比值：传 40 会让圆环的 strokeDashoffset
     //    恒为 0（环永远画满），还会因 percent >= 1 提前被当成 success。
     expect(wrapper.find(".stub-progress").attributes("data-percent")).toBe("0.4");
     await wrapper.setProps({ progress: { ...baseProgress, status: "completed", receivedCount: 5, totalCount: 5 } });
-    expect(wrapper.text()).toContain("已刷新 5 / 5 个通道");
+    expect(wrapper.text()).toContain("已刷新 5 / 5 个目录项");
     expect(wrapper.find(".stub-progress").attributes("data-percent")).toBe("1");
   });
 
@@ -72,6 +73,14 @@ describe("CatalogRefreshProgressDialog", () => {
     const wrapper = mountDialog("failed", { errorMessage: "设备拒绝查询" });
     expect(wrapper.text()).toContain("设备拒绝查询");
     await wrapper.get(".modal-cancel").trigger("click");
+    expect(wrapper.emitted("close")).toHaveLength(1);
+  });
+
+  it("提供可主动关闭刷新进度的按钮", async () => {
+    const wrapper = mountDialog("persisting");
+    const closeButton = wrapper.get(".progress-close");
+    expect(closeButton.attributes("aria-label")).toBe("关闭刷新进度");
+    await closeButton.trigger("click");
     expect(wrapper.emitted("close")).toHaveLength(1);
   });
 

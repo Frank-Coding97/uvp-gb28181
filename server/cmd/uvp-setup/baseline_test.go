@@ -42,7 +42,7 @@ func loadStatements(t *testing.T) []string {
 
 // TestBaselineGoldenCounts 钉住「基线能切出多少个对象」。
 //
-// ⛔ 这三个数字是 Linux 绿色包安装时打印的那三个（`111 张表 · 307 个索引 ·
+// ⛔ 这三个数字是 Linux 绿色包安装时打印的那三个（`112 张表 · 313 个索引 ·
 //
 //	38 条种子语句`）。数字变了就说明 baseline.sql 换了版本 —— 那时应当**显式**
 //	更新本用例，而不是让它悄悄漂移。
@@ -56,11 +56,11 @@ func TestBaselineGoldenCounts(t *testing.T) {
 			counts[phases[i]]++
 		}
 	}
-	if got := counts[phaseTable]; got != 111 {
-		t.Errorf("建表语句数 = %d，期望 111", got)
+	if got := counts[phaseTable]; got != 112 {
+		t.Errorf("建表语句数 = %d，期望 112", got)
 	}
-	if got := counts[phaseIndex]; got != 307 {
-		t.Errorf("能真正建出的索引数 = %d，期望 307", got)
+	if got := counts[phaseIndex]; got != 313 {
+		t.Errorf("能真正建出的索引数 = %d，期望 313", got)
 	}
 	if got := counts[phaseSeed]; got != 38 {
 		t.Errorf("种子数据语句数 = %d，期望 38", got)

@@ -205,6 +205,64 @@ func TestJobResultSummaryMigrationNamesMapToColumn(t *testing.T) {
 	}
 }
 
+func TestCatalogNodeSourceMigrationNamesMapToColumn(t *testing.T) {
+	for _, name := range []string{
+		"2026-10-12-catalog-node-source-device.sql",
+		"2026-10-12-catalog-node-source-device-postgresql.sql",
+		"2026-10-12-catalog-node-source-device-sqlserver.sql",
+		"2026-10-12-catalog-node-source-device-sqlite.sql",
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, baselineColumnRequirement{table: "gb_catalog_node", column: "source_device_id"}, baselineColumnMigrations[name])
+		})
+	}
+}
+
+func TestChannelParentIDsMigrationNamesMapToSizedColumn(t *testing.T) {
+	for _, file := range channelParentIDsMigrationFiles {
+		t.Run(file.up, func(t *testing.T) {
+			require.Equal(t, baselineColumnRequirement{
+				table: "gb_channel", column: "parent_id", minLength: 512,
+			}, baselineColumnMigrations[file.up])
+		})
+	}
+}
+
+func TestRunEmptyLedgerUpgradesExistingParentIDColumnWhenTooNarrow(t *testing.T) {
+	store, lock, src, exec := newFakes()
+	name := channelParentIDsMigration + "-postgresql.sql"
+	src.files[name] = `ALTER TABLE "gb_channel" ALTER COLUMN "parent_id" TYPE VARCHAR(512)`
+	probe := schemaProbe{
+		hasTable:  func(string) (bool, error) { return true, nil },
+		hasColumn: func(string, string) (bool, error) { return true, nil },
+		columnLength: func(table, column string) (int64, error) {
+			require.Equal(t, "gb_channel", table)
+			require.Equal(t, "parent_id", column)
+			return 20, nil
+		},
+	}
+
+	require.NoError(t, run(store, lock, src, exec, probe))
+	require.Equal(t, []string{src.files[name]}, exec.executed,
+		"the legacy column exists but must be widened to retain the complete standard ParentID")
+	require.Equal(t, [][]string{{name}}, store.marks)
+}
+
+func TestRunEmptyLedgerBaselinesParentIDColumnWhenAlreadyWideEnough(t *testing.T) {
+	store, lock, src, exec := newFakes()
+	name := channelParentIDsMigration + "-postgresql.sql"
+	src.files[name] = `ALTER TABLE "gb_channel" ALTER COLUMN "parent_id" TYPE VARCHAR(512)`
+	probe := schemaProbe{
+		hasTable:     func(string) (bool, error) { return true, nil },
+		hasColumn:    func(string, string) (bool, error) { return true, nil },
+		columnLength: func(string, string) (int64, error) { return 512, nil },
+	}
+
+	require.NoError(t, run(store, lock, src, exec, probe))
+	require.Empty(t, exec.executed, "a current snapshot must only baseline-mark the migration")
+	require.Equal(t, [][]string{{name}}, store.marks)
+}
+
 func TestDeviceCaptureSessionMigrationNamesMapToTable(t *testing.T) {
 	for _, name := range []string{
 		"2026-10-11-openapi-device-capture-session.sql",

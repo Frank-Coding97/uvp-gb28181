@@ -38,8 +38,46 @@ func Down(db *gorm.DB, d Dialect, upFileName string) error {
 			return store.DeleteApplied(upFileName)
 		}
 	}
+	if err := checkChannelParentIDsDown(db, d, upFileName); err != nil {
+		return err
+	}
 	exec := &dbExecutor{db: db}
 	return downWith(store, exec, &embedSource{dialect: d}, d, upFileName)
+}
+
+func checkChannelParentIDsDown(db *gorm.DB, d Dialect, upFileName string) error {
+	switch upFileName {
+	case "2026-10-13-channel-parent-ids.sql",
+		"2026-10-13-channel-parent-ids-postgresql.sql",
+		"2026-10-13-channel-parent-ids-sqlserver.sql",
+		"2026-10-13-channel-parent-ids-sqlite.sql":
+	default:
+		return nil
+	}
+	if db == nil {
+		return fmt.Errorf("无法确认 ParentID 是否可安全缩窄")
+	}
+	query := ""
+	switch d {
+	case DialectMySQL:
+		query = "SELECT COUNT(*) FROM gb_channel WHERE CHAR_LENGTH(parent_id) > 20"
+	case DialectPostgres:
+		query = `SELECT COUNT(*) FROM "gb_channel" WHERE CHAR_LENGTH("parent_id") > 20`
+	case DialectSQLServer:
+		query = "SELECT COUNT(*) FROM [gb_channel] WHERE DATALENGTH([parent_id]) > 40"
+	case DialectSQLite:
+		query = `SELECT COUNT(*) FROM "gb_channel" WHERE length("parent_id") > 20`
+	default:
+		return fmt.Errorf("无法确认 ParentID 是否可安全缩窄")
+	}
+	var longValues int64
+	if err := db.Raw(query).Scan(&longValues).Error; err != nil {
+		return fmt.Errorf("无法确认 ParentID 是否可安全缩窄: %w", err)
+	}
+	if longValues > 0 {
+		return fmt.Errorf("ParentID 中仍有超过 20 个字符的值，拒绝回滚以避免数据截断")
+	}
+	return nil
 }
 
 // checkOpenAPIDownGuard is the hard gate for the only destructive OpenAPI

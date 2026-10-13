@@ -13,7 +13,7 @@ export type OnlineStatus = "online" | "offline";
 export type AssetKind = "channel" | "device";
 export type ProtocolOverride = "auto" | "2016" | "2022";
 export type ProtocolVersionSource = "register" | "override" | "history" | "default" | string;
-export type DirectoryView = "national" | "administrative" | "business" | "custom";
+export type DirectoryView = "national" | "administrative" | "department" | "business" | "custom";
 
 export interface DirectoryNode {
   key: string;
@@ -24,7 +24,17 @@ export interface DirectoryNode {
   count: number;
   onlineCount: number;
   depth: number;
+  meta?: Record<string, string>;
+  device?: DirectoryDevice;
   children?: DirectoryNode[];
+}
+
+export interface DirectoryDevice {
+  id: number;
+  deviceId: string;
+  name: string;
+  alias: string;
+  online: boolean;
 }
 
 export interface DirectoryQuery {
@@ -452,10 +462,22 @@ export interface ChannelQuery extends DirectoryQuery {
 export const listCatalogRoots = () =>
   http.request<BaseResult<{ list: CatalogNode[]; total: number }>>("get", baseUrlApi("gb28181/device-mgmt/catalog/tree"));
 
-export const listDirectoryTree = (view: DirectoryView) =>
-  http.request<BaseResult<{ list: DirectoryNode[] }>>("get", baseUrlApi("gb28181/device-mgmt/directory/tree"), {
-    params: { view }
-  });
+export interface DirectoryResourceFilter {
+  assetKind?: AssetKind;
+  q?: string;
+  status?: OnlineStatus;
+}
+export const listDirectoryTree = (
+  view: DirectoryView,
+  options: DirectoryResourceFilter & { sync?: number; since?: string } = {}
+) =>
+  http.request<BaseResult<Partial<import("./directorySync").DirectorySyncResult> & { list?: DirectoryNode[] }>>(
+    "get",
+    baseUrlApi("gb28181/device-mgmt/directory/tree"),
+    {
+      params: { view, ...options }
+    }
+  );
 
 export const createCustomGroup = (data: { name: string; parentId?: number | null }) =>
   http.request<BaseResult<CustomGroup>>("post", baseUrlApi("gb28181/device-mgmt/custom-groups"), { data });
@@ -579,6 +601,7 @@ export const getChannelTimeline = (id: number) =>
   );
 
 export interface MapQuery extends DirectoryQuery {
+  deviceId?: string;
   limit?: number;
   zoom?: number;
   minLat?: number;

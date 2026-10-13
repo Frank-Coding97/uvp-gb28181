@@ -1,63 +1,80 @@
 import { describe, expect, it } from "vitest";
 import {
   createDirectoryState,
-  customGroupBatchActions,
   directoryQuery,
   findDirectoryNode,
+  normalizeDirectoryView,
+  persistDirectoryViewPreference,
+  readDirectoryViewPreference,
   selectDirectory,
   switchDirectoryView
 } from "./directoryState";
 
-const leafGroup = {
-  key: "custom:group:12",
-  name: "叶子组",
-  type: "group",
-  readOnly: false,
+const departmentNode = {
+  key: "department:dept:12",
+  name: "安保部",
+  type: "organization",
+  readOnly: true,
   count: 1,
-  onlineCount: 0,
+  onlineCount: 1,
   depth: 1,
   children: []
 };
-const parentGroup = { ...leafGroup, key: "custom:group:11", name: "父组", depth: 0, children: [leafGroup] };
 
 describe("directoryState", () => {
-  it("defaults to national and keeps view state separately", () => {
+  it("defaults to administrative and keeps selection and expansion per view", () => {
     let state = createDirectoryState();
-    expect(state.view).toBe("national");
-    state = selectDirectory(state, "national:area:370112");
-    state = switchDirectoryView(state, "custom");
-    state = selectDirectory(state, "custom:group:12");
-    state = switchDirectoryView(state, "national");
+    expect(state.view).toBe("administrative");
+    state = selectDirectory(state, "administrative:340200");
+    state = switchDirectoryView(state, "department");
+    state = selectDirectory(state, "department:dept:12");
+    state = switchDirectoryView(state, "administrative");
     expect(state.selectedKey).toEqual({
-      national: "national:area:370112",
-      administrative: null,
-      business: null,
-      custom: "custom:group:12"
+      administrative: "administrative:340200",
+      department: "department:dept:12",
+      business: null
     });
   });
 
-  it("maps selected namespaced key to paired query params", () => {
-    const state = selectDirectory(createDirectoryState(), "national:unknown");
-    expect(directoryQuery(state)).toEqual({ directoryView: "national", directoryKey: "national:unknown" });
+  it("remembers a selected view and falls legacy national/custom preferences back to administrative", () => {
+    let storedValue: string | null = null;
+    const storage = {
+      getItem: () => storedValue,
+      setItem: (_key: string, value: string) => {
+        storedValue = value;
+      }
+    };
+    persistDirectoryViewPreference("department", storage);
+    expect(readDirectoryViewPreference(storage)).toBe("department");
+
+    storedValue = "national";
+    expect(readDirectoryViewPreference(storage)).toBe("administrative");
+    storedValue = "custom";
+    expect(readDirectoryViewPreference(storage)).toBe("administrative");
+    expect(normalizeDirectoryView("national")).toBe("administrative");
+    expect(normalizeDirectoryView("custom")).toBe("administrative");
+    expect(normalizeDirectoryView("unknown")).toBe("administrative");
+  });
+
+  it("maps the selected department key to the paired query params", () => {
+    const state = selectDirectory(switchDirectoryView(createDirectoryState(), "department"), "department:dept:12");
+    expect(directoryQuery(state)).toEqual({ directoryView: "department", directoryKey: "department:dept:12" });
     expect(directoryQuery(createDirectoryState())).toEqual({});
   });
 
+  it("keeps an empty business view scoped so it cannot fall back to every channel", () => {
+    const businessView = switchDirectoryView(createDirectoryState(), "business");
+    expect(directoryQuery(businessView)).toEqual({ directoryView: "business" });
+  });
+
   it("reports list reset effects without owning playback state", () => {
-    const result = switchDirectoryView(createDirectoryState(), "custom");
+    const result = switchDirectoryView(createDirectoryState(), "department");
     expect(result.listReset).toEqual({ page: 1, clearSelection: true });
     expect(result).not.toHaveProperty("playing");
   });
 
-  it("shows member actions only for selected devices and real custom groups", () => {
-    expect(customGroupBatchActions("device", 2, null)).toEqual({ canAdd: true, removeGroupId: null });
-    expect(customGroupBatchActions("device", 2, leafGroup)).toEqual({ canAdd: true, removeGroupId: 12 });
-    expect(customGroupBatchActions("device", 2, parentGroup)).toEqual({ canAdd: true, removeGroupId: null });
-    expect(customGroupBatchActions("channel", 2, leafGroup)).toEqual({ canAdd: false, removeGroupId: null });
-    expect(customGroupBatchActions("device", 0, leafGroup)).toEqual({ canAdd: false, removeGroupId: null });
-  });
-
-  it("refreshes the selected node name from the latest tree", () => {
-    expect(findDirectoryNode([{ ...leafGroup, name: "新名称" }], leafGroup.key)?.name).toBe("新名称");
-    expect(findDirectoryNode([], leafGroup.key)).toBeNull();
+  it("finds a department in a nested tree", () => {
+    expect(findDirectoryNode([{ ...departmentNode, children: [departmentNode] }], departmentNode.key)?.name).toBe("安保部");
+    expect(findDirectoryNode([], departmentNode.key)).toBeNull();
   });
 });

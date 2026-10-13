@@ -59,6 +59,6 @@ func TestCaptureSessionSchemaIsPresentInMigrationsAndFreshBaselines(t *testing.T
 
 	manifest, err := os.ReadFile(filepath.Join(serverRoot, "resource/database/sqlitebaseline/manifest.json"))
 	require.NoError(t, err)
-	require.Contains(t, string(manifest), `"version": "sqlite-baseline-20261011-r1"`)
+	require.Contains(t, string(manifest), `"version": "sqlite-baseline-20261013-r2"`)
 	require.Contains(t, string(manifest), `"tables": 112`)
 }

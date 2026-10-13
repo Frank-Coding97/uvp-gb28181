@@ -1,0 +1,21 @@
+{
+  "devices": 1000,
+  "mount_ms": 308.89999997615814,
+  "rows": 1003,
+  "dom_nodes": 12094,
+  "unchanged_ms": 34.200000047683716,
+  "status_delta_ms": 31.399999976158142,
+  "collapse_ms": 34.5,
+  "expand_ms": 217.10000002384186,
+  "search_ms": 37.5,
+  "search_rows": 14,
+  "scroll_preserved": true,
+  "max_scroll_frame_ms": 17.700000000000045,
+  "slow_scroll_frames": 0,
+  "long_tasks": 3,
+  "max_long_task_ms": 209,
+  "heap_used": 69250493,
+  "errors": [],
+  "browser": "155.0.8059.39",
+  "note": "Isolated real DirectoryPanel; local synthetic API response; excludes DB/network and rest of application."
+}

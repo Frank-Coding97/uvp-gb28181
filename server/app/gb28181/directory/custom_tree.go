@@ -30,15 +30,13 @@ func BuildCustomTree(ctx context.Context, db *gorm.DB, ownerDeptID uint) ([]Dire
 		}
 		direct[relation.GroupID][relation.DeviceID] = struct{}{}
 	}
-	var onlineDeviceIDs []uint
-	if err := db.WithContext(ctx).Model(&gbmodels.GbDevice{}).
-		Where("owner_dept_id = ? AND status = ?", ownerDeptID, gbmodels.DeviceStatusOnline).
-		Pluck("id", &onlineDeviceIDs).Error; err != nil {
+	var devices []gbmodels.GbDevice
+	if err := db.WithContext(ctx).Where("owner_dept_id = ?", ownerDeptID).Order("id").Find(&devices).Error; err != nil {
 		return nil, err
 	}
-	onlineDevices := make(map[uint]struct{}, len(onlineDeviceIDs))
-	for _, deviceID := range onlineDeviceIDs {
-		onlineDevices[deviceID] = struct{}{}
+	deviceByID := make(map[uint]gbmodels.GbDevice, len(devices))
+	for _, device := range devices {
+		deviceByID[device.ID] = device
 	}
 	var build func(uint, int) ([]DirectoryNodeVO, map[uint]struct{})
 	build = func(parentID uint, depth int) ([]DirectoryNodeVO, map[uint]struct{}) {
@@ -60,8 +58,18 @@ func BuildCustomTree(ctx context.Context, db *gorm.DB, ownerDeptID uint) ([]Dire
 			}
 			onlineCount := 0
 			for id := range members {
-				if _, ok := onlineDevices[id]; ok {
+				if device, ok := deviceByID[id]; ok && device.Status == gbmodels.DeviceStatusOnline {
 					onlineCount++
+				}
+			}
+			deviceIDs := make([]uint, 0, len(direct[group.ID]))
+			for id := range direct[group.ID] {
+				deviceIDs = append(deviceIDs, id)
+			}
+			sort.Slice(deviceIDs, func(i, j int) bool { return deviceIDs[i] < deviceIDs[j] })
+			for _, id := range deviceIDs {
+				if device, ok := deviceByID[id]; ok {
+					childNodes = append(childNodes, deviceDirectoryNode(device, directoryDeviceKey("custom", group.ID, id), depth+1))
 				}
 			}
 			out = append(out, DirectoryNodeVO{Key: fmt.Sprintf("custom:group:%d", group.ID), Name: group.Name, Type: "group", Count: len(members), OnlineCount: onlineCount, Depth: depth, Children: childNodes})
@@ -69,25 +77,32 @@ func BuildCustomTree(ctx context.Context, db *gorm.DB, ownerDeptID uint) ([]Dire
 		return out, all
 	}
 	tree, _ := build(0, 0)
-	var ungrouped int64
-	if err := db.WithContext(ctx).Model(&gbmodels.GbDevice{}).Where("owner_dept_id = ?", ownerDeptID).
-		Where("NOT EXISTS (?)", db.Model(&gbmodels.GbCustomGroupDevice{}).Select("1").Where("gb_custom_group_device.device_id = gb_device.id")).Count(&ungrouped).Error; err != nil {
+	var ungroupedDevices []gbmodels.GbDevice
+	if err := db.WithContext(ctx).Where("owner_dept_id = ?", ownerDeptID).
+		Where("NOT EXISTS (?)", db.Model(&gbmodels.GbCustomGroupDevice{}).Select("1").Where("gb_custom_group_device.device_id = gb_device.id")).
+		Order("id").Find(&ungroupedDevices).Error; err != nil {
 		return nil, err
 	}
-	var ungroupedOnline int64
-	if err := db.WithContext(ctx).Model(&gbmodels.GbDevice{}).Where("owner_dept_id = ? AND status = ?", ownerDeptID, gbmodels.DeviceStatusOnline).
-		Where("NOT EXISTS (?)", db.Model(&gbmodels.GbCustomGroupDevice{}).Select("1").Where("gb_custom_group_device.device_id = gb_device.id")).Count(&ungroupedOnline).Error; err != nil {
-		return nil, err
+	ungroupedOnline := 0
+	for _, device := range ungroupedDevices {
+		if device.Status == gbmodels.DeviceStatusOnline {
+			ungroupedOnline++
+		}
 	}
-	if ungrouped > 0 {
+	if len(ungroupedDevices) > 0 {
+		ungroupedNodes := make([]DirectoryNodeVO, 0, len(ungroupedDevices))
+		for _, device := range ungroupedDevices {
+			ungroupedNodes = append(ungroupedNodes, deviceDirectoryNode(device, directoryDeviceKey("custom-ungrouped", ownerDeptID, device.ID), 1))
+		}
 		tree = append(tree, DirectoryNodeVO{
 			Key:         fmt.Sprintf("custom:ungrouped:%d", ownerDeptID),
 			Name:        "未分组",
 			Type:        "ungrouped",
 			ReadOnly:    true,
-			Count:       int(ungrouped),
-			OnlineCount: int(ungroupedOnline),
+			Count:       len(ungroupedDevices),
+			OnlineCount: ungroupedOnline,
 			Meta:        map[string]string{"ownerDeptId": fmt.Sprintf("%d", ownerDeptID)},
+			Children:    ungroupedNodes,
 		})
 	}
 	return tree, nil

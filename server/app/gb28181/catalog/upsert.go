@@ -33,6 +33,7 @@ func upsertDevice(
 	ctx context.Context,
 	db *gorm.DB,
 	ownerDeptID uint,
+	sourceDeviceID string,
 	item CatalogItem,
 	cls Classification,
 	parentNode *gbmodels.GbCatalogNode,
@@ -58,14 +59,16 @@ func upsertDevice(
 	} else {
 		// 已存在仅更新可变字段(不动 keepalive_time / status,那是注册心跳的事)
 		updates := map[string]any{}
-		if item.Name != "" && item.Name != dev.Name {
-			updates["name"] = item.Name
-		}
-		if item.Manufacturer != "" && item.Manufacturer != dev.Manufacturer {
-			updates["manufacturer"] = item.Manufacturer
-		}
-		if item.Model != "" && item.Model != dev.Model {
-			updates["model"] = item.Model
+		if dev.OwnerDeptID == 0 || dev.OwnerDeptID == ownerDeptID {
+			if item.Name != "" && item.Name != dev.Name {
+				updates["name"] = item.Name
+			}
+			if item.Manufacturer != "" && item.Manufacturer != dev.Manufacturer {
+				updates["manufacturer"] = item.Manufacturer
+			}
+			if item.Model != "" && item.Model != dev.Model {
+				updates["model"] = item.Model
+			}
 		}
 		if ownerDeptID != 0 && dev.OwnerDeptID == 0 {
 			updates["owner_dept_id"] = ownerDeptID
@@ -86,7 +89,7 @@ func upsertDevice(
 		pid = &parentNode.ID
 		parentPath = parentNode.Path
 	}
-	node, err := findOrCreateNode(db.WithContext(ctx), dev.OwnerDeptID, gbmodels.NodeTypeDevice, item.DeviceID, pid, parentPath, fallbackName(item.Name, item.DeviceID))
+	node, err := findOrCreateSourceNode(db.WithContext(ctx), ownerDeptID, sourceDeviceID, gbmodels.NodeTypeDevice, item.DeviceID, pid, parentPath, item.Name)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -219,8 +222,11 @@ func upsertChannel(
 			"model":        item.Model,
 			"owner":        item.Owner,
 			"civil_code":   resolvedCivilCode,
-			"parent_id":    item.ParentID,
 			"status":       status,
+		}
+		// 状态类 UPDATE 可能只带 DeviceID/Status，不能清空已知的物理父关系。
+		if strings.TrimSpace(item.ParentID) != "" {
+			updates["parent_id"] = strings.TrimSpace(item.ParentID)
 		}
 		// ⛔⛔ 坐标是三通路共用的落点，**不能无条件写** —— 原实现把 item.Longitude/Latitude
 		// 直接放进 updates，造成两个丢数据点：
@@ -291,7 +297,7 @@ func upsertChannel(
 		pid = &parentNode.ID
 		parentPath = parentNode.Path
 	}
-	node, err := findOrCreateNode(db.WithContext(ctx), ch.OwnerDeptID, gbmodels.NodeTypeChannel, item.DeviceID, pid, parentPath, fallbackName(item.Name, item.DeviceID))
+	node, err := findOrCreateSourceNode(db.WithContext(ctx), ch.OwnerDeptID, sourceDeviceID, gbmodels.NodeTypeChannel, item.DeviceID, pid, parentPath, item.Name)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -301,9 +307,19 @@ func upsertChannel(
 		}
 		node.ChannelID = &chIDCopy
 	}
+	if err := collapseDuplicateSourceChannelNodes(db.WithContext(ctx), node, sourceDeviceID); err != nil {
+		return nil, nil, err
+	}
 
 	// 3. 主挂载 gb_channel_mount 建/找(parentNode = 该通道默认挂载点)
 	if parentNode != nil {
+		// ParentID/BusinessGroupID 是本次目录关系的权威声明；状态更新没有
+		// 关系字段时只复用现有挂载，不能把合法人工挂载一起清掉。
+		if strings.TrimSpace(item.ParentID) != "" || strings.TrimSpace(item.BusinessGroupID) != "" {
+			if err := removeStaleCatalogMounts(ctx, db, ch.OwnerDeptID, ch.ID, parentNode.ID); err != nil {
+				return nil, nil, err
+			}
+		}
 		if err := ensurePrimaryMount(ctx, db, ch.OwnerDeptID, ch.ID, parentNode.ID, item.Name); err != nil {
 			return nil, nil, err
 		}
@@ -313,10 +329,26 @@ func upsertChannel(
 	return node, &ch, nil
 }
 
+// collapseDuplicateSourceChannelNodes 收敛历史上按父节点重复创建的 Catalog 通道节点。
+// 只软删相同 owner/source/type/code 的活动目录节点，人工节点及其他上报来源不受影响。
+func collapseDuplicateSourceChannelNodes(db *gorm.DB, keep *gbmodels.GbCatalogNode, sourceDeviceID string) error {
+	var duplicates []gbmodels.GbCatalogNode
+	if err := db.Where("owner_dept_id = ? AND source_device_id = ? AND node_type = ? AND code = ? AND id <> ?",
+		keep.OwnerDeptID, strings.TrimSpace(sourceDeviceID), gbmodels.NodeTypeChannel, keep.Code, keep.ID).
+		Where("(source = ? OR source = ?)", gbmodels.NodeSourceCatalog, "").
+		Find(&duplicates).Error; err != nil {
+		return err
+	}
+	if len(duplicates) == 0 {
+		return nil
+	}
+	return db.Delete(&duplicates).Error
+}
+
 // ensurePrimaryMount 保证主挂载存在
 func ensurePrimaryMount(ctx context.Context, db *gorm.DB, ownerDeptID, channelID, parentNodeID uint, displayName string) error {
 	var existed gbmodels.GbChannelMount
-	res := db.WithContext(ctx).Where("channel_id = ? AND parent_node_id = ?", channelID, parentNodeID).Limit(1).Find(&existed)
+	res := db.WithContext(ctx).Where("owner_dept_id = ? AND channel_id = ? AND parent_node_id = ?", ownerDeptID, channelID, parentNodeID).Limit(1).Find(&existed)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -324,7 +356,7 @@ func ensurePrimaryMount(ctx context.Context, db *gorm.DB, ownerDeptID, channelID
 		// 已存在不动(避免 is_primary 抖动);若该 channel 没有任何主挂载,把这个标主
 		var primaryCount int64
 		if err := db.WithContext(ctx).Model(&gbmodels.GbChannelMount{}).
-			Where("channel_id = ? AND is_primary = ?", channelID, true).
+			Where("owner_dept_id = ? AND channel_id = ? AND is_primary = ?", ownerDeptID, channelID, true).
 			Count(&primaryCount).Error; err != nil {
 			return err
 		}
@@ -343,7 +375,7 @@ func ensurePrimaryMount(ctx context.Context, db *gorm.DB, ownerDeptID, channelID
 	// 新建挂载:若当前 channel 还没有主挂载,这一个就是主的
 	var primaryCount int64
 	if err := db.WithContext(ctx).Model(&gbmodels.GbChannelMount{}).
-		Where("channel_id = ? AND is_primary = ?", channelID, true).
+		Where("owner_dept_id = ? AND channel_id = ? AND is_primary = ?", ownerDeptID, channelID, true).
 		Count(&primaryCount).Error; err != nil {
 		return err
 	}
@@ -356,6 +388,15 @@ func ensurePrimaryMount(ctx context.Context, db *gorm.DB, ownerDeptID, channelID
 		MountSource:  gbmodels.MountSourceCatalog,
 	}
 	return db.WithContext(ctx).Create(m).Error
+}
+
+// removeStaleCatalogMounts 清理同一来源通道已经失效的 Catalog 挂载。
+// 来源由 gb_channel(device_id) 隔离；人工挂载 mount_source=manual 永不触碰。
+func removeStaleCatalogMounts(ctx context.Context, db *gorm.DB, ownerDeptID, channelID, keepParentID uint) error {
+	return db.WithContext(ctx).
+		Where("owner_dept_id = ? AND channel_id = ? AND parent_node_id <> ?", ownerDeptID, channelID, keepParentID).
+		Where("mount_source = ? OR mount_source = ?", gbmodels.MountSourceCatalog, "").
+		Delete(&gbmodels.GbChannelMount{}).Error
 }
 
 // fallbackName 名称为空时给个兜底

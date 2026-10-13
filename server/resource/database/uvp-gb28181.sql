@@ -274,6 +274,7 @@ CREATE TABLE `gb_catalog_node` (
   `name` varchar(128) NOT NULL COMMENT '节点显示名',
   `code` varchar(32) NULL COMMENT '节点编码(行政区 6/设备 20/通道 20)',
   `civil_code` varchar(6) NULL COMMENT '关联行政区(冗余加速过滤)',
+  `source_device_id` varchar(20) NOT NULL DEFAULT '' COMMENT '目录项上报来源设备或下级平台编码',
   `device_id` bigint unsigned NULL COMMENT 'node_type=device 时引用',
   `channel_id` bigint unsigned NULL COMMENT 'node_type=channel 主挂载时引用',
   `source` varchar(16) NOT NULL DEFAULT 'catalog' COMMENT 'catalog/manual/auto',
@@ -294,7 +295,8 @@ CREATE TABLE `gb_catalog_node` (
   KEY `idx_owner_dept_civil_code` (`owner_dept_id`,`civil_code`),
   KEY `idx_owner_dept_parent` (`owner_dept_id`,`parent_id`),
   KEY `idx_owner_dept_path` (`owner_dept_id`,`path`(128)),
-  KEY `idx_owner_dept_type` (`owner_dept_id`,`node_type`)
+  KEY `idx_owner_dept_type` (`owner_dept_id`,`node_type`),
+  KEY `idx_owner_source_type_code` (`owner_dept_id`,`source_device_id`,`node_type`,`code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='国标多级目录树节点(思路 B+ 核心)';
 
 -- Table structure for `gb_channel`
@@ -309,7 +311,7 @@ CREATE TABLE `gb_channel` (
   `model` varchar(255) NOT NULL DEFAULT '' COMMENT '型号',
   `owner` varchar(64) NOT NULL DEFAULT '' COMMENT '设备归属',
   `civil_code` varchar(32) NOT NULL DEFAULT '' COMMENT '行政区划',
-  `parent_id` varchar(20) NOT NULL DEFAULT '' COMMENT '父节点编码(目录树)',
+  `parent_id` varchar(512) NOT NULL DEFAULT '' COMMENT '父节点编码(目录树,2022 多父值按 / 原样保存)',
   `ptz_type` tinyint NULL DEFAULT 0 COMMENT '云台类型 0未知 1球机 2半球 3固定枪机 4遥控枪机 5遥控半球 6多目全景/拼接通道 7多目分割通道(5-7 为 2022 新增)',
   `room_type` tinyint NOT NULL DEFAULT 0 COMMENT '室内外 0未上报 1室外 2室内(两版编码一致)',
   `supply_light_type` tinyint NOT NULL DEFAULT 0 COMMENT '补光方式 0未上报 1无补光 2红外 3白光 4激光 9其他',

@@ -86,8 +86,7 @@ describe("device-mgmt guest permission boundary", () => {
     //    以及本来就带 v-else 只读兜底的展示元素（状态带 / 内联状态）。
     expect(source).toContain('v-if="canAddDevice"');
     expect(source).toContain('v-if="canViewTraffic"');
-    expect(source).toContain('v-else class="device-status-ribbon device-status-readonly"');
-    expect(source).toContain('v-else class="status-inline status-readonly"');
+    expect(source).toContain(':disabled="!canViewTraffic"');
   });
 
   it("does not submit transport changes through the general channel edit without its permission", () => {

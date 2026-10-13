@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"gorm.io/gorm"
@@ -54,13 +56,15 @@ var baselineRequiredTables = []string{
 // schemaProbe probes the release baseline fingerprint and the few upgrade
 // columns that must still run when an older snapshot has an empty ledger.
 type schemaProbe struct {
-	hasTable  func(tableName string) (bool, error)
-	hasColumn func(tableName, columnName string) (bool, error)
+	hasTable     func(tableName string) (bool, error)
+	hasColumn    func(tableName, columnName string) (bool, error)
+	columnLength func(tableName, columnName string) (int64, error)
 }
 
 type baselineColumnRequirement struct {
-	table  string
-	column string
+	table     string
+	column    string
+	minLength int64
 }
 
 var baselineColumnMigrations = map[string]baselineColumnRequirement{
@@ -93,10 +97,18 @@ var baselineColumnMigrations = map[string]baselineColumnRequirement{
 	"2026-10-09-job-result-summary-sqlserver.sql":             {table: "sys_job_results", column: "summary"},
 	"2026-10-09-job-result-summary-sqlite.sql":                {table: "sys_job_results", column: "summary"},
 	// rtp_receive_mode 与 rtp_proxy_port 成对出现，只需登记其中一列即可。
-	"2026-10-09-meta-node-receive-mode.sql":            {table: "meta_node", column: "rtp_receive_mode"},
-	"2026-10-09-meta-node-receive-mode-postgresql.sql": {table: "meta_node", column: "rtp_receive_mode"},
-	"2026-10-09-meta-node-receive-mode-sqlserver.sql":  {table: "meta_node", column: "rtp_receive_mode"},
-	"2026-10-09-meta-node-receive-mode-sqlite.sql":     {table: "meta_node", column: "rtp_receive_mode"},
+	"2026-10-09-meta-node-receive-mode.sql":                {table: "meta_node", column: "rtp_receive_mode"},
+	"2026-10-09-meta-node-receive-mode-postgresql.sql":     {table: "meta_node", column: "rtp_receive_mode"},
+	"2026-10-09-meta-node-receive-mode-sqlserver.sql":      {table: "meta_node", column: "rtp_receive_mode"},
+	"2026-10-09-meta-node-receive-mode-sqlite.sql":         {table: "meta_node", column: "rtp_receive_mode"},
+	"2026-10-12-catalog-node-source-device.sql":            {table: "gb_catalog_node", column: "source_device_id"},
+	"2026-10-12-catalog-node-source-device-postgresql.sql": {table: "gb_catalog_node", column: "source_device_id"},
+	"2026-10-12-catalog-node-source-device-sqlserver.sql":  {table: "gb_catalog_node", column: "source_device_id"},
+	"2026-10-12-catalog-node-source-device-sqlite.sql":     {table: "gb_catalog_node", column: "source_device_id"},
+	"2026-10-13-channel-parent-ids.sql":                    {table: "gb_channel", column: "parent_id", minLength: 512},
+	"2026-10-13-channel-parent-ids-postgresql.sql":         {table: "gb_channel", column: "parent_id", minLength: 512},
+	"2026-10-13-channel-parent-ids-sqlserver.sql":          {table: "gb_channel", column: "parent_id", minLength: 512},
+	"2026-10-13-channel-parent-ids-sqlite.sql":             {table: "gb_channel", column: "parent_id", minLength: 512},
 }
 
 // baselineTableMigrations lists additive table migrations that must still run
@@ -134,7 +146,20 @@ func needsBaselineColumnUpgrade(name string, probe schemaProbe) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("探测 %s.%s 失败: %w", requirement.table, requirement.column, err)
 	}
-	return !exists, nil
+	if !exists {
+		return true, nil
+	}
+	if requirement.minLength == 0 {
+		return false, nil
+	}
+	if probe.columnLength == nil {
+		return false, fmt.Errorf("列迁移缺少列长度探测器")
+	}
+	length, err := probe.columnLength(requirement.table, requirement.column)
+	if err != nil {
+		return false, fmt.Errorf("探测 %s.%s 长度失败: %w", requirement.table, requirement.column, err)
+	}
+	return length < requirement.minLength, nil
 }
 
 func needsBaselineTableUpgrade(name string, probe schemaProbe) (bool, error) {
@@ -217,12 +242,18 @@ func (e *dbExecutor) ExecSQL(sqlText string) error {
 	// Session variables and PREPARE handles belong to a physical connection.
 	// Pin the entire file; separate pool calls may silently switch sessions.
 	return db.Connection(func(conn *gorm.DB) error {
-		for _, stmt := range splitStatements(sqlText) {
-			if err := conn.Exec(stmt).Error; err != nil {
-				return err
+		execute := func(execDB *gorm.DB) error {
+			for _, stmt := range splitStatements(sqlText) {
+				if err := execDB.Exec(stmt).Error; err != nil {
+					return err
+				}
 			}
+			return nil
 		}
-		return nil
+		if conn.Dialector.Name() == string(DialectSQLite) {
+			return conn.Transaction(execute)
+		}
+		return execute(conn)
 	})
 }
 
@@ -262,8 +293,46 @@ func Up(db *gorm.DB, d Dialect) error {
 		hasColumn: func(tableName, columnName string) (bool, error) {
 			return db.Migrator().HasColumn(tableName, columnName), nil
 		},
+		columnLength: func(tableName, columnName string) (int64, error) {
+			if d == DialectSQLite && tableName == "gb_channel" && columnName == "parent_id" {
+				return sqliteColumnLimit(db, tableName)
+			}
+			columns, err := db.Migrator().ColumnTypes(tableName)
+			if err != nil {
+				return 0, err
+			}
+			for _, column := range columns {
+				if strings.EqualFold(column.Name(), columnName) {
+					length, ok := column.Length()
+					if !ok {
+						return 0, fmt.Errorf("数据库未返回列长度")
+					}
+					return length, nil
+				}
+			}
+			return 0, fmt.Errorf("列不存在")
+		},
 	}
 	return run(NewStore(db), newDBLocker(db, d), &embedSource{dialect: d}, &dbExecutor{db: db}, probe)
+}
+
+var sqliteParentIDLengthLimit = regexp.MustCompile(`length\s*\(\s*parent_id\s*\)\s*<=\s*(\d+)`)
+
+func sqliteColumnLimit(db *gorm.DB, tableName string) (int64, error) {
+	var definition string
+	if err := db.Raw("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", tableName).Scan(&definition).Error; err != nil {
+		return 0, err
+	}
+	if definition == "" {
+		return 0, fmt.Errorf("表定义不存在")
+	}
+	normalized := strings.ToLower(strings.NewReplacer(`"`, "", "`", "", "[", "", "]", "").Replace(definition))
+	match := sqliteParentIDLengthLimit.FindStringSubmatch(normalized)
+	if len(match) != 2 {
+		// SQLite TEXT has no declared width; without this CHECK it accepts full values.
+		return 512, nil
+	}
+	return strconv.ParseInt(match[1], 10, 64)
 }
 
 // run 是 Up 的纯依赖版本,便于 fake 注入测试。

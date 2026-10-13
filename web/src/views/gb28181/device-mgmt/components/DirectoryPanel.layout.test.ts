@@ -5,11 +5,12 @@ import { describe, expect, it } from "vitest";
 const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/device-mgmt/components/DirectoryPanel.vue"), "utf8");
 
 describe("device directory panel layout", () => {
-  it("matches the multi-screen playback directory tab treatment", () => {
+  it("keeps the three device directory tabs in one compact row", () => {
     expect(source).toContain('role="tab"');
-    expect(source).toContain(":aria-selected=\"modelValue.view === 'national'\"");
-    expect(source).toContain("gap: 4px;");
-    expect(source).toContain("padding: 0 8px;");
+    expect(source).toContain(":aria-selected=\"modelValue.view === 'administrative'\"");
+    expect(source).toContain("grid-template-columns: repeat(3, minmax(0, 1fr));");
+    expect(source).toContain("gap: 3px;");
+    expect(source).toContain("padding: 0 3px;");
     expect(source).toContain("border: 1px solid transparent;");
     expect(source).toMatch(
       /\.directory-switch\s+button\s*\{(?=[^}]*transition:\s*color\s+0\.15s\s+ease,\s*background\s+0\.15s\s+ease,\s*border-color\s+0\.15s\s+ease,\s*box-shadow\s+0\.15s\s+ease;)[^}]*\}/s
@@ -19,6 +20,8 @@ describe("device directory panel layout", () => {
     expect(source).toContain("color: var(--uvp-brand-strong, var(--uvp-brand));");
     expect(source).toContain("font-weight: 650;");
     expect(source).not.toContain("box-shadow: 0 0 0 1px var(--uvp-panel-border);");
+    expect(source).not.toContain('data-view="national"');
+    expect(source).not.toContain('data-view="custom"');
   });
 
   it("keeps tree padding inside its scroll viewport", () => {

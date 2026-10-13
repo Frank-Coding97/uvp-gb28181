@@ -1,0 +1,19 @@
+{
+  "connection_and_first_query_ms": 445.751,
+  "includes": "driver and server turnaround, excludes MCP tool overhead; not pure network RTT",
+  "samples_ms": [
+    233.543,
+    74.836,
+    107.609,
+    106.141,
+    89.161,
+    105.612,
+    107.29,
+    91.958,
+    85.353,
+    124.868
+  ],
+  "scope": "existing project MySQL via VPN; read-only SELECT 1",
+  "warm_max_ms": 233.543,
+  "warm_p50_ms": 105.612
+}

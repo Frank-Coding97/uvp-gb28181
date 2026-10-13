@@ -54,7 +54,7 @@ const channel = {
 
 function mountTree() {
   return mount(PlaybackSourceTree, {
-    props: { usedChannelIds: [] },
+    props: { usedChannelIds: [], view: "devices" },
     global: {
       stubs: {
         "a-spin": { template: "<div><slot /></div>" },
@@ -84,7 +84,15 @@ function mountTree() {
 describe("PlaybackSourceTree", () => {
   beforeEach(() => {
     account.permissions = ["*:*:*"];
-    window.localStorage?.clear?.();
+    const storage = new Map<string, string>();
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+        clear: () => storage.clear()
+      }
+    });
     api.listDevices.mockReset();
     api.listChannels.mockReset();
     api.listDirectoryTree.mockReset();
@@ -112,15 +120,35 @@ describe("PlaybackSourceTree", () => {
     vi.useRealTimers();
   });
 
+  it("defaults to administrative and restores the department preference", async () => {
+    const options = { global: { stubs: { "a-spin": { template: "<div><slot /></div>" } } } };
+    const wrapper = mount(PlaybackSourceTree, options);
+    await flushPromises();
+    expect(wrapper.get("[data-test=source-view-administrative]").attributes("aria-selected")).toBe("true");
+    await wrapper.get("[data-test=source-view-department]").trigger("click");
+    await flushPromises();
+    wrapper.unmount();
+    const restored = mount(PlaybackSourceTree, options);
+    await flushPromises();
+    expect(restored.get("[data-test=source-view-department]").attributes("aria-selected")).toBe("true");
+    restored.unmount();
+  });
+
   it("shows source views and nests channels below an expanded device", async () => {
     const wrapper = mountTree();
     await flushPromises();
 
-    expect(wrapper.findAll("[role=tab]").map(node => node.text())).toEqual(["设备树", "国标目录", "自定义目录", "我的收藏"]);
+    expect(wrapper.findAll("[role=tab]").map(node => node.text())).toEqual([
+      "设备树",
+      "行政区划",
+      "部门目录",
+      "业务分组",
+      "我的收藏"
+    ]);
     expect(wrapper.findAll("[data-test^=source-view-scroll]")).toHaveLength(2);
     expect(wrapper.find("[data-test=source-view-devices] .lucide-cctv").exists()).toBe(true);
-    expect(wrapper.find("[data-test=source-view-national] .lucide-map-pin").exists()).toBe(true);
-    expect(wrapper.find("[data-test=source-view-custom] .lucide-folder").exists()).toBe(true);
+    expect(wrapper.find("[data-test=source-view-administrative] .lucide-map-pin").exists()).toBe(true);
+    expect(wrapper.find("[data-test=source-view-department] .lucide-folder").exists()).toBe(true);
     expect(wrapper.find("[data-test=source-view-favorites] .lucide-star").exists()).toBe(true);
     expect(wrapper.find(".tree-title").exists()).toBe(false);
     expect(wrapper.find(".tree-head .lucide-router").exists()).toBe(false);
@@ -168,7 +196,7 @@ describe("PlaybackSourceTree", () => {
     await flushPromises();
 
     const devicesTab = wrapper.get("[data-test=source-view-devices]");
-    const nationalTab = wrapper.get("[data-test=source-view-national]");
+    const nationalTab = wrapper.get("[data-test=source-view-administrative]");
     expect(devicesTab.classes()).toContain("active");
     expect(devicesTab.attributes("aria-selected")).toBe("true");
     expect(nationalTab.classes()).not.toContain("active");
@@ -565,16 +593,63 @@ describe("PlaybackSourceTree", () => {
     wrapper.unmount();
   });
 
-  it("loads devices under a national directory node instead of rendering a second flat list", async () => {
+  it("uses embedded department devices without querying a second device list", async () => {
+    api.listDirectoryTree.mockResolvedValue({
+      code: 0,
+      data: {
+        list: [
+          {
+            key: "department:dept:1",
+            name: "研发",
+            type: "department",
+            depth: 0,
+            count: 1,
+            onlineCount: 1,
+            children: [
+              {
+                key: "department:device:1",
+                name: "一号设备",
+                type: "device",
+                depth: 1,
+                count: 1,
+                onlineCount: 1,
+                device: { id: 1, deviceId: "device-1", name: "一号设备", alias: "", online: true }
+              }
+            ]
+          }
+        ]
+      }
+    });
     const wrapper = mountTree();
-    await wrapper.get("[data-test=source-view-national]").trigger("click");
     await flushPromises();
+    api.listDevices.mockClear();
+    await wrapper.get("[data-test=source-view-department]").trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-node-key="department:dept:1"] .twist-button').trigger("click");
+    await flushPromises();
+    expect(api.listDevices).not.toHaveBeenCalled();
+    await wrapper.get('[data-node-key="department:device:1"] .twist-button').trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-node-key="department:device:1:channel:11"] .tree-node').trigger("click");
+    expect(wrapper.emitted("select")?.[0]?.[0]).toMatchObject({ id: 11 });
+    wrapper.unmount();
+  });
+
+  it("queries business channels with directory and resource filters", async () => {
+    const wrapper = mountTree();
+    await flushPromises();
+    await wrapper.get("[data-test=source-view-business]").trigger("click");
+    await flushPromises();
+    await wrapper.get("[data-test=device-filter-toggle]").trigger("click");
+    await wrapper.get("[data-test=device-status-online]").trigger("click");
+    await flushPromises();
+    expect(api.listDirectoryTree).toHaveBeenLastCalledWith("business", { assetKind: "channel", status: "online" });
     await wrapper.get('[data-node-key="national:area:370000"] .twist-button').trigger("click");
     await flushPromises();
-
-    expect(api.listDevices).toHaveBeenLastCalledWith(
-      expect.objectContaining({ directoryView: "national", directoryKey: "national:area:370000" })
+    expect(api.listChannels).toHaveBeenLastCalledWith(
+      expect.objectContaining({ directoryView: "business", directoryKey: "national:area:370000", status: "online" })
     );
-    expect(wrapper.text()).toContain("一号设备");
+    expect(wrapper.text()).toContain("东门");
+    wrapper.unmount();
   });
 });

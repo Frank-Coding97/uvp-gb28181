@@ -242,7 +242,7 @@ describe("multi-screen playback page", () => {
     await flushPromises();
     expect(favoriteDialog.opened).toBe(true);
     expect(favoriteDialog.channels).toEqual([expect.objectContaining({ channelId: "channel-1" })]);
-    expect(wrapper.get("[data-test=playback-source-tree]").attributes("data-view")).toBe("devices");
+    expect(wrapper.get("[data-test=playback-source-tree]").attributes("data-view")).toBeUndefined();
     expect(playback.startPlay).toHaveBeenCalledTimes(callsBeforeOpen);
     expect(wrapper.findAll(".slot-channel-name").map(node => node.text())).toEqual(["东门"]);
   });

@@ -27,15 +27,18 @@ type MapController struct {
 
 func NewMapController() *MapController {
 	// ⛔ 用app.DB()（按 usedbtype 分发到 MySQL/PG/SQLServer/SQLite），
-//   不能写死 app.GormDbMysql：那样在绿色包的 SQLite 模式下拿到 nil，
-//   设备/告警/地图等页面一律报「DB 未就绪」，而日志里看不出原因。
-return &MapController{db: func() *gorm.DB { return app.DB() }}
+	//   不能写死 app.GormDbMysql：那样在绿色包的 SQLite 模式下拿到 nil，
+	//   设备/告警/地图等页面一律报「DB 未就绪」，而日志里看不出原因。
+	return &MapController{db: func() *gorm.DB { return app.DB() }}
 }
 
 func (mc *MapController) SetDB(p func() *gorm.DB) { mc.db = p }
 
 // applyMapFilters keeps map results consistent with the channel list filters.
 func applyMapFilters(c *gin.Context, db *gorm.DB, q *gorm.DB) *gorm.DB {
+	if deviceID := strings.TrimSpace(c.Query("deviceId")); deviceID != "" {
+		q = q.Where("gb_channel.device_id = ?", deviceID)
+	}
 	if s := c.Query("status"); s == "online" {
 		q = q.Where("gb_channel.status = ?", gbmodels.ChannelStatusOnline)
 	} else if s == "offline" {
@@ -73,6 +76,12 @@ func applyMapDirectoryFilter(c *gin.Context, db *gorm.DB, q *gorm.DB) (*gorm.DB,
 	scope, err := resolveDirectoryDeviceScope(c, db)
 	if err != nil {
 		return q, err
+	}
+	if scope.ChannelIDs != nil {
+		if len(scope.ChannelIDs) == 0 {
+			return q.Where("1=0"), nil
+		}
+		return q.Where("gb_channel.id IN ?", scope.ChannelIDs), nil
 	}
 	if len(scope.Codes) == 0 {
 		return q.Where("1=0"), nil

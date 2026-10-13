@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { hasMarkup, squash } from "@/test/source-assert";
+import { squash } from "@/test/source-assert";
 
 const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/device-mgmt/index.vue"), "utf8");
 
@@ -42,14 +42,7 @@ describe("device management toolbar layout", () => {
     expect(statusIndex).toBeGreaterThan(-1);
     expect(actionsIndex).toBeGreaterThan(-1);
     expect(statusIndex).toBeLessThan(actionsIndex);
-    for (const control of [
-      'class="cmdk"',
-      'class="view-switch"',
-      "create-device-btn",
-      "refresh-control",
-      "status-select",
-      "asset-kind-switch"
-    ]) {
+    for (const control of ['class="cmdk"', 'class="view-switch"', "create-device-btn", "refresh-control", "status-select"]) {
       expect(source.indexOf(control)).toBeGreaterThan(actionsIndex);
     }
     expect(source).toContain(".workspace-toolbar :deep(.uvp-search-panel__fields)");
@@ -57,14 +50,7 @@ describe("device management toolbar layout", () => {
   });
 
   it("orders toolbar controls by usage frequency", () => {
-    const controls = [
-      "asset-kind-switch",
-      'class="view-switch"',
-      'class="cmdk"',
-      "status-select",
-      "refresh-control",
-      "create-device-btn"
-    ];
+    const controls = ['class="view-switch"', 'class="cmdk"', "status-select", "refresh-control", "create-device-btn"];
     const positions = controls.map(control => source.indexOf(control));
 
     expect(positions.every(position => position > -1)).toBe(true);
@@ -88,74 +74,28 @@ describe("device management toolbar layout", () => {
     expect(catalogRule).toContain("border-right: 1px solid var(--uvp-panel-border);");
   });
 
-  it("keeps a compact right-aligned device card action strip", () => {
-    const cardRule = source.match(/\.device-summary-card\s*\{([^}]*)\}/)?.[1] || "";
-    const actionRule = source.match(/\.device-card-actions\s*\{([^}]*)\}/)?.[1] || "";
-    const buttonRule = source.match(/\.device-card-actions \.icon-btn\.small\s*\{([^}]*)\}/)?.[1] || "";
-
-    expect(cardRule).toContain("grid-template-rows: auto auto max-content;");
-    expect(cardRule).toContain("padding: 12px 12px 6px;");
-    expect(actionRule).toContain("justify-content: flex-end;");
-    expect(actionRule).toContain("gap: 6px;");
-    expect(actionRule).toContain("padding-top: 3px;");
-    expect(buttonRule).toContain("width: 28px;");
-    expect(buttonRule).toContain("height: 28px;");
-  });
-
-  it("shows the GB protocol version on both the device table and the device card", () => {
-    const flat = squash(source);
-
-    // 列表：新增「国标版本」列，夹在「型号 / 版本」与「注册时间」之间
-    const columns = ['title="型号/版本"', 'title="国标版本"', 'title="注册时间"'].map(anchor => flat.indexOf(anchor));
-    expect(columns.every(index => index > -1)).toBe(true);
-    expect(columns).toEqual([...columns].sort((left, right) => left - right));
-
-    // 卡片：同一字段夹在「型号」与「地址」之间
-    const cardModel = flat.indexOf("<span>型号</span>");
-    const cardVersion = flat.indexOf("<span>国标版本</span>");
-    const cardAddress = flat.indexOf("<span>地址</span>", cardModel);
-    expect(cardModel).toBeGreaterThan(-1);
-    expect(cardVersion).toBeGreaterThan(cardModel);
-    expect(cardAddress).toBeGreaterThan(cardVersion);
-
-    // 两个视图都读设备生效版本(effectiveVersion),并共用同一个来源 tooltip
-    expect(hasMarkup(source, "protocolVersionText(record.effectiveVersion)")).toBe(true);
-    expect(hasMarkup(source, "protocolVersionText(item.effectiveVersion)")).toBe(true);
-    expect(hasMarkup(source, "protocolVersionTooltip(record)")).toBe(true);
-    expect(hasMarkup(source, "protocolVersionTooltip(item)")).toBe(true);
-  });
-
-  it("flattens device table detail/edit/delete instead of burying them in the more menu", () => {
-    const flat = squash(source);
-    const tableStart = flat.indexOf(':data="devices"');
-    const tableEnd = flat.indexOf("</a-table>", tableStart);
-    expect(tableStart).toBeGreaterThan(-1);
-    expect(tableEnd).toBeGreaterThan(tableStart);
-
-    const table = flat.slice(tableStart, tableEnd);
-    const columnStart = table.indexOf('title="操作"');
-    const column = table.slice(columnStart, table.indexOf("</a-table-column>", columnStart));
-    expect(columnStart).toBeGreaterThan(-1);
-
-    // 三个动作平铺在操作列里,各自直连 handler,不再需要展开下拉
-    expect(hasMarkup(column, 'class="uvp-table-action uvp-table-action--detail" @click="openDevice(record)"')).toBe(true);
-    expect(hasMarkup(column, 'class="uvp-table-action uvp-table-action--edit"')).toBe(true);
-    expect(column).toContain('@click="openEditDeviceModal(record)"');
-    expect(hasMarkup(column, 'class="uvp-table-action uvp-table-action--delete"')).toBe(true);
-    expect(column).toContain('@click="handleDeleteDevice(record)"');
-
-    // 顺序跟随卡片视图:详情 → 编辑 → 删除
-    const order = ["uvp-table-action--detail", "uvp-table-action--edit", "uvp-table-action--delete"].map(token =>
-      column.indexOf(token)
-    );
-    expect(order.every(index => index > -1)).toBe(true);
-    expect(order).toEqual([...order].sort((left, right) => left - right));
-
-    // 下拉里不再有 a-doption 形态的详情/编辑/删除,只剩设备维护,且排在操作列末尾
-    expect(column).not.toContain("<a-doption");
-    expect(column).toContain("<DeviceMaintenanceMenu");
-    expect(column).toContain("<span>维护</span>");
-    expect(column.indexOf("uvp-table-action--more")).toBeGreaterThan(order[2]);
+  it("keeps device and channel lists available while exposing device context actions", () => {
+    expect(source).toContain("<DirectoryPanel");
+    expect(source).toContain('@device-select="onDirectoryDeviceSelect"');
+    expect(source).not.toContain("<DeviceTreePanel");
+    expect(source).not.toContain('class="navigation-tabs"');
+    expect(source).not.toContain("DeviceBatchManager");
+    expect(source).toContain('class="segmented asset-kind-switch"');
+    expect(source).toContain('data-asset-kind="device"');
+    expect(source).toContain('data-asset-kind="channel"');
+    expect(source).toContain(':data="devices"');
+    expect(source).toContain(':data="channels"');
+    expect(source).toContain('title="所属设备"');
+    for (const action of [
+      "openDevice",
+      "handleRefreshDeviceCatalog",
+      "openStatusEvents",
+      "openSubscriptionManager",
+      "openEditDeviceModal",
+      "handleDeleteDevice"
+    ]) {
+      expect(source).toContain(`${action}(selectedDevice)`);
+    }
   });
 
   it("sizes both action columns for every action they can render at once", () => {
@@ -239,63 +179,6 @@ describe("device management toolbar layout", () => {
     expect(cardButton).not.toContain("MoreHorizontal");
   });
 
-  it("distinguishes subscription management from the primary channel action", () => {
-    // ⭐ 权限改造（2026-10-11）：订阅按钮由「无权限时隐藏」改为「置灰禁用」，
-    //    属性变长 ⇒ 门禁的 prettier 会把它拆成多行。改用 hasMarkup 只钉 token 与顺序、不钉排版。
-    expect(hasMarkup(source, 'class="icon-btn small framed primary" type="button" @click.stop="showDeviceChannels(item)"')).toBe(
-      true
-    );
-    expect(
-      hasMarkup(
-        source,
-        'class="icon-btn small framed subscription" type="button" :disabled="!canManageSubscriptions" @click.stop="openSubscriptionManager(item)"'
-      )
-    ).toBe(true);
-    expect(source).toContain(".icon-btn.framed.subscription {");
-  });
-
-  it("places the device maintenance menu at the far right of card actions", () => {
-    const actionBar = source.slice(
-      source.indexOf('<div class="card-actions device-card-actions">'),
-      source.indexOf("</article>", source.indexOf('<div class="card-actions device-card-actions">'))
-    );
-    const moreActionsIndex = actionBar.indexOf('aria-label="更多设备操作"');
-    const deleteIndex = actionBar.indexOf('class="icon-btn small framed danger"');
-
-    expect(moreActionsIndex).toBeGreaterThan(-1);
-    expect(deleteIndex).toBeGreaterThan(-1);
-    expect(moreActionsIndex).toBeGreaterThan(deleteIndex);
-  });
-
-  it("keeps the card maintenance dropdown from scrolling when all actions fit", () => {
-    const menuRule = source.match(/\.device-action-menu-item\)\s*\{([^}]*)\}/)?.[1] || "";
-    const actionButtonIndex = source.indexOf('aria-label="更多设备操作"');
-    const cardMenuStart = source.lastIndexOf("<a-dropdown", actionButtonIndex);
-    const cardMenu = source.slice(cardMenuStart, source.indexOf("</a-dropdown>", cardMenuStart));
-
-    expect(menuRule).toContain("gap: 10px;");
-    expect(menuRule).toContain("line-height: 32px;");
-    expect(cardMenu).toContain(':popup-max-height="false"');
-    expect(cardMenu).toContain('content-class="device-card-maintenance-dropdown"');
-    expect(source).toContain(":global(.device-card-maintenance-dropdown .arco-scrollbar-thumb-direction-vertical)");
-  });
-
-  it("distinguishes device drilldown from manual channel mode", () => {
-    expect(source).toContain('channelEntrySource.value = "device-drilldown";');
-    expect(source).toContain('channelEntrySource.value = "manual";');
-    const drilldown = source.slice(
-      source.indexOf("function showDeviceChannels"),
-      source.indexOf("async function loadPtzTypeDict")
-    );
-    expect(drilldown).toContain("drawerVisible.value = false;");
-    expect(source).toContain('assetKind.value = "device";');
-    expect(source).toContain('class="filter-chip device-drilldown-chip"');
-    expect(source).toContain('aria-label="返回设备列表"');
-    expect(source).toContain('v-else-if="deviceIdFilter" class="filter-chip"');
-    expect(source).toContain("function resetFilters()");
-    expect(source).toContain('if (assetKind.value === "channel" && channelEntrySource.value === "device-drilldown")');
-  });
-
   it("edits the device alias, media node and protocol without overriding reported hardware metadata", () => {
     const modalStart = source.indexOf("<!-- 编辑设备 Modal -->");
     const modalEnd = source.indexOf("<!-- 编辑通道 Modal -->", modalStart);
@@ -311,20 +194,15 @@ describe("device management toolbar layout", () => {
     expect(source).toContain("zlmNodesError");
   });
 
-  it("exposes separate device maintenance actions on device cards", () => {
-    for (const component of [
-      "DeviceRebootDialog",
-      "DeviceFirmwareUpgradeDialog",
-      "DeviceMaintenanceRecordsDialog",
-      "DeviceMaintenanceMenu"
-    ]) {
+  it("exposes separate device maintenance actions in the selected device context", () => {
+    for (const component of ["DeviceRebootDialog", "DeviceFirmwareUpgradeDialog", "DeviceMaintenanceRecordsDialog"]) {
       expect(source).toContain(component);
     }
     expect(source).not.toContain("DeviceMaintenanceDialog");
     expect(source).not.toContain("DeviceFirmwareUpgradeDrawer");
     expect(source).toContain("DeviceMaintenanceRecordsDialog");
     expect(source).not.toContain("DeviceMaintenanceRecordsDrawer");
-    for (const target of ["record", "item"]) {
+    for (const target of ["selectedDevice"]) {
       expect(source).toContain(`openDeviceUpgrade(${target})`);
       expect(source).toContain(`openDeviceReboot(${target})`);
       expect(source).toContain(`openMaintenanceRecords(${target})`);

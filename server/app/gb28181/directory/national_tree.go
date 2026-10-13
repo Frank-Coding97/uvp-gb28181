@@ -24,8 +24,10 @@ func BuildNationalTree(ctx context.Context, db *gorm.DB, ownerDeptID uint, looku
 		return nil, err
 	}
 	online := make(map[uint]bool, len(devices))
+	deviceByID := make(map[uint]gbmodels.GbDevice, len(devices))
 	for _, device := range devices {
 		online[device.ID] = device.Status == gbmodels.DeviceStatusOnline
+		deviceByID[device.ID] = device
 	}
 
 	type aggregate struct {
@@ -34,14 +36,8 @@ func BuildNationalTree(ctx context.Context, db *gorm.DB, ownerDeptID uint, looku
 		online     map[uint]struct{}
 	}
 	aggregates := map[string]*aggregate{}
-	unknownDevices := map[uint]struct{}{}
-	unknownOnline := map[uint]struct{}{}
 	for deviceID, placement := range placements {
 		if placement.ResolvedCode == "" {
-			unknownDevices[deviceID] = struct{}{}
-			if online[deviceID] {
-				unknownOnline[deviceID] = struct{}{}
-			}
 			continue
 		}
 		for _, projection := range projectionChain(placement.ResolvedCode, lookup) {
@@ -77,17 +73,46 @@ func BuildNationalTree(ctx context.Context, db *gorm.DB, ownerDeptID uint, looku
 		return result
 	}
 	tree := build("", 0)
-	organizations, err := buildCatalogOrganizations(ctx, db, ownerDeptID, placements, online)
+	organizations, organizationDevices, err := buildCatalogOrganizations(ctx, db, ownerDeptID, placements, online, deviceByID)
 	if err != nil {
 		return nil, err
 	}
 	for areaCode, nodes := range organizations {
 		attachOrganizations(tree, areaCode, nodes)
 	}
-	if len(unknownDevices) > 0 {
+	var unknownNodes []DirectoryNodeVO
+	deviceIDs := make([]uint, 0, len(placements))
+	for deviceID := range placements {
+		deviceIDs = append(deviceIDs, deviceID)
+	}
+	sort.Slice(deviceIDs, func(i, j int) bool { return deviceIDs[i] < deviceIDs[j] })
+	for _, deviceID := range deviceIDs {
+		placement := placements[deviceID]
+		if _, inOrganization := organizationDevices[deviceID]; inOrganization {
+			continue
+		}
+		device, ok := deviceByID[deviceID]
+		if !ok {
+			continue
+		}
+		depth := placementDepth(tree, placement.ResolvedCode)
+		leaf := deviceDirectoryNode(device, fmt.Sprintf("national:device:%d", deviceID), depth+1)
+		if placement.ResolvedCode != "" && attachDeviceToArea(tree, placement.ResolvedCode, leaf) {
+			continue
+		}
+		leaf.Depth = 1
+		unknownNodes = append(unknownNodes, leaf)
+	}
+	if len(unknownNodes) > 0 {
+		unknownOnlineCount := 0
+		for _, node := range unknownNodes {
+			if node.Device.Online {
+				unknownOnlineCount++
+			}
+		}
 		tree = append(tree, DirectoryNodeVO{
 			Key: "national:unknown", Name: "未知行政区", Type: "unknown", ReadOnly: true,
-			Count: len(unknownDevices), OnlineCount: len(unknownOnline), Depth: 0,
+			Count: len(unknownNodes), OnlineCount: unknownOnlineCount, Depth: 0, Children: unknownNodes,
 		})
 	}
 	return tree, nil
@@ -101,20 +126,30 @@ type organizationAggregate struct {
 	online   map[uint]struct{}
 }
 
-func buildCatalogOrganizations(ctx context.Context, db *gorm.DB, ownerDeptID uint, placements map[uint]NationalPlacementVO, online map[uint]bool) (map[string][]DirectoryNodeVO, error) {
+func buildCatalogOrganizations(ctx context.Context, db *gorm.DB, ownerDeptID uint, placements map[uint]NationalPlacementVO, online map[uint]bool, devices map[uint]gbmodels.GbDevice) (map[string][]DirectoryNodeVO, map[uint]struct{}, error) {
 	var nodes []gbmodels.GbCatalogNode
 	if err := db.WithContext(ctx).Where("owner_dept_id = ?", ownerDeptID).Order("sort_order, id").Find(&nodes).Error; err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	byID := make(map[uint]gbmodels.GbCatalogNode, len(nodes))
 	deviceNodes := map[uint][]gbmodels.GbCatalogNode{}
+	deviceByCode := make(map[string]uint, len(devices))
+	for deviceID, device := range devices {
+		deviceByCode[device.DeviceID] = deviceID
+	}
 	for _, node := range nodes {
 		byID[node.ID] = node
 		if node.DeviceID != nil {
 			deviceNodes[*node.DeviceID] = append(deviceNodes[*node.DeviceID], node)
+		} else if node.NodeType == gbmodels.NodeTypeDevice {
+			if deviceID, ok := deviceByCode[node.Code]; ok {
+				deviceNodes[deviceID] = append(deviceNodes[deviceID], node)
+			}
 		}
 	}
 	aggregates := map[uint]*organizationAggregate{}
+	directDevices := map[uint]map[uint]DirectoryNodeVO{}
+	organizationDevices := map[uint]struct{}{}
 	for deviceID, placement := range placements {
 		for _, deviceNode := range deviceNodes[deviceID] {
 			parentID := deviceNode.ParentID
@@ -145,9 +180,21 @@ func buildCatalogOrganizations(ctx context.Context, db *gorm.DB, ownerDeptID uin
 					if online[deviceID] {
 						agg.online[deviceID] = struct{}{}
 					}
+					if childOrgID == 0 {
+						if device, ok := devices[deviceID]; ok {
+							if directDevices[parent.ID] == nil {
+								directDevices[parent.ID] = map[uint]DirectoryNodeVO{}
+							}
+							directDevices[parent.ID][deviceID] = deviceDirectoryNode(device, directoryDeviceKey("national", parent.ID, deviceID), 0)
+							organizationDevices[deviceID] = struct{}{}
+						}
+					}
 					childOrgID = parent.ID
 				}
 				parentID = parent.ParentID
+			}
+			if childOrgID != 0 {
+				break
 			}
 		}
 	}
@@ -155,28 +202,76 @@ func buildCatalogOrganizations(ctx context.Context, db *gorm.DB, ownerDeptID uin
 	for id, agg := range aggregates {
 		children[agg.parentID] = append(children[agg.parentID], id)
 	}
+	for parentID := range children {
+		sort.Slice(children[parentID], func(i, j int) bool {
+			left, right := aggregates[children[parentID][i]].node, aggregates[children[parentID][j]].node
+			if left.SortOrder != right.SortOrder {
+				return left.SortOrder < right.SortOrder
+			}
+			if left.Name != right.Name {
+				return left.Name < right.Name
+			}
+			return left.ID < right.ID
+		})
+	}
 	result := map[string][]DirectoryNodeVO{}
 	for _, id := range children[0] {
 		agg := aggregates[id]
-		result[agg.areaCode] = append(result[agg.areaCode], buildOneOrganization(id, aggregates, children, 0))
+		result[agg.areaCode] = append(result[agg.areaCode], buildOneOrganization(id, aggregates, children, directDevices, 0))
 	}
-	return result, nil
+	return result, organizationDevices, nil
 }
 
-func buildOneOrganization(id uint, aggregates map[uint]*organizationAggregate, children map[uint][]uint, depth int) DirectoryNodeVO {
+func buildOneOrganization(id uint, aggregates map[uint]*organizationAggregate, children map[uint][]uint, directDevices map[uint]map[uint]DirectoryNodeVO, depth int) DirectoryNodeVO {
 	agg := aggregates[id]
-	childNodes := make([]DirectoryNodeVO, 0, len(children[id]))
+	childNodes := make([]DirectoryNodeVO, 0, len(children[id])+len(directDevices[id]))
 	for _, childID := range children[id] {
-		childNodes = append(childNodes, buildOneOrganization(childID, aggregates, children, depth+1))
+		childNodes = append(childNodes, buildOneOrganization(childID, aggregates, children, directDevices, depth+1))
+	}
+	deviceIDs := make([]uint, 0, len(directDevices[id]))
+	for deviceID := range directDevices[id] {
+		deviceIDs = append(deviceIDs, deviceID)
+	}
+	sort.Slice(deviceIDs, func(i, j int) bool { return deviceIDs[i] < deviceIDs[j] })
+	for _, deviceID := range deviceIDs {
+		deviceNode := directDevices[id][deviceID]
+		deviceNode.Depth = depth + 1
+		childNodes = append(childNodes, deviceNode)
 	}
 	return DirectoryNodeVO{Key: "national:catalog:" + fmt.Sprint(id), Name: agg.node.Name, Type: "organization", ReadOnly: true, Count: len(agg.devices), OnlineCount: len(agg.online), Depth: depth, Children: childNodes}
+}
+
+func placementDepth(nodes []DirectoryNodeVO, code string) int {
+	for _, node := range nodes {
+		if node.Type == "area" && node.Code == code {
+			return node.Depth
+		}
+		if depth := placementDepth(node.Children, code); depth >= 0 {
+			return depth
+		}
+	}
+	return -1
+}
+
+func attachDeviceToArea(nodes []DirectoryNodeVO, code string, device DirectoryNodeVO) bool {
+	for i := range nodes {
+		if nodes[i].Type == "area" && nodes[i].Code == code {
+			device.Depth = nodes[i].Depth + 1
+			nodes[i].Children = append(nodes[i].Children, device)
+			return true
+		}
+		if attachDeviceToArea(nodes[i].Children, code, device) {
+			return true
+		}
+	}
+	return false
 }
 
 func attachOrganizations(nodes []DirectoryNodeVO, areaCode string, organizations []DirectoryNodeVO) bool {
 	for i := range nodes {
 		if nodes[i].Code == areaCode {
 			for j := range organizations {
-				organizations[j].Depth = nodes[i].Depth + 1
+				adjustDirectoryDepth(&organizations[j], nodes[i].Depth+1-organizations[j].Depth)
 			}
 			nodes[i].Children = append(nodes[i].Children, organizations...)
 			return true
@@ -186,6 +281,13 @@ func attachOrganizations(nodes []DirectoryNodeVO, areaCode string, organizations
 		}
 	}
 	return false
+}
+
+func adjustDirectoryDepth(node *DirectoryNodeVO, offset int) {
+	node.Depth += offset
+	for i := range node.Children {
+		adjustDirectoryDepth(&node.Children[i], offset)
+	}
 }
 
 func projectionChain(code string, lookup CivilCodeLookup) []CivilCodeProjection {

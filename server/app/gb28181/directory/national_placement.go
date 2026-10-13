@@ -41,10 +41,18 @@ func ResolveNationalPlacements(ctx context.Context, db *gorm.DB, ownerDeptID uin
 
 	byID := make(map[uint]gbmodels.GbCatalogNode, len(nodes))
 	deviceNodes := make(map[uint][]gbmodels.GbCatalogNode)
+	deviceByCode := make(map[string]uint, len(devices))
+	for _, device := range devices {
+		deviceByCode[device.DeviceID] = device.ID
+	}
 	for _, node := range nodes {
 		byID[node.ID] = node
 		if node.DeviceID != nil {
 			deviceNodes[*node.DeviceID] = append(deviceNodes[*node.DeviceID], node)
+		} else if node.NodeType == gbmodels.NodeTypeDevice {
+			if deviceID, ok := deviceByCode[node.Code]; ok {
+				deviceNodes[deviceID] = append(deviceNodes[deviceID], node)
+			}
 		}
 	}
 	placements := make(map[uint]NationalPlacementVO, len(devices))
