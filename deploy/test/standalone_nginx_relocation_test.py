@@ -14,6 +14,43 @@ ZLM_PORTS = {"HTTP_PORT": "52004", "SSL_PORT": "52007", "RTSP_PORT": "52005", "R
 
 
 class StandaloneNginxRelocationTests(unittest.TestCase):
+    def test_tls_initialization_preserves_existing_zlm_certificate(self):
+        source = CONTROL_SCRIPT.read_text(encoding="utf-8")
+        function = re.search(r"(?ms)^ensure_tls_material\(\) \{.*?^\}", source).group()
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            zlm = root / "zlm.pem"
+            zlm.write_text("old ZLM material")
+            script = "\n".join([
+                "set -eu", f'ZLM_SSL_PEM="{zlm}"',
+                'ensure_self_signed_cert() { echo unexpected; return 1; }',
+                function, 'ensure_tls_material',
+            ])
+            result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, "")
+            self.assertEqual(zlm.read_text(), "old ZLM material")
+
+    def test_disabled_https_port_plan_does_not_advertise_redirect(self):
+        source = CONTROL_SCRIPT.read_text(encoding="utf-8")
+        function = re.search(r"(?ms)^print_port_plan\(\) \{.*?^\}", source).group()
+        script = "\n".join([
+            "set -eu", 'NGINX_HTTPS_ENABLED=0', 'NGINX_HTTPS_PORT=52000', 'NGINX_HTTP_PORT=52001',
+            'HTTP_PORT=52002', 'REDIS_PORT=52003', 'REDIS_BIND=127.0.0.1', "C_TAG=''", "C_RST=''",
+            *[f'ZLM_{key}={value}' for key, value in ZLM_PORTS.items()],
+            'ok() { :; }', 'det() { echo "$*"; }', '_firewall_hint() { :; }', function, 'print_port_plan',
+        ])
+        result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("HTTPS 已关闭", result.stdout)
+        self.assertNotIn("HTTP 自动跳转", result.stdout)
+
+    def test_setup_helper_is_copied_once_after_build(self):
+        source = BUILD_SCRIPT.read_text(encoding="utf-8")
+        copy = 'cp "$SERVER_DIR/bin/uvp-setup" "$PKG/bin/uvp-setup"'
+        self.assertEqual(source.count(copy), 1, "setup must not be copied before build")
+        self.assertGreater(source.index(copy), source.index('build -ldflags'))
+
     def test_repeated_start_preserves_custom_port_markers_without_environment(self):
         source = CONTROL_SCRIPT.read_text(encoding="utf-8")
         functions = "\n".join(re.search(r"(?ms)^" + name + r"\(\) \{.*?^\}", source).group()
@@ -48,10 +85,14 @@ class StandaloneNginxRelocationTests(unittest.TestCase):
             root = pathlib.Path(directory)
             active = root / "releases/candidate"
             output = root / "nginx.conf"
+            (root / "bin").mkdir()
+            helper = root / "bin/uvp-setup"
+            helper.write_text("#!/bin/sh\nexit 0\n")
+            helper.chmod(0o755)
             script = "\n".join([
                 "set -eu", f'ROOT="{root}"', f'ACTIVE_ROOT="{active}"',
                 f'NGINX_CONF_TEMPLATE="{ROOT / "deploy/standalone/nginx.conf.template"}"',
-                f'NGINX_CONF="{output}"',
+                f'NGINX_CONF="{output}"', f'BIN="{root / "bin"}"',
                 'HTTP_PORT=52002', 'NGINX_HTTPS_PORT=52000', 'NGINX_HTTP_PORT=52001',
                 'resolve_nginx_worker() { printf "nobody nogroup"; }',
                 'log() { :; }', 'fail() { exit 1; }', function, 'render_nginx_conf',

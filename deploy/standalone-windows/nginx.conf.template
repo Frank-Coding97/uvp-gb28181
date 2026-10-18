@@ -67,6 +67,7 @@ http {
     # ============================================================
     # HTTPS（自签名）
     # ============================================================
+    # UVP_HTTPS_BEGIN
     server {
         listen      @HTTPS_PORT@ ssl;
         http2       on;
@@ -108,6 +109,22 @@ http {
         }
 
         # ⚠️ /api/ 与 /gb28181/ 必须列在 SPA 回落之前
+        location = /api/system/upgrade/import {
+            client_max_body_size 9g;
+            client_body_timeout 30m;
+            proxy_pass http://uvp_backend;
+            proxy_http_version 1.1;
+            proxy_set_header Host              $host;
+            proxy_set_header X-Real-IP         $remote_addr;
+            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_connect_timeout 15s;
+            proxy_send_timeout    30m;
+            proxy_read_timeout    30m;
+            proxy_request_buffering off;
+            proxy_buffering       off;
+        }
+
         location /api/ {
             proxy_pass http://uvp_backend;
             proxy_http_version 1.1;
@@ -141,9 +158,12 @@ http {
         }
     }
 
+    # UVP_HTTPS_END
+
     # ============================================================
     # HTTP：跳 HTTPS（/api/ 与 /gb28181/ 保留明文，扫码用）
     # ============================================================
+    # UVP_HTTP_BEGIN
     server {
         listen      @PLAIN_HTTP_PORT@;
         server_name _;
@@ -186,4 +206,5 @@ http {
             return 301 https://$host$request_uri;
         }
     }
+    # UVP_HTTP_END
 }

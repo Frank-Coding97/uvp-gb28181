@@ -579,7 +579,11 @@ function Write-PortPlan {
     param([hashtable]$Ports)
     Write-Host ''
     Write-UvpDet '端口规划（局域网访问需要放行）：'
-    Write-UvpDet ("  {0} 管理页面（HTTPS）      http://<本机IP>:{1}  → https://<本机IP>:{2}" -f '·', $Ports.NGINX_HTTP, $Ports.HTTPS)
+    if ($script:HttpsEnabled) {
+        Write-UvpDet ("  {0} 管理页面（HTTPS）      http://<本机IP>:{1}  → https://<本机IP>:{2}" -f '·', $Ports.NGINX_HTTP, $Ports.HTTPS)
+    } else {
+        Write-UvpDet ("  {0} 管理页面（HTTP；HTTPS 已关闭） http://<本机IP>:{1}" -f '·', $Ports.NGINX_HTTP)
+    }
     Write-UvpDet ("  {0} 后端 API（仅本机）     http://127.0.0.1:{1}" -f '·', $Ports.HTTP)
     Write-UvpDet ("  {0} Redis（仅本机）        127.0.0.1:{1}" -f '·', $Ports.REDIS)
     Write-UvpDet ("  {0} 流媒体（ZLM）          {1}-{2} / RTP {3} / SIP {4}" -f '·', $Ports.ZLM_HTTP, $Ports.ZLM_ICE, $ZlmRtpRange, $SipPort)

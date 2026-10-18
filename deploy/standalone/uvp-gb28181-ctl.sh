@@ -173,7 +173,11 @@ print_port_plan() {
 
   printf '%s[uvp]%s 端口规划（连续段 %s-%s）\n' "$C_TAG" "$C_RST" "$NGINX_HTTPS_PORT" "$fw_to"
   ok "需要对局域网开放"
-  det "  · 管理页面   ${NGINX_HTTPS_PORT}/tcp（HTTPS） · ${NGINX_HTTP_PORT}/tcp（HTTP 自动跳转）"
+  if [ "$NGINX_HTTPS_ENABLED" = "1" ]; then
+    det "  · 管理页面   ${NGINX_HTTPS_PORT}/tcp（HTTPS） · ${NGINX_HTTP_PORT}/tcp（HTTP 自动跳转）"
+  else
+    det "  · 管理页面   ${NGINX_HTTP_PORT}/tcp（HTTP；HTTPS 已关闭）"
+  fi
   det "  · 后端接口   ${HTTP_PORT}/tcp（API + 设备/App 接入地址）"
   det "  · 国标信令   ${sip_hint}/udp（默认值；实际端口以引导页录入为准）"
   det "  · 媒体服务   ${ZLM_HTTP_PORT}/tcp · ${ZLM_RTSP_PORT}/tcp · ${ZLM_RTMP_PORT}/tcp · ${ZLM_SSL_PORT}/tcp"
@@ -1742,7 +1746,7 @@ start_zlm() {
   # ⛔ `--log-dir` 必须显式给：该参数默认取**可执行文件目录**（不是 cwd），
   #   不指定的话 ZLM 自带日志会一直落在 vendor/zlm/log，与"日志统一在 logs/"
   #   的约定不符（ZLM 没有这个配置项，只能走命令行）。
-  # ⛔ 证书：与 nginx 共用同一套（ensure_tls_material 把 crt+key 合成 PEM）。
+  # 证书独立保存；首次初始化由 Nginx 证书合成，后续仅按页面同步选项更新。
   #   不传 `-s` 时 ZLM 会去找 exeDir()/default.pem，而绿色包里没这个文件
   #   ⇒ HTTPS(51007)/WSS(51010) 握手失败。文件不存在就退化成不传（不硬给）。
   local zlm_ssl=()

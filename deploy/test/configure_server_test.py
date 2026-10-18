@@ -117,6 +117,31 @@ class ConfigureServerTests(unittest.TestCase):
         self.assertIn("ReadWritePaths=/opt/uvp-gb28181", service)
         self.assertNotRegex(service, r"(?m)^(SystemMaxUse|RuntimeMaxUse|SystemKeepFree)=")
 
+    def test_upgrade_import_uses_a_bounded_long_upload_proxy_path(self) -> None:
+        configs = (
+            REPO_ROOT / "deploy" / "standalone" / "nginx.conf.template",
+            REPO_ROOT / "deploy" / "standalone-windows" / "nginx.conf.template",
+            Path(__file__).with_name("nginx.conf"),
+            Path(__file__).with_name("uvp-frontend.nginx.conf"),
+        )
+        for path in configs:
+            with self.subTest(config=path.name):
+                content = path.read_text(encoding="utf-8")
+                match = re.search(
+                    r"(?ms)^\s*location = /api/system/upgrade/import \{(.*?)^\s*\}",
+                    content,
+                )
+                self.assertIsNotNone(match, f"{path} 缺少专用升级上传代理配置")
+                block = re.sub(r"\s+", " ", match.group(1))
+                for directive in (
+                    "client_max_body_size 9g;",
+                    "client_body_timeout 30m;",
+                    "proxy_send_timeout 30m;",
+                    "proxy_read_timeout 30m;",
+                    "proxy_request_buffering off;",
+                ):
+                    self.assertIn(directive, block, f"{path} 缺少 {directive}")
+
     def test_managed_backends_use_the_shared_updater_gate(self) -> None:
         control = (REPO_ROOT / "deploy" / "standalone" / "uvp-gb28181-ctl.sh").read_text(
             encoding="utf-8"

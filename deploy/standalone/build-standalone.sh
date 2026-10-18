@@ -200,8 +200,6 @@ fi
 #
 # 这个脚本原本只有两行`cp`：
 #     cp "$SERVER_DIR/bin/uvp-server" "$PKG/bin/uvp-server"
-cp "$SERVER_DIR/bin/uvp-setup" "$PKG/bin/uvp-setup"
-chmod 0755 "$PKG/bin/uvp-setup"
 #     cp -a "$WEB_DIR/dist/." "$PKG/resource/public/"
 #   ⇒ 它**从不自己编译**，只是把上次构建的产物搬进包里。
 #

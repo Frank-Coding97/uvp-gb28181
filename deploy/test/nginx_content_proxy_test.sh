@@ -9,10 +9,13 @@ edge_config_file="$config_dir/uvplatform.npm.conf"
 content_location='location ~ ^/api/gb28181/cloud-recordings/downloads/[^/]+/content$'
 location_line=$(grep -n -F "$content_location" "$config_file" | cut -d: -f1)
 api_line=$(grep -n -F 'location /api/' "$config_file" | cut -d: -f1)
+upgrade_import_line=$(grep -n -F 'location = /api/system/upgrade/import' "$config_file" | cut -d: -f1)
 
 [ -n "$location_line" ]
 [ -n "$api_line" ]
+[ -n "$upgrade_import_line" ]
 [ "$location_line" -lt "$api_line" ]
+[ "$upgrade_import_line" -lt "$api_line" ]
 
 location_block=$(sed -n "${location_line},${api_line}p" "$config_file")
 for directive in \
@@ -29,6 +32,17 @@ for directive in \
     'proxy_set_header X-Forwarded-Proto $scheme;'
 do
     printf '%s\n' "$location_block" | grep -F -- "$directive" >/dev/null
+done
+
+upgrade_import_block=$(sed -n "${upgrade_import_line},${api_line}p" "$config_file")
+for directive in \
+    'client_max_body_size 9g;' \
+    'client_body_timeout 30m;' \
+    'proxy_send_timeout 30m;' \
+    'proxy_read_timeout 30m;' \
+    'proxy_request_buffering off;'
+do
+    printf '%s\n' "$upgrade_import_block" | grep -F -- "$directive" >/dev/null
 done
 
 grep -F -- 'proxy_cookie_flags ~^uvp_recording_download_ secure httponly samesite=strict;' "$edge_config_file" >/dev/null
