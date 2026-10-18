@@ -161,14 +161,13 @@ const emit = defineEmits<{
 }>();
 
 const MINI_PLAYER_WIDTH = 400;
-const MINI_PLAYER_HEADER_HEIGHT = 48;
 const MINI_PLAYER_MARGIN = 16;
 const isMinimized = computed(() => props.displayMode === "minimized");
 
 function miniPlayerDimensions() {
   const viewportWidth = window.innerWidth > 0 ? window.innerWidth : 1024;
   const width = Math.min(MINI_PLAYER_WIDTH, Math.max(240, viewportWidth - MINI_PLAYER_MARGIN * 2));
-  return { width, height: MINI_PLAYER_HEADER_HEIGHT + (width * 9) / 16 };
+  return { width, height: (width * 9) / 16 };
 }
 
 function renderedMiniPlayerDimensions() {
@@ -5750,14 +5749,43 @@ provide(PLAY_CONSOLE_CONTEXT, {
 :global(.play-console-container--minimized .play-console-modal--minimized) {
   overflow: hidden;
   pointer-events: auto;
-  border: 1px solid rgb(148 163 184 / 24%);
+  outline: 1px solid transparent;
+  outline-offset: -1px;
+  border: 0 !important;
   border-radius: 12px;
-  box-shadow: 0 18px 48px rgb(2 6 23 / 42%);
+  box-shadow: none !important;
+  transition:
+    outline-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+:global(.play-console-container--minimized .play-console-modal--minimized:hover),
+:global(.play-console-container--minimized .play-console-modal--minimized:focus-within) {
+  outline-color: rgb(148 163 184 / 40%);
+  box-shadow: 0 18px 48px rgb(2 6 23 / 42%) !important;
 }
 :global(.play-console-modal--minimized .arco-modal-header) {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 20;
+  box-sizing: border-box;
   height: 48px;
-  padding: 0 10px 0 12px;
-  background: var(--uvp-panel-bg);
+  min-height: 0;
+  padding: 0 10px 0 12px !important;
+  pointer-events: none;
+  background: var(--uvp-panel-bg) !important;
+  border-bottom: 0 !important;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+:global(.play-console-modal--minimized:hover .arco-modal-header),
+:global(.play-console-modal--minimized:focus-within .arco-modal-header) {
+  pointer-events: auto;
+  opacity: 1;
+}
+
+/* 全局弹窗正文带有 !important 留白，小窗只保留视频画面。 */
+:global(.play-console-container--minimized .play-console-modal--minimized .arco-modal-body) {
+  padding: 0 !important;
 }
 
 .play-console-modal :deep(.arco-modal-body) {

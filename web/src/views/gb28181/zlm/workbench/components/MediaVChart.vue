@@ -38,6 +38,7 @@ const themeRevision = ref(0);
 let chart: VChart | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let themeObserver: MutationObserver | null = null;
+let settleTimer: ReturnType<typeof setTimeout> | null = null;
 let syncVersion = 0;
 const instance = getCurrentInstance();
 const idPrefix = `media-vchart-${instance?.uid ?? Math.random().toString(36).slice(2)}`;
@@ -117,10 +118,34 @@ function disconnectResizeObserver() {
 }
 
 function releaseChart() {
+  cancelSettleResize();
   disconnectResizeObserver();
   if (!chart) return;
   chart.release();
   chart = null;
+}
+
+function cancelSettleResize() {
+  if (settleTimer !== null) {
+    clearTimeout(settleTimer);
+    settleTimer = null;
+  }
+}
+
+// ⛔ 弹窗/抽屉打开时容器尺寸在入场动画里还会变，而 VChart 用 autoFit:false 只在挂载
+//    那一刻量一次容器；ResizeObserver 只对布局尺寸变化回调，对 transform 动画不触发。
+//    于是动画期间量到的中间尺寸会被一直沿用，把纵轴刻度和标题挤出画布
+//    （2026-10-18 首页「媒体流量台账」左侧刻度整块不见）。入场动画结束后按最终尺寸
+//    再排一次；尺寸没变时是一次空操作。
+function settleResize() {
+  cancelSettleResize();
+  settleTimer = setTimeout(() => {
+    settleTimer = null;
+    if (!chart || !chartHost.value) return;
+    const width = chartHost.value.clientWidth;
+    const height = chartHost.value.clientHeight;
+    if (width > 0 && height > 0) chart.resize(width, height);
+  }, 360);
 }
 
 function observeResize() {
@@ -140,6 +165,7 @@ function mountChart(spec: MediaChartSpec) {
   chart.on("layoutStart", clearHoverState);
   chart.renderSync();
   observeResize();
+  settleResize();
 }
 
 function clearHoverState() {

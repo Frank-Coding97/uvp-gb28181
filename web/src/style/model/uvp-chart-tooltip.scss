@@ -1,0 +1,65 @@
+/*
+ * 图表悬浮信息框（VChart tooltip）统一皮肤
+ *
+ * ⛔⛔ 为什么需要这份全局覆盖：VChart 的 tooltip 底色并不是我们自己的 token，
+ *   而是 `@visactor/vchart-arco-theme` 从 Arco 的 `popupBackgroundColor` 取的
+ *   **中性灰**（暗色下实测约 #3a3a3a）。平台卡片底色是 `--uvp-panel-bg`
+ *   （暗色 #162231 深蓝、亮色 #ffffff），于是同一个页面里出现"灰盒子压在深蓝卡片上"，
+ *   2026-10-18 老板截图点名首页「媒体速率」曲线的悬浮框。
+ *
+ * ⛔⛔ 为什么必须 `!important`：VChart 是把面板样式**逐条写进元素 inline style**
+ *   （`plugin/components/tooltip-handler/utils/style.js` 的 `setStyleToDom`），
+ *   每次 hover 重绘都会重设一遍。inline 的优先级高于任何选择器，只有带 `!important`
+ *   的声明才能压住它 —— 去掉 `!important` 这份文件就整份失效，且**不报错**。
+ *
+ * 选择器依据（`@visactor/vchart` 1.x，插件 `tooltip-handler`）：
+ *   · 根面板  = `<div vchart-tooltip-id="…">`（属性的值随实例变化，只认属性名）
+ *   · 标题    = `.vchart-tooltip-title`（内部是 `<h2><span/></h2>`）
+ *   · 列容器  = `.vchart-tooltip-content-box`，列 = `.vchart-tooltip-{shape,key,value}-column`
+ *   · 行      = `.vchart-tooltip-shape` / `.vchart-tooltip-key` / `.vchart-tooltip-value`
+ *
+ * ⚠️ 这套规则只对 **DOM 渲染的 tooltip** 生效（VChart 默认 handler 即 dom）。
+ *   若哪天升级后改成 canvas 绘制 tooltip，这份文件会静默失效 —— 到时要回到
+ *   图表 spec 的 `tooltip.style` 里配置，别在这里加更多选择器硬撑。
+ */
+
+/* 面板本体：与 popconfirm / 浮层同一套语言（底色 + 边框 + 圆角 + 阴影） */
+div[vchart-tooltip-id] {
+  box-sizing: border-box;
+  padding: 10px 12px !important;
+  font-family: inherit !important;
+  font-size: 12px !important;
+  font-weight: 400;
+  line-height: 18px !important;
+  color: var(--uvp-text-primary) !important;
+  background-color: var(--uvp-popconfirm-bg) !important;
+  border: 1px solid var(--uvp-popconfirm-border) !important;
+  border-radius: 8px !important;
+  box-shadow: var(--uvp-popconfirm-shadow) !important;
+  backdrop-filter: none !important;
+}
+
+/* 标题（时间戳 / 纬度值）：比正文大一档、半粗，与卡片标题同级 */
+div[vchart-tooltip-id] .vchart-tooltip-title {
+  margin-bottom: 6px !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  line-height: 20px !important;
+  color: var(--uvp-text-primary) !important;
+}
+
+/* 指标名：次要色，避免和数值抢注意力 */
+div[vchart-tooltip-id] .vchart-tooltip-key {
+  font-size: 12px !important;
+  line-height: 18px !important;
+  color: var(--uvp-text-secondary) !important;
+}
+
+/* 数值：主色 + 半粗 + 等宽数字（同一列上下跳动时不会左右抖） */
+div[vchart-tooltip-id] .vchart-tooltip-value {
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  font-variant-numeric: tabular-nums;
+  line-height: 18px !important;
+  color: var(--uvp-text-primary) !important;
+}

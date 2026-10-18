@@ -285,12 +285,14 @@ onMounted(async () => {
   cursor: pointer;
 }
 
+// 验证码图与后端 CaptchaDisplayWidth/Height 保持 142x46 一致，等比例缩放；
+// 用 contain 而不是 cover：cover 会横向裁掉首尾字符（看着像"缺字"）。
 .verifyCodeImg {
   flex: 0 0 142px;
   width: 142px;
   height: 46px;
   cursor: pointer;
-  object-fit: cover;
+  object-fit: contain;
   background: #f8fbff;
   border: 1px solid #dbe6f4;
   border-radius: 12px;

@@ -40,6 +40,12 @@ const play = computed(() => (props.metric === "play-success-24h" ? (props.result
 const traffic = computed(() =>
   props.metric === "media-traffic-today" ? (props.result?.data as TrafficHistory | undefined) : undefined
 );
+// ⛔ 脚注给的是**整个时间范围的合计**,悬浮窗给的是**单个时间桶**。
+//    以前脚注写成「Y 轴为每个时间桶累计流量；上行 X，已结算下行 Y」,
+//    读者会把它和悬浮窗里某个桶的值直接对照,当成"对不上"(2026-10-18 老板质疑:
+//    脚注 1.3 GB vs 16:00 桶 870.9 MB —— 其实是 15/16/17 三个桶之和,数没错)。
+//    把范围写进句子,并明说「每个点是该时间桶」,两个口径就不会再混。
+const rangeLabel = computed(() => (props.range === "1h" ? "最近 1 小时" : props.range === "7d" ? "最近 7 天" : "最近 24 小时"));
 const coverageNotice = computed(() => {
   if (play.value?.summary.staleStarted)
     return `${formatNumber(play.value.summary.staleStarted)} 条点播记录超过最大超时仍未终态，成功率未将其计入分母。`;
@@ -49,7 +55,11 @@ const coverageNotice = computed(() => {
 const chartStatus = computed(() => {
   if (props.error && !props.result) return "unavailable" as const;
   if (!props.result || props.result.status === "empty") return "empty" as const;
-  return props.result.status === "partial" || props.stale ? ("partial" as const) : ("ready" as const);
+  // 2026-10-18 按老板要求去掉「部分数据」角标。
+  // 这里的 partial 只说明「统计窗口里含历史采样中断」,不代表当班数据不可信
+  // (例:缺口发生在几小时前、当班账目逐字节对平),挂在图头只会造成误读。
+  // 刷新失败等确实需要注意的状态,仍由下面的 warning 文案承载。
+  return "ready" as const;
 });
 const summary = computed(() => {
   if (sip.value)
@@ -57,7 +67,7 @@ const summary = computed(() => {
   if (play.value)
     return `终态样本 ${formatNumber(play.value.summary.attempts)}，成功 ${formatNumber(play.value.summary.success)}，失败 ${formatNumber(play.value.summary.failure)}${play.value.summary.staleStarted ? `，超时未终态 ${formatNumber(play.value.summary.staleStarted)}` : ""}`;
   if (traffic.value)
-    return `Y 轴为每个时间桶累计流量；上行 ${formatBytes(traffic.value.summary.upstreamBytes)}，已结算下行 ${formatBytes(traffic.value.summary.downstreamBytes)}`;
+    return `每个点是该时间桶的流量；${rangeLabel.value}合计：上行 ${formatBytes(traffic.value.summary.upstreamBytes)}，已结算下行 ${formatBytes(traffic.value.summary.downstreamBytes)}`;
   return "暂无下钻数据";
 });
 

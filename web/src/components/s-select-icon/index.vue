@@ -16,7 +16,17 @@
         <span class="icon-reset" @click="reset">重置</span>
       </template>
     </a-input>
-    <a-modal v-model:visible="visible" :unmount-on-close="true" width="70vw" :top="'50px'" :align-center="false" :footer="false">
+    <!-- ⛔ `modal-class="uvp-system-dialog"` 不能省：面板底色/圆角/头尾内边距全挂在这个类上，
+         漏了就变成一个裸 Arco 弹窗（2026-10-15 全仓清查时补上）。 -->
+    <a-modal
+      v-model:visible="visible"
+      :unmount-on-close="true"
+      width="70vw"
+      :top="'50px'"
+      :align-center="false"
+      :footer="false"
+      modal-class="uvp-system-dialog select-icon-dialog"
+    >
       <template #title> 请选择图标 </template>
       <a-input
         :style="{

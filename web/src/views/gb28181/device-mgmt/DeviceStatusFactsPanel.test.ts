@@ -469,7 +469,8 @@ describe("DeviceStatusFactsPanel", () => {
 describe("设备查询按钮的主题视觉契约", () => {
   it("暗色主题使用深蓝底配白字，避免浅蓝底上的白字失去对比度", () => {
     expect(PANEL_SOURCE).toMatch(
-      /body\[arco-theme="dark"\][\s\S]*fact-refresh-button[^}]*\{[\s\S]*color:\s*#ffffff[\s\S]*background:\s*#2563eb/
+      // ⛔ 整段选择器必须包在 `:global(...)` 里，否则会被 scoped 编译器静默截断（详见 dark-primary-buttons.test.ts）
+      /:global\(body\[arco-theme="dark"\] \.fact-actions[\s\S]*fact-refresh-button[\s\S]*\{[\s\S]*color:\s*#ffffff[\s\S]*background:\s*#2563eb/
     );
   });
 });

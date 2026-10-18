@@ -798,6 +798,10 @@ const emptyText = computed(() =>
     ? videoParamEmptyText(videoReconcile.value?.state ?? "never_read", { pending: videoLoading.value })
     : familyEmptyText.value
 );
+const emptyHintText = computed(() => {
+  const state = videoReconcile.value?.state ?? "never_read";
+  return !videoLoading.value && state === "never_read" ? `${emptyText.value}，点击「读取」获取当前编码参数` : emptyText.value;
+});
 
 const versionNotice = computed(() => {
   const version = activeRegisteredVersion.value;
@@ -2139,16 +2143,9 @@ onBeforeUnmount(() => {
                     </a-button>
                   </div>
                 </div>
-                <div class="dcg-reconcile dcg-reconcile-inline" :class="`is-${reconcileTone}`" data-testid="dcg-reconcile">
-                  <span class="dcg-reconcile-dot" />
-                  <span>{{ reconcileText }}</span>
-                </div>
                 <div class="dcg-empty" data-testid="dcg-empty">
-                  <p>{{ emptyText }}</p>
-                  <em>点击「读取」获取当前编码参数</em>
-                </div>
-                <div class="dcg-video-compare-slot" data-testid="dcg-video-compare-slot">
-                  <slot name="video-compare" />
+                  <span class="dcg-empty-icon"><Video :size="18" aria-hidden="true" /></span>
+                  <p>{{ emptyHintText }}</p>
                 </div>
               </div>
 
@@ -3864,6 +3861,45 @@ onBeforeUnmount(() => {
     font-size: 11px;
     font-style: normal;
     color: var(--uvp-text-tertiary);
+  }
+}
+
+.dcg-empty-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.dcg-empty-card .dcg-video-header {
+  flex: none;
+}
+
+.dcg-empty-card > .dcg-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  padding: 22px 16px;
+  text-align: center;
+
+  .dcg-empty-icon {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    color: var(--uvp-text-secondary);
+    background: var(--uvp-dialog-control-bg, #f8fbff);
+    border: 1px solid var(--uvp-panel-border, #dbe4f0);
+    border-radius: 50%;
+  }
+
+  p {
+    max-width: 300px;
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--uvp-text-secondary);
   }
 }
 

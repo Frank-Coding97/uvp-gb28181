@@ -389,8 +389,24 @@ describe("DeviceConfigDrawer 设备配置中心", () => {
       "dcg-apply"
     ]);
     expect(card.find(".dcg-video-header [aria-label='配置文件']").exists()).toBe(false);
-    expect(card.find(".dcg-reconcile-inline").exists()).toBe(true);
+    expect(card.find(".dcg-reconcile-inline").exists()).toBe(false);
     expect(card.find("[data-testid='dcg-empty']").exists()).toBe(true);
+  });
+
+  it("嵌入编码卡的未读取空态合并成带图标的单条提示", async () => {
+    const response = readOk([]);
+    const unread = { ...response, data: { ...response.data, reconcile: null } };
+    api.getChannelVideoParams.mockResolvedValue(unread);
+
+    const wrapper = mountDrawer({ embedded: true });
+    await flushPromises();
+
+    const card = wrapper.get("[data-testid='dcg-empty-card']");
+    const empty = card.get("[data-testid='dcg-empty']");
+    expect(empty.text()).toBe("尚未读取设备视频参数，点击「读取」获取当前编码参数");
+    expect(empty.find("svg").exists()).toBe(true);
+    expect(card.find(".dcg-reconcile-inline").exists()).toBe(false);
+    expect(card.find("[data-testid='dcg-video-compare-slot']").exists()).toBe(false);
   });
 
   it("嵌入配置把复杂字段和唯一操作条挂到底部目标", async () => {

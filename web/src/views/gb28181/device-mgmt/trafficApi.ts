@@ -59,6 +59,10 @@ export interface TrafficRealtime {
   upstreamBytesPerSecond: number;
   readerCount: number;
   estimatedDownstreamBytesPerSec: number;
+  /** 实测下行速率(二开 ZLM 按观看连接采样);downstreamMeasured 为 false 时无意义 */
+  downstreamBytesPerSecond?: number;
+  /** true = 下行是实测值;false = 节点不支持,前端回退展示估算值 */
+  downstreamMeasured?: boolean;
   sampledAt: string;
 }
 

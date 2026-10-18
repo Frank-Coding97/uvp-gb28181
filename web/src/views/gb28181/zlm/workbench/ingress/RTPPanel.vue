@@ -369,7 +369,17 @@ function changePageSize(next: number) {
       @confirm="confirmClose"
       @stale="closeDialog"
     />
-    <a-modal v-else :visible="closeVisible" :footer="false" :width="540" unmount-on-close @cancel="closeDialog">
+    <!-- ⛔ 预检弹窗要挂房规类（2026-10-15 全仓清查补上）：`footer=false` + 自放「关闭」按钮，
+         不挂就只是一块裸面板，底色/圆角/头部内边距全缺。 -->
+    <a-modal
+      v-else
+      :visible="closeVisible"
+      :footer="false"
+      :width="540"
+      unmount-on-close
+      modal-class="uvp-system-dialog ingress-preflight-dialog"
+      @cancel="closeDialog"
+    >
       <template #title>RTP 关闭预检</template>
       <div class="state-box" :class="{ 'state-box--error': closeError }">
         <a-spin v-if="closeLoading" /><strong>{{ closeLoading ? "正在读取后端真实状态与业务持有…" : closeReason }}</strong

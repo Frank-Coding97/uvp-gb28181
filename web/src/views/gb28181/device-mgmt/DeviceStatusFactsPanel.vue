@@ -644,13 +644,22 @@ function alarmFactText(fact: DeviceAlarmFact) {
   background: var(--uvp-shell-muted);
   border-color: var(--uvp-panel-border);
 }
-:global(body[arco-theme="dark"]) .fact-actions :deep(.fact-refresh-button.arco-btn:not(.arco-btn-disabled)) {
+
+/*
+ * ⛔⛔ 暗色这几条的**整段选择器都必须包在 `:global()` 里** ——
+ *   写成 `:global(body[arco-theme="dark"]) .fact-actions :deep(...)` 时，
+ *   scoped 编译器会**静默丢掉** `:global()` 之后的全部内容，产出
+ *   `body[arco-theme="dark"] { … }`（声明挂到 <body> 上、既不报错也不生效）。
+ *   原来就是这样，暗色规则从来没生效过。（2026-10-15 用 compileStyle 实证，
+ *   并加了全仓扫描门禁，见 `src/styles/dark-primary-buttons.test.ts`。）
+ */
+:global(body[arco-theme="dark"] .fact-actions .fact-refresh-button.arco-btn:not(.arco-btn-disabled)) {
   color: #ffffff !important;
   background: #2563eb !important;
   border-color: #2563eb !important;
 }
-:global(body[arco-theme="dark"]) .fact-actions :deep(.fact-refresh-button.arco-btn:hover:not(.arco-btn-disabled)),
-:global(body[arco-theme="dark"]) .fact-actions :deep(.fact-refresh-button.arco-btn:active:not(.arco-btn-disabled)) {
+:global(body[arco-theme="dark"] .fact-actions .fact-refresh-button.arco-btn:hover:not(.arco-btn-disabled)),
+:global(body[arco-theme="dark"] .fact-actions .fact-refresh-button.arco-btn:active:not(.arco-btn-disabled)) {
   color: #ffffff !important;
   background: #1d4ed8 !important;
   border-color: #1d4ed8 !important;

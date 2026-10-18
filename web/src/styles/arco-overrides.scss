@@ -99,11 +99,28 @@ body[arco-theme="dark"] .arco-switch[disabled].arco-switch-checked {
 }
 
 // 下拉面板
-.arco-select-dropdown {
+.arco-select-dropdown,
+.arco-tree-select-popup {
   background: var(--uvp-popconfirm-bg) !important;
   border: 1px solid var(--uvp-popconfirm-border) !important;
   border-radius: 10px !important;
   box-shadow: var(--uvp-popconfirm-shadow) !important;
+}
+
+.arco-tree-select-popup {
+  .arco-tree-node {
+    color: var(--uvp-text-primary);
+  }
+
+  .arco-tree-node:not(.arco-tree-node-disabled, .arco-tree-node-disabled-selectable) .arco-tree-node-title:hover {
+    color: var(--uvp-brand-strong);
+    background: var(--uvp-brand-soft);
+  }
+
+  .arco-tree-node-selected:not(.arco-tree-node-disabled) .arco-tree-node-title {
+    color: var(--uvp-brand-strong);
+    background: var(--uvp-brand-soft);
+  }
 }
 
 .arco-select-dropdown-list-wrapper {

@@ -693,6 +693,9 @@ onBeforeUnmount(releaseCharts);
 .ptl-brush-bar.empty {
   background: var(--uvp-panel-border);
 }
+:global(body[arco-theme="dark"] .ptl-brush-bar:not(.empty, .stalled)) {
+  background: color-mix(in srgb, var(--uvp-brand) 80%, var(--uvp-brand-cyan));
+}
 .ptl-brush-bar.stalled {
   background: var(--uvp-warning);
 }
@@ -704,6 +707,9 @@ onBeforeUnmount(releaseCharts);
   background: color-mix(in srgb, var(--uvp-brand) 18%, transparent);
   border-right: 1px solid var(--uvp-brand);
   border-left: 1px solid var(--uvp-brand);
+}
+:global(body[arco-theme="dark"] .ptl-brush-selection) {
+  background: color-mix(in srgb, var(--uvp-brand) 8%, transparent);
 }
 .ptl-hint {
   margin: 0;

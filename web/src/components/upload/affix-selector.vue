@@ -69,7 +69,15 @@
       </div>
 
       <!-- 图片预览模态框 -->
-      <a-modal v-model:visible="previewVisible" :footer="false" :width="600" title="图片预览">
+      <!-- ⛔ 预览弹窗也要挂房规类（2026-10-15 全仓清查补上）：它是嵌在上层弹窗里的**第二颗**
+           Arco Modal，同样走 Teleport、同样拿不到 scoped 样式，只能靠这个类上底色/圆角。 -->
+      <a-modal
+        v-model:visible="previewVisible"
+        :footer="false"
+        :width="600"
+        title="图片预览"
+        modal-class="uvp-system-dialog affix-preview-dialog"
+      >
         <div style="text-align: center">
           <img :src="previewImageUrl" style="max-width: 100%; max-height: 400px" />
         </div>

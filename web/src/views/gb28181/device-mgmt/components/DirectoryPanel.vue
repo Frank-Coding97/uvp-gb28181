@@ -287,69 +287,71 @@ onMounted(() => load(props.modelValue.view));
 
     <a-spin :loading="loading" class="directory-tree-wrap">
       <div class="directory-tree" role="tree">
-        <div
-          v-for="{ node, level } in visibleRows"
-          :key="node.key"
-          :data-node-key="node.key"
-          class="directory-row"
-          :class="{
-            active: selectedKey === node.key || selectedDeviceId === node.device?.id,
-            'directory-row-device': Boolean(node.device)
-          }"
-          :style="{ paddingLeft: `${8 + level * 14}px` }"
-          :title="nodeTitle(node)"
-          role="treeitem"
-          :aria-selected="selectedKey === node.key || selectedDeviceId === node.device?.id"
-        >
-          <button
-            class="twist-button"
-            :class="{ hidden: !node.children?.length, expanded: expandedKeys.includes(node.key) || normalizedKeyword }"
-            type="button"
-            :disabled="!node.children?.length"
-            aria-label="展开或收起"
-            @click.stop="toggle(node)"
+        <!-- ⛔ 提示必须走 a-tooltip：原生 title 的颜色/延迟/字体全由浏览器决定，
+             暗色页面下会弹出刺眼的浅灰块，且任何 CSS 都改不动（见 style/model/uvp-tooltip.scss）。 -->
+        <a-tooltip v-for="{ node, level } in visibleRows" :key="node.key" :content="nodeTitle(node)" position="right">
+          <div
+            :data-node-key="node.key"
+            class="directory-row"
+            :class="{
+              active: selectedKey === node.key || selectedDeviceId === node.device?.id,
+              'directory-row-device': Boolean(node.device)
+            }"
+            :style="{ paddingLeft: `${8 + level * 14}px` }"
+            role="treeitem"
+            :aria-selected="selectedKey === node.key || selectedDeviceId === node.device?.id"
           >
-            <ChevronRight :size="12" />
-          </button>
-          <button class="directory-node" :class="{ 'directory-device-node': node.device }" type="button" @click="choose(node)">
-            <template v-if="node.device">
-              <span class="device-node-icon" :class="{ online: node.device.online }"
-                ><Circle :size="8" fill="currentColor"
-              /></span>
-              <span class="device-node-copy">
+            <button
+              class="twist-button"
+              :class="{ hidden: !node.children?.length, expanded: expandedKeys.includes(node.key) || normalizedKeyword }"
+              type="button"
+              :disabled="!node.children?.length"
+              aria-label="展开或收起"
+              @click.stop="toggle(node)"
+            >
+              <ChevronRight :size="12" />
+            </button>
+            <button class="directory-node" :class="{ 'directory-device-node': node.device }" type="button" @click="choose(node)">
+              <template v-if="node.device">
+                <span class="device-node-icon" :class="{ online: node.device.online }"
+                  ><Circle :size="8" fill="currentColor"
+                /></span>
+                <span class="device-node-copy">
+                  <span class="node-name">{{ node.name }}</span>
+                  <span class="device-node-code">{{ node.device.deviceId }}</span>
+                </span>
+                <span class="device-node-status" :class="{ online: node.device.online }">{{
+                  node.device.online ? "在线" : "离线"
+                }}</span>
+              </template>
+              <template v-else>
+                <MapPin v-if="node.type === 'area' || node.type === 'unknown'" :size="13" />
+                <Camera v-else-if="node.type === 'channel'" :size="13" class="channel-node-icon" />
+                <FolderTree v-else-if="node.type === 'biz_group'" :size="13" />
+                <Folder v-else :size="13" />
                 <span class="node-name">{{ node.name }}</span>
-                <span class="device-node-code">{{ node.device.deviceId }}</span>
-              </span>
-              <span class="device-node-status" :class="{ online: node.device.online }">{{
-                node.device.online ? "在线" : "离线"
-              }}</span>
-            </template>
-            <template v-else>
-              <MapPin v-if="node.type === 'area' || node.type === 'unknown'" :size="13" />
-              <Camera v-else-if="node.type === 'channel'" :size="13" class="channel-node-icon" />
-              <FolderTree v-else-if="node.type === 'biz_group'" :size="13" />
-              <Folder v-else :size="13" />
-              <span class="node-name">{{ node.name }}</span>
-              <span v-if="node.meta?.sourceName && node.type !== 'channel'" class="node-source">{{ node.meta.sourceName }}</span>
-              <span v-if="node.type === 'channel'" class="channel-status" :class="{ online: node.onlineCount > 0 }"
-                ><Circle :size="8" fill="currentColor" />{{ node.onlineCount > 0 ? "在线" : "离线" }}</span
-              >
-              <span
-                v-else
-                class="node-count"
-                :aria-label="
-                  modelValue.view === 'business'
-                    ? `在线通道 ${node.onlineCount} 个，共 ${node.count} 个`
-                    : `在线设备 ${node.onlineCount} 台，共 ${node.count} 台`
-                "
-                :title="`在线 ${node.onlineCount} / 总数 ${node.count}`"
-              >
-                <span class="node-online-count">{{ node.onlineCount }}</span
-                ><span aria-hidden="true">/</span><span>{{ node.count }}</span>
-              </span>
-            </template>
-          </button>
-        </div>
+                <span v-if="node.meta?.sourceName && node.type !== 'channel'" class="node-source">{{
+                  node.meta.sourceName
+                }}</span>
+                <span v-if="node.type === 'channel'" class="channel-status" :class="{ online: node.onlineCount > 0 }"
+                  ><Circle :size="8" fill="currentColor" />{{ node.onlineCount > 0 ? "在线" : "离线" }}</span
+                >
+                <span
+                  v-else
+                  class="node-count"
+                  :aria-label="
+                    modelValue.view === 'business'
+                      ? `在线通道 ${node.onlineCount} 个，共 ${node.count} 个`
+                      : `在线设备 ${node.onlineCount} 台，共 ${node.count} 台`
+                  "
+                >
+                  <span class="node-online-count">{{ node.onlineCount }}</span
+                  ><span aria-hidden="true">/</span><span>{{ node.count }}</span>
+                </span>
+              </template>
+            </button>
+          </div>
+        </a-tooltip>
         <div v-if="!loading && visibleRows.length === 0" class="directory-empty">{{ emptyHint }}</div>
       </div>
     </a-spin>

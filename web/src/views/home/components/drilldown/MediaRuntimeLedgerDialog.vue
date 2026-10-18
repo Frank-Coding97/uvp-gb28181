@@ -454,19 +454,25 @@ function changeNetworkPageSize(value: number) {
         :pagination="pagination"
         row-key="key"
         class="uvp-data-table media-ledger-table"
-        :scroll="{ x: kind === 'recordings' ? 1120 : 1020, y: 480 }"
+        :scroll="{ x: kind === 'recordings' ? 1320 : 1220, y: 480 }"
       >
         <template #columns>
-          <a-table-column title="设备 / 通道" :width="240"
+          <a-table-column title="设备" :width="200"
             ><template #cell="{ record }"
               ><strong>{{ displayName(record.deviceName, "未绑定设备") }}</strong
-              ><small>{{ displayName(record.channelName, "未绑定通道") }}</small
-              ><small class="mono">{{ record.deviceId || "—" }} / {{ record.channelId || "—" }}</small></template
+              ><small class="mono">{{ record.deviceId || "—" }}</small></template
+            ></a-table-column
+          >
+          <a-table-column title="通道" :width="200"
+            ><template #cell="{ record }"
+              ><strong>{{ displayName(record.channelName, "未绑定通道") }}</strong
+              ><small class="mono">{{ record.channelId || "—" }}</small></template
             ></a-table-column
           >
           <a-table-column title="流 ID" :width="150"
             ><template #cell="{ record }"
-              ><strong class="mono">{{ record.streamId }}</strong
+              ><a-tooltip :content="record.streamId" position="top"
+                ><strong class="mono">{{ record.streamId }}</strong></a-tooltip
               ><small>{{ record.app }} · {{ record.nodeName }}</small></template
             ></a-table-column
           >
@@ -709,6 +715,12 @@ function changeNetworkPageSize(value: number) {
   gap: 12px;
   color: var(--uvp-text-primary);
 }
+
+/* grid 子项默认 min-width:auto，会让表格按内容撑开、把横向滚动挤到外层弹窗；
+   放行收缩后 scroll.x 才在表格内部生效。 */
+.media-ledger-dialog > * {
+  min-width: 0;
+}
 .media-ledger-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -766,7 +778,9 @@ function changeNetworkPageSize(value: number) {
   width: auto;
 }
 .media-ledger-keyword {
-  width: 100%;
+  flex: 0 1 320px;
+  width: 320px !important;
+  max-width: 100%;
 }
 .network-session-search :deep(.network-node-filter) {
   flex: 0 0 220px;
@@ -865,6 +879,7 @@ function changeNetworkPageSize(value: number) {
   .media-ledger-search :deep(.uvp-search-panel__surface) {
     padding: 10px;
   }
+  .media-ledger-keyword,
   .network-session-search :deep(.network-node-filter),
   .network-peer-filter,
   .network-port-filter {

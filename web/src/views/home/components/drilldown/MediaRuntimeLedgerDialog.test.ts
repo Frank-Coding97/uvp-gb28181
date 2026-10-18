@@ -141,7 +141,17 @@ describe("MediaRuntimeLedgerDialog", () => {
       resolve(process.cwd(), "src/views/home/components/drilldown/MediaRuntimeLedgerDialog.vue"),
       "utf8"
     );
-    for (const label of ["设备 / 通道", "流 ID", "协议", "观看者", "实时码率", "在线时长", "停止点播", "强制结束"]) {
+    for (const label of [
+      'title="设备"',
+      'title="通道"',
+      "流 ID",
+      "协议",
+      "观看者",
+      "实时码率",
+      "在线时长",
+      "停止点播",
+      "强制结束"
+    ]) {
       expect(source).toContain(label);
     }
     expect(source).toContain("<a-table");

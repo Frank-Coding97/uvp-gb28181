@@ -345,7 +345,14 @@
     :plan-id="activePlan?.id"
     @confirm="confirmAssignment"
   />
-  <a-modal v-model:visible="evidenceVisible" :title="evidenceTitle" :footer="false" width="720px">
+  <!-- ⛔ 取证弹窗同样要房规类（2026-10-15 全仓清查补上），否则面板没底色/圆角、跟别处不像一家。 -->
+  <a-modal
+    v-model:visible="evidenceVisible"
+    :title="evidenceTitle"
+    :footer="false"
+    width="720px"
+    modal-class="uvp-system-dialog recording-evidence-dialog"
+  >
     <a-spin :loading="evidenceLoading" class="recording-evidence-spin">
       <pre class="recording-evidence">{{ evidenceText }}</pre>
     </a-spin>

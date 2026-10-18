@@ -761,7 +761,9 @@ describe("存储卡进度条底轨的视觉契约（源码级）", () => {
       /\.storage-format-btn\s*\{[\s\S]*color:\s*var\(--uvp-danger\)[\s\S]*background:\s*var\(--uvp-danger-soft\)/
     );
     expect(panelSource).toMatch(
-      /body\[arco-theme="dark"\][\s\S]*storage-refresh-button[^}]*\{[\s\S]*color:\s*#ffffff[\s\S]*background:\s*#2563eb/
+      // ⛔ 整段选择器必须包在 `:global(...)` 里：写成 `:global(body[…]) .storage-actions :deep(…)`
+      //   会被 scoped 编译器**静默截断**成 `body[arco-theme="dark"] { … }`，暗色规则等于没写。
+      /:global\(body\[arco-theme="dark"\] \.storage-actions[\s\S]*storage-refresh-button[\s\S]*\{[\s\S]*color:\s*#ffffff[\s\S]*background:\s*#2563eb/
     );
   });
 });

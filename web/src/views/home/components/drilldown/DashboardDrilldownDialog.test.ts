@@ -37,7 +37,7 @@ const result = {
 };
 
 describe("DashboardDrilldownDialog", () => {
-  it("shows range controls, partial state, chart and ledger", async () => {
+  it("shows range controls, coverage notice, chart and ledger", async () => {
     const wrapper = mount(DashboardDrilldownDialog, {
       props: {
         visible: true,
@@ -54,7 +54,10 @@ describe("DashboardDrilldownDialog", () => {
     expect(wrapper.text()).toContain("统计覆盖不完整");
     expect(wrapper.text()).toContain("REGISTER");
     expect(wrapper.get(".modal-stub").attributes("data-modal-class")).toBe("uvp-system-dialog");
-    expect(wrapper.get(".chart-stub").attributes("data-status")).toBe("partial");
+    // 2026-10-18 按老板要求不再展示「部分数据」角标:后端 status=partial 时图表仍按 ready 渲染,
+    // 覆盖信息只保留上面那行文字提示(不改后端语义,其它页面照旧可用 partial)。
+    expect(wrapper.get(".chart-stub").attributes("data-status")).toBe("ready");
+    expect(wrapper.text()).not.toContain("部分数据");
     const buttons = wrapper.findAll(".drilldown-ranges button");
     expect(buttons).toHaveLength(3);
     await buttons[0].trigger("click");
@@ -116,7 +119,11 @@ describe("DashboardDrilldownDialog", () => {
       },
       global: { stubs: { "a-modal": AModal } }
     });
-    expect(wrapper.get(".chart-stub").text()).toContain("Y 轴为每个时间桶累计流量；上行 1.0 KB，已结算下行 512 B");
+    // ⛔ 防回归(2026-10-18):脚注必须写明「合计」及其时间范围,否则读者会拿它和
+    //    悬浮窗里单个时间桶的值对照,误判成数据不一致。
+    expect(wrapper.get(".chart-stub").text()).toContain(
+      "每个点是该时间桶的流量；最近 24 小时合计：上行 1.0 KB，已结算下行 512 B"
+    );
     expect(wrapper.get(".chart-stub").classes()).toContain("traffic-chart");
     expect(wrapper.get(".chart-stub").attributes("data-as-of")).toBe("");
     expect(wrapper.text()).not.toContain("统计覆盖不完整");

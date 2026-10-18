@@ -173,6 +173,31 @@ describe("MediaVChart", () => {
     wrapper.unmount();
   });
 
+  // 回归守卫(2026-10-18):VChart 用 autoFit:false 只在挂载那一刻量一次容器,
+  // 而弹窗入场动画期间尺寸还会变、ResizeObserver 对 transform 不触发 ⇒
+  // 必须等动画结束后按最终尺寸重排一次,否则纵轴刻度会被挤出画布。
+  it("re-fits the canvas once the open animation settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const wrapper = mount(MediaVChart, {
+        attachTo: document.body,
+        props: { title: "趋势", spec: { type: "area" } }
+      });
+      const host = wrapper.get(".media-vchart__canvas").element as HTMLElement;
+      Object.defineProperty(host, "clientWidth", { value: 720, configurable: true });
+      Object.defineProperty(host, "clientHeight", { value: 360, configurable: true });
+      const before = chart.resized;
+      vi.advanceTimersByTime(400);
+      expect(chart.resized).toBe(before + 1);
+      wrapper.unmount();
+      // 卸载后定时器必须清掉,否则会去 resize 已释放的图表
+      vi.advanceTimersByTime(400);
+      expect(chart.resized).toBe(before + 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("honors chart-specific rolling motion and turns it off for reduced-motion", () => {
     const rollingSpec = {
       type: "line",

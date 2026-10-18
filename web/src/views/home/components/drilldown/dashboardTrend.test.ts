@@ -18,6 +18,9 @@ describe("dashboard drilldown trend spec", () => {
       rollingRequests: 0
     });
     expect(spec.type).toBe("area");
+    // ⛔ 防回归（2026-10-17）：不显式给 transparent 时，VChart 会刷 Arco 暗色主题的中性黑，
+    //    在 UVP 蓝灰暗色面板上形成色温不一致的"黑补丁"。
+    expect(spec.background).toBe("transparent");
     expect((spec.data?.[0] as { values: Array<{ value: number | null }> }).values[0].value).toBeNull();
     expect(spec).toMatchObject({ invalidType: "break" });
   });
@@ -38,7 +41,20 @@ describe("dashboard drilldown trend spec", () => {
     });
     const values = (spec.data?.[0] as { values: Array<{ series: string }> }).values;
     expect(values.map(item => item.series)).toEqual(["上行", "已结算下行"]);
-    expect(spec.color).toEqual(["var(--uvp-brand)", "var(--uvp-brand-cyan)"]);
+    expect(spec.background).toBe("transparent");
+    // ⛔ 防回归（2026-10-18）：VChart 面积图**默认堆叠**，不显式关掉时青线上缘 = 上行+下行，
+    //    与悬浮窗数字自相矛盾（图上「下行」反而比上行高）。
+    expect(spec.stack).toBe(false);
+    // ⛔ 防回归（2026-10-17）：颜色必须**显式绑定系列名**，不能只给色板数组。
+    //    只给数组时 VChart 给折线与悬浮标记分配颜色的顺序可能不一致 ⇒ 图例认色认错。
+    expect(spec.color).toEqual({
+      type: "ordinal",
+      domain: ["上行", "已结算下行"],
+      range: ["var(--uvp-brand)", "var(--uvp-brand-cyan)"]
+    });
+    expect(spec.tooltip).toMatchObject({
+      style: { panel: { backgroundColor: "var(--uvp-popconfirm-bg)", border: { color: "var(--uvp-popconfirm-border)" } } }
+    });
     expect(spec.line).toMatchObject({ style: { curveType: "monotone" } });
     expect(spec.area).toMatchObject({ style: { curveType: "monotone" } });
     const yAxis = spec.axes?.[1] as { title: { text: string }; label: { formatMethod: (value: number) => string } };

@@ -20,7 +20,9 @@ import "@arco-themes/vue-gi-demo/css/arco.css"; // 自定义主题
 import "@/styles/arco-overrides.scss"; // UVP 全局样式覆盖
 import i18n from "@/lang/index";
 import { startSessionHeartbeat } from "@/services/session-heartbeat";
+import { markClientBuildIdentity } from "@/config/version";
 
+markClientBuildIdentity();
 const app = createApp(App);
 app.use(pinia);
 app.use(router);

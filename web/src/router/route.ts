@@ -46,6 +46,12 @@ export const staticRoutes = [
     component: () => import(/* webpackChunkName: "layout" */ "@/layout/index.vue"),
     children: [
       {
+        path: "/gb28181/cascade/:id/resources",
+        name: "gb28181-cascade-resources",
+        component: () => import("@/views/gb28181/cascade/resources.vue"),
+        meta: { title: "共享与目录", hide: true }
+      },
+      {
         path: "/gb28181/openapi-client/:id",
         name: "gb28181-openapi-client-detail",
         component: () => import(/* webpackChunkName: "openapi-client-detail" */ "@/views/gb28181/openapi-client/detail.vue"),
@@ -62,6 +68,12 @@ export const staticRoutes = [
           title: "流媒体管理",
           hide: true
         }
+      },
+      {
+        path: "/system/service-upgrade",
+        name: "system-service-upgrade",
+        component: () => import("@/views/system/service-upgrade/index.vue"),
+        meta: { title: "服务在线升级", hide: true, permission: "system:upgrade:read" }
       }
     ]
   }

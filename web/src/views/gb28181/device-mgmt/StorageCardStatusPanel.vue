@@ -867,23 +867,34 @@ function formatCapacity(mb: number | null | undefined) {
   background: var(--uvp-shell-muted);
   border-color: var(--uvp-panel-border);
 }
-:global(body[arco-theme="dark"]) .storage-actions :deep(.storage-refresh-button.arco-btn:not(.arco-btn-disabled)) {
+
+/*
+ * ⛔⛔ 暗色这几条的**整段选择器都必须包在 `:global()` 里** ——
+ *   写成 `:global(body[arco-theme="dark"]) .storage-actions :deep(...)` 时，
+ *   scoped 编译器会**静默丢掉** `:global()` 之后的全部内容，产出
+ *   `body[arco-theme="dark"] { … }`（声明挂到 <body> 上、既报错也不生效，
+ *   而且 `:deep()` 留在里面还会变成非法选择器）。原来就是这样，暗色规则从来没生效过。
+ *   （2026-10-15 用 `vue/compiler-sfc` 的 compileStyle 逐形态实证过，见
+ *     `src/styles/dark-primary-buttons.test.ts` 的全仓扫描门禁。）
+ *   ⚠️ 包进 `:global()` 后规则不再带 `[data-v-*]`，特异性靠 `body[...]` 那一档补回来。
+ */
+:global(body[arco-theme="dark"] .storage-actions .storage-refresh-button.arco-btn:not(.arco-btn-disabled)) {
   color: #ffffff !important;
   background: #2563eb !important;
   border-color: #2563eb !important;
 }
-:global(body[arco-theme="dark"]) .storage-actions :deep(.storage-refresh-button.arco-btn:hover:not(.arco-btn-disabled)),
-:global(body[arco-theme="dark"]) .storage-actions :deep(.storage-refresh-button.arco-btn:active:not(.arco-btn-disabled)) {
+:global(body[arco-theme="dark"] .storage-actions .storage-refresh-button.arco-btn:hover:not(.arco-btn-disabled)),
+:global(body[arco-theme="dark"] .storage-actions .storage-refresh-button.arco-btn:active:not(.arco-btn-disabled)) {
   color: #ffffff !important;
   background: #1d4ed8 !important;
   border-color: #1d4ed8 !important;
 }
-:global(body[arco-theme="dark"]) .storage-format-btn:not(:disabled) {
+:global(body[arco-theme="dark"] .storage-format-btn:not(:disabled)) {
   color: #fecaca;
   background: rgb(185 28 28 / 22%);
   border-color: rgb(248 113 113 / 48%);
 }
-:global(body[arco-theme="dark"]) .storage-format-btn:hover:not(:disabled) {
+:global(body[arco-theme="dark"] .storage-format-btn:hover:not(:disabled)) {
   color: #ffffff;
   background: #b91c1c;
   border-color: #b91c1c;

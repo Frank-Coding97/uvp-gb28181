@@ -150,19 +150,27 @@ const ArcoSliderStub = defineComponent({
 
 const ArcoCheckboxStub = defineComponent({
   inheritAttrs: false,
-  props: { modelValue: Boolean, disabled: Boolean },
+  props: { modelValue: Boolean, disabled: Boolean, indeterminate: Boolean },
   emits: ["update:modelValue", "change"],
   setup(props, { attrs, emit, slots }) {
     return () =>
-      h("label", { ...attrs }, [
-        h("input", {
-          type: "checkbox",
-          checked: props.modelValue,
-          disabled: props.disabled,
-          onChange: (event: Event) => emit("update:modelValue", (event.target as HTMLInputElement).checked)
-        }),
-        ...((slots.default?.() ?? []) as ReturnType<typeof h>[])
-      ]);
+      h(
+        "label",
+        // ⛔ 真 Arco 的 `indeterminate` 是**落在 label 上的 class**，不是给 input 设 DOM 属性
+        //    （`@arco-design/web-vue` 里只有 `[`${prefixCls}-indeterminate`]: props.indeterminate` 这一处）。
+        //    桩必须照抄，否则表头「半选态」在单测里断言不到 —— 而删掉 `:indeterminate` 也不会报错，
+        //    属于典型的静默回归（2026-10-14 级联共享通道表踩到）。
+        { ...attrs, class: [attrs.class, { "arco-checkbox-indeterminate": props.indeterminate }] },
+        [
+          h("input", {
+            type: "checkbox",
+            checked: props.modelValue,
+            disabled: props.disabled,
+            onChange: (event: Event) => emit("update:modelValue", (event.target as HTMLInputElement).checked)
+          }),
+          ...((slots.default?.() ?? []) as ReturnType<typeof h>[])
+        ]
+      );
   }
 });
 
@@ -171,7 +179,7 @@ config.global.stubs = {
   "a-input": ArcoInputStub,
   "a-input-password": { template: "<input type='password' />" },
   "a-input-number": ArcoInputNumberStub,
-  "a-modal": { template: "<div><slot name='title' /><slot /></div>" },
+  "a-modal": { template: "<div><slot name='title' /><slot /><slot name='footer' /></div>" },
   "a-select": ArcoSelectStub,
   "a-option": ArcoOptionStub,
   "a-range-picker": ArcoRangePickerStub,

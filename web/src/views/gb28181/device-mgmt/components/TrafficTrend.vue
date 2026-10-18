@@ -14,7 +14,7 @@ import {
   type TrafficSummary,
   type TrafficTrendPoint
 } from "../trafficApi";
-import { coverageLabel, formatBytes, latestRequestGuard } from "../trafficState";
+import { coverageLabel, downstreamAllMeasured, formatBytes, latestRequestGuard, summarizeRealtime } from "../trafficState";
 
 type TrafficRangeMode = "7d" | "24h";
 
@@ -55,15 +55,10 @@ function trafficParams() {
   return rangeMode.value === "24h" ? { ...scope, granularity: "hour" as const } : { ...scope, ...defaultTrafficRange() };
 }
 
-const realtimeSummary = computed(() =>
-  realtime.value.reduce(
-    (result, item) => ({
-      speed: result.speed + item.upstreamBytesPerSecond,
-      downstreamSpeed: result.downstreamSpeed + item.estimatedDownstreamBytesPerSec
-    }),
-    { speed: 0, downstreamSpeed: 0 }
-  )
-);
+const realtimeSummary = computed(() => summarizeRealtime(realtime.value));
+
+// 全部流都是实测下行时,底部说明不再标注「估算」
+const allMeasured = computed(() => downstreamAllMeasured(realtime.value));
 
 const trendTitle = computed(() => (rangeMode.value === "24h" ? "24小时流量趋势" : "7天流量趋势"));
 const chartAriaLabel = computed(() => `${trendTitle.value}，上行和下行堆叠柱、总流量折线；点击柱形查看明细`);
@@ -375,8 +370,14 @@ onBeforeUnmount(() => {
       </div>
       <a-empty v-else-if="!loading" :description="coverage?.coverage === 'not_started' ? '尚未开始统计' : '暂无流量历史'" />
       <div v-if="realtime.length" class="estimate-note">
-        当前上行 {{ formatBytes(realtimeSummary.speed) }}/s · 估算下行
-        {{ formatBytes(realtimeSummary.downstreamSpeed) }}/s，估算值不计入已结算历史。
+        <template v-if="allMeasured"
+          >当前上行 {{ formatBytes(realtimeSummary.speed) }}/s · 下行
+          {{ formatBytes(realtimeSummary.downstreamSpeed) }}/s(实测,已实时计入结算)。</template
+        >
+        <template v-else
+          >当前上行 {{ formatBytes(realtimeSummary.speed) }}/s · 估算下行
+          {{ formatBytes(realtimeSummary.downstreamSpeed) }}/s,估算值不计入已结算历史。</template
+        >
       </div>
     </a-spin>
 

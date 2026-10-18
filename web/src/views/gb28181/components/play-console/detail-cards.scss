@@ -1130,6 +1130,10 @@
   background: var(--uvp-panel-border);
 }
 
+body[arco-theme="dark"] .frame-overview:not(.muted) .frame-overview-bar:not(.empty, .stalled) {
+  background: color-mix(in srgb, var(--uvp-brand) 80%, var(--uvp-brand-cyan));
+}
+
 .frame-overview-bar.stalled {
   background: var(--uvp-warning);
 }

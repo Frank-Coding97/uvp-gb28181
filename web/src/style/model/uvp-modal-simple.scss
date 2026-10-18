@@ -105,14 +105,42 @@
   box-shadow: 0 4px 8px -2px rgb(37 99 235 / 32%);
 }
 
-/* 危险按钮 (删除场景) */
-.arco-modal-simple .arco-modal-footer .arco-btn-primary[status="danger"] {
+/*
+ * 危险按钮 (删除场景)
+ *
+ * ⛔⛔ 选择器必须用 Arco **真实的类名** `.arco-btn-status-danger`。
+ *   原来写的是属性选择器 `.arco-btn-primary[status="danger"]` —— **永远匹配不上**：
+ *   `status` 是 Arco Button 的 **prop**（`es/button/button.js` 里 `status` 进了 props、
+ *   只往 class 上加一个 `${prefixCls}-status-danger`），被 Vue 当参数吃掉后
+ *   元素上**根本不会留 `status` 属性**（真机 `el.getAttribute("status") === null`）。
+ *   ⇒ 全仓 20 多处「确认删除」弹窗的确认键一直是**品牌蓝**，而不是红，且不报任何错。
+ *   同仓 `styles/arco-overrides.scss` 的暗色白名单里早就写着 `.arco-btn-status-danger`，
+ *   可以对照：类名才是这个仓库公认的写法。
+ *
+ * ⛔ 必须排在上面那条 `.arco-btn-primary` 之后：两条对危险键同时命中时特异性打平
+ *   （都是 5 个类级），靠源码顺序取胜。
+ *
+ * ⚠️ 暗色要单独给一档：`--uvp-danger` 在暗色下是 #f87171 —— 那是**文字/图标色**
+ *   （调浅才能在深底上看见），拿它当实心底色压白字只有约 2.4:1，正是
+ *   `style/model/solid-surface-token.test.ts` 立规矩要避免的那种"发白发糊"。
+ *   实心面改用同一 token 往黑里压出来的深红，与 hover 那条 `color-mix` 同源同写法。
+ */
+.arco-modal-simple .arco-modal-footer .arco-btn-primary.arco-btn-status-danger {
+  color: #ffffff;
   background: var(--uvp-danger) !important;
   box-shadow: 0 2px 4px -2px rgb(209 67 67 / 28%);
 }
-.arco-modal-simple .arco-modal-footer .arco-btn-primary[status="danger"]:hover {
+.arco-modal-simple .arco-modal-footer .arco-btn-primary.arco-btn-status-danger:hover {
   background: color-mix(in srgb, var(--uvp-danger) 90%, #000000) !important;
   box-shadow: 0 4px 8px -2px rgb(209 67 67 / 36%);
+}
+body[arco-theme="dark"] .arco-modal-simple .arco-modal-footer .arco-btn-primary.arco-btn-status-danger {
+  background: color-mix(in srgb, var(--uvp-danger) 60%, #000000) !important;
+  box-shadow: 0 2px 4px -2px rgb(0 0 0 / 46%);
+}
+body[arco-theme="dark"] .arco-modal-simple .arco-modal-footer .arco-btn-primary.arco-btn-status-danger:hover {
+  background: color-mix(in srgb, var(--uvp-danger) 48%, #000000) !important;
+  box-shadow: 0 4px 8px -2px rgb(0 0 0 / 54%);
 }
 
 /* 次按钮 */

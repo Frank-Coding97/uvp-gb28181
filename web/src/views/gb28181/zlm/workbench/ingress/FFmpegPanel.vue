@@ -334,7 +334,17 @@ function changePageSize(next: number) {
       @confirm="confirmDelete"
       @stale="closeDelete"
     />
-    <a-modal v-else :visible="deleteVisible" :footer="false" :width="540" unmount-on-close @cancel="closeDelete">
+    <!-- ⛔ 预检弹窗要挂房规类（2026-10-15 全仓清查补上）：它 `footer=false`、自己放「关闭」按钮，
+         不挂就只是一块裸面板，底色/圆角/头部内边距全缺。 -->
+    <a-modal
+      v-else
+      :visible="deleteVisible"
+      :footer="false"
+      :width="540"
+      unmount-on-close
+      modal-class="uvp-system-dialog ingress-preflight-dialog"
+      @cancel="closeDelete"
+    >
       <template #title>FFmpeg 源释放预检</template>
       <div v-if="deleteLoading" class="preflight-state"><a-spin /><span>正在读取后端真实状态与归属…</span></div>
       <div v-else class="preflight-state" :class="{ 'state-box--error': deleteError }">

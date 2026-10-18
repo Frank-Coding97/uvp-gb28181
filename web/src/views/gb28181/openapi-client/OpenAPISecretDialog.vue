@@ -33,6 +33,7 @@ function close() {
     :esc-to-close="false"
     :closable="false"
     :footer="false"
+    modal-class="uvp-system-dialog openapi-secret-dialog"
     @cancel="close"
   >
     <a-alert type="warning" class="openapi-secret-dialog__warning">

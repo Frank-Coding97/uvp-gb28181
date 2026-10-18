@@ -786,6 +786,7 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     const modal = wrapper.findAllComponents(ModalStub)[0];
     const before = modal.props("modalStyle") as Record<string, string>;
+    expect(Number.parseFloat(before.top) + (400 * 9) / 16).toBe(window.innerHeight - 16);
     const title = wrapper.get("[data-testid='play-console-drag-handle']");
     await title.trigger("pointerdown", { button: 0, clientX: 100, clientY: 100 });
     window.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 60, clientY: 75 }));
@@ -1983,6 +1984,9 @@ describe("PlayConsoleLinked 双区联动", () => {
     // 探针详情条三栏不等分:时间线是横向柱状图,等分会把 32 根柱子挤到每根不足 9px
     expect(probePanelSource).toMatch(
       /\.linked-probe-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)\s+minmax\(0,\s*1\.4fr\)/s
+    );
+    expect(probePanelSource).toMatch(
+      /\.linked-probe-layout\s*>\s*\.linked-section\s*>\s*\.frame-overview\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);[^}]*align-items:\s*stretch/s
     );
     // ⛔ `[^{]*` 而不是 `\s*`：这条规则可能与 `.sidebar-deviceconfig .panels` **并列成一条**
     //   （`.a .panels,\n.b .panels {`），语义没变但选择器后面不再紧跟着 `{`。

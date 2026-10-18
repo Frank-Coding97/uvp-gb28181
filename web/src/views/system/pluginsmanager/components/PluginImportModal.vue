@@ -1,5 +1,13 @@
 <template>
-  <a-modal v-model:visible="visible" :width="width" :mask-closable="false" @close="handleClose">
+  <!-- ⛔ `modal-class="uvp-system-dialog"` 不能省（2026-10-15 全仓清查补上）：面板底色/圆角/
+       头尾内边距、页脚按钮间距全挂这个类，漏了就是个裸 Arco 弹窗。 -->
+  <a-modal
+    v-model:visible="visible"
+    :width="width"
+    :mask-closable="false"
+    modal-class="uvp-system-dialog plugin-import-dialog"
+    @close="handleClose"
+  >
     <template #title>导入插件</template>
     <div class="import-container">
       <!-- 拖拽上传区域 -->

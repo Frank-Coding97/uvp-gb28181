@@ -188,6 +188,13 @@ const emit = defineEmits<{ (event: "openTimeline"): void }>();
 .linked-probe-layout > .linked-section > .section-hd {
   flex: 0 0 auto;
 }
+
+/* Arco 的按钮根类会设置 inline-flex；提高选择器优先级，确保图表区保持上下两行网格。 */
+.linked-probe-layout > .linked-section > .frame-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+}
 .linked-probe-layout > .linked-section > .probe-track-merged,
 .linked-probe-layout > .linked-section > .probe-health-grid,
 .linked-probe-layout > .linked-section > .frame-overview {

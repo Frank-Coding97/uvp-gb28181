@@ -47,4 +47,5 @@ interface ViteEnv {
   VITE_USER_NODE_ENV: "development" | "production" | "test";
   VITE_PUBLIC_PATH: string;
   VITE_APP_BASE_URL: string;
+  VITE_BUILD_ID: string;
 }

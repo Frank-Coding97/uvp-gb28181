@@ -56,8 +56,28 @@ export function buildDashboardTrendSpec(metric: DashboardDrilldownMetric, histor
   }
   return {
     type: "area",
-    ...(isTraffic ? { color: ["var(--uvp-brand)", "var(--uvp-brand-cyan)"] } : {}),
+    // 与工作台其它图表一致：画布透出卡片底色。缺省时 VChart 会刷 Arco 暗色主题的中性黑，
+    // 在 UVP 的蓝灰暗色面板上会形成一块"黑补丁"（色温不一致）。
+    background: "transparent",
+    // ⛔ 只给色板数组是不够的：VChart 给「折线」和给「悬浮图例标记」分配颜色的顺序可能不一致
+    //    （实测暗色下：91.7GB 的上行线画成青色、悬浮里却标成蓝色），看图例认色就会认错。
+    //    改成显式序数映射：domain 钉死系列、range 钉死颜色，线与标记同用一把尺，不可能再错位。
+    ...(isTraffic
+      ? {
+          color: {
+            type: "ordinal",
+            domain: ["上行", "已结算下行"],
+            range: ["var(--uvp-brand)", "var(--uvp-brand-cyan)"]
+          }
+        }
+      : {}),
     data: [{ id: "dashboard-drilldown", values }],
+    // ⛔⛔ 面积图必须显式 stack:false。VChart 的 area 类型默认按系列堆叠,
+    //    「上行 / 已结算下行」一旦叠起来,青线的上缘就变成**两者之和**,
+    //    于是出现「曲线里下行比上行高、悬浮窗里 530MB < 692MB」的自相矛盾
+    //    (2026-10-18 像素实测:16:00 处两线高度比 1.77 ≈ (692+530)/692,
+    //     15:00 桶处 1.97 ≈ (141+137)/141,两处都精确命中堆叠假设)。
+    stack: false,
     xField: "bucketLabel",
     yField: "value",
     seriesField: "series",
@@ -78,6 +98,13 @@ export function buildDashboardTrendSpec(metric: DashboardDrilldownMetric, histor
     tooltip: isTraffic
       ? {
           activeType: "dimension",
+          // 悬浮面板默认用主题的中性灰，与 UVP 蓝灰面板色温不一致；对齐到弹层 token。
+          style: {
+            panel: {
+              backgroundColor: "var(--uvp-popconfirm-bg)",
+              border: { color: "var(--uvp-popconfirm-border)", width: 1, radius: 8 }
+            }
+          },
           dimension: {
             content: [
               {
@@ -87,7 +114,15 @@ export function buildDashboardTrendSpec(metric: DashboardDrilldownMetric, histor
             ]
           }
         }
-      : { mark: { title: { visible: true } } },
+      : {
+          mark: { title: { visible: true } },
+          style: {
+            panel: {
+              backgroundColor: "var(--uvp-popconfirm-bg)",
+              border: { color: "var(--uvp-popconfirm-border)", width: 1, radius: 8 }
+            }
+          }
+        },
     padding: { left: 12, right: 16, top: 12, bottom: 24 }
   } as MediaChartSpec;
 }

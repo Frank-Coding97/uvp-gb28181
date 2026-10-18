@@ -159,6 +159,12 @@ const stubs = {
       "<div data-testid='library-pagination' :data-current='current' :data-total='total'><button data-testid='page-two' @click='$emit(`change`, 2)'>2</button></div>"
   },
   // ⛔ a-drawer 的可见性 prop 就是 `visible`（不是 popupVisible）。
+  "a-image-preview": {
+    props: ["visible", "src"],
+    emits: ["update:visible"],
+    template:
+      "<div v-if='visible' data-testid='library-image-preview'><img :src='src' /><button data-testid='close-preview' @click='$emit(`update:visible`, false)'>关闭</button></div>"
+  },
   "a-drawer": {
     props: ["visible", "width", "footer", "escToClose"],
     emits: ["cancel"],
@@ -330,7 +336,7 @@ describe("snapshot library page", () => {
     const wrapper = mountPage();
     await flushPromises();
 
-    await wrapper.find(".library-thumb").trigger("click");
+    await wrapper.find('[data-testid="library-detail-1"]').trigger("click");
     await flushPromises();
 
     const drawer = wrapper.find('[data-testid="library-detail-drawer"]');
@@ -339,6 +345,48 @@ describe("snapshot library page", () => {
     // md5 界面上是短显，但复制按钮在（比对文件时必须能拿到全量）。
     expect(drawer.text()).toContain("d41d8cd9…427e");
     expect(wrapper.find('[data-testid="library-copy-md5-1"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="library-image-preview"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("previews the clicked image with authentication without opening details or downloading", async () => {
+    gbApi.listSnapshotLibrary.mockResolvedValue(listResult([row(1), row(2)]));
+    const wrapper = mountPage();
+    await flushPromises();
+
+    await wrapper.findAll(".library-thumb")[1].trigger("click");
+    const preview = wrapper.find('[data-testid="library-image-preview"]');
+    expect(preview.exists()).toBe(true);
+    expect(preview.find("img").attributes("src")).toBe(wrapper.findAll(".library-thumb img")[1].attributes("src"));
+    expect(preview.find("img").attributes("src")).toContain("token=tok-1");
+    expect(wrapper.find('[data-testid="library-detail-drawer"]').exists()).toBe(false);
+    expect(downloads).toHaveLength(0);
+
+    await wrapper.find('[data-testid="close-preview"]').trigger("click");
+    expect(wrapper.find('[data-testid="library-image-preview"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="library-detail-drawer"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("provides separate accessible icon buttons for download and details", async () => {
+    gbApi.listSnapshotLibrary.mockResolvedValue(listResult([row(1)]));
+    const wrapper = mountPage();
+    await flushPromises();
+
+    for (const [action, label] of [
+      ["download", "下载"],
+      ["detail", "详情"]
+    ]) {
+      const button = wrapper.find(`[data-testid="library-${action}-1"]`);
+      expect(button.element.tagName).toBe("BUTTON");
+      expect(button.attributes("aria-label")).toBe(label);
+      expect(button.text()).toBe("");
+      expect(button.find("svg").exists()).toBe(true);
+    }
+    await wrapper.find('[data-testid="library-download-1"]').trigger("click");
+    expect(downloads).toHaveLength(1);
+    expect(wrapper.find('[data-testid="library-detail-drawer"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="library-image-preview"]').exists()).toBe(false);
     wrapper.unmount();
   });
 

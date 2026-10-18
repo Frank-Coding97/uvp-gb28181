@@ -52,6 +52,11 @@ describe("lucide menu icons", () => {
     expect(getLucideIconComponent("lucide:HardDriveDownload")).toBeDefined();
   });
 
+  it("resolves the service upgrade menu icon stored in the database", () => {
+    expect(getLucideIconName("lucide:CloudDownload")).toBe("CloudDownload");
+    expect(getLucideIconComponent("lucide:CloudDownload")).toBeDefined();
+  });
+
   it("resolves icon names returned in lowercase by legacy menu data", () => {
     expect(getLucideIconComponent("lucide:servercog")).toBeDefined();
     expect(getLucideIconComponent("lucide:gitbranch")).toBeDefined();
@@ -83,7 +88,11 @@ describe("lucide menu icons：菜单数据覆盖率", () => {
     "postgresql_converted.sql",
     "sqlserver_converted.sql",
     "gb28181/migrations/2026-10-02-firmware-repository-menu.sql",
-    "gb28181/migrations/2026-10-03-record-cache.sql"
+    "gb28181/migrations/2026-10-03-record-cache.sql",
+    "gb28181/migrations/2026-10-18-service-upgrade-menu.sql",
+    "gb28181/migrations/2026-10-18-service-upgrade-menu-postgresql.sql",
+    "gb28181/migrations/2026-10-18-service-upgrade-menu-sqlserver.sql",
+    "gb28181/migrations/2026-10-18-service-upgrade-menu-sqlite.sql"
   ];
 
   function collectIcons(): Set<string> {

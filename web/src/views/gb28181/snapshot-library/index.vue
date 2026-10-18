@@ -134,9 +134,9 @@
               <button
                 type="button"
                 class="library-thumb"
-                :title="`查看详情 · ${item.fileName}`"
-                :aria-label="`查看 ${item.channelName || item.channelCode} 的抓拍图`"
-                @click="openDetail(item)"
+                :title="`预览大图 · ${item.fileName}`"
+                :aria-label="`预览 ${item.channelName || item.channelCode} 的抓拍图`"
+                @click="openPreview(item)"
               >
                 <!-- ⛔ 取图接口在鉴权组内，src 必须经 imageUrlFor 补 ?token=，直连会整页 401 破图。 -->
                 <img
@@ -231,13 +231,28 @@
                     选这张
                   </a-checkbox>
                   <span v-else class="library-actions-spacer" />
-                  <a-link
-                    class="uvp-table-action--primary"
-                    :data-testid="`library-download-${item.id}`"
-                    @click.stop="downloadOne(item)"
-                  >
-                    下载
-                  </a-link>
+                  <a-tooltip content="下载" position="top">
+                    <button
+                      class="icon-btn small framed primary"
+                      type="button"
+                      aria-label="下载"
+                      :data-testid="`library-download-${item.id}`"
+                      @click.stop="downloadOne(item)"
+                    >
+                      <Download :size="13" />
+                    </button>
+                  </a-tooltip>
+                  <a-tooltip content="详情" position="top">
+                    <button
+                      class="icon-btn small framed"
+                      type="button"
+                      aria-label="详情"
+                      :data-testid="`library-detail-${item.id}`"
+                      @click.stop="openDetail(item)"
+                    >
+                      <Eye :size="13" />
+                    </button>
+                  </a-tooltip>
                 </div>
               </div>
             </article>
@@ -261,6 +276,8 @@
         </footer>
       </template>
     </div>
+
+    <a-image-preview v-if="previewImage" v-model:visible="previewVisible" :src="imageUrlFor(previewImage)" />
 
     <!-- 详情抽屉 ⛔ 必须留在 .snow-fill 这一个根里：路由过渡只给「单元素根」挂钩子，
          根变成 Fragment 时淡入淡出会静默失效（见 index.layout.test.ts 的单根断言）。 -->
@@ -387,7 +404,7 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Message } from "@arco-design/web-vue";
-import { CheckSquare, Delete, Download, ImageOff, RotateCcw, Search } from "@lucide/vue";
+import { CheckSquare, Delete, Download, Eye, ImageOff, RotateCcw, Search } from "@lucide/vue";
 import { getAccessToken } from "@/utils/auth";
 import { getBaseUrl } from "@/api/utils";
 import { useUserStoreHook } from "@/store/modules/user";
@@ -438,6 +455,8 @@ const errorMessage = ref("");
 const failedIds = ref(new Set<number>());
 const accessToken = ref(getAccessToken()?.accessToken ?? "");
 const pagination = reactive({ page: 1, pageSize: SNAPSHOT_LIBRARY_PAGE_SIZE, total: 0 });
+const previewVisible = ref(false);
+const previewImage = ref<SnapshotLibraryItem | null>(null);
 const detailVisible = ref(false);
 const detail = ref<SnapshotLibraryItem | null>(null);
 const selectedIds = ref(new Set<number>());
@@ -503,6 +522,11 @@ function markFailed(id: number) {
   const next = new Set(failedIds.value);
   next.add(id);
   failedIds.value = next;
+}
+
+function openPreview(item: SnapshotLibraryItem) {
+  previewImage.value = item;
+  previewVisible.value = true;
 }
 
 function openDetail(item: SnapshotLibraryItem) {
@@ -1005,13 +1029,44 @@ onMounted(() => {
 }
 .library-card-actions {
   display: flex;
-  gap: 12px;
+  gap: 6px;
   align-items: center;
 
   /* ⛔ 不用 `justify-content: flex-end`：批量模式下左端是勾选框、
      右端是"下载"，两端分置靠 `margin-right:auto` 的占位撑开。
      保持 flex-end 会让两者都挤在右侧，勾选框被顶到中间。 */
   min-height: 24px;
+  padding-top: 9px;
+  border-top: 1px solid var(--uvp-panel-border);
+}
+.library-card-actions .icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: var(--uvp-text-secondary);
+  cursor: pointer;
+  background: var(--uvp-search-secondary-btn-bg);
+  border: 1px solid var(--uvp-search-secondary-btn-border);
+  border-radius: 8px;
+}
+.library-card-actions .icon-btn:hover {
+  color: var(--uvp-brand);
+  border-color: color-mix(in srgb, var(--uvp-brand) 28%, var(--uvp-search-secondary-btn-border));
+}
+.library-card-actions .icon-btn.primary {
+  color: var(--uvp-brand);
+  background: var(--uvp-brand-soft);
+  border-color: color-mix(in srgb, var(--uvp-brand) 24%, transparent);
+}
+.library-card-actions .icon-btn.primary:hover {
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
+  border-color: var(--uvp-solid-border);
+}
+.library-card-actions .icon-btn:focus-visible {
+  outline: 2px solid var(--uvp-brand);
+  outline-offset: 2px;
 }
 .library-footer {
   display: flex;

@@ -96,7 +96,10 @@ function mountPanel(state = createDirectoryState(), selectedDeviceId: number | n
     global: {
       stubs: {
         "a-spin": { template: "<div><slot /></div>" },
-        "a-tooltip": { template: "<span><slot /></span>" }
+        // 提示从原生 title 换成了 a-tooltip（原生 title 在暗色下是刺眼的浏览器灰块，
+        // 且任何 CSS 都改不动）。stub 把 content 落到 data-tooltip 上，好让用例继续
+        // 断言「目录编码只在提示里出现、行内不显示」这条契约。
+        "a-tooltip": { props: ["content"], template: '<span :data-tooltip="content"><slot /></span>' }
       }
     }
   });
@@ -193,7 +196,9 @@ describe("DirectoryPanel", () => {
     expect(wrapper.text()).toContain("山东省");
     expect(wrapper.text()).toContain("未知区域");
     expect(wrapper.text()).not.toContain("370000");
-    expect(wrapper.get('[data-node-key="administrative:area:370000"]').attributes("title")).toContain("370000");
+    // 契约不变：行内只显示名称，完整编码只出现在**悬浮提示**里（现在由 a-tooltip 承载）
+    const areaRow = wrapper.get('[data-node-key="administrative:area:370000"]');
+    expect(areaRow.element.parentElement?.getAttribute("data-tooltip")).toContain("370000");
     const device = wrapper.get('[data-node-key="device:31"]');
     expect(device.attributes("aria-selected")).toBe("true");
     expect(device.text()).toContain("门岗 NVR");
