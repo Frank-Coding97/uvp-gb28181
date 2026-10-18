@@ -4,7 +4,14 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { checkVersions, readProductVersion, syncVersions } from "./version.mjs";
+import {
+  checkFrontendBuildIdentity,
+  checkReleaseMetadata,
+  checkVersions,
+  readProductVersion,
+  syncVersions,
+  writeReleaseMetadata
+} from "./version.mjs";
 
 async function createFixture(version = "1.2.3") {
   const root = await mkdtemp(path.join(os.tmpdir(), "uvp-version-"));
@@ -62,6 +69,62 @@ test("fails the gate when a derived version drifts", async () => {
   const root = await createFixture();
   try {
     await assert.rejects(() => checkVersions(root), /version mismatch/i);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("writes release metadata outside the source tree with one build identity", async () => {
+  const root = await createFixture();
+  const output = path.join(root, "release-metadata");
+  try {
+    await syncVersions(root);
+    assert.deepEqual(await writeReleaseMetadata(root, "build-20261016", output), {
+      version: "1.2.3",
+      buildID: "build-20261016"
+    });
+    assert.deepEqual(JSON.parse(await readFile(path.join(output, "server/version.json"), "utf8")), {
+      name: "uvp-gb28181",
+      version: "1.2.3",
+      build_id: "build-20261016"
+    });
+    assert.deepEqual(JSON.parse(await readFile(path.join(output, "web/version.json"), "utf8")), {
+      name: "uvp-gb28181-ui",
+      version: "1.2.3",
+      build_id: "build-20261016"
+    });
+    assert.deepEqual(JSON.parse(await readFile(path.join(root, "server/version.json"), "utf8")), {
+      name: "uvp-gb28181",
+      version: "1.2.3"
+    });
+    assert.deepEqual(await checkReleaseMetadata(root, "build-20261016", output), {
+      version: "1.2.3",
+      buildID: "build-20261016"
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("checks the injected build identity in a compiled frontend JavaScript asset", async () => {
+  const root = await createFixture();
+  const dist = path.join(root, "web", "dist");
+  const buildID = "build-20261016-frontend";
+  try {
+    await syncVersions(root);
+    await mkdir(path.join(dist, "static", "js"), { recursive: true });
+    await writeFile(path.join(dist, "index.html"), '<script type="module" src="/static/js/app.js"></script>');
+    await writeFile(path.join(dist, "static", "js", "app.js"), `document.documentElement.dataset.uvpBuildId = "${buildID}";`);
+    await writeFile(path.join(dist, "version.json"), JSON.stringify({ name: "uvp-gb28181-ui", version: "1.2.3", build_id: buildID }));
+
+    assert.deepEqual(await checkFrontendBuildIdentity(root, buildID, dist), {
+      version: "1.2.3",
+      buildID,
+      assets: [path.join(dist, "static", "js", "app.js")]
+    });
+
+    await writeFile(path.join(dist, "static", "js", "app.js"), 'document.documentElement.dataset.uvpBuildId = "old-build";');
+    await assert.rejects(() => checkFrontendBuildIdentity(root, buildID, dist), /frontend build identity/i);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
