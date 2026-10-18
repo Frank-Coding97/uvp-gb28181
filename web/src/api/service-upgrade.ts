@@ -156,7 +156,7 @@ export const importServiceUpgrade = (file: File) => {
   return http.request<BaseResult<UpgradeImportJob>>("post", baseUrlApi("system/upgrade/import"), {
     data,
     headers: { "Content-Type": "multipart/form-data" },
-    timeout: 15 * 60 * 1000
+    timeout: 30 * 60 * 1000
   });
 };
 

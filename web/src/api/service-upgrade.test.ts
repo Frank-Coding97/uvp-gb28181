@@ -46,7 +46,7 @@ describe("服务升级 API", () => {
     const [, url, options] = request.mock.calls.at(-1)!;
     expect(url).toBe("/api/system/upgrade/import");
     expect(options.headers).toEqual({ "Content-Type": "multipart/form-data" });
-    expect(options.timeout).toBe(15 * 60 * 1000);
+    expect(options.timeout).toBe(30 * 60 * 1000);
     expect(options.data).toBeInstanceOf(FormData);
     expect((options.data as FormData).get("file")).toBe(file);
 

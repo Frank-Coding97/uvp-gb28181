@@ -30,6 +30,31 @@ const RECORD_CACHE_PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
 const loading = ref(false);
 const tasks = ref<RecordCacheTask[]>([]);
+
+/**
+ * 活动任务上一轮实时进度的快照（只记三件展示字段）。
+ *
+ * ⛔ 根因：列表接口**有意不带**实时进度（后端钉了反向断言 `TestListDoesNotQueryMediaServer`，
+ * 因为 N 条任务 = N 次媒体节点查询）。`loadTasks` 先把列表（活动态 `progress` 恒为 0，
+ * 进度只在整片收尾时落库）赋给 `tasks`，再 `await mergeLiveProgress()` 回填真实值。
+ * 那一帧的 0% 会被立刻画出来，等详情回来才跳到真实位置 —— 用户看到的就是
+ * "每次查询进度条先归零、再弹回当前进度"，而它本该是只增不减的。
+ * 把上一轮实时值带过来，让这一帧一开始就是对的，详情回来只会把它往前推。
+ */
+const lastLiveProgress = new Map<string, { progress: number; cachedSeconds: number; cachedBytes: number }>();
+
+/** 列表回填前，把上一轮的实时进度续上：活动态、且本轮列表值更低时，沿用上次的值。 */
+function carryForwardProgress(list: RecordCacheTask[]) {
+  for (const task of list) {
+    if (!isRecordCacheTaskActive(task.state)) continue;
+    const prev = lastLiveProgress.get(task.taskId);
+    if (prev && (task.progress || 0) < prev.progress) {
+      task.progress = prev.progress;
+      task.cachedSeconds = prev.cachedSeconds;
+      task.cachedBytes = prev.cachedBytes;
+    }
+  }
+}
 const filters = reactive({
   state: undefined as string | undefined,
   keyword: "",
@@ -177,7 +202,19 @@ async function mergeLiveProgress() {
     // ⛔ 只覆盖「还在列表里、且仍然是活动态」的行：期间用户可能已经翻页/筛选，
     //    或者任务在两次轮询之间收了尾（那一轮列表请求拿到的是更新的状态，不能被旧值盖回去）。
     if (!target || !isRecordCacheTaskActive(target.state)) continue;
+    // ⛔ 进度只增不减：实时值本应单调上升；偶发 ZLM 抖动让这一轮略低于上一轮时，
+    //    不要让进度条往回缩（用户原话："应该是递增的才对"）。
+    if (live.progress < target.progress) {
+      live.progress = target.progress;
+      live.cachedSeconds = target.cachedSeconds;
+      live.cachedBytes = target.cachedBytes;
+    }
     Object.assign(target, live);
+    lastLiveProgress.set(target.taskId, {
+      progress: target.progress,
+      cachedSeconds: target.cachedSeconds,
+      cachedBytes: target.cachedBytes
+    });
   }
 }
 
@@ -194,7 +231,11 @@ async function loadTasks(silent = false) {
       favorite: favoriteQueryValue()
     });
     const payload = response?.data;
-    tasks.value = payload?.list || [];
+    const list = payload?.list || [];
+    // ⛔ 列表（live=false）活动态的 `progress` 恒为 0，详情回填前先把上一轮实时值续上，
+    //    否则这一帧会画出 0%，等详情回来才弹回真实值 —— 正是"每次查询先归零再跳回"的成因。
+    carryForwardProgress(list);
+    tasks.value = list;
     pagination.total = payload?.total || 0;
     await mergeLiveProgress();
   } catch {

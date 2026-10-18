@@ -47,6 +47,29 @@ const visible = ref(false);
 const tasks = ref<RecordCacheTask[]>([]);
 
 /**
+ * 活动任务上一轮实时进度的快照（只记三件展示字段）。
+ *
+ * ⛔ 与列表页同款根因：列表接口不打媒体节点、进度只在整片收尾时落库，所以 `refresh`
+ * 先把列表（活动态 `progress` 恒为 0）赋给 `tasks`，再 `await mergeLiveProgress()` 回填。
+ * 那一帧 0% 会被画出来，等详情回来才跳到真实值 —— "进度条先归零再弹回当前"。
+ * 把上一轮实时值带过来，这一帧一开始就是对的。
+ */
+const lastLiveProgress = new Map<string, { progress: number; cachedSeconds: number; cachedBytes: number }>();
+
+/** 列表回填前，把上一轮的实时进度续上：活动态、且本轮列表值更低时，沿用上次的值。 */
+function carryForwardProgress(list: RecordCacheTask[]) {
+  for (const task of list) {
+    if (!isRecordCacheTaskActive(task.state)) continue;
+    const prev = lastLiveProgress.get(task.taskId);
+    if (prev && (task.progress || 0) < prev.progress) {
+      task.progress = prev.progress;
+      task.cachedSeconds = prev.cachedSeconds;
+      task.cachedBytes = prev.cachedBytes;
+    }
+  }
+}
+
+/**
  * 角标只统计"还在推进"的任务（含整理中）。
  *
  * ⛔ `merging` 必须算进去：那几十秒里录像已经拉完了、后端正在把分片拼成一个文件，
@@ -113,7 +136,19 @@ async function mergeLiveProgress() {
     // ⛔ 只覆盖「还在面板里、且仍然是活动态」的行：任务可能在两次请求之间收了尾，
     //    用这一轮的详情把它盖回去，会把已经完成的任务改回"缓存中"。
     if (!target || !isRecordCacheTaskActive(target.state)) continue;
+    // ⛔ 进度只增不减：实时值本应单调上升；偶发 ZLM 抖动让这一轮略低于上一轮时，
+    //    不要让进度条往回缩（用户原话："应该是递增的才对"）。
+    if (live.progress < target.progress) {
+      live.progress = target.progress;
+      live.cachedSeconds = target.cachedSeconds;
+      live.cachedBytes = target.cachedBytes;
+    }
     Object.assign(target, live);
+    lastLiveProgress.set(target.taskId, {
+      progress: target.progress,
+      cachedSeconds: target.cachedSeconds,
+      cachedBytes: target.cachedBytes
+    });
   }
 }
 
@@ -122,7 +157,11 @@ async function refresh() {
   if (document.hidden) return;
   try {
     const response = await listRecordCacheTasks({ page: 1, size: PAGE_SIZE }, { showErrorMessage: false });
-    tasks.value = response?.data?.list || [];
+    const list = response?.data?.list || [];
+    // ⛔ 列表活动态的 `progress` 恒为 0，详情回填前先把上一轮实时值续上，
+    //    否则这一帧会画出 0%，等详情回来才弹回真实值 —— "每次查询先归零再跳回"的成因。
+    carryForwardProgress(list);
+    tasks.value = list;
     await mergeLiveProgress();
   } catch {
     // ⛔ 保留上一次的结果，不清空、不弹提示：轮询偶发失败时把角标归零，

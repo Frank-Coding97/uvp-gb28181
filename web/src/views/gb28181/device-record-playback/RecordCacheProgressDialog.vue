@@ -128,7 +128,18 @@ async function refresh() {
   if (!props.taskId) return;
   try {
     const response = await getRecordCacheTask(props.taskId, { showErrorMessage: false });
-    task.value = response?.data || null;
+    const data = response?.data || null;
+    // ⛔ 进度只增不减：活动态下实时值本应单调上升，偶发 ZLM 抖动让这一轮略低时，
+    //    不要让进度条往回缩（用户原话："应该是递增的才对"）。
+    //    跨任务（taskId 变了）不钳制 —— 同一个弹窗可能先后跟不同的任务绑定。
+    if (data && isRecordCacheTaskActive(data.state) && task.value && task.value.taskId === data.taskId) {
+      if ((data.progress || 0) < (task.value.progress || 0)) {
+        data.progress = task.value.progress;
+        data.cachedSeconds = Math.max(data.cachedSeconds, task.value.cachedSeconds);
+        data.cachedBytes = Math.max(data.cachedBytes, task.value.cachedBytes);
+      }
+    }
+    task.value = data;
     loadError.value = "";
   } catch {
     loadError.value = "任务状态读取失败，稍后自动重试";
