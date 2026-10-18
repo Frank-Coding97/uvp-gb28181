@@ -24,11 +24,12 @@ import (
 )
 
 type recordingUpgradeRPC struct {
-	requests  []upgrade.ProtocolRequest
-	task      upgrade.TaskRecord
-	staged    *upgrade.StagedArtifact
-	imported  *upgrade.ImportRecord
-	importErr error
+	requests     []upgrade.ProtocolRequest
+	task         upgrade.TaskRecord
+	staged       *upgrade.StagedArtifact
+	imported     *upgrade.ImportRecord
+	importErr    error
+	getImportErr error
 }
 
 func (f *recordingUpgradeRPC) Call(_ context.Context, _ string, request upgrade.ProtocolRequest) (upgrade.ProtocolResponse, error) {
@@ -44,6 +45,9 @@ func (f *recordingUpgradeRPC) Call(_ context.Context, _ string, request upgrade.
 	case upgrade.ActionCreateTask, upgrade.ActionGetTask, upgrade.ActionCancel, upgrade.ActionApply, upgrade.ActionRollback:
 		response.Task = &f.task
 	case upgrade.ActionImport:
+		if f.imported != nil && f.imported.InboxToken == "" {
+			f.imported.InboxToken = request.InboxToken
+		}
 		if f.importErr != nil {
 			return upgrade.ProtocolResponse{}, f.importErr
 		}
@@ -54,8 +58,14 @@ func (f *recordingUpgradeRPC) Call(_ context.Context, _ string, request upgrade.
 			response.Import = &upgrade.ImportRecord{ImportID: strings.Repeat("b", 32), InboxToken: request.InboxToken, Phase: upgrade.ImportPhaseQueued}
 		}
 	case upgrade.ActionGetImport:
+		if f.getImportErr != nil {
+			return upgrade.ProtocolResponse{}, f.getImportErr
+		}
 		if f.imported != nil {
 			response.Import = f.imported
+		} else {
+			response.OK = false
+			response.Error = "import not found"
 		}
 	}
 	return response, nil
@@ -84,7 +94,7 @@ func TestProductionUpgradeControllerImportsThroughHelperInbox(t *testing.T) {
 
 	invokeServiceUpgradeImport(controller, ctx)
 
-	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, http.StatusAccepted, recorder.Code)
 	require.Len(t, fixture.requests, 1)
 	require.Equal(t, upgrade.ActionImport, fixture.requests[0].Action)
 	token := fixture.requests[0].InboxToken
@@ -110,8 +120,8 @@ func TestProductionUpgradeControllerReadsAsyncImportStatusFromHelper(t *testing.
 	controller := newServiceUpgradeController(serviceUpgradeOptions{VersionPath: filepath.Join(root, "version.json"), RPC: fixture})
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/system/upgrade/imports/"+importID, nil)
-	ctx.Params = gin.Params{{Key: "id", Value: importID}}
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/system/upgrade/import/"+importID, nil)
+	ctx.Params = gin.Params{{Key: "upload_id", Value: importID}}
 	oldResponse, oldLog := app.Response, app.ZapLog
 	app.Response, app.ZapLog = response.NewResponseHandler(), zap.NewNop()
 	t.Cleanup(func() { app.Response, app.ZapLog = oldResponse, oldLog })
@@ -146,10 +156,69 @@ func TestProductionUpgradeControllerCleansInboxWhenHelperRejectsImport(t *testin
 	invokeServiceUpgradeImport(controller, ctx)
 
 	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
-	require.Len(t, fixture.requests, 1)
+	require.Len(t, fixture.requests, 2)
+	require.Equal(t, upgrade.ActionGetImport, fixture.requests[1].Action)
 	entries, err := os.ReadDir(inbox)
 	require.NoError(t, err)
 	require.Empty(t, entries)
+}
+
+func TestProductionUpgradeControllerRecoversAcceptedImportAfterLostRPCResponse(t *testing.T) {
+	root := t.TempDir()
+	inbox := filepath.Join(root, "inbox")
+	require.NoError(t, os.Mkdir(inbox, 0700))
+	t.Setenv("UVP_UPGRADE_INBOX", inbox)
+	fixture := &recordingUpgradeRPC{
+		importErr: errors.New("updater RPC response was lost"),
+		imported:  &upgrade.ImportRecord{ImportID: strings.Repeat("a", 32), Phase: upgrade.ImportPhaseVerifying},
+	}
+	controller := newServiceUpgradeController(serviceUpgradeOptions{VersionPath: filepath.Join(root, "version.json"), RPC: fixture})
+	body, contentType := serviceUpgradeMultipartBody(t, []byte("upload"))
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/system/upgrade/import", bytes.NewReader(body))
+	ctx.Request.Header.Set("Content-Type", contentType)
+	oldResponse, oldLog := app.Response, app.ZapLog
+	app.Response, app.ZapLog = response.NewResponseHandler(), zap.NewNop()
+	t.Cleanup(func() { app.Response, app.ZapLog = oldResponse, oldLog })
+
+	invokeServiceUpgradeImport(controller, ctx)
+
+	require.Equal(t, http.StatusAccepted, recorder.Code)
+	require.Len(t, fixture.requests, 2)
+	require.Equal(t, upgrade.ActionImport, fixture.requests[0].Action)
+	require.Equal(t, upgrade.ActionGetImport, fixture.requests[1].Action)
+	token := fixture.requests[0].InboxToken
+	require.Equal(t, token, fixture.requests[1].ImportID)
+	require.FileExists(t, filepath.Join(inbox, token))
+	require.Contains(t, recorder.Body.String(), `"job_id":"`+strings.Repeat("a", 32)+`"`)
+}
+
+func TestProductionUpgradeControllerKeepsInboxWhenAcceptanceCannotBeConfirmed(t *testing.T) {
+	root := t.TempDir()
+	inbox := filepath.Join(root, "inbox")
+	require.NoError(t, os.Mkdir(inbox, 0700))
+	t.Setenv("UVP_UPGRADE_INBOX", inbox)
+	fixture := &recordingUpgradeRPC{
+		importErr:    errors.New("updater RPC response timed out"),
+		getImportErr: errors.New("updater status probe timed out"),
+	}
+	controller := newServiceUpgradeController(serviceUpgradeOptions{VersionPath: filepath.Join(root, "version.json"), RPC: fixture})
+	body, contentType := serviceUpgradeMultipartBody(t, []byte("upload"))
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/system/upgrade/import", bytes.NewReader(body))
+	ctx.Request.Header.Set("Content-Type", contentType)
+	oldResponse, oldLog := app.Response, app.ZapLog
+	app.Response, app.ZapLog = response.NewResponseHandler(), zap.NewNop()
+	t.Cleanup(func() { app.Response, app.ZapLog = oldResponse, oldLog })
+
+	invokeServiceUpgradeImport(controller, ctx)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.Len(t, fixture.requests, 2)
+	token := fixture.requests[0].InboxToken
+	require.FileExists(t, filepath.Join(inbox, token))
 }
 
 func TestProductionUpgradeControllerCleansInterruptedUploadWithoutRPC(t *testing.T) {

@@ -152,18 +152,22 @@ type baselinePermissionRequirement struct {
 }
 
 var baselinePermissionMigrations = map[string]baselinePermissionRequirement{
-	"2026-10-13-cascade-publish-group-permission.sql":            {path: "/api/gb28181/cascade/platforms/:id/publish-group", method: "PUT", permission: "gb28181:cascade:manage"},
-	"2026-10-13-cascade-publish-group-permission-postgresql.sql": {path: "/api/gb28181/cascade/platforms/:id/publish-group", method: "PUT", permission: "gb28181:cascade:manage"},
-	"2026-10-13-cascade-publish-group-permission-sqlserver.sql":  {path: "/api/gb28181/cascade/platforms/:id/publish-group", method: "PUT", permission: "gb28181:cascade:manage"},
-	"2026-10-13-cascade-publish-group-permission-sqlite.sql":     {path: "/api/gb28181/cascade/platforms/:id/publish-group", method: "PUT", permission: "gb28181:cascade:manage"},
-	"2026-10-16-service-upgrade-permission.sql":                  {path: "/api/system/upgrade/status", method: "GET", permission: "system:upgrade:read"},
-	"2026-10-16-service-upgrade-permission-postgresql.sql":       {path: "/api/system/upgrade/status", method: "GET", permission: "system:upgrade:read"},
-	"2026-10-16-service-upgrade-permission-sqlserver.sql":        {path: "/api/system/upgrade/status", method: "GET", permission: "system:upgrade:read"},
-	"2026-10-16-service-upgrade-permission-sqlite.sql":           {path: "/api/system/upgrade/status", method: "GET", permission: "system:upgrade:read"},
-	"2026-10-16-service-upgrade-migration-plan.sql":              {path: "/api/system/upgrade/migration-plan", method: "GET", permission: "system:upgrade:read"},
-	"2026-10-16-service-upgrade-migration-plan-postgresql.sql":   {path: "/api/system/upgrade/migration-plan", method: "GET", permission: "system:upgrade:read"},
-	"2026-10-16-service-upgrade-migration-plan-sqlserver.sql":    {path: "/api/system/upgrade/migration-plan", method: "GET", permission: "system:upgrade:read"},
-	"2026-10-16-service-upgrade-migration-plan-sqlite.sql":       {path: "/api/system/upgrade/migration-plan", method: "GET", permission: "system:upgrade:read"},
+	"2026-10-13-cascade-publish-group-permission.sql":                   {path: "/api/gb28181/cascade/platforms/:id/publish-group", method: "PUT", permission: "gb28181:cascade:manage"},
+	"2026-10-13-cascade-publish-group-permission-postgresql.sql":        {path: "/api/gb28181/cascade/platforms/:id/publish-group", method: "PUT", permission: "gb28181:cascade:manage"},
+	"2026-10-13-cascade-publish-group-permission-sqlserver.sql":         {path: "/api/gb28181/cascade/platforms/:id/publish-group", method: "PUT", permission: "gb28181:cascade:manage"},
+	"2026-10-13-cascade-publish-group-permission-sqlite.sql":            {path: "/api/gb28181/cascade/platforms/:id/publish-group", method: "PUT", permission: "gb28181:cascade:manage"},
+	"2026-10-16-service-upgrade-permission.sql":                         {path: "/api/system/upgrade/status", method: "GET", permission: "system:upgrade:read"},
+	"2026-10-16-service-upgrade-permission-postgresql.sql":              {path: "/api/system/upgrade/status", method: "GET", permission: "system:upgrade:read"},
+	"2026-10-16-service-upgrade-permission-sqlserver.sql":               {path: "/api/system/upgrade/status", method: "GET", permission: "system:upgrade:read"},
+	"2026-10-16-service-upgrade-permission-sqlite.sql":                  {path: "/api/system/upgrade/status", method: "GET", permission: "system:upgrade:read"},
+	"2026-10-16-service-upgrade-migration-plan.sql":                     {path: "/api/system/upgrade/migration-plan", method: "GET", permission: "system:upgrade:read"},
+	"2026-10-16-service-upgrade-migration-plan-postgresql.sql":          {path: "/api/system/upgrade/migration-plan", method: "GET", permission: "system:upgrade:read"},
+	"2026-10-16-service-upgrade-migration-plan-sqlserver.sql":           {path: "/api/system/upgrade/migration-plan", method: "GET", permission: "system:upgrade:read"},
+	"2026-10-16-service-upgrade-migration-plan-sqlite.sql":              {path: "/api/system/upgrade/migration-plan", method: "GET", permission: "system:upgrade:read"},
+	"2026-10-18-service-upgrade-async-import-permission.sql":            {path: "/api/system/upgrade/import/:upload_id", method: "GET", permission: "system:upgrade:read"},
+	"2026-10-18-service-upgrade-async-import-permission-postgresql.sql": {path: "/api/system/upgrade/import/:upload_id", method: "GET", permission: "system:upgrade:read"},
+	"2026-10-18-service-upgrade-async-import-permission-sqlserver.sql":  {path: "/api/system/upgrade/import/:upload_id", method: "GET", permission: "system:upgrade:read"},
+	"2026-10-18-service-upgrade-async-import-permission-sqlite.sql":     {path: "/api/system/upgrade/import/:upload_id", method: "GET", permission: "system:upgrade:read"},
 }
 
 // needsBaselineColumnUpgrade applies only to additive column migrations whose

@@ -71,7 +71,7 @@ func OperationLogMiddleware() gin.HandlerFunc {
 		// 防止单个大请求制造多份内存副本拖垮进程。
 		// 业务侧始终拿到完整请求体:超限时把已读前缀与剩余流拼接回去
 		var requestBody []byte
-		if c.Request.Body != nil {
+		if c.Request.Body != nil && !isHTTPSMaterialRequest(c.Request.URL.Path) {
 			const maxAuditBodyBytes = 64 << 10
 			requestBody, _ = io.ReadAll(io.LimitReader(c.Request.Body, maxAuditBodyBytes+1))
 			c.Request.Body = io.NopCloser(io.MultiReader(bytes.NewReader(requestBody), c.Request.Body))
@@ -410,4 +410,10 @@ func sanitizeRequestData(data []byte) string {
 		return string(data[:10000]) + "...(truncated)"
 	}
 	return string(data)
+}
+
+// The audit record retains metadata; certificate/private-key bytes are never
+// read into its capture buffer, including uploads rejected by authentication.
+func isHTTPSMaterialRequest(path string) bool {
+	return path == "/api/system/https/certificate" || path == "/api/system/https/apply"
 }

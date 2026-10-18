@@ -257,6 +257,9 @@ func TestBuildServeRuntimeWiresRegisteredControl(t *testing.T) {
 	if !ok {
 		t.Fatalf("control = %T, want *upgrade.ControlService", server.Control)
 	}
+	if control.ImportStore == nil {
+		t.Fatal("control import status is not persisted by the updater")
+	}
 	if control.ReleaseSource != "https://updates.example.test/uvp-gb28181/channels/stable/manifest.json" {
 		t.Fatalf("release source = %q", control.ReleaseSource)
 	}

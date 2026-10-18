@@ -58,3 +58,41 @@ func TestServiceUpgradeMigrationsAreEmbeddedForEveryDialect(t *testing.T) {
 		require.Contains(t, names, plan)
 	}
 }
+
+func TestAsyncImportStatusPermissionMigrationsCoverEveryDialect(t *testing.T) {
+	dir := filepath.Join("../../../resource", "database", "gb28181", "migrations")
+	variants := []string{"", "-postgresql", "-sqlserver", "-sqlite"}
+	for _, variant := range variants {
+		t.Run(variant, func(t *testing.T) {
+			up := filepath.Join(dir, "2026-10-18-service-upgrade-async-import-permission"+variant+".sql")
+			down := filepath.Join(dir, "2026-10-18-service-upgrade-async-import-permission"+variant+"-down.sql")
+			upBody, err := os.ReadFile(up)
+			require.NoError(t, err)
+			upSQL := strings.ToLower(string(upBody))
+			require.Contains(t, upSQL, "/api/system/upgrade/import/:upload_id")
+			require.Contains(t, upSQL, "system:upgrade:read")
+			require.Contains(t, upSQL, "sys_menu_api")
+			require.Contains(t, upSQL, "sys_casbin_rule")
+
+			downBody, err := os.ReadFile(down)
+			require.NoError(t, err)
+			downSQL := strings.ToLower(string(downBody))
+			require.Contains(t, downSQL, "/api/system/upgrade/import/:upload_id")
+			require.Contains(t, downSQL, "sys_api")
+		})
+	}
+}
+
+func TestAsyncImportStatusPermissionMigrationsAreEmbedded(t *testing.T) {
+	wants := map[Dialect]string{
+		DialectMySQL:     "2026-10-18-service-upgrade-async-import-permission.sql",
+		DialectPostgres:  "2026-10-18-service-upgrade-async-import-permission-postgresql.sql",
+		DialectSQLServer: "2026-10-18-service-upgrade-async-import-permission-sqlserver.sql",
+		DialectSQLite:    "2026-10-18-service-upgrade-async-import-permission-sqlite.sql",
+	}
+	for dialect, filename := range wants {
+		names, err := (&embedSource{dialect: dialect}).UpFiles()
+		require.NoError(t, err)
+		require.Contains(t, names, filename)
+	}
+}

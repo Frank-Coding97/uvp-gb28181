@@ -11,9 +11,13 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"gorm.io/gorm"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 	"uvplatform.com/uvp-gb28181/app/global/consts"
+	"uvplatform.com/uvp-gb28181/app/models"
 )
 
 type countingBody struct {
@@ -103,4 +107,42 @@ func TestOperationLogDoesNotReadServerStartedPayload(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Zero(t, body.reads, "operation log must not inspect the secret-bearing hook body")
+}
+
+func TestHTTPSAuditDoesNotReadPrivateMaterialBeforeAuthentication(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	conn, err := db.DB()
+	require.NoError(t, err)
+	conn.SetMaxOpenConns(1)
+	defer conn.Close()
+	require.NoError(t, db.AutoMigrate(&models.SysOperationLog{}))
+	oldDB, oldConfig, oldLog := app.GormDbMysql, app.ConfigYml, app.ZapLog
+	app.GormDbMysql, app.ConfigYml, app.ZapLog = db, loggingAuditConfig{}, zap.NewNop()
+	defer func() { app.GormDbMysql, app.ConfigYml, app.ZapLog = oldDB, oldConfig, oldLog }()
+	for _, path := range []string{"/api/system/https/certificate", "/api/system/https/apply"} {
+		body := &countingBody{reader: strings.NewReader("PRIVATE KEY should never enter audit capture")}
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		req.Body = body
+		recorder := httptest.NewRecorder()
+		engine := gin.New()
+		engine.Use(OperationLogMiddleware())
+		engine.POST(path, func(c *gin.Context) {
+			c.Request.URL.Path = "/api/users/session/heartbeat"
+			c.Status(http.StatusUnauthorized)
+		})
+		engine.ServeHTTP(recorder, req)
+		require.Zero(t, body.reads)
+		require.Equal(t, http.StatusUnauthorized, recorder.Code)
+	}
+	require.Eventually(t, func() bool {
+		var count int64
+		return db.Model(&models.SysOperationLog{}).Count(&count).Error == nil && count == 2
+	}, time.Second, 10*time.Millisecond)
+	var records []models.SysOperationLog
+	require.NoError(t, db.Find(&records).Error)
+	for _, record := range records {
+		require.NotContains(t, record.RequestData, "PRIVATE KEY")
+	}
 }

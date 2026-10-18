@@ -663,6 +663,12 @@ func (c *ServiceUpgradeController) importViaUpgradeHelper(ctx *gin.Context) {
 		InboxToken: token,
 	})
 	if err != nil {
+		if imported, missing := c.recoverImportAfterRPCLoss(ctx, token); imported != nil {
+			c.respondImportAccepted(ctx, imported)
+			return
+		} else if missing || isUpgradeRPCConnectFailure(err) {
+			removeUpgradeInboxFile(tokenPath)
+		}
 		c.FailAndAbort(ctx, "升级助手不可用", err, http.StatusServiceUnavailable)
 		return
 	}
@@ -672,7 +678,7 @@ func (c *ServiceUpgradeController) importViaUpgradeHelper(ctx *gin.Context) {
 		return
 	}
 	if response.Import != nil {
-		c.SuccessWithMessage(ctx, "离线升级包已接收，正在后台校验", publicUpgradeImport(response.Import))
+		c.respondImportAccepted(ctx, response.Import)
 		return
 	}
 	// A previously installed updater may still return the legacy synchronous
@@ -683,6 +689,31 @@ func (c *ServiceUpgradeController) importViaUpgradeHelper(ctx *gin.Context) {
 	}
 	removeUpgradeInboxFile(tokenPath)
 	c.FailAndAbort(ctx, "离线升级包导入失败", errors.New("upgrade helper returned no import record"), http.StatusBadGateway)
+}
+
+func (c *ServiceUpgradeController) respondImportAccepted(ctx *gin.Context, imported *upgrade.ImportRecord) {
+	app.Response.ReturnJson(ctx, http.StatusAccepted, 0, "离线升级包已接收，正在后台校验", publicUpgradeImport(imported))
+}
+
+func (c *ServiceUpgradeController) recoverImportAfterRPCLoss(ctx *gin.Context, token string) (*upgrade.ImportRecord, bool) {
+	probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx.Request.Context()), 12*time.Second)
+	defer cancel()
+	response, err := c.callUpgradeRPC(probeCtx, upgrade.ProtocolRequest{
+		Protocol: upgrade.UpdaterProtocolVersion,
+		Action:   upgrade.ActionGetImport,
+		ImportID: token,
+	})
+	if err != nil {
+		return nil, false
+	}
+	if response.OK && response.Import != nil {
+		return response.Import, false
+	}
+	return nil, !response.OK && strings.Contains(strings.ToLower(response.Error), "not found")
+}
+
+func isUpgradeRPCConnectFailure(err error) bool {
+	return err != nil && strings.HasPrefix(err.Error(), "connect updater socket:")
 }
 
 func (c *ServiceUpgradeController) GetImport(ctx *gin.Context) {
