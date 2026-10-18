@@ -1,0 +1,204 @@
+// Package httpsconfig manages only the reverse proxy and media server bundled
+// with a standalone installation. No request can select paths or commands.
+package httpsconfig
+
+import (
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+)
+
+const MaxMaterialBytes = 1 << 20
+
+type Settings struct {
+	Enabled bool `json:"enabled"`
+	Port    int  `json:"port"`
+}
+type CertificateInfo struct {
+	Subject     string    `json:"subject"`
+	DNSNames    []string  `json:"dnsNames"`
+	NotBefore   time.Time `json:"notBefore"`
+	NotAfter    time.Time `json:"notAfter"`
+	Fingerprint string    `json:"fingerprint"`
+}
+
+func certificateInfo(cert *x509.Certificate) CertificateInfo {
+	sum := sha256.Sum256(cert.Raw)
+	return CertificateInfo{cert.Subject.String(), cert.DNSNames, cert.NotBefore, cert.NotAfter, hex.EncodeToString(sum[:])}
+}
+func ValidateCertificate(crt, key []byte) (CertificateInfo, error) {
+	return parseCertificate(crt, key, true)
+}
+func parseCertificate(crt, key []byte, checkDates bool) (CertificateInfo, error) {
+	if len(crt) == 0 || len(key) == 0 || len(crt) > MaxMaterialBytes || len(key) > MaxMaterialBytes {
+		return CertificateInfo{}, errors.New("请上传证书及私钥，每个文件不能超过 1 MiB")
+	}
+	pair, err := tls.X509KeyPair(crt, key)
+	if err != nil {
+		return CertificateInfo{}, errors.New("证书或未加密 PEM 私钥格式不正确，或两者不匹配")
+	}
+	var leaf *x509.Certificate
+	for i, der := range pair.Certificate {
+		cert, err := x509.ParseCertificate(der)
+		if err != nil {
+			return CertificateInfo{}, errors.New("证书链包含无效证书")
+		}
+		if checkDates && (time.Now().Before(cert.NotBefore) || time.Now().After(cert.NotAfter)) {
+			return CertificateInfo{}, errors.New("证书链包含已过期或尚未生效的证书")
+		}
+		if i == 0 {
+			leaf = cert
+		}
+	}
+	return certificateInfo(leaf), nil
+}
+
+const tlsBegin = "# UVP_HTTPS_BEGIN"
+const tlsEnd = "# UVP_HTTPS_END"
+const httpBegin = "# UVP_HTTP_BEGIN"
+const httpEnd = "# UVP_HTTP_END"
+
+var sslListen = regexp.MustCompile(`(?m)^(\s*listen\s+)(\[::\]:)?\d+ ssl;`)
+var httpListen = regexp.MustCompile(`(?m)^\s*listen\s+(?:\[::\]:)?(\d+);`)
+var redirect = regexp.MustCompile(`return 301 https://\$host(?::\d+)?\$request_uri;`)
+
+func section(base, begin, end string) (int, int, string, error) {
+	start := strings.Index(base, begin)
+	finish := strings.Index(base, end)
+	if start < 0 || finish <= start {
+		return 0, 0, "", errors.New("安装包 Nginx 模板不支持 HTTPS 管理，请更新完整安装包")
+	}
+	return start, finish + len(end), base[start+len(begin) : finish], nil
+}
+func Render(base string, s Settings) (string, error) {
+	if s.Port < 1 || s.Port > 65535 {
+		return "", errors.New("HTTPS 端口必须在 1—65535 之间")
+	}
+	start, end, tlsBlock, err := section(base, tlsBegin, tlsEnd)
+	if err != nil {
+		return "", err
+	}
+	hs, he, httpBlock, err := section(base, httpBegin, httpEnd)
+	if err != nil {
+		return "", err
+	}
+	if end > hs {
+		return "", errors.New("Nginx 模板分段顺序不正确")
+	}
+	portMatch := httpListen.FindStringSubmatch(httpBlock)
+	if len(portMatch) != 2 {
+		return "", errors.New("无法识别 Nginx HTTP 端口")
+	}
+	if strconv.Itoa(s.Port) == portMatch[1] {
+		return "", errors.New("HTTPS 端口不能与 HTTP 端口相同")
+	}
+	if s.Enabled {
+		tlsBlock = sslListen.ReplaceAllString(tlsBlock, "${1}${2}"+strconv.Itoa(s.Port)+" ssl;")
+		httpBlock = redirect.ReplaceAllStringFunc(httpBlock, func(string) string { return "return 301 https://$host:" + strconv.Itoa(s.Port) + "$request_uri;" })
+		tlsBlock = addProbe(tlsBlock, "https")
+		return base[:start] + tlsBegin + tlsBlock + tlsEnd + base[end:hs] + httpBegin + httpBlock + httpEnd + base[he:], nil
+	}
+	// Reuse every route from the HTTPS server so disabling TLS cannot remove
+	// static assets, upload aliases or proxy settings.
+	plain := sslListen.ReplaceAllString(tlsBlock, "${1}${2}"+portMatch[1]+";")
+	var lines []string
+	for _, line := range strings.Split(plain, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "ssl_") || strings.HasPrefix(trimmed, "http2 ") {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return base[:start] + addProbe(strings.Join(lines, "\n"), "http") + base[end:hs] + base[he:], nil
+}
+
+// AtomicWrite also replaces existing material on Windows (os.Rename uses
+// MoveFileEx with REPLACE_EXISTING there). Private material is never logged.
+func AtomicWrite(path string, data []byte, mode os.FileMode) error {
+	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("拒绝替换符号链接文件")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(filepath.Dir(path), ".https-*")
+	if err != nil {
+		return err
+	}
+	name := f.Name()
+	defer os.Remove(name)
+	if err = f.Chmod(mode); err == nil {
+		_, err = f.Write(data)
+	}
+	if err == nil {
+		err = f.Sync()
+	}
+	closeErr := f.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	return os.Rename(name, path)
+}
+func writeJSON(path string, value any) error {
+	b, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	return AtomicWrite(path, b, 0600)
+}
+
+// RenderStartup runs after the platform script has substituted all paths and
+// ports. It keeps the unmodified base for future HTTP <-> HTTPS changes.
+func RenderStartup(root, platform string) error {
+	m := New(root, platform)
+	base, err := os.ReadFile(m.confPath())
+	if err != nil {
+		return err
+	}
+	if err := AtomicWrite(m.basePath(), base, 0600); err != nil {
+		return err
+	}
+	s, err := m.Settings()
+	if err != nil {
+		return err
+	}
+	rendered, err := Render(string(base), s)
+	if err != nil {
+		return err
+	}
+	return AtomicWrite(m.confPath(), []byte(rendered), 0600)
+}
+func readSettings(path string) (Settings, error) {
+	var s Settings
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return s, err
+	}
+	err = json.Unmarshal(b, &s)
+	if err == nil && (s.Port < 1 || s.Port > 65535) {
+		err = fmt.Errorf("无效的 HTTPS 配置端口")
+	}
+	return s, err
+}
+
+func addProbe(block, mode string) string {
+	i := strings.Index(block, "server_name _;")
+	if i < 0 {
+		return block
+	}
+	i += len("server_name _;")
+	return block[:i] + "\n        location = /__uvp_https_probe { add_header X-UVP-HTTPS-Mode " + mode + " always; return 204; }\n" + block[i:]
+}
