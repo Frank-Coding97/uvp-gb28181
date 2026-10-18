@@ -3,7 +3,7 @@
     <div class="snow-fill-inner">
       <a-tabs class="uvp-system-tabs sysconfig-tabs" v-model:active-key="activeTab" :animation="true">
         <template #extra>
-          <div class="sysconfig-tabs__actions">
+          <div v-if="activeTab !== 'https'" class="sysconfig-tabs__actions">
             <a-button
               type="primary"
               :loading="sysConfigStore.loading"
@@ -220,6 +220,9 @@
           </a-card>
         </a-tab-pane>
 
+        <a-tab-pane v-if="hasPermission('system:config:update')" key="https" title="HTTPS">
+          <HTTPSSettings v-if="activeTab === 'https'" />
+        </a-tab-pane>
         <a-tab-pane key="logCleanup" title="日志清理">
           <a-card :bordered="false" class="uvp-system-panel uvp-system-panel--dense mb-4">
             <a-alert class="mb-4" type="warning">
@@ -254,6 +257,8 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed, reactive } from "vue";
+import HTTPSSettings from "./components/HTTPSSettings.vue";
+import { hasPermission } from "@/hooks/usePermission";
 import { useRoute } from "vue-router";
 import { useSysConfigStore } from "@/store/modules/sys-config";
 import { defaultLogCleanupConfig } from "@/api/sysconfig";
@@ -281,7 +286,9 @@ const layoutMode = computed(() => {
 const activeTab = ref(
   typeof route.query.tab === "string" && route.query.tab === logCleanupPageRoute.query.tab
     ? logCleanupPageRoute.query.tab
-    : "server"
+    : route.query.tab === "https"
+      ? "https"
+      : "server"
 );
 
 // 使用系统配置 store
