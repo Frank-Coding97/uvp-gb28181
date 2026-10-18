@@ -278,6 +278,59 @@ describe("record cache workspace", () => {
     expect(wrapper.text()).toContain("2.0 MB/s");
   });
 
+  it("再查一次时进度条不会先归零再弹回当前位置", async () => {
+    // ⛔ 列表接口对活动态行**有意**不带实时进度（后端契约），实时值要等详情回来。
+    //    直接把列表值铺上去就会先画一帧 0%：用户看到的是"每次查询先归零、再跳回"，
+    //    而进度条本该是只增不减的。判据 = 详情还没回来那一帧就已经是上次的进度。
+    // ⛔ 每轮都要**新建**应答对象：`mockResolvedValue` 复用同一个对象的话，
+    //    上一轮详情回填（`Object.assign`）会把它连同列表那份一起改成 45%，
+    //    第二轮"列表只给 0"根本不成立 —— 用例会变成假通过。
+    api.listRecordCacheTasks.mockImplementation(() =>
+      Promise.resolve(page([task({ progress: 0, cachedSeconds: 0, cachedBytes: 0 })]))
+    );
+    api.getRecordCacheTask.mockImplementation(() =>
+      Promise.resolve({ code: 0, data: task({ progress: 0.45, cachedSeconds: 870, cachedBytes: 400 * 1024 * 1024 }) })
+    );
+
+    const wrapper = mount(RecordCachePage, { global: { stubs } });
+    await flushPromises();
+    expect(wrapper.get(".record-cache-progress__percent").text()).toBe("45%");
+
+    // 第二轮：列表照旧只给 0，详情这次故意挂住 —— 正是"列表已画出来、详情还没到"的那一帧。
+    const pending: Array<(value: unknown) => void> = [];
+    api.getRecordCacheTask.mockImplementation(() => new Promise(resolve => pending.push(resolve)));
+    await buttonByText(wrapper, "查询").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get(".cache-progress").attributes("data-percent")).toBe("0.45");
+    expect(wrapper.get(".record-cache-progress__percent").text()).toBe("45%");
+    // 已缓存时长同样不能在这一帧掉回 0。
+    expect(wrapper.text()).toContain("14分30秒");
+
+    // 详情回来后只会往前推。
+    pending.forEach(resolve => resolve({ code: 0, data: task({ progress: 0.5, cachedSeconds: 968 }) }));
+    await flushPromises();
+    expect(wrapper.get(".record-cache-progress__percent").text()).toBe("50%");
+  });
+
+  it("详情偶发给出更低进度时，进度条不往回缩", async () => {
+    // ⛔ 实时进度取自媒体节点，抖动那一轮可能给出更小的值（服务端已加水位线兜底，
+    //    这里再兜一层）。用户原话："应该是递增的才对"。
+    api.listRecordCacheTasks.mockResolvedValue(page([task({ progress: 0, cachedSeconds: 0 })]));
+    api.getRecordCacheTask.mockResolvedValue({ code: 0, data: task({ progress: 0.45, cachedSeconds: 870 }) });
+
+    const wrapper = mount(RecordCachePage, { global: { stubs } });
+    await flushPromises();
+    expect(wrapper.get(".record-cache-progress__percent").text()).toBe("45%");
+
+    api.getRecordCacheTask.mockResolvedValue({ code: 0, data: task({ progress: 0.2, cachedSeconds: 380 }) });
+    await buttonByText(wrapper, "查询").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get(".cache-progress").attributes("data-percent")).toBe("0.45");
+    expect(wrapper.get(".record-cache-progress__percent").text()).toBe("45%");
+  });
+
   it("终态任务一行都不问详情", async () => {
     api.listRecordCacheTasks.mockResolvedValue(
       page([task({ state: "succeeded", progress: 1 }), task({ taskId: "t2", state: "failed" })])

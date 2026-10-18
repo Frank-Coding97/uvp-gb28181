@@ -175,6 +175,29 @@ describe("RecordCacheTaskCenter", () => {
     expect(wrapper.text()).toContain("暂无正在缓存的任务");
   });
 
+  it("再刷一轮时进度条不会先归零再弹回当前位置", async () => {
+    // ⛔ 与列表页同款根因：列表**有意**不带实时进度（后端契约），实时值要等详情回来。
+    //    直接把列表值铺上去就会先画一帧 0% —— 用户看到的是"每次刷新先归零、再跳回"，
+    //    而进度条本该是只增不减的。
+    // ⛔ 每轮必须**新建**应答对象：`mockResolvedValue` 复用同一个对象的话，上一轮的
+    //    详情回填（`Object.assign`）会把它连同列表那份一起改成 45%，用例就成了假通过。
+    api.listRecordCacheTasks.mockImplementation(() => Promise.resolve(page([task({ progress: 0, cachedSeconds: 0 })])));
+    api.getRecordCacheTask.mockImplementation(() =>
+      Promise.resolve({ code: 0, data: task({ progress: 0.45, cachedSeconds: 870 }) })
+    );
+
+    const wrapper = mountCenter();
+    await flushPromises();
+    expect(wrapper.get(".center-progress").attributes("data-percent")).toBe("0.45");
+
+    // 第二轮：列表照旧只给 0，详情挂住 —— 正是"列表已画出来、详情还没到"的那一帧。
+    const pending: Array<(value: unknown) => void> = [];
+    api.getRecordCacheTask.mockImplementation(() => new Promise(resolve => pending.push(resolve)));
+    await tick();
+
+    expect(wrapper.get(".center-progress").attributes("data-percent")).toBe("0.45");
+  });
+
   it("面板里每条给出通道名、状态、进度与实时速率", async () => {
     const wrapper = mountCenter();
     await flushPromises();

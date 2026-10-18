@@ -121,6 +121,28 @@ describe("record cache progress dialog", () => {
     expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 2000);
   });
 
+  it("进度只增不减：详情偶发给出更低值时进度条不往回缩", async () => {
+    // ⛔ 实时进度取自媒体节点的实时探测，抖动那一轮可能给出更小的值
+    //    （服务端已加水位线兜底，这里再兜一层）。用户原话："应该是递增的才对"。
+    // ⛔ 每轮都要**新建**应答对象：`mockResolvedValue` 复用同一个对象的话，
+    //    第一次回填会把它改掉，第二次"更低的值"根本不成立 —— 用例会变成假通过。
+    api.getRecordCacheTask
+      .mockImplementationOnce(() => Promise.resolve({ code: 0, data: task({ progress: 0.45, cachedSeconds: 870 }) }))
+      .mockImplementationOnce(() => Promise.resolve({ code: 0, data: task({ progress: 0.2, cachedSeconds: 380 }) }));
+
+    const wrapper = mountDialog();
+    await flushPromises();
+    expect(wrapper.get("[data-testid='record-cache-percent']").text()).toBe("45%");
+
+    // 手动推下一次刷新（不依赖 2 秒定时器）。
+    await (wrapper.vm as unknown as { refresh: () => Promise<void> }).refresh();
+
+    expect(wrapper.get(".dialog-progress").attributes("data-percent")).toBe("0.45");
+    expect(wrapper.get("[data-testid='record-cache-percent']").text()).toBe("45%");
+    // 已缓存时长同样不回退：否则界面上会自相矛盾地写着"6分20秒"却停在 45%。
+    expect(wrapper.text()).toContain("14分30秒");
+  });
+
   it("任务进入终态后不再轮询，并提示去列表下载", async () => {
     api.getRecordCacheTask.mockResolvedValue({
       code: 0,
