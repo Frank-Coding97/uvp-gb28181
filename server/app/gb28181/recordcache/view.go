@@ -17,6 +17,49 @@ func newTaskID() string { return uuid.NewString() }
 // newRequestID 是回放会话幂等键的前缀（每片再拼片序号）。
 func newRequestID() string { return "rc-" + uuid.NewString() }
 
+// progressFloor 是单条任务的实时进度水位（已缓存媒体时长 / 字节）。
+type progressFloor struct {
+	seconds float64
+	size    uint64
+}
+
+// raiseProgressFloor 把实时进度顶到「历史最高」：只抬不降。
+//
+// 返回的是**抬过之后**的值，调用方直接用它作为本轮的展示值。
+//
+// ⛔ 它只服务于活动态任务的实时展示：终态的进度由落库的分片清单决定，
+// 拿它压住或抬高终态值都会让界面说出库里没有的话。
+func (s *Service) raiseProgressFloor(taskID string, seconds float64, size uint64) (float64, uint64) {
+	if s == nil || strings.TrimSpace(taskID) == "" {
+		return seconds, size
+	}
+	s.progressMu.Lock()
+	defer s.progressMu.Unlock()
+	if s.progressFloor == nil {
+		s.progressFloor = map[string]progressFloor{}
+	}
+	floor := s.progressFloor[taskID]
+	if seconds > floor.seconds {
+		floor.seconds = seconds
+	}
+	if size > floor.size {
+		floor.size = size
+	}
+	s.progressFloor[taskID] = floor
+	return floor.seconds, floor.size
+}
+
+// forgetProgressFloor 丢掉一条任务的水位（任务进入终态 / 被删除时）。
+// 幂等，重复调用无害。
+func (s *Service) forgetProgressFloor(taskID string) {
+	if s == nil || strings.TrimSpace(taskID) == "" {
+		return
+	}
+	s.progressMu.Lock()
+	defer s.progressMu.Unlock()
+	delete(s.progressFloor, taskID)
+}
+
 // viewOf 把模型转成对外视图。
 //
 // live=true 时额外向 ZLM 取一次实时状态（码率 / 本片已推进的媒体时长 / 已收字节）：
@@ -57,6 +100,21 @@ func (s *Service) viewOf(ctx context.Context, task *gbmodels.GbRecordCacheTask, 
 	if cached > total {
 		cached = total
 	}
+	cachedBytes := task.CachedBytes + liveBytes
+	if live {
+		// ⛔ 进度水位线（只增不减）。
+		//
+		// ZLM 那一轮查不到时实时值归零，没有它进度会掉回「已收尾分片」那一点 ——
+		// 单分片任务就是 0%，用户看到的是"每次查询进度条先归零、再弹回当前位置"。
+		// 抬水位放在封顶之后，所以水位本身也永远不会超过请求区间。
+		//
+		// 终态一律抹掉水位：那条任务的进度此后由分片清单说了算。
+		if gbmodels.RecordCacheTaskActive(task.State) {
+			cached, cachedBytes = s.raiseProgressFloor(task.TaskID, cached, cachedBytes)
+		} else {
+			s.forgetProgressFloor(task.TaskID)
+		}
+	}
 	progress := 0.0
 	if total > 0 {
 		progress = cached / total
@@ -75,7 +133,7 @@ func (s *Service) viewOf(ctx context.Context, task *gbmodels.GbRecordCacheTask, 
 		StartTime: task.StartTime.Format(time.RFC3339), EndTime: task.EndTime.Format(time.RFC3339),
 		RecordType: task.RecordType, DownloadSpeed: task.DownloadSpeed,
 		State: task.State, LastError: task.LastError, Favorite: task.Favorite,
-		CachedBytes: task.CachedBytes + liveBytes, CachedSeconds: cached, TotalSeconds: total, Progress: progress,
+		CachedBytes: cachedBytes, CachedSeconds: cached, TotalSeconds: total, Progress: progress,
 		EstimatedBytes: task.EstimatedBytes,
 		Files:          files,
 		CreatedByName:  task.CreatedByName, CreatedAt: task.CreatedAt.Format(time.RFC3339),

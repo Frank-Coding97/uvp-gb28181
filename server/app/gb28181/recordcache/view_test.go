@@ -121,6 +121,89 @@ func TestDetailSurvivesMediaServerFailure(t *testing.T) {
 	require.Zero(t, view.CachedBytes)
 }
 
+// ── 进度只增不减 ──────────────────────────────────────────────────────
+//
+// ⛔⛔ 这一组是「每次查询进度条先归零、再弹回当前位置」的根因护栏。
+//
+// 症状：进度明明已经到 45%，下一次轮询却先画 0%（或退回一个更小的值），
+// 几百毫秒后再弹回 45% —— 用户原话："应该是递增的才对"。
+//
+// 根因：实时部分来自 ZLM 的 getMediaInfo，它在流刚建立 / 刚停录、节点抖动、
+// 分片交接的空档里会查不到 ⇒ 那一轮实时值归零，于是进度掉回
+// 「已收尾分片」那一点 —— 单分片任务那一点就是 0%。
+//
+// 修法：详情接口给实时进度加一条**水位线**（raiseProgressFloor），只抬不降。
+// 前端那层页面内快照只能兜住"同一个页面不刷新"的场景，换了页面 / 重开弹窗
+// 就没了，所以真正的判据必须落在服务端。
+
+func TestDetailProgressNeverGoesBackOnMediaServerBlip(t *testing.T) {
+	h, task := runningSegmentHarness(t, 30*time.Minute)
+	h.recorder.setMediaInfo(2<<20, 300<<20, 600_000)
+
+	first, err := h.service.Detail(context.Background(), task.TaskID, nil)
+	require.NoError(t, err)
+	require.InDelta(t, 600, first.CachedSeconds, 0.001)
+
+	// 下一轮 ZLM 查不到这条流（流刚交接 / 节点抖动）：实时值归零。
+	h.recorder.mediaErr = errors.New("zlm blip")
+	second, err := h.service.Detail(context.Background(), task.TaskID, nil)
+	require.NoError(t, err)
+	require.InDelta(t, 600, second.CachedSeconds, 0.001,
+		"ZLM 那一轮查不到时，进度不能掉回「已收尾分片」那一点（单分片任务就是 0%）")
+	require.InDelta(t, first.Progress, second.Progress, 0.0001, "进度只增不减")
+	require.Equal(t, first.CachedBytes, second.CachedBytes,
+		"已缓存字节同理：界面上不能出现 300 MB → 0 B 再弹回")
+}
+
+func TestProgressFloorIsPerTask(t *testing.T) {
+	h, first := runningSegmentHarness(t, 30*time.Minute)
+	h.recorder.setMediaInfo(1<<20, 100<<20, 600_000)
+
+	viewA, err := h.service.Detail(context.Background(), first.TaskID, nil)
+	require.NoError(t, err)
+	require.InDelta(t, 600, viewA.CachedSeconds, 0.001)
+
+	// 另一条任务（别的通道，刚起步、一片都还没收尾）：ZLM 同样查不到它。
+	other := gbmodels.GbRecordCacheTask{
+		TaskID: "task-b", ChannelID: 12, State: gbmodels.RecordCacheStateRunning,
+		Stream: "pb-stream-2", StartTime: h.segmentStart, EndTime: h.segmentEnd,
+	}
+	require.NoError(t, other.EncodeSegments(nil))
+	require.NoError(t, h.repo.Create(context.Background(), &other))
+
+	h.recorder.mediaErr = errors.New("zlm blip")
+	viewB, err := h.service.Detail(context.Background(), other.TaskID, nil)
+	require.NoError(t, err)
+	require.Zero(t, viewB.CachedSeconds, "水位必须按任务号分开记：A 已经 600 秒，B 不能蹭到 A 的进度")
+}
+
+func TestProgressFloorDroppedWhenTaskLeavesActiveState(t *testing.T) {
+	h, task := runningSegmentHarness(t, 30*time.Minute)
+	h.recorder.setMediaInfo(1<<20, 100<<20, 600_000)
+	_, err := h.service.Detail(context.Background(), task.TaskID, nil)
+	require.NoError(t, err)
+
+	h.service.progressMu.Lock()
+	_, tracked := h.service.progressFloor[task.TaskID]
+	h.service.progressMu.Unlock()
+	require.True(t, tracked, "活动态任务的实时进度必须记住水位")
+
+	// 任务跑完：终态的进度由落库的分片清单说了算，水位不该再留着。
+	row, err := h.repo.FindByTaskID(context.Background(), task.TaskID, nil)
+	require.NoError(t, err)
+	row.State = gbmodels.RecordCacheStateSucceeded
+	require.NoError(t, h.repo.Update(context.Background(), row))
+
+	view, err := h.service.Detail(context.Background(), task.TaskID, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1.0, view.Progress)
+
+	h.service.progressMu.Lock()
+	_, tracked = h.service.progressFloor[task.TaskID]
+	h.service.progressMu.Unlock()
+	require.False(t, tracked, "终态任务不该再占着水位（也防同一行复用时画出旧进度）")
+}
+
 func TestDetailSkipsLiveProbeForFinishedTask(t *testing.T) {
 	h := newHarness(t, 4, 30*time.Minute)
 	task := h.create(t, 0)

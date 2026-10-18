@@ -90,6 +90,19 @@ type Service struct {
 	leaseMu    sync.Mutex
 	heldLeases map[string]SourceLease
 
+	// progressMu/progressFloor 是「实时进度的水位线」：按任务号记住详情接口
+	// 报出去过的**最高**已缓存媒体时长 / 字节。
+	//
+	// ⛔ 为什么需要它：实时部分取自 ZLM 的 getMediaInfo，它在流刚建 / 刚停、
+	// 节点抖动、分片交接的空档里会查不到 ⇒ 那一轮实时值归零。没有水位线的话，
+	// 进度会掉回「已收尾分片」那一点 —— 单分片任务就是 0%，用户看到的是
+	// "每次查询进度条先归零、再弹回当前位置"，而它本该是只增不减的。
+	//
+	// ⛔ 只对**活动态**抬水位，且任务离开活动态就抹掉（见 forgetProgressFloor）：
+	// 终态的进度由落库的分片清单决定，那是权威值，不该被曾经的实时值压住。
+	progressMu    sync.Mutex
+	progressFloor map[string]progressFloor
+
 	// mergingMu/merging 是「这条任务的收尾合并正在后台跑」的进程内标记。
 	//
 	// ⛔ 要有它：合并是异步的，但任务状态在整个合成期间都是 merging，
@@ -119,6 +132,7 @@ func NewService(options Options) *Service {
 		mergedDirPath: strings.TrimSpace(options.MergedDir),
 		heldLeases:    map[string]SourceLease{},
 		merging:       map[string]struct{}{},
+		progressFloor: map[string]progressFloor{},
 	}
 	if service.now == nil {
 		service.now = time.Now
@@ -322,6 +336,9 @@ func (s *Service) Cancel(ctx context.Context, taskID string, scope Scope) (TaskV
 	if err := s.repo.Update(ctx, task); err != nil {
 		return TaskView{}, err
 	}
+	// 已经不是活动态了，实时进度水位到此为止（不抹的话它会一直占着一小块内存，
+	// 而且万一同一行被复用，界面会先画出旧任务的进度）。
+	s.forgetProgressFloor(task.TaskID)
 	return s.viewOf(ctx, task, false), nil
 }
 
@@ -336,7 +353,11 @@ func (s *Service) Delete(ctx context.Context, taskID string, scope Scope) error 
 		s.stopSegment(ctx, task, "deleted by user")
 	}
 	s.removeFiles(ctx, task)
-	return s.repo.Delete(ctx, task.ID)
+	if err := s.repo.Delete(ctx, task.ID); err != nil {
+		return err
+	}
+	s.forgetProgressFloor(task.TaskID)
+	return nil
 }
 
 // SetFavorite 设置/取消收藏。
@@ -753,6 +774,8 @@ func (s *Service) succeed(ctx context.Context, task *gbmodels.GbRecordCacheTask)
 	expires := now.Add(time.Duration(s.retentionDays()) * 24 * time.Hour)
 	task.ExpiresAt = &expires
 	_ = s.repo.Update(ctx, task)
+	// 任务跑完了，实时进度水位没必要再留着。
+	s.forgetProgressFloor(task.TaskID)
 }
 
 // driveMerge 在后台把多分片合成一个文件，完成后把任务判定为 succeeded。
@@ -847,6 +870,7 @@ func (s *Service) fail(ctx context.Context, task *gbmodels.GbRecordCacheTask, re
 	task.Stream = ""
 	task.FinishedAt = &now
 	_ = s.repo.Update(ctx, task)
+	s.forgetProgressFloor(task.TaskID)
 }
 
 // cleanupExpired 按保留期清理产出文件（保留任务行，状态标 expired，
