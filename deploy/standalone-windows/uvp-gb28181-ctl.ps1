@@ -7,7 +7,8 @@
       .\uvp-gb28181-ctl.ps1 stop       停止全部组件（零残留）
       .\uvp-gb28181-ctl.ps1 restart    重启
       .\uvp-gb28181-ctl.ps1 status     查看运行状态
-  也可以直接双击同目录的 start.cmd / stop.cmd / status.cmd。
+      .\uvp-gb28181-ctl.ps1 reset-password   忘记了登录口令时，把管理员口令还原成出厂口令
+  也可以直接双击同目录的 start.cmd / stop.cmd / status.cmd / reset-password.cmd。
 
   ⛔⛔ 本文件必须保存为 **UTF-8 with BOM**。
      Windows PowerShell 5.1 读 .ps1 时若没有 BOM，会按系统 ANSI 代码页（简中=GBK）
@@ -251,7 +252,83 @@ function Get-Config {
     }
     # ⛔ 必须 `@(...)` 包一层：`Resolve-Port` 一次都没命中时 `$ref.Value` 可能仍是
     #   空数组（也可能被 `+=` 折成单个字符串），包一层后 `.Count` 才可靠。
+    $script:HttpsEnabled = $true
+    $httpsState = Join-Path $DataDir 'https\settings.json'
+    if (Test-Path -LiteralPath $httpsState) {
+        $savedHttps = Get-Content -LiteralPath $httpsState -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($savedHttps.enabled -isnot [bool] -or $savedHttps.port -lt 1 -or $savedHttps.port -gt 65535) { Fail 'HTTPS 配置文件无效' }
+        $script:HttpsEnabled = $savedHttps.enabled
+        $ports.HTTPS = [int]$savedHttps.port
+    }
     return @{ Ports = $ports; EnvMap = $envMap; UserSet = @($ref.Value) }
+}
+
+# 砍掉 YAML 标量里**引号外**的行尾注释，再剥掉包裹的引号。
+#   `"123456"  # 登录页默认密码`  →  `123456`
+# ⛔ 两步的顺序不能反：口令里带 `#` 是合法的（客户完全可能设成 `P#ssw0rd`），
+#   先剥引号就会把它当成注释起点、把口令截断。
+function ConvertFrom-YamlScalar {
+    param([string]$Raw)
+    $value = $Raw
+    $cut = $value.Length
+    $quote = ''
+    for ($i = 0; $i -lt $value.Length; $i++) {
+        $ch = $value[$i]
+        if ($quote -ne '') {
+            if ($ch -eq $quote) { $quote = '' }
+        } elseif ($ch -eq '"' -or $ch -eq "'") {
+            $quote = $ch
+        } elseif ($ch -eq '#') {
+            $cut = $i
+            break
+        }
+    }
+    $value = $value.Substring(0, $cut).Trim()
+    if ($value.Length -ge 2) {
+        $first = $value.Substring(0, 1)
+        $last = $value.Substring($value.Length - 1, 1)
+        if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
+            $value = $value.Substring(1, $value.Length - 2)
+        }
+    }
+    return $value
+}
+
+# 读 config.yml 里 `server.demoaccount` 的出厂账号与口令 —— **只用于给用户提示**，
+# 不参与任何业务逻辑。
+#
+# ⛔⛔ 为什么要读配置、而不是继续写死（2026-10-15 修）：本文件的启动横幅原先印的是
+#   `admin / admin123`，而 2026-10-08 之后出厂口令已改成由后端读
+#   config.yml 的 `server.demoaccount.defaultpassword`（当前是 `123456`；seed 里 admin 的
+#   bcrypt 哈希就是它的哈希，契约见 server/resource/database/password_bootstrap_contract_test.go）。
+#   ⇒ 那行文案是**错的**：客户照着试会白扣两次尝试次数，第 3 次直接锁 600 秒，
+#   然后来报「初始口令不对 / 登不进去」。改成从配置读之后，配置改了横幅自动跟着变。
+function Get-DemoCredential {
+    $user = ''
+    $pass = ''
+    if (-not (Test-Path -LiteralPath $ConfFile)) { return @{ User = $user; Password = $pass } }
+    $inSection = $false
+    $sectionIndent = 0
+    foreach ($line in (Get-Content -LiteralPath $ConfFile -Encoding UTF8)) {
+        $trimmed = $line.Trim()
+        if ($trimmed -eq '' -or $trimmed.StartsWith('#')) { continue }
+        if ($trimmed -match '^demoaccount\s*:\s*(#.*)?$') {
+            # ⛔ 按**缩进层级**定位，不能只认顶格：config.yml 里 demoaccount 是嵌套段
+            #   （server: → demoaccount:，2 空格缩进），认顶格的话永远找不到。
+            $inSection = $true
+            $sectionIndent = $line.Length - $line.TrimStart().Length
+            continue
+        }
+        if (-not $inSection) { continue }
+        $indent = $line.Length - $line.TrimStart().Length
+        if ($indent -le $sectionIndent) { $inSection = $false; continue }
+        if ($trimmed -match '^defaultusername\s*:\s*(.*)$') {
+            $user = ConvertFrom-YamlScalar -Raw $Matches[1]
+        } elseif ($trimmed -match '^defaultpassword\s*:\s*(.*)$') {
+            $pass = ConvertFrom-YamlScalar -Raw $Matches[1]
+        }
+    }
+    return @{ User = $user; Password = $pass }
 }
 
 # ---------------------------------------------------------------- 组件基元 ----
@@ -527,8 +604,15 @@ function Write-PortPlan {
 function Write-StartSummary {
     param([hashtable]$Ports, [string]$LanIP)
     Write-Host ''
-    Write-UvpDet ("访问地址：https://{0}:{1}   （自签证书，浏览器首次会提示不受信任，选择继续即可）" -f $LanIP, $Ports.HTTPS)
-    Write-UvpDet '首次登录：admin / admin123（登录后请立即修改密码）'
+    $scheme = 'https'; $entryPort = $Ports.HTTPS
+    if (-not $script:HttpsEnabled) { $scheme = 'http'; $entryPort = $Ports.NGINX_HTTP }
+    Write-UvpDet ("访问地址：{0}://{1}:{2}" -f $scheme, $LanIP, $entryPort)
+    $demo = Get-DemoCredential
+    if ($demo.Password) {
+        Write-UvpDet ("首次登录：{0} / {1}（登录后请立即修改密码）" -f $demo.User, $demo.Password)
+    } else {
+        Write-UvpDet '首次登录：admin（口令见 config\config.yml 的 server.demoaccount.defaultpassword，登录后请立即修改密码）'
+    }
 }
 
 # ---------------------------------------------------------------- 阶段 1 ---- ----
@@ -569,6 +653,7 @@ function Test-PortsFree {
                      $Ports.ZLM_HTTP, $Ports.ZLM_RTSP, $Ports.ZLM_RTMP, $Ports.ZLM_SSL,
                      $Ports.ZLM_RTC, $Ports.ZLM_SIGNALING, $Ports.ZLM_SIGNALING_SSL,
                      $Ports.ZLM_ONVIF, $Ports.ZLM_ICE)) { $tcpPorts.Add([int]$p) }
+    if (-not $script:HttpsEnabled) { $tcpPorts.Remove([int]$Ports.HTTPS) | Out-Null }
     $udpPorts.Add([int]$Ports.ZLM_SRT)
     $udpPorts.Add([int]$Ports.ZLM_ICE)
     $rtpStart = [int]($ZlmRtpRange.Split('-')[0])
@@ -722,6 +807,8 @@ function Invoke-NginxConfRender {
     #   `[emerg] unknown directive "\ufeff#" in ...\nginx.conf:22`（行号指向被吞掉的
     #   那条指令 worker_processes 的结尾），**极易误导成"第 22 行有问题"**。
     Write-Utf8NoBom -Path $NginxConf -Text $text
+    & $SetupExe https-render --root $Root
+    if ($LASTEXITCODE -ne 0) { Fail '应用 HTTPS 配置失败' }
     # BOM 属于"静默坏"：不主动检查就只能等 nginx 报错才暴露，所以渲染完立刻回读自检。
     $back = [System.IO.File]::ReadAllText($NginxConf, (New-Object System.Text.UTF8Encoding $false))
     if ($back.Length -gt 0 -and [int]$back[0] -eq 0xFEFF) {
@@ -856,6 +943,7 @@ function Start-Backend {
     #        （数据都在包内）行为也不一致。
     #   ⚠️ 为什么不写进 config.yml：出包时不知道客户的解压路径，写不了绝对路径；
     #     而 PrepareStateDir 对**显式值不做绝对化**，塞相对路径会埋雷。⇒ 只能运行时注入。
+    $env:UVP_STANDALONE_ROOT = $Root
     $env:UVP_PROCESS_AUTHORITY_DIR = Join-Path $DataDir 'process-authority'
     Initialize-ProcessAuthorityDir -Path $env:UVP_PROCESS_AUTHORITY_DIR
     $log = Join-Path $LogsDir 'backend.log'
@@ -919,7 +1007,9 @@ function Start-Nginx {
     #   所以必须自己加引号，否则安装目录一带空格就被切碎（详见 Quote-NativeArg）。
     Start-Child -Name 'nginx' -Exe $NginxExe -WorkDir $NginxDir -LogPath (Join-Path $LogsDir 'nginx-console.log') `
         -PidPath $null -Arguments @('-p', (Quote-NativeArg $NginxDir), '-c', (Quote-NativeArg $NginxConf)) | Out-Null
-    if (-not (Wait-Port -Port $Ports.HTTPS -Tries 50 -SleepMs 200 -LogPath (Join-Path $LogsDir 'nginx-error.log'))) {
+    $entryPort = $Ports.HTTPS
+    if (-not $script:HttpsEnabled) { $entryPort = $Ports.NGINX_HTTP }
+    if (-not (Wait-Port -Port $entryPort -Tries 50 -SleepMs 200 -LogPath (Join-Path $LogsDir 'nginx-error.log'))) {
         $detail = ''
         $errLog = Join-Path $LogsDir 'nginx-error.log'
         if (Test-Path -LiteralPath $errLog) {
@@ -927,7 +1017,7 @@ function Start-Nginx {
         }
         Fail "nginx 启动失败，详见 $errLog`n$detail"
     }
-    Write-UvpOk "管理页面已就绪（https://<本机IP>:$($Ports.HTTPS)）"
+    Write-UvpOk "管理页面已就绪（HTTPS 开启=$script:HttpsEnabled，入口端口 $entryPort）"
 }
 
 # ---------------------------------------------------------------- 动作 ----
@@ -1025,9 +1115,11 @@ function Invoke-Status {
     Write-UvpDet ("后端        " + (Format-Status -Alive (Test-TcpPort -Port $ports.HTTP) -Detail "端口 $($ports.HTTP)"))
     Write-UvpDet ("Redis       " + (Format-Status -Alive (Test-TcpPort -Port $ports.REDIS) -Detail "端口 $($ports.REDIS)"))
     Write-UvpDet ("流媒体 ZLM  " + (Format-Status -Alive (Test-TcpPort -Port $ports.ZLM_HTTP) -Detail "端口 $($ports.ZLM_HTTP)"))
-    Write-UvpDet ("管理页面    " + (Format-Status -Alive (Test-TcpPort -Port $ports.HTTPS) -Detail "https://<本机IP>:$($ports.HTTPS)"))
+    $scheme = 'https'; $entryPort = $ports.HTTPS
+    if (-not $script:HttpsEnabled) { $scheme = 'http'; $entryPort = $ports.NGINX_HTTP }
+    Write-UvpDet ("管理页面    " + (Format-Status -Alive (Test-TcpPort -Port $entryPort) -Detail "${scheme}://<本机IP>:$entryPort"))
     Write-Host ''
-    if (-not (Test-TcpPort -Port $ports.HTTPS)) {
+    if (-not (Test-TcpPort -Port $entryPort)) {
         Write-UvpDet "（管理页面未就绪时，可临时直连后端明文端口 http://127.0.0.1:$($ports.HTTP) 排查）"
         Write-Host ''
     }
@@ -1039,17 +1131,45 @@ function Format-Status {
     return ("{0}未运行{1}" -f $C.err, $C.rst)
 }
 
+# 忘记了登录口令时，把管理员口令还原成**出厂口令**并重新要求首次登录改密。
+#
+# 为什么需要它：平台上没有自助找回入口（登录页的「忘记密码」是注释掉的死链、
+# 后端也没有重置接口），而管理员在首次登录时改成自己的口令后就只剩改库一条路。
+# ⛔ Windows 客户机**不保证有 python3、包里也不带 sqlite3.exe** —— 以前只能让客户
+#   把 data\uvp.db（含全部业务数据）发回来，或远程连进去手改；现在一条命令即可。
+# 实现放在 uvp-setup.exe（纯 Go、离线、无外部依赖），本函数只负责拼参数与提示。
+function Invoke-ResetPassword {
+    Write-Host ''
+    Write-UvpLog '重置登录口令'
+    if (-not (Test-Path -LiteralPath $DbPath)) {
+        Fail "找不到数据库 $DbPath —— 这台机器还没执行过 start（库里还没有账号）"
+    }
+    $demo = Get-DemoCredential
+    # ⛔ 变量不能叫 `$args`：那是 PowerShell 的自动变量（函数实参），赋值会踩到它。
+    $resetArgs = @('reset-admin', '--root', $Root, '--db', $DbPath, '--config', $ConfFile)
+    if ($demo.User) { $resetArgs += @('--username', $demo.User) }
+    & $SetupExe @resetArgs
+    if ($LASTEXITCODE -ne 0) { Fail "重置口令失败（uvp-setup 退出码 $LASTEXITCODE）" }
+    Write-Host ''
+    # 口令是**每次登录现读库**的，所以不必重启；写"若仍失败再重启"是为了兜住
+    # "库被占用导致写入没生效"这种极少数情况，别让现场卡在"到底要不要重启"上。
+    Write-UvpDet '改完即可直接登录（无需重启）；若仍登不上，执行 .\uvp-gb28181-ctl.ps1 restart 后再试'
+    Write-Host ''
+}
+
 function Show-Usage {
     Write-Banner
-    Write-Host '用法: .\uvp-gb28181-ctl.ps1 <start|stop|restart|status>'
-    Write-Host '  也可以双击同目录的 start.cmd / stop.cmd / status.cmd'
+    Write-Host '用法: .\uvp-gb28181-ctl.ps1 <start|stop|restart|status|reset-password>'
+    Write-Host '  也可以双击同目录的 start.cmd / stop.cmd / status.cmd / reset-password.cmd'
     Write-Host ''
 }
 
 switch ($Action.ToLower()) {
-    'start'   { Invoke-Start }
-    'stop'    { Invoke-Stop }
-    'restart' { Invoke-Stop; Invoke-Start }
-    'status'  { Invoke-Status }
-    default   { Show-Usage; exit 2 }
+    'start'          { Invoke-Start }
+    'stop'           { Invoke-Stop }
+    'restart'        { Invoke-Stop; Invoke-Start }
+    'restart-zlm'    { $config = Get-Config; Stop-Component -Label 'ZLM' -PidPath $ZlmPidFile -ExePath $ZlmExe; Start-Zlm -Ports $config.Ports }
+    'status'         { Invoke-Status }
+    'reset-password' { Invoke-ResetPassword }
+    default          { Show-Usage; exit 2 }
 }

@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile
     image: "uvp-gb28181-backend:${IMAGE_TAG:-test}"
     container_name: wvp-backend
+    user: "${UVP_BUSINESS_UID:-10001}:${UVP_BUSINESS_GID:-10001}"
     restart: unless-stopped
     stop_grace_period: 45s
     logging:
@@ -17,6 +18,9 @@ services:
     environment:
       TZ: Asia/Shanghai
       UVP_PROCESS_AUTHORITY_DIR: /var/lib/uvp/process-authority
+      UVP_UPDATER_SOCKET: /run/uvp-updater/updater.sock
+      UVP_UPDATER_STATE: /var/lib/uvp/updater-state
+      UVP_UPDATER_GATE_PATH: /var/lib/uvp/updater-gate/gate.json
     ports:
       - "127.0.0.1:56001:18978"
       - "0.0.0.0:56002:56002/tcp"
@@ -30,7 +34,21 @@ services:
         target: /var/lib/uvp/process-authority
         bind:
           create_host_path: false
-      - /run/uvp:/run/uvp
+      - ${UVP_UPDATER_SOCKET_DIR:-/run/uvp-updater}:/run/uvp-updater
+      - type: bind
+        source: ${UVP_ROOT:-/opt/uvp-gb28181}/data/updater-state
+        target: /var/lib/uvp/updater-state
+        bind:
+          create_host_path: true
+      - type: bind
+        source: ${UVP_ROOT:-/opt/uvp-gb28181}/updater-gate
+        target: /var/lib/uvp/updater-gate
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      updater-gate-init:
+        condition: service_completed_successfully
     networks:
       wvp-network:
         aliases:
@@ -41,6 +59,35 @@ services:
       timeout: 3s
       retries: 12
       start_period: 20s
+
+  # The host updater owns this gate after the Compose instance is registered.
+  # This one-shot initializer exists only so a first `docker compose up` can
+  # create the read-only bind source before the backend is started.
+  updater-gate-init:
+    image: "uvp-gb28181-backend:${IMAGE_TAG:-test}"
+    entrypoint: ["/bin/sh", "-ec"]
+    command: |
+      gate_dir=/var/lib/uvp/updater-gate
+      gate="$gate_dir/gate.json"
+      [ ! -L "$gate_dir" ]
+      mkdir -p "$gate_dir"
+      chmod 0750 "$gate_dir"
+      if [ ! -e "$gate" ]; then
+        temporary="$(mktemp "$gate_dir/.gate.json.XXXXXX")"
+        printf '%s\n' '{"mode":"normal","updated_at":"compose-bootstrap"}' > "$temporary"
+        chmod 0640 "$temporary"
+        ln "$temporary" "$gate" 2>/dev/null || true
+        rm -f "$temporary"
+      fi
+      [ -f "$gate" ] && [ ! -L "$gate" ]
+      chmod 0640 "$gate"
+    restart: "no"
+    volumes:
+      - type: bind
+        source: ${UVP_ROOT:-/opt/uvp-gb28181}/updater-gate
+        target: /var/lib/uvp/updater-gate
+        bind:
+          create_host_path: true
 
   frontend:
     build:

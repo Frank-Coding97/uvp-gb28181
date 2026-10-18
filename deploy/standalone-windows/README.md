@@ -24,7 +24,10 @@ https://<本机IP>:15500
 
 > 用的是自签名证书，浏览器首次会提示「不安全 / 证书不受信任」，选择**继续访问**即可。
 
-**初始账号：`admin` / `admin123`** —— 登录后请立即修改密码。
+**初始账号：`admin` / `123456`** —— 登录后系统会**强制要求修改密码**。
+
+> 口令来自 `config\config.yml` 的 `server.demoaccount.defaultpassword`，`start.cmd` 的输出里
+> 也会把它打出来；如果你改过配置，以配置为准。**把自己设的新口令忘了**见第六节。
 
 ---
 
@@ -127,7 +130,7 @@ UVP_REDIS_PORT=15503
 
 ```
 uvp-gb28181-ctl.ps1     唯一入口（PowerShell 控制脚本）
-start.cmd / stop.cmd / status.cmd    供双击的包装
+start.cmd / stop.cmd / status.cmd / reset-password.cmd    供双击的包装
 bin\                    本平台自己的程序（uvp-server.exe / uvp-setup.exe）
 vendor\redis\           自带 Redis
 vendor\zlm\             自带流媒体服务 ZLMediaKit（MediaServer.exe）
@@ -143,7 +146,37 @@ resource\               前端页面产物 + 建库脚本
 
 ---
 
-## 六、常见问题
+## 六、忘记了登录口令
+
+平台上**没有**「忘记密码」自助入口（登录页那个链接是预留的），口令忘了只能把它
+**还原成出厂口令**：
+
+```
+双击 reset-password.cmd
+```
+
+（等同 `.\uvp-gb28181-ctl.ps1 reset-password`，也可以去 `bin\` 里直接跑
+`uvp-setup.exe reset-admin --root .`。）
+
+它会：
+
+1. 把 `admin` 的口令还原成出厂口令（同上：`config\config.yml` 的
+   `server.demoaccount.defaultpassword`）；
+2. 标记该账号「首次登录必须改密」—— 所以下次登录后会**强制**让你设一个新口令；
+3. 顺手清掉 Redis 里的登录失败/锁定记录（连错 3 次会锁 10 分钟，这一步省得等）。
+
+> ⚠️ 这是「重置」不是「找回」：旧口令**不会被恢复**，改成新口令后请记好。
+> ⚠️ 提示「找不到数据库」= 这台机器还没启动过（库里还没有账号），先双击 `start.cmd`。
+> ⚠️ 命令只动一个账号，**不碰**设备、通道、录像等任何业务数据，也不删库不重建库。
+> ⚠️ 改完即可直接登录（无需重启）；仍登不上就 `.\uvp-gb28181-ctl.ps1 restart` 再试。
+> 需要重置别的账号（正常情况下用不到）：加 `--username <账号名>`。
+
+**换机器**：数据库就是 `data\uvp.db` 一个文件，连同 `config\` 一起拷走即可
+（端口段跨平台不同，Linux 是 51000 段，见第三节的对照表）。
+
+---
+
+## 七、常见问题
 
 **浏览器打不开页面**
 

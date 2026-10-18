@@ -14,8 +14,16 @@ fail() {
 [[ -d "$SOURCE_ROOT/server" && -d "$SOURCE_ROOT/web" ]] || fail "invalid source root"
 actual_sha=$(git -C "$SOURCE_ROOT" rev-parse HEAD)
 [[ "$actual_sha" == "$SHA" ]] || fail "source HEAD $actual_sha does not match $SHA"
+BUILD_ID="$SHA"
 
 node "$SOURCE_ROOT/scripts/version.mjs" check >&2
+
+release_metadata_dir=$(mktemp -d "${TMPDIR:-/tmp}/uvp-release-metadata.XXXXXX")
+cleanup() {
+  rm -rf "$release_metadata_dir"
+}
+trap cleanup EXIT
+node "$SOURCE_ROOT/scripts/version.mjs" release-metadata "$BUILD_ID" "$release_metadata_dir" >&2
 
 if [[ "${UVP_SKIP_TESTS:-0}" != "1" ]]; then
   (cd "$SOURCE_ROOT/server" && go test ./... -count=1)
@@ -26,15 +34,20 @@ mkdir -p "$SOURCE_ROOT/server/bin"
 # production server's memory budget (4C/3.8G with ~1.3G available)
 (cd "$SOURCE_ROOT/server" && \
   env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOMAXPROCS=2 \
-  go build -p 2 -trimpath -ldflags='-s -w' -o bin/uvp-gb28181-linux-amd64 main.go)
+  go build -p 2 -trimpath -ldflags="-s -w -X uvplatform.com/uvp-gb28181/app/global/app.BuildID=$BUILD_ID" -o bin/uvp-gb28181-linux-amd64 main.go)
 (cd "$SOURCE_ROOT/server" && \
   env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOMAXPROCS=2 \
   go build -p 2 -trimpath -ldflags='-s -w' -o bin/uvp-firewall-agent-linux-amd64 ./cmd/uvp-firewall-agent)
+(cd "$SOURCE_ROOT/server" && \
+  env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOMAXPROCS=2 \
+  go build -p 2 -trimpath -ldflags='-s -w' -o bin/uvp-updater-linux-amd64 ./cmd/uvp-updater)
 
 # pnpm progress goes to stderr: the caller captures stdout via command
 # substitution and treats it as the archive path
 (cd "$SOURCE_ROOT/web" && pnpm install --frozen-lockfile >&2)
-(cd "$SOURCE_ROOT/web" && NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=1536}" pnpm run build:prod >&2)
+(cd "$SOURCE_ROOT/web" && VITE_BUILD_ID="$BUILD_ID" NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=1536}" pnpm run build:prod >&2)
+node "$SOURCE_ROOT/scripts/version.mjs" check-frontend-build-id "$BUILD_ID" "$SOURCE_ROOT/web/dist" >&2
 
 UVP_SOURCE_ROOT="$SOURCE_ROOT" \
+  UVP_RELEASE_METADATA_DIR="$release_metadata_dir" \
   "$SOURCE_ROOT/deploy/test/assemble-release.sh" "$SHA" "$OUTPUT_DIR"

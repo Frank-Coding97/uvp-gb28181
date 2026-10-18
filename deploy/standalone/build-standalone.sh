@@ -135,6 +135,19 @@ done
 fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 log()  { printf '[build] %s\n' "$*"; }
 
+NODE_BIN="${NODE:-node}"
+command -v "$NODE_BIN" >/dev/null 2>&1 || fail "构建机需要 node（生成发布身份文件）"
+
+# 默认只允许把干净 Git 提交标记为发布构建。需要从本地改动出包时，调用方必须
+# 显式提供一个独立的 UVP_BUILD_ID，避免把未提交代码伪装成 HEAD 对应的发布物。
+BUILD_ID="${UVP_BUILD_ID:-}"
+if [ -z "$BUILD_ID" ]; then
+  command -v git >/dev/null 2>&1 || fail "找不到 git；请显式设置 UVP_BUILD_ID"
+  [ -z "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=normal)" ] || fail "源码工作区有未提交改动；请先提交，或显式设置 UVP_BUILD_ID"
+  BUILD_ID="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+fi
+[[ "$BUILD_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || fail "UVP_BUILD_ID 只能包含字母、数字、点、下划线或连字符"
+
 # 构建机上用的 python（生成配置要跑脚本）。目标机上由 uvp-gb28181-ctl.sh 自行探测。
 PY="${UVP_BUILD_PY:-python3}"
 command -v "$PY" >/dev/null 2>&1 || fail "构建机需要 python3（用来生成 config.yml）"
@@ -187,6 +200,8 @@ fi
 #
 # 这个脚本原本只有两行`cp`：
 #     cp "$SERVER_DIR/bin/uvp-server" "$PKG/bin/uvp-server"
+cp "$SERVER_DIR/bin/uvp-setup" "$PKG/bin/uvp-setup"
+chmod 0755 "$PKG/bin/uvp-setup"
 #     cp -a "$WEB_DIR/dist/." "$PKG/resource/public/"
 #   ⇒ 它**从不自己编译**，只是把上次构建的产物搬进包里。
 #
@@ -207,7 +222,7 @@ SKIP_BUILD="${UVP_SKIP_BUILD:-0}"
 if [ "$SKIP_BUILD" = "1" ]; then
   log "⚠️ 已跳过构建（UVP_SKIP_BUILD=1）—— **包里的产物可能比源码旧**，请自行确认"
 else
-  log "构建后端二进制（${PKG_OS}/${PKG_ARCH}）"
+  log "构建后端与升级助手二进制（${PKG_OS}/${PKG_ARCH}）"
   # CGO_ENABLED=0：SQLite 引擎是纯 Go（modernc.org/sqlite），不需要 libcgo。
   #   交叉编译必须关 CGO —— 它会去找本机（macOS）的 C 工具链，产物就废了。
   # -s -w：去符号表与调试信息，22MB vs 66MB，对交付体积差别很大。
@@ -221,9 +236,14 @@ else
     # ⛔ GOOS/GOARCH 取自 PKG_OS/PKG_ARCH（包名那段），保证「包名里的架构」
     #   与「真正编出来的架构」永远是同一个来源，不会被改漏。
     CGO_ENABLED=0 GOOS="$PKG_OS" GOARCH="$PKG_ARCH" GOFLAGS=-mod=mod \
-      "$GO_BIN" build -ldflags="-s -w" -o bin/uvp-server .
+      "$GO_BIN" build -ldflags="-s -w -X uvplatform.com/uvp-gb28181/app/global/app.BuildID=$BUILD_ID" -o bin/uvp-server .
+    CGO_ENABLED=0 GOOS="$PKG_OS" GOARCH="$PKG_ARCH" GOFLAGS=-mod=mod \
+      "$GO_BIN" build -ldflags="-s -w" -o bin/uvp-updater ./cmd/uvp-updater
+    CGO_ENABLED=0 GOOS="$PKG_OS" GOARCH="$PKG_ARCH" GOFLAGS=-mod=mod \
+      "$GO_BIN" build -ldflags="-s -w" -o bin/uvp-setup ./cmd/uvp-setup
   ) || fail "后端构建失败（见上）。⚠️ 不要用旧的 bin/uvp-server 顶替——那就是本周反复踩的坑。"
   log "  后端二进制: $(du -h bin/uvp-server 2>/dev/null | cut -f1 || echo '?')"
+  log "  升级助手二进制: $(du -h bin/uvp-updater 2>/dev/null | cut -f1 || echo '?')"
 
   # ⛔⛔ `--skip-frontend` 必须真的跳过前端构建。
   #   原实现只在后面的"前端产物存在性检查"（见 `if [ "$SKIP_FRONTEND" -eq 0 ]`）
@@ -253,7 +273,7 @@ else
     #   里保证读得到（`vite build` 的 mode 就是 production），而 `.local` 已被
     #   web/.gitignore 的 `*.local` 忽略 ⇒ 不会污染工作区。
     ENV_LOCAL="$WEB_DIR/.env.production.local"
-    printf 'VITE_DEFAULT_SIP_PORT=%s\n' "$SIP_PORT" > "$ENV_LOCAL"
+    printf 'VITE_DEFAULT_SIP_PORT=%s\nVITE_BUILD_ID=%s\n' "$SIP_PORT" "$BUILD_ID" > "$ENV_LOCAL"
     # 构建失败/断言失败/正常结束一律清掉，别把这个临时文件留在工作区。
     trap 'rm -f "$ENV_LOCAL"' EXIT
     if [ -x node_modules/.bin/vite ]; then
@@ -277,6 +297,8 @@ else
 fi
 
 [ -x "$SERVER_DIR/bin/uvp-server" ] || fail "缺少后端二进制：$SERVER_DIR/bin/uvp-server"
+[ -x "$SERVER_DIR/bin/uvp-setup" ] || fail "缺少安装辅助程序：$SERVER_DIR/bin/uvp-setup"
+[ -x "$SERVER_DIR/bin/uvp-updater" ] || fail "缺少升级助手二进制：$SERVER_DIR/bin/uvp-updater"
 [ -x "$DEPLOY_DIR/bin/redis-server" ] || fail "缺少 redis-server：$DEPLOY_DIR/bin/redis-server（先跑 deploy/standalone/build-redis.sh）"
 [ -x "$DEPLOY_DIR/bin/redis-cli" ]    || fail "缺少 redis-cli：$DEPLOY_DIR/bin/redis-cli（先跑 deploy/standalone/build-redis.sh）"
 [ -f "$SQLITE_DIR/baseline.sql" ]     || fail "缺少 SQLite 基线：$SQLITE_DIR/baseline.sql（先跑 generate.py）"
@@ -313,6 +335,9 @@ else
   fi
 fi
 
+"$NODE_BIN" "$REPO_ROOT/scripts/version.mjs" check-frontend-build-id "$BUILD_ID" "$WEB_DIR/dist"
+log "  前端构建身份 ${BUILD_ID} 读回校验通过"
+
 # 静态校验：二进制必须是**目标架构**（PKG_ARCH，默认 linux/amd64）。用 file 判，别只看文件名。
 # ⛔ 判据从 PKG_ARCH 反推，与上面那行交叉编译同源 —— 否则会做出
 #   「包名写着 arm64、里面装的还是 x86_64」这种包内外不一致、且全程零报错的包。
@@ -323,6 +348,8 @@ case "$PKG_ARCH" in
 esac
 arch_of() { file "$1" | grep -oE "$ELF_ARCH_RE" | head -1; }
 [ -n "$(arch_of "$SERVER_DIR/bin/uvp-server")" ] || fail "后端二进制不是 $PKG_ARCH"
+[ -n "$(arch_of "$SERVER_DIR/bin/uvp-setup")" ] || fail "安装辅助程序不是 $PKG_ARCH"
+[ -n "$(arch_of "$SERVER_DIR/bin/uvp-updater")" ] || fail "升级助手二进制不是 $PKG_ARCH"
 [ -n "$(arch_of "$DEPLOY_DIR/bin/redis-server")" ] || fail "redis-server 不是 $PKG_ARCH"
 [ -n "$(arch_of "$ZLM_DIR/MediaServer")" ]|| fail "MediaServer 不是 $PKG_ARCH"
 # nginx 也必须一起查：它是最容易"忘了换"的那个（ZLM/redis 有明显的 lib 目录提示，
@@ -336,20 +363,26 @@ cleanup() { rm -rf "$STAGE"; }
 trap cleanup EXIT
 
 PKG="$STAGE/${PKG_STEM}"
+RELEASE_METADATA_DIR="$STAGE/release-metadata"
+"$NODE_BIN" "$REPO_ROOT/scripts/version.mjs" release-metadata "$BUILD_ID" "$RELEASE_METADATA_DIR"
 # ⛔ 包内布局（2026-10-10 整理，与 uvp-gb28181-ctl.sh 顶部注释必须一致）：
-#   bin/    只放**我们自己**的程序（uvp-server）
+#   bin/    只放当前版本的后端程序（uvp-server）
+#   updater/ 独立升级助手，固定在安装根，不能随 current 切换被替换
 #   vendor/ 第三方运行时，每个组件自成一体（自带 conf/lib/www）
 #   config/ data/ logs/ run/ resource/
 #   ⛔ 顶层只允许 4 个文件：uvp-gb28181-ctl.sh（唯一入口）、
 #      uvp-gb28181-service-install.sh / -uninstall.sh（可选的服务注册）、version.json。
 #      再往顶层塞东西先问一句「它是不是应该进 config/ 或 data/」。
 # ⛔ 不再建空的 scripts/ —— 历史上它从没被填过任何东西。
-mkdir -p "$PKG"/{bin,config,data/redis,logs,run}
+mkdir -p "$PKG"/{bin,updater,config,data/redis,logs,run}
 mkdir -p "$PKG"/vendor/{redis,nginx,zlm}
 
 log "复制后端二进制"
 cp "$SERVER_DIR/bin/uvp-server" "$PKG/bin/uvp-server"
-chmod 0755 "$PKG/bin/uvp-server"
+cp "$SERVER_DIR/bin/uvp-setup" "$PKG/bin/uvp-setup"
+chmod 0755 "$PKG/bin/uvp-setup"
+cp "$SERVER_DIR/bin/uvp-updater" "$PKG/updater/uvp-updater"
+chmod 0755 "$PKG/bin/uvp-server" "$PKG/updater/uvp-updater"
 
 # ---- 产物新鲜度断言（双保险，与上面的自动构建互为兜底）----
 #
@@ -400,6 +433,8 @@ assert_fresh() {
   log "  $label 新鲜度 OK"
 }
 assert_fresh "$SERVER_DIR/bin/uvp-server" "后端二进制"
+assert_fresh "$SERVER_DIR/bin/uvp-setup" "安装辅助程序"
+assert_fresh "$SERVER_DIR/bin/uvp-updater" "升级助手二进制"
 if [ -f "$WEB_DIR/dist/index.html" ]; then
   assert_fresh "$WEB_DIR/dist/index.html" "前端产物"
 else
@@ -468,6 +503,11 @@ log "复制 nginx（前端 + HTTPS 终止）"
 mkdir -p "$PKG/vendor/nginx"
 cp -a "$NGINX_DIR/." "$PKG/vendor/nginx/"
 chmod 0755 "$PKG/vendor/nginx/sbin/nginx"
+# nginx.conf is a rendered runtime file and may contain the build machine's
+# absolute install path. Ship only the template so each installation renders
+# paths for its own root on first start.
+rm -f "$PKG/vendor/nginx/conf/nginx.conf"
+rm -f "$PKG/vendor/nginx/conf/uvp.crt" "$PKG/vendor/nginx/conf/uvp.key"
 
 # ---- nginx 配置模板：以仓库版本为唯一真源 ----
 #
@@ -480,6 +520,9 @@ chmod 0755 "$PKG/vendor/nginx/sbin/nginx"
 #   ——旧副本里 include 的仍是 bin/nginx 路径，而旧布局迁移已把 bin/nginx 删了。
 #   ⇒ ① 出包时强制用仓库版本覆盖；② 断言包内模板不再出现 bin/nginx。
 cp "$DEPLOY_DIR/nginx.conf.template" "$PKG/vendor/nginx/conf/nginx.conf.template"
+if [ -e "$PKG/vendor/nginx/conf/nginx.conf" ]; then
+  fail "包内不能包含构建机路径的 nginx.conf；目标机必须从 nginx.conf.template 渲染"
+fi
 if grep -q '@ROOT@/bin/nginx' "$PKG/vendor/nginx/conf/nginx.conf.template"; then
   fail "nginx 配置模板里仍是旧路径（@ROOT@/bin/nginx）——仓库模板没覆盖进去"
 fi
@@ -524,7 +567,7 @@ else
   log "  ⚠️ 未找到 $AVATAR_SEED_SRC/admin.png，admin 将无默认头像（不阻断出包）"
 fi
 
-cp "$SERVER_DIR/version.json" "$PKG/version.json"
+install -m 0644 "$RELEASE_METADATA_DIR/server/version.json" "$PKG/version.json"
 
 # ⛔ 出包前断言：**库里有头像路径 ⇒ 包里必须有那个文件**。
 #   这类"数据库说有、磁盘上没有"的组合最坑：nginx 的 SPA 回落会把
@@ -736,6 +779,8 @@ bash "$DEPLOY_DIR/check-portable-elf.sh" \
   --glibc-max "${UVP_GLIBC_MAX:-2.17}" \
   --provided-dir "$PKG/vendor/zlm/lib" \
   "$PKG/bin/uvp-server" \
+  "$PKG/bin/uvp-setup" \
+  "$PKG/updater/uvp-updater" \
   "$PKG/vendor/nginx/sbin/nginx" \
   "$PKG/vendor/redis/redis-server" \
   "$PKG/vendor/redis/redis-cli" \
@@ -753,6 +798,10 @@ ARCHIVE="$OUT_DIR/${PKG_STEM}.tar.gz"
 #   用 root 解压后目录变成 0700，非 root 的服务进程就**穿不过去** ⇒ 页面全 404，
 #   而且没有任何报错。必须显式 chmod。
 chmod 0755 "$STAGE" "$PKG"
+# 注册文件与安装密钥必须位于非组/全局可写目录，且密钥文件不能被其他用户读取。
+# 构建机 umask 可能放宽目录和文件默认权限，不能把它带进交付包。
+chmod 0700 "$PKG/config"
+chmod 0600 "$PKG/config/config.yml" "$PKG/config/config.env"
 
 log "打包 → ${ARCHIVE}"
 # ⛔⛔ 必须保证归档里**没有 Apple 扩展属性**（xattr / provenance / ACL）。

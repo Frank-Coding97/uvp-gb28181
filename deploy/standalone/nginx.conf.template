@@ -45,7 +45,7 @@ events {
 }
 
 http {
-    include @ROOT@/vendor/nginx/conf/mime.types;
+    include @ACTIVE_ROOT@/vendor/nginx/conf/mime.types;
     default_type  application/octet-stream;
 
     # 临时目录放包内（/tmp 可能被 noexec 挂载）
@@ -86,6 +86,7 @@ http {
     # ============================================================
     # HTTPS（自签名）
     # ============================================================
+    # UVP_HTTPS_BEGIN
     server {
         listen      @HTTPS_PORT@ ssl;
         listen      [::]:@HTTPS_PORT@ ssl;
@@ -104,7 +105,7 @@ http {
         ssl_session_cache    shared:UVP:4m;
         ssl_session_timeout  1h;
 
-        root @ROOT@/resource/public;
+        root @ACTIVE_ROOT@/resource/public;
         index index.html;
 
         # ---------------- 前端 ----------------
@@ -143,7 +144,7 @@ http {
 
         # 其余 /public/ 下的静态文件（图纸、文档等）
         location /public/ {
-            alias @ROOT@/resource/public/;
+            alias @ACTIVE_ROOT@/resource/public/;
             autoindex off;
         }
 
@@ -151,6 +152,23 @@ http {
         #   否则刷新 /devices/123 会 404（前端是 history 路由）。
         #   ⚠️ 但 /api/ 与 /gb28181/ 必须列在前面 —— 否则它们会被这条规则
         #   吞掉、返回 HTML，前端拿到 HTML 当 JSON 解析 ⇒ 报一个和真因无关的错。
+        location = /api/system/upgrade/import {
+            client_max_body_size 9g;
+            client_body_timeout 30m;
+            proxy_pass http://uvp_backend;
+            proxy_http_version 1.1;
+            proxy_set_header Host              $host;
+            proxy_set_header X-Real-IP         $remote_addr;
+            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Connection        "";
+            proxy_connect_timeout 15s;
+            proxy_send_timeout    30m;
+            proxy_read_timeout    30m;
+            proxy_request_buffering off;
+            proxy_buffering       off;
+        }
+
         location /api/ {
             proxy_pass http://uvp_backend;
             proxy_http_version 1.1;
@@ -192,6 +210,8 @@ http {
         }
     }
 
+    # UVP_HTTPS_END
+
     # ============================================================
     # HTTP：跳 HTTPS
     #
@@ -200,6 +220,7 @@ http {
     #   （含模拟器 App）只信任这个来源；让它们也能直接打到这里可以少一层依赖。
     #   若客户不需要这条例外，把下面 location /api/ 与 /gb28181/ 整块删掉即可。
     # ============================================================
+    # UVP_HTTP_BEGIN
     server {
         listen      @PLAIN_HTTP_PORT@;
         listen      [::]:@PLAIN_HTTP_PORT@;
@@ -240,7 +261,7 @@ http {
         }
 
         location /public/ {
-            alias @ROOT@/resource/public/;
+            alias @ACTIVE_ROOT@/resource/public/;
             autoindex off;
         }
 
@@ -251,4 +272,5 @@ http {
             return 301 https://$host:@HTTPS_PORT@$request_uri;
         }
     }
+    # UVP_HTTP_END
 }

@@ -117,6 +117,94 @@ class ConfigureServerTests(unittest.TestCase):
         self.assertIn("ReadWritePaths=/opt/uvp-gb28181", service)
         self.assertNotRegex(service, r"(?m)^(SystemMaxUse|RuntimeMaxUse|SystemKeepFree)=")
 
+    def test_managed_backends_use_the_shared_updater_gate(self) -> None:
+        control = (REPO_ROOT / "deploy" / "standalone" / "uvp-gb28181-ctl.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('UPDATER_GATE_PATH="$ROOT/updater-gate/gate.json"', control)
+        self.assertGreaterEqual(
+            control.count('export UVP_UPDATER_GATE_PATH="$UPDATER_GATE_PATH"'),
+            2,
+        )
+
+        service = Path(__file__).with_name("uvp-backend.service").read_text(encoding="utf-8")
+        self.assertIn(
+            "Environment=UVP_UPDATER_GATE_PATH=/opt/uvp-gb28181/updater-gate/gate.json",
+            service,
+        )
+
+        compose = (Path(__file__).with_name("compose.yml")).read_text(encoding="utf-8")
+        self.assertIn(
+            "UVP_UPDATER_GATE_PATH: /var/lib/uvp/updater-gate/gate.json",
+            compose,
+        )
+        self.assertRegex(
+            compose,
+            re.compile(
+                r"(?ms)^      - type: bind\n"
+                r"        source: \$\{UVP_ROOT:-/opt/uvp-gb28181\}/updater-gate\n"
+                r"        target: /var/lib/uvp/updater-gate\n"
+                r"        read_only: true\n"
+                r"        bind:\n"
+                r"          create_host_path: false$"
+            ),
+        )
+
+    def test_compose_bootstraps_the_gate_before_starting_backend(self) -> None:
+        compose = (Path(__file__).with_name("compose.yml")).read_text(encoding="utf-8")
+
+        self.assertRegex(
+            compose,
+            re.compile(
+                r"(?ms)^  backend:\n.*?^    depends_on:\n"
+                r"      updater-gate-init:\n"
+                r"        condition: service_completed_successfully$"
+            ),
+        )
+        self.assertRegex(
+            compose,
+            re.compile(
+                r"(?ms)^  updater-gate-init:\n.*?^    restart: \"no\"$"
+            ),
+        )
+        self.assertRegex(
+            compose,
+            re.compile(
+                r"(?ms)^      - type: bind\n"
+                r"        source: \$\{UVP_ROOT:-/opt/uvp-gb28181\}/updater-gate\n"
+                r"        target: /var/lib/uvp/updater-gate\n"
+                r"        bind:\n"
+                r"          create_host_path: true$"
+            ),
+        )
+
+        installer = REPO_ROOT / "deploy" / "compose" / "uvp-compose-upgrade-install.sh"
+        self.assertTrue(installer.is_file())
+        content = installer.read_text(encoding="utf-8")
+        self.assertIn("--deployment compose", content)
+        self.assertIn("--compose-file \"$COMPOSE_FILE\"", content)
+        self.assertIn("systemctl restart \"$UPDATER_UNIT\"", content)
+        self.assertIn('install -m 0755 "$PROJECT_DIR/updater/uvp-updater" "$UPDATER_BIN"', content)
+
+    def test_release_keeps_a_stable_updater_bootstrap_binary(self) -> None:
+        builder = (Path(__file__).with_name("build-release.sh")).read_text(encoding="utf-8")
+        self.assertIn("bin/uvp-updater-linux-amd64 ./cmd/uvp-updater", builder)
+
+        assembler = (Path(__file__).with_name("assemble-release.sh")).read_text(encoding="utf-8")
+        self.assertIn("server/bin/uvp-updater-linux-amd64", assembler)
+        self.assertIn('"$release_dir/updater/uvp-updater"', assembler)
+        self.assertIn("uvp-compose-upgrade-install.sh", assembler)
+
+    def test_standalone_backend_requires_its_independent_updater(self) -> None:
+        installer = (REPO_ROOT / "deploy" / "standalone" / "uvp-gb28181-service-install.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Requires=${UPDATER_UNIT_NAME}", installer)
+        self.assertIn("After=${UPDATER_UNIT_NAME}", installer)
+
+        deploy = (Path(__file__).with_name("deploy-uvp.sh")).read_text(encoding="utf-8")
+        self.assertIn("updater/uvp-updater \\", deploy)
+
     def test_persistent_log_link_and_history_policy_are_documented(self) -> None:
         deploy_script = (Path(__file__).with_name("deploy-uvp.sh")).read_text(encoding="utf-8")
         self.assertIn('ln -sfn "$ROOT/data/logs" "$FINAL_RELEASE/backend/resource/logs"', deploy_script)

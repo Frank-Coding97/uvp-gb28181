@@ -4,6 +4,10 @@ umask 027
 
 ROOT="/opt/uvp-gb28181"
 RELEASES="$ROOT/releases"
+UPDATER_BIN="$ROOT/updater/uvp-updater"
+UPDATER_STATE="$ROOT/updater-state"
+UPDATER_REGISTRATION="$ROOT/config/updater-registration.json"
+UPDATER_UNIT="uvp-updater.service"
 INCOMING="/home/uvp-deploy/incoming"
 LOCK_FILE="/run/lock/uvp-gb28181-deploy.lock"
 SHA="${1:-}"
@@ -21,6 +25,41 @@ log() {
 fail() {
   log "ERROR: $*"
   exit 1
+}
+
+ensure_updater_registration() {
+  [[ -x "$UPDATER_BIN" ]] || fail "Stable updater is missing: $UPDATER_BIN"
+  install -d -m 0700 "$UPDATER_STATE"
+  local registration_tmp registration_changed=0
+  registration_tmp="$(mktemp "$ROOT/config/.updater-registration.XXXXXX")"
+  if ! "$UPDATER_BIN" register \
+    --config-dir "$ROOT/config" \
+    --registration "$registration_tmp" \
+    --deployment systemd \
+    --root "$ROOT" \
+    --state "$UPDATER_STATE" \
+    --external-backup-max-bytes "${UVP_UPGRADE_EXTERNAL_BACKUP_MAX_BYTES:-8589934592}" \
+    --unit uvp-backend.service; then
+    rm -f "$registration_tmp"
+    fail "Updater registration failed"
+  fi
+  if [[ ! -f "$UPDATER_REGISTRATION" ]] || ! cmp -s "$registration_tmp" "$UPDATER_REGISTRATION"; then
+    chmod 0600 "$registration_tmp"
+    mv -f "$registration_tmp" "$UPDATER_REGISTRATION"
+    registration_changed=1
+  else
+    rm -f "$registration_tmp"
+  fi
+  systemctl enable "$UPDATER_UNIT"
+  if (( registration_changed == 1 )) || ! systemctl is-active --quiet "$UPDATER_UNIT"; then
+    systemctl restart "$UPDATER_UNIT"
+  fi
+  systemctl is-active --quiet "$UPDATER_UNIT" || fail "Updater helper is not active"
+  for _ in {1..50}; do
+    [[ -S /run/uvp/updater.sock ]] && return 0
+    sleep 0.1
+  done
+  fail "Updater socket was not created"
 }
 
 rollback() {
@@ -57,6 +96,7 @@ trap rollback ERR
 [[ "$ARCHIVE" == "$INCOMING/uvp-release-$SHA.tar.gz" ]] || fail "Unexpected archive path"
 [[ -f "$ARCHIVE" ]] || fail "Release archive not found"
 [[ -f "$ROOT/config/config.yml" ]] || fail "Runtime config is missing"
+ensure_updater_registration
 # This test deployment's unit runs as root. First install provisions state
 # independently of releases; upgrades never chmod/unlink an existing domain.
 if [[ ! -e "$ROOT/data/process-authority" && ! -L "$ROOT/data/process-authority" ]]; then
@@ -96,6 +136,7 @@ for required in \
   compose.yml \
   backend/Dockerfile \
   backend/uvp-gb28181 \
+  updater/uvp-updater \
   agent/uvp-firewall-agent \
   agent/uvp-firewall-agent.service \
   agent/uvp-firewall-agent.default \

@@ -5,6 +5,8 @@
 Description=UVP GB28181 backend
 After=network-online.target
 Wants=network-online.target
+Requires=uvp-updater.service
+After=uvp-updater.service
 
 [Service]
 Type=simple
@@ -13,6 +15,9 @@ Group=root
 WorkingDirectory=/opt/uvp-gb28181/current/backend
 Environment=TZ=Asia/Shanghai
 Environment=UVP_PROCESS_AUTHORITY_DIR=/opt/uvp-gb28181/data/process-authority
+Environment=UVP_UPDATER_SOCKET=/run/uvp/updater.sock
+Environment=UVP_UPDATER_STATE=/opt/uvp-gb28181/updater-state
+Environment=UVP_UPDATER_GATE_PATH=/opt/uvp-gb28181/updater-gate/gate.json
 EnvironmentFile=/opt/uvp-gb28181/config/sip-trace-backend.env
 ExecStart=/opt/uvp-gb28181/current/backend/uvp-gb28181
 Restart=on-failure

@@ -571,7 +571,7 @@ Write-Utf8NoBom -Path (Join-Path $Pkg 'config\config.env') -Text $envBody
 Ok 'config.env 已写入（SIP 报文诊断密钥 / OpenAPI 主密钥）'
 
 # ---- 顶层脚本与说明 ----
-foreach ($f in @('uvp-gb28181-ctl.ps1', 'start.cmd', 'stop.cmd', 'status.cmd')) {
+foreach ($f in @('uvp-gb28181-ctl.ps1', 'start.cmd', 'stop.cmd', 'status.cmd', 'reset-password.cmd')) {
     $src = Join-Path $WinDir $f
     if (-not (Test-Path -LiteralPath $src)) { Fail "缺少 $f（deploy\standalone-windows\ 下应有）" }
     Copy-Item -LiteralPath $src -Destination (Join-Path $Pkg $f) -Force
@@ -579,7 +579,7 @@ foreach ($f in @('uvp-gb28181-ctl.ps1', 'start.cmd', 'stop.cmd', 'status.cmd')) 
 if (Test-Path -LiteralPath (Join-Path $WinDir 'README.md')) {
     Copy-Item -LiteralPath (Join-Path $WinDir 'README.md') -Destination (Join-Path $Pkg 'README.md') -Force
 }
-Det '顶层：uvp-gb28181-ctl.ps1 / start.cmd / stop.cmd / status.cmd / version.json'
+Det '顶层：uvp-gb28181-ctl.ps1 / start.cmd / stop.cmd / status.cmd / reset-password.cmd / version.json'
 
 # ---- 空目录占位（zip 不带目录项时会被丢掉；ctl 虽然会自建，但保持布局一致更好读）----
 foreach ($d in @('data', 'data\redis', 'logs', 'run')) {
@@ -626,7 +626,8 @@ foreach ($item in @(
         @{ P = 'vendor\zlm\config.ini';              N = 'ZLM 配置' },
         @{ P = 'vendor\nginx\nginx.exe';             N = 'nginx' },
         @{ P = 'vendor\nginx\conf\nginx.conf.template'; N = 'nginx 配置模板' },
-        @{ P = 'uvp-gb28181-ctl.ps1';                N = '控制脚本' }
+        @{ P = 'uvp-gb28181-ctl.ps1';                N = '控制脚本' },
+        @{ P = 'reset-password.cmd';                 N = '忘记口令时的入口' }
     )) {
     if (-not (Test-Path -LiteralPath (Join-Path $Pkg $item.P))) { Fail "包内缺少 $($item.N)：$($item.P)" }
 }

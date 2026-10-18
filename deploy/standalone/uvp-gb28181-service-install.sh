@@ -35,6 +35,8 @@ set -Eeuo pipefail
 
 UNIT_NAME="uvp-gb28181.service"
 UNIT_PATH="/etc/systemd/system/${UNIT_NAME}"
+UPDATER_UNIT_NAME="uvp-gb28181-updater.service"
+UPDATER_UNIT_PATH="/etc/systemd/system/${UPDATER_UNIT_NAME}"
 
 log()  { printf '[uvp-service] %s\n' "$*"; }
 fail() { printf '[uvp-service][ERROR] %s\n' "$*" >&2; exit 1; }
@@ -87,6 +89,7 @@ RUN_USER="${SUDO_USER:-$(id -un)}"
 [ -n "$RUN_USER" ] || RUN_USER="root"
 id "$RUN_USER" >/dev/null 2>&1 \
   || fail "解析出的运行用户「${RUN_USER}」在本机不存在 —— 请改用 sudo -u <用户名> 执行本脚本"
+RUN_GROUP="$(id -gn "$RUN_USER")"
 
 log "安装目录：${ROOT}"
 log "运行身份：${RUN_USER}"
@@ -107,6 +110,8 @@ trap 'rm -f "$TMP_UNIT"' EXIT
 cat > "$TMP_UNIT" <<UNIT
 [Unit]
 Description=UVP GB28181 平台（绿色包：nginx + 后端 + Redis + ZLM）
+Requires=${UPDATER_UNIT_NAME}
+After=${UPDATER_UNIT_NAME}
 # 要监听端口，等网络就绪更稳（缺这条时可能抢在网络配置完成前启动）
 After=network-online.target
 Wants=network-online.target
@@ -142,11 +147,47 @@ UNIT
 install -m 0644 "$TMP_UNIT" "$UNIT_PATH"
 log "已写入服务单元：${UNIT_PATH}"
 
+# 助手必须独立于业务 unit，业务 stop/restart 时继续持有任务、锁和回退能力。
+TMP_UPDATER_UNIT="$(mktemp)"
+trap 'rm -f "$TMP_UNIT" "$TMP_UPDATER_UNIT"' EXIT
+cat > "$TMP_UPDATER_UNIT" <<UNIT
+[Unit]
+Description=UVP GB28181 服务升级助手
+After=local-fs.target
+Before=${UNIT_NAME}
+
+[Service]
+Type=simple
+# The helper must survive and control the business unit while it is stopped.
+# It is root-owned; every application command is launched with the registered
+# RUN_USER identity by the updater adapter.
+User=root
+Group=root
+WorkingDirectory=${ROOT}
+Environment=UVP_UPGRADE_BUSINESS_UID=$(id -u "$RUN_USER")
+Environment=UVP_UPGRADE_BUSINESS_GID=$(id -g "$RUN_USER")
+Environment=UVP_UPGRADER_ALLOWED_UID=$(id -u "$RUN_USER")
+# 前台 exec 到助手，避免 Type=simple 只跟踪到已经退出的后台启动脚本。
+ExecStart=/bin/bash "${CTL}" serve-updater
+Restart=on-failure
+RestartSec=3s
+TimeoutStartSec=30s
+TimeoutStopSec=45s
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+install -m 0644 "$TMP_UPDATER_UNIT" "$UPDATER_UNIT_PATH"
+log "已写入独立升级助手单元：${UPDATER_UNIT_PATH}"
+
 # --------------------------------------------------- 生效 + 开机自启 ----
 systemctl daemon-reload
 
+systemctl enable "$UPDATER_UNIT_NAME" 2>&1 | sed 's/^/    /' || fail "升级助手 enable 失败"
 systemctl enable "$UNIT_NAME" 2>&1 | sed 's/^/    /' || fail "systemctl enable 失败"
 log "已设为开机自启"
+
+systemctl start "$UPDATER_UNIT_NAME" 2>&1 | sed 's/^/    /' || fail "升级助手启动失败"
 
 if systemctl is-active --quiet "$UNIT_NAME" 2>/dev/null; then
   log "服务当前处于运行中，单元文件已更新 —— 让改动生效：systemctl restart ${UNIT_NAME}"

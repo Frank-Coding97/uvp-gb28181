@@ -16,6 +16,17 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
+# 稳定入口位于安装根；升级后 current 指向 releases/<task_id>，程序和随包
+# 依赖从活动版本读取，config/data/logs/run 仍固定在安装根，避免切版本丢数据。
+ACTIVE_ROOT="$ROOT"
+if [ -L "$ROOT/current" ]; then
+  ACTIVE_ROOT="$(readlink -f "$ROOT/current" 2>/dev/null || true)"
+  if [ -z "$ACTIVE_ROOT" ]; then
+    printf '[uvp][ERROR] current 版本指针不可解析\n' >&2
+    exit 1
+  fi
+fi
+
 # ------------------------------------------------------------ 输出样式 ----
 #
 # ⛔⛔ 颜色只在**交互终端**下开。输出被重定向到文件、经管道、或进 systemd journal
@@ -72,8 +83,8 @@ _render_detail_block() {
 #   用上下两条等长横线做边界，中间行不做右对齐 —— 怎么换都不会歪。
 print_banner() {
   local ver="" title
-  if [ -f "$ROOT/version.json" ]; then
-    ver="$(grep -m1 '"version"' "$ROOT/version.json" 2>/dev/null | cut -d'"' -f4 || true)"
+  if [ -f "$ACTIVE_ROOT/version.json" ]; then
+    ver="$(grep -m1 '"version"' "$ACTIVE_ROOT/version.json" 2>/dev/null | cut -d'"' -f4 || true)"
   fi
   title="UVP-GB28181  统一视频接入平台"
   if [ -n "$ver" ]; then title="$title  版本号 v$ver"; fi
@@ -184,12 +195,14 @@ print_port_plan() {
 print_start_summary() {
   local lan lan_url local_url
   local scheme="https"
-  [ -x "$NGINX_BIN" ] || scheme="http"
+  [ -x "$NGINX_BIN" ] && [ "$NGINX_HTTPS_ENABLED" = "1" ] || scheme="http"
+  local plain_port="$NGINX_HTTP_PORT"
+  [ -x "$NGINX_BIN" ] || plain_port="$HTTP_PORT"
 
   if [ "$scheme" = "https" ]; then
     local_url="https://127.0.0.1:${NGINX_HTTPS_PORT}"
   else
-    local_url="http://127.0.0.1:${HTTP_PORT}"
+    local_url="http://127.0.0.1:${plain_port}"
   fi
 
   printf '%s[uvp]%s 启动完成\n' "$C_TAG" "$C_RST"
@@ -199,7 +212,7 @@ print_start_summary() {
     if [ "$scheme" = "https" ]; then
       lan_url="https://${lan}:${NGINX_HTTPS_PORT}"
     else
-      lan_url="http://${lan}:${HTTP_PORT}"
+      lan_url="http://${lan}:${plain_port}"
     fi
     ok "管理页面  ${lan_url}"
     det "  · 本机访问  ${local_url}"
@@ -207,7 +220,16 @@ print_start_summary() {
     ok "管理页面  ${local_url}"
     det "  · 未识别到对外网卡地址，其它电脑请用本机 IP 访问"
   fi
-  det "  · 登录账号  admin（密码见交付说明，登录后请立即修改）"
+  local demo_pw=""
+  if [ -n "$PY_BIN" ]; then
+    demo_pw="$(read_conf_scalar demoaccount defaultpassword 2>/dev/null || true)"
+  fi
+  if [ -n "$demo_pw" ]; then
+    det "  · 登录账号  admin / ${demo_pw}（登录后请立即修改）"
+  else
+    # ⛔ 读不到就**不编**一个口令出来：只说"见交付说明"（包的 README 里写着）。
+    det "  · 登录账号  admin（密码见 README/交付说明，登录后请立即修改）"
+  fi
   return 0
 }
 
@@ -220,15 +242,21 @@ print_start_summary() {
 #   data/      可写数据（SQLite / Redis / 运行期密钥）
 #   logs/      全部日志（含 app/ 后端业务日志、zlm/ ZLM 自带滚动日志）
 #   resource/  只读静态资源（前端产物 + 上传目录 + 建库 SQL）
-BIN="$ROOT/bin"
-VENDOR="$ROOT/vendor"
+BIN="$ACTIVE_ROOT/bin"
+VENDOR="$ACTIVE_ROOT/vendor"
 DATA="$ROOT/data"
 LOGS="$ROOT/logs"
 RUN="$ROOT/run"
 CONF="$ROOT/config/config.yml"
+RESOURCE="$ACTIVE_ROOT/resource"
 
 BACKEND_PID_FILE="$RUN/backend.pid"
 REDIS_PID_FILE="$RUN/redis.pid"
+UPDATER_PID_FILE="$RUN/updater.pid"
+UPDATER_SOCKET="$RUN/updater.sock"
+UPDATER_STATE="$ROOT/updater-state"
+UPDATER_GATE_PATH="$ROOT/updater-gate/gate.json"
+UPDATER_REGISTRATION="$ROOT/config/updater-registration.json"
 
 # ------------------------------------------------------ 端口（可在目标机改）----
 # ⛔⛔ 端口必须能在**目标机上**改，而不是只在打包时。
@@ -371,6 +399,120 @@ migrate_legacy_layout() {
 
 migrate_legacy_layout
 
+upgrade_password_env_name() {
+  local configured=""
+  if [ -z "${UVP_UPGRADE_DB_PASSWORD_ENV:-}" ]; then
+    configured="$(read_env_file UVP_UPGRADE_DB_PASSWORD_ENV 2>/dev/null || true)"
+  fi
+  printf '%s' "${UVP_UPGRADE_DB_PASSWORD_ENV:-${configured:-UVP_UPGRADE_DB_PASSWORD}}"
+}
+
+upgrade_external_backup_max_bytes() {
+  local configured=""
+  if [ -z "${UVP_UPGRADE_EXTERNAL_BACKUP_MAX_BYTES:-}" ]; then
+    configured="$(read_env_file UVP_UPGRADE_EXTERNAL_BACKUP_MAX_BYTES 2>/dev/null || true)"
+  fi
+  printf '%s' "${UVP_UPGRADE_EXTERNAL_BACKUP_MAX_BYTES:-${configured:-8589934592}}"
+}
+
+ensure_updater_registration() {
+  [ -x "$UPDATER_BIN" ] || fail "找不到升级助手：$UPDATER_BIN"
+  mkdir -p "$ROOT/config" "$UPDATER_STATE" "$RUN"
+  chmod 0700 "$UPDATER_STATE" "$RUN"
+  local password_env max_backup_bytes
+  password_env="$(upgrade_password_env_name)"
+  max_backup_bytes="$(upgrade_external_backup_max_bytes)"
+  case "$password_env" in
+    ''|[!A-Za-z_]*|*[!A-Za-z0-9_]*) fail "外置数据库口令环境变量名无效：$password_env" ;;
+  esac
+  local business_uid business_gid allowed_uid
+  business_uid="${UVP_UPGRADE_BUSINESS_UID:-$(id -u "${SUDO_USER:-$(id -un)}")}" \
+    || fail "无法解析业务用户 UID"
+  business_gid="${UVP_UPGRADE_BUSINESS_GID:-$(id -g "${SUDO_USER:-$(id -un)}")}" \
+    || fail "无法解析业务用户 GID"
+  allowed_uid="${UVP_UPGRADER_ALLOWED_UID:-$business_uid}"
+  [[ "$business_uid" =~ ^[0-9]+$ && "$business_gid" =~ ^[0-9]+$ && "$allowed_uid" =~ ^[0-9]+$ ]] \
+    || fail "升级助手业务 UID/GID 必须是数字"
+  "$UPDATER_BIN" register \
+    --config-dir "$ROOT/config" \
+    --registration "$UPDATER_REGISTRATION" \
+    --deployment standalone \
+    --root "$ROOT" \
+    --state "$UPDATER_STATE" \
+    --control "$ROOT/uvp-gb28181-ctl.sh" \
+    --allow-uid "$allowed_uid" \
+    --business-uid "$business_uid" \
+    --business-gid "$business_gid" \
+    --password-env "$password_env" \
+    --external-backup-max-bytes "$max_backup_bytes" \
+    || fail "无法生成升级助手注册文件"
+}
+
+prepare_updater() {
+  ensure_updater_registration
+  # 外置数据库备份口令只通过环境变量交给独立助手；默认不从
+  # config.yml 读取并导出，避免升级助手启动时把配置口令带入进程环境。
+  # systemd 可用 EnvironmentFile 注入，绿色包也可在 config.env 中显式设置。
+  local password_env; password_env="$(upgrade_password_env_name)"
+  case "$password_env" in
+    ''|[!A-Za-z_]*|*[!A-Za-z0-9_]*) fail "外置数据库口令环境变量名无效：$password_env" ;;
+  esac
+  if [ -z "$(printenv "$password_env" 2>/dev/null || true)" ]; then
+    local configured_password; configured_password="$(read_env_file "$password_env")"
+    if [ -n "$configured_password" ]; then
+      export "$password_env=$configured_password"
+    fi
+  fi
+}
+
+start_updater() {
+  # systemd starts the root-owned helper in its own unit before the business
+  # unit. A non-root business process must reuse that socket and never try to
+  # rewrite the administrator-owned registration or state directory.
+  if [ -S "$UPDATER_SOCKET" ] && [ -f "$UPDATER_PID_FILE" ]; then
+    local running_pid; running_pid="$(cat "$UPDATER_PID_FILE" 2>/dev/null || true)"
+    if [ -n "$running_pid" ] && kill -0 "$running_pid" 2>/dev/null; then
+      log "升级助手已在运行"
+      return 0
+    fi
+  fi
+  prepare_updater
+  if [ -S "$UPDATER_SOCKET" ] && [ -f "$UPDATER_PID_FILE" ]; then
+    local pid; pid="$(cat "$UPDATER_PID_FILE" 2>/dev/null || true)"
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      log "升级助手已在运行"
+      return 0
+    fi
+  fi
+  rm -f "$UPDATER_SOCKET"
+  ( "$UPDATER_BIN" serve --socket "$UPDATER_SOCKET" --state "$UPDATER_STATE" --registration "$UPDATER_REGISTRATION" >"$LOGS/updater.log" 2>&1 & echo $! > "$UPDATER_PID_FILE" ) >/dev/null 2>&1
+  for _ in $(seq 1 30); do
+    [ -S "$UPDATER_SOCKET" ] && return 0
+    sleep 0.1
+  done
+  tail -30 "$LOGS/updater.log" >&2 || true
+  fail "升级助手未能启动"
+}
+
+# serve_updater is the systemd entrypoint. It intentionally replaces the
+# shell so Type=simple tracks the helper itself instead of a launcher that
+# has already exited after backgrounding it.
+serve_updater() {
+  prepare_updater
+  if [ -S "$UPDATER_SOCKET" ]; then
+    local pid=""
+    if [ -f "$UPDATER_PID_FILE" ]; then
+      pid="$(cat "$UPDATER_PID_FILE" 2>/dev/null || true)"
+    fi
+    if [ -n "$pid" ] && [ "$pid" != "$$" ] && kill -0 "$pid" 2>/dev/null; then
+      fail "升级助手已在运行（PID ${pid}）"
+    fi
+    rm -f "$UPDATER_SOCKET"
+  fi
+  printf '%s\n' "$$" > "$UPDATER_PID_FILE"
+  exec "$UPDATER_BIN" serve --socket "$UPDATER_SOCKET" --state "$UPDATER_STATE" --registration "$UPDATER_REGISTRATION"
+}
+
 # ⛔ 端口规划：整段 51000-51064 **连续无空洞**（老板 2026-10-10 定）。
 #   顺序：对外在前（nginx → ZLM），内部随后，RTP 动态段收尾，末尾 51064 给 SIP。
 #   ⚠️ SIP（51064）不在下面的预检清单里：它由**引导页**录入并写进 gb_sip_config 表，
@@ -417,6 +559,7 @@ REDIS_LOG="$LOGS/redis.log"
 
 # ---- 自家程序 / 第三方运行时（2026-10-10 起分家）----
 SERVER_BIN="$BIN/uvp-server"
+UPDATER_BIN="$ROOT/updater/uvp-updater"
 REDIS_BIN="$VENDOR/redis/redis-server"
 REDIS_CLI="$VENDOR/redis/redis-cli"
 
@@ -436,35 +579,44 @@ ZLM_NATIVE_LOG_DIR="$LOGS/zlm"
 #   而真实原因是端口没写进配置文件。⚠️ 实测踩过这个（设了 18081 仍起不来）。
 #   ⇒ sync_zlm_ports_ini() 负责写进去。
 ZLM_INI="$ZLM_DIR/config.ini"
-ZLM_HTTP_PORT="${UVP_ZLM_HTTP_PORT:-$(read_port_env UVP_ZLM_HTTP_PORT)}"
+ZLM_HTTP_PORT="${UVP_ZLM_HTTP_PORT:-$(read_env_file UVP_ZLM_HTTP_PORT)}"
 # ⛔ 默认值一律选**高位端口**，不用 ZLM 自带的 80/443/554。
 #   1024 以下需要 CAP_NET_BIND_SERVICE，非 root 起不来（实测：
 #   「Listen on :: 554 failed: permission denied」）。
 #   绿色包的运行用户就是普通用户，所以默认值必须避开特权区。
 ZLM_HTTP_PORT="${ZLM_HTTP_PORT:-51004}"
-ZLM_SSL_PORT="${UVP_ZLM_SSL_PORT:-$(read_port_env UVP_ZLM_SSL_PORT)}"
+ZLM_SSL_PORT="${UVP_ZLM_SSL_PORT:-$(read_env_file UVP_ZLM_SSL_PORT)}"
 ZLM_SSL_PORT="${ZLM_SSL_PORT:-51007}"
-ZLM_RTSP_PORT="${UVP_ZLM_RTSP_PORT:-$(read_port_env UVP_ZLM_RTSP_PORT)}"
+ZLM_RTSP_PORT="${UVP_ZLM_RTSP_PORT:-$(read_env_file UVP_ZLM_RTSP_PORT)}"
 ZLM_RTSP_PORT="${ZLM_RTSP_PORT:-51005}"
 # 其余对外段也统一到规划段（PORTS.md）
-ZLM_RTMP_PORT="${UVP_ZLM_RTMP_PORT:-51006}"
-ZLM_RTC_PORT="${UVP_ZLM_RTC_PORT:-51008}"
+ZLM_RTMP_PORT="${UVP_ZLM_RTMP_PORT:-$(read_env_file UVP_ZLM_RTMP_PORT)}"
+ZLM_RTMP_PORT="${ZLM_RTMP_PORT:-51006}"
+ZLM_RTC_PORT="${UVP_ZLM_RTC_PORT:-$(read_env_file UVP_ZLM_RTC_PORT)}"
+ZLM_RTC_PORT="${ZLM_RTC_PORT:-51008}"
 # ⛔ rtp_proxy 端口必须 = RTP 动态段的起点（同一个值，改一个必须改另一个）
-ZLM_RTP_PROXY_PORT="${UVP_ZLM_RTP_PROXY_PORT:-51014}"
+ZLM_RTP_PROXY_PORT="${UVP_ZLM_RTP_PROXY_PORT:-$(read_env_file UVP_ZLM_RTP_PROXY_PORT)}"
+ZLM_RTP_PROXY_PORT="${ZLM_RTP_PROXY_PORT:-51014}"
 # ⛔⛔ RTP 动态端口段必须改！ZLM 默认是 49152-65535，那是 Linux 的
 #   **临时端口范围**（客户端出站 connect 随机占用它）⇒ 两者抢端口，
 #   表现为「偶发 bind 失败 / 偶发推流失败」，重启就好、复现极难。
 # ⭐ 段长 = 默认 50 个（UDP+TCP 成对占用 ⇒ 50 路并发收流）；不够时改这个键放大，
 #   但**注意别越过 51063**（51064 是 SIP 预留位，见 PORTS.md）。
-ZLM_RTP_RANGE="${UVP_ZLM_RTP_RANGE:-51014-51063}"
+ZLM_RTP_RANGE="${UVP_ZLM_RTP_RANGE:-$(read_env_file UVP_ZLM_RTP_RANGE)}"
+ZLM_RTP_RANGE="${ZLM_RTP_RANGE:-51014-51063}"
 # WebRTC 信令（键名不是 port，按"段名+port"匹配抓不到，实测漏掉导致 ZLM 起不来）
-ZLM_SIGNALING_PORT="${UVP_ZLM_SIGNALING_PORT:-51009}"
-ZLM_SIGNALING_SSL_PORT="${UVP_ZLM_SIGNALING_SSL_PORT:-51010}"
+ZLM_SIGNALING_PORT="${UVP_ZLM_SIGNALING_PORT:-$(read_env_file UVP_ZLM_SIGNALING_PORT)}"
+ZLM_SIGNALING_PORT="${ZLM_SIGNALING_PORT:-51009}"
+ZLM_SIGNALING_SSL_PORT="${UVP_ZLM_SIGNALING_SSL_PORT:-$(read_env_file UVP_ZLM_SIGNALING_SSL_PORT)}"
+ZLM_SIGNALING_SSL_PORT="${ZLM_SIGNALING_SSL_PORT:-51010}"
 # SRT / onvif：容器默认 9000/3702 在目标机上极易被占，一并挪进规划段
-ZLM_SRT_PORT="${UVP_ZLM_SRT_PORT:-51011}"
-ZLM_ONVIF_PORT="${UVP_ZLM_ONVIF_PORT:-51012}"
+ZLM_SRT_PORT="${UVP_ZLM_SRT_PORT:-$(read_env_file UVP_ZLM_SRT_PORT)}"
+ZLM_SRT_PORT="${ZLM_SRT_PORT:-51011}"
+ZLM_ONVIF_PORT="${UVP_ZLM_ONVIF_PORT:-$(read_env_file UVP_ZLM_ONVIF_PORT)}"
+ZLM_ONVIF_PORT="${ZLM_ONVIF_PORT:-51012}"
 # STUN/TURN（icePort / iceTcpPort）：容器默认 3478，UDP 上极易与其它服务冲突
-ZLM_ICE_PORT="${UVP_ZLM_ICE_PORT:-51013}"
+ZLM_ICE_PORT="${UVP_ZLM_ICE_PORT:-$(read_env_file UVP_ZLM_ICE_PORT)}"
+ZLM_ICE_PORT="${ZLM_ICE_PORT:-51013}"
 # ⛔⛔ TURN 一律**关掉**（`[rtc] enableTurn=0`，老板 2026-10-10 定）。
 #   不是"用不到"，而是**根本没接上**：平台的 ICE 下发只有 STUN 一条路 ——
 #   `app/gb28181/talk/ice.go` 的 BuildICEServers() 只构造 `"stun:" + endpoint`
@@ -525,7 +677,9 @@ check_ports_free() {
   }
 
   # 顺序与 PORTS.md 的规划段一致（51000-51064 连续无空洞；51064 SIP 由引导页自检）
-  _check_one 51000 tcp "HTTPS（浏览器访问管理页面）"     NGINX_HTTPS_PORT
+  if [ "$NGINX_HTTPS_ENABLED" = "1" ]; then
+    _check_one 51000 tcp "HTTPS（浏览器访问管理页面）" NGINX_HTTPS_PORT
+  fi
   _check_one 51001 tcp "HTTP（跳 HTTPS + 保留明文 API）" NGINX_HTTP_PORT
   _check_one 51002 tcp "后端 HTTP（API + 扫码接入地址）"  HTTP_PORT
   _check_one 51003 tcp "Redis（仅回环）"                  REDIS_PORT
@@ -824,7 +978,7 @@ start_backend() {
   fi
   [ -x "$SERVER_BIN" ] || fail "找不到可执行的 $SERVER_BIN"
   [ -f "$CONF" ]    || fail "找不到配置文件 $CONF"
-  [ -f "$ROOT/version.json" ] || fail "找不到 version.json（后端启动会读它，缺了日志里全是噪音）"
+  [ -f "$ACTIVE_ROOT/version.json" ] || fail "找不到 version.json（后端启动会读它，缺了日志里全是噪音）"
 
   # ---- 把「后端要读的环境变量」从 config.env 显式导出到子进程 ----
   #
@@ -855,6 +1009,11 @@ start_backend() {
   if [ -n "$openapi_master_key" ]; then
     export "$OPENAPI_MASTER_KEY_ENV=$openapi_master_key"
   fi
+  export UVP_STANDALONE_ROOT="$ROOT"
+  export UVP_VERSION_PATH="$ACTIVE_ROOT/version.json"
+  export UVP_UPDATER_SOCKET="$UPDATER_SOCKET"
+  export UVP_UPDATER_STATE="$UPDATER_STATE"
+  export UVP_UPDATER_GATE_PATH="$UPDATER_GATE_PATH"
 
   # ⛔ 绝不能关掉子 shell 的 stdio：`uvp-gb28181-ctl.sh start | tail` 这类用法会永远挂住
   #   （孤儿子 shell 攥着管道的写端），看起来像「启动卡死」。实测挂过 10 分钟以上。
@@ -888,6 +1047,22 @@ stop_backend() {
   #   连接。SIGKILL 会留下 -wal/-shm（下次启动能恢复，但期间数据处于
   #   「已提交、未 checkpoint」状态，出问题时难排查）。
   stop_by_pidfile "$BACKEND_PID_FILE" "$SERVER_BIN" "后端"
+}
+
+migrate_backend() {
+  check_preconditions
+  [ -x "$SERVER_BIN" ] || fail "找不到后端可执行文件：$SERVER_BIN"
+  # Keep database migration in the application migration runner. The updater
+  # invokes this fixed subcommand only after the service has stopped; it never
+  # accepts SQL, paths, or command text from the upgrade request.
+  ensure_database
+  sync_ports_into_config
+  export UVP_STANDALONE_ROOT="$ROOT"
+  export UVP_VERSION_PATH="$ACTIVE_ROOT/version.json"
+  export UVP_UPDATER_STATE="$UPDATER_STATE"
+  export UVP_UPDATER_GATE_PATH="$UPDATER_GATE_PATH"
+  log "执行应用迁移"
+  "$SERVER_BIN" -migrate-up
 }
 
 # ---------------------------------------------------------------- 入口 ----
@@ -962,16 +1137,30 @@ _python_too_old() {
 # @BACKEND_PORT@（二维码里填的就是它，App 因此完全不碰 TLS）。
 NGINX_DIR="$VENDOR/nginx"
 NGINX_BIN="$NGINX_DIR/sbin/nginx"
-NGINX_CONF="$NGINX_DIR/conf/nginx.conf"
+NGINX_CONF="$RUN/nginx.conf"
 NGINX_PID_FILE="$RUN/nginx.pid"
 NGINX_LOG="$LOGS/nginx.log"
 NGINX_CONF_TEMPLATE="$NGINX_DIR/conf/nginx.conf.template"
-NGINX_CRT="$NGINX_DIR/conf/uvp.crt"
-NGINX_KEY="$NGINX_DIR/conf/uvp.key"
+# Certificates belong to the installation, not an interchangeable release.
+NGINX_CRT="$ROOT/vendor/nginx/conf/uvp.crt"
+NGINX_KEY="$ROOT/vendor/nginx/conf/uvp.key"
 
 # HTTPS 端口：给客户换端口时只改这里（同时也在 config.env 里）
 NGINX_HTTPS_PORT="${UVP_HTTPS_PORT:-$(read_port_env UVP_HTTPS_PORT)}"
 NGINX_HTTPS_PORT="${NGINX_HTTPS_PORT:-51000}"
+NGINX_HTTPS_ENABLED=1
+if [ -f "$DATA/https/settings.json" ]; then
+  [ -n "$PY_BIN" ] || fail "读取 HTTPS 配置需要 python3"
+  _https_state="$("$PY_BIN" - "$DATA/https/settings.json" <<'HTTPS_STATE'
+import json, sys
+s = json.load(open(sys.argv[1], encoding='utf-8'))
+if type(s.get('enabled')) is not bool or type(s.get('port')) is not int or not 1 <= s['port'] <= 65535:
+    raise ValueError('invalid HTTPS settings')
+print(int(s['enabled']), s['port'])
+HTTPS_STATE
+  )" || fail "HTTPS 配置文件无效"
+  read -r NGINX_HTTPS_ENABLED NGINX_HTTPS_PORT <<< "$_https_state"
+fi
 # ⛔⛔ 变量名必须与后端的 UVP_HTTP_PORT 区分开。实测踩过：nginx 的明文端口
 #   曾经也叫 UVP_HTTP_PORT，于是后端设 8390 时nginx 也去 bind 8390 ⇒
 #   `bind() to 0.0.0.0:8390 failed: Address already in use`，
@@ -1044,11 +1233,14 @@ render_nginx_conf() {
   #   别的行），而带空格的 `listen      443 ssl;` 又匹配不上 ⇒ 一行都没换对。
   #   模板里端口已经写成 @HTTPS_PORT@ / @PLAIN_HTTP_PORT@，这里只负责填值。
   sed -e "s|@ROOT@|$ROOT|g" \
+      -e "s|@ACTIVE_ROOT@|$ACTIVE_ROOT|g" \
       -e "s|@BACKEND_PORT@|$HTTP_PORT|g" \
       -e "s|@HTTPS_PORT@|$NGINX_HTTPS_PORT|g" \
       -e "s|@PLAIN_HTTP_PORT@|$NGINX_HTTP_PORT|g" \
       -e "s|@NGINX_WORKER_DIRECTIVE@|$worker_line|g" \
       "$NGINX_CONF_TEMPLATE" > "$NGINX_CONF"
+  "$BIN/uvp-setup" https-render --root "$ROOT" || fail "应用 HTTPS 配置失败"
+
 
   # ⛔ 渲染后自检：模板里不该再有 @...@。有就是漏了某个占位符，
   #   而 nginx 会把它当成一个畸形的路径/指令，报的错与真因完全无关。
@@ -1071,7 +1263,7 @@ render_nginx_conf() {
 #   写在启动输出里是噪音）；失败才报，且必须先试 nginx 再报。
 ensure_self_signed_cert() {
   [ -f "$NGINX_CRT" ] && [ -f "$NGINX_KEY" ] && return 0
-  mkdir -p "$NGINX_DIR/conf"
+  mkdir -p "$(dirname "$NGINX_CRT")"
   if command -v openssl >/dev/null 2>&1; then
     # ⛔⛔ `-addext` 是 **OpenSSL 1.1.1+** 才有的选项，而 Ubuntu 16.04 自带的是
     #   1.0.2 ⇒ 直接带上它会让整条命令**失败**（"unknown option -addext"），
@@ -1097,17 +1289,11 @@ ensure_self_signed_cert() {
   return 1
 }
 
-# ensure_tls_material 准备 TLS 证书：**nginx 与 ZLM 共用同一套**。
-#
-# ⛔⛔ 为什么 ZLM 也必须拿到证书：ZLM 的 HTTPS(51007) 与 WebRTC 信令 WSS(51010)
-#   都要加载证书，它只从命令行 `-s/--ssl` 指定的**单个 PEM** 读（默认值
-#   `exeDir()/default.pem`）—— 而绿色包里**根本没带 default.pem**
-#   ⇒ 不给它，这两个端口虽然会 listen 但握手失败，WebRTC(HTTPS 场景)直接不可用。
-#   ⇒ 这里把 nginx 的 crt+key 合成一份 PEM 给 ZLM，两边同一套证书（换真证书时
-#     只要替换 vendor/nginx/conf/uvp.crt|key，ZLM 下次启动自动跟随）。
-# ⛔ ZLM 的 `-s` 只认**单个文件**（私钥与证书在同一个 PEM 里），不能分别给
-#   .crt / .key。拼接顺序照 ZLM 自带 default.pem：**先私钥、后证书**。
+# 首次初始化时由 Nginx 证书合成 ZLM 独立 PEM（私钥在前）。
+# 后续证书更新由 HTTPS 管理功能显式同步，不在普通启动时自动覆盖。
 ensure_tls_material() {
+  # 首次初始化后独立保存，页面未选择同步时，重启不得覆盖 ZLM。
+  [ -s "$ZLM_SSL_PEM" ] && return 0
   ensure_self_signed_cert || return 1
   [ -f "$NGINX_KEY" ] && [ -f "$NGINX_CRT" ] || return 0
 
@@ -1149,7 +1335,9 @@ nginx_healthy() {
   #   症状极具误导性：stop 的退出码是 1、**一行输出都没有**，
   #   而 ZLM 还在跑 —— 看起来像"stop 失败了"，实际是"stop 把自己杀了"。
   #   只有用探针插进 || 分支（发现 close 之后那句没打）才定位到。
-  (exec 3<>"/dev/tcp/127.0.0.1/$NGINX_HTTPS_PORT") 2>/dev/null || {
+  local entry_port="$NGINX_HTTPS_PORT"
+  [ "$NGINX_HTTPS_ENABLED" = "1" ] || entry_port="$NGINX_HTTP_PORT"
+  (exec 3<>"/dev/tcp/127.0.0.1/$entry_port") 2>/dev/null || {
     ( exec 3<&- 3>&- ) 2>/dev/null || true
     return 1
   }
@@ -1165,12 +1353,17 @@ start_nginx() {
     log "⚠️  未找到 nginx（${NGINX_BIN}），跳过。系统仍可通过 http://127.0.0.1:${HTTP_PORT} 访问"
     return 0
   fi
+
+  # Upgrade archives can carry a rendered config from their build/install path.
+  # Refresh it before the health check so a reused process cannot preserve stale
+  # absolute paths for the next restart.
+  render_nginx_conf || return 0
+
   if nginx_healthy; then
     log "nginx 已在运行（端口 ${NGINX_HTTPS_PORT}）"
     return 0
   fi
 
-  render_nginx_conf || return 0
   ensure_self_signed_cert || return 0
 
   # ⛔ 先 -t 校验再起：nginx 配置写错时的表现是「反复重启、端口时有时无」，
@@ -1185,7 +1378,7 @@ start_nginx() {
 
   for _ in $(seq 1 50); do
     if nginx_healthy; then
-      ok "nginx 启动成功（HTTPS ${NGINX_HTTPS_PORT}，前端已托管）"
+      ok "nginx 启动成功（HTTPS 开启=${NGINX_HTTPS_ENABLED}，HTTP ${NGINX_HTTP_PORT}，HTTPS ${NGINX_HTTPS_PORT}）"
       return 0
     fi
     sleep 0.2
@@ -1626,7 +1819,7 @@ stop_zlm() {
 #   表现是"文件在、库是空的"。
 ensure_database() {
   local db_path="${UVP_DB_PATH:-./data/uvp.db}"
-  local baseline="$ROOT/resource/baseline/baseline.sql"
+  local baseline="$RESOURCE/baseline/baseline.sql"
 
   [ -f "$baseline" ] || fail "缺少建库脚本 ${baseline}（包不完整？请重新解压）"
 
@@ -2031,10 +2224,18 @@ sync_ports_into_config() {
     printf 'UVP_HTTPS_PORT=%s\nUVP_NGINX_HTTP_PORT=%s\n' "${NGINX_HTTPS_PORT}" "${NGINX_HTTP_PORT}"
     # 记录"这四个值不是用户设的" ⇒ 下次读到它们时按默认值处理。
     # ⛔ 环境变量显式传入时（${UVP_*}非空）才算用户设置，要写 1。
-    [ -n "${UVP_HTTP_PORT:-}" ]        && printf 'UVP_USER_SET_UVP_HTTP_PORT=1\n'
-    [ -n "${UVP_REDIS_PORT:-}" ]       && printf 'UVP_USER_SET_UVP_REDIS_PORT=1\n'
-    [ -n "${UVP_HTTPS_PORT:-}" ]       && printf 'UVP_USER_SET_UVP_HTTPS_PORT=1\n'
-    [ -n "${UVP_NGINX_HTTP_PORT:-}" ]  && printf 'UVP_USER_SET_UVP_NGINX_HTTP_PORT=1\n'
+    local port_key
+    for port_key in UVP_HTTP_PORT UVP_REDIS_PORT UVP_HTTPS_PORT UVP_NGINX_HTTP_PORT; do
+      # A persisted explicit choice remains explicit across helper restarts.
+      if [ -n "${!port_key:-}" ] || [ "$(read_env_file "UVP_USER_SET_$port_key")" = "1" ]; then
+        printf 'UVP_USER_SET_%s=1\n' "$port_key"
+      fi
+    done
+    local zlm_key runtime_key
+    for zlm_key in HTTP_PORT SSL_PORT RTSP_PORT RTMP_PORT RTC_PORT RTP_PROXY_PORT RTP_RANGE SIGNALING_PORT SIGNALING_SSL_PORT SRT_PORT ONVIF_PORT ICE_PORT; do
+      runtime_key="ZLM_$zlm_key"
+      printf 'UVP_ZLM_%s=%s\n' "$zlm_key" "${!runtime_key}"
+    done
   } > "$ENV_FILE.new"
   # ⛔⛔⛔ 必须把**非本函数托管的键原样搬回去**，否则用户手工加的键会被无声清掉。
   #
@@ -2052,14 +2253,13 @@ sync_ports_into_config() {
   local preserved
   preserved="$(mktemp "$ROOT/config/.config.env.preserve.XXXXXX")"
   if [ -f "$ENV_FILE" ]; then
-    grep -vE '^(UVP_HTTP_PORT|UVP_REDIS_PORT|UVP_HTTPS_PORT|UVP_NGINX_HTTP_PORT|UVP_USER_SET_UVP_HTTP_PORT|UVP_USER_SET_UVP_REDIS_PORT|UVP_USER_SET_UVP_HTTPS_PORT|UVP_USER_SET_UVP_NGINX_HTTP_PORT)=' "$ENV_FILE" > "$preserved" || true
+    grep -vE '^(UVP_HTTP_PORT|UVP_REDIS_PORT|UVP_HTTPS_PORT|UVP_NGINX_HTTP_PORT|UVP_USER_SET_UVP_HTTP_PORT|UVP_USER_SET_UVP_REDIS_PORT|UVP_USER_SET_UVP_HTTPS_PORT|UVP_USER_SET_UVP_NGINX_HTTP_PORT|UVP_ZLM_(HTTP_PORT|SSL_PORT|RTSP_PORT|RTMP_PORT|RTC_PORT|RTP_PROXY_PORT|RTP_RANGE|SIGNALING_PORT|SIGNALING_SSL_PORT|SRT_PORT|ONVIF_PORT|ICE_PORT))=' "$ENV_FILE" > "$preserved" || true
   else
     : > "$preserved"
   fi
   cat "$ENV_FILE.new" > "$ENV_FILE"
-  # 追加时先补一个空行，避免用户第一行注释紧贴端口行、可读性差
+  # Preserve the existing separator rather than adding one on every start.
   if [ -s "$preserved" ]; then
-    printf '\n' >> "$ENV_FILE"
     cat "$preserved" >> "$ENV_FILE"
   fi
   rm -f "$ENV_FILE.new" "$preserved"
@@ -2127,6 +2327,199 @@ SYNC_PY
   ok "端口配置已写入 config.env / config.yml"
 }
 
+# ============================================ 忘记登录口令 ⇒ 还原出厂口令 ====
+#
+# 场景：客户装完包、首次登录时把 admin 的口令改成了自己的，后来忘了。
+#   平台上**没有任何自助找回入口**（登录页的「忘记密码」是注释掉的死链；
+#   后端也只有 PUT /users/changeInitialPassword，前提是账号仍处于「待改密」）
+#   ⇒ 唯一出路是把库里的口令写回出厂值。
+#
+# ⛔ 语义与 Windows 包的 `uvp-setup reset-admin` **逐条一致**（那份用 Go 写，
+#   见 server/cmd/uvp-setup/resetadmin.go，两边各有测试）：
+#     ① 口令 = 出厂口令（config.yml 的 server.demoaccount.defaultpassword）；
+#     ② must_change_password 置 1 ⇒ 下次登录强制改密；
+#     ③ 只动指定的那一个账号；不删库、不重建库、不改 status。
+#
+# ⛔⛔ 为什么这里写的是**哈希常量**、而不是现场算 bcrypt：
+#   bcrypt 不在 Python 标准库里 —— Linux 的 crypt 模块只认 $1$/$5$/$6$ 不认 $2a$
+#   （glibc 至今如此），目标机也不保证装了 passlib，而 Windows 有编译好的
+#   uvp-setup.exe 可以用 Go 现场算。所以这里存常量，并用**三道契约锁**保证它不漂移：
+#     · 本文件的 CTL_FACTORY_PASSWORD == config.example.yml 的 demoaccount.defaultpassword
+#     · 本文件的 CTL_FACTORY_HASH     == resource/baseline/baseline.sql 里 admin 的哈希
+#     · 该哈希就是该口令的 bcrypt（Go 侧 password_bootstrap_contract_test.go）
+#   锁在 scripts/standalone-factory-password.test.mjs，任一环漂移立刻红。
+#   运行时再挡一道：config.yml 里那个值一旦不等于常量就**直接拒绝执行** ——
+#   宁可让客户来找我们，也不能把口令重置成一个谁也猜不到的字符串
+#   （"重置完还是登不进去"是最贵的一类故障）。
+CTL_FACTORY_PASSWORD='123456'
+CTL_FACTORY_HASH='$2a$10$bQef.b.0CL9rFokdAdTMIe0J.z1Ub0avdu7lyr3mnrh9FQacYQTuW'
+
+# read_conf_scalar 读 config.yml 里某段（可嵌套）下某个键的标量值（剥引号与行尾注释）。
+# ⛔ 必须按**缩进层级**定位段落：port/host 这类键在 httpserver/redis/zlm/gormv2
+#   多个段下重名，全局第一个命中往往不是你要的那个（本项目反复踩）。
+read_conf_scalar() {
+  local section="$1" key="$2" value=""
+  # ⛔⛔ 本脚本开头是 `set -Eeuo pipefail`：`value="$(cmd)"` 在命令替换**失败时会让整个
+  #   脚本当场退出**（哪怕是赋值语句，它的退出码就是命令替换的退出码）。
+  #   这里要的是"读不到就回空串、由调用方决定怎么办"，所以必须 `|| value=""` 兜住 ——
+  #   否则 config.yml 有任何异常（编码坏、权限不够）都会让 start 静默死在这一行，
+  #   连一句报错都没有。实测踩过：reset-password 报错信息就是这么被吞掉的。
+  value="$("$PY_BIN" - "$CONF" "$section" "$key" <<'CONF_SCALAR_PY'
+import re
+import sys
+
+path, section, key = sys.argv[1], sys.argv[2], sys.argv[3]
+
+
+def cut_comment(value):
+    # 砍掉**引号外**的行尾注释。顺序与下面 strip_quotes 不能反：
+    # 口令里带 # 是合法的（客户完全可能设成 P#ssw0rd），先剥引号就会把它当成
+    # 注释起点、把口令截断 —— 表现是"重置成了半个口令"，没人能猜到。
+    quote = ""
+    for i in range(len(value)):
+        ch = value[i]
+        if quote:
+            if ch == quote:
+                quote = ""
+        elif ch == '"' or ch == "'":
+            quote = ch
+        elif ch == "#":
+            return value[:i]
+    return value
+
+
+def strip_quotes(value):
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and (value[0] == '"' or value[0] == "'"):
+        return value[1:-1]
+    return value
+
+
+lines = open(path, encoding="utf-8").read().split("\n")
+start = -1
+indent = 0
+for i, line in enumerate(lines):
+    t = line.strip()
+    if not t or t.startswith("#"):
+        continue
+    m = re.match(r"^(\s*)" + re.escape(section) + r"\s*:\s*(#.*)?$", line)
+    if m:
+        start = i
+        indent = len(m.group(1))
+        break
+
+if start >= 0:
+    for line in lines[start + 1:]:
+        t = line.strip()
+        if not t or t.startswith("#"):
+            continue
+        # 走到同级或更浅的非注释行 ⇒ 已出段落，停（否则会顺着文件往下把别段的同名键也认了）
+        if len(line) - len(line.lstrip()) <= indent:
+            break
+        m = re.match(r"^" + re.escape(key) + r"\s*:\s*(.*)$", t)
+        if m:
+            print(strip_quotes(cut_comment(m.group(1))))
+            break
+CONF_SCALAR_PY
+)" || value=""
+  printf '%s' "$value"
+}
+
+# reset_admin_password 把某个账号的口令还原成出厂口令，并重新标记「首次登录必须改密」。
+reset_admin_password() {
+  local username="$1"
+  [ -n "$username" ] || username="admin"
+  # ⛔ 与 ensure_database 用**同一个表达式**取库路径（包括这个相对路径）：两个函数
+  #   对"库在哪"必须永远一致，否则会出现"建库建在 A、重置改的是 B"而两边都报成功。
+  local db_path="${UVP_DB_PATH:-./data/uvp.db}"
+
+  printf '\n'
+  check_python
+  [ -f "$db_path" ] || fail "找不到数据库 ${db_path} —— 这台机器还没执行过 start（库里还没有账号）"
+  [ -f "$CONF" ]    || fail "找不到配置文件 ${CONF}"
+
+  local configured
+  configured="$(read_conf_scalar demoaccount defaultpassword)"
+  if [ "$configured" != "$CTL_FACTORY_PASSWORD" ]; then
+    fail "本机 config.yml 的出厂口令（server.demoaccount.defaultpassword）不是本包已知的出厂口令。
+      为避免把口令重置成一个谁也猜不到的字符串，这里**拒绝执行**。
+      请把该值改回 ${CTL_FACTORY_PASSWORD} 后重试；若这台机器的出厂口令确实被改过，
+      请联系我们处理（或参照 README「忘记了登录口令」手工处理）。"
+  fi
+
+  log "重置账号 ${username} 的口令"
+  # ⛔⛔ 两条硬约束（都实测踩过，别改回去）：
+  #   ① 取值必须分两条语句（先声明、再赋值）：写成 `local out="$(...)"` 会把命令替换的
+  #      退出码吞掉（`local` 自己返回 0），于是"库里没有这个账号"也被当成成功。
+  #   ② `|| rc=$?` 不能省：本脚本是 `set -Eeuo pipefail`，而**赋值语句的退出码就是
+  #      命令替换的退出码** ⇒ python 非零退出会让脚本在赋值那一行直接结束，
+  #      下面的 fail 根本没机会打印 —— 现场看到的是"rc=1 且一句话都没有"。
+  local out="" rc=0
+  out="$("$PY_BIN" - "$db_path" "$username" "$CTL_FACTORY_HASH" "$CTL_FACTORY_PASSWORD" 2>&1 <<'RESET_ADMIN_PY'
+import sqlite3
+import sys
+
+db_path, username, factory_hash, factory_password = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+
+# timeout：平台正在运行时会短暂持有写锁，等一会儿比直接报 database is locked 好。
+db = sqlite3.connect(db_path, timeout=15)
+try:
+    rows = db.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='sys_users'").fetchone()
+    if rows[0] != 1:
+        sys.exit("%s 里没有 sys_users 表 —— 这不是本平台的数据库，已放弃（未改动任何数据）" % db_path)
+
+    # 老版本包（2026-10-08 之前出的）的库缺这一列。DDL 与平台侧迁移
+    # resource/database/gb28181/migrations/2026-10-08-initial-admin-password-change-sqlite.sql
+    # **逐字一致** —— 同一列由两处创建，差一个字就会出现"两种包建出的库不一样"。
+    cols = [row[1] for row in db.execute('PRAGMA table_info("sys_users")').fetchall()]
+    if "must_change_password" not in cols:
+        db.execute('ALTER TABLE "sys_users" ADD COLUMN "must_change_password" '
+                   'INTEGER NOT NULL DEFAULT 0 CHECK ("must_change_password" IN (0, 1))')
+
+    cur = db.execute('UPDATE "sys_users" SET "password" = ?, "must_change_password" = 1 '
+                     'WHERE "username" = ?', (factory_hash, username))
+    if cur.rowcount != 1:
+        names = [row[0] for row in db.execute(
+            'SELECT "username" FROM "sys_users" ORDER BY "id" LIMIT 20').fetchall()]
+        sys.exit("库里没有账号 %s（现有账号：%s）—— 未改动任何数据" % (username, ", ".join(names)))
+    db.commit()
+
+    # 落盘后回读：光看 UPDATE 不报错不够（被触发器改写、写错列都会"成功但没生效"），
+    # 而症状是"重置了还是登不进去"，现场只会去怀疑别的地方。
+    row = db.execute('SELECT "password" FROM "sys_users" WHERE "username" = ?', (username,)).fetchone()
+    if row is None or row[0] != factory_hash:
+        sys.exit("回读校验失败：库里的口令与预期不一致（本次写入未生效）")
+finally:
+    db.close()
+
+print("账号 %s 的口令已还原为出厂口令 %s，并已标记「首次登录必须改密」" % (username, factory_password))
+RESET_ADMIN_PY
+)" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    fail "重置口令失败（python 退出码 ${rc}）：
+      ${out}"
+  fi
+  _render_detail_block "$out"
+
+  # 清登录锁定键：连错 3 次（safe.loginlockthreshold）会锁 600 秒，
+  # 现场"重置完登不进去"的第一嫌疑就是它。⛔ 尽力而为：Redis 没起不算失败。
+  local indexdb
+  indexdb="$(read_conf_scalar redis indexdb)"
+  case "$indexdb" in
+    ''|*[!0-9]*) indexdb=1 ;;
+  esac
+  if [ -x "$REDIS_CLI" ]; then
+    if "$REDIS_CLI" -h "$REDIS_BIND" -p "$REDIS_PORT" -n "$indexdb" \
+         del "account_locked:${username}" "login_fail_count:${username}" >/dev/null 2>&1; then
+      det "  · 已清 Redis ${indexdb} 号库的登录锁定键（若有）"
+    else
+      det "  · Redis 未运行/连不上：若登录提示「账户已被锁定」，等 10 分钟再试"
+    fi
+  fi
+  det "  · 改完即可直接登录（无需重启）；仍登不上就执行 ./uvp-gb28181-ctl.sh restart 后再试"
+  return 0
+}
+
 case "${1:-start}" in
   start)
     print_banner
@@ -2163,6 +2556,8 @@ case "${1:-start}" in
     ensure_tls_material || true
 
     log "阶段 3/3 · 启动服务"
+    # 升级助手独立于业务进程，必须先启动；业务 stop 时不停止它。
+    start_updater
     # ⛔ ZLM 要在**后端之前**起来：后端启动后会立即注册 hook、
     #   校验 ZLM 连通性，ZLM 没起就报连接失败。
     start_zlm
@@ -2175,12 +2570,26 @@ case "${1:-start}" in
     print_start_summary
     print_port_plan
     ;;
+  restart-zlm)
+    stop_zlm
+    start_zlm
+    ;;
+  start-updater)
+    start_updater
+    ;;
+  serve-updater)
+    serve_updater
+    ;;
   stop)
     stop_nginx
     stop_backend
     stop_zlm
     stop_redis
+    # 升级助手独立运行，业务 stop/restart 不得杀掉它。
     log "已停止"
+    ;;
+  migrate)
+    migrate_backend
     ;;
   restart)
     "$0" stop; "$0" start
@@ -2190,13 +2599,17 @@ case "${1:-start}" in
     zlm_healthy      && log "ZLM:    运行中（端口 ${ZLM_HTTP_PORT}）" || log "ZLM:    未运行"
     backend_healthy && log "后端:  运行中（端口 ${HTTP_PORT}）"    || log "后端:  未运行"
     if [ -x "$NGINX_BIN" ]; then
-      nginx_healthy  && log "nginx:  运行中（HTTPS ${NGINX_HTTPS_PORT}）" || log "nginx:  未运行"
+      nginx_healthy  && log "nginx:  运行中（HTTPS 开启=${NGINX_HTTPS_ENABLED}，HTTP ${NGINX_HTTP_PORT}，HTTPS ${NGINX_HTTPS_PORT}）" || log "nginx:  未运行"
     else
       log "nginx:  未安装（可直接访问 http://127.0.0.1:${HTTP_PORT}）"
     fi
     ;;
+  reset-password)
+    reset_admin_password "${2:-}"
+    ;;
   *)
-    echo "用法: $0 {start|stop|restart|status}" >&2
+    echo "用法: $0 {start|stop|restart|status|migrate|start-updater|serve-updater|reset-password [账号名]}" >&2
+    echo "  reset-password：忘记了登录口令时，把账号（默认 admin）的口令还原成出厂口令" >&2
     exit 2
     ;;
 esac

@@ -15,6 +15,8 @@ set -Eeuo pipefail
 
 UNIT_NAME="uvp-gb28181.service"
 UNIT_PATH="/etc/systemd/system/${UNIT_NAME}"
+UPDATER_UNIT_NAME="uvp-gb28181-updater.service"
+UPDATER_UNIT_PATH="/etc/systemd/system/${UPDATER_UNIT_NAME}"
 
 log()  { printf '[uvp-service] %s\n' "$*"; }
 fail() { printf '[uvp-service][ERROR] %s\n' "$*" >&2; exit 1; }
@@ -44,10 +46,13 @@ log "停止服务并取消开机自启…"
 #   User= 降权**执行它 ⇒ 不会像「用 root 直接跑 ctl」那样把 logs/app 之类建出 root 属主目录。
 # ⛔ 失败不当致命错误：服务可能本来就处于 failed/dead，仍要继续把注册摘干净。
 systemctl disable --now "$UNIT_NAME" 2>&1 | sed 's/^/    /' || true
+systemctl disable --now "$UPDATER_UNIT_NAME" 2>&1 | sed 's/^/    /' || true
 
 rm -f "$UNIT_PATH"
+rm -f "$UPDATER_UNIT_PATH"
 systemctl daemon-reload
 systemctl reset-failed "$UNIT_NAME" >/dev/null 2>&1 || true
+systemctl reset-failed "$UPDATER_UNIT_NAME" >/dev/null 2>&1 || true
 log "已移除服务单元 ${UNIT_PATH}"
 
 # ------------------------------------------------------------ 残留进程检查 ----
