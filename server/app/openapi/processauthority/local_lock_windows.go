@@ -101,6 +101,10 @@ func localFileIdentity(file *os.File) (string, error) {
 	return fmt.Sprintf("windows:%x:%x:%x", info.VolumeSerialNumber, info.FileIndexHigh, info.FileIndexLow), nil
 }
 
+// Windows volume serial numbers and file indexes are stable across reboots,
+// so the record keeps all three fields and is compared verbatim.
+func localIdentityMatch(recorded, live string) bool { return recorded == live }
+
 // File.Sync flushes the fixed domain record. Directory handles opened for
 // reading cannot be flushed on Windows. Loss of the directory entry must fail
 // DB domain binding on next start, never authorize automatic domain recovery.

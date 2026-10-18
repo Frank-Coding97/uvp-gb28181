@@ -16,6 +16,7 @@ import (
 	openapiauth "uvplatform.com/uvp-gb28181/app/openapi/auth"
 	openapicontrollers "uvplatform.com/uvp-gb28181/app/openapi/controllers"
 	openapiroutes "uvplatform.com/uvp-gb28181/app/openapi/routes"
+	upgrade "uvplatform.com/uvp-gb28181/internal/upgrade"
 )
 
 var userControllers = controllers.NewUserController()                       // 用户控制器
@@ -37,9 +38,25 @@ var sysJobsControllers = controllers.NewSysJobsController()                 // �
 var sysJobResultsControllers = controllers.NewSysJobResultsController()     // 定时任务执行结果控制器
 var sysParamControllers = controllers.NewSysParamController()               // 参数管理控制器
 var sysOnlineUserControllers = controllers.NewSysOnlineUserController()     // 在线用户控制器
+var serviceUpgradeControllers = controllers.NewServiceUpgradeController()   // 服务升级控制器
+
+var httpsManagementControllers = controllers.NewHTTPSManagementController()
+
+var startAutoScheduler = func(ctx context.Context) {
+	serviceUpgradeControllers.StartAutoScheduler(ctx)
+}
+
+// StartAutoScheduler starts the policy-driven upgrade checker after the
+// business runtime has been admitted. Route construction is intentionally
+// side-effect free because candidate validation builds routes before the
+// updater clears its gate.
+func StartAutoScheduler(ctx context.Context) {
+	startAutoScheduler(ctx)
+}
 
 // InitRoutes 初始化路由
 func InitRoutes(engine *gin.Engine) *openapiauth.Gateway {
+	engine.GET(upgrade.RuntimeIdentityPath, serviceUpgradeControllers.UpgradeReadiness)
 	if err := middleware.ConfigureTrustedProxies(engine, app.ConfigYml.GetStringSlice("httpserver.trustedproxies")); err != nil {
 		panic("invalid httpserver.trustedproxies: " + err.Error())
 	}
@@ -120,9 +137,32 @@ func InitRoutes(engine *gin.Engine) *openapiauth.Gateway {
 		protected.Use(middleware.JWTAuthMiddleware())
 		protected.Use(middleware.InitialPasswordMiddleware())
 		protected.Use(middleware.DemoAccountMiddleware()) // 添加演示账号中间件
+		protected.Use(middleware.UpgradeCandidateMiddleware())
 		protected.Use(middleware.CasbinMiddleware())
 		openapiroutes.RegisterAdminRoutes(protected, openAPIAdmin)
 		{
+			httpsManagement := protected.Group("/system/https")
+			httpsManagement.GET("/status", httpsManagementControllers.Status)
+			httpsManagement.POST("/check-port", httpsManagementControllers.CheckPort)
+			httpsManagement.POST("/certificate", httpsManagementControllers.Certificate)
+			httpsManagement.POST("/apply", httpsManagementControllers.Apply)
+
+			serviceUpgrade := protected.Group("/system/upgrade")
+			{
+				serviceUpgrade.GET("/status", serviceUpgradeControllers.Status)
+				serviceUpgrade.GET("/policy", serviceUpgradeControllers.Policy)
+				serviceUpgrade.GET("/migration-plan", serviceUpgradeControllers.MigrationPlan)
+				serviceUpgrade.PUT("/policy", serviceUpgradeControllers.UpdatePolicy)
+				serviceUpgrade.POST("/check", serviceUpgradeControllers.Check)
+				serviceUpgrade.POST("/import", serviceUpgradeControllers.Import)
+				serviceUpgrade.GET("/import/:upload_id", serviceUpgradeControllers.GetImport)
+				serviceUpgrade.POST("/tasks", serviceUpgradeControllers.CreateTask)
+				serviceUpgrade.GET("/tasks/:id", serviceUpgradeControllers.GetTask)
+				serviceUpgrade.POST("/tasks/:id/cancel", serviceUpgradeControllers.CancelTask)
+				serviceUpgrade.POST("/tasks/:id/apply", serviceUpgradeControllers.ApplyTask)
+				serviceUpgrade.POST("/tasks/:id/rollback", serviceUpgradeControllers.RollbackTask)
+			}
+
 			sysOnlineUser := protected.Group("/sysOnlineUser")
 			{
 				sysOnlineUser.GET("/list", sysOnlineUserControllers.List)

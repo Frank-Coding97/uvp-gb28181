@@ -128,7 +128,7 @@ func AcquireLocalLock(path string) (lock *LocalLock, acquireErr error) {
 	var domain localDomain
 	decoder := json.NewDecoder(bytes.NewReader(s.encoded))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&domain) != nil || domain.Version != 1 || len(domain.DomainID) != 32 || domain.FileIdentity != fileIdentity {
+	if decoder.Decode(&domain) != nil || domain.Version != 1 || len(domain.DomainID) != 32 || !localIdentityMatch(domain.FileIdentity, fileIdentity) {
 		return nil, ErrLocalAuthorityUnavailable
 	}
 	raw, err := hex.DecodeString(domain.DomainID)
