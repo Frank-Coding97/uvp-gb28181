@@ -12,9 +12,10 @@ import (
 )
 
 var (
-	ErrInvalidCatalogQuery  = errors.New("cascade catalog: invalid catalog query")
-	ErrUnknownCatalogTarget = errors.New("cascade catalog: unknown catalog target")
-	ErrInvalidCatalogBatch  = errors.New("cascade catalog: invalid catalog batch size")
+	ErrInvalidCatalogQuery      = errors.New("cascade catalog: invalid catalog query")
+	ErrUnknownCatalogTarget     = errors.New("cascade catalog: unknown catalog target")
+	ErrConflictingCatalogTarget = errors.New("cascade catalog: conflicting catalog target")
+	ErrInvalidCatalogBatch      = errors.New("cascade catalog: invalid catalog batch size")
 )
 
 // CatalogResponse is one already-encoded MANSCDP response. Content-Type and
@@ -106,6 +107,47 @@ func PlanCatalogResponsesWithinLimit(profile protocol.Profile, targetID string, 
 	return responses, nil
 }
 
+// ValidateCatalogRequestTargets checks the three target carriers in an
+// inbound MESSAGE before a response is planned. The local platform ID is a
+// container target and therefore does not narrow the XML target; every other
+// target must resolve inside this platform snapshot and agree with the other
+// non-container carriers. Rejecting a mismatch is safer than broadening a
+// query to the union of its targets.
+func ValidateCatalogRequestTargets(snapshot Snapshot, localDeviceID, toID, requestURIID, queryID string) error {
+	local := strings.TrimSpace(localDeviceID)
+	if local == "" {
+		return fmt.Errorf("%w: empty local platform id", ErrInvalidCatalogQuery)
+	}
+	ids := []struct {
+		name  string
+		value string
+	}{
+		{name: "To", value: strings.TrimSpace(toID)},
+		{name: "Request-URI", value: strings.TrimSpace(requestURIID)},
+		{name: "XML DeviceID", value: strings.TrimSpace(queryID)},
+	}
+	var specific string
+	for _, target := range ids {
+		if target.value == "" {
+			return fmt.Errorf("%w: empty %s", ErrInvalidCatalogQuery, target.name)
+		}
+		if target.value == local {
+			continue
+		}
+		if _, err := catalogItemsForQuery(snapshot, local, target.value); err != nil {
+			return fmt.Errorf("%w: %s %q: %v", ErrUnknownCatalogTarget, target.name, target.value, err)
+		}
+		if specific == "" {
+			specific = target.value
+			continue
+		}
+		if specific != target.value {
+			return fmt.Errorf("%w: %q and %q", ErrConflictingCatalogTarget, specific, target.value)
+		}
+	}
+	return nil
+}
+
 func catalogItemsForQuery(snapshot Snapshot, localDeviceID, requestedID string) ([]CatalogItem, error) {
 	if requestedID == strings.TrimSpace(localDeviceID) {
 		return snapshot.Items, nil
@@ -117,7 +159,31 @@ func catalogItemsForQuery(snapshot Snapshot, localDeviceID, requestedID string) 
 			break
 		}
 	}
-	if target == nil || (target.Kind != CatalogItemBusinessGroup && target.Kind != CatalogItemVirtualOrganization) {
+	if target == nil {
+		// A publication may omit the physical device item while retaining its
+		// scoped authorization map for a direct device query. Such a lookup is
+		// valid only when the device ID itself remains published in this snapshot;
+		// never fall back to a global source-device or channel list.
+		if snapshot.HasPublishedID(requestedID) {
+			if _, ok := snapshot.deviceChannels[requestedID]; ok {
+				return channelsForDevice(snapshot, requestedID), nil
+			}
+		}
+		return nil, fmt.Errorf("%w: %q", ErrUnknownCatalogTarget, requestedID)
+	}
+	if target.Kind == CatalogItemCivil {
+		items := make([]CatalogItem, 0)
+		for _, item := range snapshot.Items {
+			if (item.Kind == CatalogItemCivil && strings.HasPrefix(item.ID, requestedID)) || (item.Kind == CatalogItemChannel && strings.HasPrefix(item.CivilCode, requestedID)) {
+				items = append(items, item)
+			}
+		}
+		return items, nil
+	}
+	if target.Kind == CatalogItemDevice {
+		return channelsForDevice(snapshot, requestedID), nil
+	}
+	if target.Kind != CatalogItemBusinessGroup && target.Kind != CatalogItemVirtualOrganization {
 		return nil, fmt.Errorf("%w: %q", ErrUnknownCatalogTarget, requestedID)
 	}
 
@@ -171,6 +237,28 @@ func catalogItemsForQuery(snapshot Snapshot, localDeviceID, requestedID string) 
 	return items, nil
 }
 
+func channelsForDevice(snapshot Snapshot, deviceID string) []CatalogItem {
+	if items, ok := snapshot.deviceChannels[deviceID]; ok {
+		return append([]CatalogItem(nil), items...)
+	}
+	// Keep hand-built snapshots and older callers safe while Build remains the
+	// authoritative source of the authorization-only index.
+	items := make([]CatalogItem, 0)
+	for _, item := range snapshot.Items {
+		if item.Kind != CatalogItemChannel {
+			continue
+		}
+		parent := item.ParentID
+		if slash := strings.IndexByte(parent, '/'); slash >= 0 {
+			parent = parent[:slash]
+		}
+		if parent == deviceID {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
 func containsCatalogParent(ancestors map[string]struct{}, parentID string) bool {
 	for _, part := range strings.Split(parentID, "/") {
 		if _, ok := ancestors[strings.TrimSpace(part)]; ok {
@@ -215,6 +303,8 @@ type catalogDeviceListXML struct {
 // It emits only facts present in the platform projection and never turns an
 // unknown PTZ type or coordinate into a fabricated zero value.
 type catalogItemXML struct {
+	kind            CatalogItemKind
+	version         protocol.Version
 	DeviceID        string              `xml:"DeviceID"`
 	Name            string              `xml:"Name"`
 	Manufacturer    string              `xml:"Manufacturer"`
@@ -234,6 +324,43 @@ type catalogItemInfoXML struct {
 	BusinessGroupID string `xml:"BusinessGroupID,omitempty"`
 }
 
+func (item catalogItemXML) MarshalXML(encoder *xml.Encoder, start xml.StartElement) error {
+	if item.kind == CatalogItemCivil {
+		return encoder.EncodeElement(struct {
+			DeviceID string `xml:"DeviceID"`
+			Name     string `xml:"Name"`
+		}{item.DeviceID, item.Name}, start)
+	}
+	if item.kind == CatalogItemPlatform {
+		if item.version == protocol.Version2016 {
+			return encoder.EncodeElement(struct {
+				DeviceID     string `xml:"DeviceID"`
+				Name         string `xml:"Name"`
+				Manufacturer string `xml:"Manufacturer"`
+				Model        string `xml:"Model"`
+				Owner        string `xml:"Owner"`
+				CivilCode    string `xml:"CivilCode"`
+				Address      string `xml:"Address"`
+				RegisterWay  int    `xml:"RegisterWay"`
+				Secrecy      int    `xml:"Secrecy"`
+			}{item.DeviceID, item.Name, item.Manufacturer, item.Model, item.Owner, item.CivilCode, item.Address, 1, item.Secrecy}, start)
+		}
+		return encoder.EncodeElement(struct {
+			DeviceID     string `xml:"DeviceID"`
+			Name         string `xml:"Name"`
+			Manufacturer string `xml:"Manufacturer"`
+			Model        string `xml:"Model"`
+			CivilCode    string `xml:"CivilCode"`
+			Address      string `xml:"Address"`
+			RegisterWay  int    `xml:"RegisterWay"`
+			Secrecy      int    `xml:"Secrecy"`
+			Status       string `xml:"Status"`
+		}{item.DeviceID, item.Name, item.Manufacturer, item.Model, item.CivilCode, item.Address, 1, item.Secrecy, item.Status}, start)
+	}
+	type plain catalogItemXML
+	return encoder.EncodeElement(plain(item), start)
+}
+
 func marshalCatalogResponse(profile protocol.Profile, query manscdp.CatalogQuery, items []CatalogItem, total int) (CatalogResponse, error) {
 	response := catalogResponseXML{
 		CmdType:  manscdp.CmdCatalog,
@@ -245,6 +372,8 @@ func marshalCatalogResponse(profile protocol.Profile, query manscdp.CatalogQuery
 		response.DeviceList = &catalogDeviceListXML{Num: len(items), Items: make([]catalogItemXML, 0, len(items))}
 		for _, item := range items {
 			wireItem := catalogItemXML{
+				kind:         item.Kind,
+				version:      profile.Version,
 				DeviceID:     item.ID,
 				Name:         item.Name,
 				Manufacturer: item.Manufacturer,

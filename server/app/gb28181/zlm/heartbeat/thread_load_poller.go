@@ -3,6 +3,7 @@ package heartbeat
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
@@ -22,10 +23,23 @@ type ThreadLoadFetcher interface {
 // 为什么主动拉而非 keepalive 解析:ZLM on_server_keepalive payload **不含**
 // NetThreadLoad / WorkThreadLoad 字段,只能调 REST `/index/api/getThreadsLoad`
 // + `/getWorkThreadsLoad` 拿。Poller 跟 Watcher 同频率(30s)运行。
+// defaultReviveEvery 每 N 次 Tick 才给离线节点做一次"复活探测"。
+//
+// ⛔ 为什么是低频慢通道，而不是把离线节点直接并进常规轮询：
+// TestThreadLoadPoller_Tick_SkipsOfflineNode 锁的契约是"别每 30s 去敲一台已经失联的
+// 节点"——真死的节点每次 API 调用都要等超时，白占连接和 goroutine。
+// ⛔ 但又不能干脆没有这条路：节点一旦被判 offline，就再也轮不到 UpdateLivenessAt，
+// 而后者本来能把**实际可达**的节点翻回在线 ⇒ 缺了它就是一个单向死循环
+// （2026-10-18 现场：192.168.10.220:18090 可达却永久显示"节点离线"）。
+// 取 10（30s 一轮 ⇒ 约 5 分钟一次）：足够慢，又足够让现场自己痊愈。
+const defaultReviveEvery = 10
+
 type ThreadLoadPoller struct {
 	registry     *node.Registry
 	fetcher      ThreadLoadFetcher
 	interval     time.Duration
+	reviveEvery  int
+	ticks        atomic.Uint64
 	fetchMu      sync.Mutex
 	fetchWG      sync.WaitGroup
 	fetchStopped bool
@@ -33,10 +47,27 @@ type ThreadLoadPoller struct {
 
 // NewThreadLoadPoller 构造
 func NewThreadLoadPoller(reg *node.Registry, fetcher ThreadLoadFetcher, interval time.Duration) *ThreadLoadPoller {
-	return &ThreadLoadPoller{registry: reg, fetcher: fetcher, interval: interval}
+	return &ThreadLoadPoller{registry: reg, fetcher: fetcher, interval: interval, reviveEvery: defaultReviveEvery}
+}
+
+// SetReviveEvery 调整"离线节点复活探测"频率（每 N 次 Tick 一次）。
+//
+// n<=0 = 彻底关掉慢通道（只想测常规轮询时用）；已 Stopped 的实例忽略，
+// 免得把 fetchOne 泄漏给已经停用的 goroutine。
+func (p *ThreadLoadPoller) SetReviveEvery(n int) {
+	p.fetchMu.Lock()
+	defer p.fetchMu.Unlock()
+	if p.fetchStopped {
+		return
+	}
+	p.reviveEvery = n
 }
 
 // Tick 一次轮询:并发拉所有 active 节点的 2 个负载,写回 Stats
+//
+// 除常规轮询外，每 reviveEvery 次还会对**离线但未被人工停用**的节点补一次探测：
+// 探测成功 ⇒ UpdateLivenessAt 把它翻回 active ⇒ 节点不必靠人工介入就能回到在线，
+// 随后启动期的收敛循环会顺手把回调地址重新下发对（见 bootstrap 的 config convergence）。
 func (p *ThreadLoadPoller) Tick(ctx context.Context) {
 	active := p.registry.ListActive()
 	p.fetchMu.Lock()
@@ -45,6 +76,18 @@ func (p *ThreadLoadPoller) Tick(ctx context.Context) {
 		return
 	}
 	for _, n := range active {
+		nCopy := n
+		p.fetchWG.Add(1)
+		go func() {
+			defer p.fetchWG.Done()
+			p.fetchOne(ctx, nCopy)
+		}()
+	}
+	tick := p.ticks.Add(1)
+	if p.reviveEvery <= 0 || tick%uint64(p.reviveEvery) != 0 {
+		return
+	}
+	for _, n := range p.registry.ListReviveCandidates() {
 		nCopy := n
 		p.fetchWG.Add(1)
 		go func() {

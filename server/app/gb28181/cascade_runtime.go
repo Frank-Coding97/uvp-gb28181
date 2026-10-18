@@ -77,6 +77,13 @@ type cascadePlatformClient struct {
 	keepalive    sipclient.KeepaliveEncoder
 }
 
+func (c *cascadePlatformClient) SetProfile(profile protocol.Version) error {
+	if c == nil || c.transactions == nil {
+		return fmt.Errorf("cascade SIP transaction client is unavailable")
+	}
+	return c.transactions.SetProfile(profile)
+}
+
 func (c *cascadePlatformClient) Register(ctx context.Context, expires int, callID string) sipclient.TransactionResult {
 	return c.transactions.Register(ctx, expires, callID)
 }
@@ -105,16 +112,18 @@ func (f *cascadePlatformClientFactory) NewClient(platform model.GbCascadePlatfor
 	}
 	profile := effectiveCascadeProfile(platform)
 	requestFactory, err := sipclient.NewRequestFactory(sipclient.Identity{
-		UpstreamServerID: platform.UpstreamServerID,
-		UpstreamDomain:   platform.UpstreamDomain,
-		Host:             platform.Host,
-		Port:             platform.Port,
-		LocalDeviceID:    platform.LocalDeviceID,
-		LocalDomain:      platform.LocalDomain,
-		LocalIP:          platform.LocalSIPIP,
-		LocalPort:        platform.LocalSIPPort,
-		Transport:        platform.Transport,
-		Profile:          profile,
+		UpstreamServerID:  platform.UpstreamServerID,
+		UpstreamDomain:    platform.UpstreamDomain,
+		Host:              platform.Host,
+		Port:              platform.Port,
+		LocalDeviceID:     platform.LocalDeviceID,
+		LocalDomain:       platform.LocalDomain,
+		LocalIP:           platform.LocalSIPIP,
+		LocalPort:         platform.LocalSIPPort,
+		Transport:         platform.Transport,
+		Profile:           profile,
+		UserAgent:         gbconfig.CurrentCascadeSettings().UserAgent,
+		UserAgentProvider: func() string { return gbconfig.CurrentCascadeSettings().UserAgent },
 	})
 	if err != nil {
 		return nil, err
@@ -167,6 +176,15 @@ func effectiveCascadeProfile(platform model.GbCascadePlatform) protocol.Version 
 		return protocol.Version2022
 	}
 	return protocol.Version2016
+}
+
+func cascadeWireProfile(platform model.GbCascadePlatform) protocol.Profile {
+	profile := protocol.ProfileFor(effectiveCascadeProfile(platform))
+	charset := protocol.Charset(strings.ToUpper(strings.TrimSpace(platform.CharsetOverride)))
+	if protocol.IsSupportedCharset(charset) {
+		profile.Charset = charset
+	}
+	return profile
 }
 
 type cascadeResourceAcquirer struct {
@@ -286,10 +304,13 @@ func startCascadeRuntime(cfg gbconfig.Config, server sipRuntimeServer, credentia
 		warnCascadeCredentialKeyUnavailable()
 	}
 	store := repository.NewGormRepository(app.DB())
+	clients := newCascadePlatformClientFactory(transport, cipher, gbconfig.SIPCommandTimeout())
+	pusher := newCascadeCatalogPusher(store, clients)
 	manager := cascaderuntime.NewManager(cascaderuntime.Dependencies{
-		Store:     store,
-		Clients:   newCascadePlatformClientFactory(transport, cipher, gbconfig.SIPCommandTimeout()),
-		Resources: newCascadeResourceAcquirer(cfg),
+		Store:         store,
+		Clients:       clients,
+		Resources:     newCascadeResourceAcquirer(cfg),
+		CatalogPusher: pusher,
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), gbconfig.SIPCommandTimeout())
 	defer cancel()
@@ -300,10 +321,10 @@ func startCascadeRuntime(cfg gbconfig.Config, server sipRuntimeServer, credentia
 	if receiver, ok := server.(interface {
 		SetCascadeMessageHandler(func(*sipwire.Request, sipwire.ServerTransaction) bool)
 	}); ok {
-		receiver.SetCascadeMessageHandler(newCascadeMessageHandler(store, newCascadePlatformClientFactory(transport, cipher, gbconfig.SIPCommandTimeout())))
+		receiver.SetCascadeMessageHandler(newCascadeMessageHandler(store, clients))
 	}
 	cascadeRuntimeManager = manager
-	setupCascadeManagement(manager, cipher, newCascadeCatalogPusher(store, newCascadePlatformClientFactory(transport, cipher, gbconfig.SIPCommandTimeout())))
+	setupCascadeManagement(manager, cipher, pusher)
 	return nil
 }
 

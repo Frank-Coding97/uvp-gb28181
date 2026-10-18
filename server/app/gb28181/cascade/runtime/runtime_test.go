@@ -11,6 +11,7 @@ import (
 
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/sipclient"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 )
 
 func TestManagerKeepsPlatformsIsolatedAndOneTransactionInFlight(t *testing.T) {
@@ -94,6 +95,134 @@ func TestFirstKeepaliveIsScheduledShortlyAfterRegistrationSuccess(t *testing.T) 
 	require.NoError(t, manager.Shutdown(context.Background()))
 }
 
+func TestActorUsesGrantedRegisterExpiryForPersistenceAndRefresh(t *testing.T) {
+	clock := &testClock{now: time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)}
+	store := newTestStore(platform(1, "a", 1))
+	clients := newTestClients()
+	clients.client(1).registerResult = sipclient.TransactionResult{
+		StatusCode: 200, Success: true, GrantedExpiresFound: true, GrantedExpires: 1200,
+	}
+	scheduler := &recordingScheduler{}
+	manager := NewManager(Dependencies{Store: store, Clients: clients, Resources: &testResources{}, Clock: clock, Scheduler: scheduler, RetryDelay: time.Minute})
+	require.NoError(t, manager.Reload(context.Background()))
+	require.Eventually(t, func() bool { return store.registrationSuccesses(1) == 1 }, time.Second, time.Millisecond)
+	require.True(t, scheduler.hasSchedule(sipclient.RefreshDelay(1200)))
+	require.False(t, scheduler.hasSchedule(sipclient.RefreshDelay(3600)))
+	require.NoError(t, manager.Shutdown(context.Background()))
+}
+
+func TestActorDoesNotDropMaintenanceCommandWhileTransactionIsInFlight(t *testing.T) {
+	clock := &testClock{now: time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)}
+	store := newTestStore(platform(1, "a", 1))
+	clients := newTestClients()
+	resources := &testResources{}
+	manager := NewManager(Dependencies{Store: store, Clients: clients, Resources: resources, Clock: clock, Scheduler: newTestScheduler(), RetryDelay: time.Minute})
+	require.NoError(t, manager.Reload(context.Background()))
+	require.Eventually(t, func() bool { return store.registrationSuccesses(1) == 1 }, time.Second, time.Millisecond)
+
+	client := clients.client(1)
+	client.mu.Lock()
+	client.registerStarted = make(chan struct{})
+	client.registerGate = make(chan struct{})
+	client.mu.Unlock()
+	manager.mu.RLock()
+	actor := manager.actors[1]
+	manager.mu.RUnlock()
+	require.NotNil(t, actor)
+
+	actor.enqueue(context.Background(), commandRefresh)
+	require.Eventually(t, func() bool {
+		client.mu.Lock()
+		defer client.mu.Unlock()
+		return client.registerStarted != nil && client.registerCount >= 2
+	}, time.Second, time.Millisecond)
+	actor.enqueue(context.Background(), commandKeepalive)
+	close(client.registerGate)
+
+	require.Eventually(t, func() bool { return client.keepaliveCalls() == 1 }, time.Second, time.Millisecond)
+	require.NoError(t, manager.Shutdown(context.Background()))
+}
+
+func TestActorReRegistersAfterThreeHeartbeatTimeouts(t *testing.T) {
+	clock := &testClock{now: time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)}
+	store := newTestStore(platform(1, "a", 1))
+	clients := newTestClients()
+	client := clients.client(1)
+	client.keepaliveResults = []sipclient.TransactionResult{
+		{TransportErr: context.DeadlineExceeded},
+		{TransportErr: context.DeadlineExceeded},
+		{TransportErr: context.DeadlineExceeded},
+	}
+	manager := NewManager(Dependencies{Store: store, Clients: clients, Resources: &testResources{}, Clock: clock, Scheduler: newTestScheduler(), RetryDelay: time.Minute})
+	require.NoError(t, manager.Reload(context.Background()))
+	require.Eventually(t, func() bool { return store.registrationSuccesses(1) == 1 }, time.Second, time.Millisecond)
+	manager.mu.RLock()
+	actor := manager.actors[1]
+	manager.mu.RUnlock()
+	require.NotNil(t, actor)
+
+	for i := 0; i < 3; i++ {
+		actor.enqueue(context.Background(), commandKeepalive)
+		require.Eventually(t, func() bool { return client.keepaliveCalls() >= i+1 }, time.Second, time.Millisecond)
+		// Let the result event return to the actor loop before the next command.
+		require.Eventually(t, func() bool { return store.heartbeatFailures(1) >= i+1 }, time.Second, time.Millisecond)
+	}
+	require.Eventually(t, func() bool { return client.registerCalls() == 2 }, time.Second, time.Millisecond)
+	require.NoError(t, manager.Shutdown(context.Background()))
+}
+
+func TestActorDoesNotCombineHeartbeatRejectionWithLaterTimeouts(t *testing.T) {
+	clock := &testClock{now: time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)}
+	store := newTestStore(platform(1, "a", 1))
+	clients := newTestClients()
+	client := clients.client(1)
+	client.keepaliveResults = []sipclient.TransactionResult{
+		{StatusCode: 403},
+		{TransportErr: context.DeadlineExceeded},
+		{TransportErr: context.DeadlineExceeded},
+	}
+	manager := NewManager(Dependencies{Store: store, Clients: clients, Resources: &testResources{}, Clock: clock, Scheduler: newTestScheduler(), RetryDelay: time.Minute})
+	require.NoError(t, manager.Reload(context.Background()))
+	require.Eventually(t, func() bool { return store.registrationSuccesses(1) == 1 }, time.Second, time.Millisecond)
+	manager.mu.RLock()
+	actor := manager.actors[1]
+	manager.mu.RUnlock()
+	require.NotNil(t, actor)
+
+	for i := 0; i < 3; i++ {
+		actor.enqueue(context.Background(), commandKeepalive)
+		require.Eventually(t, func() bool { return client.keepaliveCalls() >= i+1 }, time.Second, time.Millisecond)
+		require.Eventually(t, func() bool { return store.heartbeatFailures(1) >= i+1 }, time.Second, time.Millisecond)
+	}
+	// The rejection breaks the timeout streak, so two later timeouts are not
+	// enough to invalidate the registration.
+	require.Equal(t, 1, client.registerCalls())
+	require.NoError(t, manager.Shutdown(context.Background()))
+}
+
+func TestActorAppliesAutoNegotiatedRegisterVersion(t *testing.T) {
+	clock := &testClock{now: time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)}
+	platform := platform(1, "a", 1)
+	platform.ProfileOverride = model.CascadeProfileOverrideAuto
+	platform.EffectiveVersion = string(protocol.Version2016)
+	store := newTestStore(platform)
+	clients := newTestClients()
+	clients.client(1).registerResult = sipclient.TransactionResult{
+		StatusCode: 200, Success: true, ReportedGBVersion: "3.0", ReportedGBVersionFound: true,
+		NegotiatedVersion: protocol.Version2022, NegotiatedVersionFound: true,
+	}
+	manager := NewManager(Dependencies{Store: store, Clients: clients, Resources: &testResources{}, Clock: clock, Scheduler: newTestScheduler(), RetryDelay: time.Minute})
+	require.NoError(t, manager.Reload(context.Background()))
+	require.Eventually(t, func() bool { return store.registrationSuccesses(1) == 1 }, time.Second, time.Millisecond)
+	require.Equal(t, string(protocol.Version2022), store.negotiatedVersion(1))
+	manager.mu.RLock()
+	actor := manager.actors[1]
+	manager.mu.RUnlock()
+	require.Equal(t, string(protocol.Version2022), actor.platform.EffectiveVersion)
+	require.Equal(t, "negotiated", actor.platform.EffectiveVersionFrom)
+	require.NoError(t, manager.Shutdown(context.Background()))
+}
+
 func TestInvalidPlatformDoesNotBlockOtherPlatforms(t *testing.T) {
 	clock := &testClock{now: time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)}
 	store := newTestStore(platform(1, "broken", 1), platform(2, "healthy", 1))
@@ -121,10 +250,12 @@ type testStore struct {
 	enabled            []model.GbCascadePlatform
 	registrationOK     map[uint64]int
 	registrationFailed map[uint64]string
+	heartbeatFailed    map[uint64]int
+	negotiated         map[uint64]string
 }
 
 func newTestStore(platforms ...model.GbCascadePlatform) *testStore {
-	return &testStore{enabled: platforms, registrationOK: make(map[uint64]int), registrationFailed: make(map[uint64]string)}
+	return &testStore{enabled: platforms, registrationOK: make(map[uint64]int), registrationFailed: make(map[uint64]string), heartbeatFailed: make(map[uint64]int), negotiated: make(map[uint64]string)}
 }
 
 func (s *testStore) ListEnabledPlatforms(context.Context) ([]model.GbCascadePlatform, error) {
@@ -140,6 +271,13 @@ func (s *testStore) RecordRegistrationSuccess(_ context.Context, id uint64, _, _
 	return nil
 }
 
+func (s *testStore) RecordRegistrationVersion(_ context.Context, id uint64, _, effective, _ string, _ time.Time) error {
+	s.mu.Lock()
+	s.negotiated[id] = effective
+	s.mu.Unlock()
+	return nil
+}
+
 func (s *testStore) RecordRegistrationExpired(context.Context, uint64, time.Time) error { return nil }
 
 func (s *testStore) RecordRegistrationFailure(_ context.Context, id uint64, code, _ string, _ time.Time) error {
@@ -151,8 +289,17 @@ func (s *testStore) RecordRegistrationFailure(_ context.Context, id uint64, code
 
 func (s *testStore) RecordHeartbeatSuccess(context.Context, uint64, time.Time) error { return nil }
 
-func (s *testStore) RecordHeartbeatFailure(context.Context, uint64, string, string, time.Time) error {
+func (s *testStore) RecordHeartbeatFailure(_ context.Context, id uint64, _, _ string, _ time.Time) error {
+	s.mu.Lock()
+	s.heartbeatFailed[id]++
+	s.mu.Unlock()
 	return nil
+}
+
+func (s *testStore) heartbeatFailures(id uint64) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.heartbeatFailed[id]
 }
 
 func (s *testStore) registrationSuccesses(id uint64) int {
@@ -165,6 +312,12 @@ func (s *testStore) lastFailureCode(id uint64) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.registrationFailed[id]
+}
+
+func (s *testStore) negotiatedVersion(id uint64) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.negotiated[id]
 }
 
 func (s *testStore) setEnabled(platforms ...model.GbCascadePlatform) {
@@ -205,13 +358,15 @@ func (f *testClients) client(id uint64) *testClient {
 }
 
 type testClient struct {
-	mu              sync.Mutex
-	registerResult  sipclient.TransactionResult
-	logoutResult    sipclient.TransactionResult
-	registerStarted chan struct{}
-	registerGate    chan struct{}
-	registerCount   int
-	logoutCount     int
+	mu               sync.Mutex
+	registerResult   sipclient.TransactionResult
+	logoutResult     sipclient.TransactionResult
+	registerStarted  chan struct{}
+	registerGate     chan struct{}
+	registerCount    int
+	logoutCount      int
+	keepaliveCount   int
+	keepaliveResults []sipclient.TransactionResult
 }
 
 func (c *testClient) Register(ctx context.Context, _ int, _ string) sipclient.TransactionResult {
@@ -244,7 +399,23 @@ func (c *testClient) Logout(context.Context, string) sipclient.TransactionResult
 }
 
 func (c *testClient) Keepalive(context.Context, string) sipclient.TransactionResult {
-	return sipclient.TransactionResult{StatusCode: 200, Success: true}
+	c.mu.Lock()
+	c.keepaliveCount++
+	index := c.keepaliveCount - 1
+	var result sipclient.TransactionResult
+	if index < len(c.keepaliveResults) {
+		result = c.keepaliveResults[index]
+	} else {
+		result = sipclient.TransactionResult{StatusCode: 200, Success: true}
+	}
+	c.mu.Unlock()
+	return result
+}
+
+func (c *testClient) keepaliveCalls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.keepaliveCount
 }
 
 func (c *testClient) registerCalls() int {

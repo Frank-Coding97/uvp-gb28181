@@ -168,6 +168,9 @@ func TestBuildSnapshotProjectsOnlyBoundBusinessCatalogItems(t *testing.T) {
 	target, ok := snapshot.LookupPublishedChannel(assigned.PublishedChannelID)
 	require.True(t, ok)
 	require.Equal(t, uint64(200), target.SourceChannelID)
+	target, ok = snapshot.LookupPublishedChannel(unassigned.PublishedChannelID)
+	require.True(t, ok, "an ungrouped shared channel remains authorized for playback")
+	require.Equal(t, unassigned.SourceChannelID, target.SourceChannelID)
 }
 
 func TestBuildSnapshotKeepsLegacyFlatDirectoryWhenBusinessPublishingOffOrTreeEmpty(t *testing.T) {

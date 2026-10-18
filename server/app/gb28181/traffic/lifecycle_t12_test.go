@@ -23,6 +23,10 @@ func (c *blockingSamplerClient) GetMediaList(context.Context, string, string, st
 	return nil, nil
 }
 
+func (c *blockingSamplerClient) GetMediaPlayerList(context.Context, string, string, string, string) ([]zlm.MediaPlayer, error) {
+	return nil, nil
+}
+
 func TestLoggingSamplerT12StartDoneWaitsForInFlightSample(t *testing.T) {
 	repo := newTrafficTestRepo(t)
 	client := &blockingSamplerClient{started: make(chan struct{}), release: make(chan struct{})}

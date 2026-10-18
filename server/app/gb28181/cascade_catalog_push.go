@@ -12,7 +12,6 @@ import (
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/repository"
 	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
-	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
@@ -59,7 +58,7 @@ func (p *cascadeCatalogPusher) PushCatalog(ctx context.Context, platformID uint6
 	if !ok {
 		return 0, 0, fmt.Errorf("cascade client does not support MESSAGE transport")
 	}
-	profile := protocol.ProfileFor(effectiveCascadeProfile(*matched))
+	profile := cascadeWireProfile(*matched)
 	// 合成 SN:无入站查询可回带,取纳秒时间戳低位保证 1..1e9 内唯一即可。
 	sn := int(time.Now().UnixNano() % 1_000_000_000)
 	if sn < 1 {
@@ -79,6 +78,13 @@ func (p *cascadeCatalogPusher) PushCatalog(ctx context.Context, platformID uint6
 	}
 	sent := 0
 	for _, response := range responses {
+		current, checkErr := p.store.FindPlatform(ctx, matched.ID)
+		if checkErr != nil {
+			return len(snapshot.Items), sent, checkErr
+		}
+		if !current.Enabled || current.ConfigRevision != matched.ConfigRevision || current.ProjectionRevision != snapshot.Revision {
+			return len(snapshot.Items), sent, fmt.Errorf("cascade catalog authorization changed during publication")
+		}
 		result := outbound.transactions.SendMessage(ctx, response.Body, fmt.Sprintf("catalog-push-%d-%d", matched.ID, time.Now().UnixNano()))
 		if !result.Success {
 			app.Log(ctx).Warn("级联目录手动推送失败",

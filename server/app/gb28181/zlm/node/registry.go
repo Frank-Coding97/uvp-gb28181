@@ -54,7 +54,7 @@ type Registry struct {
 	uuids                map[string]int64      // mediaServerUUID -> ID(Hook 反查)
 	autoOnDemandReady    map[int64]bool        // 当前进程已写入并回读确认缺流 Hook
 	admissionBlocked     map[int64]bool        // 显式运维/恢复 gate,不改变普通 active 语义
-	platformSDPIP       string
+	platformSDPIP        string
 	platformPlaybackHost string
 	repo                 Repo
 }
@@ -328,8 +328,10 @@ func (r *Registry) SetAutoOnDemandReady(id int64, ready bool) bool {
 }
 
 // SetAutoOnDemandReadyIfRevision publishes readiness only for the snapshot
-// that was just reconciled. It serializes with state persistence so an
-// offline/maintenance transition cannot be followed by a stale ready=true.
+// that was just reconciled. Configuration readiness is independent from the
+// operator admission toggle: disabled nodes can be ready, but remain
+// unschedulable through IsSchedulable. It serializes with state persistence so
+// an offline/maintenance transition cannot be followed by a stale ready=true.
 func (r *Registry) SetAutoOnDemandReadyIfRevision(id int64, revision uint64, ready bool) bool {
 	lock := r.nodeMutationLock(id)
 	lock.Lock()
@@ -340,7 +342,7 @@ func (r *Registry) SetAutoOnDemandReadyIfRevision(id int64, revision uint64, rea
 	if !ok || current.Revision != revision {
 		return false
 	}
-	if ready && (!current.IsSchedulable() || current.RecoveryRequired) {
+	if ready && (!current.IsActive() || current.RecoveryRequired) {
 		return false
 	}
 	r.autoOnDemandReady[id] = ready
@@ -551,6 +553,33 @@ func (r *Registry) ListActive() []*Node {
 	return out
 }
 
+// ListReviveCandidates 已经 offline、但**没有**被人为移出服务体系的节点。
+//
+// ⛔⛔ 存在的理由（2026-10-18 现场，192.168.10.220:18090）：
+// 主动探活（ThreadLoadPoller）原本只扫 ListActive ⇒ 节点一旦被 Watcher 判 offline，
+// 就再也没有任何通道触达 UpdateLivenessAt，而后者本来能把可达节点翻回 active
+// ⇒ 一个外部 curl 秒回、好端端的节点就这样**永久**停在"节点离线"。
+//
+// ⛔ 但它**不能**被无节制地用在每一轮 Tick 上 —— `TestThreadLoadPoller_Tick_SkipsOfflineNode`
+// 锁住的契约是"别每 30s 就去敲一台已经失联的节点"。所以调用方（Poller）必须以
+// 低得多的频率使用本方法，把"复活"当成**慢通道**，而不是把离线节点拉进常规轮询。
+//
+// 排除项与运营意图保持一致：maintenance（主动下线检修）与 AdminState=disabled
+// （人工停用）都不该被"探活"悄悄翻回在线 —— 那是在跟操作员的决定对着干。
+func (r *Registry) ListReviveCandidates() []*Node {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]*Node, 0, len(r.nodes))
+	for _, n := range r.nodes {
+		if n.State != StateOffline || !n.IsEnabled() {
+			continue
+		}
+		copy := r.withRuntimeDefaults(cloneNode(*n))
+		out = append(out, &copy)
+	}
+	return out
+}
+
 // ListSchedulable 仅可调度节点(active + 非 NearCapacity)
 //
 // 比 ListActive 多一层容量过滤:port_usage >= 80% 或 cpu >= 80% 的节点
@@ -733,14 +762,14 @@ func (r *Registry) MarkOffline(ctx context.Context, id int64) error {
 	return ErrRevisionConflict
 }
 
-// MarkActive 标记节点活跃(由启动探活 probe 调用,写 DB + 内存)
+// MarkActive 标记节点活跃(由启动探活 probe 调用;离线翻活跃时写 DB + 内存)
 //
 // 用于两类场景:
 //   - 进程启动时主动探活成功 → 从 DB 里读到的 offline 翻回 active,填 LastHeartbeatAt
 //     让 Watcher 90 秒窗口从此刻起算,而不是从进程启动起算
 //   - 运维手动拉回节点(maintenance → active 走 Update,不走本方法)
 //
-// 幂等:已经是 active 的节点再调只刷 LastHeartbeatAt + UpdatedAt,不 panic。
+// 幂等:已经是 active 的节点只刷新进程内 LastHeartbeatAt,避免无意义的持久化 revision 变化。
 // maintenance 节点由调用方判断跳过(本方法不做状态守卫)。
 func (r *Registry) MarkActive(ctx context.Context, id int64) error {
 	lock := r.nodeMutationLock(id)
@@ -757,6 +786,23 @@ func (r *Registry) MarkActive(ctx context.Context, id int64) error {
 	snapshot := cloneNode(*cur)
 	r.mu.RUnlock()
 	now := time.Now()
+	if snapshot.State == StateActive {
+		// Startup probing runs concurrently with initial config convergence.
+		// Rewriting an already-active row would advance its durable revision and
+		// make a successful external ZLM apply look stale even though no config
+		// or lifecycle state changed.
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		current, ok := r.nodes[id]
+		if !ok {
+			return ErrNotFound
+		}
+		if current.Revision != snapshot.Revision || !current.IsActive() {
+			return ErrRevisionConflict
+		}
+		current.Stats.LastHeartbeatAt = now
+		return nil
+	}
 	snapshot.State = StateActive
 	snapshot.Stats.LastHeartbeatAt = now
 	snapshot.UpdatedAt = now

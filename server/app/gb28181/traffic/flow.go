@@ -54,7 +54,14 @@ func (s *FlowService) CollectFlow(ctx context.Context, report handler.FlowReport
 		if report.ID == "" {
 			return errors.New("flow report session id 不能为空")
 		}
-		businessKey = fmt.Sprintf("flow:%d:%s:%s", nodeID, report.ID, direction)
+		if report.Player {
+			// ⛔ 下行必须与采样器共用同一个键函数:观看连接存活期间 Sampler
+			// 已按此键增量入账,这里结算时复用同一条会话只补尾差;
+			// 若各写各的键,采样累计与最终结算会落到两条会话上 → 重复计数
+			businessKey = downstreamBusinessKey(nodeID, report.ID)
+		} else {
+			businessKey = fmt.Sprintf("flow:%d:%s:%s", nodeID, report.ID, direction)
+		}
 	}
 	at := s.now().UTC()
 	_, err = s.repo.Apply(ctx, ApplyRequest{

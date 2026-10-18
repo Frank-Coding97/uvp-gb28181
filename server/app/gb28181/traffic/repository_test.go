@@ -170,3 +170,76 @@ func TestRepositoryPruneSettledBeforeIsBoundedAndKeepsActiveSessions(t *testing.
 	require.Equal(t, "active", remaining[0].BusinessKey)
 	require.Equal(t, "new", remaining[1].BusinessKey)
 }
+
+func TestSettleStaleDownstreamSettlesOnlyStaleActiveDownstream(t *testing.T) {
+	repo := newTrafficTestRepo(t)
+	now := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
+	started := now.Add(-20 * time.Minute)
+	staleSeen := now.Add(-10 * time.Minute)
+	freshSeen := now.Add(-time.Minute)
+	rows := []gbmodels.GbDeviceTrafficSession{
+		{BusinessKey: "stale-down", NodeID: 7, DeviceCode: "d", ChannelCode: "c", Direction: string(DirectionDownstream), State: string(SessionActive), StartedAt: &started, LastSeenAt: &staleSeen, LastTotalBytes: 500},
+		{BusinessKey: "fresh-down", NodeID: 7, DeviceCode: "d", ChannelCode: "c", Direction: string(DirectionDownstream), State: string(SessionActive), StartedAt: &started, LastSeenAt: &freshSeen},
+		{BusinessKey: "stale-up", NodeID: 7, DeviceCode: "d", ChannelCode: "c", Direction: string(DirectionUpstream), State: string(SessionActive), StartedAt: &started, LastSeenAt: &staleSeen},
+		{BusinessKey: "settled-down", NodeID: 7, DeviceCode: "d", ChannelCode: "c", Direction: string(DirectionDownstream), State: string(SessionSettled), StartedAt: &started, LastSeenAt: &staleSeen, EndedAt: &staleSeen, SettledTotalBytes: 500},
+	}
+	require.NoError(t, repo.db.Create(&rows).Error)
+
+	affected, err := repo.SettleStaleDownstream(context.Background(), now.Add(-3*time.Minute), 100)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, affected, "只有失联的活跃下行会话应被收尾")
+
+	var stale gbmodels.GbDeviceTrafficSession
+	require.NoError(t, repo.db.Where("business_key = ?", "stale-down").First(&stale).Error)
+	require.Equal(t, string(SessionSettled), stale.State)
+	require.NotNil(t, stale.EndedAt)
+	require.True(t, stale.EndedAt.Equal(staleSeen), "结束时间应取最后一次采样时间")
+	require.EqualValues(t, 600, stale.DurationSeconds, "时长应由 started_at 推算")
+	require.EqualValues(t, 500, stale.LastTotalBytes, "收尾不得改动已入账字节")
+	require.EqualValues(t, 500, stale.SettledTotalBytes, "会话明细页要能看到本次观看累计字节,不能留 0")
+
+	// 字节不能重复计:采样时已按增量入账过,收尾只补会话数与时长
+	var daily gbmodels.GbDeviceTrafficDaily
+	require.NoError(t, repo.db.First(&daily).Error)
+	require.EqualValues(t, 0, daily.DownstreamBytes, "收尾不得补记字节")
+	require.EqualValues(t, 1, daily.DownstreamSessions)
+	require.EqualValues(t, 600, daily.DownstreamDurationSeconds)
+	var hourly gbmodels.GbDeviceTrafficHourly
+	require.NoError(t, repo.db.First(&hourly).Error)
+	require.EqualValues(t, 0, hourly.DownstreamBytes)
+	require.EqualValues(t, 1, hourly.DownstreamSessions)
+	require.EqualValues(t, 600, hourly.DownstreamDurationSeconds)
+
+	for key, wantState := range map[string]string{"fresh-down": string(SessionActive), "stale-up": string(SessionActive), "settled-down": string(SessionSettled)} {
+		var row gbmodels.GbDeviceTrafficSession
+		require.NoError(t, repo.db.Where("business_key = ?", key).First(&row).Error)
+		require.Equal(t, wantState, row.State, "%s 不应被误收尾", key)
+	}
+}
+
+func TestSettleStaleDownstreamSkipsRowAlreadySettledByFlowReport(t *testing.T) {
+	repo := newTrafficTestRepo(t)
+	now := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
+	started := now.Add(-20 * time.Minute)
+	staleSeen := now.Add(-10 * time.Minute)
+	// flow_report 先到,会话已被结算:收尾必须认不出来,不能重复补会话数/时长
+	rows := []gbmodels.GbDeviceTrafficSession{
+		{BusinessKey: "down-1", NodeID: 7, DeviceCode: "d", ChannelCode: "c", Direction: string(DirectionDownstream),
+			State: string(SessionActive), StartedAt: &started, LastSeenAt: &staleSeen, LastTotalBytes: 500},
+	}
+	require.NoError(t, repo.db.Create(&rows).Error)
+	_, err := repo.Apply(context.Background(), ApplyRequest{
+		BusinessKey: "down-1", NodeID: 7, Direction: DirectionDownstream, DeviceCode: "d", ChannelCode: "c",
+		At: now, AbsoluteBytes: 900, SettleAt: now, DurationSeconds: 1200,
+	})
+	require.NoError(t, err)
+
+	affected, err := repo.SettleStaleDownstream(context.Background(), now.Add(-3*time.Minute), 100)
+	require.NoError(t, err)
+	require.Zero(t, affected, "已结算的会话不应再被收尾")
+
+	var hourly gbmodels.GbDeviceTrafficHourly
+	require.NoError(t, repo.db.First(&hourly).Error)
+	require.EqualValues(t, 1, hourly.DownstreamSessions, "会话数只能由实际结算的那条路径记一次")
+	require.EqualValues(t, 1200, hourly.DownstreamDurationSeconds)
+}

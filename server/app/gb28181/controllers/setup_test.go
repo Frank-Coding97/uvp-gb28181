@@ -187,6 +187,36 @@ func TestSetupController_SaveConfigReloadFailurePropagates(t *testing.T) {
 	require.Equal(t, gbsetup.RuntimeFailed, runtime.Snapshot().State)
 }
 
+func TestSetupController_SaveConfigSeparatesSIPAndMediaReloadResults(t *testing.T) {
+	db := newSetupControllerDB(t)
+	runtime := gbsetup.NewRuntimeStatus()
+	sipReloadCalls := 0
+	mediaReloadCalls := 0
+	controller := NewSetupController(db, runtime, nil, func() error {
+		sipReloadCalls++
+		runtime.MarkRunning()
+		return nil
+	})
+	controller.SetPlatformMediaDefaultsReloader(func() error {
+		mediaReloadCalls++
+		return errors.New("node config changed during convergence")
+	})
+	router := newSetupControllerRouter(controller)
+	body := `{"deploymentMode":"lan","listenIp":"0.0.0.0","advertiseIp":"192.168.1.10","port":5061,"domain":"3402000000","serverId":"34020000002000000001","hookIp":"192.168.1.10","sdpIp":"192.168.1.10","streamIp":"192.168.1.10","password":"Sec12345Aa!!"}`
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/config", bytes.NewBufferString(body)))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, 1, sipReloadCalls)
+	require.Equal(t, 1, mediaReloadCalls)
+
+	data := decodeSetupResponse(t, recorder)["data"].(map[string]any)
+	require.Equal(t, true, data["reloadedOk"], "媒体默认值失败不能误报 SIP 重载失败")
+	require.Equal(t, "", data["reloadError"])
+	require.Equal(t, false, data["mediaDefaultsApplied"])
+	require.Contains(t, data["mediaDefaultsError"], "node config changed during convergence")
+	require.Equal(t, gbsetup.RuntimeRunning, runtime.Snapshot().State)
+}
+
 func TestSetupController_SaveConfigValidationAndDatabaseFailure(t *testing.T) {
 	db := newSetupControllerDB(t)
 	router := newSetupControllerRouter(NewSetupController(db, gbsetup.NewRuntimeStatus(), nil, nil))

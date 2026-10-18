@@ -6,15 +6,21 @@ import (
 )
 
 type RealtimeSnapshot struct {
-	DeviceCode                     string    `json:"deviceCode"`
-	ChannelCode                    string    `json:"channelCode"`
-	NodeID                         int64     `json:"nodeId"`
-	Stream                         string    `json:"stream"`
-	InProgressUpstreamBytes        uint64    `json:"inProgressUpstreamBytes"`
-	UpstreamBytesPerSecond         uint64    `json:"upstreamBytesPerSecond"`
-	ReaderCount                    int       `json:"readerCount"`
-	EstimatedDownstreamBytesPerSec uint64    `json:"estimatedDownstreamBytesPerSec"`
-	SampledAt                      time.Time `json:"sampledAt"`
+	DeviceCode                     string `json:"deviceCode"`
+	ChannelCode                    string `json:"channelCode"`
+	NodeID                         int64  `json:"nodeId"`
+	Stream                         string `json:"stream"`
+	InProgressUpstreamBytes        uint64 `json:"inProgressUpstreamBytes"`
+	UpstreamBytesPerSecond         uint64 `json:"upstreamBytesPerSecond"`
+	ReaderCount                    int    `json:"readerCount"`
+	EstimatedDownstreamBytesPerSec uint64 `json:"estimatedDownstreamBytesPerSec"`
+	// DownstreamBytesPerSecond 是实测下行速率(由观看连接的采样增量算出)。
+	// 仅当节点是支持实时下行计数的二开 ZLM 时有意义,搭配 DownstreamMeasured 判断。
+	DownstreamBytesPerSecond uint64 `json:"downstreamBytesPerSecond"`
+	// DownstreamMeasured 为 true 表示下行是实测值;false 时前端应回退展示
+	// EstimatedDownstreamBytesPerSec(估算值,不计入已结算历史)
+	DownstreamMeasured bool      `json:"downstreamMeasured"`
+	SampledAt          time.Time `json:"sampledAt"`
 }
 
 type RealtimeStore struct {

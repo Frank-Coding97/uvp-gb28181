@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/repository"
@@ -34,11 +35,19 @@ const (
 	ResourceStatusOffline ResourceStatus = "OFF"
 )
 
-// SourceFacts contains the status facts read with the projection. Missing
-// entries are offline so a snapshot never invents an online resource.
+// SourceFacts contains the status and channel metadata read with the projection.
+// Missing status entries are offline so a snapshot never invents an online resource.
 type SourceFacts struct {
-	DeviceOnline  map[uint64]bool
-	ChannelOnline map[uint64]bool
+	DeviceOnline    map[uint64]bool
+	ChannelOnline   map[uint64]bool
+	ChannelMetadata map[uint64]ChannelMetadata
+}
+
+type ChannelMetadata struct {
+	Manufacturer string
+	Model        string
+	Owner        string
+	CivilCode    string
 }
 
 // CatalogItem is the metadata whitelist available to an outbound Catalog
@@ -76,8 +85,14 @@ type Snapshot struct {
 	SumNum     int
 	Items      []CatalogItem
 
-	publishedIDs map[string]struct{}
-	channels     map[string]PublishedChannelTarget
+	publishedIDs    map[string]struct{}
+	channels        map[string]PublishedChannelTarget
+	channelMetadata map[uint64]CatalogItem
+	// deviceChannels is an authorization-only lookup. A publication may omit
+	// physical device nodes while still needing to answer a scoped Catalog query
+	// addressed to one of those nodes; the map never contains resources outside
+	// this platform snapshot.
+	deviceChannels map[string][]CatalogItem
 }
 
 func (s Snapshot) HasPublishedID(id string) bool {
@@ -112,10 +127,12 @@ func Build(projection repository.ProjectionSnapshot, facts SourceFacts) (Snapsho
 	// their legacy flat catalog until there is a complete tree to publish.
 	publishSystem := projection.Platform.PublishPlatform || (projection.Platform.PublishGroup && len(groupNodes) > 0)
 	snapshot := Snapshot{
-		PlatformID:   platformID,
-		Revision:     projection.Revision,
-		publishedIDs: make(map[string]struct{}, len(groupNodes)+len(devices)+len(channels)+1),
-		channels:     make(map[string]PublishedChannelTarget, len(channels)),
+		PlatformID:      platformID,
+		Revision:        projection.Revision,
+		publishedIDs:    make(map[string]struct{}, len(groupNodes)+len(devices)+len(channels)+1),
+		channels:        make(map[string]PublishedChannelTarget, len(channels)),
+		channelMetadata: make(map[uint64]CatalogItem, len(channels)),
+		deviceChannels:  make(map[string][]CatalogItem, len(devices)),
 	}
 	if publishSystem {
 		if err := addPublishedID(snapshot.publishedIDs, projection.Platform.LocalDeviceID); err != nil {
@@ -137,6 +154,21 @@ func Build(projection repository.ProjectionSnapshot, facts SourceFacts) (Snapsho
 	}
 	if err := appendChannelItems(&snapshot, platformID, devices, channels, facts, bindings); err != nil {
 		return Snapshot{}, err
+	}
+	for _, device := range devices {
+		snapshot.deviceChannels[device.PublishedDeviceID] = nil
+	}
+	for _, item := range snapshot.Items {
+		if item.Kind != CatalogItemChannel {
+			continue
+		}
+		parent := item.ParentID
+		if slash := strings.IndexByte(parent, '/'); slash >= 0 {
+			parent = parent[:slash]
+		}
+		if _, ok := snapshot.deviceChannels[parent]; ok {
+			snapshot.deviceChannels[parent] = append(snapshot.deviceChannels[parent], item)
+		}
 	}
 	snapshot.SumNum = len(snapshot.Items)
 	return snapshot, nil
@@ -170,6 +202,12 @@ func appendChannelItems(snapshot *Snapshot, platformID uint64, devices map[uint6
 			}
 		}
 		device := devices[channel.DeviceProjectionID]
+		metadata := deviceCatalogItem(device, "", false, facts)
+		if source, ok := facts.ChannelMetadata[channel.SourceChannelID]; ok {
+			metadata.Manufacturer, metadata.Model, metadata.Owner = source.Manufacturer, source.Model, source.Owner
+			metadata.CivilCode = source.CivilCode
+		}
+		snapshot.channelMetadata[channel.SourceChannelID] = metadata
 		item := CatalogItem{
 			ID:       channel.PublishedChannelID,
 			ParentID: parentID,
@@ -494,6 +532,7 @@ func (s Snapshot) ChannelsOnly() Snapshot {
 	result := s
 	result.Items = make([]CatalogItem, 0, len(s.channels))
 	result.publishedIDs = make(map[string]struct{}, len(s.channels))
+	result.deviceChannels = make(map[string][]CatalogItem, len(s.deviceChannels))
 	for _, item := range s.Items {
 		if item.Kind != CatalogItemChannel {
 			continue
@@ -502,6 +541,13 @@ func (s Snapshot) ChannelsOnly() Snapshot {
 		item.Parental = 0
 		result.Items = append(result.Items, item)
 		result.publishedIDs[item.ID] = struct{}{}
+	}
+	for deviceID, items := range s.deviceChannels {
+		for _, item := range items {
+			item.ParentID = ""
+			item.Parental = 0
+			result.deviceChannels[deviceID] = append(result.deviceChannels[deviceID], item)
+		}
 	}
 	result.SumNum = len(result.Items)
 	return result

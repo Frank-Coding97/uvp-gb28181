@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	"uvplatform.com/uvp-gb28181/app/gb28181/mansrtsp"
 	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.com/uvp-gb28181/app/gb28181/playurl"
 	"uvplatform.com/uvp-gb28181/app/gb28181/sdp"
@@ -79,8 +81,12 @@ type PlaybackInviter interface {
 	Teardown(context.Context, string) error
 }
 
-// PlaybackActioner is implemented by the SIP dialog owner. Keeping it separate
-// from PlaybackInviter lets the create path retain its narrow invite contract.
+// PlaybackRangeActioner must pass the full Range, including its time base and end.
+type PlaybackRangeActioner interface {
+	ActionRange(context.Context, string, string, time.Duration) error
+}
+
+// PlaybackActioner retains the basic control contract for existing adapters.
 type PlaybackActioner interface {
 	Action(context.Context, string, string, float64, float64, time.Duration) (float64, float64, error)
 }
@@ -717,7 +723,17 @@ func (s *Service) Action(ctx context.Context, sessionID, ownerID string, request
 	if duration <= 0 {
 		return nil, ErrInvalidSession
 	}
-	if request.Action == "seek" && (request.PositionSeconds < 0 || request.PositionSeconds >= duration.Seconds()) {
+	if request.RangeValue != "" {
+		if request.Action != "seek" {
+			return nil, ErrInvalidSession
+		}
+		r, err := mansrtsp.ParseRange(request.RangeValue)
+		if err != nil || r.StartSeconds >= duration.Seconds() || (r.HasEnd && r.EndSeconds > duration.Seconds()) {
+			return nil, ErrInvalidSession
+		}
+		request.PositionSeconds = r.StartSeconds
+	}
+	if request.Action == "seek" && (math.IsNaN(request.PositionSeconds) || math.IsInf(request.PositionSeconds, 0) || request.PositionSeconds < 0 || request.PositionSeconds >= duration.Seconds()) {
 		return nil, ErrInvalidSession
 	}
 	if request.Action == "scale" && !validScale(request.Scale) {
@@ -730,12 +746,23 @@ func (s *Service) Action(ctx context.Context, sessionID, ownerID string, request
 	if owner, managed := session.Resources.(*playbackIntentOwner); managed {
 		command := playauth.DeviceSIPINFOCommand{Action: request.Action}
 		if request.Action == "seek" {
-			command.PositionNanos, command.SegmentDurationNanos = int64(time.Duration(position*float64(time.Second))), int64(duration)
+			command.SegmentDurationNanos = int64(duration)
+			if request.RangeValue != "" {
+				command.RangeValue = request.RangeValue
+			} else {
+				command.PositionNanos = int64(time.Duration(position * float64(time.Second)))
+			}
 		}
 		if request.Action == "scale" {
 			command.Scale = scale
 		}
 		err = owner.action(ctx, command)
+	} else if request.RangeValue != "" {
+		actioner, ok := s.inviter.(PlaybackRangeActioner)
+		if !ok {
+			return nil, ErrPlaybackRangeUnsupported
+		}
+		err = actioner.ActionRange(ctx, session.CallID, request.RangeValue, duration)
 	} else {
 		actioner, ok := s.inviter.(PlaybackActioner)
 		if !ok {

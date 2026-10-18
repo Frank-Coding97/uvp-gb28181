@@ -78,6 +78,9 @@ func TestServiceConfigController_AggregateGetAndPut(t *testing.T) {
 		Data ServiceConfig `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(get.Body.Bytes(), &envelope))
+	require.NotNil(t, envelope.Data.Cascade)
+	require.Equal(t, "UVP-GB28181", envelope.Data.Cascade.UserAgent)
+	envelope.Data.Cascade = &gbconfig.CascadeSettings{UserAgent: "Gateway/1.0", PlatformName: "Regional platform", Manufacturer: "Vendor", Model: "Gateway", CivilCode: "340200", Address: "Monitoring center"}
 	envelope.Data.PTZDefaultSpeed.Level = 8
 	envelope.Data.SIPCommandTimeout.TimeoutSec = 20
 	envelope.Data.GlobalSubscriptions.Items = []string{"catalog", "mobile_position"}
@@ -89,6 +92,42 @@ func TestServiceConfigController_AggregateGetAndPut(t *testing.T) {
 	require.Equal(t, 8, config.values[ptzDefaultSpeedLevelConfigKey])
 	require.Equal(t, 20, config.values[gbconfig.SIPCommandTimeoutSecConfigKey])
 	require.Equal(t, []string{"catalog", "mobile_position"}, config.values[gbconfig.GlobalSubscriptionItemsConfigKey])
+	require.Equal(t, "Gateway/1.0", config.values[gbconfig.CascadeUserAgentConfigKey])
+	require.Equal(t, "Regional platform", config.values[gbconfig.CascadePlatformNameConfigKey])
+	require.Equal(t, "340200", config.values[gbconfig.CascadeCivilCodeConfigKey])
+}
+
+func TestServiceConfigController_LegacyRequestPreservesCascadeSettings(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{gbconfig.CascadePlatformNameConfigKey: "Existing platform"}}
+	app.ConfigYml = config
+	controller := NewServiceConfigController()
+	request := controller.currentServiceConfig()
+	request.Cascade = nil
+	request.PTZDefaultSpeed.Level = 8
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(controller).ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/service-config", jsonBody(t, request)))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, "Existing platform", config.values[gbconfig.CascadePlatformNameConfigKey])
+	var result struct {
+		Data ServiceConfig `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &result))
+	require.Equal(t, "Existing platform", result.Data.Cascade.PlatformName)
+}
+
+func TestServiceConfigController_InvalidCascadeDoesNotSave(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{}}
+	app.ConfigYml = config
+	request := NewServiceConfigController().currentServiceConfig()
+	request.Cascade.UserAgent = "UVP\r\nX-Injected: true"
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/service-config", jsonBody(t, request)))
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Zero(t, config.saveNum)
 }
 
 func TestServiceConfigController_AggregateRejectsInvalidWithoutSaving(t *testing.T) {
@@ -107,14 +146,16 @@ func TestServiceConfigController_AggregateRejectsInvalidWithoutSaving(t *testing
 func TestServiceConfigController_AggregateRollsBackOnSaveFailure(t *testing.T) {
 	previous := app.ConfigYml
 	t.Cleanup(func() { app.ConfigYml = previous })
-	config := &serviceConfigTestYAML{values: map[string]interface{}{ptzDefaultSpeedLevelConfigKey: 4}, saveErr: errors.New("disk full")}
+	config := &serviceConfigTestYAML{values: map[string]interface{}{ptzDefaultSpeedLevelConfigKey: 4, gbconfig.CascadePlatformNameConfigKey: "Existing platform"}, saveErr: errors.New("disk full")}
 	app.ConfigYml = config
 	request := NewServiceConfigController().currentServiceConfig()
 	request.PTZDefaultSpeed.Level = 9
+	request.Cascade.PlatformName = "New platform"
 	recorder := httptest.NewRecorder()
 	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/service-config", jsonBody(t, request)))
 	require.Equal(t, http.StatusInternalServerError, recorder.Code)
 	require.Equal(t, 4, config.values[ptzDefaultSpeedLevelConfigKey])
+	require.Equal(t, "Existing platform", config.values[gbconfig.CascadePlatformNameConfigKey])
 }
 
 func TestServiceConfigController_AggregateRollsBackWhenPlayAuthTTLApplyFails(t *testing.T) {

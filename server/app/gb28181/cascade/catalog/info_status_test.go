@@ -113,6 +113,27 @@ func TestPlanDeviceStatusResponseUsesExplicitFactsAndProfiledAlarmAttribute(t *t
 	}
 }
 
+func TestPlanDeviceInfoResponseAcceptsPublishedChannelsOnly(t *testing.T) {
+	profile := protocol.ProfileFor(protocol.Version2022)
+	snapshot := Snapshot{Items: []CatalogItem{
+		{ID: "34020000001320000011", Kind: CatalogItemChannel, Name: "shared camera", Manufacturer: "vendor"},
+		{ID: "340203", Kind: CatalogItemCivil, Name: "region"},
+	}}
+	query, err := manscdp.BuildDeviceInfoQueryWithProfile(profile, snapshot.Items[0].ID, 19)
+	require.NoError(t, err)
+	response, err := PlanDeviceInfoResponse(profile, PlatformDeviceInfo{DeviceID: "platform"}, snapshot, query)
+	require.NoError(t, err)
+	decoded := decodeDeviceInfoResponse(t, profile, response.Body)
+	require.Equal(t, "shared camera", decoded.DeviceName)
+	require.Equal(t, "vendor", decoded.Manufacturer)
+	for _, target := range []string{"340203", "34020000001320000099"} {
+		query, err = manscdp.BuildDeviceInfoQueryWithProfile(profile, target, 20)
+		require.NoError(t, err)
+		_, err = PlanDeviceInfoResponse(profile, PlatformDeviceInfo{DeviceID: "platform"}, snapshot, query)
+		require.ErrorIs(t, err, ErrUnknownInfoStatusTarget)
+	}
+}
+
 func TestPlanDeviceStatusResponseOmitsUnknownOptionalFacts(t *testing.T) {
 	const platformID = "34020000002000000001"
 	profile := protocol.ProfileFor(protocol.Version2022)

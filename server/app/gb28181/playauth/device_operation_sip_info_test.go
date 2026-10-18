@@ -166,3 +166,21 @@ func TestDeviceSIPINFOCannotAttachPlaybackControlToOtherIntentKinds(t *testing.T
 		})
 	}
 }
+
+func TestDeviceSIPINFORangeSurvivesDurableReadback(t *testing.T) {
+	command := DeviceSIPINFOCommand{Action: "seek", RangeValue: "smpte=0:00:12:15-0:00:30:00", SegmentDurationNanos: int64(time.Minute)}
+	_, store, id := sipINFOFixture(t)
+	identity := sipINFOIdentity(t, 1, command)
+	_, err := store.PrepareSIPINFO(context.Background(), id, 6, identity)
+	require.NoError(t, err)
+	stored, err := store.LoadSIPInviteSteps(context.Background(), id)
+	require.NoError(t, err)
+	actual := stored.Steps[0].KnownBranch.InfoSteps[0].Identity.Command
+	require.Equal(t, command, actual)
+	body, err := actual.Body(identity.Request.Request.CSeq)
+	require.NoError(t, err)
+	require.Contains(t, string(body), "Range: smpte=0:00:12:15-0:00:30:00\r\n")
+	command.PositionNanos = 1
+	_, err = command.Body(2)
+	require.Error(t, err, "ambiguous time inputs must be rejected")
+}

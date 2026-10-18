@@ -61,6 +61,7 @@ const (
 )
 
 type PlaybackInfoRequest struct {
+	RangeValue                string
 	Action                    PlaybackInfoAction
 	Position, SegmentDuration time.Duration
 	Scale                     float64
@@ -314,6 +315,9 @@ func (u *UAC) InvitePlayback(ctx context.Context, in PlaybackInviteRequest) (Pla
 }
 
 func buildPlaybackInfoBody(request PlaybackInfoRequest, cseq uint32) ([]byte, error) {
+	if request.RangeValue != "" && request.Action != PlaybackInfoSeek {
+		return nil, fmt.Errorf("%w: Range requires seek", mansrtsp.ErrInvalidArgument)
+	}
 	switch request.Action {
 	case PlaybackInfoPlay:
 		return mansrtsp.BuildPlay(cseq)
@@ -322,6 +326,9 @@ func buildPlaybackInfoBody(request PlaybackInfoRequest, cseq uint32) ([]byte, er
 	case PlaybackInfoResume:
 		return mansrtsp.BuildResume(cseq)
 	case PlaybackInfoSeek:
+		if request.RangeValue != "" {
+			return mansrtsp.BuildRange(cseq, request.RangeValue, request.SegmentDuration)
+		}
 		return mansrtsp.BuildSeek(cseq, request.Position, request.SegmentDuration)
 	case PlaybackInfoScale:
 		return mansrtsp.BuildScale(cseq, request.Scale)

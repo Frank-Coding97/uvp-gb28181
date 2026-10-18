@@ -34,12 +34,17 @@ func TestPlaybackIntentINFOActualUDPAndCleanupShareDurableSequence(t *testing.T)
 	defer cancel()
 	last := f.op.invite.CSeq
 	commands := []playauth.DeviceSIPINFOCommand{{Action: "play"}, {Action: "pause"}, {Action: "resume"},
-		{Action: "seek", PositionNanos: int64(time.Second), SegmentDurationNanos: int64(time.Minute)}, {Action: "scale", Scale: 2}, {Action: "teardown"}}
+		{Action: "seek", PositionNanos: int64(time.Second), SegmentDurationNanos: int64(time.Minute)}, {Action: "scale", Scale: 2},
+		{Action: "seek", RangeValue: "npt=1-30", SegmentDurationNanos: int64(time.Minute)},
+		{Action: "seek", RangeValue: "smpte=0:00:12:15-0:00:30:00", SegmentDurationNanos: int64(time.Minute)}, {Action: "teardown"}}
 	for _, command := range commands {
 		finished := make(chan error, 1)
 		go func() { finished <- f.op.SendINFO(ctx, command) }()
 		info, address := readCleanupRequest(t, f.peer)
 		require.Equal(t, sip.INFO, info.Method)
+		if command.RangeValue != "" {
+			require.Contains(t, string(info.Body()), "Range: "+command.RangeValue+"\r\n")
+		}
 		require.Equal(t, last+1, info.CSeq().SeqNo)
 		last++
 		require.Contains(t, string(info.Body()), fmt.Sprintf("CSeq: %d\r\n", last))

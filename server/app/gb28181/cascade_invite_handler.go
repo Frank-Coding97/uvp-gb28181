@@ -2,6 +2,7 @@ package gb28181
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"strconv"
@@ -18,28 +19,32 @@ import (
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/media"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/repository"
+	"uvplatform.com/uvp-gb28181/app/gb28181/mansrtsp"
+	"uvplatform.com/uvp-gb28181/app/gb28181/play"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 	gbroutes "uvplatform.com/uvp-gb28181/app/gb28181/routes"
 	"uvplatform.com/uvp-gb28181/app/gb28181/sdp"
 	"uvplatform.com/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
-// cascadePeer 是上级平台在本次事务里实际使用的网络身份。
-//
-// ⚠️ 不要拿源 IP 当身份。同一台上级平台可能双网卡 / 经 NAT / 走 VPN，
-// 主动发起请求时的源地址只取决于到我们这边的路由，跟它回复我们时用的源地址
-// 可以不是一个（220 WVP 实测：回我们 REGISTER 用 192.168.10.220:8160，
-// 发 INVITE 却用 VPN 地址 10.8.0.2:8160）。把 IP 写进匹配条件，
-// 结果就是「同一台平台一半的报文认不出来」，而配置里填哪个 IP 都不对。
-//
-// 稳定的身份是：From 用户（上级 SIP 服务器 ID）+ 端口 + 传输层。
-// 端口不能省 —— 同一台上级平台可以挂多个接入实例，端口是唯一区分依据。
+// cascadePeer binds the configured upstream identity to the observed SIP endpoint.
 type cascadePeer struct {
 	host      string
 	port      int
 	transport string
 	fromUser  string
 }
+
+// cascadePeerDNS centralizes host resolution so every inbound cascade entry
+// point applies the same source-address policy. Tests replace lookup with a
+// deterministic resolver; production uses the system resolver and performs a
+// fresh lookup for each new transaction, so an address change takes effect on
+// the next request without weakening an established dialog's peer binding.
+var cascadePeerDNS = struct {
+	sync.RWMutex
+	lookup func(string) ([]net.IP, error)
+}{lookup: net.LookupIP}
 
 func (p cascadePeer) String() string {
 	if p.host == "" && p.fromUser == "" {
@@ -68,7 +73,7 @@ func cascadePeerFromRequest(req *sip.Request) (cascadePeer, bool) {
 	}, true
 }
 
-// identify 按身份认定平台，不看源 IP。上游换网卡/经 NAT 时靠它兜底。
+// identify checks identity fields; match additionally requires a trusted source IP.
 func (p cascadePeer) identify(platform model.GbCascadePlatform) bool {
 	return p.fromUser == platform.UpstreamServerID &&
 		p.port == platform.Port &&
@@ -77,14 +82,59 @@ func (p cascadePeer) identify(platform model.GbCascadePlatform) bool {
 
 // match 是严格口径：身份一致之外，源 IP 也要对上配置的 Host。
 func (p cascadePeer) match(platform model.GbCascadePlatform) bool {
-	return p.identify(platform) && strings.EqualFold(p.host, platform.Host)
+	return p.identify(platform) && cascadePeerHostMatches(p.host, platform.Host)
 }
 
-// sameSession 用于建立后的 ACK/BYE 比对。同一个对话框的后续请求同样可能
-// 换一张网卡发出来，所以只认 From + 端口 + 传输层；端口是阻止
-// 「另一个接入实例拿同一个 Call-ID 拆本对话框」的那道闸。
+func cascadePeerHostMatches(observed, configured string) bool {
+	observed = normalizeCascadeHost(observed)
+	configured = normalizeCascadeHost(configured)
+	if observed == "" || configured == "" {
+		return false
+	}
+	observedIP := net.ParseIP(observed)
+	if observedIP == nil {
+		// A SIP source address is expected to be a numeric IP. Do not let a
+		// hostname in a synthetic or malformed source bypass DNS verification.
+		return false
+	}
+	if configuredIP := net.ParseIP(configured); configuredIP != nil {
+		return configuredIP.Equal(observedIP)
+	}
+	cascadePeerDNS.RLock()
+	lookup := cascadePeerDNS.lookup
+	cascadePeerDNS.RUnlock()
+	if lookup == nil {
+		return false
+	}
+	addresses, err := lookup(configured)
+	if err != nil || len(addresses) == 0 {
+		return false
+	}
+	for _, address := range addresses {
+		if address != nil && address.Equal(observedIP) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeCascadeHost(host string) string {
+	host = strings.TrimSpace(host)
+	host = strings.TrimPrefix(host, "[")
+	host = strings.TrimSuffix(host, "]")
+	if zone := strings.LastIndexByte(host, '%'); zone >= 0 {
+		host = host[:zone]
+	}
+	return host
+}
+
+// sameSession 用于建立后的 ACK/BYE/INFO 比对。会话建立后仍要求实际
+// 来源地址、端口、传输层和 From 身份全部一致，不能因同端口而放行另一来源。
 func (p cascadePeer) sameSession(observed cascadePeer) bool {
-	return p.fromUser == observed.fromUser && p.port == observed.port && p.transport == observed.transport
+	return p.fromUser == observed.fromUser &&
+		strings.EqualFold(p.host, observed.host) &&
+		p.port == observed.port &&
+		p.transport == observed.transport
 }
 
 // The SIP flow identifies the upper platform. To/Request-URI identifies its
@@ -105,19 +155,33 @@ type cascadeVideoSession struct {
 	platform model.GbCascadePlatform
 	// peer 是 INVITE 到达时看到的实际网络身份，后续 ACK/BYE 拿它比对，
 	// 而不是拿可能已经过期的平台配置里的 Host。
-	peer         cascadePeer
-	cancel       context.CancelFunc
-	acknowledged atomic.Bool
+	peer              cascadePeer
+	source            cascadeMediaSourceIdentity
+	inviteKey         cascadeInviteKey
+	ssrc              string
+	senderMu          sync.Mutex
+	stopCurrentSender func(context.Context) error
+	done              chan struct{}
+	context           context.Context
+	transport         zlm.GBSendRTPTransport
+	rtpInfo           *mansrtsp.RTPInfo
+	cancel            context.CancelFunc
+	acknowledged      atomic.Bool
+	playback          *cascadePlaybackLease
+	controlMu         sync.Mutex
 }
 
 type cascadeVideoRuntime struct {
-	client   *sipgo.Client
-	store    *repository.GormRepository
-	sources  *media.Provider
-	sender   *media.Sender
-	nodes    media.SenderNodeLookup
-	mu       sync.Mutex
-	sessions map[string]*cascadeVideoSession
+	client          *sipgo.Client
+	store           *repository.GormRepository
+	sources         *media.Provider
+	sender          *media.Sender
+	nodes           media.SenderNodeLookup
+	playback        cascadePlaybackService
+	monitorInterval time.Duration
+	mu              sync.Mutex
+	sessions        map[string]*cascadeVideoSession
+	sourcePending   map[cascadeSourceKey]cascadeInviteKey
 	// ZLM's stop API addresses a sender by source + SSRC, not SIP dialog.
 	senders map[string]bool
 	closed  bool
@@ -152,7 +216,7 @@ func setupCascadeVideoRuntime(server sipRuntimeServer) error {
 	if err != nil {
 		return err
 	}
-	h := &cascadeVideoRuntime{client: client, store: repository.NewGormRepository(app.DB()), sources: media.NewProvider(media.NewPlayServiceAdapter(playSvc)), sender: media.NewSender(zlmRegistry, nil), nodes: zlmRegistry, sessions: map[string]*cascadeVideoSession{}, senders: map[string]bool{}}
+	h := &cascadeVideoRuntime{client: client, store: repository.NewGormRepository(app.DB()), sources: media.NewProvider(media.NewPlayServiceAdapter(playSvc)), sender: media.NewSender(zlmRegistry, nil), nodes: zlmRegistry, playback: playbackService, sessions: map[string]*cascadeVideoSession{}, senders: map[string]bool{}}
 	// Persisted sender identities allow cleanup after a process crash. Never
 	// reconstruct a SIP dialog from stale rows or stop the shared source stream.
 	if err := h.recoverSenders(); err != nil {
@@ -161,7 +225,40 @@ func setupCascadeVideoRuntime(server sipRuntimeServer) error {
 	cascadeVideo.Store(h)
 	gbroutes.SetCascadeSourceLeaseChecker(h.sources)
 	receiver.SetCascadeDialogHandler(h.Handle)
+	if cancelReceiver, ok := server.(interface {
+		SetCascadeCancelValidator(func(*sip.Request, sip.ServerTransaction) bool)
+	}); ok {
+		cancelReceiver.SetCascadeCancelValidator(h.ValidateCancel)
+	}
 	return nil
+}
+
+func (h *cascadeVideoRuntime) ValidateCancel(req *sip.Request, tx sip.ServerTransaction) bool {
+	originProvider, ok := tx.(interface{ Origin() *sip.Request })
+	if h == nil || req == nil || tx == nil || !ok || originProvider.Origin() == nil || !cascadeRequestHasVideo(originProvider.Origin()) {
+		return true
+	}
+	originPeer, ok := cascadePeerFromRequest(originProvider.Origin())
+	if !ok {
+		return false
+	}
+	// A pending video transaction stays bound to its original transport peer,
+	// independently of later DNS, database or platform configuration changes.
+	cancelPeer, ok := cascadePeerFromRequest(req)
+	return ok && cancelPeer.sameSession(originPeer)
+}
+
+func cascadeRequestHasVideo(req *sip.Request) bool {
+	if req == nil {
+		return false
+	}
+	for _, line := range strings.Split(string(req.Body()), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 0 && fields[0] == "m=video" {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *cascadeVideoRuntime) Handle(req *sip.Request, tx sip.ServerTransaction) bool {
@@ -213,6 +310,8 @@ func (h *cascadeVideoRuntime) Handle(req *sip.Request, tx sip.ServerTransaction)
 		} else {
 			session.cancel()
 		}
+	case sip.INFO:
+		h.playbackInfo(req, tx, session)
 	default:
 		return false
 	}
@@ -257,46 +356,38 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 	}
 	var platform *model.GbCascadePlatform
 	var strictCount int
-	var identityOnly []model.GbCascadePlatform
 	for i := range platforms {
-		switch {
-		case peer.match(platforms[i]):
+		if peer.match(platforms[i]) {
 			strictCount++
 			if platform == nil {
 				platform = &platforms[i]
 			}
-		case peer.identify(platforms[i]):
-			identityOnly = append(identityOnly, platforms[i])
 		}
 	}
 	if strictCount > 1 {
 		fail(403, fmt.Errorf("ambiguous upstream: %d platforms match %s", strictCount, peer))
 		return
 	}
-	if strictCount == 0 {
-		// 源 IP 与配置不符：上游双网卡 / 走 VPN / 经 NAT 时会有这一半的报文。
-		// 退一步按身份认定，但仍然要求唯一 —— 认不出来好过认错。
-		if len(identityOnly) > 1 {
-			fail(403, fmt.Errorf("ambiguous upstream: %d platforms match %s", len(identityOnly), peer))
-			return
-		}
-		if len(identityOnly) == 1 {
-			platform = &identityOnly[0]
-			h.logPeerMismatch(platform.ID, cascadeCallID(req), peer.String(), identityOnly[0].Host)
-		}
-	}
 	if platform == nil || !platform.Enabled {
 		fail(403, fmt.Errorf("unknown or disabled upstream (platforms=%d, peer=%s)", len(platforms), peer))
 		return
 	}
 	platformID = platform.ID
+	if offer.Playback && !platform.RecordingEnabled {
+		fail(403, fmt.Errorf("recording sharing is disabled"))
+		return
+	}
 	subject := req.GetHeader("Subject")
 	if subject == nil {
 		fail(400, fmt.Errorf("missing Subject"))
 		return
 	}
-	parts := strings.Split(subject.Value(), ",")
-	if len(parts) != 2 || strings.SplitN(parts[0], ":", 2)[0] != req.Recipient.User || strings.SplitN(parts[1], ":", 2)[0] != platform.UpstreamServerID {
+	identity, subjectErr := parseCascadeMediaSourceIdentity(subject.Value(), offer.Playback)
+	if subjectErr != nil {
+		fail(400, subjectErr)
+		return
+	}
+	if identity.SenderID != req.Recipient.User || identity.ReceiverID != platform.UpstreamServerID {
 		fail(403, fmt.Errorf("subject identity mismatch"))
 		return
 	}
@@ -325,6 +416,30 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 		fail(480, fmt.Errorf("source channel offline"))
 		return
 	}
+	var deviceEpoch int64
+	if !offer.Playback {
+		security, err := playauth.NewDeviceSecurityStore(app.DB()).Load(ctx, source.DeviceCode)
+		if err != nil || security.CleanupCompletedEpoch != security.AccessEpoch {
+			fail(503, play.ErrPlayAuthorizationUnavailable)
+			return
+		}
+		deviceEpoch = security.AccessEpoch
+	}
+	releaseReservation, duplicate, err := h.reserveSource(ctx, platform.ID, identity, offer.SSRC, req)
+	if err != nil {
+		fail(503, err)
+		return
+	}
+	if duplicate {
+		// The owning SIP transaction retransmits its cached final response.
+		_ = tx.Respond(sip.NewResponseFromRequest(req, 100, "Trying", nil))
+		return
+	}
+	defer func() {
+		if releaseReservation != nil {
+			releaseReservation()
+		}
+	}()
 	ua := sipgo.DialogUA{Client: h.client, RewriteContact: true, ContactHDR: sip.ContactHeader{Address: sip.Uri{User: platform.LocalDeviceID, Host: platform.LocalSIPIP, Port: platform.LocalSIPPort}}}
 	dialog, err := ua.ReadInvite(req, tx)
 	if err != nil {
@@ -333,7 +448,7 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 	}
 	responseRequest = dialog.InviteRequest
 	sessionCtx, sessionCancel := context.WithCancel(dialog.Context())
-	session := &cascadeVideoSession{dialog: dialog, platform: *platform, peer: peer, cancel: func() { sessionCancel(); tx.Terminate() }}
+	session := &cascadeVideoSession{dialog: dialog, platform: *platform, peer: peer, source: identity, inviteKey: cascadeInviteTransactionKey(req), ssrc: offer.SSRC, done: make(chan struct{}), context: sessionCtx, transport: offer.Transport, cancel: func() { sessionCancel(); tx.Terminate() }}
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
@@ -357,21 +472,54 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 	h.wg.Add(1)
 	h.mu.Unlock()
 	defer h.wg.Done()
-	defer func() { sessionCancel(); h.mu.Lock(); delete(h.sessions, dialog.ID); h.mu.Unlock(); _ = dialog.Close() }()
+	defer func() {
+		sessionCancel()
+		h.mu.Lock()
+		delete(h.sessions, dialog.ID)
+		h.mu.Unlock()
+		_ = dialog.Close()
+		close(session.done)
+	}()
 	_ = dialog.Respond(100, "Trying", nil)
 	provisionCtx, provisionCancel := context.WithTimeout(sessionCtx, 30*time.Second)
 	defer provisionCancel()
-	lease, err := h.sources.Acquire(provisionCtx, media.AcquireRequest{ConsumerKey: dialog.ID, DeviceID: source.DeviceCode, ChannelID: source.ChannelCode})
+	var sourceMedia media.StartResult
+	var releaseSource func()
+	if offer.Playback {
+		sourceMedia, releaseSource, err = h.acquirePlayback(provisionCtx, session, target, offer)
+	} else {
+		var lease *media.Lease
+		lease, err = h.sources.Acquire(provisionCtx, media.AcquireRequest{ConsumerKey: dialog.ID, DeviceID: source.DeviceCode, ChannelID: source.ChannelCode, DeviceEpoch: deviceEpoch})
+		if err == nil {
+			sourceMedia = lease.Source
+			releaseSource = func() {
+				if releaseErr := lease.Release(context.Background()); releaseErr != nil && app.ZapLog != nil {
+					app.ZapLog.Warn("级联媒体 source 释放失败", zap.String("event", "cascade.source_release_failed"), zap.String("dialog_id", dialog.ID), zap.Error(releaseErr))
+				}
+			}
+		}
+	}
 	if err != nil {
 		fail(503, err)
 		return
 	}
-	defer func() {
-		if releaseErr := lease.Release(context.Background()); releaseErr != nil && app.ZapLog != nil {
-			app.ZapLog.Warn("级联媒体 source 释放失败", zap.String("event", "cascade.source_release_failed"), zap.String("dialog_id", dialog.ID), zap.Error(releaseErr))
-		}
-	}()
-	key := fmt.Sprintf("%d/%s/%s/%s", lease.Source.NodeID, lease.Source.App, lease.Source.StreamID, offer.SSRC)
+	defer releaseSource()
+	latestProjection, err := h.store.ProjectionSnapshot(provisionCtx, platform.ID)
+	if err != nil {
+		fail(500, err)
+		return
+	}
+	latestSnapshot, err := catalog.Build(*latestProjection, catalog.SourceFacts{})
+	if err != nil {
+		fail(500, err)
+		return
+	}
+	latestTarget, ok := latestSnapshot.LookupPublishedChannel(published)
+	if !ok || latestTarget.SourceDeviceID != target.SourceDeviceID || latestTarget.SourceChannelID != target.SourceChannelID {
+		fail(403, fmt.Errorf("channel sharing changed during INVITE"))
+		return
+	}
+	key := fmt.Sprintf("%d/%s/%s/%s", sourceMedia.NodeID, sourceMedia.App, sourceMedia.StreamID, offer.SSRC)
 	h.mu.Lock()
 	busy := h.senders[key]
 	if !busy {
@@ -384,26 +532,66 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 	}
 	defer func() { h.mu.Lock(); delete(h.senders, key); h.mu.Unlock() }()
 	latest, err := h.store.FindPlatform(provisionCtx, platform.ID)
-	if err != nil || !latest.Enabled || latest.ConfigRevision != platform.ConfigRevision || latest.ProjectionRevision != platform.ProjectionRevision {
+	if err != nil || !latest.Enabled || (offer.Playback && !latest.RecordingEnabled) || latest.ConfigRevision != platform.ConfigRevision || latest.ProjectionRevision != platform.ProjectionRevision {
 		fail(403, fmt.Errorf("platform or sharing changed during INVITE"))
 		return
 	}
 	now := time.Now()
-	row := model.GbCascadeMediaSession{PlatformID: platform.ID, DialogKey: dialog.ID, CallID: req.CallID().Value(), CSeq: uint64(req.CSeq().SeqNo), SourceDeviceID: target.SourceDeviceID, SourceChannelID: target.SourceChannelID, PublishedChannelID: published, ZLMNodeID: lease.Source.NodeID, ZLMVHost: "__defaultVhost__", ZLMApp: lease.Source.App, ZLMStream: lease.Source.StreamID, SenderSSRC: offer.SSRC, Transport: string(offer.Transport), RemoteIP: offer.RemoteIP, RemotePort: offer.RemotePort, State: model.CascadeMediaSessionStateProvisioning, ReceivedAt: &now}
+	identitySummary, _ := json.Marshal(identity)
+	row := model.GbCascadeMediaSession{PlatformID: platform.ID, DialogKey: dialog.ID, CallID: req.CallID().Value(), CSeq: uint64(req.CSeq().SeqNo), SourceDeviceID: target.SourceDeviceID, SourceChannelID: target.SourceChannelID, PublishedChannelID: published, ZLMNodeID: sourceMedia.NodeID, ZLMVHost: "__defaultVhost__", ZLMApp: sourceMedia.App, ZLMStream: sourceMedia.StreamID, SenderSSRC: offer.SSRC, SDPSummary: string(identitySummary), Transport: string(offer.Transport), RemoteIP: offer.RemoteIP, RemotePort: offer.RemotePort, State: model.CascadeMediaSessionStateProvisioning, ReceivedAt: &now}
 	if err = h.store.CreateMediaSession(provisionCtx, &row); err != nil {
 		fail(500, err)
 		return
 	}
 	state := row.State
 	completed := false
+	byeSent := false
 	// Store ownership before starting: even an ambiguous HTTP timeout remains recoverable.
-	sender, err := h.sender.Start(provisionCtx, media.SenderRequest{Source: lease.Source, SSRC: offer.SSRC, PayloadType: offer.PayloadType, RemoteIP: offer.RemoteIP, RemotePort: offer.RemotePort, Transport: offer.Transport})
+	request := media.SenderRequest{Source: sourceMedia, SSRC: offer.SSRC, PayloadType: offer.PayloadType, RemoteIP: offer.RemoteIP, RemotePort: offer.RemotePort, Transport: offer.Transport, RTCPKeepalive: platform.RTCPKeepalive}
+	var sender *media.SenderLease
+	senderStopped := false
+	stopRow := row
+	session.senderMu.Lock()
+	h.mu.Lock()
+	session.stopCurrentSender = func(stopCtx context.Context) error {
+		session.senderMu.Lock()
+		defer session.senderMu.Unlock()
+		if senderStopped {
+			return nil
+		}
+		var stopErr error
+		if session.playback != nil {
+			stopErr = session.playback.stopSender(stopCtx)
+		} else {
+			stopErr = h.stopSender(stopCtx, stopRow)
+		}
+		if stopErr == nil {
+			senderStopped = true
+		}
+		return stopErr
+	}
+	h.mu.Unlock()
+	if session.playback != nil {
+		sender, err = session.playback.startSender(provisionCtx, row, request)
+	} else {
+		sender, err = h.sender.Start(provisionCtx, request)
+	}
+	session.senderMu.Unlock()
 	defer func() {
 		for {
 			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
-			stopErr := h.stopSender(cleanupCtx, row)
+			stopErr := session.stopCurrentSender(cleanupCtx)
 			cleanupCancel()
 			if stopErr == nil {
+				if !byeSent && session.dialog.LoadState() == sip.DialogStateConfirmed {
+					byeCtx, byeCancel := context.WithTimeout(context.Background(), 3*time.Second)
+					byeErr := session.dialog.Bye(byeCtx)
+					byeCancel()
+					byeSent = true
+					if byeErr != nil {
+						h.logByeFailed(platform.ID, session.dialog.ID, byeErr)
+					}
+				}
 				saved := false
 				if completed || (session.acknowledged.Load() && sessionCtx.Err() != nil) {
 					if state == model.CascadeMediaSessionStateActive || state == model.CascadeMediaSessionStateAnswered {
@@ -427,7 +615,10 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 		fail(503, err)
 		return
 	}
-	mediaNode, ok := h.nodes.Get(lease.Source.NodeID)
+	if sender.RTPInfo != nil && strings.TrimSpace(sender.RTPInfo.URL) != "" {
+		session.rtpInfo = &mansrtsp.RTPInfo{URL: sender.RTPInfo.URL, Seq: sender.RTPInfo.Seq, RTPTime: sender.RTPInfo.RTPTime}
+	}
+	mediaNode, ok := h.nodes.Get(sourceMedia.NodeID)
 	if !ok {
 		fail(503, fmt.Errorf("media node disappeared"))
 		return
@@ -454,15 +645,20 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 		fail(500, fmt.Errorf("persist answer state failed"))
 		return
 	}
+	releaseReservation()
+	releaseReservation = nil
 	if err = dialog.RespondSDP(answer); err != nil {
 		h.logAnswerFailed(platform.ID, dialog.ID, err)
+		return
+	}
+	if !session.acknowledged.Load() || sessionCtx.Err() != nil {
 		return
 	}
 	if !h.transition(&row, &state, model.CascadeMediaSessionStateActive) {
 		return
 	}
 	h.logEstablished(platform.ID, dialog.ID)
-	<-sessionCtx.Done()
+	h.waitCascadeVideo(sessionCtx, session, sender)
 	completed = true
 }
 
@@ -689,14 +885,7 @@ func (h *cascadeVideoRuntime) revalidate(ctx context.Context) error {
 	h.mu.Unlock()
 	for _, session := range obsolete {
 		session.cancel()
-		if session.dialog.LoadState() == sip.DialogStateConfirmed {
-			byeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			err := session.dialog.Bye(byeCtx)
-			cancel()
-			if err != nil {
-				h.logByeFailed(session.platform.ID, session.dialog.ID, err)
-			}
-		}
+
 	}
 	return nil
 }

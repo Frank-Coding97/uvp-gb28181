@@ -155,6 +155,30 @@ func TestCatalogServiceKeepsIndexWhenPhysicalDeleteFails(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestCatalogServiceDropsIndexWhenPhysicalFileAlreadyGone 锁住幂等语义：
+// ZLM 回报"文件已不在"时目标状态已达成，必须连目录索引一起删，
+// 否则这条记录永远删不掉（2026-10-18 220 现场：文件被删了、列表还在、再点删除继续报错）。
+func TestCatalogServiceDropsIndexWhenPhysicalFileAlreadyGone(t *testing.T) {
+	db := newCatalogServiceDB(t)
+	now := time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC)
+	file := catalogFile(114, 10, 1, now, "record.mp4")
+	file.RecordDate = ptrTime(now)
+	require.NoError(t, db.Create(&file).Error)
+	client := &catalogDeleteClient{err: zlm.ErrRecordingNotFound}
+	service := NewCatalogService(CatalogServiceConfig{
+		Repo:          NewGormRepo(db),
+		Nodes:         catalogTestNodes{nodes: map[int64]*node.Node{1: {ID: 1, State: node.StateActive}}},
+		ResolveAccess: func(context.Context, uint) (CatalogAccess, error) { return CatalogAccess{DeptIDs: []uint{10}}, nil },
+		NewFileClient: func(*node.Node) CatalogFileClient { return client },
+	})
+
+	result, err := service.DeleteFile(context.Background(), 7, 114)
+	require.NoError(t, err)
+	require.Equal(t, DeleteFileResult{ID: "114", Deleted: true}, result)
+	_, err = NewGormRepo(db).GetCatalogFile(context.Background(), 114, nil, true)
+	require.ErrorIs(t, err, ErrRecordingFileNotFound)
+}
+
 func TestCatalogServiceBatchDeleteReturnsPartialResults(t *testing.T) {
 	db := newCatalogServiceDB(t)
 	now := time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC)

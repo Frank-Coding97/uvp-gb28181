@@ -29,6 +29,18 @@ var ErrConfigConvergenceInProgress = errors.New("node config convergence in prog
 
 var ErrNodeConfigChanged = errors.New("node config changed during convergence")
 
+const (
+	nodeConfigChangePlatformDefaults = "platform_media_defaults_changed"
+	nodeConfigChangeInactive         = "node_became_inactive"
+	nodeConfigChangeEndpoint         = "node_endpoint_changed"
+	nodeConfigChangeRevision         = "node_revision_changed_before_ready"
+	nodeConfigChangeRecoveryRequired = "node_recovery_required_before_ready"
+)
+
+func nodeConfigChanged(reason string) error {
+	return fmt.Errorf("%w: %s", ErrNodeConfigChanged, reason)
+}
+
 var ErrRTPListenerMismatch = errors.New("rtp_listener_mismatch")
 
 // RTPListenerMismatchError carries only numeric, user-actionable state from
@@ -64,9 +76,10 @@ var ErrRollbackUncertain = errors.New("rollback_uncertain")
 var ErrRestartPending = errors.New("restart already pending")
 
 const (
-	maxNodeRecoveryReason   = 255
-	endpointRecoveryPending = "endpoint convergence pending"
-	endpointRecoveryFailed  = "endpoint convergence failed"
+	maxNodeRecoveryReason           = 255
+	endpointRecoveryPending         = "endpoint convergence pending"
+	endpointRecoveryFailed          = "endpoint convergence failed"
+	maxScheduledConvergenceAttempts = 2
 )
 
 // ZLMProbe 节点连通性探测 + 配置下发抽象
@@ -202,10 +215,12 @@ type NodeService struct {
 	scheduleMu      sync.Mutex
 	scheduleWG      sync.WaitGroup
 	scheduleStopped bool
+	scheduled       map[int64]struct{}
 	scheduleDone    chan struct{}
 	scheduleWait    sync.Once
 	applyMu         sync.Mutex
 	tuningMu        sync.RWMutex
+	tuningRevision  uint64
 	applying        map[int64]struct{}
 	locksMu         sync.Mutex
 	locks           map[int64]*sync.Mutex
@@ -230,6 +245,7 @@ func NewNodeService(reg *node.Registry, probe ZLMProbe, tuning MediaTuning) *Nod
 		probe:        probe,
 		tuning:       tuning,
 		applying:     make(map[int64]struct{}),
+		scheduled:    make(map[int64]struct{}),
 		locks:        make(map[int64]*sync.Mutex),
 		logger:       zap.NewNop(),
 		scheduleDone: make(chan struct{}),
@@ -760,10 +776,16 @@ func (s *NodeService) ApplyActiveConfigs(ctx context.Context) []ConfigApplyResul
 // converges all active nodes through the verified ZLM apply path. Node-level
 // HookIP/SDPIP/PlaybackHost overrides remain authoritative.
 func (s *NodeService) ReloadPlatformMediaDefaults(ctx context.Context, hookIP, sdpIP, streamIP string) error {
+	hookIP = strings.TrimSpace(hookIP)
+	sdpIP = strings.TrimSpace(sdpIP)
+	streamIP = strings.TrimSpace(streamIP)
 	s.tuningMu.Lock()
-	s.tuning.HookIP = strings.TrimSpace(hookIP)
-	s.tuning.SDPIP = strings.TrimSpace(sdpIP)
-	s.tuning.StreamIP = strings.TrimSpace(streamIP)
+	if s.tuning.HookIP != hookIP || s.tuning.SDPIP != sdpIP || s.tuning.StreamIP != streamIP {
+		s.tuningRevision++
+	}
+	s.tuning.HookIP = hookIP
+	s.tuning.SDPIP = sdpIP
+	s.tuning.StreamIP = streamIP
 	tuning := s.tuning
 	s.tuningMu.Unlock()
 	s.registry.SetPlatformPlaybackHost(tuning.StreamIP)
@@ -792,31 +814,42 @@ func (s *NodeService) ConvergeNodeConfig(ctx context.Context, nodeID int64) erro
 // failed apply leaves readiness false so the next heartbeat retries it.
 func (s *NodeService) ScheduleConfigConvergence(nodeID int64) bool {
 	// Admission and WaitGroup.Add must be serialized with StopContext's
-	// WaitGroup.Wait. Do not hold this lifecycle lock while waiting for the
-	// per-node lock: an in-flight apply may hold it for the full ZLM timeout.
+	// WaitGroup.Wait. Keep a separate scheduled set so duplicate heartbeat
+	// notifications are rejected without taking the per-node lock here.
 	s.scheduleMu.Lock()
 	if s.scheduleStopped {
 		s.scheduleMu.Unlock()
 		return false
 	}
+	if _, exists := s.scheduled[nodeID]; exists {
+		s.scheduleMu.Unlock()
+		return false
+	}
+	s.scheduled[nodeID] = struct{}{}
 	s.scheduleWG.Add(1)
 	s.scheduleMu.Unlock()
 
-	lock := s.nodeLock(nodeID)
-	lock.Lock()
-	current, ok := s.beginConfigConvergence(nodeID)
-	lock.Unlock()
-	if !ok {
-		s.scheduleWG.Done()
-		return false
-	}
 	go func() {
-		defer s.scheduleWG.Done()
+		defer func() {
+			s.scheduleMu.Lock()
+			delete(s.scheduled, nodeID)
+			s.scheduleMu.Unlock()
+			s.scheduleWG.Done()
+		}()
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		lock := s.nodeLock(nodeID)
 		lock.Lock()
-		err := s.applyClaimedConfig(ctx, current)
+		var err error
+		for attempt := 0; attempt < maxScheduledConvergenceAttempts; attempt++ {
+			// Read and apply the current node snapshot under the same keyed lock.
+			// If state changes while the external ZLM call is in flight, retry once
+			// from the new revision instead of leaving this worker on a stale copy.
+			err = s.convergeNodeLocked(ctx, nodeID)
+			if !errors.Is(err, ErrNodeConfigChanged) {
+				break
+			}
+		}
 		lock.Unlock()
 		if err != nil {
 			s.logger.Warn("GB28181 ZLM 节点配置恢复失败", zap.String("event", "zlm.node.restore_failed"),
@@ -872,21 +905,6 @@ func (s *NodeService) StopContext(ctx context.Context) error {
 	}
 }
 
-func (s *NodeService) beginConfigConvergence(nodeID int64) (*node.Node, bool) {
-	current, ok := s.registry.Get(nodeID)
-	if !ok || !current.IsActive() || s.registry.IsAutoOnDemandReady(nodeID) {
-		return nil, false
-	}
-	s.applyMu.Lock()
-	defer s.applyMu.Unlock()
-	if _, exists := s.applying[nodeID]; exists {
-		return nil, false
-	}
-	s.applying[nodeID] = struct{}{}
-	s.registry.SetAutoOnDemandReady(nodeID, false)
-	return cloneNode(current), true
-}
-
 func (s *NodeService) convergeNodeLocked(ctx context.Context, nodeID int64) error {
 	current, ok := s.registry.Get(nodeID)
 	if !ok {
@@ -918,6 +936,7 @@ func (s *NodeService) applyClaimedConfig(ctx context.Context, current *node.Node
 	}()
 	s.tuningMu.RLock()
 	tuning := s.tuning
+	tuningRevision := s.tuningRevision
 	s.tuningMu.RUnlock()
 	if err := s.probe.ApplyConfigForNode(ctx, current, tuning); err != nil {
 		return redactNodeError(err, current)
@@ -928,39 +947,72 @@ func (s *NodeService) applyClaimedConfig(ctx context.Context, current *node.Node
 		s.registry.SetAutoOnDemandReady(current.ID, false)
 		return fmt.Errorf("%w: %v", ErrExternalStateUncertain, redactNodeError(err, current))
 	}
+	s.tuningMu.RLock()
+	if s.tuningRevision != tuningRevision {
+		s.tuningMu.RUnlock()
+		s.registry.SetAutoOnDemandReady(current.ID, false)
+		return nodeConfigChanged(nodeConfigChangePlatformDefaults)
+	}
 	latest, ok := s.registry.Get(current.ID)
 	if !ok {
+		s.tuningMu.RUnlock()
 		return ErrNodeNotFound
 	}
-	if !latest.IsActive() || latest.Host != current.Host || latest.APIPort != current.APIPort ||
-		latest.APISecret != current.APISecret || latest.MediaServerUUID != current.MediaServerUUID {
+	if !latest.IsActive() {
+		s.tuningMu.RUnlock()
 		s.registry.SetAutoOnDemandReady(current.ID, false)
-		return ErrNodeConfigChanged
+		return nodeConfigChanged(nodeConfigChangeInactive)
+	}
+	if latest.Host != current.Host || latest.APIPort != current.APIPort ||
+		latest.APISecret != current.APISecret || latest.MediaServerUUID != current.MediaServerUUID {
+		s.tuningMu.RUnlock()
+		s.registry.SetAutoOnDemandReady(current.ID, false)
+		return nodeConfigChanged(nodeConfigChangeEndpoint)
 	}
 	if latest.RecoveryRequired || latest.RecoveryReason != "" || latest.RecoveryFingerprint != "" {
 		latest.RecoveryRequired = false
 		latest.RecoveryReason = ""
 		latest.RecoveryFingerprint = ""
 		if err := s.registry.Update(ctx, *latest); err != nil {
+			s.tuningMu.RUnlock()
 			s.registry.SetAutoOnDemandReady(current.ID, false)
 			return err
 		}
 		latest, ok = s.registry.Get(current.ID)
 		if !ok {
+			s.tuningMu.RUnlock()
 			return ErrNodeNotFound
 		}
-		if !latest.IsActive() || latest.Host != current.Host || latest.APIPort != current.APIPort ||
-			latest.APISecret != current.APISecret || latest.MediaServerUUID != current.MediaServerUUID {
+		if !latest.IsActive() {
+			s.tuningMu.RUnlock()
 			s.registry.SetAutoOnDemandReady(current.ID, false)
-			return ErrNodeConfigChanged
+			return nodeConfigChanged(nodeConfigChangeInactive)
+		}
+		if latest.Host != current.Host || latest.APIPort != current.APIPort ||
+			latest.APISecret != current.APISecret || latest.MediaServerUUID != current.MediaServerUUID {
+			s.tuningMu.RUnlock()
+			s.registry.SetAutoOnDemandReady(current.ID, false)
+			return nodeConfigChanged(nodeConfigChangeEndpoint)
 		}
 	}
 	if !s.registry.SetAutoOnDemandReadyIfRevision(current.ID, latest.Revision, true) {
-		if _, ok := s.registry.Get(current.ID); !ok {
+		s.tuningMu.RUnlock()
+		currentAfter, ok := s.registry.Get(current.ID)
+		if !ok {
 			return ErrNodeNotFound
 		}
-		return ErrNodeConfigChanged
+		if currentAfter.Revision != latest.Revision {
+			return nodeConfigChanged(nodeConfigChangeRevision)
+		}
+		if !currentAfter.IsActive() {
+			return nodeConfigChanged(nodeConfigChangeInactive)
+		}
+		if currentAfter.RecoveryRequired {
+			return nodeConfigChanged(nodeConfigChangeRecoveryRequired)
+		}
+		return nodeConfigChanged(nodeConfigChangeRevision)
 	}
+	s.tuningMu.RUnlock()
 	return nil
 }
 

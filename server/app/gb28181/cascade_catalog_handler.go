@@ -5,8 +5,6 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
-	"net"
-	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +14,8 @@ import (
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/control"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/repository"
+	"uvplatform.com/uvp-gb28181/app/gb28181/civilcode"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
 	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.com/uvp-gb28181/app/global/app"
@@ -59,21 +59,33 @@ func cascadePeerLabel(req *sip.Request) string {
 }
 
 func matchCascadeCatalogPeer(req *sip.Request, p model.GbCascadePlatform) bool {
-	host, port, err := net.SplitHostPort(req.Source())
-	if err != nil {
+	if !matchCascadeCatalogPeerIdentity(req, p) {
 		return false
 	}
-	return req.From() != nil && req.To() != nil && req.From().Address.User == p.UpstreamServerID && req.To().Address.User == p.LocalDeviceID &&
-		strings.EqualFold(host, p.Host) && port == strconv.Itoa(p.Port) && strings.EqualFold(req.Transport(), p.Transport)
+	return req.To() != nil &&
+		(req.To().Address.User == p.LocalDeviceID || (p.PublishCivil && cascadeCivilTarget(req.To().Address.User)))
+}
+
+func matchCascadeCatalogPeerIdentity(req *sip.Request, p model.GbCascadePlatform) bool {
+	peer, ok := cascadePeerFromRequest(req)
+	return ok && peer.match(p)
+}
+
+func cascadeCivilTarget(id string) bool {
+	if len(id) != 2 && len(id) != 4 && len(id) != 6 && len(id) != 8 {
+		return false
+	}
+	for _, digit := range id {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+	}
+	return !strings.HasPrefix(id, "00")
 }
 
 func matchCascadeControlPeer(req *sip.Request, p model.GbCascadePlatform) bool {
-	host, port, err := net.SplitHostPort(req.Source())
-	if err != nil {
-		return false
-	}
-	return req.From() != nil && req.From().Address.User == p.UpstreamServerID &&
-		strings.EqualFold(host, p.Host) && port == strconv.Itoa(p.Port) && strings.EqualFold(req.Transport(), p.Transport)
+	peer, ok := cascadePeerFromRequest(req)
+	return ok && peer.match(p)
 }
 
 func findCascadeControlPeer(req *sip.Request, platforms []model.GbCascadePlatform) (*model.GbCascadePlatform, bool) {
@@ -91,7 +103,7 @@ func findCascadeControlPeer(req *sip.Request, platforms []model.GbCascadePlatfor
 	return matched, false
 }
 
-// buildCascadeCatalogSnapshot builds the channel-only catalog snapshot for one
+// buildCascadeCatalogSnapshot builds the publication snapshot for one
 // upstream platform, restricted to the resources explicitly shared with it.
 // Used by the query responder and the proactive manual push.
 func buildCascadeCatalogSnapshot(ctx context.Context, store *repository.GormRepository, platform *model.GbCascadePlatform) (catalog.Snapshot, error) {
@@ -99,11 +111,19 @@ func buildCascadeCatalogSnapshot(ctx context.Context, store *repository.GormRepo
 	if err != nil {
 		return catalog.Snapshot{}, err
 	}
-	facts := catalog.SourceFacts{DeviceOnline: map[uint64]bool{}, ChannelOnline: map[uint64]bool{}}
+	facts := catalog.SourceFacts{DeviceOnline: map[uint64]bool{}, ChannelOnline: map[uint64]bool{}, ChannelMetadata: map[uint64]catalog.ChannelMetadata{}}
 	// Read only the resources selected for this upstream, never the entire device catalog.
 	type statusRow struct {
 		ID     uint64
 		Status int
+	}
+	type channelRow struct {
+		ID           uint64
+		Status       int
+		Manufacturer string
+		Model        string
+		Owner        string
+		CivilCode    string
 	}
 	var deviceIDs, channelIDs []uint64
 	for _, d := range projection.Devices {
@@ -121,23 +141,42 @@ func buildCascadeCatalogSnapshot(ctx context.Context, store *repository.GormRepo
 			facts.DeviceOnline[r.ID] = r.Status == 1
 		}
 	}
-	rows = nil
 	if len(channelIDs) > 0 {
-		if err = app.DB().WithContext(ctx).Table("gb_channel").Select("id,status").Where("id IN ?", channelIDs).Find(&rows).Error; err != nil {
+		var channels []channelRow
+		if err = app.DB().WithContext(ctx).Table("gb_channel").Select("id,status,manufacturer,model,owner,civil_code").Where("id IN ? AND deleted_at IS NULL", channelIDs).Find(&channels).Error; err != nil {
 			return catalog.Snapshot{}, err
 		}
-		for _, r := range rows {
+		for _, r := range channels {
 			facts.ChannelOnline[r.ID] = r.Status == 1
+			facts.ChannelMetadata[r.ID] = catalog.ChannelMetadata{Manufacturer: r.Manufacturer, Model: r.Model, Owner: r.Owner, CivilCode: r.CivilCode}
 		}
 	}
 	snapshot, err := catalog.Build(*projection, facts)
 	if err != nil {
 		return catalog.Snapshot{}, err
 	}
-	if platform.PublishGroup && len(projection.Nodes) > 0 {
-		return snapshot, nil
+	settings := gbconfig.CurrentCascadeSettings()
+	names := make(map[string]string)
+	lookup := func(code string) string {
+		if name, ok := names[code]; ok {
+			return name
+		}
+		lookupCode := code
+		if len(code) < 6 {
+			lookupCode += strings.Repeat("0", 6-len(code))
+		}
+		var row civilcode.SysCivilCode
+		if err := app.DB().WithContext(ctx).Where("code = ?", lookupCode).First(&row).Error; err == nil {
+			names[code] = row.Name
+		} else {
+			names[code] = ""
+		}
+		return names[code]
 	}
-	return snapshot.ChannelsOnly(), nil
+	return snapshot.Publish(*platform, catalog.PublicationSettings{
+		PlatformName: settings.PlatformName, Manufacturer: settings.Manufacturer, Model: settings.Model,
+		CivilCode: settings.CivilCode, Address: settings.Address, CivilName: lookup,
+	}), nil
 }
 
 func newCascadeCatalogHandler(store *repository.GormRepository, clients *cascadePlatformClientFactory) func(*sip.Request, sip.ServerTransaction) bool {
@@ -151,8 +190,11 @@ func newCascadeCatalogHandler(store *repository.GormRepository, clients *cascade
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
+		accepted := false
 		fail := func(code int, err error) bool {
-			_ = tx.Respond(sip.NewResponseFromRequest(req, code, "Catalog query rejected", nil))
+			if !accepted {
+				_ = tx.Respond(sip.NewResponseFromRequest(req, code, "Catalog query rejected", nil))
+			}
 			// 这里拿不到 platform_id：多数失败（多个候选 / 认不出上游 / 平台被禁用）
 			// 恰恰发生在认定平台之前。所以身份靠 call_id + peer 承担，
 			// 不要为了"看起来有定位"而塞一个 platform_id=0 进去。
@@ -171,7 +213,7 @@ func newCascadeCatalogHandler(store *repository.GormRepository, clients *cascade
 		var matched *model.GbCascadePlatform
 		for i := range platforms {
 			p := &platforms[i]
-			if matchCascadeCatalogPeer(req, *p) {
+			if matchCascadeCatalogPeerIdentity(req, *p) {
 				if matched != nil {
 					return fail(403, fmt.Errorf("ambiguous upstream"))
 				}
@@ -181,9 +223,25 @@ func newCascadeCatalogHandler(store *repository.GormRepository, clients *cascade
 		if matched == nil || !matched.Enabled {
 			return fail(403, fmt.Errorf("unrecognized or disabled upstream"))
 		}
+		query, err := catalog.ParseCatalogQuery(cascadeWireProfile(*matched), req.Body())
+		if err != nil {
+			return fail(400, err)
+		}
+		// Confirm receipt before database reads and XML generation can delay the SIP transaction.
+		if err := tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil)); err != nil {
+			return true
+		}
+		accepted = true
 		snapshot, err := buildCascadeCatalogSnapshot(ctx, store, matched)
 		if err != nil {
 			return fail(500, err)
+		}
+		toID := ""
+		if req.To() != nil {
+			toID = req.To().Address.User
+		}
+		if err := catalog.ValidateCatalogRequestTargets(snapshot, matched.LocalDeviceID, toID, req.Recipient.User, query.DeviceID); err != nil {
+			return fail(403, err)
 		}
 		client, err := clients.NewClient(*matched)
 		if err != nil {
@@ -194,14 +252,15 @@ func newCascadeCatalogHandler(store *repository.GormRepository, clients *cascade
 		if strings.EqualFold(matched.Transport, "UDP") {
 			fits = outbound.transactions.MessageFitsUDP
 		}
-		responses, err := catalog.PlanCatalogResponsesWithinLimit(protocol.ProfileFor(effectiveCascadeProfile(*matched)), matched.LocalDeviceID, snapshot, matched.CatalogBatchSize, req.Body(), fits)
+		responses, err := catalog.PlanCatalogResponsesWithinLimit(cascadeWireProfile(*matched), matched.LocalDeviceID, snapshot, matched.CatalogBatchSize, req.Body(), fits)
 		if err != nil {
 			return fail(400, err)
 		}
-		if err = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil)); err != nil {
-			return true
-		}
 		for _, response := range responses {
+			current, checkErr := store.FindPlatform(ctx, matched.ID)
+			if checkErr != nil || !current.Enabled || current.ConfigRevision != matched.ConfigRevision || current.ProjectionRevision != snapshot.Revision {
+				return true
+			}
 			result := outbound.transactions.SendMessage(ctx, response.Body, fmt.Sprintf("catalog-%d-%d", matched.ID, time.Now().UnixNano()))
 			if !result.Success {
 				app.Log(ctx).Warn("级联目录响应发送失败",
@@ -230,7 +289,15 @@ func newCascadeCatalogHandler(store *repository.GormRepository, clients *cascade
 // an unmatched response.
 func newCascadeMessageHandler(store *repository.GormRepository, clients *cascadePlatformClientFactory) func(*sip.Request, sip.ServerTransaction) bool {
 	catalogHandler := newCascadeCatalogHandler(store, clients)
+	infoHandler := newCascadeInfoHandler(store, clients)
+	recordInfoHandler := newCascadeRecordInfoHandler(store, clients)
 	return func(req *sip.Request, tx sip.ServerTransaction) bool {
+		if recordInfoHandler(req, tx) {
+			return true
+		}
+		if infoHandler(req, tx) {
+			return true
+		}
 		if catalogHandler(req, tx) {
 			return true
 		}

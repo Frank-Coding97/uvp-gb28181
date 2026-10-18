@@ -6,6 +6,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 
 	"uvplatform.com/uvp-gb28181/app/gb28181/zlm"
 )
@@ -18,6 +19,9 @@ type CascadeVideoOffer struct {
 	SSRC        string
 	PayloadType int
 	Transport   zlm.GBSendRTPTransport
+	Playback    bool
+	Start       time.Time
+	End         time.Time
 }
 
 type cascadeVideoConnection struct {
@@ -51,6 +55,8 @@ func ParseCascadeVideoOffer(body []byte) (CascadeVideoOffer, error) {
 	var sessionDirection string
 	var sessionFormat string
 	var sessionName string
+	var timing string
+	var timingCount int
 	var current *cascadeVideoMedia
 	var video *cascadeVideoMedia
 
@@ -71,6 +77,9 @@ func ParseCascadeVideoOffer(body []byte) (CascadeVideoOffer, error) {
 			}
 		case strings.HasPrefix(line, "s="):
 			sessionName = strings.TrimSpace(strings.TrimPrefix(line, "s="))
+		case strings.HasPrefix(line, "t="):
+			timing = strings.TrimSpace(strings.TrimPrefix(line, "t="))
+			timingCount++
 		case strings.HasPrefix(line, "c="):
 			connection := parseCascadeVideoConnection(strings.TrimPrefix(line, "c="))
 			if current != nil {
@@ -93,14 +102,14 @@ func ParseCascadeVideoOffer(body []byte) (CascadeVideoOffer, error) {
 			}
 		case strings.HasPrefix(line, "f="):
 			format := strings.TrimSpace(strings.TrimPrefix(line, "f="))
-			switch current {
-			case video:
+			switch {
+			case current != nil && current == video:
 				current.format = format
-			case nil:
+			case current == nil:
 				sessionFormat = format
 			}
 		default:
-			if value, ok := cascadeVideoAttributeValue(line, "a=rtpmap:"); ok && current == video {
+			if value, ok := cascadeVideoAttributeValue(line, "a=rtpmap:"); ok && current != nil && current == video {
 				fields := strings.Fields(value)
 				if len(fields) >= 2 {
 					payloadType, err := strconv.Atoi(fields[0])
@@ -110,15 +119,15 @@ func ParseCascadeVideoOffer(body []byte) (CascadeVideoOffer, error) {
 				}
 				continue
 			}
-			if value, ok := cascadeVideoAttributeValue(line, "a=setup:"); ok && current == video {
+			if value, ok := cascadeVideoAttributeValue(line, "a=setup:"); ok && current != nil && current == video {
 				current.setup = strings.ToLower(value)
 				continue
 			}
 			if direction, ok := cascadeVideoDirection(line); ok {
-				switch current {
-				case video:
+				switch {
+				case current != nil && current == video:
 					current.direction = direction
-				case nil:
+				case current == nil:
 					sessionDirection = direction
 				}
 			}
@@ -128,8 +137,22 @@ func ParseCascadeVideoOffer(body []byte) (CascadeVideoOffer, error) {
 		return CascadeVideoOffer{}, err
 	}
 
-	if !strings.EqualFold(strings.TrimSpace(sessionName), "Play") {
-		return CascadeVideoOffer{}, fmt.Errorf("cascade video SDP session must be Play")
+	playback := strings.EqualFold(sessionName, "Playback")
+	if !playback && !strings.EqualFold(sessionName, "Play") {
+		return CascadeVideoOffer{}, fmt.Errorf("cascade video SDP session must be Play or Playback")
+	}
+	var start, end time.Time
+	if playback {
+		fields := strings.Fields(timing)
+		if timingCount != 1 || len(fields) != 2 {
+			return CascadeVideoOffer{}, fmt.Errorf("cascade playback SDP requires one time range")
+		}
+		first, firstErr := strconv.ParseInt(fields[0], 10, 64)
+		last, lastErr := strconv.ParseInt(fields[1], 10, 64)
+		if firstErr != nil || lastErr != nil || first <= 0 || last <= first || last > 253402300799 {
+			return CascadeVideoOffer{}, fmt.Errorf("cascade playback SDP time range is invalid")
+		}
+		start, end = time.Unix(first, 0).UTC(), time.Unix(last, 0).UTC()
 	}
 	if video == nil {
 		return CascadeVideoOffer{}, fmt.Errorf("cascade video SDP missing video media")
@@ -164,7 +187,7 @@ func ParseCascadeVideoOffer(body []byte) (CascadeVideoOffer, error) {
 	if !video.ssrcSeen && sessionSSRCSeen {
 		ssrc = sessionSSRC
 	}
-	if !validCascadeVideoSSRC(ssrc) {
+	if (!playback && !validCascadeVideoSSRC(ssrc)) || (playback && !validPlaybackSSRC(ssrc)) {
 		return CascadeVideoOffer{}, fmt.Errorf("cascade video SDP SSRC is missing or invalid")
 	}
 
@@ -214,6 +237,7 @@ func ParseCascadeVideoOffer(body []byte) (CascadeVideoOffer, error) {
 	return CascadeVideoOffer{
 		RemoteIP: parsedIP.To4().String(), RemotePort: video.port, SSRC: ssrc,
 		PayloadType: payloadType, Transport: transport,
+		Playback: playback, Start: start, End: end,
 	}, nil
 }
 
@@ -232,11 +256,14 @@ func BuildCascadeVideoAnswer(offer CascadeVideoOffer, localID, localIP string, l
 		return nil, fmt.Errorf("cascade video answer local port is invalid")
 	}
 	ssrc := strings.TrimSpace(offer.SSRC)
-	if !validCascadeVideoSSRC(ssrc) {
+	if (!offer.Playback && !validCascadeVideoSSRC(ssrc)) || (offer.Playback && !validPlaybackSSRC(ssrc)) {
 		return nil, fmt.Errorf("cascade video answer SSRC is missing or invalid")
 	}
 	if offer.PayloadType < 96 || offer.PayloadType > 127 {
 		return nil, fmt.Errorf("cascade video answer payload type is invalid")
+	}
+	if offer.Playback && (offer.Start.IsZero() || !offer.End.After(offer.Start)) {
+		return nil, fmt.Errorf("cascade playback answer time range is invalid")
 	}
 
 	transport := ""
@@ -257,9 +284,17 @@ func BuildCascadeVideoAnswer(offer CascadeVideoOffer, localID, localIP string, l
 	var answer strings.Builder
 	answer.WriteString("v=0\r\n")
 	fmt.Fprintf(&answer, "o=%s 0 0 IN IP4 %s\r\n", localID, parsedIP.To4().String())
-	answer.WriteString("s=Play\r\n")
+	if offer.Playback {
+		answer.WriteString("s=Playback\r\n")
+	} else {
+		answer.WriteString("s=Play\r\n")
+	}
 	fmt.Fprintf(&answer, "c=IN IP4 %s\r\n", parsedIP.To4().String())
-	answer.WriteString("t=0 0\r\n")
+	if offer.Playback {
+		fmt.Fprintf(&answer, "t=%d %d\r\n", offer.Start.Unix(), offer.End.Unix())
+	} else {
+		answer.WriteString("t=0 0\r\n")
+	}
 	fmt.Fprintf(&answer, "m=video %d %s %d\r\n", localPort, transport, offer.PayloadType)
 	answer.WriteString(setup)
 	answer.WriteString("a=sendonly\r\n")

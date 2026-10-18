@@ -668,6 +668,12 @@ type MediaPlayer struct {
 	LocalPort  int    `json:"local_port"`
 	Identifier string `json:"identifier"`
 	TypeID     string `json:"typeid"`
+	// TotalBytes 是该连接存活期累计下行字节,与断开时 on_flow_report 上报的
+	// totalBytes 同源(同一个会话计数),因此采样值必然 <= 最终结算值。
+	// 仅在二开 ZLM 且该会话类型会以自身 identifier 上报流量时返回;
+	// 旧版本 ZLM / HLS 切片下载(由 HlsMediaSource 按 cookie 聚合上报)不返回,
+	// 调用方必须区分「不支持实时计数(nil)」与「计数为 0」。
+	TotalBytes *uint64 `json:"totalBytes"`
 }
 
 // GetMediaPlayerList returns the active players for one media source.

@@ -139,6 +139,23 @@ type QueryRequest struct {
 	RecorderID      string
 }
 
+// CascadeQueryRequest is internal authority: its caller must resolve a channel
+// from an enabled upstream's sharing projection before querying device records.
+// It deliberately has no HTTP user or client identity and issues no RecordKey.
+type CascadeQueryRequest struct {
+	ChannelID       uint
+	DeviceCode      string
+	ChannelCode     string
+	Destination     string
+	Transport       string
+	ProtocolVersion protocol.Version
+	StartTime       time.Time
+	EndTime         time.Time
+	Type            manscdp.RecordInfoQueryType
+	Secrecy         int
+	RecorderID      string
+}
+
 type Record struct {
 	manscdp.RecordInfoItem
 	RecordKey string

@@ -253,7 +253,7 @@ func buildDeviceStatusResponse(profile protocol.Profile, query InfoStatusQuery, 
 
 func findPublishedDevice(snapshot Snapshot, deviceID string) (CatalogItem, bool) {
 	for _, item := range snapshot.Items {
-		if item.Kind == CatalogItemDevice && item.ID == deviceID {
+		if (item.Kind == CatalogItemDevice || item.Kind == CatalogItemChannel) && item.ID == deviceID {
 			return item, true
 		}
 	}

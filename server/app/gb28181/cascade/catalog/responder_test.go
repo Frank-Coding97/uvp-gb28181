@@ -253,6 +253,105 @@ func TestCatalogBusinessQueriesReturnOnlyTargetSubtreeAndRecountBatches(t *testi
 	}
 }
 
+func TestCatalogDeviceQueryReturnsOnlyPublishedDeviceChannels(t *testing.T) {
+	profile := baseprotocol.ProfileFor(baseprotocol.Version2022)
+	const (
+		localID       = "34020000002000000001"
+		deviceID      = "34020000001320000001"
+		otherDeviceID = "34020000001320000002"
+		emptyDeviceID = "34020000001320000003"
+		channelA      = "34020000001320000011"
+		channelB      = "34020000001320000012"
+		foreign       = "34020000001320000021"
+	)
+	snapshot := Snapshot{
+		Items: []CatalogItem{
+			{ID: localID, Kind: CatalogItemPlatform},
+			{ID: deviceID, Kind: CatalogItemDevice},
+			{ID: otherDeviceID, Kind: CatalogItemDevice},
+			{ID: emptyDeviceID, Kind: CatalogItemDevice},
+		},
+		publishedIDs: map[string]struct{}{
+			localID:       {},
+			deviceID:      {},
+			otherDeviceID: {},
+			emptyDeviceID: {},
+		},
+		deviceChannels: map[string][]CatalogItem{
+			deviceID: {
+				{ID: channelA, ParentID: deviceID, Kind: CatalogItemChannel},
+				{ID: channelB, ParentID: deviceID + "/34020000002160000001", Kind: CatalogItemChannel},
+			},
+			otherDeviceID: {{ID: foreign, ParentID: otherDeviceID, Kind: CatalogItemChannel}},
+		},
+	}
+	query, err := manscdp.BuildCatalogQueryWithProfile(profile, deviceID, 91)
+	require.NoError(t, err)
+	responses, err := PlanCatalogResponses(profile, localID, snapshot, 1, query)
+	require.NoError(t, err)
+	require.Len(t, responses, 2)
+	for _, response := range responses {
+		require.Equal(t, 91, response.SN)
+		require.Equal(t, 2, response.SumNum)
+		var decoded manscdp.CatalogResponse
+		require.NoError(t, manscdp.DecodeProfiledXML(profile, response.Body, &decoded))
+		require.Len(t, decoded.DeviceList.Items, 1)
+		require.Contains(t, map[string]struct{}{channelA: {}, channelB: {}}, decoded.DeviceList.Items[0].DeviceID)
+		require.NotEqual(t, foreign, decoded.DeviceList.Items[0].DeviceID)
+	}
+
+	// A device kept only in the internal index is not queryable unless its ID
+	// remains published in this platform snapshot.
+	const unpublishedDevice = "34020000001320000009"
+	snapshot.deviceChannels[unpublishedDevice] = []CatalogItem{{ID: foreign, Kind: CatalogItemChannel}}
+	query, err = manscdp.BuildCatalogQueryWithProfile(profile, unpublishedDevice, 92)
+	require.NoError(t, err)
+	_, err = PlanCatalogResponses(profile, localID, snapshot, 10, query)
+	require.ErrorIs(t, err, ErrUnknownCatalogTarget)
+
+	// A published device with no child channels produces a stable empty result.
+	query, err = manscdp.BuildCatalogQueryWithProfile(profile, emptyDeviceID, 93)
+	require.NoError(t, err)
+	responses, err = PlanCatalogResponses(profile, localID, snapshot, 10, query)
+	require.NoError(t, err)
+	require.Len(t, responses, 1)
+	require.Zero(t, responses[0].SumNum)
+}
+
+func TestValidateCatalogRequestTargetsKeepsLocalContainerAndRejectsConflicts(t *testing.T) {
+	const (
+		localID = "34020000002000000001"
+		rootID  = "34020000002150000001"
+		orgID   = "34020000002160000001"
+	)
+	snapshot := Snapshot{
+		Items: []CatalogItem{
+			{ID: localID, Kind: CatalogItemPlatform},
+			{ID: rootID, ParentID: localID, Kind: CatalogItemBusinessGroup},
+			{ID: orgID, Kind: CatalogItemVirtualOrganization, BusinessGroupID: rootID},
+		},
+		publishedIDs: map[string]struct{}{localID: {}, rootID: {}, orgID: {}},
+	}
+	for _, tc := range []struct {
+		name       string
+		toID       string
+		requestURI string
+		queryID    string
+	}{
+		{name: "local To with organization XML target", toID: localID, requestURI: localID, queryID: orgID},
+		{name: "direct organization target", toID: orgID, requestURI: orgID, queryID: orgID},
+		{name: "local Request URI with direct organization To", toID: orgID, requestURI: localID, queryID: orgID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NoError(t, ValidateCatalogRequestTargets(snapshot, localID, tc.toID, tc.requestURI, tc.queryID))
+		})
+	}
+	err := ValidateCatalogRequestTargets(snapshot, localID, orgID, orgID, rootID)
+	require.ErrorIs(t, err, ErrConflictingCatalogTarget)
+	err = ValidateCatalogRequestTargets(snapshot, localID, localID, localID, "34020000002160000999")
+	require.ErrorIs(t, err, ErrUnknownCatalogTarget)
+}
+
 func TestCatalogBusinessGroupIDUsesVersionSpecificXMLLocation(t *testing.T) {
 	const (
 		localID = "34020000002000000001"

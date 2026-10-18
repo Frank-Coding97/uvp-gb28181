@@ -140,7 +140,12 @@ func (s *CatalogService) DeleteFile(ctx context.Context, userID uint, fileID uin
 			return result, zlm.ErrRecordingPathInvalid
 		}
 		if err := s.newFileClient(n).DeleteMP4RecordFile(ctx, file.VHost, file.App, file.Stream, period, file.FileName); err != nil {
-			return result, err
+			// ZLM 明确回报"文件已不在"时按幂等删除处理：目标状态已达成，
+			// 必须把目录索引一起清掉，否则这条记录永远删不掉（重复点击只会继续报错）。
+			// 其它失败仍然保留索引，物理文件还在就不该丢索引。
+			if !errors.Is(err, zlm.ErrRecordingNotFound) {
+				return result, err
+			}
 		}
 	}
 	if err := s.repo.DeleteCatalogFile(ctx, file.ID); err != nil {

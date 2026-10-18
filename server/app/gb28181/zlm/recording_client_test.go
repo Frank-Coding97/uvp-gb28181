@@ -217,11 +217,64 @@ func TestDeleteMP4RecordFileSendsExactFileParameters(t *testing.T) {
 		} {
 			require.Equal(t, want, r.URL.Query().Get(key), key)
 		}
-		_, _ = w.Write([]byte(`{"code":0,"result":true}`))
+		// ⛔ 这是 ZLM 的真实成功响应：只有 code + path，**没有 result**。
+		// 用 {"code":0,"result":true} 会掩盖"按 result 判成功"的缺陷。
+		_, _ = w.Write([]byte(`{"code":0,"path":"/record/rtp/stream/2026-08-10/090000-091000.mp4"}`))
 	})
 	defer server.Close()
 
 	require.NoError(t, client.DeleteMP4RecordFile(context.Background(), "__defaultVhost__", "rtp", "34020000001320000001", "2026-08-10", "090000-091000.mp4"))
+}
+
+// TestDeleteMP4RecordFileTreatsMissingZLMResultFieldAsSuccess 锁住现场缺陷：
+// ZLM 删除成功时不回 result 字段，旧实现按 `!response.Result` 判失败，
+// 导致"文件已从磁盘删除、接口却报 502、录像目录索引残留"。
+func TestDeleteMP4RecordFileTreatsMissingZLMResultFieldAsSuccess(t *testing.T) {
+	client, server := newMockClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"code":0,"path":"/record/x.mp4"}`))
+	})
+	defer server.Close()
+
+	require.NoError(t, client.DeleteMP4RecordFile(context.Background(), "v", "a", "s", "2026-08-10", "x.mp4"))
+}
+
+func TestDeleteMP4RecordFileHonorsExplicitResultFalse(t *testing.T) {
+	client, server := newMockClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"code":0,"result":false}`))
+	})
+	defer server.Close()
+
+	require.ErrorIs(t, client.DeleteMP4RecordFile(context.Background(), "v", "a", "s", "2026-08-10", "x.mp4"), ErrRecordingDeleteFailed)
+}
+
+// TestDeleteMP4RecordFileClassifiesZLMCodeMinusOne 覆盖 ZLM 删除失败的两种实况：
+// 文件确实不在了（幂等，报 NotFound 让上层清索引）与文件仍在（真失败，保留索引）。
+func TestDeleteMP4RecordFileClassifiesZLMCodeMinusOne(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		paths     string
+		wantError error
+	}{
+		{name: "file already gone", paths: `[]`, wantError: ErrRecordingNotFound},
+		{name: "target file still listed", paths: `["x.mp4"]`, wantError: ErrRecordingAccessUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client, server := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/index/api/deleteRecordDirectory":
+					_, _ = w.Write([]byte(`{"code":-1,"path":"/record/rtp/stream/2026-08-10/x.mp4"}`))
+				case "/index/api/getMP4RecordFile":
+					require.Equal(t, "2026-08-10", r.URL.Query().Get("period"))
+					_, _ = w.Write([]byte(`{"code":0,"data":{"rootPath":"/record/rtp/stream/2026-08-10/","paths":` + tc.paths + `}}`))
+				default:
+					t.Fatalf("unexpected path: %s", r.URL.Path)
+				}
+			})
+			defer server.Close()
+
+			require.ErrorIs(t, client.DeleteMP4RecordFile(context.Background(), "v", "a", "s", "2026-08-10", "x.mp4"), tc.wantError)
+		})
+	}
 }
 
 func TestDeleteMP4RecordFileRejectsDirectoryTraversal(t *testing.T) {

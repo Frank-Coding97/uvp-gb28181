@@ -35,6 +35,7 @@ import (
 	"go.uber.org/zap"
 
 	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
 )
 
 // Client probe 只需要一个探活能力,不依赖 zlm.Client 具体类型(避免循环 + 便于打桩)
@@ -44,6 +45,25 @@ type Client interface {
 
 // ClientFactory 从节点造 Client(生产:zlm.NewClientForNode 适配;测试:直接返回 fake)
 type ClientFactory func(n *node.Node) Client
+
+type probeLogError struct {
+	cause  error
+	detail string
+}
+
+func (e probeLogError) Error() string { return e.detail }
+func (e probeLogError) Unwrap() error { return e.cause }
+
+func safeProbeLogError(err error, target *node.Node) error {
+	if err == nil {
+		return nil
+	}
+	detail := err.Error()
+	if target != nil && target.APISecret != "" {
+		detail = strings.ReplaceAll(detail, target.APISecret, "[REDACTED]")
+	}
+	return probeLogError{cause: err, detail: detail}
+}
 
 // mediaServerIDKey 端点自报身份的配置键。
 //
@@ -171,7 +191,7 @@ func (p *Prober) Run(ctx context.Context) []Result {
 					zap.String("endpoint", target.HTTPEndpoint()),
 					zap.Int64("duration_ms", r.DurationMS),
 					zap.String("state_before", string(r.StateBefore)),
-					zap.Error(err))
+					logging.Error(safeProbeLogError(err, target)))
 				return
 			}
 
@@ -201,7 +221,7 @@ func (p *Prober) Run(ctx context.Context) []Result {
 				p.logger.Warn("GB28181 ZLM 启动探活 pass 但 MarkActive 失败", zap.String("event", "zlm.probe.activation_failed"),
 					zap.Int64("node_id", target.ID),
 					zap.String("name", target.Name),
-					zap.Error(err))
+					logging.Error(safeProbeLogError(err, target)))
 			}
 			r.Pass = true
 			r.StateAfter = node.StateActive
@@ -220,7 +240,7 @@ func (p *Prober) Run(ctx context.Context) []Result {
 						p.logger.Warn("GB28181 ZLM 收流范围对账失败",
 							zap.String("event", "zlm.node.rtp_range_reconcile_failed"),
 							zap.Int64("node_id", target.ID),
-							zap.String("reason", recErr.Error()))
+							logging.Error(safeProbeLogError(recErr, target)))
 					case changed:
 						r.RTPRangeReconciled = true
 						p.logger.Info("GB28181 ZLM 收流范围已按端点实际值校正",

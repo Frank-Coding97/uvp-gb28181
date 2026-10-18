@@ -41,6 +41,21 @@ func TestCascadeControlPeerUsesPublishedChannelAsTarget(t *testing.T) {
 	require.False(t, matchCascadeControlPeer(req, p))
 }
 
+func TestCascadeCatalogPeerAcceptsCivilTargetOnlyWhenEnabled(t *testing.T) {
+	p := model.GbCascadePlatform{UpstreamServerID: "34020000002000000001", LocalDeviceID: "34020000002000000002", Host: "192.0.2.10", Port: 5060, Transport: "UDP", PublishCivil: true}
+	req := sip.NewRequest(sip.MESSAGE, sip.Uri{User: "340203", Host: p.LocalDeviceID})
+	req.AppendHeader(&sip.FromHeader{Address: sip.Uri{User: p.UpstreamServerID}})
+	req.AppendHeader(&sip.ToHeader{Address: sip.Uri{User: "340203"}})
+	req.SetSource("192.0.2.10:5060")
+	req.SetTransport("UDP")
+	require.True(t, matchCascadeCatalogPeer(req, p))
+	p.PublishCivil = false
+	require.False(t, matchCascadeCatalogPeer(req, p))
+	p.PublishCivil = true
+	req.To().Address.User = "unpublished-platform"
+	require.False(t, matchCascadeCatalogPeer(req, p))
+}
+
 func TestFindCascadeControlPeerLeavesDeviceControlResponsesForDeviceHandler(t *testing.T) {
 	platforms := []model.GbCascadePlatform{
 		{ID: 3, UpstreamServerID: "34020000002000000001", Host: "192.168.10.220", Port: 15060, Transport: "UDP"},

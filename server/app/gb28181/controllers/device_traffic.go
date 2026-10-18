@@ -350,6 +350,8 @@ type currentViewer struct {
 	ID        string `json:"id"`
 	Type      string `json:"type"`
 	Kickable  bool   `json:"kickable"`
+	// TotalBytes 是该观看连接存活期累计下行字节(二开 ZLM 才有),nil 时前端不展示
+	TotalBytes *uint64 `json:"totalBytes,omitempty"`
 }
 
 type currentViewerStream struct {
@@ -503,7 +505,7 @@ func currentViewerStreamsFromMedia(ctx context.Context, client trafficNodeClient
 			stream.Viewers = append(stream.Viewers, currentViewer{
 				ChannelID: channel.ID, Schema: item.Schema,
 				Remote: fmt.Sprintf("%s:%d", player.PeerIP, player.PeerPort), LocalPort: player.LocalPort,
-				ID: player.Identifier, Type: player.TypeID,
+				ID: player.Identifier, Type: player.TypeID, TotalBytes: player.TotalBytes,
 				Kickable: player.Identifier != "" && typeID != "" && !strings.Contains(typeID, "udp"),
 			})
 		}

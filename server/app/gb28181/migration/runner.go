@@ -56,9 +56,10 @@ var baselineRequiredTables = []string{
 // schemaProbe probes the release baseline fingerprint and the few upgrade
 // columns that must still run when an older snapshot has an empty ledger.
 type schemaProbe struct {
-	hasTable     func(tableName string) (bool, error)
-	hasColumn    func(tableName, columnName string) (bool, error)
-	columnLength func(tableName, columnName string) (int64, error)
+	hasTable                  func(tableName string) (bool, error)
+	hasColumn                 func(tableName, columnName string) (bool, error)
+	columnLength              func(tableName, columnName string) (int64, error)
+	hasPermissionRegistration func(path, method, permission string) (bool, error)
 }
 
 type baselineColumnRequirement struct {
@@ -68,6 +69,18 @@ type baselineColumnRequirement struct {
 }
 
 var baselineColumnMigrations = map[string]baselineColumnRequirement{
+	"2026-10-13-cascade-auto-push-catalog.sql":                {table: "gb_cascade_platform", column: "auto_push_catalog"},
+	"2026-10-13-cascade-auto-push-catalog-postgresql.sql":     {table: "gb_cascade_platform", column: "auto_push_catalog"},
+	"2026-10-13-cascade-auto-push-catalog-sqlserver.sql":      {table: "gb_cascade_platform", column: "auto_push_catalog"},
+	"2026-10-13-cascade-auto-push-catalog-sqlite.sql":         {table: "gb_cascade_platform", column: "auto_push_catalog"},
+	"2026-10-13-cascade-recording-enabled.sql":                {table: "gb_cascade_platform", column: "recording_enabled"},
+	"2026-10-13-cascade-recording-enabled-postgresql.sql":     {table: "gb_cascade_platform", column: "recording_enabled"},
+	"2026-10-13-cascade-recording-enabled-sqlserver.sql":      {table: "gb_cascade_platform", column: "recording_enabled"},
+	"2026-10-13-cascade-recording-enabled-sqlite.sql":         {table: "gb_cascade_platform", column: "recording_enabled"},
+	"2026-10-13-cascade-rtcp-keepalive.sql":                   {table: "gb_cascade_platform", column: "rtcp_keepalive"},
+	"2026-10-13-cascade-rtcp-keepalive-postgresql.sql":        {table: "gb_cascade_platform", column: "rtcp_keepalive"},
+	"2026-10-13-cascade-rtcp-keepalive-sqlserver.sql":         {table: "gb_cascade_platform", column: "rtcp_keepalive"},
+	"2026-10-13-cascade-rtcp-keepalive-sqlite.sql":            {table: "gb_cascade_platform", column: "rtcp_keepalive"},
 	"2026-10-08-initial-admin-password-change.sql":            {table: "sys_users", column: "must_change_password"},
 	"2026-10-08-initial-admin-password-change-postgresql.sql": {table: "sys_users", column: "must_change_password"},
 	"2026-10-08-initial-admin-password-change-sqlserver.sql":  {table: "sys_users", column: "must_change_password"},
@@ -132,6 +145,27 @@ var baselineTableMigrations = map[string]baselineTableRequirement{
 	"2026-10-13-cascade-business-group-sqlite.sql":                {tables: []string{"gb_cascade_business_node", "gb_cascade_business_binding"}},
 }
 
+type baselinePermissionRequirement struct {
+	path       string
+	method     string
+	permission string
+}
+
+var baselinePermissionMigrations = map[string]baselinePermissionRequirement{
+	"2026-10-13-cascade-publish-group-permission.sql":            {path: "/api/gb28181/cascade/platforms/:id/publish-group", method: "PUT", permission: "gb28181:cascade:manage"},
+	"2026-10-13-cascade-publish-group-permission-postgresql.sql": {path: "/api/gb28181/cascade/platforms/:id/publish-group", method: "PUT", permission: "gb28181:cascade:manage"},
+	"2026-10-13-cascade-publish-group-permission-sqlserver.sql":  {path: "/api/gb28181/cascade/platforms/:id/publish-group", method: "PUT", permission: "gb28181:cascade:manage"},
+	"2026-10-13-cascade-publish-group-permission-sqlite.sql":     {path: "/api/gb28181/cascade/platforms/:id/publish-group", method: "PUT", permission: "gb28181:cascade:manage"},
+	"2026-10-16-service-upgrade-permission.sql":                  {path: "/api/system/upgrade/status", method: "GET", permission: "system:upgrade:read"},
+	"2026-10-16-service-upgrade-permission-postgresql.sql":       {path: "/api/system/upgrade/status", method: "GET", permission: "system:upgrade:read"},
+	"2026-10-16-service-upgrade-permission-sqlserver.sql":        {path: "/api/system/upgrade/status", method: "GET", permission: "system:upgrade:read"},
+	"2026-10-16-service-upgrade-permission-sqlite.sql":           {path: "/api/system/upgrade/status", method: "GET", permission: "system:upgrade:read"},
+	"2026-10-16-service-upgrade-migration-plan.sql":              {path: "/api/system/upgrade/migration-plan", method: "GET", permission: "system:upgrade:read"},
+	"2026-10-16-service-upgrade-migration-plan-postgresql.sql":   {path: "/api/system/upgrade/migration-plan", method: "GET", permission: "system:upgrade:read"},
+	"2026-10-16-service-upgrade-migration-plan-sqlserver.sql":    {path: "/api/system/upgrade/migration-plan", method: "GET", permission: "system:upgrade:read"},
+	"2026-10-16-service-upgrade-migration-plan-sqlite.sql":       {path: "/api/system/upgrade/migration-plan", method: "GET", permission: "system:upgrade:read"},
+}
+
 // needsBaselineColumnUpgrade applies only to additive column migrations whose
 // presence can be checked safely. All other embedded migrations keep the
 // normal empty-ledger baseline behavior.
@@ -191,8 +225,27 @@ func needsBaselineTableUpgrade(name string, probe schemaProbe) (bool, error) {
 }
 
 func needsBaselineUpgrade(name string, probe schemaProbe) (bool, error) {
+	// 菜单补全必须在空版本表的快照库上执行，不能因 API 已注册而跳过角色授权。
+	switch name {
+	case "2026-10-18-https-management.sql", "2026-10-18-https-management-postgresql.sql",
+		"2026-10-18-https-management-sqlserver.sql", "2026-10-18-https-management-sqlite.sql":
+		return true, nil
+	case "2026-10-18-service-upgrade-menu.sql", "2026-10-18-service-upgrade-menu-postgresql.sql",
+		"2026-10-18-service-upgrade-menu-sqlserver.sql", "2026-10-18-service-upgrade-menu-sqlite.sql":
+		return true, nil
+	}
 	if _, ok := baselineColumnMigrations[name]; ok {
 		return needsBaselineColumnUpgrade(name, probe)
+	}
+	if requirement, ok := baselinePermissionMigrations[name]; ok {
+		if probe.hasPermissionRegistration == nil {
+			return false, fmt.Errorf("权限迁移缺少注册项探测器")
+		}
+		registered, err := probe.hasPermissionRegistration(requirement.path, requirement.method, requirement.permission)
+		if err != nil {
+			return false, fmt.Errorf("探测 API 权限注册失败: %w", err)
+		}
+		return !registered, nil
 	}
 	return needsBaselineTableUpgrade(name, probe)
 }
@@ -324,6 +377,16 @@ func Up(db *gorm.DB, d Dialect) error {
 				}
 			}
 			return 0, fmt.Errorf("列不存在")
+		},
+		hasPermissionRegistration: func(path, method, permission string) (bool, error) {
+			var count int64
+			err := db.Raw(`SELECT COUNT(*) FROM sys_api a
+				JOIN sys_menu_api ma ON ma.api_id = a.id
+				JOIN sys_menu m ON m.id = ma.menu_id
+				WHERE a.path = ? AND a.method = ? AND m.permission = ?
+				AND EXISTS (SELECT 1 FROM sys_casbin_rule c WHERE c.ptype = 'p' AND c.v0 = 'role_1' AND c.v1 = a.path AND c.v2 = a.method)`,
+				path, method, permission).Scan(&count).Error
+			return count > 0, err
 		},
 	}
 	return run(NewStore(db), newDBLocker(db, d), &embedSource{dialect: d}, &dbExecutor{db: db}, probe)

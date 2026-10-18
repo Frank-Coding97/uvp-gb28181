@@ -852,6 +852,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			cascade.PUT("/platforms/:id/shares", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.ReplaceShares(c) }))
 			cascade.GET("/platforms/:id/business-group", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.GetBusinessGroup(c) }))
 			cascade.PUT("/platforms/:id/business-group", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.ReplaceBusinessGroup(c) }))
+			cascade.PUT("/platforms/:id/publish-group", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.SetPublishGroup(c) }))
 			// Plan-compatible aliases keep channel terminology available to existing clients.
 			cascade.GET("/platforms/:id/channels", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.GetShares(c) }))
 			cascade.POST("/platforms/:id/channels/share", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.ReplaceShares(c) }))

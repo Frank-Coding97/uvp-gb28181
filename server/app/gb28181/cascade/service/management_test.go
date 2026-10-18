@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -45,6 +46,85 @@ func TestManagementServiceCreatesAndUpdatesWriteOnlyPassword(t *testing.T) {
 	require.Equal(t, []byte("cipher:"+password), stored.SecretCiphertext)
 }
 
+func TestManagementMutationsReportRuntimeSynchronizationSeparately(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*ManagementService, *managementStoreFake, *managementRuntimeFake) (*PlatformView, error)
+	}{
+		{
+			name: "create",
+			mutate: func(svc *ManagementService, _ *managementStoreFake, _ *managementRuntimeFake) (*PlatformView, error) {
+				return svc.Create(context.Background(), validPlatformInput(nil))
+			},
+		},
+		{
+			name: "update",
+			mutate: func(svc *ManagementService, store *managementStoreFake, _ *managementRuntimeFake) (*PlatformView, error) {
+				stored := store.platforms[1]
+				input := validPlatformInput(nil)
+				input.Host = "192.0.2.11"
+				return svc.Update(context.Background(), stored.ID, stored.ConfigRevision, input)
+			},
+		},
+		{
+			name: "enable",
+			mutate: func(svc *ManagementService, store *managementStoreFake, _ *managementRuntimeFake) (*PlatformView, error) {
+				stored := store.platforms[1]
+				return svc.SetEnabled(context.Background(), stored.ID, stored.ConfigRevision, false)
+			},
+		},
+	} {
+		t.Run(tc.name+" runtime success", func(t *testing.T) {
+			store := newManagementStoreFake()
+			runtime := &managementRuntimeFake{}
+			svc := NewManagementService(store, &credentialSealerFake{}, runtime, fakeClock{now: time.Now()})
+			if tc.name != "create" {
+				_, err := svc.Create(context.Background(), validPlatformInput(nil))
+				require.NoError(t, err)
+				runtime.reloads = 0
+				if tc.name == "enable" {
+					platform := store.platforms[1]
+					platform.Enabled = false
+					store.platforms[1] = platform
+				}
+			}
+			view, err := tc.mutate(svc, store, runtime)
+			require.NoError(t, err)
+			require.NotNil(t, view.RuntimeSynced)
+			require.True(t, *view.RuntimeSynced)
+			require.Equal(t, 1, runtime.reloads)
+		})
+		t.Run(tc.name+" runtime failure preserves committed state", func(t *testing.T) {
+			store := newManagementStoreFake()
+			runtime := &managementRuntimeFake{}
+			svc := NewManagementService(store, &credentialSealerFake{}, runtime, fakeClock{now: time.Now()})
+			if tc.name != "create" {
+				_, err := svc.Create(context.Background(), validPlatformInput(nil))
+				require.NoError(t, err)
+				runtime.reloads = 0
+				if tc.name == "enable" {
+					platform := store.platforms[1]
+					platform.Enabled = false
+					store.platforms[1] = platform
+				}
+			}
+			runtime.err = errors.New("runtime unavailable")
+			view, err := tc.mutate(svc, store, runtime)
+			require.ErrorIs(t, err, ErrRuntimeSyncFailed)
+			require.NotNil(t, view)
+			require.NotNil(t, view.RuntimeSynced)
+			require.False(t, *view.RuntimeSynced)
+			require.Equal(t, 1, runtime.reloads)
+			stored, findErr := store.FindPlatform(context.Background(), view.ID)
+			require.NoError(t, findErr)
+			require.Equal(t, view.Enabled, stored.Enabled)
+			if tc.name == "update" {
+				require.Equal(t, "192.0.2.11", stored.Host)
+			}
+		})
+	}
+}
+
 func TestManagementServiceValidatesConfigBeforePersistence(t *testing.T) {
 	store := newManagementStoreFake()
 	service := NewManagementService(store, &credentialSealerFake{}, nil, fakeClock{now: time.Now()})
@@ -68,6 +148,89 @@ func TestManagementServiceValidatesConfigBeforePersistence(t *testing.T) {
 	require.Empty(t, store.platforms)
 }
 
+func TestManagementServiceAllowsUnlimitedStreamsAndRejectsNegativeLimit(t *testing.T) {
+	store := newManagementStoreFake()
+	service := NewManagementService(store, &credentialSealerFake{}, nil, fakeClock{now: time.Now()})
+	input := validPlatformInput(nil)
+	input.Enabled = false
+	input.Enabled = false
+	input.MaxStreams = 0
+	created, err := service.Create(context.Background(), input)
+	require.NoError(t, err)
+	require.Zero(t, created.MaxStreams)
+	input.MaxStreams = 4
+	updated, err := service.Update(context.Background(), created.ID, created.ConfigRevision, input)
+	require.NoError(t, err)
+	require.Equal(t, 4, updated.MaxStreams)
+	input.MaxStreams = 0
+	updated, err = service.Update(context.Background(), created.ID, updated.ConfigRevision, input)
+	require.NoError(t, err)
+	require.Zero(t, updated.MaxStreams)
+	input.MaxStreams = -1
+	_, err = service.Update(context.Background(), created.ID, updated.ConfigRevision, input)
+	require.ErrorIs(t, err, ErrInvalidPlatformConfig)
+}
+
+func TestManagementServiceCatalogBatchPresetsPreserveExistingLegacyValue(t *testing.T) {
+	store := newManagementStoreFake()
+	service := NewManagementService(store, nil, nil, fakeClock{now: time.Now()})
+	input := validPlatformInput(nil)
+	input.Enabled = false
+	input.CatalogBatchSize = 100
+	_, err := service.Create(context.Background(), input)
+	require.ErrorIs(t, err, ErrInvalidPlatformConfig)
+	require.Empty(t, store.platforms)
+	for _, batch := range []int{1, 2, 4, 8, 16, 32, 64} {
+		input.CatalogBatchSize = batch
+		created, err := service.Create(context.Background(), input)
+		require.NoError(t, err)
+		require.Equal(t, batch, created.CatalogBatchSize)
+	}
+	legacy := &model.GbCascadePlatform{ID: 99, CatalogBatchSize: 100, ConfigRevision: 1}
+	store.platforms[legacy.ID] = *legacy
+	input.CatalogBatchSize = 100
+	updated, err := service.Update(context.Background(), legacy.ID, legacy.ConfigRevision, input)
+	require.NoError(t, err)
+	require.Equal(t, 100, updated.CatalogBatchSize)
+	input.CatalogBatchSize = 200
+	_, err = service.Update(context.Background(), legacy.ID, updated.ConfigRevision, input)
+	require.ErrorIs(t, err, ErrInvalidPlatformConfig)
+	input.CatalogBatchSize = 64
+	updated, err = service.Update(context.Background(), legacy.ID, updated.ConfigRevision, input)
+	require.NoError(t, err)
+	require.Equal(t, 64, updated.CatalogBatchSize)
+	input.CatalogBatchSize = 100
+	_, err = service.Update(context.Background(), legacy.ID, updated.ConfigRevision, input)
+	require.ErrorIs(t, err, ErrInvalidPlatformConfig)
+}
+
+func TestManagementServiceOptionViewsReflectPersistedConfig(t *testing.T) {
+	store := newManagementStoreFake()
+	service := NewManagementService(store, nil, nil, fakeClock{now: time.Now()})
+	input := validPlatformInput(nil)
+	input.Enabled = false
+	input.CatalogBatchSize = 1
+	require.NoError(t, json.Unmarshal([]byte(`{"autoPushCatalog":true,"recordingEnabled":true,"rtcpKeepalive":true}`), &input))
+	created, err := service.Create(context.Background(), input)
+	require.NoError(t, err)
+	encoded, err := json.Marshal(created)
+	require.NoError(t, err)
+	var view map[string]any
+	require.NoError(t, json.Unmarshal(encoded, &view))
+	for _, name := range []string{"autoPushCatalog", "recordingEnabled", "rtcpKeepalive"} {
+		require.Equal(t, true, view[name], name)
+	}
+	require.NoError(t, json.Unmarshal([]byte(`{"autoPushCatalog":false,"recordingEnabled":false,"rtcpKeepalive":false}`), &input))
+	updated, err := service.Update(context.Background(), created.ID, created.ConfigRevision, input)
+	require.NoError(t, err)
+	encoded, err = json.Marshal(updated)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(encoded, &view))
+	for _, name := range []string{"autoPushCatalog", "recordingEnabled", "rtcpKeepalive"} {
+		require.Equal(t, false, view[name], name)
+	}
+}
+
 func TestManagementServiceEnableAndDeleteRespectRuntimeAndSessions(t *testing.T) {
 	store := newManagementStoreFake()
 	runtime := &managementRuntimeFake{}
@@ -84,16 +247,59 @@ func TestManagementServiceEnableAndDeleteRespectRuntimeAndSessions(t *testing.T)
 	require.Equal(t, 1, runtime.reloads)
 
 	store.sessions[created.ID] = []model.GbCascadeMediaSession{{PlatformID: created.ID, State: model.CascadeMediaSessionStateActive}}
-	err = service.Delete(context.Background(), created.ID)
+	_, err = service.Delete(context.Background(), created.ID)
 	require.ErrorIs(t, err, ErrPlatformHasActiveSessions)
 	_, err = store.FindPlatform(context.Background(), created.ID)
 	require.NoError(t, err)
 
 	store.sessions[created.ID] = nil
-	err = service.Delete(context.Background(), created.ID)
+	_, err = service.Delete(context.Background(), created.ID)
 	require.NoError(t, err)
 	_, err = store.FindPlatform(context.Background(), created.ID)
 	require.ErrorIs(t, err, repository.ErrPlatformNotFound)
+}
+
+func TestManagementServiceDeleteReportsPersistenceAndRuntimeSeparately(t *testing.T) {
+	store := newManagementStoreFake()
+	runtime := &managementRuntimeFake{}
+	service := NewManagementService(store, &credentialSealerFake{}, runtime, fakeClock{now: time.Now()})
+	created, err := service.Create(context.Background(), validPlatformInput(nil))
+	require.NoError(t, err)
+
+	runtime.err = errors.New("reload failed")
+	result, err := service.Delete(context.Background(), created.ID)
+	require.ErrorIs(t, err, ErrRuntimeSyncFailed)
+	require.False(t, result.Deleted)
+	require.False(t, result.RuntimeSynced)
+	require.NotNil(t, result.Platform)
+	require.False(t, result.Platform.Enabled)
+	stored, findErr := store.FindPlatform(context.Background(), created.ID)
+	require.NoError(t, findErr)
+	require.False(t, stored.Enabled, "first failed reload leaves a visible disabled platform for retry")
+
+	runtime.err = nil
+	result, err = service.Delete(context.Background(), created.ID)
+	require.NoError(t, err)
+	require.True(t, result.Deleted)
+	require.True(t, result.RuntimeSynced)
+	_, findErr = store.FindPlatform(context.Background(), created.ID)
+	require.ErrorIs(t, findErr, repository.ErrPlatformNotFound)
+}
+
+func TestManagementServiceRejectsRegisterExpiryBelowStandardMinimum(t *testing.T) {
+	store := newManagementStoreFake()
+	service := NewManagementService(store, &credentialSealerFake{}, nil, fakeClock{now: time.Now()})
+	input := validPlatformInput(nil)
+	input.Enabled = false
+	for _, expiry := range []int{1, 60, 3599} {
+		input.RegisterExpires = expiry
+		_, err := service.Create(context.Background(), input)
+		require.ErrorIs(t, err, ErrInvalidPlatformConfig, expiry)
+	}
+	input.RegisterExpires = 3600
+	created, err := service.Create(context.Background(), input)
+	require.NoError(t, err)
+	require.Equal(t, 3600, created.RegisterExpires)
 }
 
 func TestManagementServiceProjectionOperationsStayPlatformScoped(t *testing.T) {
@@ -132,7 +338,7 @@ func validPlatformInput(password *string) PlatformConfigInput {
 		Host: "192.0.2.10", Port: 5060, LocalDeviceID: "34020000002000000009", LocalDomain: "3402000000",
 		LocalSIPIP: "192.0.2.20", LocalSIPPort: 5060, AuthUsername: "34020000002000000009", Password: password,
 		ProfileOverride: model.CascadeProfileOverrideAuto, Transport: "UDP", RegisterExpires: 3600,
-		KeepaliveInterval: 60, CatalogBatchSize: 100, MaxStreams: 4, Enabled: true,
+		KeepaliveInterval: 60, CatalogBatchSize: 1, MaxStreams: 4, Enabled: true,
 	}
 }
 
@@ -210,6 +416,23 @@ func (s *managementStoreFake) UpdatePlatformConfig(_ context.Context, platform *
 	copy.ConfigRevision = revision + 1
 	s.platforms[platform.ID] = copy
 	return &copy, nil
+}
+
+func (s *managementStoreFake) SetPublishGroup(_ context.Context, id, revision uint64, publishGroup bool) (*model.GbCascadePlatform, error) {
+	stored, ok := s.platforms[id]
+	if !ok {
+		return nil, repository.ErrPlatformNotFound
+	}
+	if stored.ConfigRevision != revision {
+		return nil, repository.ErrRevisionConflict
+	}
+	if stored.PublishGroup != publishGroup {
+		stored.ProjectionRevision++
+	}
+	stored.PublishGroup = publishGroup
+	stored.ConfigRevision++
+	s.platforms[id] = stored
+	return &stored, nil
 }
 
 func (s *managementStoreFake) SoftDeletePlatform(_ context.Context, id uint64) error {

@@ -130,6 +130,7 @@ type ServiceConfig struct {
 	FixedAddressPlayback             gbconfig.FixedAddressPlaybackSettings  `json:"fixedAddressPlayback"`
 	PlayAuth                         gbconfig.PlayAuthSettings              `json:"playAuth"`
 	SIPLog                           SIPLogUpdateResult                     `json:"sipLog"`
+	Cascade                          *gbconfig.CascadeSettings              `json:"cascade,omitempty"`
 }
 
 func (sc *ServiceConfigController) GetServiceConfig(c *gin.Context) {
@@ -152,6 +153,7 @@ func (sc *ServiceConfigController) currentServiceConfig() ServiceConfig {
 			cloud = days
 		}
 	}
+	cascade := gbconfig.CurrentCascadeSettings()
 	return ServiceConfig{
 		PositionHistory: position, CloudRecordingRetention: CloudRecordingRetentionConfig{RetentionDays: cloud},
 		SDPExtension:         SDPExtensionConfig{Enabled: gbconfig.SDPExtensionEnabled()},
@@ -162,6 +164,7 @@ func (sc *ServiceConfigController) currentServiceConfig() ServiceConfig {
 		DefaultPlaybackProtocol: DefaultPlaybackProtocolConfig{Protocol: gbconfig.CurrentDefaultPlaybackProtocol()}, GlobalSubscriptions: GlobalSubscriptionConfig{Items: gbconfig.GlobalSubscriptionItems()},
 		DefaultChannelAudio: DefaultChannelAudioConfig{Enabled: gbconfig.DefaultChannelAudioEnabled()}, PlaybackSettings: gbconfig.CurrentPlaybackSettings(), FixedAddressPlayback: gbconfig.CurrentFixedAddressPlaybackSettings(),
 		PlayAuth: gbconfig.CurrentPlayAuthSettings(), SIPLog: SIPLogUpdateResult{Enabled: gbconfig.SIPTraceEnabled(), RetentionDays: gbconfig.SIPTraceRetentionDays(), Applied: sc.sipTraceApplied(gbconfig.SIPTraceEnabled())},
+		Cascade: &cascade,
 	}
 }
 
@@ -183,6 +186,9 @@ func (sc *ServiceConfigController) UpdateServiceConfig(c *gin.Context) {
 	defer sc.playbackSettingsMu.Unlock()
 	unlock := logcleanup.LockConfig()
 	previous := sc.currentServiceConfig()
+	if request.Cascade == nil {
+		request.Cascade = previous.Cascade
+	}
 	applyServiceConfig(request)
 	if err := app.ConfigYml.SaveConfig(); err != nil {
 		applyServiceConfig(previous)
@@ -212,6 +218,11 @@ func (sc *ServiceConfigController) UpdateServiceConfig(c *gin.Context) {
 }
 
 func validateServiceConfig(v ServiceConfig) error {
+	if v.Cascade != nil {
+		if err := gbconfig.ValidateCascadeSettings(*v.Cascade); err != nil {
+			return err
+		}
+	}
 	if err := gbconfig.ValidatePlaybackSettings(v.PlaybackSettings); err != nil {
 		return err
 	}
@@ -253,6 +264,14 @@ func validateServiceConfig(v ServiceConfig) error {
 }
 
 func applyServiceConfig(v ServiceConfig) {
+	if v.Cascade != nil {
+		app.ConfigYml.Set(gbconfig.CascadeUserAgentConfigKey, v.Cascade.UserAgent)
+		app.ConfigYml.Set(gbconfig.CascadePlatformNameConfigKey, v.Cascade.PlatformName)
+		app.ConfigYml.Set(gbconfig.CascadeManufacturerConfigKey, v.Cascade.Manufacturer)
+		app.ConfigYml.Set(gbconfig.CascadeModelConfigKey, v.Cascade.Model)
+		app.ConfigYml.Set(gbconfig.CascadeCivilCodeConfigKey, v.Cascade.CivilCode)
+		app.ConfigYml.Set(gbconfig.CascadeAddressConfigKey, v.Cascade.Address)
+	}
 	app.ConfigYml.Set(positionHistoryConfigKey, v.PositionHistory.Enabled)
 	app.ConfigYml.Set(positionHistoryRetentionDaysConfigKey, v.PositionHistory.RetentionDays)
 	app.ConfigYml.Set(cloudRecordingRetentionDaysConfigKey, v.CloudRecordingRetention.RetentionDays)

@@ -2,12 +2,165 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
+
+func TestReplaceBusinessGroupWithSharesUsesSourceRowsAndPreservesExistingProjection(t *testing.T) {
+	repo := newTestRepository(t)
+	ctx := context.Background()
+	require.NoError(t, repo.db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbChannel{}))
+	platform := newPlatform("upstream-a", "34020000002000000001")
+	platform.PTZEnabled = true
+	require.NoError(t, repo.CreatePlatform(ctx, platform))
+	device, channels := createBusinessGroupSource(t, repo, "34020000001320000011", "34020000001320000012")
+	first, second := channels[0], channels[1]
+
+	existingDevice := model.GbCascadeDeviceProjection{
+		PlatformID: platform.ID, SourceDeviceID: uint64(device.ID), PublishedDeviceID: "34020000001320000101",
+		Name: "保留设备名称", Manufacturer: "保留厂商", Model: "保留型号", Active: true, Revision: 7,
+	}
+	require.NoError(t, repo.db.Create(&existingDevice).Error)
+	existingChannel := model.GbCascadeChannelProjection{
+		PlatformID: platform.ID, DeviceProjectionID: existingDevice.ID, SourceChannelID: uint64(first.ID),
+		PublishedChannelID: "34020000001320000111", Name: "保留通道名称", ParentOverride: "34020000002000000009",
+		PTZAllowed: false, Active: true, Revision: 9,
+	}
+	require.NoError(t, repo.db.Create(&existingChannel).Error)
+
+	root := "34020000002150000001"
+	organization := "34020000002160000001"
+	nodes := []BusinessNodeInput{
+		{Code: root, Name: "业务根", Kind: "group"},
+		{Code: organization, Name: "组织", Kind: "organization", ParentCode: root},
+	}
+	bindings := []BusinessBindingInput{
+		{SourceChannelID: uint64(first.ID), NodeCode: organization},
+		{SourceChannelID: uint64(second.ID), NodeCode: organization},
+	}
+	require.NoError(t, repo.ReplaceBusinessGroupWithShares(ctx, platform.ID, 0, nodes, bindings, []uint64{uint64(second.ID)}, nil))
+
+	snapshot, err := repo.ProjectionSnapshot(ctx, platform.ID)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, snapshot.Revision)
+	require.Len(t, snapshot.Devices, 1)
+	require.Len(t, snapshot.Channels, 2)
+	require.Len(t, snapshot.Bindings, 2)
+	require.Equal(t, existingDevice.ID, snapshot.Devices[0].ID)
+	require.Equal(t, existingDevice.PublishedDeviceID, snapshot.Devices[0].PublishedDeviceID)
+	require.Equal(t, existingDevice.Name, snapshot.Devices[0].Name)
+	require.Equal(t, existingDevice.Manufacturer, snapshot.Devices[0].Manufacturer)
+	require.Equal(t, existingDevice.Model, snapshot.Devices[0].Model)
+	require.Equal(t, existingDevice.Revision, snapshot.Devices[0].Revision, "adding a channel on an already shared device must preserve its projection")
+
+	var preserved model.GbCascadeChannelProjection
+	require.NoError(t, repo.db.First(&preserved, existingChannel.ID).Error)
+	require.Equal(t, existingChannel.DeviceProjectionID, preserved.DeviceProjectionID)
+	require.Equal(t, existingChannel.PublishedChannelID, preserved.PublishedChannelID)
+	require.Equal(t, existingChannel.Name, preserved.Name)
+	require.Equal(t, existingChannel.ParentOverride, preserved.ParentOverride)
+	require.Equal(t, existingChannel.PTZAllowed, preserved.PTZAllowed)
+	require.Equal(t, existingChannel.Revision, preserved.Revision, "an already shared channel may only change its business binding")
+	var added model.GbCascadeChannelProjection
+	require.NoError(t, repo.db.Where("platform_id = ? AND source_channel_id = ?", platform.ID, second.ID).First(&added).Error)
+	require.Equal(t, uint64(device.ID), added.DeviceProjectionID)
+	require.Equal(t, second.ChannelID, added.PublishedChannelID)
+	require.Equal(t, second.Name, added.Name)
+	require.True(t, added.PTZAllowed)
+	require.True(t, added.Active, "offline source rows remain eligible for sharing")
+}
+
+func TestReplaceBusinessGroupWithSharesRollsBackOnInvalidTreeAndAuthorization(t *testing.T) {
+	for _, testCase := range []struct {
+		name        string
+		authorize   bool
+		invalidTree bool
+	}{
+		{name: "authorization denied"},
+		{name: "invalid tree rolls back staged share", authorize: true, invalidTree: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			repo := newTestRepository(t)
+			ctx := context.Background()
+			require.NoError(t, repo.db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbChannel{}))
+			platform := newPlatform("upstream-a", "34020000002000000001")
+			require.NoError(t, repo.CreatePlatform(ctx, platform))
+			_, channels := createBusinessGroupSource(t, repo, "34020000001320000011", "34020000001320000012")
+			channel := channels[1]
+			root := "34020000002150000001"
+			organization := "34020000002160000001"
+			nodes := []BusinessNodeInput{{Code: root, Name: "业务根", Kind: "group"}, {Code: organization, Name: "组织", Kind: "organization", ParentCode: root}}
+			if testCase.invalidTree {
+				nodes = append(nodes, BusinessNodeInput{Code: root, Name: "重复根", Kind: "group"})
+			}
+			authorizer := func(_ *gorm.DB, _, _ []uint64) error {
+				if testCase.authorize {
+					return nil
+				}
+				return errors.New("source access denied")
+			}
+			err := repo.ReplaceBusinessGroupWithShares(ctx, platform.ID, 0, nodes,
+				[]BusinessBindingInput{{SourceChannelID: uint64(channel.ID), NodeCode: organization}}, []uint64{uint64(channel.ID)}, authorizer)
+			require.Error(t, err)
+			var deviceCount, channelCount, nodeCount, bindingCount int64
+			require.NoError(t, repo.db.Model(&model.GbCascadeDeviceProjection{}).Where("platform_id = ?", platform.ID).Count(&deviceCount).Error)
+			require.NoError(t, repo.db.Model(&model.GbCascadeChannelProjection{}).Where("platform_id = ?", platform.ID).Count(&channelCount).Error)
+			require.NoError(t, repo.db.Model(&model.GbCascadeBusinessNode{}).Where("platform_id = ?", platform.ID).Count(&nodeCount).Error)
+			require.NoError(t, repo.db.Model(&model.GbCascadeBusinessBinding{}).Where("platform_id = ?", platform.ID).Count(&bindingCount).Error)
+			require.Zero(t, deviceCount)
+			require.Zero(t, channelCount)
+			require.Zero(t, nodeCount)
+			require.Zero(t, bindingCount)
+			stored, findErr := repo.FindPlatform(ctx, platform.ID)
+			require.NoError(t, findErr)
+			require.Zero(t, stored.ProjectionRevision)
+		})
+	}
+}
+
+func TestReplaceBusinessGroupWithSharesRejectsStaleRevisionAndUnboundSelection(t *testing.T) {
+	repo := newTestRepository(t)
+	ctx := context.Background()
+	require.NoError(t, repo.db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbChannel{}))
+	platform := newPlatform("upstream-a", "34020000002000000001")
+	require.NoError(t, repo.CreatePlatform(ctx, platform))
+	_, channels := createBusinessGroupSource(t, repo, "34020000001320000011", "34020000001320000012")
+	channel := channels[1]
+	root := "34020000002150000001"
+	organization := "34020000002160000001"
+	nodes := []BusinessNodeInput{{Code: root, Name: "业务根", Kind: "group"}, {Code: organization, Name: "组织", Kind: "organization", ParentCode: root}}
+	authorizer := func(_ *gorm.DB, _, _ []uint64) error { return nil }
+
+	err := repo.ReplaceBusinessGroupWithShares(ctx, platform.ID, 1, nodes,
+		[]BusinessBindingInput{{SourceChannelID: uint64(channel.ID), NodeCode: organization}}, []uint64{uint64(channel.ID)}, authorizer)
+	require.ErrorIs(t, err, ErrRevisionConflict)
+	err = repo.ReplaceBusinessGroupWithShares(ctx, platform.ID, 0, nodes, nil, []uint64{uint64(channel.ID)}, authorizer)
+	require.ErrorIs(t, err, ErrInvalidProjection)
+	var deviceCount, channelCount int64
+	require.NoError(t, repo.db.Model(&model.GbCascadeDeviceProjection{}).Where("platform_id = ?", platform.ID).Count(&deviceCount).Error)
+	require.NoError(t, repo.db.Model(&model.GbCascadeChannelProjection{}).Where("platform_id = ?", platform.ID).Count(&channelCount).Error)
+	require.Zero(t, deviceCount)
+	require.Zero(t, channelCount)
+}
+
+func createBusinessGroupSource(t *testing.T, repo *GormRepository, channelIDs ...string) (gbmodels.GbDevice, []gbmodels.GbChannel) {
+	t.Helper()
+	device := gbmodels.GbDevice{DeviceID: "34020000001320000001", Name: "源设备", Manufacturer: "源厂商", Model: "源型号", Status: 0, OwnerDeptID: 10}
+	require.NoError(t, repo.db.Create(&device).Error)
+	channels := make([]gbmodels.GbChannel, 0, len(channelIDs))
+	for index, channelID := range channelIDs {
+		channel := gbmodels.GbChannel{DeviceID: device.DeviceID, ChannelID: channelID, Name: "源通道" + string(rune('A'+index)), Status: 0, OwnerDeptID: 10}
+		require.NoError(t, repo.db.Create(&channel).Error)
+		channels = append(channels, channel)
+	}
+	return device, channels
+}
 
 func TestReplaceBusinessGroupStoresPlatformScopedTreeAndBindings(t *testing.T) {
 	repo := newTestRepository(t)

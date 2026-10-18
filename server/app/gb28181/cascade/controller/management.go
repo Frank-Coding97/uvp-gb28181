@@ -25,9 +25,12 @@ import (
 // ManagementController is the HTTP boundary for upstream cascade management.
 // The service is intentionally injected so an unconfigured runtime is visible as 503.
 type ManagementController struct {
-	service *service.ManagementService
-	db      *gorm.DB
+	service           *service.ManagementService
+	db                *gorm.DB
+	permissionChecker cascadePermissionChecker
 }
+
+const cascadeRuntimeSyncWarning = "配置已保存，但运行时同步失败；请稍后重试"
 
 func NewManagementController(svc *service.ManagementService, db *gorm.DB) *ManagementController {
 	return &ManagementController{service: svc, db: db}
@@ -75,7 +78,7 @@ func (c *ManagementController) Create(ctx *gin.Context) {
 	if err != nil {
 		if errors.Is(err, service.ErrRuntimeSyncFailed) && item != nil {
 			// 配置已持久化,仅运行时未同步:返回已提交资源,附降级提示
-			ctx.JSON(http.StatusOK, gin.H{"platform": item, "runtimeSynced": false, "warning": err.Error()})
+			ctx.JSON(http.StatusOK, gin.H{"platform": item, "runtimeSynced": false, "warning": cascadeRuntimeSyncWarning})
 			return
 		}
 		c.fail(ctx, err)
@@ -101,7 +104,7 @@ func (c *ManagementController) Update(ctx *gin.Context) {
 	item, err := c.service.Update(ctx.Request.Context(), id, req.ExpectedRevision, req.input())
 	if err != nil {
 		if errors.Is(err, service.ErrRuntimeSyncFailed) && item != nil {
-			ctx.JSON(http.StatusOK, gin.H{"platform": item, "runtimeSynced": false, "warning": err.Error()})
+			ctx.JSON(http.StatusOK, gin.H{"platform": item, "runtimeSynced": false, "warning": cascadeRuntimeSyncWarning})
 			return
 		}
 		c.fail(ctx, err)
@@ -118,16 +121,17 @@ func (c *ManagementController) Delete(ctx *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := c.service.Delete(ctx.Request.Context(), id); err != nil {
+	result, err := c.service.Delete(ctx.Request.Context(), id)
+	if err != nil {
 		if errors.Is(err, service.ErrRuntimeSyncFailed) {
-			// 删除/禁用已提交,仅运行时未同步:返回已提交结果附降级提示
-			ctx.JSON(http.StatusOK, gin.H{"ok": true, "runtimeSynced": false, "warning": err.Error()})
+			// 删除/禁用已提交,仅运行时未同步:显式区分是否已经软删除。
+			ctx.JSON(http.StatusOK, gin.H{"ok": result.Deleted, "deleted": result.Deleted, "runtimeSynced": false, "platform": result.Platform, "warning": err.Error()})
 			return
 		}
 		c.fail(ctx, err)
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"ok": true})
+	ctx.JSON(http.StatusOK, gin.H{"ok": result.Deleted, "deleted": result.Deleted, "runtimeSynced": result.RuntimeSynced})
 }
 
 func (c *ManagementController) SetEnabled(ctx *gin.Context) {
@@ -146,7 +150,7 @@ func (c *ManagementController) SetEnabled(ctx *gin.Context) {
 	item, err := c.service.SetEnabled(ctx.Request.Context(), id, req.ExpectedRevision, req.Enabled)
 	if err != nil {
 		if errors.Is(err, service.ErrRuntimeSyncFailed) && item != nil {
-			ctx.JSON(http.StatusOK, gin.H{"platform": item, "runtimeSynced": false, "warning": err.Error()})
+			ctx.JSON(http.StatusOK, gin.H{"platform": item, "runtimeSynced": false, "warning": cascadeRuntimeSyncWarning})
 			return
 		}
 		c.fail(ctx, err)
@@ -295,16 +299,15 @@ func (c *ManagementController) fail(ctx *gin.Context, err error) {
 	switch {
 	case duplicate:
 		status = http.StatusConflict
+	case errors.Is(err, errCascadeManageDenied):
+		status = http.StatusForbidden
 	case errors.Is(err, service.ErrInvalidPlatformConfig), errors.Is(err, service.ErrInvalidBusinessGroup), errors.Is(err, repository.ErrInvalidProjection):
 		status = http.StatusBadRequest
 	case errors.Is(err, repository.ErrPlatformNotFound):
 		status = http.StatusNotFound
 	case errors.Is(err, repository.ErrRevisionConflict), errors.Is(err, service.ErrPlatformHasActiveSessions), errors.Is(err, service.ErrPlatformDisabled):
 		status = http.StatusConflict
-	case errors.Is(err, repository.ErrRetiredPlatformConflict):
-		// 软删的遗留平台仍占着键位,且名称与接入关系分属两条不同的行,接手不了。
-		status = http.StatusConflict
-	case errors.Is(err, service.ErrRuntimeUnavailable), errors.Is(err, service.ErrCredentialUnavailable):
+	case errors.Is(err, errCascadePermissionError), errors.Is(err, service.ErrRuntimeUnavailable), errors.Is(err, service.ErrCredentialUnavailable):
 		status = http.StatusServiceUnavailable
 	}
 	message := "国标级联操作失败"
@@ -323,14 +326,14 @@ func (c *ManagementController) fail(ctx *gin.Context, err error) {
 	if status == http.StatusServiceUnavailable {
 		message = "国标级联服务暂不可用"
 	}
+	if status == http.StatusForbidden {
+		message = "当前账号没有切换级联共享方式的管理权限"
+	}
 	if errors.Is(err, service.ErrCredentialUnavailable) {
 		message = "认证密码暂时无法保存，请检查平台数据目录是否可读写"
 	}
 	if duplicate {
 		message = "平台名称或上级接入关系已存在，请检查上级地址、端口及平台身份"
-	}
-	if errors.Is(err, repository.ErrRetiredPlatformConflict) {
-		message = "平台名称与上级接入关系分别被两条已删除的平台占用，请修改名称或上级地址后重试"
 	}
 	if app.ZapLog != nil {
 		fields := []zap.Field{zap.String("method", ctx.Request.Method), zap.String("route", ctx.FullPath()), zap.Int("status", status), zap.String("error_type", fmt.Sprintf("%T", err))}

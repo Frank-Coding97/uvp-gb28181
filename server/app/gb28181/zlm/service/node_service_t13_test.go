@@ -104,10 +104,12 @@ func (r *t13Repo) Delete(_ context.Context, id int64) error {
 
 type t13Probe struct {
 	mu           sync.Mutex
+	applyOnce    sync.Once
 	getErrs      []error
 	applyErrs    []error
 	gets         []*node.Node
 	applyNodes   []*node.Node
+	applyTunings []service.MediaTuning
 	restartErr   error
 	applyEntered chan struct{}
 	applyRelease chan struct{}
@@ -252,9 +254,10 @@ func (p *t13Probe) GetServerConfig(_ context.Context, n *node.Node) (map[string]
 	return map[string]string{"http.port": "80"}, nil
 }
 
-func (p *t13Probe) ApplyConfigForNode(_ context.Context, n *node.Node, _ service.MediaTuning) error {
+func (p *t13Probe) ApplyConfigForNode(_ context.Context, n *node.Node, tuning service.MediaTuning) error {
 	p.mu.Lock()
 	p.applyNodes = append(p.applyNodes, cloneT13Node(n))
+	p.applyTunings = append(p.applyTunings, tuning)
 	var err error
 	if len(p.applyErrs) > 0 {
 		err, p.applyErrs = p.applyErrs[0], p.applyErrs[1:]
@@ -262,7 +265,7 @@ func (p *t13Probe) ApplyConfigForNode(_ context.Context, n *node.Node, _ service
 	entered, release := p.applyEntered, p.applyRelease
 	p.mu.Unlock()
 	if entered != nil {
-		close(entered)
+		p.applyOnce.Do(func() { close(entered) })
 		<-release
 	}
 	return err
@@ -300,6 +303,184 @@ func t13Node(t *testing.T, reg *node.Registry) *node.Node {
 	})
 	require.NoError(t, err)
 	return n
+}
+
+func TestNodeServiceT13_ScheduledConvergenceRetriesLatestNodeAfterRevisionChange(t *testing.T) {
+	repo := newT13Repo()
+	reg := node.NewRegistry(repo)
+	n := t13Node(t, reg)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	probe := &t13Probe{applyEntered: entered, applyRelease: release}
+	svc := service.NewNodeService(reg, probe, service.MediaTuning{})
+
+	require.True(t, svc.ScheduleConfigConvergence(n.ID))
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("scheduled convergence did not reach ZLM")
+	}
+
+	latest, ok := reg.Get(n.ID)
+	require.True(t, ok)
+	latest.Host = "new.example"
+	require.NoError(t, reg.Update(context.Background(), *latest))
+	close(release)
+	require.NoError(t, svc.StopContext(context.Background()))
+
+	probe.mu.Lock()
+	require.Len(t, probe.applyNodes, 2, "a changed endpoint must be re-read and converged")
+	require.Equal(t, "old.example", probe.applyNodes[0].Host)
+	require.Equal(t, "new.example", probe.applyNodes[1].Host)
+	probe.mu.Unlock()
+	require.True(t, reg.IsAutoOnDemandReady(n.ID))
+}
+
+func TestNodeServiceT13_ScheduledConvergenceReappliesChangedPlatformDefaults(t *testing.T) {
+	repo := newT13Repo()
+	reg := node.NewRegistry(repo)
+	n := t13Node(t, reg)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	probe := &t13Probe{applyEntered: entered, applyRelease: release}
+	svc := service.NewNodeService(reg, probe, service.MediaTuning{HookIP: "old-hook", SDPIP: "old-sdp", StreamIP: "old-stream"})
+
+	require.True(t, svc.ScheduleConfigConvergence(n.ID))
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("scheduled convergence did not reach ZLM")
+	}
+
+	reloadDone := make(chan error, 1)
+	go func() {
+		reloadDone <- svc.ReloadPlatformMediaDefaults(context.Background(), "new-hook", "new-sdp", "new-stream")
+	}()
+	require.Eventually(t, func() bool {
+		current, ok := reg.Get(n.ID)
+		return ok && current.EffectiveSDPIP() == "new-sdp"
+	}, time.Second, time.Millisecond, "platform default update should precede the blocked node apply")
+	close(release)
+	require.NoError(t, <-reloadDone)
+	require.NoError(t, svc.StopContext(context.Background()))
+
+	probe.mu.Lock()
+	require.GreaterOrEqual(t, len(probe.applyTunings), 2, "the in-flight old defaults must not win readiness")
+	last := probe.applyTunings[len(probe.applyTunings)-1]
+	probe.mu.Unlock()
+	require.Equal(t, "new-hook", last.HookIP)
+	require.Equal(t, "new-sdp", last.SDPIP)
+	require.Equal(t, "new-stream", last.StreamIP)
+	require.True(t, reg.IsAutoOnDemandReady(n.ID))
+}
+
+func TestNodeServiceT13_ConvergenceReportsPlatformDefaultsChanged(t *testing.T) {
+	repo := newT13Repo()
+	reg := node.NewRegistry(repo)
+	n := t13Node(t, reg)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	probe := &t13Probe{applyEntered: entered, applyRelease: release}
+	svc := service.NewNodeService(reg, probe, service.MediaTuning{HookIP: "old-hook", SDPIP: "old-sdp", StreamIP: "old-stream"})
+
+	convergeDone := make(chan error, 1)
+	go func() { convergeDone <- svc.ConvergeNodeConfig(context.Background(), n.ID) }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("convergence did not reach ZLM")
+	}
+
+	reloadDone := make(chan error, 1)
+	go func() {
+		reloadDone <- svc.ReloadPlatformMediaDefaults(context.Background(), "new-hook", "new-sdp", "new-stream")
+	}()
+	require.Eventually(t, func() bool {
+		current, ok := reg.Get(n.ID)
+		return ok && current.EffectiveSDPIP() == "new-sdp"
+	}, time.Second, time.Millisecond, "the updated defaults should be visible before the old apply completes")
+	close(release)
+
+	err := <-convergeDone
+	require.ErrorIs(t, err, service.ErrNodeConfigChanged)
+	require.Contains(t, err.Error(), "platform_media_defaults_changed")
+	require.NoError(t, <-reloadDone, "the serialized apply must converge with the new defaults")
+	require.True(t, reg.IsAutoOnDemandReady(n.ID))
+}
+
+func TestNodeServiceT13_ConvergenceReportsNodeBecameInactive(t *testing.T) {
+	repo := newT13Repo()
+	reg := node.NewRegistry(repo)
+	n := t13Node(t, reg)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	probe := &t13Probe{applyEntered: entered, applyRelease: release}
+	svc := service.NewNodeService(reg, probe, service.MediaTuning{})
+
+	convergeDone := make(chan error, 1)
+	go func() { convergeDone <- svc.ConvergeNodeConfig(context.Background(), n.ID) }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("convergence did not reach ZLM")
+	}
+
+	latest, ok := reg.Get(n.ID)
+	require.True(t, ok)
+	latest.State = node.StateMaintenance
+	require.NoError(t, reg.Update(context.Background(), *latest))
+	close(release)
+
+	err := <-convergeDone
+	require.ErrorIs(t, err, service.ErrNodeConfigChanged)
+	require.Contains(t, err.Error(), "node_became_inactive")
+	require.False(t, reg.IsAutoOnDemandReady(n.ID))
+}
+
+func TestNodeServiceT13_ActiveStartupProbeDoesNotInvalidateConvergence(t *testing.T) {
+	repo := newT13Repo()
+	reg := node.NewRegistry(repo)
+	n := t13Node(t, reg)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	probe := &t13Probe{applyEntered: entered, applyRelease: release}
+	svc := service.NewNodeService(reg, probe, service.MediaTuning{})
+
+	convergeDone := make(chan error, 1)
+	go func() { convergeDone <- svc.ConvergeNodeConfig(context.Background(), n.ID) }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("convergence did not reach ZLM")
+	}
+
+	before, ok := reg.Get(n.ID)
+	require.True(t, ok)
+	require.NoError(t, reg.MarkActive(context.Background(), n.ID), "probing an already-active node should only refresh runtime liveness")
+	after, ok := reg.Get(n.ID)
+	require.True(t, ok)
+	require.Equal(t, before.Revision, after.Revision)
+	close(release)
+
+	require.NoError(t, <-convergeDone)
+	require.True(t, reg.IsAutoOnDemandReady(n.ID))
+}
+
+func TestNodeServiceT13_DisabledActiveNodeCanConvergeWithoutBecomingSchedulable(t *testing.T) {
+	repo := newT13Repo()
+	reg := node.NewRegistry(repo)
+	n := t13Node(t, reg)
+	disabled, ok := reg.Get(n.ID)
+	require.True(t, ok)
+	disabled.AdminState = "disabled"
+	require.NoError(t, reg.Update(context.Background(), *disabled))
+	probe := &t13Probe{}
+	svc := service.NewNodeService(reg, probe, service.MediaTuning{})
+
+	require.NoError(t, svc.ConvergeNodeConfig(context.Background(), n.ID))
+	require.True(t, reg.IsAutoOnDemandReady(n.ID), "readiness tracks applied config, independent of operator admission")
+	_, admitted := reg.ResolveAutoOnDemandNode(n.MediaServerUUID)
+	require.False(t, admitted, "a disabled node must remain unavailable for automatic admission")
 }
 
 func TestNodeServiceT13_UpdateCandidateProbeFailureDoesNotPersist(t *testing.T) {

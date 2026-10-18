@@ -19,6 +19,7 @@ var (
 	ErrSenderNodeUnavailable = errors.New("cascade sender node unavailable")
 	ErrSenderStartFailed     = errors.New("cascade sender start failed")
 	ErrSenderStopFailed      = errors.New("cascade sender stop failed")
+	ErrSenderCheckFailed     = errors.New("cascade sender status check failed")
 )
 
 type SenderNodeLookup interface {
@@ -33,12 +34,13 @@ type GBSenderClient interface {
 type SenderClientFactory func(*node.Node) GBSenderClient
 
 type SenderRequest struct {
-	Source      StartResult
-	SSRC        string
-	PayloadType int
-	RemoteIP    string
-	RemotePort  int
-	Transport   zlm.GBSendRTPTransport
+	Source        StartResult
+	SSRC          string
+	PayloadType   int
+	RemoteIP      string
+	RemotePort    int
+	Transport     zlm.GBSendRTPTransport
+	RTCPKeepalive bool
 }
 
 // Sender starts a PS-over-RTP sender on the same ZLM node as the acquired
@@ -56,11 +58,31 @@ func NewSender(nodes SenderNodeLookup, clientFor SenderClientFactory) *Sender {
 }
 
 type SenderLease struct {
-	LocalPort int
-	client    GBSenderClient
-	request   zlm.GBSendRTPRequest
-	once      sync.Once
-	err       error
+	LocalPort  int
+	RTPInfo    *zlm.GBRTPInfo
+	client     GBSenderClient
+	request    zlm.GBSendRTPRequest
+	nodeSecret string
+	once       sync.Once
+	err        error
+}
+
+// IsActive checks the leased SSRC without changing other senders or the source.
+func (l *SenderLease) IsActive(ctx context.Context) (bool, error) {
+	if l == nil || l.client == nil {
+		return false, nil
+	}
+	checker, ok := l.client.(interface {
+		IsGBSendRTPActive(context.Context, zlm.GBSendRTPRequest) (bool, error)
+	})
+	if !ok {
+		return false, fmt.Errorf("%w: client does not support status checks", ErrSenderCheckFailed)
+	}
+	active, err := checker.IsGBSendRTPActive(ctx, l.request)
+	if err != nil {
+		return false, fmt.Errorf("%w: %s", ErrSenderCheckFailed, redactNodeSecret(err.Error(), l.nodeSecret))
+	}
+	return active, nil
 }
 
 func (l *SenderLease) Stop(ctx context.Context) error {
@@ -93,6 +115,7 @@ func (s *Sender) Start(ctx context.Context, request SenderRequest) (*SenderLease
 	params := zlm.GBSendRTPRequest{
 		VHost: defaultSenderVHost, App: request.Source.App, Stream: request.Source.StreamID, SSRC: request.SSRC,
 		PayloadType: request.PayloadType, RemoteIP: request.RemoteIP, RemotePort: request.RemotePort, Transport: request.Transport,
+		RTCPKeepalive: request.RTCPKeepalive,
 	}
 	result, err := client.StartGBSendRTP(ctx, params)
 	if err != nil {
@@ -101,7 +124,7 @@ func (s *Sender) Start(ctx context.Context, request SenderRequest) (*SenderLease
 	if result == nil || result.LocalPort <= 0 || result.LocalPort > 65535 {
 		return nil, fmt.Errorf("%w: invalid local port", ErrSenderStartFailed)
 	}
-	return &SenderLease{LocalPort: result.LocalPort, client: client, request: params}, nil
+	return &SenderLease{LocalPort: result.LocalPort, RTPInfo: result.RTPInfo, client: client, request: params, nodeSecret: mediaNode.APISecret}, nil
 }
 
 func validateSenderRequest(request SenderRequest) error {
@@ -119,6 +142,9 @@ func validateSenderRequest(request SenderRequest) error {
 	}
 	ip := net.ParseIP(strings.TrimSpace(request.RemoteIP))
 	if ip == nil || ip.IsUnspecified() || request.RemotePort <= 0 || request.RemotePort > 65535 {
+		return ErrInvalidSenderRequest
+	}
+	if request.Transport == zlm.GBSendRTPUDP && request.RTCPKeepalive && request.RemotePort == 65535 {
 		return ErrInvalidSenderRequest
 	}
 	return nil

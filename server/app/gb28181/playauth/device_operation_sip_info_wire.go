@@ -7,6 +7,7 @@ import (
 
 type sipINFOCommandWire struct {
 	Action               string  `json:"action"`
+	RangeValue           string  `json:"rangeValue,omitempty"`
 	PositionNanos        int64   `json:"positionNanos"`
 	SegmentDurationNanos int64   `json:"segmentDurationNanos"`
 	Scale                float64 `json:"scale"`

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/emiago/sipgo/sip"
+	"github.com/stretchr/testify/require"
 
 	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 )
@@ -64,6 +65,87 @@ func TestRequestFactoryRejectsInvalidIdentity(t *testing.T) {
 		if _, err := NewRequestFactory(identity); err == nil {
 			t.Fatalf("case %d must fail", i)
 		}
+	}
+}
+
+func TestRequestFactoryUsesConfiguredUserAgentWithoutHeaderInjection(t *testing.T) {
+	identity := Identity{
+		UpstreamServerID: "34020000002000000001", UpstreamDomain: "3402000000", Host: "192.0.2.10", Port: 5060,
+		LocalDeviceID: "34020000001320000001", LocalDomain: "3402000000", LocalIP: "192.0.2.20", LocalPort: 5061,
+		Transport: "UDP", Profile: protocol.Version2016, UserAgent: "UVP/2.0",
+	}
+	factory := mustFactory(t, identity)
+	register, err := factory.BuildRegister(3600, "register")
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := factory.BuildMessage([]byte("<Query/>"), "message")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, request := range []*sip.Request{register, message} {
+		if header := request.GetHeader("User-Agent"); header == nil || header.Value() != "UVP/2.0" {
+			t.Fatalf("User-Agent=%v", header)
+		}
+	}
+	identity.UserAgent = "UVP\r\nVia: injected"
+	if _, err := NewRequestFactory(identity); err == nil {
+		t.Fatal("header injection must fail")
+	}
+}
+
+func TestRequestFactoryRejectsShortRegistrationExpiryButAllowsLogout(t *testing.T) {
+	factory := mustFactory(t, Identity{
+		UpstreamServerID: "34020000002000000001", UpstreamDomain: "3402000000", Host: "192.0.2.10", Port: 5060,
+		LocalDeviceID: "34020000001320000001", LocalDomain: "3402000000", LocalIP: "192.0.2.20", LocalPort: 5061,
+		Transport: "UDP", Profile: protocol.Version2016,
+	})
+	for _, expires := range []int{-1, 1, 3599} {
+		if _, err := factory.BuildRegister(expires, "short"); err == nil {
+			t.Fatalf("expires=%d must be rejected", expires)
+		}
+	}
+	for _, expires := range []int{0, 3600, 86400} {
+		if _, err := factory.BuildRegister(expires, "valid"); err != nil {
+			t.Fatalf("expires=%d must be accepted: %v", expires, err)
+		}
+	}
+}
+
+func TestRequestFactoryProfileCanBeNegotiatedForSubsequentMessages(t *testing.T) {
+	factory := mustFactory(t, Identity{
+		UpstreamServerID: "34020000002000000001", UpstreamDomain: "3402000000", Host: "192.0.2.10", Port: 5060,
+		LocalDeviceID: "34020000001320000001", LocalDomain: "3402000000", LocalIP: "192.0.2.20", LocalPort: 5061,
+		Transport: "UDP", Profile: protocol.Version2016,
+	})
+	require.NoError(t, factory.SetProfile(protocol.Version2022))
+	request, err := factory.BuildMessage([]byte("<Notify/>"), "message")
+	require.NoError(t, err)
+	require.Equal(t, protocol.Version(protocol.Version2022), factory.Profile())
+	require.Equal(t, "3.0", request.GetHeader("X-GB-Ver").Value())
+}
+
+func TestRequestFactoryRefreshesUserAgentForExistingClient(t *testing.T) {
+	value := "UVP/old"
+	factory := mustFactory(t, Identity{
+		UpstreamServerID: "34020000002000000001", UpstreamDomain: "3402000000", Host: "192.0.2.10", Port: 5060,
+		LocalDeviceID: "34020000001320000001", LocalDomain: "3402000000", LocalIP: "192.0.2.20", LocalPort: 5061,
+		Transport: "UDP", Profile: protocol.Version2016, UserAgentProvider: func() string { return value },
+	})
+	first, err := factory.BuildRegister(3600, "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.GetHeader("User-Agent").Value() != value {
+		t.Fatal("old User-Agent missing")
+	}
+	value = "UVP/new"
+	next, err := factory.BuildMessage([]byte("<Notify/>"), "next")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.GetHeader("User-Agent").Value() != value {
+		t.Fatal("saved User-Agent did not apply")
 	}
 }
 

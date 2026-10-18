@@ -53,14 +53,28 @@ func NewService(sender TrackedSender, options Options) (*Service, error) {
 }
 
 func (s *Service) Query(ctx context.Context, request QueryRequest) (QueryResult, error) {
+	if err := validateQueryRequest(request); err != nil {
+		return QueryResult{}, err
+	}
+	return s.query(ctx, request)
+}
+
+func (s *Service) QueryForCascade(ctx context.Context, request CascadeQueryRequest) (QueryResult, error) {
+	input := QueryRequest{ChannelID: request.ChannelID, DeviceCode: request.DeviceCode, ChannelCode: request.ChannelCode,
+		Destination: request.Destination, Transport: request.Transport, ProtocolVersion: request.ProtocolVersion,
+		StartTime: request.StartTime, EndTime: request.EndTime, Type: request.Type, Secrecy: request.Secrecy, RecorderID: request.RecorderID}
+	if err := validateQueryTarget(input); err != nil {
+		return QueryResult{}, err
+	}
+	return s.query(ctx, input)
+}
+
+func (s *Service) query(ctx context.Context, request QueryRequest) (QueryResult, error) {
 	if s == nil {
 		return QueryResult{}, queryError(ErrorCodeUnavailable, ErrUnavailable)
 	}
 	startedAt := s.options.Now()
 	result := QueryResult{StartedAt: startedAt}
-	if err := validateQueryRequest(request); err != nil {
-		return result, err
-	}
 	queryID, err := randomToken(18)
 	if err != nil {
 		return result, queryError(ErrorCodeUnavailable, err)
@@ -80,7 +94,7 @@ func (s *Service) Query(ctx context.Context, request QueryRequest) (QueryResult,
 	var beginErr error
 	if request.OwnerClientID > 0 {
 		beginErr = s.snapshots.BeginQueryForClient(request.OwnerClientID, request.ChannelID, queryID)
-	} else {
+	} else if request.OwnerUserID > 0 {
 		beginErr = s.snapshots.BeginQuery(request.OwnerUserID, request.ChannelID, queryID)
 	}
 	if beginErr != nil {
@@ -256,7 +270,7 @@ func (s *Service) finish(result QueryResult, request QueryRequest, snapshot entr
 	result.Incomplete = status == QueryStatusPartial || status == QueryStatusTimeout || status == QueryStatusCanceled || status == QueryStatusUnavailable
 	result.FinishedAt = s.options.Now()
 	result.Records = make([]Record, 0, len(snapshot.records))
-	issueSnapshots := status == QueryStatusComplete || status == QueryStatusPartial
+	issueSnapshots := (status == QueryStatusComplete || status == QueryStatusPartial) && (request.OwnerUserID > 0 || request.OwnerClientID > 0)
 	for _, item := range snapshot.records {
 		start, startErr := ParseWallClock(item.StartTime, s.options.Location)
 		end, endErr := ParseWallClock(item.EndTime, s.options.Location)
@@ -299,7 +313,14 @@ func (s *Service) nextSequence() int {
 }
 
 func validateQueryRequest(request QueryRequest) error {
-	if (request.OwnerUserID > 0) == (request.OwnerClientID > 0) || request.ChannelID == 0 || normalizeIdentity(request.DeviceCode) == "" ||
+	if (request.OwnerUserID > 0) == (request.OwnerClientID > 0) {
+		return queryError(ErrorCodeInvalidArgument, ErrInvalidArgument)
+	}
+	return validateQueryTarget(request)
+}
+
+func validateQueryTarget(request QueryRequest) error {
+	if request.ChannelID == 0 || normalizeIdentity(request.DeviceCode) == "" ||
 		normalizeIdentity(request.ChannelCode) == "" || normalizeIdentity(request.Destination) == "" ||
 		request.StartTime.IsZero() || !request.EndTime.After(request.StartTime) {
 		return queryError(ErrorCodeInvalidArgument, ErrInvalidArgument)

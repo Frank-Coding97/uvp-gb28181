@@ -3,6 +3,8 @@ package sipclient
 import (
 	"context"
 	"fmt"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -64,13 +66,24 @@ type KeepaliveEncoder interface {
 // TransactionResult separates transport failures from a received SIP status.
 // It is a transient value for the caller/actor; this package never persists it.
 type TransactionResult struct {
-	Response     *sip.Response
-	TransportErr error
-	BuildErr     error
-	StatusCode   int
-	Challenge    bool
-	Retried      bool
-	Success      bool
+	Response            *sip.Response
+	TransportErr        error
+	BuildErr            error
+	StatusCode          int
+	Challenge           bool
+	Retried             bool
+	Success             bool
+	GrantedExpires      int
+	GrantedExpiresFound bool
+	GrantedExpiresErr   error
+	// ReportedGBVersion is read only from the final successful REGISTER
+	// response. An unknown or malformed value is retained as an error and never
+	// implicitly changes the active profile.
+	ReportedGBVersion      string
+	ReportedGBVersionFound bool
+	NegotiatedVersion      protocol.Version
+	NegotiatedVersionFound bool
+	NegotiatedVersionErr   error
 }
 
 type TransactionClient struct {
@@ -78,6 +91,13 @@ type TransactionClient struct {
 	transport   Transport
 	credentials Credentials
 	timeout     time.Duration
+}
+
+func (c *TransactionClient) SetProfile(profile protocol.Version) error {
+	if c == nil || c.factory == nil {
+		return fmt.Errorf("cascade SIP request factory is unavailable")
+	}
+	return c.factory.SetProfile(profile)
 }
 
 func NewTransactionClient(factory *RequestFactory, transport Transport, credentials Credentials, timeout time.Duration) (*TransactionClient, error) {
@@ -141,6 +161,13 @@ func (c *TransactionClient) execute(parent context.Context, request *sip.Request
 		return TransactionResult{TransportErr: err}
 	}
 	result := transactionResult(response)
+	if request.Method == sip.REGISTER && result.Success {
+		annotateRegisterVersion(&result, response)
+		result.GrantedExpires, result.GrantedExpiresFound, result.GrantedExpiresErr = grantedRegisterExpires(request, response)
+		if result.GrantedExpiresErr != nil {
+			result.Success = false
+		}
+	}
 	if !ShouldRetryDigest(result.StatusCode, hasDigestChallenge(response), 0) {
 		return result
 	}
@@ -155,9 +182,82 @@ func (c *TransactionClient) execute(parent context.Context, request *sip.Request
 		return result
 	}
 	next := transactionResult(response)
+	if request.Method == sip.REGISTER && next.Success {
+		annotateRegisterVersion(&next, response)
+		next.GrantedExpires, next.GrantedExpiresFound, next.GrantedExpiresErr = grantedRegisterExpires(request, response)
+		if next.GrantedExpiresErr != nil {
+			next.Success = false
+		}
+	}
 	next.Challenge = true
 	next.Retried = true
 	return next
+}
+
+func annotateRegisterVersion(result *TransactionResult, response *sip.Response) {
+	if result == nil || response == nil {
+		return
+	}
+	header := response.GetHeader("X-GB-Ver")
+	if header == nil {
+		return
+	}
+	raw := strings.TrimSpace(header.Value())
+	result.ReportedGBVersion = raw
+	result.ReportedGBVersionFound = true
+	parsed := protocol.ResolveAdvertisedVersion(raw)
+	if parsed.WarningCode != protocol.WarningNone {
+		result.NegotiatedVersionErr = fmt.Errorf("unsupported X-GB-Ver %q: %s", raw, parsed.WarningCode)
+		return
+	}
+	result.NegotiatedVersion = parsed.Version
+	result.NegotiatedVersionFound = true
+}
+
+func grantedRegisterExpires(request *sip.Request, response *sip.Response) (int, bool, error) {
+	if request == nil || response == nil {
+		return 0, false, nil
+	}
+	if response.Contact() != nil && request.Contact() != nil && sameContactBinding(request.Contact(), response.Contact()) {
+		if raw, ok := response.Contact().Params.Get("expires"); ok {
+			value, err := strconv.ParseUint(strings.TrimSpace(raw), 10, 32)
+			if err != nil {
+				return 0, true, fmt.Errorf("invalid REGISTER Contact expires")
+			}
+			return int(value), true, nil
+		}
+	}
+	if header := response.GetHeader("Expires"); header != nil {
+		value, err := strconv.ParseUint(strings.TrimSpace(header.Value()), 10, 32)
+		if err != nil {
+			return 0, true, fmt.Errorf("invalid REGISTER Expires")
+		}
+		return int(value), true, nil
+	}
+	return 0, false, nil
+}
+
+func sameContactBinding(want, got *sip.ContactHeader) bool {
+	if want == nil || got == nil {
+		return false
+	}
+	return strings.EqualFold(want.Address.User, got.Address.User) &&
+		strings.EqualFold(normalizeContactHost(want.Address.Host), normalizeContactHost(got.Address.Host)) &&
+		contactPort(want.Address) == contactPort(got.Address)
+}
+
+func normalizeContactHost(host string) string {
+	if parsed := net.ParseIP(strings.Trim(host, "[]")); parsed != nil {
+		return parsed.String()
+	}
+	return strings.ToLower(strings.TrimSpace(host))
+}
+
+func contactPort(uri sip.Uri) int {
+	if uri.Port > 0 {
+		return uri.Port
+	}
+	return 5060
 }
 
 func transactionResult(response *sip.Response) TransactionResult {

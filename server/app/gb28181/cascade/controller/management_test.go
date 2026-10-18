@@ -2,7 +2,6 @@ package controller
 
 import (
 	"encoding/json"
-	"fmt"
 	"github.com/go-sql-driver/mysql"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
@@ -16,21 +15,6 @@ import (
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/repository"
 )
-
-// 两条已删除的平台分别占着名称与接入关系键位时,仓库层报 ErrRetiredPlatformConflict。
-// 接口层必须把它翻成 409 + 可执行的提示,而不是 500「国标级联操作失败」——
-// 用户要做的是改名字或改上级地址,不是去查日志。
-func TestManagementControllerMapsRetiredPlatformConflictToConflict(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	controller := NewManagementController(nil, nil)
-
-	controller.fail(ctx, fmt.Errorf("create platform: %w", repository.ErrRetiredPlatformConflict))
-
-	require.Equal(t, http.StatusConflict, recorder.Code)
-	require.Contains(t, recorder.Body.String(), "已删除的平台占用")
-}
 
 func TestManagementControllerUnconfiguredReturns503(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -130,6 +114,20 @@ func TestPlatformRequestUsesCamelCaseAndKeepsPasswordWriteOnly(t *testing.T) {
 	require.EqualValues(t, 4, request.ExpectedRevision)
 	require.NotNil(t, request.Password)
 	require.Equal(t, "secret", *request.Password)
+}
+
+func TestPlatformRequestMapsCascadeOptionFields(t *testing.T) {
+	var request platformRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"autoPushCatalog":true,"recordingEnabled":true,"rtcpKeepalive":true}`), &request))
+	input := request.input()
+	require.True(t, input.AutoPushCatalog)
+	require.True(t, input.RecordingEnabled)
+	require.True(t, input.RTCPKeepalive)
+	require.NoError(t, json.Unmarshal([]byte(`{"autoPushCatalog":false,"recordingEnabled":false,"rtcpKeepalive":false}`), &request))
+	input = request.input()
+	require.False(t, input.AutoPushCatalog)
+	require.False(t, input.RecordingEnabled)
+	require.False(t, input.RTCPKeepalive)
 }
 
 func TestManagementFailureLogsDuplicateWithoutFieldValues(t *testing.T) {

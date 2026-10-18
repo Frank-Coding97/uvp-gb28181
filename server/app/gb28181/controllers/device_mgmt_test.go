@@ -505,6 +505,22 @@ func TestDeviceMgmt_ListChannels_FilterStatus(t *testing.T) {
 	assert.EqualValues(t, 1, data["total"])
 }
 
+func TestDeviceMgmt_ListChannels_SearchMatchesDisplayedAlias(t *testing.T) {
+	r, db := newDeviceMgmtRouter(t)
+	device := gbmodels.GbDevice{DeviceID: "34020000002000000001", Name: "源设备"}
+	require.NoError(t, db.Create(&device).Error)
+	channel := gbmodels.GbChannel{
+		DeviceID: device.DeviceID, ChannelID: "34020000001320000011", Name: "设备原名", Alias: "前门入口",
+	}
+	require.NoError(t, db.Create(&channel).Error)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/gb28181/device-mgmt/channels?q=%E5%89%8D%E9%97%A8", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	data := unmarshal(t, w)["data"].(map[string]any)
+	require.EqualValues(t, 1, data["total"])
+	require.EqualValues(t, channel.ID, data["list"].([]any)[0].(map[string]any)["id"])
+}
+
 func TestDeviceMgmt_ListChannels_FilterByDeviceID(t *testing.T) {
 	r, db := newDeviceMgmtRouter(t)
 	seedDevicesAndChannels(t, db)

@@ -49,10 +49,11 @@ type SIPReloader func() error
 
 type SetupController struct {
 	controllers.Common
-	db         *gorm.DB
-	runtime    *gbsetup.RuntimeStatus
-	interfaces gbsetup.InterfaceProvider
-	reload     SIPReloader
+	db                    *gorm.DB
+	runtime               *gbsetup.RuntimeStatus
+	interfaces            gbsetup.InterfaceProvider
+	reload                SIPReloader
+	mediaDefaultsReloader SIPReloader
 }
 
 func NewSetupController(db *gorm.DB, runtime *gbsetup.RuntimeStatus, interfaces gbsetup.InterfaceProvider, reload SIPReloader) *SetupController {
@@ -60,6 +61,11 @@ func NewSetupController(db *gorm.DB, runtime *gbsetup.RuntimeStatus, interfaces 
 		runtime = gbsetup.NewRuntimeStatus()
 	}
 	return &SetupController{db: db, runtime: runtime, interfaces: interfaces, reload: reload}
+}
+
+// SetPlatformMediaDefaultsReloader injects the independent ZLM media-defaults apply step.
+func (sc *SetupController) SetPlatformMediaDefaultsReloader(reload SIPReloader) {
+	sc.mediaDefaultsReloader = reload
 }
 
 // Status GET /api/gb28181/sip/setup/status
@@ -120,8 +126,8 @@ func (sc *SetupController) SaveConfig(c *gin.Context) {
 		zap.Int("port", view.Port),
 		zap.String("server_id", view.ServerID))
 
-	// 保存后立即热启动 SIP 服务,让用户免于重启进程.
-	// 热启动失败时 runtime state 已经被 Reloader 内部置为 failed,原因通过 snapshot 返回给前端.
+	// SIP 监听重载与媒体节点默认值收敛是两项独立操作，分别报告结果，
+	// 避免媒体节点配置冲突被展示成 SIP 监听启动失败。
 	reloadOK := true
 	reloadErrText := ""
 	if sc.reload != nil {
@@ -133,13 +139,28 @@ func (sc *SetupController) SaveConfig(c *gin.Context) {
 				logging.Error(err))
 		}
 	}
-
-	sc.Success(c, gin.H{
+	response := gin.H{
 		"config":      view,
 		"reloadedOk":  reloadOK,
 		"reloadError": reloadErrText,
 		"runtime":     sc.runtime.Snapshot(),
-	})
+	}
+	if sc.mediaDefaultsReloader != nil {
+		mediaDefaultsApplied := true
+		mediaDefaultsErrText := ""
+		if err := sc.mediaDefaultsReloader(); err != nil {
+			mediaDefaultsApplied = false
+			mediaDefaultsErrText = err.Error()
+			app.Log(c.Request.Context()).Warn("SIP 配置已保存,但平台媒体默认值收敛失败",
+				zap.String("event", "setup.media_defaults_reload_failed"),
+				zap.String("server_id", view.ServerID),
+				logging.Error(err))
+		}
+		response["mediaDefaultsApplied"] = mediaDefaultsApplied
+		response["mediaDefaultsError"] = mediaDefaultsErrText
+	}
+
+	sc.Success(c, response)
 }
 
 // Skip POST /api/gb28181/sip/setup/skip

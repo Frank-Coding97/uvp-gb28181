@@ -28,6 +28,26 @@ func TestParseCascadeVideoOffer(t *testing.T) {
 	}, offer)
 }
 
+func TestParseCascadeVideoOfferIgnoresMediaAttributesBeforeFirstMedia(t *testing.T) {
+	body := []byte("v=0\r\n" +
+		"o=34020000002000000001 0 0 IN IP4 192.0.2.30\r\n" +
+		"s=Play\r\n" +
+		"c=IN IP4 192.0.2.30\r\n" +
+		"t=0 0\r\n" +
+		"a=recvonly\r\n" +
+		"f=v/PS/1920x1080/25/CBR/4096a////\r\n" +
+		"a=rtpmap:96 PS/90000\r\n" +
+		"a=setup:active\r\n" +
+		"m=video 30000 RTP/AVP 96\r\n" +
+		"y=0200000001\r\n")
+
+	offer, err := ParseCascadeVideoOffer(body)
+	require.NoError(t, err)
+	require.Equal(t, "192.0.2.30", offer.RemoteIP)
+	require.Equal(t, 30000, offer.RemotePort)
+	require.Equal(t, 96, offer.PayloadType)
+}
+
 func TestParseCascadeVideoOfferAcceptsPSFormatWithoutRTPMap(t *testing.T) {
 	body := []byte("v=0\r\n" +
 		"o=34020000002000000001 0 0 IN IP4 192.0.2.30\r\n" +
@@ -91,6 +111,24 @@ func TestBuildCascadeVideoAnswer(t *testing.T) {
 		"a=sendonly\r\n"+
 		"a=rtpmap:96 PS/90000\r\n"+
 		"y=0200000001\r\n", string(answer))
+}
+
+func TestCascadePlaybackOfferPreservesUnixTimeRange(t *testing.T) {
+	body := []byte("v=0\r\no=upper 0 0 IN IP4 192.0.2.30\r\ns=Playback\r\nc=IN IP4 192.0.2.30\r\n" +
+		"t=1785632400 1785636000\r\nm=video 30000 RTP/AVP 96\r\na=recvonly\r\na=rtpmap:96 PS/90000\r\ny=1200000001\r\n")
+	offer, err := ParseCascadeVideoOffer(body)
+	require.NoError(t, err)
+	require.True(t, offer.Playback)
+	require.EqualValues(t, 1785632400, offer.Start.Unix())
+	require.EqualValues(t, 1785636000, offer.End.Unix())
+	answer, err := BuildCascadeVideoAnswer(offer, "34020000002000000002", "192.0.2.10", 31000)
+	require.NoError(t, err)
+	require.Contains(t, string(answer), "s=Playback\r\n")
+	require.Contains(t, string(answer), "t=1785632400 1785636000\r\n")
+	for _, replacement := range []string{"t=0 0", "t=1785632400 1785632400", "t=invalid 1785636000"} {
+		_, err = ParseCascadeVideoOffer([]byte(strings.Replace(string(body), "t=1785632400 1785636000", replacement, 1)))
+		require.Error(t, err)
+	}
 }
 
 func TestBuildCascadeVideoAnswerTCPRoleMapping(t *testing.T) {

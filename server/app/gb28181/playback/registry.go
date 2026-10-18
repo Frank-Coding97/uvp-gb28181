@@ -208,7 +208,7 @@ func (r *Registry) Create(ctx context.Context, request CreateRequest) (CreateRes
 		IdempotencyKey: request.IdempotencyKey, SegmentStart: request.SegmentStart, SegmentEnd: request.SegmentEnd,
 		PlayFrom: request.PlayFrom,
 		State:    StateCreating, Scale: 1, CreatedAt: now, LastActivityAt: now,
-		IdleDeadline: idleDeadline, Deadline: now.Add(r.maxSession), Resources: request.Resources}
+		IdleDeadline: idleDeadline, Deadline: now.Add(r.maxSession), Resources: request.Resources, BeforeCleanup: request.BeforeCleanup}
 	record := &sessionRecord{session: session}
 	r.sessions[id] = record
 	r.activeByScope[scope] = id
@@ -424,12 +424,22 @@ func (r *Registry) stopRecord(ctx context.Context, record *sessionRecord, reason
 	session := record.session
 	record.mu.Unlock()
 
-	err := r.cleanup.Run(ctx, resources)
+	var err error
+	guardFailed := false
+	if session.BeforeCleanup != nil {
+		err = session.BeforeCleanup(ctx)
+		guardFailed = err != nil
+	}
+	if err == nil {
+		err = r.cleanup.Run(ctx, resources)
+	}
 	abandoned := false
 	if err != nil {
 		record.mu.Lock()
-		record.cleanupAttempts++
-		exhausted := record.cleanupAttempts >= playbackCleanupAttemptLimit
+		if !guardFailed {
+			record.cleanupAttempts++
+		}
+		exhausted := !guardFailed && record.cleanupAttempts >= playbackCleanupAttemptLimit
 		record.mu.Unlock()
 		if exhausted {
 			// 设备侧始终没有确认拆除。此时继续"保留绑定等安全重试"只会把通道

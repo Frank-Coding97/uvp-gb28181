@@ -63,12 +63,15 @@ type GbCascadePlatform struct {
 	RetryPolicy       string `gorm:"column:retry_policy;type:text" json:"retryPolicy"`
 	Transport         string `gorm:"column:transport;size:16;not null;default:UDP;uniqueIndex:uk_cascade_platform_connection,priority:6" json:"transport"`
 
-	CatalogBatchSize int  `gorm:"column:catalog_batch_size;not null;default:100" json:"catalogBatchSize"`
+	CatalogBatchSize int  `gorm:"column:catalog_batch_size;not null;default:1" json:"catalogBatchSize"`
+	AutoPushCatalog  bool `gorm:"column:auto_push_catalog;not null;default:false" json:"autoPushCatalog"`
 	PublishPlatform  bool `gorm:"column:publish_platform;not null;default:false" json:"publishPlatform"`
 	PublishCivil     bool `gorm:"column:publish_civil;not null;default:false" json:"publishCivil"`
 	PublishGroup     bool `gorm:"column:publish_group;not null;default:false" json:"publishGroup"`
-	MaxStreams       int  `gorm:"column:max_streams;not null;default:1" json:"maxStreams"`
+	MaxStreams       int  `gorm:"column:max_streams;not null;default:0" json:"maxStreams"` // 0 means unlimited.
 	PTZEnabled       bool `gorm:"column:ptz_enabled;not null;default:false" json:"ptzEnabled"`
+	RecordingEnabled bool `gorm:"column:recording_enabled;not null;default:false" json:"recordingEnabled"`
+	RTCPKeepalive    bool `gorm:"column:rtcp_keepalive;not null;default:false" json:"rtcpKeepalive"`
 
 	RegisterAt        *time.Time `gorm:"column:register_at" json:"registerAt"`
 	RegisterExpiresAt *time.Time `gorm:"column:register_expires_at" json:"registerExpiresAt"`

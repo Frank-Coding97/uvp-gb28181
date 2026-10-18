@@ -16,9 +16,6 @@ var (
 	ErrRevisionConflict       = errors.New("cascade platform revision conflict")
 	ErrInvalidProjection      = errors.New("invalid cascade projection")
 	ErrInvalidMediaTransition = errors.New("invalid cascade media transition")
-	// ErrRetiredPlatformConflict 两条已删除的平台分别占着"名称"与"接入关系"两个
-	// 唯一键位,新建的这条平台无法同时接手两行。详见 findRetiredPlatform。
-	ErrRetiredPlatformConflict = errors.New("cascade platform identity claimed by retired rows")
 )
 
 type PlatformStore interface {
@@ -27,6 +24,7 @@ type PlatformStore interface {
 	ListPlatforms(ctx context.Context) ([]model.GbCascadePlatform, error)
 	ListEnabledPlatforms(ctx context.Context) ([]model.GbCascadePlatform, error)
 	UpdatePlatformConfig(ctx context.Context, platform *model.GbCascadePlatform, expectedRevision uint64) (*model.GbCascadePlatform, error)
+	SetPublishGroup(ctx context.Context, platformID, expectedRevision uint64, publishGroup bool) (*model.GbCascadePlatform, error)
 	SoftDeletePlatform(ctx context.Context, platformID uint64) error
 	RecordRegistrationSuccess(ctx context.Context, platformID uint64, registeredAt, expiresAt time.Time) error
 	RecordRegistrationExpired(ctx context.Context, platformID uint64, at time.Time) error
@@ -42,6 +40,25 @@ type ProjectionStore interface {
 
 type BusinessGroupStore interface {
 	ReplaceBusinessGroup(ctx context.Context, platformID uint64, expectedProjectionRevision uint64, nodes []BusinessNodeInput, bindings []BusinessBindingInput) error
+}
+
+type BusinessGroupShareStore interface {
+	ReplaceBusinessGroupWithShares(ctx context.Context, platformID uint64, expectedProjectionRevision uint64, nodes []BusinessNodeInput, bindings []BusinessBindingInput, shareChannelIDs []uint64, authorize BusinessGroupSourceAuthorizer) error
+}
+
+type BusinessGroupResourceStore interface {
+	ReplaceBusinessGroupWithResourceChanges(ctx context.Context, platformID uint64, expectedProjectionRevision uint64, nodes []BusinessNodeInput, bindings []BusinessBindingInput, legacyShareChannelIDs []uint64, changes BusinessGroupResourceChanges, authorize BusinessGroupSourceAuthorizer) error
+}
+
+type BusinessGroupPublicationUpdate struct {
+	PublishGroup           *bool
+	ExpectedConfigRevision uint64
+}
+
+type BusinessGroupPublicationAuthorizer func() error
+
+type BusinessGroupOptionsStore interface {
+	ReplaceBusinessGroupWithOptions(ctx context.Context, platformID, expectedProjectionRevision uint64, nodes []BusinessNodeInput, bindings []BusinessBindingInput, legacyShareChannelIDs []uint64, changes BusinessGroupResourceChanges, publication BusinessGroupPublicationUpdate, authorize BusinessGroupSourceAuthorizer, authorizePublication BusinessGroupPublicationAuthorizer) error
 }
 
 type MediaSessionStore interface {
@@ -72,6 +89,10 @@ func NewGormRepository(db *gorm.DB) *GormRepository {
 //
 // 名称与接入关系都命中"已软删的遗留行"时接手那一行而不是 INSERT —— 否则用户
 // 删掉平台再建一个同名(或同上级地址)的平台会撞 1062。理由见 platform_resurrect.go。
+//
+// 两个键位分别命中两条不同的遗留行时(名称取自 A 行、接入关系取自 B 行,两条都已删):
+// 接手接入关系那条,并把另一条连残留子表一起真删 —— 键位腾干净才建得出来,
+// 而这两条行在界面上都看不见,用户没有任何入口可点。
 func (r *GormRepository) CreatePlatform(ctx context.Context, platform *model.GbCascadePlatform) error {
 	row := *platform
 	row.ID = 0
@@ -97,10 +118,7 @@ func (r *GormRepository) CreatePlatform(ctx context.Context, platform *model.GbC
 		row.KeepaliveInterval = 60
 	}
 	if row.CatalogBatchSize == 0 {
-		row.CatalogBatchSize = 100
-	}
-	if row.MaxStreams == 0 {
-		row.MaxStreams = 1
+		row.CatalogBatchSize = 1
 	}
 	now := time.Now().UTC()
 	if row.CreatedAt.IsZero() {
@@ -112,13 +130,19 @@ func (r *GormRepository) CreatePlatform(ctx context.Context, platform *model.GbC
 			return fmt.Errorf("%w: 新建上级平台时不能直接启用业务分组发布，请先创建平台并配置 215 根节点", ErrInvalidProjection)
 		}
 		// 两个唯一索引都不含 deleted_at,软删的平台行会继续占着"名称"和"接入关系"
-		// 两个键位。先认领遗留行,否则删掉再建同名平台会撞 1062(见 platform_resurrect.go)。
-		retired, err := findRetiredPlatform(tx, &row)
+		// 两个键位。先腾掉另一个键位上的遗留行、再认领这一条,否则删掉再建同名平台
+		// 会撞 1062(见 platform_resurrect.go)。
+		claim, err := findRetiredPlatform(tx, &row)
 		if err != nil {
 			return err
 		}
-		if retired != nil {
-			if err := resurrectPlatform(tx, &row, retired); err != nil {
+		if claim != nil {
+			// ⛔ 顺序不能颠倒:先真删占着另一个键位的那条,再接手这条 ——
+			// 反过来的话,接手的 Save 会先撞上它占着的键位。
+			if err := purgeRetiredPlatform(tx, claim.purge); err != nil {
+				return err
+			}
+			if err := resurrectPlatform(tx, &row, claim.take); err != nil {
 				return err
 			}
 		} else if err := tx.Create(&row).Error; err != nil {
@@ -156,8 +180,12 @@ func (r *GormRepository) ListEnabledPlatforms(ctx context.Context) ([]model.GbCa
 
 // UpdatePlatformConfig intentionally excludes runtime facts. Actor events cannot be overwritten by a stale form post.
 //
-// 改名前先确认目标名称/接入关系没有被一条"已删除"的平台占着:那种 UPDATE 会撞
-// 唯一键,接口只回一句"已存在",而用户翻遍平台列表也找不到那个平台(它已经删了)。
+// 改名前先看目标名称/接入关系有没有被一条"已删除"的平台占着:那种 UPDATE 会撞唯一键,
+// 接口只回一句"已存在",而用户翻遍平台列表也找不到那个平台(它已经删了)。
+// 处理方式是把那行连残留子表一起真删,把键位腾出来 —— 遗留行在界面上完全不可见,
+// 不腾的话用户只能换个名字,或者手工清库。
+// ⚠️ 改名不接手任何遗留行(目标必须落在当前这条活着的平台上),所以 take 与 purge
+// 两条占着键位的遗留行都要清掉。
 func (r *GormRepository) UpdatePlatformConfig(ctx context.Context, platform *model.GbCascadePlatform, expectedRevision uint64) (*model.GbCascadePlatform, error) {
 	if platform == nil || platform.ID == 0 || expectedRevision == 0 {
 		return nil, ErrRevisionConflict
@@ -175,12 +203,17 @@ func (r *GormRepository) UpdatePlatformConfig(ctx context.Context, platform *mod
 		if current.ConfigRevision != expectedRevision {
 			return ErrRevisionConflict
 		}
-		retired, err := findRetiredPlatform(tx, platform)
+		claim, err := findRetiredPlatform(tx, platform)
 		if err != nil {
 			return err
 		}
-		if retired != nil {
-			return fmt.Errorf("%w: 目标名称或接入关系仍被已删除的平台 id=%d 占用", ErrRetiredPlatformConflict, retired.ID)
+		if claim != nil {
+			if err := purgeRetiredPlatform(tx, claim.take); err != nil {
+				return err
+			}
+			if err := purgeRetiredPlatform(tx, claim.purge); err != nil {
+				return err
+			}
 		}
 		identitiesChanged := current.LocalDeviceID != platform.LocalDeviceID || current.UpstreamServerID != platform.UpstreamServerID
 		validateGroupPublication := platform.PublishGroup && (!current.PublishGroup || identitiesChanged)
@@ -207,6 +240,15 @@ func (r *GormRepository) UpdatePlatformConfig(ctx context.Context, platform *mod
 				nodes = append(nodes, BusinessNodeInput{Code: node.Code})
 			}
 			if err := validateBusinessCodesAgainstPlatform(tx, *platform, nodes); err != nil {
+				return err
+			}
+		}
+		if platform.PublishGroup {
+			nodes, bindings, err := loadBusinessGroupInputs(tx, platform.ID)
+			if err != nil {
+				return err
+			}
+			if _, err := validatePublishedBusinessGroup(tx, *platform, nodes, bindings); err != nil {
 				return err
 			}
 		}
@@ -267,11 +309,14 @@ func platformConfigUpdates(platform *model.GbCascadePlatform) map[string]any {
 		"retry_policy":       platform.RetryPolicy,
 		"transport":          platform.Transport,
 		"catalog_batch_size": platform.CatalogBatchSize,
+		"auto_push_catalog":  platform.AutoPushCatalog,
 		"publish_platform":   platform.PublishPlatform,
 		"publish_civil":      platform.PublishCivil,
 		"publish_group":      platform.PublishGroup,
 		"max_streams":        platform.MaxStreams,
 		"ptz_enabled":        platform.PTZEnabled,
+		"recording_enabled":  platform.RecordingEnabled,
+		"rtcp_keepalive":     platform.RTCPKeepalive,
 		"enabled":            platform.Enabled,
 	}
 }
@@ -317,6 +362,19 @@ func (r *GormRepository) RecordRegistrationSuccess(ctx context.Context, platform
 	return r.updateRuntimeFacts(ctx, platformID, map[string]any{
 		"register_at": registeredAt, "register_expires_at": expiresAt,
 		"last_error_code": "", "last_error_message": "", "last_error_at": nil,
+	})
+}
+
+// RecordRegistrationVersion stores the final REGISTER capability observation
+// separately from the configured override. It is called only for auto-profile
+// platforms after a successful final response.
+func (r *GormRepository) RecordRegistrationVersion(ctx context.Context, platformID uint64, reported, effective, source string, at time.Time) error {
+	return r.updateRuntimeFacts(ctx, platformID, map[string]any{
+		"reported_gb_version":      reported,
+		"reported_gb_version_at":   at,
+		"effective_version":        effective,
+		"effective_version_source": source,
+		"effective_version_at":     at,
 	})
 }
 
@@ -452,6 +510,15 @@ func (r *GormRepository) ReplaceProjection(ctx context.Context, platformID uint6
 			AND channel_projection.active = ?
 		)`, platformID, true).Delete(&model.GbCascadeBusinessBinding{}).Error; err != nil {
 			return err
+		}
+		if platform.PublishGroup {
+			nodes, bindings, err := loadBusinessGroupInputs(tx, platformID)
+			if err != nil {
+				return err
+			}
+			if _, err := validatePublishedBusinessGroup(tx, platform, nodes, bindings); err != nil {
+				return err
+			}
 		}
 		// 提交时做真正的 CAS:revision 条件写回,并发陈旧写者得到 0 行而非覆盖
 		result := tx.Model(&model.GbCascadePlatform{}).

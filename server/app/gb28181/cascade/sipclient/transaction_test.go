@@ -84,6 +84,75 @@ func TestTransactionClientRetriesDigestChallengeExactlyOnce(t *testing.T) {
 	}
 }
 
+func TestTransactionClientUsesGrantedRegisterContactExpiry(t *testing.T) {
+	response := sip.NewResponse(sip.StatusOK, "OK")
+	contact := &sip.ContactHeader{Address: sip.Uri{Scheme: "sip", User: "34020000001320000001", Host: "192.0.2.20", Port: 5061}}
+	contact.Params.Add("expires", "1200")
+	response.AppendHeader(contact)
+	client := mustTransactionClient(t, protocol.Version2016, &fakeTransport{doResponses: []*sip.Response{response}})
+	result := client.Register(context.Background(), 3600, "register-call")
+	if !result.Success || !result.GrantedExpiresFound || result.GrantedExpires != 1200 {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestTransactionClientUsesRegisterExpiresHeaderWhenContactHasNoExpiry(t *testing.T) {
+	response := sip.NewResponse(sip.StatusOK, "OK")
+	response.AppendHeader(sip.NewHeader("Expires", "900"))
+	client := mustTransactionClient(t, protocol.Version2016, &fakeTransport{doResponses: []*sip.Response{response}})
+	result := client.Register(context.Background(), 3600, "register-call")
+	if !result.Success || !result.GrantedExpiresFound || result.GrantedExpires != 900 {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestTransactionClientParsesFinalRegisterVersion(t *testing.T) {
+	for _, testCase := range []struct {
+		raw  string
+		want protocol.Version
+	}{
+		{raw: "2.0", want: protocol.Version2016},
+		{raw: "3.0", want: protocol.Version2022},
+	} {
+		response := sip.NewResponse(sip.StatusOK, "OK")
+		response.AppendHeader(sip.NewHeader("X-GB-Ver", testCase.raw))
+		result := mustTransactionClient(t, protocol.Version2016, &fakeTransport{doResponses: []*sip.Response{response}}).Register(context.Background(), 3600, "version")
+		if !result.Success || !result.ReportedGBVersionFound || result.ReportedGBVersion != testCase.raw || !result.NegotiatedVersionFound || result.NegotiatedVersion != testCase.want {
+			t.Fatalf("raw=%q result=%+v", testCase.raw, result)
+		}
+	}
+}
+
+func TestTransactionClientOnlyUsesFinalDigestResponseVersion(t *testing.T) {
+	challenge := sip.NewResponse(sip.StatusUnauthorized, "challenge")
+	challenge.AppendHeader(sip.NewHeader("WWW-Authenticate", `Digest realm="upstream", nonce="nonce"`))
+	final := sip.NewResponse(sip.StatusOK, "OK")
+	final.AppendHeader(sip.NewHeader("X-GB-Ver", "3.0"))
+	result := mustTransactionClient(t, protocol.Version2016, &fakeTransport{doResponses: []*sip.Response{challenge}, digestResponses: []*sip.Response{final}}).Register(context.Background(), 3600, "version-digest")
+	if !result.Success || !result.Retried || result.ReportedGBVersion != "3.0" || result.NegotiatedVersion != protocol.Version2022 {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestTransactionClientDoesNotTreatUnknownVersionAsNegotiated(t *testing.T) {
+	response := sip.NewResponse(sip.StatusOK, "OK")
+	response.AppendHeader(sip.NewHeader("X-GB-Ver", "9.9"))
+	result := mustTransactionClient(t, protocol.Version2016, &fakeTransport{doResponses: []*sip.Response{response}}).Register(context.Background(), 3600, "version-unknown")
+	if !result.Success || !result.ReportedGBVersionFound || result.NegotiatedVersionFound || result.NegotiatedVersionErr == nil {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestTransactionClientRejectsInvalidRegisterExpiry(t *testing.T) {
+	response := sip.NewResponse(sip.StatusOK, "OK")
+	response.AppendHeader(sip.NewHeader("Expires", "soon"))
+	client := mustTransactionClient(t, protocol.Version2016, &fakeTransport{doResponses: []*sip.Response{response}})
+	result := client.Register(context.Background(), 3600, "register-call")
+	if result.Success || result.GrantedExpiresErr == nil {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
 func TestTransactionClientDoesNotRetryMalformedChallengeOrTransportFailure(t *testing.T) {
 	challenge := sip.NewResponse(sip.StatusUnauthorized, "missing challenge")
 	transport := &fakeTransport{doResponses: []*sip.Response{challenge}}

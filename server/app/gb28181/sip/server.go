@@ -491,6 +491,9 @@ func (s *Server) registerHandlers() {
 	s.srv.OnInvite(s.dispatchCascadeDialog(s.handleBroadcastInvite))
 	s.srv.OnAck(s.dispatchCascadeDialog(s.handleBroadcastAck))
 	s.srv.OnBye(s.dispatchCascadeDialog(s.handleBye))
+	s.srv.OnInfo(s.dispatchCascadeDialog(func(req *siplib.Request, tx siplib.ServerTransaction) {
+		_ = tx.Respond(siplib.NewResponseFromRequest(req, 481, "Dialog Does Not Exist", nil))
+	}))
 }
 
 func (s *Server) handleBroadcastInvite(req *siplib.Request, tx siplib.ServerTransaction) {
@@ -917,6 +920,20 @@ func (s *Server) SetCascadeDialogHandler(fn func(*siplib.Request, siplib.ServerT
 	s.cascadeMessageMu.Lock()
 	s.cascadeDialog = fn
 	s.cascadeMessageMu.Unlock()
+}
+
+// SetCascadeCancelValidator protects pending cascade video INVITE transactions
+// before sipgo's transaction layer consumes CANCEL.
+func (s *Server) SetCascadeCancelValidator(fn func(*siplib.Request, siplib.ServerTransaction) bool) {
+	if s == nil || s.srv == nil {
+		return
+	}
+	s.srv.SetCancelValidator(func(req *siplib.Request, tx *siplib.ServerTx) bool {
+		if fn == nil {
+			return true
+		}
+		return fn(req, tx)
+	})
 }
 func (s *Server) dispatchCascadeDialog(fallback func(*siplib.Request, siplib.ServerTransaction)) func(*siplib.Request, siplib.ServerTransaction) {
 	return func(req *siplib.Request, tx siplib.ServerTransaction) {

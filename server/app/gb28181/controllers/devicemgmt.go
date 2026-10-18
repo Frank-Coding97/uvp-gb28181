@@ -656,7 +656,7 @@ func (dc *DeviceMgmtController) ListChannels(c *gin.Context) {
 	}
 	if kw := strings.TrimSpace(c.Query("q")); kw != "" {
 		like := "%" + kw + "%"
-		q = q.Where("name LIKE ? OR channel_id LIKE ?", like, like)
+		q = q.Where("name LIKE ? OR alias LIKE ? OR channel_id LIKE ?", like, like, like)
 	}
 
 	var total int64

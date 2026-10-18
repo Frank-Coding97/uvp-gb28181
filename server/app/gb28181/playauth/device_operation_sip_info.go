@@ -17,13 +17,14 @@ const maxSIPINFOSteps = 16
 // request, credentials or response reason is retained in the intent row.
 type DeviceSIPINFOCommand struct {
 	Action               string  `json:"-"`
+	RangeValue           string  `json:"-"`
 	PositionNanos        int64   `json:"-"`
 	SegmentDurationNanos int64   `json:"-"`
 	Scale                float64 `json:"-"`
 }
 
 func (c DeviceSIPINFOCommand) Body(cseq uint32) ([]byte, error) {
-	if (c.Action != "seek" && (c.PositionNanos != 0 || c.SegmentDurationNanos != 0)) || (c.Action != "scale" && c.Scale != 0) {
+	if (c.Action != "seek" && (c.RangeValue != "" || c.PositionNanos != 0 || c.SegmentDurationNanos != 0)) || (c.Action != "scale" && c.Scale != 0) {
 		return nil, ErrDeviceIntentInvalid
 	}
 	switch c.Action {
@@ -34,6 +35,12 @@ func (c DeviceSIPINFOCommand) Body(cseq uint32) ([]byte, error) {
 	case "resume":
 		return mansrtsp.BuildResume(cseq)
 	case "seek":
+		if c.RangeValue != "" {
+			if c.PositionNanos != 0 {
+				return nil, ErrDeviceIntentInvalid
+			}
+			return mansrtsp.BuildRange(cseq, c.RangeValue, time.Duration(c.SegmentDurationNanos))
+		}
 		return mansrtsp.BuildSeek(cseq, time.Duration(c.PositionNanos), time.Duration(c.SegmentDurationNanos))
 	case "scale":
 		return mansrtsp.BuildScale(cseq, c.Scale)

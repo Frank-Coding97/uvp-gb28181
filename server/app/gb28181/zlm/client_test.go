@@ -286,7 +286,7 @@ func TestGetMediaPlayerList_MockedZLM(t *testing.T) {
 				t.Errorf("%s 未透传: got=%q want=%q", key, got, want)
 			}
 		}
-		_, _ = w.Write([]byte(`{"code":0,"data":[{"peer_ip":"10.0.0.8","peer_port":4567,"local_port":80,"local_ip":"0.0.0.0","identifier":"sid-1","typeid":"HttpSession"}]}`))
+		_, _ = w.Write([]byte(`{"code":0,"data":[{"peer_ip":"10.0.0.8","peer_port":4567,"local_port":80,"local_ip":"0.0.0.0","identifier":"sid-1","typeid":"HttpSession","totalBytes":1024},{"peer_ip":"10.0.0.9","peer_port":4568,"local_port":80,"local_ip":"0.0.0.0","identifier":"sid-2","typeid":"HlsCookieData"}]}`))
 	})
 	defer srv.Close()
 
@@ -294,8 +294,16 @@ func TestGetMediaPlayerList_MockedZLM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetMediaPlayerList 报错: %v", err)
 	}
-	if len(players) != 1 || players[0].Identifier != "sid-1" || players[0].PeerIP != "10.0.0.8" {
+	if len(players) != 2 || players[0].Identifier != "sid-1" || players[0].PeerIP != "10.0.0.8" {
 		t.Fatalf("播放器解析异常: %#v", players)
+	}
+	// 二开 ZLM 返回的存活期累计字节必须解析出来;未返回(旧版本/不支持类型)必须是 nil,
+	// 调用方靠 nil 区分「不支持实时计数」与「计数为 0」
+	if players[0].TotalBytes == nil || *players[0].TotalBytes != 1024 {
+		t.Fatalf("totalBytes 解析异常: %#v", players[0].TotalBytes)
+	}
+	if players[1].TotalBytes != nil {
+		t.Fatalf("未返回 totalBytes 的播放器应为 nil: %#v", players[1].TotalBytes)
 	}
 }
 

@@ -183,11 +183,13 @@ func TestRegistry_MarkActive_FlipsOfflineToActive(t *testing.T) {
 func TestRegistry_MarkActive_IdempotentOnActive(t *testing.T) {
 	r := node.NewRegistry(newMemoryRepo())
 	added := mustAdd(t, r, node.Node{Name: "a", MediaServerUUID: "ua", State: node.StateActive})
+	beforeRevision := added.Revision
 	require.NoError(t, r.MarkActive(context.Background(), added.ID))
 	require.NoError(t, r.MarkActive(context.Background(), added.ID))
 	got, _ := r.Get(added.ID)
 	require.Equal(t, node.StateActive, got.State)
 	require.False(t, got.Stats.LastHeartbeatAt.IsZero())
+	require.Equal(t, beforeRevision, got.Revision, "an already-active probe must not invalidate in-flight config convergence")
 }
 
 func TestRegistry_MarkActive_UnknownID(t *testing.T) {

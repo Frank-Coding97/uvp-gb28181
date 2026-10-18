@@ -26,4 +26,8 @@ func TestCascadeRoutesReturn503UntilServiceIsInjected(t *testing.T) {
 		engine.ServeHTTP(recorder, request)
 		require.Equal(t, http.StatusServiceUnavailable, recorder.Code, path)
 	}
+	putRecorder := httptest.NewRecorder()
+	putRequest := httptest.NewRequest(http.MethodPut, "/api/gb28181/cascade/platforms/1/publish-group", nil)
+	engine.ServeHTTP(putRecorder, putRequest)
+	require.Equal(t, http.StatusServiceUnavailable, putRecorder.Code, "publish-group path must be registered and reach the controller")
 }

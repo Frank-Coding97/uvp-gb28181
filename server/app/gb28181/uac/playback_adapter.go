@@ -39,3 +39,8 @@ func (a *PlaybackAdapter) Teardown(ctx context.Context, callID string) error {
 func (a *PlaybackAdapter) Action(ctx context.Context, callID, action string, positionSeconds, scale float64, segmentDuration time.Duration) (float64, float64, error) {
 	return a.UAC.Action(ctx, callID, action, positionSeconds, scale, segmentDuration)
 }
+
+func (a *PlaybackAdapter) ActionRange(ctx context.Context, callID, rangeValue string, duration time.Duration) error {
+	_, err := a.UAC.SendPlaybackInfo(ctx, callID, PlaybackInfoRequest{Action: PlaybackInfoSeek, RangeValue: rangeValue, SegmentDuration: duration})
+	return err
+}

@@ -44,11 +44,7 @@ func TestCascadeInvitePeerAcceptsPublishedTargetAndSeparatesPorts(t *testing.T) 
 	require.False(t, matchCascadeInvitePeer(req, p))
 }
 
-// 线上实况：220 WVP 双网卡（局域网 192.168.10.220 + VPN 10.8.0.2）。
-// 它回复我们的 REGISTER 用 192.168.10.220:8160，主动发 INVITE 却用 10.8.0.2:8160
-// （源地址只取决于到我们这边的路由）。旧口径要求源 IP 等于配置 Host，
-// 于是这类报文一律 403 unknown or disabled upstream，而配置里填哪个 IP 都不对。
-func TestCascadeInvitePeerToleratesUpstreamSignallingFromAnotherAddress(t *testing.T) {
+func TestCascadeInvitePeerRequiresConfiguredSourceAddress(t *testing.T) {
 	p := model.GbCascadePlatform{UpstreamServerID: "35020000002000000001", LocalDeviceID: "34020000002000000002", Host: "192.168.10.220", Port: 8160, Transport: "UDP"}
 	req := sip.NewRequest(sip.INVITE, sip.Uri{User: "34020000001320000001", Host: "10.8.0.3"})
 	req.AppendHeader(&sip.FromHeader{Address: sip.Uri{User: p.UpstreamServerID}})
@@ -56,7 +52,6 @@ func TestCascadeInvitePeerToleratesUpstreamSignallingFromAnotherAddress(t *testi
 	req.SetSource("10.8.0.2:8160")
 	req.SetTransport("UDP")
 
-	// 严格口径仍然不认 —— 保留这条断言，防止有人把源地址校验整个删掉。
 	require.False(t, matchCascadeInvitePeer(req, p))
 
 	peer, ok := cascadePeerFromRequest(req)
@@ -76,37 +71,59 @@ func TestCascadeInvitePeerToleratesUpstreamSignallingFromAnotherAddress(t *testi
 	require.False(t, peer.identify(p))
 }
 
-func TestCascadeVideoAcceptsUpstreamSignallingFromAnotherAddress(t *testing.T) {
+func TestCascadePeerMatchesAllResolvedDomainAddressesAndRejectsResolutionFailure(t *testing.T) {
+	previous := cascadePeerDNS.lookup
+	cascadePeerDNS.Lock()
+	cascadePeerDNS.lookup = func(host string) ([]net.IP, error) {
+		if host != "upstream.example.test" {
+			return nil, fmt.Errorf("dns lookup failed for %s", host)
+		}
+		return []net.IP{net.ParseIP("192.0.2.10"), net.ParseIP("2001:db8::10")}, nil
+	}
+	cascadePeerDNS.Unlock()
+	t.Cleanup(func() {
+		cascadePeerDNS.Lock()
+		cascadePeerDNS.lookup = previous
+		cascadePeerDNS.Unlock()
+	})
+
+	p := model.GbCascadePlatform{UpstreamServerID: "35020000002000000001", Host: "upstream.example.test", Port: 8160, Transport: "UDP"}
+	for _, source := range []string{"192.0.2.10:8160", "[2001:db8::10]:8160"} {
+		req := sip.NewRequest(sip.INVITE, sip.Uri{User: "34020000001320000001", Host: "local"})
+		req.AppendHeader(&sip.FromHeader{Address: sip.Uri{User: p.UpstreamServerID}})
+		req.SetSource(source)
+		req.SetTransport("UDP")
+		peer, ok := cascadePeerFromRequest(req)
+		require.True(t, ok)
+		require.True(t, peer.match(p), source)
+	}
+
+	p.Host = "missing.example.test"
+	require.False(t, (&cascadePeer{host: "192.0.2.10", port: 8160, transport: "udp", fromUser: p.UpstreamServerID}).match(p))
+}
+
+func TestCascadePeerKeepsEstablishedSourceBindingWhenDNSChanges(t *testing.T) {
+	original := cascadePeer{host: "192.0.2.10", port: 8160, transport: "udp", fromUser: "35020000002000000001"}
+	observed := original
+	// sameSession compares the actual peer captured by the dialog, not the
+	// current DNS answer. A later address change cannot migrate an established
+	// session to another source.
+	require.True(t, original.sameSession(observed))
+	observed.host = "192.0.2.11"
+	require.False(t, original.sameSession(observed))
+}
+
+func TestCascadeVideoRejectsUpstreamSignallingFromAnotherAddress(t *testing.T) {
 	h, _, stops := newCascadeVideoTestRuntime(t)
-	// 同一个 Call-ID 的 ACK/BYE 也从这张网卡回来，必须一起放行，否则建不起来也拆不掉。
 	req := cascadeTestRequestFrom("10.8.0.2", 15060, "0200000001")
 	tx := &cascadeInviteTestTx{siptest.NewServerTxRecorder(req), make(chan *sip.Response, 10)}
 	defer tx.Terminate()
-	finished := make(chan struct{})
-	go func() { h.Handle(req, tx); close(finished) }()
-
-	res := cascadeAwaitResponse(t, tx)
-	require.Equal(t, 200, res.StatusCode)
-
-	ack := cascadeDialogRequest(req, res, sip.ACK)
-	require.True(t, h.Handle(ack, tx))
-
-	bye := cascadeDialogRequest(req, res, sip.BYE)
-	byeTx := siptest.NewServerTxRecorder(bye)
-	defer byeTx.Terminate()
-	require.True(t, h.Handle(bye, byeTx))
-	require.Equal(t, 200, byeTx.Result()[0].StatusCode)
-
-	select {
-	case <-finished:
-	case <-time.After(3 * time.Second):
-		t.Fatal("session not released")
-	}
+	go h.Handle(req, tx)
+	require.Equal(t, 403, cascadeAwaitResponse(t, tx).StatusCode)
 	select {
 	case ssrc := <-stops:
-		require.Equal(t, "0200000001", ssrc)
-	case <-time.After(time.Second):
-		t.Fatal("sender not stopped")
+		t.Fatalf("unexpected sender stop for rejected request: %s", ssrc)
+	default:
 	}
 }
 
@@ -137,13 +154,57 @@ func TestCascadeVideoRejectsUpstreamWithUnknownFromUser(t *testing.T) {
 	require.Equal(t, 403, cascadeAwaitResponse(t, tx).StatusCode)
 }
 
+func TestCascadeCancelValidatorBindsVideoTransactionToOriginalPeer(t *testing.T) {
+	h, _, _ := newCascadeVideoTestRuntime(t)
+	origin := cascadeTestRequest(15060, "0200000001")
+	tx := siptest.NewServerTxRecorder(origin)
+	defer tx.Terminate()
+
+	cancel := origin.Clone()
+	cancel.Method = sip.CANCEL
+	cancel.CSeq().MethodName = sip.CANCEL
+	cancel.SetSource("10.8.0.2:15060")
+	require.False(t, h.ValidateCancel(cancel, tx), "异源 CANCEL 不能终止级联视频 INVITE")
+
+	cancel.SetSource("192.168.10.220:15060")
+	require.True(t, h.ValidateCancel(cancel, tx), "同源 CANCEL 应交给 SIP 事务层处理")
+}
+
+func TestCascadeCancelKeepsOriginalPeerAfterPlatformEndpointChanges(t *testing.T) {
+	h, db, _ := newCascadeVideoTestRuntime(t)
+	origin := cascadeTestRequest(15060, "0200000001")
+	tx := siptest.NewServerTxRecorder(origin)
+	defer tx.Terminate()
+	// Changing the configured endpoint must not detach a pending transaction
+	// from the peer that actually sent its INVITE.
+	require.NoError(t, db.Model(&model.GbCascadePlatform{}).Where("id = 1").Update("host", "192.0.2.99").Error)
+	cancel := origin.Clone()
+	cancel.Method = sip.CANCEL
+	cancel.CSeq().MethodName = sip.CANCEL
+	cancel.SetSource("10.8.0.2:15060")
+	require.False(t, h.ValidateCancel(cancel, tx))
+	cancel.SetSource(origin.Source())
+	require.True(t, h.ValidateCancel(cancel, tx))
+}
+
 type cascadeInviteTestNodes struct{ value *node.Node }
 
 func (n cascadeInviteTestNodes) Get(id int64) (*node.Node, bool) { return n.value, id == n.value.ID }
 
 type cascadeInviteTestSource struct{}
 
-func (cascadeInviteTestSource) Start(context.Context, string, string) (media.StartResult, error) {
+func (cascadeInviteTestSource) Start(context.Context, media.AcquireRequest) (media.StartResult, error) {
+	return media.StartResult{NodeID: 1, App: "rtp", StreamID: "shared-source"}, nil
+}
+
+type cascadeCallbackSource struct {
+	onStart func(media.AcquireRequest)
+}
+
+func (s cascadeCallbackSource) Start(_ context.Context, request media.AcquireRequest) (media.StartResult, error) {
+	if s.onStart != nil {
+		s.onStart(request)
+	}
 	return media.StartResult{NodeID: 1, App: "rtp", StreamID: "shared-source"}, nil
 }
 
@@ -205,8 +266,15 @@ func cascadeDialogRequest(req *sip.Request, res *sip.Response, method sip.Reques
 }
 
 func newCascadeVideoTestRuntime(t *testing.T, stopFailures ...int) (*cascadeVideoRuntime, *gorm.DB, chan string) {
+	return newCascadeVideoTestRuntimeWithSource(t, cascadeInviteTestSource{}, stopFailures...)
+}
+
+func newCascadeVideoTestRuntimeWithSource(t *testing.T, source media.SourceStarter, stopFailures ...int) (*cascadeVideoRuntime, *gorm.DB, chan string) {
 	db := cascadeInviteTestDB(t)
 	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &model.GbCascadePlatform{}, &model.GbCascadeDeviceProjection{}, &model.GbCascadeChannelProjection{}, &model.GbCascadeBusinessNode{}, &model.GbCascadeBusinessBinding{}, &model.GbCascadeMediaSession{}))
+	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN access_epoch BIGINT NOT NULL DEFAULT 1").Error)
+	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN cleanup_completed_epoch BIGINT NOT NULL DEFAULT 1").Error)
+	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
 	device := gbmodels.GbDevice{DeviceID: "37010301021180000007", Status: 1}
 	require.NoError(t, db.Create(&device).Error)
 	channel := gbmodels.GbChannel{DeviceID: device.DeviceID, ChannelID: "34020000001320000010", Status: 1}
@@ -229,14 +297,18 @@ func newCascadeVideoTestRuntime(t *testing.T, stopFailures ...int) (*cascadeVide
 		if strings.HasSuffix(r.URL.Path, "stopSendRtp") {
 			stops <- r.Form.Get("ssrc")
 			if failures.Add(-1) >= 0 {
-				if _, err := fmt.Fprint(w, `{"code":-1,"msg":"temporarily unavailable"}`); err != nil {
+				if _, err := fmt.Fprint(w, `{"code":-400,"msg":"temporarily unavailable"}`); err != nil {
 					panic(err)
 				}
 				return
 			}
 		}
+		if strings.HasSuffix(r.URL.Path, "listRtpSender") {
+			_, _ = fmt.Fprint(w, `{"code":0,"data":["0200000001","0200000002","1200000001","1200000002"]}`)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
-		if _, err := fmt.Fprint(w, `{"code":0,"local_port":31000}`); err != nil {
+		if _, err := fmt.Fprint(w, `{"code":0,"local_port":31000,"rtp_info":{"url":"rtsp://192.0.2.20/rtp/source-1","seq":9,"rtptime":9000}}`); err != nil {
 			panic(err)
 		}
 	}))
@@ -250,7 +322,7 @@ func newCascadeVideoTestRuntime(t *testing.T, stopFailures ...int) (*cascadeVide
 	t.Cleanup(func() { _ = ua.Close() })
 	client, err := sipgo.NewClient(ua)
 	require.NoError(t, err)
-	h := &cascadeVideoRuntime{client: client, store: repository.NewGormRepository(db), sources: media.NewProvider(cascadeInviteTestSource{}), sender: media.NewSender(nodes, nil), nodes: nodes, sessions: map[string]*cascadeVideoSession{}, senders: map[string]bool{}}
+	h := &cascadeVideoRuntime{client: client, store: repository.NewGormRepository(db), sources: media.NewProvider(source), sender: media.NewSender(nodes, nil), nodes: nodes, sessions: map[string]*cascadeVideoSession{}, senders: map[string]bool{}}
 	return h, db, stops
 }
 
@@ -373,7 +445,7 @@ func TestCascadeVideoRejectsSameSenderWithoutStoppingFirst(t *testing.T) {
 
 type cascadeBlockingSource struct{ started chan struct{} }
 
-func (s cascadeBlockingSource) Start(ctx context.Context, _, _ string) (media.StartResult, error) {
+func (s cascadeBlockingSource) Start(ctx context.Context, _ media.AcquireRequest) (media.StartResult, error) {
 	close(s.started)
 	<-ctx.Done()
 	return media.StartResult{}, ctx.Err()
@@ -460,6 +532,7 @@ func TestCascadeVideoRetainsLeaseUntilFailedStopIsRetried(t *testing.T) {
 
 func TestCascadeVideoPlatformCapacityAndShareRevocation(t *testing.T) {
 	h, db, _ := newCascadeVideoTestRuntime(t)
+	require.NoError(t, db.Model(&model.GbCascadePlatform{}).Where("port = ?", 15060).Update("max_streams", 1).Error)
 	req := cascadeTestRequest(15060, "0200000001")
 	tx := &cascadeInviteTestTx{siptest.NewServerTxRecorder(req), make(chan *sip.Response, 10)}
 	defer tx.Terminate()
@@ -484,6 +557,93 @@ func TestCascadeVideoPlatformCapacityAndShareRevocation(t *testing.T) {
 		t.Fatal("revoked sharing left session active")
 	}
 	require.Zero(t, h.sources.LeaseCount("shared-source"))
+}
+
+func TestCascadeVideoRejectsUnavailableDeviceAuthorization(t *testing.T) {
+	for _, change := range []string{
+		"UPDATE gb_device SET access_epoch = 2",
+		"UPDATE gb_device SET access_epoch = 0",
+		"UPDATE gb_device SET cleanup_completed_epoch = 0",
+		"ALTER TABLE gb_device DROP COLUMN access_epoch",
+	} {
+		t.Run(change, func(t *testing.T) {
+			h, db, _ := newCascadeVideoTestRuntime(t)
+			require.NoError(t, db.Exec(change).Error)
+			req := cascadeTestRequest(15060, "0200000001")
+			tx := &cascadeInviteTestTx{siptest.NewServerTxRecorder(req), make(chan *sip.Response, 10)}
+			defer tx.Terminate()
+			done := make(chan struct{})
+			go func() { h.Handle(req, tx); close(done) }()
+			res := cascadeAwaitResponse(t, tx)
+			if res.StatusCode == 200 {
+				h.Handle(cascadeDialogRequest(req, res, sip.ACK), tx)
+				byeTx := siptest.NewServerTxRecorder(req)
+				defer byeTx.Terminate()
+				h.Handle(cascadeDialogRequest(req, res, sip.BYE), byeTx)
+			}
+			select {
+			case <-done:
+			case <-time.After(3 * time.Second):
+				t.Fatal("INVITE did not finish")
+			}
+			require.Equal(t, 503, res.StatusCode)
+			require.False(t, h.sources.HasLease("shared-source"))
+			var count int64
+			require.NoError(t, db.Model(&model.GbCascadeMediaSession{}).Count(&count).Error)
+			require.Zero(t, count)
+		})
+	}
+}
+
+func TestCascadeVideoRejectsProjectionRevocationBeforeSender(t *testing.T) {
+	var source cascadeCallbackSource
+	h, db, _ := newCascadeVideoTestRuntimeWithSource(t, source)
+	source.onStart = func(media.AcquireRequest) {
+		// Simulate a transfer/removal that clears the channel projection without
+		// changing the platform projection revision.
+		_ = db.Where("platform_id = ?", uint64(1)).Delete(&model.GbCascadeChannelProjection{}).Error
+	}
+	h.sources = media.NewProvider(source)
+	req := cascadeTestRequest(15060, "0200000001")
+	tx := &cascadeInviteTestTx{siptest.NewServerTxRecorder(req), make(chan *sip.Response, 10)}
+	defer tx.Terminate()
+	done := make(chan struct{})
+	go func() { h.Handle(req, tx); close(done) }()
+	res := cascadeAwaitResponse(t, tx)
+	require.Equal(t, 403, res.StatusCode)
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("INVITE did not finish")
+	}
+	require.False(t, h.sources.HasLease("shared-source"))
+	var count int64
+	require.NoError(t, db.Model(&model.GbCascadeMediaSession{}).Count(&count).Error)
+	require.Zero(t, count)
+}
+
+func TestCascadeVideoDefaultAllowsMultipleStreamsForOnePlatform(t *testing.T) {
+	h, _, _ := newCascadeVideoTestRuntime(t)
+	t.Cleanup(func() {
+		h.mu.Lock()
+		for _, session := range h.sessions {
+			session.cancel()
+		}
+		h.mu.Unlock()
+		h.wg.Wait()
+	})
+	for i := 1; i <= 2; i++ {
+		req := cascadeTestRequest(15060, fmt.Sprintf("020000000%d", i))
+		callID := sip.CallIDHeader(fmt.Sprintf("unlimited-%d", i))
+		req.ReplaceHeader(&callID)
+		tx := &cascadeInviteTestTx{siptest.NewServerTxRecorder(req), make(chan *sip.Response, 10)}
+		t.Cleanup(tx.Terminate)
+		go h.Handle(req, tx)
+		res := cascadeAwaitResponse(t, tx)
+		require.Equal(t, 200, res.StatusCode)
+		require.True(t, h.Handle(cascadeDialogRequest(req, res, sip.ACK), tx))
+	}
+	require.Equal(t, 2, h.sources.LeaseCount("shared-source"))
 }
 
 func TestCascadeVideoUnacknowledgedTransactionFailureReleasesSender(t *testing.T) {

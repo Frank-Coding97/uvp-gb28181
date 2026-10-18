@@ -375,20 +375,24 @@ func startControlPlane(cfg gbconfig.Config, authority *processauthority.Authorit
 		warnCascadeCredentialKeyUnavailable()
 	}
 	setupCascadeManagement(nil, cascadeCipher, nil)
+	sipReload := func() error { return ReloadSIP(authority) }
+	mediaDefaultsReload := func() error { return reloadZLMPlatformMediaDefaults() }
 	reload := func() error {
 		var reloadErr error
-		if err := ReloadSIP(authority); err != nil {
+		if err := sipReload(); err != nil {
 			reloadErr = errors.Join(reloadErr, err)
 		}
 		// SIP and media-node runtime are independent consumers of the same
 		// persisted wizard row; a transient SIP restart failure must not leave
 		// a newly saved Hook/Stream default unapplied.
-		if err := reloadZLMPlatformMediaDefaults(); err != nil {
+		if err := mediaDefaultsReload(); err != nil {
 			reloadErr = errors.Join(reloadErr, err)
 		}
 		return reloadErr
 	}
-	gbroutes.SetSetupController(gbcontrollers.NewSetupController(app.DB(), sipRuntimeStatus, nil, reload))
+	setupController := gbcontrollers.NewSetupController(app.DB(), sipRuntimeStatus, nil, sipReload)
+	setupController.SetPlatformMediaDefaultsReloader(mediaDefaultsReload)
+	gbroutes.SetSetupController(setupController)
 	gbroutes.SetServiceConfigSIPTraceReloader(reload)
 	logcleanup.SetSIPReloader(reload)
 	gbroutes.SetServiceConfigSIPTraceRuntimeProvider(SIPTraceRuntimeEnabled)
@@ -876,11 +880,6 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 	sipGenerationBackground = &asyncgroup.Group{}
 	sipServer = srv
 	credentialWarningReported := len(credentialWarning) > 0 && credentialWarning[0]
-	if err := startCascadeRuntime(cfg, srv, credentialWarningReported); err != nil {
-		app.ZapLog.Error("国标级联运行时装配失败,设备侧 SIP 继续运行", zap.String("event", "gb28181.cascade.assemble_failed"), zap.Error(err))
-	} else {
-		app.ZapLog.Info("国标级联运行时已装配")
-	}
 	if traceServer, ok := srv.(interface{ TraceRuntime() gbtrace.Runtime }); ok {
 		setupTraceController(cfg, traceServer.TraceRuntime())
 	}
@@ -1055,10 +1054,18 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 		openAPIPlayRoot.Clear()
 		gbroutes.SetOpenAPIViewerLifecycle(nil, nil, nil)
 	}
+	setupPlaybackRuntime(cfg, srv.UAC(), deviceOperations, deviceIntents)
 	if err := setupCascadeVideoRuntime(srv); err != nil {
 		return fmt.Errorf("装配级联点播失败: %w", err)
 	}
-	setupPlaybackRuntime(cfg, srv.UAC(), deviceOperations, deviceIntents)
+	// Upstream registration can trigger an INVITE as soon as it succeeds. Install
+	// the video dialog handler only after both the playback service and its
+	// runtime are ready, so the first upstream request cannot race assembly.
+	if err := startCascadeRuntime(cfg, srv, credentialWarningReported); err != nil {
+		app.ZapLog.Error("国标级联运行时装配失败,设备侧 SIP 继续运行", zap.String("event", "gb28181.cascade.assemble_failed"), zap.Error(err))
+	} else {
+		app.ZapLog.Info("国标级联运行时已装配")
+	}
 	setupTalkRuntime(cfg, srv)
 	setupRecordingRuntime(cfg)
 	// 录像缓存依赖回放服务与录像查询快照，必须排在它们之后。

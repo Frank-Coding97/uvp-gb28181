@@ -223,6 +223,15 @@ func (c *Client) GetMP4RecordFiles(ctx context.Context, vhost, appName, stream, 
 
 // DeleteMP4RecordFile deletes one exact MP4 file. The name parameter is
 // mandatory because omitting it makes ZLM delete the whole recording period.
+//
+// ⛔⛔ 成功判据只能是 `code == 0`，**不能看 `result` 字段**：
+// ZLM 的 `deleteRecordDirectory`（server/WebApi.cpp）成功时只回
+// `{"code":0,"path":"..."}`，**响应体里根本没有 result**；
+// 失败时回 `{"code":-1,"path":"..."}`。曾按 `result` 判成功，
+// 于是"文件删掉了、接口报 502 删不掉、目录索引还在"（2026-10-18 220 现场）。
+//
+// 失败码 -1 不区分"文件本来就不在"与"真删不掉"，所以再用文件列表反查一次：
+// 目标文件已不在列表里 ⇒ 按 ErrRecordingNotFound 上报（调用方据此走幂等删除）。
 func (c *Client) DeleteMP4RecordFile(ctx context.Context, vhost, appName, stream, period, name string) error {
 	if strings.TrimSpace(vhost) == "" || strings.TrimSpace(appName) == "" || strings.TrimSpace(stream) == "" ||
 		strings.TrimSpace(name) == "" || path.Base(name) != name || strings.ContainsAny(name, `/\`) {
@@ -233,7 +242,9 @@ func (c *Client) DeleteMP4RecordFile(ctx context.Context, vhost, appName, stream
 	}
 	var response struct {
 		baseResp
-		Result bool `json:"result"`
+		// 指针用于区分"字段未出现"与"显式 false"：ZLM 正常不带该字段，
+		// 只有显式 false 才说明对端真的拒绝删除。
+		Result *bool `json:"result"`
 	}
 	if err := c.call(ctx, "deleteRecordDirectory", map[string]string{
 		"vhost": vhost, "app": appName, "stream": stream, "period": period, "name": name,
@@ -241,12 +252,30 @@ func (c *Client) DeleteMP4RecordFile(ctx context.Context, vhost, appName, stream
 		return classifyRecordingControlError(err)
 	}
 	if response.Code != 0 {
+		if absent, err := c.mp4RecordFileAbsent(ctx, vhost, appName, stream, period, name); err == nil && absent {
+			return fmt.Errorf("%w: zlm code %d", ErrRecordingNotFound, response.Code)
+		}
 		return classifyRecordingCode(response.Code)
 	}
-	if !response.Result {
+	if response.Result != nil && !*response.Result {
 		return ErrRecordingDeleteFailed
 	}
 	return nil
+}
+
+// mp4RecordFileAbsent 判断目标文件是否已经不在 ZLM 该日期目录的录像列表里。
+// 目录整体不存在时 ZLM 返回空列表（scanDir 不报错），同样视为"文件已不在"。
+func (c *Client) mp4RecordFileAbsent(ctx context.Context, vhost, appName, stream, period, name string) (bool, error) {
+	files, err := c.GetMP4RecordFiles(ctx, vhost, appName, stream, period)
+	if err != nil {
+		return false, err
+	}
+	for _, file := range files {
+		if file.FileName == name {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func classifyRecordingCode(code int) error {

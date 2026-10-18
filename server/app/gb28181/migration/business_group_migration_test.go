@@ -14,6 +14,7 @@ import (
 )
 
 const cascadeBusinessGroupMigration = "2026-10-13-cascade-business-group"
+const cascadePublishGroupMigration = "2026-10-13-cascade-publish-group-permission"
 
 var cascadeBusinessGroupMigrationFiles = []struct {
 	dialect Dialect
@@ -200,11 +201,78 @@ func TestCascadeBusinessGroupTablesAndEndpointsArePresentInEveryFreshBaseline(t 
 				"/api/gb28181/cascade/platforms/:id/business-group",
 				"gb28181:cascade:view",
 				"gb28181:cascade:share",
+				"/api/gb28181/cascade/platforms/:id/publish-group",
+				"gb28181:cascade:manage",
 			} {
 				require.Contains(t, text, token, name)
 			}
 		})
 	}
+}
+
+func TestCascadePublishGroupPermissionMigrationIsAvailableForEveryDatabase(t *testing.T) {
+	for _, file := range []string{
+		cascadePublishGroupMigration + ".sql",
+		cascadePublishGroupMigration + "-postgresql.sql",
+		cascadePublishGroupMigration + "-sqlserver.sql",
+		cascadePublishGroupMigration + "-sqlite.sql",
+	} {
+		t.Run(file, func(t *testing.T) {
+			up := strings.ToLower(readCascadeBusinessGroupMigration(t, file))
+			require.Contains(t, up, "/api/gb28181/cascade/platforms/:id/publish-group")
+			require.Contains(t, up, "gb28181:cascade:manage")
+			require.NotContains(t, up, "gb28181:cascade:share")
+			require.NotContains(t, up, "insert into sys_menu ", "publication control reuses the existing permission menu")
+			down := strings.TrimSuffix(file, ".sql") + "-down.sql"
+			_ = readCascadeBusinessGroupMigration(t, down)
+		})
+	}
+	names, err := (&embedSource{dialect: DialectSQLite}).UpFiles()
+	require.NoError(t, err)
+	require.Contains(t, names, cascadePublishGroupMigration+"-sqlite.sql")
+	name := cascadePublishGroupMigration + "-sqlite.sql"
+	probe := schemaProbe{hasPermissionRegistration: func(path, method, permission string) (bool, error) {
+		require.Equal(t, "/api/gb28181/cascade/platforms/:id/publish-group", path)
+		require.Equal(t, "PUT", method)
+		require.Equal(t, "gb28181:cascade:manage", permission)
+		return false, nil
+	}}
+	needed, err := needsBaselineUpgrade(name, probe)
+	require.NoError(t, err)
+	require.True(t, needed, "legacy full baselines must execute missing API permission registration")
+	probe.hasPermissionRegistration = func(string, string, string) (bool, error) { return true, nil }
+	needed, err = needsBaselineUpgrade(name, probe)
+	require.NoError(t, err)
+	require.False(t, needed, "fresh baselines should mark existing permission registration applied")
+}
+
+func TestCascadePublishGroupSQLiteMigrationMapsOnlyManagePermissionIdempotently(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	for _, statement := range []string{
+		"CREATE TABLE sys_api(id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT,path TEXT,method TEXT,api_group TEXT,created_at TEXT,updated_at TEXT,deleted_at TEXT,created_by INTEGER)",
+		"CREATE TABLE sys_menu(id INTEGER PRIMARY KEY,permission TEXT)",
+		"CREATE TABLE sys_menu_api(menu_id INTEGER,api_id INTEGER,PRIMARY KEY(menu_id,api_id))",
+		"CREATE TABLE sys_casbin_rule(id INTEGER PRIMARY KEY AUTOINCREMENT,ptype TEXT,v0 TEXT,v1 TEXT,v2 TEXT,v3 TEXT,v4 TEXT,v5 TEXT)",
+		"INSERT INTO sys_menu(id,permission) VALUES(140376,'gb28181:cascade:view'),(140379,'gb28181:cascade:share'),(140377,'gb28181:cascade:manage')",
+	} {
+		require.NoError(t, db.Exec(statement).Error, statement)
+	}
+	up := readCascadeBusinessGroupMigration(t, cascadePublishGroupMigration+"-sqlite.sql")
+	require.NoError(t, (&dbExecutor{db: db}).ExecSQL(up))
+	require.NoError(t, (&dbExecutor{db: db}).ExecSQL(up), "running initialization twice must be safe")
+	var apiCount, manageCount, shareCount, policyCount int64
+	path := "/api/gb28181/cascade/platforms/:id/publish-group"
+	require.NoError(t, db.Raw("SELECT count(*) FROM sys_api WHERE path=? AND method='PUT'", path).Scan(&apiCount).Error)
+	require.NoError(t, db.Raw(`SELECT count(*) FROM sys_menu_api ma JOIN sys_menu m ON m.id=ma.menu_id JOIN sys_api a ON a.id=ma.api_id
+		WHERE a.path=? AND a.method='PUT' AND m.permission='gb28181:cascade:manage'`, path).Scan(&manageCount).Error)
+	require.NoError(t, db.Raw(`SELECT count(*) FROM sys_menu_api ma JOIN sys_menu m ON m.id=ma.menu_id JOIN sys_api a ON a.id=ma.api_id
+		WHERE a.path=? AND a.method='PUT' AND m.permission='gb28181:cascade:share'`, path).Scan(&shareCount).Error)
+	require.EqualValues(t, 1, apiCount)
+	require.EqualValues(t, 1, manageCount)
+	require.EqualValues(t, 0, shareCount)
+	require.NoError(t, db.Raw("SELECT count(*) FROM sys_casbin_rule WHERE ptype='p' AND v0='role_1' AND v1=? AND v2='PUT'", path).Scan(&policyCount).Error)
+	require.EqualValues(t, 1, policyCount)
 }
 
 func readCascadeBusinessGroupMigration(t *testing.T, name string) string {

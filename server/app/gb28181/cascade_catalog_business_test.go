@@ -69,11 +69,13 @@ func TestCascadeCatalogHandlerAndPusherUseBusinessSnapshot(t *testing.T) {
 	store := repository.NewGormRepository(db)
 	snapshot, err := buildCascadeCatalogSnapshot(t.Context(), store, &platform)
 	require.NoError(t, err)
-	require.Equal(t, []catalog.CatalogItemKind{catalog.CatalogItemPlatform, catalog.CatalogItemBusinessGroup, catalog.CatalogItemVirtualOrganization, catalog.CatalogItemDevice, catalog.CatalogItemChannel, catalog.CatalogItemChannel}, []catalog.CatalogItemKind{
-		snapshot.Items[0].Kind, snapshot.Items[1].Kind, snapshot.Items[2].Kind, snapshot.Items[3].Kind, snapshot.Items[4].Kind, snapshot.Items[5].Kind,
+	require.Len(t, snapshot.Items, 5)
+	require.Equal(t, []catalog.CatalogItemKind{catalog.CatalogItemPlatform, catalog.CatalogItemBusinessGroup, catalog.CatalogItemVirtualOrganization, catalog.CatalogItemChannel, catalog.CatalogItemChannel}, []catalog.CatalogItemKind{
+		snapshot.Items[0].Kind, snapshot.Items[1].Kind, snapshot.Items[2].Kind, snapshot.Items[3].Kind, snapshot.Items[4].Kind,
 	})
-	require.Equal(t, device.DeviceID+"/"+catalogBusinessOrgID, snapshot.Items[4].ParentID)
-	require.Equal(t, device.DeviceID, snapshot.Items[5].ParentID, "unmounted shared channels keep their existing physical parent")
+	require.Equal(t, catalogBusinessLocalID+"/"+catalogBusinessOrgID, snapshot.Items[3].ParentID)
+	require.Equal(t, catalogBusinessLocalID, snapshot.Items[4].ParentID, "unmounted shared channels use the platform as their parent")
+	require.False(t, snapshot.HasPublishedID(device.DeviceID))
 
 	queryBody, err := manscdp.BuildCatalogQueryWithProfile(protocol.ProfileFor(protocol.Version2016), catalogBusinessRootID, 91)
 	require.NoError(t, err)
@@ -94,6 +96,7 @@ func TestCascadeCatalogHandlerAndPusherUseBusinessSnapshot(t *testing.T) {
 			DeviceList struct {
 				Items []struct {
 					DeviceID        string `xml:"DeviceID"`
+					ParentID        string `xml:"ParentID"`
 					BusinessGroupID string `xml:"BusinessGroupID"`
 					Info            struct {
 						BusinessGroupID string `xml:"BusinessGroupID"`
@@ -108,6 +111,7 @@ func TestCascadeCatalogHandlerAndPusherUseBusinessSnapshot(t *testing.T) {
 				require.Equal(t, catalogBusinessRootID, item.Info.BusinessGroupID)
 			}
 			if item.DeviceID == channel.ChannelID {
+				require.Equal(t, catalogBusinessLocalID+"/"+catalogBusinessOrgID, item.ParentID)
 				require.Emptyf(t, item.BusinessGroupID, "channel %s should not declare BusinessGroupID", item.DeviceID)
 				require.Emptyf(t, item.Info.BusinessGroupID, "channel %s should not declare BusinessGroupID in Info", item.DeviceID)
 			}
@@ -115,20 +119,56 @@ func TestCascadeCatalogHandlerAndPusherUseBusinessSnapshot(t *testing.T) {
 	}
 	require.Equal(t, []string{catalogBusinessRootID, catalogBusinessOrgID, channel.ChannelID}, queryIDs)
 
+	// A platform may address a published business node directly in both the
+	// Request-URI and To header. The XML target is still scoped to that node.
+	transport.requests = nil
+	directOrgQuery, err := manscdp.BuildCatalogQueryWithProfile(protocol.ProfileFor(protocol.Version2016), catalogBusinessOrgID, 92)
+	require.NoError(t, err)
+	directOrgReq := newCascadeCatalogRequest(platform, directOrgQuery)
+	directOrgReq.Recipient.User = catalogBusinessOrgID
+	directOrgReq.To().Address.User = catalogBusinessOrgID
+	directOrgTx := &cascadeInviteTestTx{siptest.NewServerTxRecorder(directOrgReq), make(chan *sip.Response, 4)}
+	defer directOrgTx.Terminate()
+	require.True(t, handler(directOrgReq, directOrgTx))
+	require.Equal(t, sip.StatusOK, (<-directOrgTx.responses).StatusCode)
+	var directIDs []string
+	for _, request := range transport.requests {
+		var response manscdp.CatalogResponse
+		require.NoError(t, manscdp.DecodeProfiledXML(protocol.ProfileFor(protocol.Version2016), request.Body(), &response))
+		require.Equal(t, 2, response.SumNum)
+		directIDs = append(directIDs, catalogResponseItemIDs(response)...)
+	}
+	require.Equal(t, []string{catalogBusinessOrgID, channel.ChannelID}, directIDs)
+
+	// Conflicting non-container targets must not broaden the response to the
+	// business root. A SIP 200 is only the MESSAGE acknowledgement; no Catalog
+	// response is sent for the rejected scoped target.
+	transport.requests = nil
+	conflictQuery, err := manscdp.BuildCatalogQueryWithProfile(protocol.ProfileFor(protocol.Version2016), catalogBusinessRootID, 93)
+	require.NoError(t, err)
+	conflictReq := newCascadeCatalogRequest(platform, conflictQuery)
+	conflictReq.Recipient.User = catalogBusinessOrgID
+	conflictReq.To().Address.User = catalogBusinessOrgID
+	conflictTx := &cascadeInviteTestTx{siptest.NewServerTxRecorder(conflictReq), make(chan *sip.Response, 4)}
+	defer conflictTx.Terminate()
+	require.True(t, handler(conflictReq, conflictTx))
+	require.Equal(t, sip.StatusOK, (<-conflictTx.responses).StatusCode)
+	require.Empty(t, transport.requests)
+
 	transport.requests = nil
 	items, batches, err := newCascadeCatalogPusher(store, clients).PushCatalog(t.Context(), platform.ID)
 	require.NoError(t, err)
-	require.Equal(t, 6, items)
+	require.Equal(t, 5, items)
 	require.Equal(t, len(transport.requests), batches)
 	var pushedIDs []string
 	for _, request := range transport.requests {
 		var pushed manscdp.CatalogResponse
 		require.NoError(t, manscdp.DecodeProfiledXML(protocol.ProfileFor(protocol.Version2016), request.Body(), &pushed))
-		require.Equal(t, 6, pushed.SumNum)
+		require.Equal(t, 5, pushed.SumNum)
 		require.Equal(t, catalogBusinessLocalID, pushed.DeviceID)
 		pushedIDs = append(pushedIDs, catalogResponseItemIDs(pushed)...)
 	}
-	require.Equal(t, []string{catalogBusinessLocalID, catalogBusinessRootID, catalogBusinessOrgID, device.DeviceID, channel.ChannelID, unmounted.ChannelID}, pushedIDs)
+	require.Equal(t, []string{catalogBusinessLocalID, catalogBusinessRootID, catalogBusinessOrgID, channel.ChannelID, unmounted.ChannelID}, pushedIDs)
 }
 
 func TestBuildCascadeCatalogSnapshotKeepsLegacyFlatOutputForPublishGroupWithoutTree(t *testing.T) {

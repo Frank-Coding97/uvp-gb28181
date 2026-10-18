@@ -7,17 +7,20 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/service"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/sipclient"
+	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 )
 
 const (
-	defaultRegisterExpires = 3600
-	defaultKeepalive       = 60 * time.Second
-	defaultRetryDelay      = time.Minute
+	defaultRegisterExpires           = 3600
+	defaultKeepalive                 = 60 * time.Second
+	defaultRetryDelay                = time.Minute
+	defaultHeartbeatFailureThreshold = 3
 	// 注册成功后首条 Keepalive 尽快发出以确认链路,缩短「等待心跳」展示窗口;
 	// 后续心跳仍按平台配置的周期进行。
 	firstKeepaliveDelay = time.Second
@@ -29,6 +32,14 @@ type PlatformClient interface {
 	Register(context.Context, int, string) sipclient.TransactionResult
 	Logout(context.Context, string) sipclient.TransactionResult
 	Keepalive(context.Context, string) sipclient.TransactionResult
+}
+
+type profileNegotiator interface {
+	SetProfile(protocol.Version) error
+}
+
+type registrationVersionStore interface {
+	RecordRegistrationVersion(context.Context, uint64, string, string, string, time.Time) error
 }
 
 type ClientFactory interface {
@@ -59,12 +70,13 @@ type PlatformStore interface {
 }
 
 type Dependencies struct {
-	Store      PlatformStore
-	Clients    ClientFactory
-	Resources  ResourceAcquirer
-	Clock      service.Clock
-	Scheduler  Scheduler
-	RetryDelay time.Duration
+	Store         PlatformStore
+	Clients       ClientFactory
+	Resources     ResourceAcquirer
+	Clock         service.Clock
+	Scheduler     Scheduler
+	RetryDelay    time.Duration
+	CatalogPusher service.CatalogPusher
 }
 
 // Manager reconciles enabled platform configuration without affecting the
@@ -139,6 +151,12 @@ func (m *Manager) Reload(ctx context.Context) error {
 		_, exists := m.actors[id]
 		m.mu.RUnlock()
 		if exists {
+			m.mu.RLock()
+			actor := m.actors[id]
+			m.mu.RUnlock()
+			if actor.projectionRevision.Swap(platform.ProjectionRevision) != platform.ProjectionRevision {
+				actor.enqueue(context.Background(), commandCatalog)
+			}
 			continue
 		}
 		actor, createErr := m.newActor(platform)
@@ -181,7 +199,10 @@ func (m *Manager) newActor(platform model.GbCascadePlatform) (*Actor, error) {
 			return nil, errors.New("cascade platform resource release is unavailable")
 		}
 	}
-	return newActor(platform, client, m.deps.Store, m.deps.Clock, m.deps.Scheduler, m.deps.RetryDelay, release), nil
+	actor := newActor(platform, client, m.deps.Store, m.deps.Clock, m.deps.Scheduler, m.deps.RetryDelay, release)
+	actor.pusher = m.deps.CatalogPusher
+	actor.projectionRevision.Store(platform.ProjectionRevision)
+	return actor, nil
 }
 
 func (m *Manager) removeActor(id uint64, actor *Actor) {
@@ -264,6 +285,7 @@ const (
 	commandKeepalive
 	commandStop
 	commandForceStop
+	commandCatalog
 )
 
 type transactionKind uint8
@@ -290,12 +312,15 @@ type Actor struct {
 	retry     time.Duration
 	release   func() error
 
-	ctx    context.Context
-	cancel context.CancelFunc
-	cmd    chan actorCommand
-	result chan transactionEvent
-	done   chan struct{}
-	once   sync.Once
+	ctx                context.Context
+	cancel             context.CancelFunc
+	cmd                chan actorCommand
+	result             chan transactionEvent
+	done               chan struct{}
+	once               sync.Once
+	pusher             service.CatalogPusher
+	projectionRevision atomic.Uint64
+	pushWG             sync.WaitGroup
 }
 
 func newActor(platform model.GbCascadePlatform, client PlatformClient, store PlatformStore, clock service.Clock, scheduler Scheduler, retry time.Duration, release func() error) *Actor {
@@ -352,12 +377,45 @@ func (a *Actor) enqueue(ctx context.Context, command actorCommand) {
 }
 
 func (a *Actor) run() {
-	var refreshTimer, keepaliveTimer, retryTimer Timer
+	var refreshTimer, keepaliveTimer, retryTimer, catalogRetryTimer Timer
 	var inFlight bool
 	var registered bool
 	var stopping bool
+	var refreshPending, keepalivePending bool
+	heartbeatFailures := 0
 	var sequence uint64
+	var pushInFlight, pushPending bool
+	pushNeeded := true
+	pushResults := make(chan error, 1)
+	pushCtx, cancelPush := context.WithCancel(a.ctx)
+	defer cancelPush()
+	startPush := func() {
+		if !registered || stopping || !a.platform.AutoPushCatalog || a.pusher == nil {
+			return
+		}
+		if pushInFlight {
+			pushPending = true
+			return
+		}
+		pushInFlight = true
+		pushNeeded = false
+		a.pushWG.Add(1)
+		go func() {
+			defer a.pushWG.Done()
+			ctx, cancel := context.WithTimeout(pushCtx, 2*time.Minute)
+			defer cancel()
+			_, _, err := a.pusher.PushCatalog(ctx, a.platform.ID)
+			select {
+			case pushResults <- err:
+			case <-a.ctx.Done():
+			}
+		}()
+	}
 	stopTimers := func() {
+		if catalogRetryTimer != nil {
+			catalogRetryTimer.Stop()
+			catalogRetryTimer = nil
+		}
 		if refreshTimer != nil {
 			refreshTimer.Stop()
 			refreshTimer = nil
@@ -371,10 +429,21 @@ func (a *Actor) run() {
 			retryTimer = nil
 		}
 	}
+	stopHeartbeatTimers := func() {
+		if refreshTimer != nil {
+			refreshTimer.Stop()
+			refreshTimer = nil
+		}
+		if keepaliveTimer != nil {
+			keepaliveTimer.Stop()
+			keepaliveTimer = nil
+		}
+	}
 	finish := func() {
 		a.once.Do(func() {
 			stopTimers()
 			a.cancel()
+			a.pushWG.Wait()
 			if a.release != nil {
 				_ = a.release()
 			}
@@ -388,7 +457,16 @@ func (a *Actor) run() {
 		return fmt.Sprintf("cascade-%s-%d-%d", kind, a.platform.ID, sequence)
 	}
 	startTransaction := func(kind transactionKind) {
-		if inFlight || a.client == nil {
+		if a.client == nil {
+			return
+		}
+		if inFlight {
+			switch kind {
+			case transactionRegister:
+				refreshPending = true
+			case transactionKeepalive:
+				keepalivePending = true
+			}
 			return
 		}
 		inFlight = true
@@ -426,10 +504,30 @@ func (a *Actor) run() {
 
 	for {
 		select {
+		case err := <-pushResults:
+			pushInFlight = false
+			pushNeeded = err != nil
+			if pushPending {
+				pushPending = false
+				startPush()
+			} else if err != nil && !stopping {
+				catalogRetryTimer = schedule(a.retry, commandCatalog)
+			}
 		case command := <-a.cmd:
 			switch command {
+			case commandCatalog:
+				if catalogRetryTimer != nil {
+					catalogRetryTimer.Stop()
+					catalogRetryTimer = nil
+				}
+				pushNeeded = true
+				startPush()
 			case commandStart, commandReconnect:
 				if !stopping {
+					if command == commandReconnect && retryTimer != nil {
+						retryTimer.Stop()
+						retryTimer = nil
+					}
 					startTransaction(transactionRegister)
 				}
 			case commandRefresh:
@@ -445,6 +543,9 @@ func (a *Actor) run() {
 					continue
 				}
 				stopping = true
+				refreshPending = false
+				keepalivePending = false
+				cancelPush()
 				stopTimers()
 				if !inFlight {
 					if registered {
@@ -461,26 +562,77 @@ func (a *Actor) run() {
 			now := a.clock.Now().UTC()
 			switch event.kind {
 			case transactionRegister:
-				if event.result.Success {
+				grantedExpires := registerExpiresForResult(a.platform, event.result)
+				if event.result.Success && grantedExpires > 0 {
 					registered = true
-					_ = a.store.RecordRegistrationSuccess(context.Background(), a.platform.ID, now, now.Add(time.Duration(registerExpires(a.platform))*time.Second))
+					heartbeatFailures = 0
+					if a.platform.ProfileOverride == model.CascadeProfileOverrideAuto && event.result.NegotiatedVersionFound {
+						if versionStore, ok := a.store.(registrationVersionStore); ok {
+							effective := string(event.result.NegotiatedVersion)
+							if err := versionStore.RecordRegistrationVersion(context.Background(), a.platform.ID, event.result.ReportedGBVersion, effective, "negotiated", now); err == nil {
+								a.platform.ReportedGBVersion = event.result.ReportedGBVersion
+								a.platform.EffectiveVersion = effective
+								a.platform.EffectiveVersionFrom = "negotiated"
+								a.platform.EffectiveVersionAt = &now
+								if negotiator, ok := a.client.(profileNegotiator); ok {
+									_ = negotiator.SetProfile(event.result.NegotiatedVersion)
+								}
+							}
+						}
+					}
+					_ = a.store.RecordRegistrationSuccess(context.Background(), a.platform.ID, now, now.Add(time.Duration(grantedExpires)*time.Second))
 					if !stopping {
-						refreshTimer = schedule(sipclient.RefreshDelay(registerExpires(a.platform)), commandRefresh)
-						keepaliveTimer = schedule(firstKeepaliveDelay, commandKeepalive)
+						if pushNeeded {
+							startPush()
+						}
+						if !refreshPending {
+							refreshTimer = schedule(sipclient.RefreshDelay(grantedExpires), commandRefresh)
+						}
+						if !keepalivePending {
+							keepaliveTimer = schedule(firstKeepaliveDelay, commandKeepalive)
+						}
 					}
 				} else {
-					_ = a.store.RecordRegistrationFailure(context.Background(), a.platform.ID, resultCode(event.result), resultMessage(event.result), now)
+					registered = false
+					pushNeeded = true
+					code, message := resultCode(event.result), resultMessage(event.result)
+					if event.result.GrantedExpiresFound && event.result.GrantedExpires == 0 {
+						code, message = "expired", "upstream granted zero REGISTER expiry"
+					}
+					_ = a.store.RecordRegistrationFailure(context.Background(), a.platform.ID, code, message, now)
 					if !stopping {
 						retryTimer = schedule(a.retry, commandReconnect)
 					}
 				}
 			case transactionKeepalive:
 				if event.result.Success {
+					heartbeatFailures = 0
 					_ = a.store.RecordHeartbeatSuccess(context.Background(), a.platform.ID, now)
 				} else {
+					// Only an actual timeout contributes to the consecutive
+					// failure threshold. A definitive SIP rejection is a
+					// different state and must not be combined with later
+					// timeouts to trigger a false re-registration.
+					if isHeartbeatTimeout(event.result) {
+						heartbeatFailures++
+					} else {
+						heartbeatFailures = 0
+					}
 					_ = a.store.RecordHeartbeatFailure(context.Background(), a.platform.ID, resultCode(event.result), resultMessage(event.result), now)
+					if isHeartbeatTimeout(event.result) && heartbeatFailures >= defaultHeartbeatFailureThreshold {
+						registered = false
+						keepalivePending = false
+						refreshPending = true
+						stopHeartbeatTimers()
+						if retryTimer != nil {
+							retryTimer.Stop()
+							retryTimer = nil
+						}
+						heartbeatFailures = 0
+						_ = a.store.RecordRegistrationExpired(context.Background(), a.platform.ID, now)
+					}
 				}
-				if !stopping && registered {
+				if !stopping && registered && !keepalivePending {
 					keepaliveTimer = schedule(keepaliveDelay(a.platform), commandKeepalive)
 				}
 			case transactionLogout:
@@ -490,6 +642,15 @@ func (a *Actor) run() {
 					_ = a.store.RecordRegistrationFailure(context.Background(), a.platform.ID, resultCode(event.result), resultMessage(event.result), now)
 				}
 				return
+			}
+			if !stopping && !inFlight {
+				if refreshPending {
+					refreshPending = false
+					startTransaction(transactionRegister)
+				} else if keepalivePending && registered {
+					keepalivePending = false
+					startTransaction(transactionKeepalive)
+				}
 			}
 			if stopping && !inFlight {
 				if registered {
@@ -509,6 +670,13 @@ func registerExpires(platform model.GbCascadePlatform) int {
 	return defaultRegisterExpires
 }
 
+func registerExpiresForResult(platform model.GbCascadePlatform, result sipclient.TransactionResult) int {
+	if result.GrantedExpiresFound {
+		return result.GrantedExpires
+	}
+	return registerExpires(platform)
+}
+
 func keepaliveDelay(platform model.GbCascadePlatform) time.Duration {
 	if platform.KeepaliveInterval > 0 {
 		return time.Duration(platform.KeepaliveInterval) * time.Second
@@ -517,6 +685,9 @@ func keepaliveDelay(platform model.GbCascadePlatform) time.Duration {
 }
 
 func resultCode(result sipclient.TransactionResult) string {
+	if result.GrantedExpiresErr != nil {
+		return "expires"
+	}
 	if result.StatusCode > 0 {
 		return fmt.Sprintf("%d", result.StatusCode)
 	}
@@ -530,6 +701,9 @@ func resultCode(result sipclient.TransactionResult) string {
 }
 
 func resultMessage(result sipclient.TransactionResult) string {
+	if result.GrantedExpiresErr != nil {
+		return result.GrantedExpiresErr.Error()
+	}
 	if result.BuildErr != nil {
 		return result.BuildErr.Error()
 	}
@@ -540,6 +714,18 @@ func resultMessage(result sipclient.TransactionResult) string {
 		return fmt.Sprintf("SIP %d", result.StatusCode)
 	}
 	return "cascade transaction failed"
+}
+
+func isHeartbeatTimeout(result sipclient.TransactionResult) bool {
+	if result.TransportErr != nil {
+		return errors.Is(result.TransportErr, context.DeadlineExceeded) || errors.Is(result.TransportErr, context.Canceled)
+	}
+	switch result.StatusCode {
+	case 408, 480, 504:
+		return true
+	default:
+		return false
+	}
 }
 
 type wallClock struct{}

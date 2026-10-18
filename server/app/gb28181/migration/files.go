@@ -1,8 +1,11 @@
 package migration
 
 import (
+	"fmt"
 	"sort"
 	"strings"
+
+	migrationsfs "uvplatform.com/uvp-gb28181/resource/database/gb28181"
 )
 
 // FilterUpFiles 从文件名列表中筛出当前方言的 up 迁移文件,字典序排列。
@@ -17,6 +20,21 @@ func FilterUpFiles(names []string, d Dialect) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// AvailableUpFiles returns the embedded migration set for a dialect. It is
+// read-only and is used by the upgrade preview API; execution remains owned by
+// the migration runner.
+func AvailableUpFiles(d Dialect) ([]string, error) {
+	entries, err := migrationsfs.FS.ReadDir("migrations")
+	if err != nil {
+		return nil, fmt.Errorf("列迁移文件失败: %w", err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	return FilterUpFiles(names, d), nil
 }
 
 func isUpFile(name string, d Dialect) bool {

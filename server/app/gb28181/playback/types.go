@@ -8,11 +8,12 @@ import (
 )
 
 var (
-	ErrPlaybackNotFound  = errors.New("playback session not found")
-	ErrPlaybackBusy      = errors.New("playback session already active")
-	ErrRegistryClosed    = errors.New("playback registry closed")
-	ErrInvalidTransition = errors.New("invalid playback state transition")
-	ErrInvalidSession    = errors.New("invalid playback session")
+	ErrPlaybackNotFound         = errors.New("playback session not found")
+	ErrPlaybackBusy             = errors.New("playback session already active")
+	ErrRegistryClosed           = errors.New("playback registry closed")
+	ErrInvalidTransition        = errors.New("invalid playback state transition")
+	ErrPlaybackRangeUnsupported = errors.New("playback device adapter cannot enforce Range")
+	ErrInvalidSession           = errors.New("invalid playback session")
 )
 
 type ServiceError struct {
@@ -112,6 +113,7 @@ type Session struct {
 	IdleDeadline    time.Time
 	Deadline        time.Time
 	Resources       CleanupResources
+	BeforeCleanup   func(context.Context) error `json:"-"`
 }
 
 type CreateRequest struct {
@@ -128,6 +130,9 @@ type CreateRequest struct {
 	Secure                                            bool
 	Now                                               time.Time
 	Resources                                         CleanupResources
+	// Cascaded consumers must confirm their sender is stopped before releasing
+	// the downstream source, including when the source ends or its lease expires.
+	BeforeCleanup func(context.Context) error `json:"-"`
 }
 
 type CreateResult struct {
@@ -136,6 +141,8 @@ type CreateResult struct {
 }
 
 type ActionRequest struct {
+	// RangeValue preserves npt/smpte and the optional end through device control.
+	RangeValue      string
 	Action          string
 	PositionSeconds float64
 	Scale           float64

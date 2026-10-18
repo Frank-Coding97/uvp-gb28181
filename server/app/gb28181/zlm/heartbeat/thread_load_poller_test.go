@@ -118,3 +118,86 @@ func TestThreadLoadPoller_Tick_PreservesHeartbeatStats(t *testing.T) {
 	require.InDelta(t, 0.4, got.Stats.NetThreadLoadAvg, 0.001)
 	require.InDelta(t, 0.3, got.Stats.WorkThreadLoadAvg, 0.001)
 }
+
+// ---------------------------------------------------------------------------
+// 2026-10-18 现场：192.168.10.220:18090 可达（外部 curl 秒回）却被永久判离线。
+// 因为 Watcher 判 offline 之后，常规轮询不再覆盖它 ⇒ UpdateLivenessAt 这条
+// "主动探测等价刷新存活"的通道永远轮不到 ⇒ 单向死循环。
+//
+// ⛔ 但修法不能是把离线节点直接塞进常规轮询 ——
+//    TestThreadLoadPoller_Tick_SkipsOfflineNode 锁住的是"别每 30s 去敲失联节点"。
+// 所以新增的是一条**慢通道**：每 N 次 Tick 才给离线节点一次复活机会。
+// ---------------------------------------------------------------------------
+
+func TestThreadLoadPoller_ReviveTick_ProbesOfflineNodeAndBringsItBack(t *testing.T) {
+	reg, id := setupRegistry(t, "uuid-offline")
+	require.NoError(t, reg.MarkOffline(context.Background(), id))
+
+	f := newFakeFetcher()
+	f.netReturn["uuid-offline"] = 0.5
+	f.wrkReturn["uuid-offline"] = 0.2
+
+	p := heartbeat.NewThreadLoadPoller(reg, f, 30*time.Second)
+	p.SetReviveEvery(3)
+
+	// 前两次都不该碰离线节点（慢通道还没到点）
+	for i := 0; i < 2; i++ {
+		p.Tick(context.Background())
+	}
+	time.Sleep(80 * time.Millisecond)
+	require.Zero(t, f.netCalls.Load(), "没到复活轮次时，离线节点仍不应被拉")
+
+	// 第 3 次轮到慢通道
+	p.Tick(context.Background())
+	require.Eventually(t, func() bool {
+		got, ok := reg.GetByUUID("uuid-offline")
+		return ok && got != nil && got.State == node.StateActive
+	}, 2*time.Second, 10*time.Millisecond,
+		"复活探测成功必须把可达的离线节点翻回 active，否则它就永久卡在离线")
+
+	got, _ := reg.GetByUUID("uuid-offline")
+	require.False(t, got.Stats.LastHeartbeatAt.IsZero(), "同��应刷新最后存活时间")
+	require.InDelta(t, 0.5, got.Stats.NetThreadLoadAvg, 0.001)
+}
+
+func TestThreadLoadPoller_ReviveTick_KeepsOfflineWhenProbeFails(t *testing.T) {
+	reg, id := setupRegistry(t, "uuid-dead")
+	require.NoError(t, reg.MarkOffline(context.Background(), id))
+
+	f := newFakeFetcher()
+	f.netErr["uuid-dead"] = errors.New("connection refused")
+
+	p := heartbeat.NewThreadLoadPoller(reg, f, 30*time.Second)
+	p.SetReviveEvery(1)
+	p.Tick(context.Background())
+	time.Sleep(80 * time.Millisecond)
+
+	got, _ := reg.GetByUUID("uuid-dead")
+	require.Equal(t, node.StateOffline, got.State, "探不到就不许翻回在线")
+}
+
+func TestReviveCandidates_SkipsMaintenanceAndDisabledNodes(t *testing.T) {
+	// ⛔ 运维意图不可被"探活"悄悄翻掉：maintenance 与 disabled 不进复活候选。
+	// setupRegistry 每次都新建 Registry，所以这里手工在同一个 registry 里造三种节点。
+	reg, _ := setupRegistry(t, "uuid-parked")
+	for uuid, opts := range map[string]struct {
+		state      node.State
+		adminState string
+	}{
+		"uuid-offline":  {state: node.StateOffline},
+		"uuid-maint":    {state: node.StateMaintenance},
+		"uuid-disabled": {state: node.StateOffline, adminState: "disabled"},
+	} {
+		_, err := reg.Add(context.Background(), node.Node{
+			Name: "n-" + uuid, MediaServerUUID: uuid, State: opts.state, AdminState: opts.adminState,
+		})
+		require.NoError(t, err)
+	}
+
+	var got []string
+	for _, c := range reg.ListReviveCandidates() {
+		got = append(got, c.MediaServerUUID)
+	}
+	require.Equal(t, []string{"uuid-offline"}, got,
+		"只有「离线且未被人工移出服务体系」的节点允许进复活候选")
+}
