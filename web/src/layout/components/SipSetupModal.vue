@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Message } from "@arco-design/web-vue";
+import { Message, Modal } from "@arco-design/web-vue";
 import { AlertCircle, Bell, ChevronLeft, ChevronRight, Save } from "lucide-vue-next";
 import DeploymentStep from "@/views/gb28181/sip/steps/DeploymentStep.vue";
 import NetworkStep from "@/views/gb28181/sip/steps/NetworkStep.vue";
@@ -82,18 +82,42 @@ async function save() {
   try {
     const result = await setup.save();
     if (result.reloadedOk) {
-      Message.success("SIP 配置已保存并成功启动");
+      if (result.mediaDefaultsApplied === false) {
+        Message.warning(`SIP 服务已启动，但媒体节点默认值更新失败：${result.mediaDefaultsError || "请检查媒体节点状态"}`);
+      } else {
+        Message.success("SIP 配置已保存并成功启动");
+      }
       emit("saved");
       emit("close");
     } else {
       // 保存到 DB 成功,但热启动失败(端口冲突/IP 不可达等).
       // Modal 保持打开,把错误显示在 banner 里,用户改一个字段就能再点保存.
       reloadError.value = result.reloadError || "SIP 服务启动失败,请检查配置";
+      if (result.mediaDefaultsApplied === false) {
+        Message.warning(`媒体节点默认值更新也失败：${result.mediaDefaultsError || "请检查媒体节点状态"}`);
+      }
       step.value = 4; // 停留在确认页,让用户看到当前 payload
     }
   } catch {
     Message.error(setup.error.value || "保存失败");
   }
+}
+
+function handleSave() {
+  if (!props.editing) {
+    void save();
+    return;
+  }
+
+  Modal.confirm({
+    title: "应用 SIP 配置会短暂中断信令",
+    content:
+      "确认后，系统会在后端进程内关闭并重新启动 SIP 服务。切换期间 SIP 信令会短暂中断，设备注册状态可能短暂变化并需要重新注册；正在进行的点播、回放、对讲等 SIP 操作可能失败。UVP 后端整体与 ZLMediaKit 不会重启。",
+    okText: "确认保存并应用",
+    cancelText: "取消",
+    modalClass: "uvp-system-dialog",
+    onOk: save
+  });
 }
 
 function skipLater() {
@@ -171,7 +195,7 @@ function skipLater() {
         下一步
         <template #icon><ChevronRight :size="16" /></template>
       </a-button>
-      <a-button v-else type="primary" :loading="setup.saving.value" @click="save">
+      <a-button v-else type="primary" :loading="setup.saving.value" @click="handleSave">
         <template #icon><Save :size="16" /></template>
         {{ editing ? "保存并应用" : "保存并启动" }}
       </a-button>

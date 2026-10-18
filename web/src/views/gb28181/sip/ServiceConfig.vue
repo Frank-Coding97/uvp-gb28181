@@ -10,13 +10,19 @@ import {
   type PlaybackProtocol,
   type FixedAddressPlaybackConfig,
   type PlayAuthConfig,
+  type CascadeSettingsConfig,
   type PlaybackSettingsConfig
 } from "@/api/gb28181";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import SNumberField from "@/components/s-number-field/index.vue";
 import { logCleanupPageRoute } from "@/views/system/sysconfig/sysconfigState";
 import { PLAYBACK_PROTOCOL_DICT_CODE, playbackProtocolOptionsFromDictionary } from "../playbackProtocol";
-import { createStaticServiceConfigDraft, normalizePlayAuthConfig } from "./serviceConfigState";
+import {
+  createCascadeSettingsDraft,
+  createStaticServiceConfigDraft,
+  normalizePlayAuthConfig,
+  validateCascadeSettings
+} from "./serviceConfigState";
 
 const { isMobile } = useDevicesSize();
 const activeTab = ref("gb");
@@ -113,6 +119,10 @@ const savedIgnoreChannelOfflineStatusNotify = ref(false);
 const savedSIPLogEnabled = ref(false);
 const savedSIPLogRetentionDays = ref(7);
 const savedCloudRecordingRetentionDays = ref(7);
+const savedCascadeSettings = reactive(createCascadeSettingsDraft());
+const cascadeChanged = computed(() => JSON.stringify(draft.cascade) !== JSON.stringify(savedCascadeSettings));
+const cascadeErrors = computed(() => validateCascadeSettings(draft.cascade));
+const cascadeValid = computed(() => Object.keys(cascadeErrors.value).length === 0);
 type NumberFieldInstance = InstanceType<typeof SNumberField>;
 const positionHistoryRetentionField = ref<NumberFieldInstance | null>(null);
 const cloudRecordingRetentionField = ref<NumberFieldInstance | null>(null);
@@ -213,17 +223,32 @@ const hasChanges = computed(
     preallocationModeChanged.value ||
     ignoreChannelOfflineStatusNotifyChanged.value ||
     sipLogChanged.value ||
-    cloudRecordingRetentionChanged.value
+    cloudRecordingRetentionChanged.value ||
+    cascadeChanged.value
 );
 const configSaving = computed(() => aggregateSaving.value);
 const configReady = computed(() => aggregateReady.value && !aggregateLoading.value);
 const formLayout = computed(() => (isMobile.value ? "vertical" : "horizontal"));
+const cascadeFields = [
+  { key: "userAgent", label: "User-Agent", tooltip: "级联 SIP 报文使用的平台标识，所有上级平台共用。", max: 128, required: true },
+  { key: "platformName", label: "平台名称", tooltip: "向上级平台发布的平台名称。", max: 128, required: true },
+  { key: "manufacturer", label: "厂商", tooltip: "平台设备信息和平台目录中的厂商名称。", max: 128, required: true },
+  { key: "model", label: "型号", tooltip: "平台设备信息和平台目录中的型号。", max: 128, required: true },
+  { key: "civilCode", label: "行政区划", tooltip: "平台所属行政区划，可为空或填写 2、4、6、8 位数字。", max: 8, required: false },
+  { key: "address", label: "安装地址", tooltip: "平台目录中的安装地址。", max: 256, required: false }
+] as const;
 
 function applyPlaybackSettings(settings: PlaybackSettingsConfig) {
   draft.playback.playTimeoutMs = settings.playTimeoutMs;
   draft.playback.onDemandLive = settings.onDemandLive;
   draft.playback.cloudRecordingEnabled = settings.cloudRecordingEnabled;
   Object.assign(savedPlaybackSettings, settings);
+}
+
+function applyCascadeSettings(settings?: CascadeSettingsConfig) {
+  const values = settings ?? createCascadeSettingsDraft();
+  Object.assign(draft.cascade, values);
+  Object.assign(savedCascadeSettings, values);
 }
 
 function restorePlaybackSettingsDraft() {
@@ -278,6 +303,7 @@ async function loadPlaybackProtocolOptions() {
 }
 
 function resetDraft() {
+  Object.assign(draft.cascade, savedCascadeSettings);
   draft.saveMobilePositionHistory = savedPositionHistoryEnabled.value;
   draft.positionHistoryRetentionDays = savedPositionHistoryRetentionDays.value;
   draft.sdpExtension = savedSDPExtensionEnabled.value;
@@ -320,6 +346,7 @@ function handlePlayAuthEnabledChange(enabled: boolean) {
 
 async function saveConfig() {
   if (!configReady.value) return;
+  if (!cascadeValid.value) return;
   const numberFieldError = numberFields.value.map(field => field.value?.error || "").find(Boolean);
   if (numberFieldError) {
     Message.warning(numberFieldError);
@@ -368,10 +395,12 @@ async function saveConfig() {
         enabled: draft.sipLogEnabled,
         retentionDays: latestSipLogConfig.data.sipLog.retentionDays,
         applied: sipLogApplied.value
-      }
+      },
+      cascade: { ...draft.cascade }
     });
     if (response.code !== 0) throw new Error(response.message || "保存配置失败");
     const v = response.data;
+    applyCascadeSettings(v.cascade);
     draft.saveMobilePositionHistory = v.positionHistory.enabled;
     draft.positionHistoryRetentionDays = v.positionHistory.retentionDays ?? 7;
     draft.cloudRecordingRetentionDays = v.cloudRecordingRetention.retentionDays ?? 7;
@@ -446,6 +475,7 @@ async function loadServiceConfig() {
     const response = await fetchServiceConfig();
     if (response.code !== 0) throw new Error(response.message || "加载配置失败");
     const v = response.data;
+    applyCascadeSettings(v.cascade);
     draft.saveMobilePositionHistory = v.positionHistory.enabled;
     draft.positionHistoryRetentionDays = v.positionHistory.retentionDays ?? 7;
     savedPositionHistoryEnabled.value = v.positionHistory.enabled;
@@ -580,6 +610,7 @@ onMounted(async () => {
               configSaving ||
               !configReady ||
               !hasChanges ||
+              !cascadeValid ||
               !numberFieldsValid ||
               !sipLogRetentionValid ||
               !playTimeoutValid ||
@@ -1039,54 +1070,30 @@ onMounted(async () => {
         </a-card>
       </a-tab-pane>
 
-      <a-tab-pane key="cascade" title="国标级联相关">
+      <a-tab-pane key="cascade" title="国标级联">
         <a-card :bordered="false" class="uvp-system-panel uvp-system-panel--dense mb-4">
-          <div class="uvp-config-view">
-            <div class="uvp-config-view__row">
-              <span class="uvp-config-view__label">上级平台点播超时时间</span>
-              <code class="uvp-config-view__value">{{ draft.cascade.parentInviteTimeoutMs }} ms</code>
-            </div>
-            <div class="uvp-config-view__row">
-              <span class="uvp-config-view__label">国标级联对讲流模式</span>
-              <code class="uvp-config-view__value">{{ draft.cascade.intercomStreamMode }}</code>
-            </div>
-            <div class="uvp-config-view__row">
-              <span class="uvp-config-view__label">设备/通道状态变化时发送消息</span>
-              <span
-                class="uvp-config-badge"
-                :class="draft.cascade.sendStatusChangeMessages ? 'uvp-config-badge--on' : 'uvp-config-badge--off'"
-                >{{ draft.cascade.sendStatusChangeMessages ? "开启" : "关闭" }}</span
-              >
-            </div>
-            <div class="uvp-config-view__row">
-              <span class="uvp-config-view__label">是否使用自定义的 ssrc</span>
-              <span
-                class="uvp-config-badge"
-                :class="draft.cascade.useCustomSsrc ? 'uvp-config-badge--on' : 'uvp-config-badge--off'"
-                >{{ draft.cascade.useCustomSsrc ? "开启" : "关闭" }}</span
-              >
-            </div>
-            <div class="uvp-config-view__row">
-              <span class="uvp-config-view__label">国标级联离线重试间隔（秒）</span>
-              <code class="uvp-config-view__value">{{ draft.cascade.offlineRetryIntervalSec }} 秒</code>
-            </div>
-            <div class="uvp-config-view__row">
-              <span class="uvp-config-view__label">国标续订方式</span>
-              <span
-                class="uvp-config-badge"
-                :class="draft.cascade.renewalMode ? 'uvp-config-badge--on' : 'uvp-config-badge--off'"
-                >{{ draft.cascade.renewalMode ? "开启" : "关闭" }}</span
-              >
-            </div>
-            <div class="uvp-config-view__row">
-              <span class="uvp-config-view__label">使用推流状态作为推流通道状态</span>
-              <span
-                class="uvp-config-badge"
-                :class="draft.cascade.usePushStatusAsChannelStatus ? 'uvp-config-badge--on' : 'uvp-config-badge--off'"
-                >{{ draft.cascade.usePushStatusAsChannelStatus ? "开启" : "关闭" }}</span
-              >
-            </div>
-          </div>
+          <a-form class="uvp-system-form" :layout="formLayout" :model="draft" auto-label-width>
+            <a-row :gutter="24">
+              <a-col v-for="field in cascadeFields" :key="field.key" :span="isMobile ? 24 : 12">
+                <a-form-item
+                  :field="`cascade.${field.key}`"
+                  :label="field.label"
+                  :tooltip="field.tooltip"
+                  :required="field.required"
+                  :validate-status="cascadeErrors[field.key] ? 'error' : undefined"
+                  :help="cascadeErrors[field.key]"
+                >
+                  <a-input
+                    v-model="draft.cascade[field.key]"
+                    class="service-config-text-input"
+                    :max-length="field.max"
+                    :disabled="configSaving || !configReady"
+                    :allow-clear="!field.required"
+                  />
+                </a-form-item>
+              </a-col>
+            </a-row>
+          </a-form>
         </a-card>
       </a-tab-pane>
     </a-tabs>
@@ -1174,6 +1181,10 @@ onMounted(async () => {
 
 :deep(.service-config-number-input) {
   width: min(100%, 260px);
+}
+
+:deep(.service-config-text-input) {
+  width: min(100%, 360px);
 }
 
 .ptz-default-speed {

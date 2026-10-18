@@ -81,6 +81,12 @@ export function cascadeCycleLabel(platform: Pick<CascadePlatform, "registerExpir
   return `${expires} / ${keepalive}`;
 }
 
+export function cascadeRuntimeSyncPending(response: unknown): boolean {
+  if (!response || typeof response !== "object") return false;
+  const result = response as { runtimeSynced?: unknown; platform?: { runtimeSynced?: unknown } };
+  return result.runtimeSynced === false || result.platform?.runtimeSynced === false;
+}
+
 export function validGbId(value: string): boolean {
   return /^\d{20}$/.test(value.trim());
 }
@@ -166,7 +172,7 @@ export function validateCascadeStep(
   } else if (
     step === 3 &&
     (!Number.isInteger(form.registerExpires) ||
-      form.registerExpires < 60 ||
+      form.registerExpires < 3600 ||
       form.registerExpires > 86400 ||
       !Number.isInteger(form.keepaliveInterval) ||
       form.keepaliveInterval < 5 ||
@@ -276,6 +282,9 @@ export function defaultCascadePlatform() {
     publishGroup: false,
     maxStreams: 0,
     ptzEnabled: false,
+    autoPushCatalog: false,
+    recordingEnabled: false,
+    rtcpKeepalive: false,
     enabled: false
   };
 }

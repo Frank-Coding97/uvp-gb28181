@@ -11,6 +11,7 @@ import {
   replaceCascadeBusinessGroup,
   replaceCascadeShares,
   setCascadePlatformEnabled,
+  setCascadePlatformPublishGroup,
   updateCascadePlatform
 } from "./gb28181";
 
@@ -18,7 +19,14 @@ describe("cascade API contract", () => {
   beforeEach(() => request.mockReset());
 
   it("uses the management endpoints and keeps password write-only", async () => {
-    const input: any = { name: "upstream", password: "secret", enabled: false };
+    const input: any = {
+      name: "upstream",
+      password: "secret",
+      enabled: false,
+      autoPushCatalog: true,
+      recordingEnabled: true,
+      rtcpKeepalive: true
+    };
     await listCascadePlatforms();
     expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/cascade/platforms");
     await updateCascadePlatform(7, input, 3);
@@ -66,5 +74,30 @@ describe("cascade API contract", () => {
     };
     await replaceCascadeBusinessGroup(7, data);
     expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/cascade/platforms/7/business-group", { data });
+  });
+
+  it("changes only the business-group publication flag with the config revision", async () => {
+    await setCascadePlatformPublishGroup(7, true, 9);
+    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/cascade/platforms/7/publish-group", {
+      data: { publishGroup: true, expectedRevision: 9 }
+    });
+  });
+
+  it("submits sharing mode, resources, permissions and directory changes in one revision request", async () => {
+    const data = {
+      nodes: [],
+      bindings: [],
+      resourceChanges: {
+        shareChannelIds: [21],
+        unshareChannelIds: [22],
+        channelPermissions: [{ sourceChannelId: 21, ptzAllowed: true }]
+      },
+      expectedProjectionRevision: 12,
+      expectedConfigRevision: 9,
+      publishGroup: true
+    };
+    await replaceCascadeBusinessGroup(7, data);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledWith("put", "/api/gb28181/cascade/platforms/7/business-group", { data });
   });
 });

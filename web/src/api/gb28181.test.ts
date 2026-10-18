@@ -72,7 +72,18 @@ describe("国标服务配置 API", () => {
   });
 
   it("使用聚合接口读取并保存全部国标服务配置", async () => {
-    const aggregate = { positionHistory: { enabled: true, retentionDays: 7 }, ptzDefaultSpeed: { level: 6 } };
+    const aggregate = {
+      positionHistory: { enabled: true, retentionDays: 7 },
+      ptzDefaultSpeed: { level: 6 },
+      cascade: {
+        userAgent: "Gateway/1.0",
+        platformName: "Regional platform",
+        manufacturer: "Vendor",
+        model: "Gateway",
+        civilCode: "340200",
+        address: "Monitoring center"
+      }
+    };
     const { fetchServiceConfig, updateServiceConfig } = await import("./gb28181");
     await fetchServiceConfig();
     expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config");

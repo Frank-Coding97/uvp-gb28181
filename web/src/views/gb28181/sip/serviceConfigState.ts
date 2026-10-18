@@ -1,3 +1,5 @@
+import type { CascadeSettingsConfig } from "@/api/gb28181";
+
 export interface StaticServiceConfigDraft {
   defaultChannelStreamTransport: "UDP" | "TCP-Active" | "TCP-Passive";
   globalSubscriptionItems: Array<"catalog" | "mobile_position" | "alarm" | "ptz_precise_position">;
@@ -26,15 +28,7 @@ export interface StaticServiceConfigDraft {
     cloudRecordingEnabled: boolean;
     onDemandLive: boolean;
   };
-  cascade: {
-    parentInviteTimeoutMs: number;
-    intercomStreamMode: string;
-    sendStatusChangeMessages: boolean;
-    useCustomSsrc: boolean;
-    offlineRetryIntervalSec: number;
-    renewalMode: boolean;
-    usePushStatusAsChannelStatus: boolean;
-  };
+  cascade: CascadeSettingsConfig;
 }
 
 export const staticServiceConfigLabels = [
@@ -67,15 +61,34 @@ export const playbackServiceConfigLabels = [
   "按需直播"
 ] as const;
 
-export const cascadeServiceConfigLabels = [
-  "上级平台点播超时时间",
-  "国标级联对讲流模式",
-  "设备/通道状态变化时发送消息",
-  "是否使用自定义的ssrc",
-  "国标级联离线久重试间隔（秒）",
-  "国标续订方式",
-  "使用推流状态作为推流通道状态"
-] as const;
+export const cascadeServiceConfigLabels = ["User-Agent", "平台名称", "厂商", "型号", "行政区划", "安装地址"] as const;
+
+export function createCascadeSettingsDraft(): CascadeSettingsConfig {
+  return {
+    userAgent: "UVP-GB28181",
+    platformName: "UVP GB28181",
+    manufacturer: "UVP",
+    model: "UVP-GB28181",
+    civilCode: "",
+    address: ""
+  };
+}
+
+export function validateCascadeSettings(settings: CascadeSettingsConfig): Partial<Record<keyof CascadeSettingsConfig, string>> {
+  const errors: Partial<Record<keyof CascadeSettingsConfig, string>> = {};
+  const fields = ["userAgent", "platformName", "manufacturer", "model", "address"] as const;
+  for (const field of fields) {
+    const value = settings[field];
+    if (field !== "address" && !value.trim()) errors[field] = "不能为空";
+    const max = field === "address" ? 256 : 128;
+    if ([...value].length > max) errors[field] = `最多 ${max} 个字符`;
+    if (/[\u0000-\u001f\u007f-\u009f]/.test(value)) errors[field] = "不能包含控制字符";
+  }
+  if (settings.civilCode && !/^(?:\d{2}|\d{4}|\d{6}|\d{8})$/.test(settings.civilCode)) {
+    errors.civilCode = "请输入 2、4、6 或 8 位数字";
+  }
+  return errors;
+}
 
 export function createStaticServiceConfigDraft(): StaticServiceConfigDraft {
   return {
@@ -106,15 +119,7 @@ export function createStaticServiceConfigDraft(): StaticServiceConfigDraft {
       cloudRecordingEnabled: false,
       onDemandLive: true
     },
-    cascade: {
-      parentInviteTimeoutMs: 60000,
-      intercomStreamMode: "TCP被动",
-      sendStatusChangeMessages: true,
-      useCustomSsrc: false,
-      offlineRetryIntervalSec: 60,
-      renewalMode: true,
-      usePushStatusAsChannelStatus: false
-    }
+    cascade: createCascadeSettingsDraft()
   };
 }
 

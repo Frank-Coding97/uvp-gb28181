@@ -145,6 +145,30 @@ describe("useSipSetup", () => {
     expect(result.reloadError).toContain("bind failed");
   });
 
+  it("keeps successful SIP reload separate from media defaults convergence failure", async () => {
+    const api = fakeApi({
+      save: vi.fn().mockResolvedValue({
+        code: 0,
+        message: "",
+        data: {
+          config: configuredStatus.config,
+          reloadedOk: true,
+          reloadError: "",
+          mediaDefaultsApplied: false,
+          mediaDefaultsError: "node config changed during convergence",
+          runtime: { state: "running", updatedAt: "", errorSummary: "" }
+        }
+      })
+    });
+    const setup = useSipSetup(api);
+    setup.form.deploymentMode = "lan";
+    const result = await setup.save();
+    expect(result.reloadedOk).toBe(true);
+    expect(result.reloadError).toBe("");
+    expect(result.mediaDefaultsApplied).toBe(false);
+    expect(result.mediaDefaultsError).toContain("node config changed during convergence");
+  });
+
   // ---- 向导默认端口的来源（绿色包与其它构建形态必须分开）----
   describe("default port", () => {
     afterEach(() => {

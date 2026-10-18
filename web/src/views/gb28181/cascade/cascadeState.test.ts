@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  cascadeRuntimeSyncPending,
   CASCADE_CATALOG_BATCH_SIZES,
   CASCADE_REGISTER_STATE_LABEL_FALLBACK,
   DICT_CODE_CASCADE_REGISTER_STATE,
@@ -17,6 +18,17 @@ import {
 } from "./cascadeState";
 
 describe("cascade platform state", () => {
+  it("recognizes both direct and wrapped runtime-sync failure responses", () => {
+    expect(cascadeRuntimeSyncPending({ runtimeSynced: false })).toBe(true);
+    expect(cascadeRuntimeSyncPending({ platform: { runtimeSynced: false }, warning: "pending" })).toBe(true);
+    expect(cascadeRuntimeSyncPending({ runtimeSynced: true })).toBe(false);
+    expect(cascadeRuntimeSyncPending({})).toBe(false);
+    expect(cascadeRuntimeSyncPending(null)).toBe(false);
+  });
+
+  it("keeps automatic catalog publication, recording authorization and RTCP opt-in", () => {
+    expect(defaultCascadePlatform()).toMatchObject({ autoPushCatalog: false, recordingEnabled: false, rtcpKeepalive: false });
+  });
   it("defaults catalog batches to one and limits new choices to powers of two through 64", () => {
     expect(defaultCascadePlatform().catalogBatchSize).toBe(1);
     expect(CASCADE_CATALOG_BATCH_SIZES).toEqual([1, 2, 4, 8, 16, 32, 64]);
@@ -98,6 +110,15 @@ describe("cascade platform state", () => {
     expect(validateCascadeStep({ ...form, authUsername: "user" }, 1)).toContain("认证用户名必须是 20 位数字或留空");
     expect(validateCascadeStep({ ...form, registerExpires: 86401 }, 3).length).toBeGreaterThan(0);
     expect(validateCascadeStep({ ...form, maxStreams: 10001 }, 4).length).toBeGreaterThan(0);
+  });
+
+  it.each([1, 60, 3599])("rejects a positive register expiry below the GB minimum: %s", registerExpires => {
+    const form = { ...defaultCascadePlatform(), registerExpires };
+    expect(validateCascadeStep(form, 3)).toContain("注册有效期或心跳间隔超出允许范围");
+  });
+
+  it("accepts exactly 3600 seconds as the minimum register expiry", () => {
+    expect(validateCascadeStep({ ...defaultCascadePlatform(), registerExpires: 3600 }, 3)).toEqual([]);
   });
 
   it("maps runtime facts to product conclusions", () => {

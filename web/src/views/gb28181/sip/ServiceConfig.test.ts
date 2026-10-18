@@ -69,6 +69,14 @@ const aggregateSections = [
 ] as const;
 
 let aggregateSnapshot: Record<string, any> = {};
+let cascadeSnapshot = {
+  userAgent: "RegionalGateway/1.0",
+  platformName: "Regional platform",
+  manufacturer: "Vendor",
+  model: "Gateway",
+  civilCode: "340200",
+  address: "Monitoring center"
+};
 
 function installAggregateApiMocks() {
   api.fetchServiceConfig.mockImplementation(async () => {
@@ -76,10 +84,13 @@ function installAggregateApiMocks() {
       aggregateSections.map(async ([section, fetchName]) => [section, (await api[fetchName]()).data] as const)
     );
     aggregateSnapshot = Object.fromEntries(results.map(([section, value]) => [section, structuredClone(value)]));
+    aggregateSnapshot.cascade = structuredClone(cascadeSnapshot);
     return { code: 0, message: "", data: structuredClone(aggregateSnapshot) };
   });
   api.updateServiceConfig.mockImplementation(async (payload: Record<string, any>) => {
     const next = structuredClone(aggregateSnapshot);
+    next.cascade = structuredClone(payload.cascade);
+    cascadeSnapshot = structuredClone(payload.cascade);
     for (const [section, , updateName] of aggregateSections) {
       if (JSON.stringify(payload[section]) === JSON.stringify(aggregateSnapshot[section])) continue;
       const value = payload[section];
@@ -142,6 +153,12 @@ const InputNumberStub = {
   template: `<input type="number" :disabled="disabled" :value="modelValue" @input="$emit('update:modelValue', Number($event.target.value))" />`
 };
 
+const InputStub = {
+  props: ["modelValue", "disabled"],
+  emits: ["update:modelValue"],
+  template: `<input type="text" :disabled="disabled" :value="modelValue" @input="$emit('update:modelValue', $event.target.value)" />`
+};
+
 const SliderStub = {
   props: ["modelValue", "min", "max", "step", "disabled"],
   emits: ["update:modelValue"],
@@ -184,13 +201,14 @@ function mountPage() {
           template: `<div :data-span="span"><slot /></div>`
         },
         "a-form-item": {
-          props: ["field", "label", "tooltip", "validateStatus"],
-          template: `<label :data-field="field" :data-tooltip="tooltip">{{ label }}<slot /><slot name="extra" /></label>`
+          props: ["field", "label", "tooltip", "validateStatus", "help"],
+          template: `<label :data-field="field" :data-tooltip="tooltip" :data-validate-status="validateStatus">{{ label }}<slot /><slot name="extra" />{{ help }}</label>`
         },
         "a-button": ButtonStub,
         "a-switch": SwitchStub,
         "a-slider": SliderStub,
         "a-input-number": InputNumberStub,
+        "a-input": InputStub,
         "s-number-field": InputNumberStub,
         "a-radio-group": SelectStub,
         "a-radio": OptionStub,
@@ -206,6 +224,14 @@ function mountPage() {
 
 describe("ServiceConfig edit mode", () => {
   beforeEach(() => {
+    cascadeSnapshot = {
+      userAgent: "RegionalGateway/1.0",
+      platformName: "Regional platform",
+      manufacturer: "Vendor",
+      model: "Gateway",
+      civilCode: "340200",
+      address: "Monitoring center"
+    };
     api.fetchServiceConfig.mockReset();
     api.updateServiceConfig.mockReset();
     api.fetchPositionHistoryConfig.mockReset();
@@ -345,9 +371,9 @@ describe("ServiceConfig edit mode", () => {
     expect(wrapper.find(".uvp-system-tabs").exists()).toBe(true);
     expect(wrapper.find(".service-config-shell").exists()).toBe(false);
     expect(wrapper.findAll(".uvp-system-panel")).toHaveLength(3);
-    expect(wrapper.findAll(".uvp-system-form")).toHaveLength(2);
-    expect(wrapper.findAll(".uvp-config-view")).toHaveLength(1);
-    expect(wrapper.findAll(".uvp-config-badge")).toHaveLength(4);
+    expect(wrapper.findAll(".uvp-system-form")).toHaveLength(3);
+    expect(wrapper.findAll(".uvp-config-view")).toHaveLength(0);
+    expect(wrapper.findAll(".uvp-config-badge")).toHaveLength(0);
     expect(wrapper.findAll("input[type='number']")).toHaveLength(5);
     expect(wrapper.findAll("input[type='number']").every(input => input.classes().includes("service-config-number-input"))).toBe(
       true
@@ -358,11 +384,48 @@ describe("ServiceConfig edit mode", () => {
     const wrapper = mountPage();
     await flushPromises();
 
-    expect(wrapper.findAll("[data-tooltip]")).toHaveLength(25);
+    expect(wrapper.findAll("[data-tooltip]")).toHaveLength(31);
     expect(wrapper.find("[data-field='saveMobilePositionHistory']").attributes("data-tooltip")).toBe(
       "关闭后仍更新设备和通道的最新位置，不再新增轨迹点。"
     );
     expect(wrapper.find("[data-field='sipLogEnabled']").attributes("data-tooltip")).toContain("保存后会热重载 SIP 服务");
+  });
+
+  it("loads shared cascade metadata and resets or saves it with the page actions", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    const platformName = wrapper.find("[data-field='cascade.platformName'] input");
+    expect((platformName.element as HTMLInputElement).value).toBe("Regional platform");
+    const save = wrapper.findAll("button").find(button => button.text().includes("保存配置"))!;
+    const reset = wrapper.findAll("button").find(button => button.text().includes("重置"))!;
+    expect(save.element).toHaveProperty("disabled", true);
+    await platformName.setValue("New platform");
+    expect(wrapper.find(".service-config-unsaved").exists()).toBe(true);
+    await reset.trigger("click");
+    expect((platformName.element as HTMLInputElement).value).toBe("Regional platform");
+    await platformName.setValue("New platform");
+    await save.trigger("click");
+    await flushPromises();
+    expect(api.updateServiceConfig).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        cascade: { ...cascadeSnapshot, platformName: "New platform" }
+      })
+    );
+    expect(wrapper.find(".service-config-unsaved").exists()).toBe(false);
+  });
+
+  it("blocks saving invalid cascade header values and administrative codes", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    const civilCode = wrapper.find("[data-field='cascade.civilCode'] input");
+    await civilCode.setValue("34020x");
+    const save = wrapper.findAll("button").find(button => button.text().includes("保存配置"))!;
+    expect(save.element).toHaveProperty("disabled", true);
+    expect(wrapper.find("[data-field='cascade.civilCode']").attributes("data-validate-status")).toBe("error");
+    await civilCode.setValue("340200");
+    await wrapper.find("[data-field='cascade.userAgent'] input").setValue(" ");
+    expect(save.element).toHaveProperty("disabled", true);
+    expect(api.updateServiceConfig).not.toHaveBeenCalled();
   });
 
   it("联动固定播放地址与自动点播开关", async () => {

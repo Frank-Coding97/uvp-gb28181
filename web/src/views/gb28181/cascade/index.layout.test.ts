@@ -5,6 +5,23 @@ import { describe, expect, it } from "vitest";
 const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/cascade/index.vue"), "utf8");
 
 describe("cascade platform editor layout", () => {
+  it("shows sharing mode as a summary and directs changes to the resource workspace", () => {
+    expect(source).not.toContain('v-model="form.publishGroup"');
+    expect(source).toContain('form.publishGroup ? "按照目录共享" : "按照通道共享"');
+    expect(source).toContain("共享方式请在“共享与目录”页面切换并保存");
+  });
+  it("edits and confirms catalog automation, recording authorization and RTCP without codec policy", () => {
+    for (const [field, label] of [
+      ["autoPushCatalog", "自动推送目录"],
+      ["recordingEnabled", "允许录像查询与回放"],
+      ["rtcpKeepalive", "RTCP 保活"]
+    ]) {
+      expect(source).toContain(`v-model="form.${field}"`);
+      expect(source).toContain(`<dt>${label}</dt>`);
+      expect(source).toContain(`${field}: platform.${field} ?? false`);
+    }
+    expect(source).not.toContain("视频编码策略");
+  });
   it("keeps publication switch rows unfilled while retaining switch state colors", () => {
     const rowStyle = source.match(/\.switch-grid label\s*\{([^}]*)\}/)?.[1];
     expect(rowStyle).toBeDefined();
@@ -28,6 +45,10 @@ describe("cascade platform editor layout", () => {
     expect(source).toContain("<dt>每批目录条数</dt>");
     expect(source).toContain("validateCascadeStep(form, editorStep.value, editing.value?.catalogBatchSize)");
     expect(source).toContain("validateCascadeStep(form, step, editing.value?.catalogBatchSize)");
+  });
+
+  it("uses the GB minimum positive registration expiry in the editor", () => {
+    expect(source).toContain('<s-number-field ref="registerExpiresField" v-model="form.registerExpires" :min="3600"');
   });
 
   it("explains the unlimited stream value and displays it in confirmation", () => {
@@ -132,44 +153,62 @@ describe("cascade platform editor layout", () => {
     expect(source).toContain('class="cascade-search-actions"');
   });
 
-  it("uses centered dialogs with explicit device/channel sharing modes", () => {
+  it("keeps the platform editor dialog and removes the old resource dialogs", () => {
     const editorStart = source.indexOf("<a-modal");
-    const shareStart = source.search(/<a-modal\s+v-model:visible="shareVisible"/);
+    const editorEnd = source.indexOf("</a-modal>", editorStart) + "</a-modal>".length;
 
     expect(editorStart).toBeGreaterThan(-1);
-    expect(shareStart).toBeGreaterThan(editorStart);
-
-    const editor = source.slice(editorStart, shareStart);
+    expect(editorEnd).toBeGreaterThan(editorStart);
+    const editor = source.slice(editorStart, editorEnd);
     expect(editor).toContain('v-model:visible="editorVisible"');
     expect(editor).toContain('modal-class="uvp-system-dialog cascade-platform-dialog"');
     expect(editor).toContain('width="min(820px, calc(100vw - 24px))"');
     expect(editor).toContain(':mask-closable="!saving"');
     expect(editor).toContain("<template #footer>");
     expect(editor).not.toContain("<a-drawer");
-
-    const sharing = source.slice(shareStart);
-    expect(sharing).toContain('modal-class="uvp-system-dialog cascade-share-dialog"');
-    expect(sharing).toContain('width="min(1080px, calc(100vw - 24px))"');
-    // 2026-09-29 分页统一：共享通道表也要挂 uvp-data-table，否则退回 Arco 原生分页样式。
-    expect(sharing).toContain('class="uvp-data-table share-channel-table share-table"');
-    expect(sharing).toContain('@update:selected-keys="handleChannelSelectionChange"');
-    expect(sharing).toContain('placeholder="通道名称 / 国标编号"');
-    // 设备模式已移除:弹窗只允许直接勾选具体通道。
-    expect(sharing).not.toContain("share-mode-switch");
-    expect(sharing).not.toContain('<a-radio value="device">按设备</a-radio>');
-    expect(sharing).not.toContain("share-device-table");
-    expect(sharing).not.toContain("设备模式下会将该设备的全部通道加入共享");
-    expect(sharing).not.toContain("<a-drawer");
+    expect(source.match(/<a-modal\b/g)).toHaveLength(1);
+    expect(source).not.toContain("BusinessGroupManager");
+    expect(source).not.toContain("shareVisible");
+    expect(source).not.toContain("sharedDevicesVisible");
+    expect(source).not.toContain("cascade-share-dialog");
+    expect(source).not.toContain("shared-devices-dialog");
   });
 
-  it("keeps device selection as a channel projection and supports server pagination", () => {
-    expect(source).toContain("selectedDeviceIds = computed");
-    expect(source).toContain("channelSourceDeviceIds");
-    expect(source).toContain("projectionDevices.get(channel.deviceProjectionId)");
-    expect(source).toContain("channelKeyword");
-    expect(source).toContain("channelPage");
-    expect(source).toContain("listDevicePage");
-    expect(source).toContain("listChannelPage");
+  it("uses one shared-and-directory entry for platform resource management", () => {
+    const actionStart = source.indexOf('data-action="shared-directory"');
+    const editActionStart = source.indexOf('class="uvp-table-action uvp-table-action--edit"', actionStart);
+    const action = source.slice(actionStart, editActionStart);
+    const summaryLink = source.match(/<a-link class="shared-channels-link"[^>]*>[\s\S]*?<\/a-link>/)?.[0] ?? "";
+
+    expect(actionStart).toBeGreaterThan(-1);
+    expect(action).toContain("共享与目录");
+    expect(action).toContain(':disabled="!canView"');
+    expect(action).toContain('@click="openSharedDirectory(record)"');
+    expect(source.match(/data-action="shared-directory"/g)).toHaveLength(1);
+    expect(source).not.toContain('data-action="business-group"');
+    expect(source).not.toContain('data-action="share-platform"');
+    expect(source).toContain('import { useRouter } from "vue-router"');
+    expect(source).toContain("router.push(`/gb28181/cascade/${platform.id}/resources`)");
+    expect(summaryLink).toContain(':disabled="!canView"');
+    expect(summaryLink).toContain('@click="openSharedDirectory(record)"');
+    expect(source).toContain("function sharedSummary(id: number)");
+    expect(source).toContain("loadSharedSnapshot(platform.id)");
+  });
+
+  it("keeps list actions behind their existing permission checks and preserves platform editing", () => {
+    expect(source).toContain('data-action="shared-directory"');
+    expect(source).toContain(':disabled="!canView"');
+    expect(source).toContain(':disabled="!canShare || !record.enabled"');
+    expect(source).toContain(':disabled="!canManage" @click="openEdit(record)"');
+    expect(source).toContain("function openEdit(platform: CascadePlatform)");
+    expect(source).toContain("async function savePlatform()");
+    expect(source.match(/if \(cascadeRuntimeSyncPending\(response\)\)/g)).toHaveLength(2);
+    expect(source).toContain("配置已保存，但运行时尚未同步；请稍后重试");
+    expect(source).toContain("平台已启用，但运行时尚未完成注册同步");
+    expect(source).toContain("上级平台已保存并启用，正在向上级注册；通道请到“共享与目录”配置");
+    expect(source).toContain("上级平台已保存，当前未启用；通道请到“共享与目录”配置");
+    expect(source).toContain("保存后可到平台列表的“共享与目录”配置通道。");
+    expect(source).toContain('<a-table-column title="操作" :width="340"');
   });
 
   it("exposes register/deregister as an inline enable switch instead of a dropdown option", () => {
@@ -189,38 +228,9 @@ describe("cascade platform editor layout", () => {
     expect(source).toContain("overflow-y: auto;");
   });
 
-  it("renders the shared-channel summary as an obvious link and the viewer as a system dialog with removal", () => {
-    expect(source).toMatch(/<a-link class="shared-channels-link"[^>]*>\s*<ListVideo :size="14" \/>/s);
-    expect(source).toMatch(
-      /<a-modal\s+v-model:visible="sharedDevicesVisible"[\s\S]*?modal-class="uvp-system-dialog shared-devices-dialog"/
-    );
-    expect(source).not.toMatch(/<a-modal\s+v-model:visible="sharedDevicesVisible"[\s\S]*?:footer="false"/);
-    expect(source).toContain('title="操作"');
-    expect(source).toContain("function removeSharedChannel(");
-    expect(source).toContain("expectedProjectionRevision: snapshot?.revision ?? 0");
-    expect(source).toContain(".shared-devices-dialog .arco-modal-body");
-  });
-
-  it("waits for channel-to-device resolution before judging the share payload", () => {
-    // 勾选后的解析是异步的；保存必须先收敛，否则会把"请求还在路上"
-    // 误判成"部分通道无法关联所属设备"，用户只能靠刷新碰运气。
-    expect(source).toContain("async function settleChannelSourceResolutions()");
-    expect(source).toContain("await settleChannelSourceResolutions();");
-    expect(source).toMatch(/shareSaving\.value = true;[\s\S]*?await settleChannelSourceResolutions\(\);/);
-    expect(source).toContain("pendingChannelSourceResolutions");
-    expect(source).toContain("Promise.allSettled");
-    // 同一通道复用同一条在途请求，并在保存前重新补算仍为空的勾选项。
-    expect(source).toMatch(/async function handleChannelSelectionChange[\s\S]*?await settleChannelSourceResolutions\(\);/);
-    // 失败时指名通道，而不是笼统的"部分通道"。
-    expect(source).not.toContain("部分通道无法关联所属设备，请刷新后重新选择。");
-    expect(source).toContain("channelSourceLabel");
-    // 设备查询不能被 pageSize:1 截断成"另一台设备"。
-    expect(source).not.toContain("pageSize: 1, q: channel.deviceId");
-  });
-
   it("follows the form-input template rules in the platform editor dialog", () => {
     const editorStart = source.indexOf("<a-modal");
-    const editor = source.slice(editorStart, source.search(/<a-modal\s+v-model:visible="sharedDevicesVisible"/));
+    const editor = source.slice(editorStart, source.indexOf("</a-modal>", editorStart));
     // 硬规则 2:数值输入不使用 a-input-number 的静默 clamp。
     expect(editor).not.toContain("<a-input-number");
     expect(editor.match(/<s-number-field/g)?.length).toBeGreaterThanOrEqual(5);

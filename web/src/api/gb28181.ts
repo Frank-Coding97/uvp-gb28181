@@ -297,6 +297,9 @@ export interface CascadePlatform {
   publishGroup: boolean;
   maxStreams: number;
   ptzEnabled: boolean;
+  autoPushCatalog: boolean;
+  recordingEnabled: boolean;
+  rtcpKeepalive: boolean;
   enabled: boolean;
   configRevision: number;
   projectionRevision: number;
@@ -311,6 +314,19 @@ export interface CascadePlatform {
   lastErrorCode?: string;
   lastErrorMessage?: string;
   lastErrorAt?: string | null;
+  /** mutation responses set this only after runtime reload has completed */
+  runtimeSynced?: boolean;
+  warning?: string;
+}
+
+export type CascadeMutationResult<T> = T | { platform: T; runtimeSynced: false; warning: string };
+export type CascadePublishGroupResult = CascadeMutationResult<CascadePlatform>;
+export interface CascadeDeleteResult {
+  ok: boolean;
+  deleted: boolean;
+  runtimeSynced: boolean;
+  platform?: CascadePlatform;
+  warning?: string;
 }
 
 export type CascadePlatformInput = Omit<
@@ -347,6 +363,14 @@ export interface CascadeChannelProjection {
   platformId?: number;
   deviceProjectionId?: number;
   sourceDeviceId: number;
+  /**
+   * 来源设备的 20 位国标编号。**只在前端草稿态有意义**：
+   * 刚通过「添加共享」选进来的行还没有设备主键（`sourceDeviceId` 恒为 0），
+   * 但通道对象自带设备编号 —— 共享通道表的「在线状态」列就是靠它去回查的
+   * （见 `BusinessGroupManager.ensureChannelStatuses`）。
+   * ⛔ 保存时后端会**按通道重新推导**设备归属，这个字段不会落库，前端不用管它的一致性。
+   */
+  sourceDeviceCode?: string;
   sourceChannelId: number;
   publishedChannelId: string;
   name: string;
@@ -378,9 +402,13 @@ export interface BusinessBinding {
 export interface CascadeBusinessGroup {
   platformId: number;
   revision: number;
+  configRevision?: number;
+  publishGroup?: boolean;
   nodes: BusinessNode[];
   bindings: BusinessBinding[];
   channels: CascadeChannelProjection[];
+  runtimeSynced?: boolean;
+  warning?: string;
 }
 
 export interface CascadeListData {
@@ -393,19 +421,24 @@ export const getCascadePlatform = (id: number) =>
   http.request<CascadePlatform>("get", baseUrlApi(`gb28181/cascade/platforms/${id}`));
 
 export const createCascadePlatform = (data: CascadePlatformInput) =>
-  http.request<CascadePlatform>("post", baseUrlApi("gb28181/cascade/platforms"), { data });
+  http.request<CascadeMutationResult<CascadePlatform>>("post", baseUrlApi("gb28181/cascade/platforms"), { data });
 
 export const updateCascadePlatform = (id: number, data: CascadePlatformInput, expectedRevision: number) =>
-  http.request<CascadePlatform>("put", baseUrlApi(`gb28181/cascade/platforms/${id}`), {
+  http.request<CascadeMutationResult<CascadePlatform>>("put", baseUrlApi(`gb28181/cascade/platforms/${id}`), {
     data: { ...data, expectedRevision }
   });
 
 export const deleteCascadePlatform = (id: number) =>
-  http.request<{ ok: boolean }>("delete", baseUrlApi(`gb28181/cascade/platforms/${id}`));
+  http.request<CascadeDeleteResult>("delete", baseUrlApi(`gb28181/cascade/platforms/${id}`));
 
 export const setCascadePlatformEnabled = (id: number, enabled: boolean, expectedRevision: number) =>
-  http.request<CascadePlatform>("put", baseUrlApi(`gb28181/cascade/platforms/${id}/enabled`), {
+  http.request<CascadeMutationResult<CascadePlatform>>("put", baseUrlApi(`gb28181/cascade/platforms/${id}/enabled`), {
     data: { enabled, expectedRevision }
+  });
+
+export const setCascadePlatformPublishGroup = (id: number, publishGroup: boolean, expectedRevision: number) =>
+  http.request<CascadePublishGroupResult>("put", baseUrlApi(`gb28181/cascade/platforms/${id}/publish-group`), {
+    data: { publishGroup, expectedRevision }
   });
 
 export const pushCascadeCatalog = (id: number) =>
@@ -432,7 +465,21 @@ export const getCascadeBusinessGroup = (id: number) =>
 
 export const replaceCascadeBusinessGroup = (
   id: number,
-  data: { nodes: BusinessNode[]; bindings: BusinessBinding[]; expectedProjectionRevision: number }
+  data: {
+    nodes: BusinessNode[];
+    bindings: BusinessBinding[];
+    shareChannelIds?: number[];
+    resourceChanges?: {
+      shareChannelIds: number[];
+      unshareChannelIds: number[];
+      channelPermissions: Array<{ sourceChannelId: number; ptzAllowed: boolean }>;
+      publishGroup?: boolean;
+      expectedConfigRevision?: number;
+    };
+    publishGroup?: boolean;
+    expectedConfigRevision?: number;
+    expectedProjectionRevision: number;
+  }
 ) => http.request<CascadeBusinessGroup>("put", baseUrlApi(`gb28181/cascade/platforms/${id}/business-group`), { data });
 
 // ===== 多屏播放方案 =====
@@ -1808,6 +1855,15 @@ export interface SIPLogConfig {
   applyError?: string;
 }
 
+export interface CascadeSettingsConfig {
+  userAgent: string;
+  platformName: string;
+  manufacturer: string;
+  model: string;
+  civilCode: string;
+  address: string;
+}
+
 export interface ServiceConfigAggregate {
   positionHistory: { enabled: boolean; retentionDays: number };
   cloudRecordingRetention: { retentionDays: number };
@@ -1827,6 +1883,7 @@ export interface ServiceConfigAggregate {
   fixedAddressPlayback: FixedAddressPlaybackConfig;
   playAuth: PlayAuthConfig;
   sipLog: SIPLogConfig;
+  cascade?: CascadeSettingsConfig;
 }
 
 export const fetchServiceConfig = () =>
@@ -1907,13 +1964,18 @@ export const fetchSipSetupStatus = () => http.request<BaseResult<SipSetupStatus>
 export const fetchSipNetworkInterfaces = () =>
   http.request<BaseResult<SipNetworkInterfaces>>("get", baseUrlApi("gb28181/sip/setup/network-interfaces"));
 
-// 保存后端会立即热启动 SIP,响应体带 reloadedOk 表示是否成功,失败时 reloadError 是原因字符串.
+// 保存后端会分别返回 SIP 热重载与 ZLM 平台媒体默认值收敛结果.
 export const saveSipSetupConfig = (data: SaveSipConfigPayload) =>
-  http.request<BaseResult<{ config: SipConfigSummary; reloadedOk: boolean; reloadError: string; runtime: SipRuntimeStatus }>>(
-    "put",
-    baseUrlApi("gb28181/sip/setup/config"),
-    { data }
-  );
+  http.request<
+    BaseResult<{
+      config: SipConfigSummary;
+      reloadedOk: boolean;
+      reloadError: string;
+      mediaDefaultsApplied?: boolean;
+      mediaDefaultsError?: string;
+      runtime: SipRuntimeStatus;
+    }>
+  >("put", baseUrlApi("gb28181/sip/setup/config"), { data });
 
 // 2026-07-20 后端不再持久化 skip 状态,仅返回 acknowledged 用于审计. 暂缓由前端 sessionStorage 记住.
 export const skipSipSetup = () =>

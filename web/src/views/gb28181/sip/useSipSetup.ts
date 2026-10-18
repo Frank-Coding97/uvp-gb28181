@@ -57,6 +57,8 @@ type SaveResult = BaseResult<{
   config: NonNullable<SipSetupStatus["config"]>;
   reloadedOk: boolean;
   reloadError: string;
+  mediaDefaultsApplied?: boolean;
+  mediaDefaultsError?: string;
   runtime: SipRuntimeStatus;
 }>;
 

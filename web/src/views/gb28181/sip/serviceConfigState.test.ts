@@ -3,6 +3,7 @@ import {
   cascadeServiceConfigLabels,
   createStaticServiceConfigDraft,
   normalizePlayAuthConfig,
+  validateCascadeSettings,
   playbackServiceConfigLabels,
   staticServiceConfigLabels
 } from "./serviceConfigState";
@@ -43,7 +44,7 @@ describe("static service config draft", () => {
     expect(playbackServiceConfigLabels).toHaveLength(9);
     expect(playbackServiceConfigLabels).not.toContain("推流是否录制");
     expect(playbackServiceConfigLabels).not.toContain("推流鉴权");
-    expect(cascadeServiceConfigLabels).toHaveLength(7);
+    expect(cascadeServiceConfigLabels).toEqual(["User-Agent", "平台名称", "厂商", "型号", "行政区划", "安装地址"]);
     expect(draft.playback.fixedAddressEnabled).toBe(false);
     expect(draft.playback.autoOnDemandEnabled).toBe(false);
     expect(draft.playback.authEnabled).toBe(false);
@@ -62,13 +63,32 @@ describe("static service config draft", () => {
     expect(playbackServiceConfigLabels).not.toContain("是否开启无人观看自动停止");
     expect(draft.playback).not.toHaveProperty("recordPushStream");
     expect(draft.playback).not.toHaveProperty("pushAuth");
-    expect(draft.cascade.parentInviteTimeoutMs).toBe(60000);
-    expect(draft.cascade.intercomStreamMode).toBe("TCP被动");
-    expect(draft.cascade.offlineRetryIntervalSec).toBe(60);
+    expect(draft.cascade).toEqual({
+      userAgent: "UVP-GB28181",
+      platformName: "UVP GB28181",
+      manufacturer: "UVP",
+      model: "UVP-GB28181",
+      civilCode: "",
+      address: ""
+    });
+    expect(draft.cascade).not.toHaveProperty("parentInviteTimeoutMs");
     expect(staticServiceConfigLabels).not.toContain("SIP平台 ID");
     expect(staticServiceConfigLabels).not.toContain("SIP端口");
     expect(staticServiceConfigLabels).not.toContain("SIP域");
     expect(staticServiceConfigLabels).not.toContain("SIP密码");
+  });
+
+  it("validates shared cascade identity and administrative codes before saving", () => {
+    const valid = createStaticServiceConfigDraft().cascade;
+    for (const civilCode of ["", "34", "3402", "340200", "34020001"]) {
+      expect(validateCascadeSettings({ ...valid, civilCode })).toEqual({});
+    }
+    expect(validateCascadeSettings({ ...valid, userAgent: "UVP\r\nInjected: true" })).toHaveProperty("userAgent");
+    expect(validateCascadeSettings({ ...valid, platformName: "  " })).toHaveProperty("platformName");
+    expect(validateCascadeSettings({ ...valid, civilCode: "34020x" })).toHaveProperty("civilCode");
+    expect(validateCascadeSettings({ ...valid, civilCode: "340" })).toHaveProperty("civilCode");
+    expect(validateCascadeSettings({ ...valid, userAgent: "a".repeat(129) })).toHaveProperty("userAgent");
+    expect(validateCascadeSettings({ ...valid, address: "a".repeat(257) })).toHaveProperty("address");
   });
 
   it("disables IP binding whenever playback auth is disabled", () => {
