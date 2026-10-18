@@ -62,6 +62,15 @@ processauthority:
   # 所在文件系统只认 ext4/xfs/btrfs/f2fs，以及 overlayfs（容器根，绿色包装进容器时用）；
   # 网络盘、内存盘会被拒绝启动（错误码 reason=state_unavailable）。
   state_dir: "" # 例如 /opt/uvp-gb28181/data/process-authority
+upgrade:
+  # 自建 HTTPS 发布站点的 stable 清单地址；运行时不访问 GitHub。
+  release_source: ""
+  # 内置可信 Ed25519 公钥，键为 key_id，值为标准 Base64 或十六进制。
+  trusted_keys: {}
+  # 业务进程上传离线包的受限收件目录；留空时使用注册状态目录下的 staging。
+  inbox: ""
+  # standalone、systemd 或 compose；留空时按当前运行环境推断。
+  deployment: ""
 openapi:
   enabled: false # 首版单 API 进程；启动时决定，默认关闭；媒体申请仍受独立门禁
   play_enabled: false # 仅启动期激活；需完整媒体门禁，启用后的持久鉴权锁不随关闭接入解除

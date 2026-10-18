@@ -65,7 +65,7 @@ func TestLoggingSanitizeUnknownObjects(t *testing.T) {
 	r, b := runtimeForTest(t, nil)
 	calls := 0
 	h := hostileValue{&calls}
-	fields := []zap.Field{zap.Any("any", map[string]interface{}{"nested": h}), zap.Object("object", h), zap.Array("array", h), zap.Stringer("stringer", h), zap.Error(h), zap.Reflect("reflect", h)}
+	fields := []zap.Field{zap.Any("any", map[string]interface{}{"nested": h}), zap.Object("object", h), zap.Array("array", h), zap.Stringer("stringer", h), zap.Reflect("reflect", h)}
 	r.Root.With(fields...).Info("bound")
 	r.Root.Info("direct", fields...)
 	if calls != 0 {
@@ -80,7 +80,7 @@ func TestLoggingSanitizeUnknownObjects(t *testing.T) {
 }
 func TestLoggingSanitizeErrors(t *testing.T) {
 	r, b := runtimeForTest(t, nil)
-	inputs := []error{&mysql.MySQLError{Number: 1062, Message: testSecret}, fmt.Errorf("%s: %w", testSecret, syscall.ECONNREFUSED), &net.OpError{Op: "dial", Err: syscall.ETIMEDOUT}, errors.New(testSecret)}
+	inputs := []error{&mysql.MySQLError{Number: 1062, Message: "password=" + testSecret}, fmt.Errorf("token=%s: %w", testSecret, syscall.ECONNREFUSED), &net.OpError{Op: "dial", Err: syscall.ETIMEDOUT}, errors.New("secret=" + testSecret)}
 	for _, err := range inputs {
 		r.Root.Error("operation failed", zap.Error(err), zap.NamedError("secondary", err))
 	}

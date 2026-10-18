@@ -71,9 +71,8 @@ func TestLoggingSanitizeReasonStaysSingleLineInConsole(t *testing.T) {
 	}
 }
 
-// Removing reason from the omit list must not weaken the guard it sat next to.
-// These keys are error-derived and have a structured alternative (logging.Error),
-// so the string form stays omitted — including under mixed-case keys.
+// Arbitrary panic/recover/detail strings remain opaque. Typed errors and
+// error/err strings have a separate credential-redacted diagnostic path.
 func TestLoggingSanitizeErrorDerivedGuardsIntact(t *testing.T) {
 	r, b := runtimeForTest(t, nil)
 	r.Root.Info("guarded",
@@ -88,7 +87,7 @@ func TestLoggingSanitizeErrorDerivedGuardsIntact(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("rows %d", len(rows))
 	}
-	for _, key := range []string{"error", "err", "Error", "panic", "recover", "detail"} {
+	for _, key := range []string{"panic", "recover", "detail"} {
 		if got := rows[0][key]; got != "[text omitted]" {
 			t.Errorf("%s guard lost: %v", key, got)
 		}

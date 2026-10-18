@@ -29,8 +29,8 @@ const (
 // safeError is the only object marshaler the core trusts. It never retains the
 // original error, and its encoder cannot invoke third-party formatting code.
 type safeError struct {
-	class, typ, code string
-	number           int64
+	class, typ, code, detail string
+	number                   int64
 }
 
 func (e safeError) MarshalLogObject(enc zapcore.ObjectEncoder) error {
@@ -40,6 +40,9 @@ func (e safeError) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 		enc.AddInt64("code", e.number)
 	} else if e.code != "" {
 		enc.AddString("code", e.code)
+	}
+	if e.detail != "" {
+		enc.AddString("detail", e.detail)
 	}
 	return nil
 }
@@ -58,8 +61,10 @@ func TypeName(v interface{}) string {
 	s, _ = clipJSON(s, 128)
 	return s
 }
-func summarizeError(err error) safeError {
-	out := safeError{class: "unknown", typ: TypeName(err)}
+func summarizeError(err error) (out safeError) {
+	out = safeError{class: "unknown", typ: TypeName(err)}
+	original := err
+	defer func() { out.detail = errorDetail(original) }()
 	for depth := 0; err != nil && depth < 8; depth++ {
 		switch e := err.(type) {
 		case *mysql.MySQLError:
@@ -230,21 +235,8 @@ const (
 // Shared by normalization and the unchanged-entry proof; adding a special
 // string source here automatically keeps it out of the fast path.
 //
-// The omit list is a guard for text the core cannot vouch for, not a list of
-// "uninteresting" fields. Every member is error-derived and has a sanctioned
-// structured alternative: logging.Error(err) renders class/type/code instead of
-// pasting raw text, so omitting the string form forces call sites to that path.
-// Keep them even though no call site currently uses them — they are the tripwire
-// that stops a future zap.String("error", err.Error()) from leaking a DSN.
-//
-// "reason" used to sit in this list by mistake. It is a controlled diagnostic
-// code at every call site ("no_candidate", "ambiguous_attempt", "accepted", ...),
-// never free text, and omitting it hid the answer on the highest-volume WARN in
-// the tree (ptz.response.unmatched, ~600 lines per log file). It now flows
-// through the ordinary string path: retained, bounded by the 2048-byte clip, and
-// counted by "truncated" when cut. If a future call site needs to pass genuinely
-// untrusted text, pre-scrub it there rather than re-adding the key here.
-// Contract: docs/logging-governance/contracts/sanitize-policy.md
+// Error fields retain credential-redacted diagnostics. Other arbitrary detail
+// and panic strings remain opaque; URL fields keep their existing policy.
 func stringFieldPolicy(key string) stringFieldRule {
 	k := strings.ToLower(key)
 	switch k {
@@ -273,6 +265,9 @@ func sanitizeField(f zap.Field) zap.Field {
 	case zapcore.ArrayMarshalerType, zapcore.ReflectType, zapcore.StringerType, zapcore.InlineMarshalerType, zapcore.BinaryType, zapcore.ByteStringType:
 		return zap.String(f.Key, "[omitted:"+TypeName(f.Interface)+"]")
 	case zapcore.StringType:
+		if strings.EqualFold(f.Key, "error") || strings.EqualFold(f.Key, "err") {
+			return zap.String(f.Key, redactErrorDetail(f.String))
+		}
 		policy := stringFieldPolicy(f.Key)
 		if policy == stringFieldOmit {
 			return zap.String(f.Key, "[text omitted]")
@@ -348,6 +343,9 @@ func fieldSize(f zap.Field) int {
 		n += encodedStringSize(f.String)
 	case zapcore.ObjectMarshalerType:
 		n += 256
+		if e, ok := f.Interface.(safeError); ok {
+			n += encodedStringSize(e.detail)
+		}
 	default:
 		n += 64
 	}

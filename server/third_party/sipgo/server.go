@@ -355,6 +355,14 @@ func (srv *Server) WriteResponse(r *sip.Response) error {
 	return srv.tp.WriteMsg(r)
 }
 
+// SetCancelValidator installs an optional transaction-layer validator for
+// CANCEL requests before the built-in 200/487 processing.
+func (srv *Server) SetCancelValidator(validator sip.CancelValidator) {
+	if srv != nil && srv.tx != nil {
+		srv.tx.SetCancelValidator(validator)
+	}
+}
+
 // QuiesceRequests closes new server transaction admission while preserving
 // matching retransmissions, ACK, CANCEL and responses.
 func (srv *Server) QuiesceRequests() {

@@ -353,3 +353,106 @@ func TestSqliteDialectIsPureGo(t *testing.T) {
 		t.Fatalf("连接应可用: %v", err)
 	}
 }
+
+func TestGetOneSqliteReadOnlyClientRequiresExistingRegularFile(t *testing.T) {
+	dir := t.TempDir()
+	originalBasePath := app.BasePath
+	app.BasePath = dir
+	t.Cleanup(func() { app.BasePath = originalBasePath })
+
+	missingParent := filepath.Join(dir, "missing")
+	for _, path := range []string{filepath.Join(missingParent, "uvp.db"), dir} {
+		withSQLiteConfig(t, sqliteFixture{
+			"gormv2." + consts.DbTypeSqlite + ".write.database": path,
+		})
+		if _, err := GetOneSqliteReadOnlyClient(); err == nil {
+			t.Fatalf("只读连接接受了不存在或非常规的 SQLite 路径 %q", path)
+		}
+	}
+	if _, err := os.Stat(missingParent); !os.IsNotExist(err) {
+		t.Fatalf("只读预检不应创建缺失的父目录: %v", err)
+	}
+}
+
+func TestGetOneSqliteReadOnlyClientRejectsWrites(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "uvp.db")
+	writable, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writable.Exec("CREATE TABLE migration_probe (id INTEGER PRIMARY KEY, value TEXT)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := writable.Exec("INSERT INTO migration_probe(value) VALUES (?)", "before").Error; err != nil {
+		t.Fatal(err)
+	}
+	var beforeJournal string
+	if err := writable.Raw("PRAGMA journal_mode").Scan(&beforeJournal).Error; err != nil {
+		t.Fatal(err)
+	}
+	var beforeRows int
+	if err := writable.Raw("SELECT count(*) FROM migration_probe").Scan(&beforeRows).Error; err != nil {
+		t.Fatal(err)
+	}
+	writableSQL, err := writable.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writableSQL.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	originalBasePath := app.BasePath
+	app.BasePath = dir
+	t.Cleanup(func() { app.BasePath = originalBasePath })
+	withSQLiteConfig(t, sqliteFixture{
+		"gormv2." + consts.DbTypeSqlite + ".write.database": path,
+	})
+	readonly, err := GetOneSqliteReadOnlyClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	readonlySQL, err := readonly.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value string
+	if err := readonly.Raw("SELECT value FROM migration_probe WHERE id = 1").Scan(&value).Error; err != nil {
+		t.Fatal(err)
+	}
+	if value != "before" {
+		t.Fatalf("查询结果 = %q", value)
+	}
+	if err := readonly.Exec("INSERT INTO migration_probe(value) VALUES ('after')").Error; err == nil {
+		t.Fatal("只读 SQLite 连接接受了写入")
+	}
+	var afterJournal string
+	if err := readonly.Raw("PRAGMA journal_mode").Scan(&afterJournal).Error; err != nil {
+		t.Fatal(err)
+	}
+	if afterJournal != beforeJournal {
+		t.Fatalf("journal_mode 从 %q 变成了 %q", beforeJournal, afterJournal)
+	}
+	var afterRows int
+	if err := readonly.Raw("SELECT count(*) FROM migration_probe").Scan(&afterRows).Error; err != nil {
+		t.Fatal(err)
+	}
+	if afterRows != beforeRows {
+		t.Fatalf("迁移账本行数从 %d 变成了 %d", beforeRows, afterRows)
+	}
+	if err := readonlySQL.Close(); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatal("只读预检修改了 SQLite 数据库文件")
+	}
+}

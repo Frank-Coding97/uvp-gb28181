@@ -196,12 +196,15 @@ CREATE TABLE IF NOT EXISTS "gb_cascade_platform" (
   "keepalive_interval" INTEGER NOT NULL CHECK ("keepalive_interval" IS NULL OR typeof("keepalive_interval") = 'integer') DEFAULT 60,
   "retry_policy" TEXT NULL,
   "transport" TEXT NOT NULL CHECK ("transport" IS NULL OR length("transport") <= 16) DEFAULT 'UDP',
-  "catalog_batch_size" INTEGER NOT NULL CHECK ("catalog_batch_size" IS NULL OR typeof("catalog_batch_size") = 'integer') DEFAULT 100,
+  "catalog_batch_size" INTEGER NOT NULL CHECK ("catalog_batch_size" IS NULL OR typeof("catalog_batch_size") = 'integer') DEFAULT 1,
+  "auto_push_catalog" INTEGER NOT NULL CHECK ("auto_push_catalog" IS NULL OR typeof("auto_push_catalog") = 'integer') CHECK ("auto_push_catalog" IS NULL OR "auto_push_catalog" IN (0, 1)) DEFAULT 0,
   "publish_platform" INTEGER NOT NULL CHECK ("publish_platform" IS NULL OR typeof("publish_platform") = 'integer') CHECK ("publish_platform" IS NULL OR "publish_platform" IN (0, 1)) DEFAULT 0,
   "publish_civil" INTEGER NOT NULL CHECK ("publish_civil" IS NULL OR typeof("publish_civil") = 'integer') CHECK ("publish_civil" IS NULL OR "publish_civil" IN (0, 1)) DEFAULT 0,
   "publish_group" INTEGER NOT NULL CHECK ("publish_group" IS NULL OR typeof("publish_group") = 'integer') CHECK ("publish_group" IS NULL OR "publish_group" IN (0, 1)) DEFAULT 0,
-  "max_streams" INTEGER NOT NULL CHECK ("max_streams" IS NULL OR typeof("max_streams") = 'integer') DEFAULT 1,
+  "max_streams" INTEGER NOT NULL CHECK ("max_streams" IS NULL OR typeof("max_streams") = 'integer') DEFAULT 0,
   "ptz_enabled" INTEGER NOT NULL CHECK ("ptz_enabled" IS NULL OR typeof("ptz_enabled") = 'integer') CHECK ("ptz_enabled" IS NULL OR "ptz_enabled" IN (0, 1)) DEFAULT 0,
+  "recording_enabled" INTEGER NOT NULL CHECK ("recording_enabled" IS NULL OR typeof("recording_enabled") = 'integer') CHECK ("recording_enabled" IS NULL OR "recording_enabled" IN (0, 1)) DEFAULT 0,
+  "rtcp_keepalive" INTEGER NOT NULL CHECK ("rtcp_keepalive" IS NULL OR typeof("rtcp_keepalive") = 'integer') CHECK ("rtcp_keepalive" IS NULL OR "rtcp_keepalive" IN (0, 1)) DEFAULT 0,
   "register_at" DATETIME NULL,
   "register_expires_at" DATETIME NULL,
   "heartbeat_at" DATETIME NULL,
@@ -2010,6 +2013,25 @@ CREATE TABLE IF NOT EXISTS "sys_openapi_client_scope" (
   "updated_at" DATETIME NOT NULL,
   PRIMARY KEY ("client_id", "scope")
 );
+CREATE TABLE IF NOT EXISTS "sys_openapi_device_capture_session" (
+  "id" INTEGER PRIMARY KEY AUTOINCREMENT CHECK ("id" IS NULL OR (typeof("id") = 'integer' AND "id" >= 0)),
+  "client_id" INTEGER NOT NULL CHECK ("client_id" IS NULL OR typeof("client_id") = 'integer'),
+  "idempotency_digest" TEXT NOT NULL CHECK ("idempotency_digest" IS NULL OR length("idempotency_digest") <= 64),
+  "request_digest" TEXT NOT NULL CHECK ("request_digest" IS NULL OR length("request_digest") <= 64),
+  "session_id" TEXT NOT NULL CHECK ("session_id" IS NULL OR length("session_id") <= 36),
+  "registry_session_id" TEXT NOT NULL CHECK ("registry_session_id" IS NULL OR length("registry_session_id") <= 36) DEFAULT '',
+  "operation_id" TEXT NOT NULL CHECK ("operation_id" IS NULL OR length("operation_id") <= 64) DEFAULT '',
+  "device_id" TEXT NOT NULL CHECK ("device_id" IS NULL OR length("device_id") <= 20),
+  "channel_id" TEXT NOT NULL CHECK ("channel_id" IS NULL OR length("channel_id") <= 20),
+  "internal_device_id" INTEGER NOT NULL CHECK ("internal_device_id" IS NULL OR (typeof("internal_device_id") = 'integer' AND "internal_device_id" >= 0)),
+  "internal_channel_id" INTEGER NOT NULL CHECK ("internal_channel_id" IS NULL OR (typeof("internal_channel_id") = 'integer' AND "internal_channel_id" >= 0)),
+  "department_id" INTEGER NOT NULL CHECK ("department_id" IS NULL OR (typeof("department_id") = 'integer' AND "department_id" >= 0)),
+  "snap_num" INTEGER NOT NULL CHECK ("snap_num" IS NULL OR typeof("snap_num") = 'integer'),
+  "interval_seconds" INTEGER NOT NULL CHECK ("interval_seconds" IS NULL OR typeof("interval_seconds") = 'integer'),
+  "state" TEXT NOT NULL CHECK ("state" IS NULL OR length("state") <= 24),
+  "created_at" DATETIME NOT NULL,
+  "updated_at" DATETIME NOT NULL
+);
 CREATE TABLE IF NOT EXISTS "sys_openapi_nonce" (
   "client_id" INTEGER NOT NULL CHECK ("client_id" IS NULL OR typeof("client_id") = 'integer'),
   "nonce" TEXT NOT NULL CHECK ("nonce" IS NULL OR length("nonce") <= 32),
@@ -2283,25 +2305,6 @@ CREATE TABLE IF NOT EXISTS "sys_openapi_runtime_state" (
   "loaded_at" DATETIME NULL,
   "updated_at" DATETIME NOT NULL,
   PRIMARY KEY ("id")
-);
-CREATE TABLE IF NOT EXISTS "sys_openapi_device_capture_session" (
-  "id" INTEGER PRIMARY KEY AUTOINCREMENT CHECK ("id" IS NULL OR (typeof("id") = 'integer' AND "id" >= 0)),
-  "client_id" INTEGER NOT NULL CHECK ("client_id" IS NULL OR typeof("client_id") = 'integer'),
-  "idempotency_digest" TEXT NOT NULL CHECK ("idempotency_digest" IS NULL OR length("idempotency_digest") <= 64),
-  "request_digest" TEXT NOT NULL CHECK ("request_digest" IS NULL OR length("request_digest") <= 64),
-  "session_id" TEXT NOT NULL CHECK ("session_id" IS NULL OR length("session_id") <= 36),
-  "registry_session_id" TEXT NOT NULL CHECK ("registry_session_id" IS NULL OR length("registry_session_id") <= 36) DEFAULT '',
-  "operation_id" TEXT NOT NULL CHECK ("operation_id" IS NULL OR length("operation_id") <= 64) DEFAULT '',
-  "device_id" TEXT NOT NULL CHECK ("device_id" IS NULL OR length("device_id") <= 20),
-  "channel_id" TEXT NOT NULL CHECK ("channel_id" IS NULL OR length("channel_id") <= 20),
-  "internal_device_id" INTEGER NOT NULL CHECK ("internal_device_id" IS NULL OR (typeof("internal_device_id") = 'integer' AND "internal_device_id" >= 0)),
-  "internal_channel_id" INTEGER NOT NULL CHECK ("internal_channel_id" IS NULL OR (typeof("internal_channel_id") = 'integer' AND "internal_channel_id" >= 0)),
-  "department_id" INTEGER NOT NULL CHECK ("department_id" IS NULL OR (typeof("department_id") = 'integer' AND "department_id" >= 0)),
-  "snap_num" INTEGER NOT NULL CHECK ("snap_num" IS NULL OR typeof("snap_num") = 'integer'),
-  "interval_seconds" INTEGER NOT NULL CHECK ("interval_seconds" IS NULL OR typeof("interval_seconds") = 'integer'),
-  "state" TEXT NOT NULL CHECK ("state" IS NULL OR length("state") <= 24),
-  "created_at" DATETIME NOT NULL,
-  "updated_at" DATETIME NOT NULL
 );
 
 -- 索引与表级约束（SQLite 不允许写在表定义内部；必须在建表之后执行）
@@ -2591,6 +2594,11 @@ CREATE INDEX IF NOT EXISTS "idx_openapi_audit_client_time" ON "sys_openapi_audit
 CREATE INDEX IF NOT EXISTS "idx_openapi_audit_time" ON "sys_openapi_audit" ("created_at");
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_openapi_ak" ON "sys_openapi_client" ("ak");
 CREATE INDEX IF NOT EXISTS "idx_openapi_client_dept" ON "sys_openapi_client" ("owner_dept_id");
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_openapi_capture_idem" ON "sys_openapi_device_capture_session" ("client_id", "idempotency_digest");
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_openapi_capture_session" ON "sys_openapi_device_capture_session" ("session_id");
+CREATE INDEX IF NOT EXISTS "idx_openapi_capture_registry_session" ON "sys_openapi_device_capture_session" ("registry_session_id");
+CREATE INDEX IF NOT EXISTS "idx_openapi_capture_session_client" ON "sys_openapi_device_capture_session" ("client_id", "device_id", "channel_id");
+CREATE INDEX IF NOT EXISTS "idx_openapi_capture_state_updated" ON "sys_openapi_device_capture_session" ("state", "created_at");
 CREATE INDEX IF NOT EXISTS "idx_openapi_nonce_expiry" ON "sys_openapi_nonce" ("expires_at");
 CREATE INDEX IF NOT EXISTS "fk_openapi_authority_generation" ON "sys_openapi_process_authority" ("domain_id", "current_generation_id");
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_openapi_generation_domain" ON "sys_openapi_process_generation" ("domain_id", "generation_id");
@@ -2624,11 +2632,6 @@ CREATE INDEX IF NOT EXISTS "idx_openapi_release_item_capability" ON "sys_openapi
 CREATE INDEX IF NOT EXISTS "idx_openapi_release_item_operation" ON "sys_openapi_release_item" ("operation_id");
 CREATE INDEX IF NOT EXISTS "idx_openapi_release_item_release" ON "sys_openapi_release_item" ("release_id");
 CREATE INDEX IF NOT EXISTS "idx_openapi_runtime_release" ON "sys_openapi_runtime_state" ("active_release_id");
-CREATE UNIQUE INDEX IF NOT EXISTS "uk_openapi_capture_idem" ON "sys_openapi_device_capture_session" ("client_id", "idempotency_digest");
-CREATE UNIQUE INDEX IF NOT EXISTS "uk_openapi_capture_session" ON "sys_openapi_device_capture_session" ("session_id");
-CREATE INDEX IF NOT EXISTS "idx_openapi_capture_registry_session" ON "sys_openapi_device_capture_session" ("registry_session_id");
-CREATE INDEX IF NOT EXISTS "idx_openapi_capture_session_client" ON "sys_openapi_device_capture_session" ("client_id", "device_id", "channel_id");
-CREATE INDEX IF NOT EXISTS "idx_openapi_capture_state_updated" ON "sys_openapi_device_capture_session" ("state", "created_at");
 
 -- Deterministic system seed and permission metadata.
 INSERT INTO "gb_sip_security_policy" ("id", "scope_key", "mode", "window_seconds", "ban_score", "max_packet_bytes", "max_udp_per_window", "max_tcp_connections", "sample_per_source", "nonce_ttl_seconds", "ban_ttl_steps", "allowlist_text", "updated_by", "updated_at") VALUES
@@ -2694,6 +2697,11 @@ INSERT INTO "sys_api" ("id", "title", "path", "method", "api_group", "created_at
 (61, '设置数据权限', '/api/sysRole/dataScope', 'PUT', '角色管理', '2025-09-26 17:04:15.000000', '2025-09-26 17:04:15.000000', NULL, 1),
 (62, '读取系统配置', '/api/config/get', 'GET', '系统配置', '2025-10-09 16:21:29.000000', '2025-10-09 16:21:29.000000', NULL, 1),
 (63, '修改系统配置', '/api/config/update', 'PUT', '系统配置', '2025-10-09 16:21:59.000000', '2025-10-09 16:22:09.000000', NULL, 1),
+(65, '列表查询', '/api/plugins/example/list', 'GET', '插件示例', '2025-10-14 10:54:47.000000', '2025-10-14 10:54:47.000000', NULL, 1),
+(66, '新增插件示例', '/api/plugins/example/add', 'POST', '插件示例', '2025-10-14 10:56:43.000000', '2025-10-14 10:56:43.000000', NULL, 1),
+(67, '修改', '/api/plugins/example/edit', 'PUT', '插件示例', '2025-10-14 10:57:10.000000', '2025-10-14 10:57:17.000000', NULL, 1),
+(68, '删除插件示例', '/api/plugins/example/delete', 'DELETE', '插件示例', '2025-10-14 10:58:03.000000', '2025-10-14 10:58:03.000000', NULL, 1),
+(69, '查询单条数据', '/api/plugins/example/:id', 'GET', '插件示例', '2025-10-14 10:59:33.000000', '2025-10-14 10:59:33.000000', NULL, 1),
 (70, '日志列表', '/api/sysOperationLog/list', 'GET', '日志中心', '2025-10-20 10:10:58.000000', '2025-10-20 10:10:58.000000', NULL, 1),
 (72, '日志删除', '/api/sysOperationLog/delete', 'DELETE', '日志中心', '2025-10-20 10:13:19.000000', '2025-10-20 10:13:19.000000', NULL, 1),
 (73, '日志导出', '/api/sysOperationLog/export', 'GET', '日志中心', '2025-10-20 10:14:11.000000', '2025-10-20 10:14:11.000000', NULL, 1),
@@ -2713,6 +2721,10 @@ INSERT INTO "sys_api" ("id", "title", "path", "method", "api_group", "created_at
 (195, '刷新代码生成配置的字段信息', '/api/sysGen/refreshFields', 'PUT', '代码生成', '2025-11-17 15:27:33.000000', '2025-11-17 15:27:33.000000', NULL, 1),
 (196, '生成菜单', '/api/codegen/insertmenuandapi', 'POST', '代码生成', '2025-11-26 15:12:56.000000', '2025-11-26 15:12:56.000000', NULL, 1),
 (197, '批量删除', '/api/sysMenu/batchDelete', 'DELETE', '菜单管理', '2025-12-05 17:48:52.000000', '2025-12-05 17:48:52.000000', NULL, 1),
+(198, '获取插件列表', '/api/pluginsmanager/exports', 'GET', '插件管理', '2025-12-08 16:38:26.000000', '2025-12-08 16:38:26.000000', NULL, 1),
+(199, '导出插件', '/api/pluginsmanager/export', 'POST', '插件管理', '2025-12-08 16:39:19.000000', '2025-12-08 16:44:36.000000', NULL, 1),
+(200, '导入插件', '/api/pluginsmanager/import', 'POST', '插件管理', '2025-12-08 16:47:11.000000', '2025-12-08 16:47:11.000000', NULL, 1),
+(201, '卸载插件', '/api/pluginsmanager/uninstall', 'DELETE', '插件管理', '2025-12-08 16:48:07.000000', '2025-12-08 16:48:07.000000', NULL, 1),
 (203, '定时任务列表', '/api/sysJobs/list', 'GET', '定时任务', '2026-02-11 11:56:54.000000', '2026-02-11 11:56:54.000000', NULL, 1),
 (204, '定时任务获取所有执行器列表', '/api/sysJobs/executors', 'GET', '定时任务', '2026-02-12 17:57:47.000000', '2026-02-12 17:57:47.000000', NULL, 1),
 (205, '定时任务新增', '/api/sysJobs/add', 'POST', '定时任务', '2026-02-11 11:57:33.000000', '2026-02-11 11:57:33.000000', NULL, 1),
@@ -3073,7 +3085,10 @@ INSERT INTO "sys_api" ("id", "title", "path", "method", "api_group", "created_at
 (647, '固件仓库详情', '/api/gb28181/device-mgmt/firmware-repository/:id', 'GET', '设备管理', NULL, NULL, NULL, 1),
 (648, '获取固件下载链接', '/api/gb28181/device-mgmt/firmware-repository/:id/download-link', 'POST', '设备管理', NULL, NULL, NULL, 1),
 (649, '查询国标服务配置', '/api/gb28181/sip/service-config', 'GET', '国标平台', NULL, NULL, NULL, 1),
-(650, '保存国标服务配置', '/api/gb28181/sip/service-config', 'PUT', '国标平台', NULL, NULL, NULL, 1);
+(650, '保存国标服务配置', '/api/gb28181/sip/service-config', 'PUT', '国标平台', NULL, NULL, NULL, 1),
+(651, '查看级联业务分组', '/api/gb28181/cascade/platforms/:id/business-group', 'GET', '国标级联', NULL, NULL, NULL, 1),
+(652, '保存级联业务分组', '/api/gb28181/cascade/platforms/:id/business-group', 'PUT', '国标级联', NULL, NULL, NULL, 1),
+(653, '设置级联业务分组发布', '/api/gb28181/cascade/platforms/:id/publish-group', 'PUT', '国标级联', NULL, NULL, NULL, 1);
 INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5") VALUES
 (6266, 'g', 'user_1', 'role_1', '*', '', '', ''),
 (8166, 'p', 'role_3', '/api/users/logout', 'POST', '*', '', ''),
@@ -3200,6 +3215,7 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8349, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/streams/playback-grant', 'POST', '*', '', ''),
 (8350, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id/ptz/home-position', 'PATCH', '*', '', ''),
 (8351, 'p', 'role_1', '/api/sysAffix/upload', 'POST', '*', '', ''),
+(8352, 'p', 'role_1', '/api/pluginsmanager/exports', 'GET', '*', '', ''),
 (8353, 'p', 'role_1', '/api/sysLoginLog/list', 'GET', '*', '', ''),
 (8354, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id/cloud-recording', 'PATCH', '*', '', ''),
 (8355, 'p', 'role_1', '/api/gb28181/openapi-clients', 'POST', '*', '', ''),
@@ -3236,6 +3252,7 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8386, 'p', 'role_1', '/api/gb28181/device-mgmt/permission-workbench/assignments/departments', 'POST', '*', '', ''),
 (8387, 'p', 'role_1', '/api/gb28181/device-mgmt/map/markers', 'GET', '*', '', ''),
 (8388, 'p', 'role_1', '/api/sysDict/add', 'POST', '*', '', ''),
+(8389, 'p', 'role_1', '/api/plugins/example/:id', 'GET', '*', '', ''),
 (8390, 'p', 'role_1', '/api/gb28181/zlm/nodes', 'POST', '*', '', ''),
 (8391, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id', 'DELETE', '*', '', ''),
 (8392, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/recordings/runtime/force-stop', 'POST', '*', '', ''),
@@ -3261,6 +3278,7 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8412, 'p', 'role_1', '/api/gb28181/sip/service-config/sync-channels-on-online', 'PUT', '*', '', ''),
 (8413, 'p', 'role_1', '/api/gb28181/device-mgmt/permission-workbench/assignments', 'POST', '*', '', ''),
 (8414, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/streams/close/batch/preflight', 'POST', '*', '', ''),
+(8415, 'p', 'role_1', '/api/plugins/example/list', 'GET', '*', '', ''),
 (8416, 'p', 'role_1', '/api/sysDepartment/delete', 'DELETE', '*', '', ''),
 (8417, 'p', 'role_1', '/api/sysRole/dataScope', 'PUT', '*', '', ''),
 (8418, 'p', 'role_1', '/api/gb28181/cloud-recordings/files/:id/access', 'POST', '*', '', ''),
@@ -3310,6 +3328,7 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8461, 'p', 'role_1', '/api/gb28181/recording-plans/channels/:channelId/diagnosis', 'GET', '*', '', ''),
 (8462, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/config', 'PUT', '*', '', ''),
 (8463, 'p', 'role_1', '/api/gb28181/device-mgmt/device/batch-delete', 'POST', '*', '', ''),
+(8464, 'p', 'role_1', '/api/plugins/example/add', 'POST', '*', '', ''),
 (8465, 'p', 'role_1', '/api/sysJobs/executors', 'GET', '*', '', ''),
 (8466, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/proxies/push', 'POST', '*', '', ''),
 (8467, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/ffmpeg-sources/:key', 'DELETE', '*', '', ''),
@@ -3340,6 +3359,7 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8492, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id/ptz/presets/:presetId/call', 'POST', '*', '', ''),
 (8493, 'p', 'role_1', '/api/gb28181/device-mgmt/channel/:id/ptz/operations/:operationId', 'GET', '*', '', ''),
 (8494, 'p', 'role_1', '/api/sysMenu/batchDelete', 'DELETE', '*', '', ''),
+(8495, 'p', 'role_1', '/api/pluginsmanager/export', 'POST', '*', '', ''),
 (8496, 'p', 'role_1', '/api/gb28181/sip/service-config/play-auth', 'PUT', '*', '', ''),
 (8497, 'p', 'role_1', '/api/gb28181/recording-plans/:id/channels', 'GET', '*', '', ''),
 (8498, 'p', 'role_1', '/api/users/profile', 'GET', '*', '', ''),
@@ -3355,6 +3375,7 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8508, 'p', 'role_1', '/api/gb28181/recording-plans/:id/assignment-options/channels', 'GET', '*', '', ''),
 (8509, 'p', 'role_1', '/api/gb28181/home/layout', 'DELETE', '*', '', ''),
 (8510, 'p', 'role_1', '/api/sysApi/delete', 'DELETE', '*', '', ''),
+(8511, 'p', 'role_1', '/api/plugins/example/edit', 'PUT', '*', '', ''),
 (8512, 'p', 'role_1', '/api/gb28181/alarms/batch-delete', 'POST', '*', '', ''),
 (8513, 'p', 'role_1', '/api/gb28181/cascade/platforms', 'POST', '*', '', ''),
 (8514, 'p', 'role_1', '/api/gb28181/device-mgmt/permission-workbench/devices/resolve', 'POST', '*', '', ''),
@@ -3379,6 +3400,7 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8533, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/streams/viewers', 'GET', '*', '', ''),
 (8534, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id', 'GET', '*', '', ''),
 (8535, 'p', 'role_1', '/api/gb28181/recording-plans/:id', 'PUT', '*', '', ''),
+(8536, 'p', 'role_1', '/api/pluginsmanager/uninstall', 'DELETE', '*', '', ''),
 (8537, 'p', 'role_1', '/api/gb28181/sip/service-config/ptz-default-speed', 'GET', '*', '', ''),
 (8538, 'p', 'role_1', '/api/gb28181/sip/setup/skip', 'POST', '*', '', ''),
 (8539, 'p', 'role_1', '/api/sysLoginLog/:id', 'GET', '*', '', ''),
@@ -3435,6 +3457,7 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8590, 'p', 'role_1', '/api/gb28181/device-mgmt/device/:id/maintenance-operations', 'GET', '*', '', ''),
 (8591, 'p', 'role_1', '/api/gb28181/device-mgmt/catalog/tree', 'GET', '*', '', ''),
 (8592, 'p', 'role_1', '/api/codegen/generate', 'POST', '*', '', ''),
+(8593, 'p', 'role_1', '/api/pluginsmanager/import', 'POST', '*', '', ''),
 (8594, 'p', 'role_1', '/api/gb28181/playback-schemes', 'POST', '*', '', ''),
 (8595, 'p', 'role_1', '/api/gb28181/cascade/platforms/:id', 'PUT', '*', '', ''),
 (8596, 'p', 'role_1', '/api/gb28181/recording-plans/channels/:channelId/recording-mode', 'PATCH', '*', '', ''),
@@ -3459,6 +3482,7 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (8615, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/activate', 'POST', '*', '', ''),
 (8616, 'p', 'role_1', '/api/gb28181/zlm/nodes/probe', 'POST', '*', '', ''),
 (8617, 'p', 'role_1', '/api/gb28181/zlm/nodes/:id/sessions/network', 'GET', '*', '', ''),
+(8618, 'p', 'role_1', '/api/plugins/example/delete', 'DELETE', '*', '', ''),
 (8619, 'p', 'role_1', '/api/sysGen/:id', 'GET', '*', '', ''),
 (8620, 'p', 'role_1', '/api/gb28181/sip-traces/sessions', 'GET', '*', '', ''),
 (8621, 'p', 'role_1', '/api/gb28181/device-traffic/viewers', 'GET', '*', '', ''),
@@ -3570,7 +3594,10 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (10293, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository/:id', 'GET', '*', '', ''),
 (10294, 'p', 'role_1', '/api/gb28181/device-mgmt/firmware-repository/:id/download-link', 'POST', '*', '', ''),
 (10295, 'p', 'role_1', '/api/gb28181/sip/service-config', 'GET', '*', '', ''),
-(10296, 'p', 'role_1', '/api/gb28181/sip/service-config', 'PUT', '*', '', '');
+(10296, 'p', 'role_1', '/api/gb28181/sip/service-config', 'PUT', '*', '', ''),
+(10297, 'p', 'role_1', '/api/gb28181/cascade/platforms/:id/business-group', 'GET', '*', '', ''),
+(10298, 'p', 'role_1', '/api/gb28181/cascade/platforms/:id/business-group', 'PUT', '*', '', ''),
+(10299, 'p', 'role_1', '/api/gb28181/cascade/platforms/:id/publish-group', 'PUT', '*', '', '');
 INSERT INTO "sys_civil_code" ("code", "name", "short_name", "parent_code", "level", "pinyin", "created_at", "updated_at") VALUES
 ('110000', '北京市', '北京市', '', 1, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),
 ('110100', '北京市市辖区', '市辖区', '110000', 2, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),
@@ -7222,6 +7249,11 @@ INSERT INTO "sys_menu" ("id", "parent_id", "path", "name", "redirect", "componen
 (140244, 1002, '', '', '', '', '数据权限', 0, 0, 0, 1, 0, '', 0, '', '', 0, 3, 0, 'system:role:dataScope', '2025-09-26 17:07:16.000000', '2025-09-26 17:07:16.000000', NULL, 1),
 (140245, 10, '/system/sysconfig', 'SystemSysconfig', '', 'system/sysconfig/sysconfig', 'system-config', 0, 0, 0, 1, 0, '', 0, '', 'lucide:SlidersHorizontal', 0, 2, 0, '', '2025-10-09 16:15:21.000000', '2026-07-08 10:46:25.000000', NULL, 1),
 (140246, 140245, '', '', '', '', '修改系统配置', 0, 0, 0, 1, 0, '', 0, '', '', 0, 3, 0, 'system:config:update', '2025-10-09 16:24:33.000000', '2025-10-09 16:24:33.000000', NULL, 1),
+(140247, 0, '/demo', 'Demo', '', '', 'plugin-example', 0, 0, 0, 1, 0, '', 0, '', 'lucide:Box', 170, 1, 0, '', '2025-10-13 14:38:38.000000', '2026-09-15 18:59:24.000000', NULL, 1),
+(140248, 140247, '/plugins/example', 'PluginsExample', '', 'plugins/example/views/examplelist', 'plugin-example', 0, 0, 0, 1, 0, '', 0, '', 'lucide:Box', 0, 2, 0, '', '2025-10-13 15:19:20.000000', '2026-07-08 10:46:25.000000', NULL, 1),
+(140249, 140248, '', '', '', '', '新增', 0, 0, 0, 1, 0, '', 0, '', '', 0, 3, 0, 'plugins:example:add', '2025-10-14 11:02:42.000000', '2025-10-14 11:02:42.000000', NULL, 1),
+(140250, 140248, '', '', '', '', '编辑', 0, 0, 0, 1, 0, '', 0, '', '', 0, 3, 0, 'plugins:example:edit', '2025-10-14 11:03:08.000000', '2025-10-14 11:03:08.000000', NULL, 1),
+(140251, 140248, '', '', '', '', '删除', 0, 0, 0, 1, 0, '', 0, '', '', 0, 3, 0, 'plugins:example:delete', '2025-10-14 11:03:25.000000', '2025-10-14 11:03:25.000000', NULL, 1),
 (140252, 1007, '', '', '', '', '修改密码、手机号等', 0, 0, 0, 1, 0, '', 0, '', '', 0, 3, 0, 'system:userinfo:updateAccount', '2025-10-17 11:12:56.000000', '2025-10-17 11:12:56.000000', NULL, 1),
 (140254, 140239, '', '', '', '', '复制链接', 0, 0, 0, 1, 0, '', 0, '', '', 0, 3, 0, 'system:affix:copy', '2025-10-17 11:38:09.000000', '2025-10-17 11:38:09.000000', NULL, 1),
 (140255, 1006, '', '', '', '', '导出', 0, 0, 0, 1, 0, '', 0, '', '', 0, 3, 0, 'system:log:export', '2025-10-20 10:16:51.000000', '2025-10-20 10:16:51.000000', NULL, 1),
@@ -7237,6 +7269,10 @@ INSERT INTO "sys_menu" ("id", "parent_id", "path", "name", "redirect", "componen
 (140333, 140265, '', '', '', '', '同步数据库', 0, 0, 0, 1, 0, '', 0, '', '', 1, 3, 0, 'system:codegen:refreshFields', '2025-11-17 15:35:51.000000', '2025-11-17 15:35:51.000000', NULL, 1),
 (140334, 140265, '', '', '', '', '删除', 0, 0, 0, 1, 0, '', 0, '', '', 1, 3, 0, 'system:codegen:delete', '2025-11-17 15:36:50.000000', '2025-11-17 15:36:50.000000', NULL, 1),
 (140335, 140265, '', '', '', '', '生成菜单', 0, 0, 0, 1, 0, '', 0, '', '', 0, 3, 0, 'system:codegen:insertmenuandapi', '2025-11-26 15:16:32.000000', '2025-11-26 15:16:32.000000', NULL, 1),
+(140336, 10, '/system/pluginsmanager', 'SystemPluginsmanager', '', 'system/pluginsmanager/pluginsmanager', 'plugins-manager', 0, 0, 0, 1, 0, '', 0, '', 'lucide:Blocks', 0, 2, 0, '', '2025-12-05 17:59:34.000000', '2026-07-08 10:46:25.000000', NULL, 1),
+(140338, 140336, '', '', '', '', '导出插件', 0, 0, 0, 1, 0, '', 0, '', '', 0, 3, 0, 'system:pluginsmanager:export', '2025-12-08 16:33:32.000000', '2025-12-08 16:33:32.000000', NULL, 1),
+(140339, 140336, '', '', '', '', '导入插件', 0, 0, 0, 1, 0, '', 0, '', '', 0, 3, 0, 'system:pluginsmanager:import', '2025-12-08 16:33:51.000000', '2025-12-08 16:33:51.000000', NULL, 1),
+(140340, 140336, '', '', '', '', '插件卸载', 0, 0, 0, 1, 0, '', 0, '', '', 0, 3, 0, 'system:pluginsmanager:uninstall', '2025-12-08 16:34:53.000000', '2025-12-08 16:34:53.000000', NULL, 1),
 (140341, 0, '/sysjobs', 'Sysjobs', '', '', 'sysjobs', 0, 0, 0, 1, 0, '', 0, '', 'lucide:CalendarClock', 160, 1, 0, '', '2026-02-11 11:29:40.000000', '2026-09-15 18:59:24.000000', NULL, 1),
 (140342, 140341, '/system/sysjobslist', 'SystemSysjobslist', '', 'system/sysjobs/sysjobslist', 'jobslist', 0, 0, 0, 1, 0, '', 0, '', 'lucide:ListTodo', 0, 2, 0, '', '2026-02-11 11:36:54.000000', '2026-07-08 10:46:25.000000', NULL, 1),
 (140343, 140342, '', '', '', '', '新增', 0, 0, 0, 1, 0, '', 0, '', '', 0, 3, 0, 'system:sysjobs:add', '2026-02-11 11:43:35.000000', '2026-02-11 11:43:35.000000', NULL, 1),
@@ -7450,6 +7486,12 @@ INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (140244, 61),
 (140245, 62),
 (140246, 63),
+(140248, 65),
+(140248, 69),
+(140249, 66),
+(140250, 67),
+(140250, 69),
+(140251, 68),
 (140252, 53),
 (140254, 60),
 (140255, 73),
@@ -7469,6 +7511,10 @@ INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (140333, 195),
 (140334, 194),
 (140335, 196),
+(140336, 198),
+(140338, 199),
+(140339, 200),
+(140340, 201),
 (140342, 203),
 (140342, 204),
 (140343, 205),
@@ -7577,6 +7623,7 @@ INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (140376, 326),
 (140376, 607),
+(140376, 651),
 (140377, 318),
 (140377, 319),
 (140377, 320),
@@ -7588,6 +7635,8 @@ INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (140379, 327),
 (140379, 617),
 (140379, 618),
+(140379, 652),
+(140377, 653),
 (140381, 306),
 (140381, 308),
 (140381, 335),
@@ -7772,10 +7821,10 @@ INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (140459, 511),
 (140459, 514),
 (140459, 515),
-(140459, 581),
-(140459, 586),
-(140459, 591);
+(140459, 581);
 INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
+(140459, 586),
+(140459, 591),
 (140459, 606),
 (140460, 512),
 (140460, 513),
@@ -7894,6 +7943,11 @@ INSERT INTO "sys_role_menu" ("role_id", "menu_id") VALUES
 (1, 140244),
 (1, 140245),
 (1, 140246),
+(1, 140247),
+(1, 140248),
+(1, 140249),
+(1, 140250),
+(1, 140251),
 (1, 140252),
 (1, 140254),
 (1, 140255),
@@ -7909,6 +7963,10 @@ INSERT INTO "sys_role_menu" ("role_id", "menu_id") VALUES
 (1, 140333),
 (1, 140334),
 (1, 140335),
+(1, 140336),
+(1, 140338),
+(1, 140339),
+(1, 140340),
 (1, 140341),
 (1, 140342),
 (1, 140343),
@@ -8064,23 +8122,3 @@ INSERT INTO "sys_user_role" ("user_id", "role_id") VALUES
 (1, 1);
 INSERT INTO "sys_users" ("id", "username", "password", "email", "status", "dept_id", "phone", "sex", "nick_name", "avatar", "description", "created_at", "updated_at", "deleted_at", "created_by", "must_change_password") VALUES
 (1, 'admin', '$2a$10$bQef.b.0CL9rFokdAdTMIe0J.z1Ub0avdu7lyr3mnrh9FQacYQTuW', '', 1, 1, '', '', '系统管理员', '/public/uploads/seed/admin.png', '初始系统管理员', '2025-08-18 14:55:05.000000', '2026-10-09 20:03:48.000000', NULL, 0, 1);
-INSERT INTO sys_api (title,path,method,api_group,created_at,updated_at,deleted_at,created_by)
-SELECT '查看级联业务分组','/api/gb28181/cascade/platforms/:id/business-group','GET','国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1
-WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path='/api/gb28181/cascade/platforms/:id/business-group' AND method='GET');
-INSERT INTO sys_api (title,path,method,api_group,created_at,updated_at,deleted_at,created_by)
-SELECT '保存级联业务分组','/api/gb28181/cascade/platforms/:id/business-group','PUT','国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1
-WHERE NOT EXISTS (SELECT 1 FROM sys_api WHERE path='/api/gb28181/cascade/platforms/:id/business-group' AND method='PUT');
-INSERT INTO sys_menu_api (menu_id,api_id)
-SELECT m.id,a.id FROM sys_menu m JOIN sys_api a ON a.path='/api/gb28181/cascade/platforms/:id/business-group' AND a.method='GET'
-WHERE m.permission='gb28181:cascade:view'
-AND NOT EXISTS (SELECT 1 FROM sys_menu_api ma WHERE ma.menu_id=m.id AND ma.api_id=a.id);
-INSERT INTO sys_menu_api (menu_id,api_id)
-SELECT m.id,a.id FROM sys_menu m JOIN sys_api a ON a.path='/api/gb28181/cascade/platforms/:id/business-group' AND a.method='PUT'
-WHERE m.permission='gb28181:cascade:share'
-AND NOT EXISTS (SELECT 1 FROM sys_menu_api ma WHERE ma.menu_id=m.id AND ma.api_id=a.id);
-INSERT INTO sys_casbin_rule (ptype,v0,v1,v2,v3,v4,v5)
-SELECT 'p','role_1','/api/gb28181/cascade/platforms/:id/business-group','GET','*','',''
-WHERE NOT EXISTS (SELECT 1 FROM sys_casbin_rule WHERE ptype='p' AND v0='role_1' AND v1='/api/gb28181/cascade/platforms/:id/business-group' AND v2='GET');
-INSERT INTO sys_casbin_rule (ptype,v0,v1,v2,v3,v4,v5)
-SELECT 'p','role_1','/api/gb28181/cascade/platforms/:id/business-group','PUT','*','',''
-WHERE NOT EXISTS (SELECT 1 FROM sys_casbin_rule WHERE ptype='p' AND v0='role_1' AND v1='/api/gb28181/cascade/platforms/:id/business-group' AND v2='PUT');

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,6 +61,35 @@ func resolveSQLitePath(configured string) (string, error) {
 		return "", fmt.Errorf("创建 SQLite 数据目录失败: %w", err)
 	}
 	return path, nil
+}
+
+func resolveExistingSQLitePath(configured string) (string, error) {
+	path := strings.TrimSpace(configured)
+	if path == "" {
+		return "", errors.New("SQLite 数据库路径未配置（gormv2.sqlite.write.database）")
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(app.BasePath, path)
+	}
+	path = filepath.Clean(path)
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("SQLite 只读预检数据库不可用: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", errors.New("SQLite 只读预检数据库不是常规文件")
+	}
+	return path, nil
+}
+
+func sqliteReadOnlyDSN(path string) string {
+	uri := url.URL{Scheme: "file", Path: filepath.ToSlash(path)}
+	query := url.Values{}
+	query.Set("mode", "ro")
+	query.Add("_pragma", "busy_timeout(5000)")
+	query.Add("_pragma", "query_only(1)")
+	uri.RawQuery = query.Encode()
+	return uri.String()
 }
 
 // GetOneSqliteClient 返回 SQLite 连接。
@@ -123,6 +153,33 @@ func GetOneSqliteClient() (*gorm.DB, error) {
 	_ = gormDb.Callback().Update().Before("gorm:before_update").Register("UpdateBeforeHook", UpdateBeforeHook)
 	_ = gormDb.Callback().Delete().Before("gorm:before_delete").Register("DeleteBeforeHook", DeleteBeforeHook)
 
+	return gormDb, nil
+}
+
+// GetOneSqliteReadOnlyClient opens an existing SQLite database for an
+// upgrade preflight. It deliberately does not create parent directories,
+// probe writability, or apply journal_mode changes.
+func GetOneSqliteReadOnlyClient() (*gorm.DB, error) {
+	const sqliteDialect = consts.DbTypeSqlite
+
+	path, err := resolveExistingSQLitePath(app.ConfigYml.GetString("gormv2." + sqliteDialect + ".write.database"))
+	if err != nil {
+		return nil, err
+	}
+	gormDb, err := gorm.Open(sqlite.Open(sqliteReadOnlyDSN(path)), &gorm.Config{
+		PrepareStmt:            false,
+		SkipDefaultTransaction: true,
+		Logger:                 redefineLog(sqliteDialect),
+	})
+	if err != nil {
+		return nil, err
+	}
+	rawDb, err := gormDb.DB()
+	if err != nil {
+		return nil, err
+	}
+	rawDb.SetMaxOpenConns(1)
+	rawDb.SetMaxIdleConns(1)
 	return gormDb, nil
 }
 

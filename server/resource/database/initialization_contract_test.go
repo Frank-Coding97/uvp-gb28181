@@ -702,6 +702,30 @@ func TestMySQLReleaseInitializationContract(t *testing.T) {
 	}
 }
 
+func TestCascadeBaselineDirectoryBatchAndOptionDefaults(t *testing.T) {
+	files := append(append([]string{}, releaseFiles...), "sqlitebaseline/baseline.sql")
+	for _, file := range files {
+		t.Run(file, func(t *testing.T) {
+			text := readForTestLowered(t, file)
+			section, found := tableSection(text, "gb_cascade_platform")
+			require.True(t, found)
+			section = strings.NewReplacer("`", "", `"`, "", "[", "", "]", "").Replace(section)
+			require.Regexp(t, `(?m)^\s*catalog_batch_size\s+[^\n]*\bdefault\s+1\s*[,\n]`, section)
+			for _, column := range []string{"auto_push_catalog", "recording_enabled", "rtcp_keepalive"} {
+				require.Regexp(t, `(?m)^\s*`+column+`\s+[^\n]*\bnot null\b[^\n]*\bdefault\s+(?:0|false)\s*[,\n]`, section)
+			}
+		})
+	}
+}
+
+func TestCascadeBaselineDefaultsToUnlimitedStreams(t *testing.T) {
+	for _, file := range append(append([]string{}, releaseFiles...), "sqlitebaseline/baseline.sql") {
+		body, err := os.ReadFile(file)
+		require.NoError(t, err)
+		require.Regexp(t, "(?m)^\\s*[`\"\\[]max_streams[`\"\\]]\\s+[^\\n]*DEFAULT 0[,\\s]", string(body), file)
+	}
+}
+
 // TestSeedDataExcludesEnvironmentRows 锁定 policy.json 的清洗规则确实生效：
 // 基线里不该出现演示账号，也不该有指向不存在角色的悬空权限规则。
 func TestSeedDataExcludesEnvironmentRows(t *testing.T) {

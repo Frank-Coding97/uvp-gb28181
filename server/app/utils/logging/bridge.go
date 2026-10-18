@@ -93,6 +93,8 @@ func appendSlogAttr(fields []zap.Field, group string, a slog.Attr, depth int) []
 		key = group + "." + key
 	}
 	switch a.Value.Kind() {
+	case slog.KindLogValuer:
+		fields = append(fields, zap.Reflect(key, a.Value.Any()))
 	case slog.KindGroup:
 		for _, child := range a.Value.Group() {
 			fields = appendSlogAttr(fields, key, child, depth+1)

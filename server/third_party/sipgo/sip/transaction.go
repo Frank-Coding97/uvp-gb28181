@@ -381,10 +381,25 @@ func makeServerTxKey(msg Message, asMethod RequestMethod) (string, error) {
 	if from == nil {
 		return "", fmt.Errorf("'From' header not found in message '%s'", messageShortString(msg))
 	}
-	fromTag, ok := from.Params.Get("tag")
-	if !ok {
-		return "", fmt.Errorf("'tag' param not found in 'From' header of message '%s'", messageShortString(msg))
-	}
+	// ⛔⛔ From tag 缺失**不再当畸形报文**（2026-10-13 放宽）。
+	//
+	// GB28181 现场确实存在「Via 的 branch 不带 RFC3261 magic cookie(z9hG4bK)」
+	// **同时**「From 漏了 tag 参数」的设备/SDK（已见 luna 系 SDK：
+	// `branch=lunaProxy<随机数>` + `From: <sip:...>` 无 tag）。
+	// 这两个缺陷叠加时旧逻辑既拿不到 branch 键、也拿不到 from-tag 键，于是
+	// `makeServerTxKey` 报错 → 事务层在**业务处理之前**回 stateless 400，
+	// 设备永远注册不上；而平台侧只留下一条 caller=TransactionLayer 的
+	// "格式非法"假象（没有 401 挑战、没有 register.* 事件、没有安全事件），
+	// 排障时极易被带到错的模块去。
+	//
+	// 退化为「空 tag」后键仍由 Call-Id + method + CSeq + Via 保证唯一，
+	// 重传也稳定命中同一个键（同一请求的响应复用同一组 Via/From/Call-Id/CSeq，
+	// 因此响应侧算出的键与请求侧一致）。
+	//
+	// ⛔ 不要把它读成"畸形报文可以放行"：**键能不能算出来 ≠ 报文合不合规**。
+	// 合规判定归业务层（register 的 ServerID/digest 校验、安全模块计分），
+	// 这里只保证"报文格式足够建事务"就能进业务。
+	fromTag, _ := from.Params.Get("tag")
 	callId := msg.CallID()
 	if callId == nil {
 		return "", fmt.Errorf("'Call-ID' header not found in message '%s'", messageShortString(msg))

@@ -5,11 +5,13 @@
 //     依赖目标机有 python3；**Windows 客户机不能这么假设**。
 //   - Linux 版的自签证书用 openssl CLI 生成；Windows 自带没有 openssl。
 //
-// 两个子命令：
+// 子命令：
 //
 //	uvp-setup db-init  --baseline <baseline.sql> --db <uvp.db> [--quiet]
 //	uvp-setup certgen  --dir <conf 目录> --zlm-pem <输出.pem> [--cn uvp-local] [--ip 1.2.3.4]... [--force]
 //	uvp-setup db-init  --baseline <baseline.sql> --split-digest   # 只打印切分指纹，不碰库
+//	uvp-setup reset-admin [--root <包根>] [--db <uvp.db>] [--username admin] [--password <明文>]
+//	                      # 忘记登录口令时把账号还原成出厂初始口令（见 resetadmin.go）
 //
 // ⛔ db-init 的建库语义必须与 Linux 版**逐条等价**（同一份 baseline.sql、同一种切分、
 // 同样「PRAGMA 必须在事务外」、同样「重复索引名被 SQLite 静默跳过要显式报出」、
@@ -36,8 +38,12 @@ func main() {
 		err = runDBInit(os.Args[2:])
 	case "certgen":
 		err = runCertgen(os.Args[2:])
+	case "https-render":
+		err = runHTTPSRender(os.Args[2:])
 	case "ports-sync":
 		err = runPortsSync(os.Args[2:])
+	case "reset-admin":
+		err = runResetAdmin(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -62,6 +68,10 @@ func usage() {
 		"  uvp-setup certgen --dir <目录> [--zlm-pem <file.pem>] [--cn uvp-local] [--ip A]... [--days 3650] [--force]",
 		"  uvp-setup ports-sync --env <config.env> --yml <config.yml> --ini <config.ini> \\",
 		"      --http P --redis P --https P --nginx-http P --zlm-http P --zlm-rtp-proxy P [--user-set K1,K2]",
+		"  uvp-setup https-render --root <包根>   # 应用页面保存的 HTTPS 配置",
+		"  uvp-setup reset-admin [--root <包根>] [--db <uvp.db>] [--config <config.yml>] [--username admin]",
+		"      [--password <明文>] [--no-force-change] [--no-unlock]",
+		"      # 忘记登录口令时用：把账号口令还原成出厂初始口令，并重新要求首次登录改密",
 		"",
 	}, "\n"))
 }
@@ -76,6 +86,12 @@ func note(format string, a ...any) {
 
 func success(format string, a ...any) {
 	fmt.Fprintf(os.Stdout, indent+"✓ "+format+"\n", a...)
+}
+
+// warn 与 note/success 同宽：一行"结论正确但需要人注意"的提示（例如"Redis 没连上，
+// 锁定键请手工清"）。⛔ 它**不**改变退出码 —— 只在真失败时由 main 返回 error。
+func warn(format string, a ...any) {
+	fmt.Fprintf(os.Stdout, indent+"! "+format+"\n", a...)
 }
 
 // resolvePath 把相对路径按当前工作目录补全，并确保父目录存在。

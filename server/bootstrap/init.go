@@ -27,16 +27,43 @@ import (
 	"uvplatform.com/uvp-gb28181/app/utils/tokenhelper"
 	"uvplatform.com/uvp-gb28181/app/utils/uploadhelper"
 	"uvplatform.com/uvp-gb28181/app/utils/ymlconfig"
+	upgrade "uvplatform.com/uvp-gb28181/internal/upgrade"
 )
 
 func init() {
 	// 检查必要的文件夹是否存在
 	checkRequiredFolders()
-	versionErr := app.LoadVersionInfo()
+	preflightRequested := upgradePreflightRequested()
+	readinessRequested := upgradeReadinessRequested()
+	var versionErr error
+	if !preflightRequested && !readinessRequested {
+		versionErr = app.LoadVersionInfo()
+	}
 	var err error
 	app.ConfigYml, err = ymlconfig.LoadYamlFactory(app.BasePath + "/config")
 	if err != nil {
 		startupFail("config", err)
+	}
+	// The independent updater invokes this process after stopping the business
+	// service. Keep the path read-only: no logging runtime, config listener,
+	// migration, scheduler, or business bootstrap may start before it exits.
+	if preflightRequested {
+		if err := initUpgradePreflightDB(); err != nil {
+			upgradePreflightFail(err)
+		}
+		// Plugin init functions register routes before main runs. They require a
+		// logger, but opening the configured logging runtime could write to
+		// stdout and corrupt this command's JSON response.
+		app.ZapLog = zap.NewNop()
+		return
+	}
+	// The Compose validation helper only reads the already-running backend's
+	// loopback readiness endpoint. It must not open a second database runtime,
+	// run migrations, initialize business services, or write logs before
+	// emitting the single JSON response.
+	if readinessRequested {
+		app.ZapLog = zap.NewNop()
+		return
 	}
 	initLogging()
 	if versionErr != nil {
@@ -57,14 +84,27 @@ func init() {
 		return
 	}
 
-	// 数据库迁移自动执行(schema 变更随部署生效,先迁移后启动业务初始化)
-	if err := migration.RunMigrations(map[string]*gorm.DB{
-		"mysql":      app.GormDbMysql,
-		"sqlserver":  app.GormDbSqlserver,
-		"postgresql": app.GormDbPostgreSql,
-		"sqlite":     app.GormDbSqlite,
-	}); err != nil {
-		startupFail("migration", err)
+	// Read the updater gate before any startup write. A candidate process is
+	// validating a release after the updater already ran its explicit
+	// migration; running the normal migration pass here would let the staged
+	// process mutate the database before it has passed readiness.
+	gateState, err := upgrade.GateStateFromEnv()
+	if err != nil {
+		startupFail("upgrade_gate", err)
+	}
+	if err := upgrade.ValidateStartupGate(gateState); err != nil {
+		startupFail("upgrade_gate", err)
+	}
+	if shouldRunAutomaticStartupWork(gateState.Mode) {
+		// 数据库迁移自动执行(schema 变更随部署生效,先迁移后启动业务初始化)
+		if err := migration.RunMigrations(map[string]*gorm.DB{
+			"mysql":      app.GormDbMysql,
+			"sqlserver":  app.GormDbSqlserver,
+			"postgresql": app.GormDbPostgreSql,
+			"sqlite":     app.GormDbSqlite,
+		}); err != nil {
+			startupFail("migration", err)
+		}
 	}
 
 	// 初始化casbin
@@ -90,17 +130,100 @@ func init() {
 	// 初始化任务调度器
 	app.JobScheduler = newScheduler()
 
-	// 注册所有执行器
+	// 注册所有执行器。执行器注册只建立进程内定义，不触碰数据库；系统任务
+	// 的 upsert 与加载延迟到 main 的 business runtime，避免 candidate 阶段写库。
 	scheduler.RegisterExecutors()
-	if err := scheduler.RegisterSystemJobs(app.DB()); err != nil {
-		startupFail("scheduler", err)
+	if shouldRunAutomaticStartupWork(gateState.Mode) {
+		if err := InitializeBusinessJobs(); err != nil {
+			startupFail("scheduler", err)
+		}
 	}
-
-	// 从数据库加载启用的任务到调度器及任务结果处理器
-	scheduler.LoadJobsFromDB()
 
 	// 初始化Response
 	app.Response = response.NewResponseHandler()
+}
+
+// InitializeBusinessJobs completes the scheduler setup after process authority
+// and the candidate gate have admitted the business runtime. It is exported so
+// a candidate process can perform this setup only when the updater clears the
+// gate; normal startup calls it during bootstrap for backward-compatible
+// initialization timing.
+func InitializeBusinessJobs() error {
+	if err := scheduler.RegisterSystemJobs(app.DB()); err != nil {
+		return err
+	}
+	// 从数据库加载启用的任务到调度器及任务结果处理器。
+	scheduler.LoadJobsFromDB()
+	return nil
+}
+
+func shouldRunAutomaticStartupWork(mode upgrade.GateMode) bool {
+	return mode != upgrade.GateCandidate
+}
+
+func upgradeReadinessRequested() bool {
+	for _, arg := range os.Args[1:] {
+		if arg == "-upgrade-readiness" {
+			return true
+		}
+	}
+	return false
+}
+
+func upgradePreflightRequested() bool {
+	for _, arg := range os.Args[1:] {
+		if arg == "-upgrade-preflight" {
+			return true
+		}
+	}
+	return false
+}
+
+// initUpgradePreflightDB opens only the configured primary database. The
+// normal initDB path is intentionally unsuitable because it can open every
+// enabled dialect and the normal SQLite connection creates or alters files.
+func initUpgradePreflightDB() error {
+	dialect, err := upgrade.PreflightDatabaseDialect(app.ConfigYml)
+	if err != nil {
+		return err
+	}
+	switch dialect {
+	case "mysql":
+		db, err := gormhelper.GetOneMysqlClient()
+		if err != nil {
+			return err
+		}
+		app.GormDbMysql = db
+	case "sqlserver":
+		db, err := gormhelper.GetOneSqlserverClient()
+		if err != nil {
+			return err
+		}
+		app.GormDbSqlserver = db
+	case "postgresql":
+		db, err := gormhelper.GetOnePostgreSqlClient()
+		if err != nil {
+			return err
+		}
+		app.GormDbPostgreSql = db
+	case "sqlite":
+		db, err := gormhelper.GetOneSqliteReadOnlyClient()
+		if err != nil {
+			return err
+		}
+		app.GormDbSqlite = db
+	default:
+		return errors.New("unsupported upgrade preflight database")
+	}
+	return nil
+}
+
+func upgradePreflightFail(err error) {
+	if err == nil {
+		err = errors.New("upgrade preflight failed")
+	}
+	logging.ReportStartupFailure(os.Stderr, nil, "database", err)
+	os.Exit(1)
 }
 
 // 初始化数据库

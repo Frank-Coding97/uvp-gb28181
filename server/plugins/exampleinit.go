@@ -10,17 +10,20 @@ import (
 
 // 插件初始化时自动执行
 func init() {
-	// 纯迁移运维入口不初始化 JobScheduler:
+	// 纯运维入口不初始化 JobScheduler:
 	// 此时注册执行器会 nil panic,必须先短路
-	if migrationRequested() {
+	if maintenanceCommandRequested() {
 		return
 	}
 	// 注册示例执行器
 	scheduler.RegisterExampleExecutors()
 }
 
-func migrationRequested() bool {
+func maintenanceCommandRequested() bool {
 	for _, arg := range os.Args {
+		if arg == "-upgrade-preflight" || arg == "-upgrade-readiness" {
+			return true
+		}
 		if arg == "-migrate-up" {
 			return true
 		}

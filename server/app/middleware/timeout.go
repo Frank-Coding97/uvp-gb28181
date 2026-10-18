@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -12,7 +13,16 @@ import (
 func TimeoutMiddleware(timeout time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// SSE streams own their lifetime and emit application-level heartbeats.
-		if c.Request.URL.Path == "/api/gb28181/logs/stream" || c.Request.URL.Path == "/api/gb28181/logs/stream/" {
+		// The upgrade import endpoint owns a bounded multipart upload. Its
+		// handler returns as soon as the file is durably handed to the updater;
+		// applying the ordinary request deadline would cancel slower, valid
+		// uploads before the asynchronous verifier can take over.
+		if isUploadRequestPath(c.Request.URL.Path) {
+			setRequestIODeadline(c.Writer, time.Now().Add(upgradeUploadTimeout))
+			c.Next()
+			return
+		}
+		if isRealtimeRequestPath(c.Request.URL.Path) {
 			c.Next()
 			return
 		}
@@ -24,4 +34,25 @@ func TimeoutMiddleware(timeout time.Duration) gin.HandlerFunc {
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	}
+}
+
+const upgradeUploadTimeout = 30 * time.Minute
+
+func isUploadRequestPath(path string) bool {
+	return path == "/api/system/upgrade/import" || path == "/api/system/upgrade/import/"
+}
+
+func isRealtimeRequestPath(path string) bool {
+	switch path {
+	case "/api/gb28181/logs/stream", "/api/gb28181/logs/stream/":
+		return true
+	default:
+		return false
+	}
+}
+
+func setRequestIODeadline(writer http.ResponseWriter, deadline time.Time) {
+	controller := http.NewResponseController(writer)
+	_ = controller.SetReadDeadline(deadline)
+	_ = controller.SetWriteDeadline(deadline)
 }

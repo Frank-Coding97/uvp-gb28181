@@ -6,7 +6,7 @@
     "live_table_count": 114,
     "included_table_count": 113,
     "excluded_table_count": 20,
-    "schema_fingerprint": "3ea6fd315c79548d9c26eabbccca5844cd764877cbc1b89a053b560bf3137e1b",
+    "schema_fingerprint": "c780de8efae7054b4474e95f542a77b12dba130c5be9eb678baf1bacf90450ae",
     "policy_rev": 1,
     "model_derived_tables": [
       "gb_cascade_business_binding",
@@ -2048,10 +2048,20 @@
           "name": "catalog_batch_size",
           "type": "int",
           "nullable": false,
-          "default": "100",
+          "default": "1",
           "extra": "",
           "comment": "",
           "collation": null
+        },
+        {
+          "name": "auto_push_catalog",
+          "type": "tinyint(1)",
+          "nullable": false,
+          "default": "0",
+          "extra": "",
+          "comment": "",
+          "collation": null,
+          "boolean": true
         },
         {
           "name": "publish_platform",
@@ -2087,13 +2097,33 @@
           "name": "max_streams",
           "type": "int",
           "nullable": false,
-          "default": "1",
+          "default": "0",
           "extra": "",
           "comment": "",
           "collation": null
         },
         {
           "name": "ptz_enabled",
+          "type": "tinyint(1)",
+          "nullable": false,
+          "default": "0",
+          "extra": "",
+          "comment": "",
+          "collation": null,
+          "boolean": true
+        },
+        {
+          "name": "recording_enabled",
+          "type": "tinyint(1)",
+          "nullable": false,
+          "default": "0",
+          "extra": "",
+          "comment": "",
+          "collation": null,
+          "boolean": true
+        },
+        {
+          "name": "rtcp_keepalive",
           "type": "tinyint(1)",
           "nullable": false,
           "default": "0",
@@ -19642,6 +19672,239 @@
       ],
       "uniques": [],
       "indexes": [],
+      "foreign_keys": [],
+      "checks": [],
+      "seeded": false
+    },
+    {
+      "name": "sys_openapi_device_capture_session",
+      "comment": "",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": null,
+          "extra": "auto_increment",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "client_id",
+          "type": "bigint",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "idempotency_digest",
+          "type": "varchar(64)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "request_digest",
+          "type": "varchar(64)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "session_id",
+          "type": "varchar(36)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "registry_session_id",
+          "type": "varchar(36)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "operation_id",
+          "type": "varchar(64)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "device_id",
+          "type": "varchar(20)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "channel_id",
+          "type": "varchar(20)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "internal_device_id",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "internal_channel_id",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "department_id",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "snap_num",
+          "type": "int",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "interval_seconds",
+          "type": "int",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "state",
+          "type": "varchar(24)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "updated_at",
+          "type": "datetime(3)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        }
+      ],
+      "primary_key": [
+        {
+          "name": "id",
+          "prefix": null
+        }
+      ],
+      "uniques": [
+        {
+          "name": "uk_openapi_capture_idem",
+          "columns": [
+            {
+              "name": "client_id",
+              "prefix": null
+            },
+            {
+              "name": "idempotency_digest",
+              "prefix": null
+            }
+          ]
+        },
+        {
+          "name": "uk_openapi_capture_session",
+          "columns": [
+            {
+              "name": "session_id",
+              "prefix": null
+            }
+          ]
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_openapi_capture_registry_session",
+          "columns": [
+            {
+              "name": "registry_session_id",
+              "prefix": null
+            }
+          ]
+        },
+        {
+          "name": "idx_openapi_capture_session_client",
+          "columns": [
+            {
+              "name": "client_id",
+              "prefix": null
+            },
+            {
+              "name": "device_id",
+              "prefix": null
+            },
+            {
+              "name": "channel_id",
+              "prefix": null
+            }
+          ]
+        },
+        {
+          "name": "idx_openapi_capture_state_updated",
+          "columns": [
+            {
+              "name": "state",
+              "prefix": null
+            },
+            {
+              "name": "created_at",
+              "prefix": null
+            }
+          ]
+        }
+      ],
       "foreign_keys": [],
       "checks": [],
       "seeded": false

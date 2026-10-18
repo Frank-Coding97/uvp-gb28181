@@ -147,6 +147,44 @@ func TestTransactionLayerMalformedRequestStateless400(t *testing.T) {
 	assert.Equal(t, "Bad Request", resp.Reason)
 }
 
+func TestTransactionLayerCancelValidatorRejectsBeforeBuiltInTermination(t *testing.T) {
+	origin := testCreateRequest(t, "INVITE", "sip:34020000001320000010", "UDP", "192.0.2.20:5060")
+	key, err := makeServerTxKey(origin, "")
+	require.NoError(t, err)
+	conn := &validatorTestConnection{}
+	tx := NewServerTx(key, origin, conn, DefaultLogger())
+	require.NoError(t, tx.Init())
+	txl := &TransactionLayer{serverTransactions: newTransactionStore[*ServerTx]()}
+	txl.serverTransactions.items[key] = tx
+	txl.SetCancelValidator(func(*Request, *ServerTx) bool { return false })
+
+	cancel := origin.Clone()
+	cancel.Method = CANCEL
+	cancel.CSeq().MethodName = CANCEL
+	require.NoError(t, txl.handleRequest(cancel))
+	require.Len(t, conn.messages, 1)
+	response, ok := conn.messages[0].(*Response)
+	require.True(t, ok)
+	require.Equal(t, StatusForbidden, response.StatusCode)
+	select {
+	case <-tx.Done():
+		t.Fatal("rejected CANCEL must not terminate the original INVITE transaction")
+	default:
+	}
+	tx.Terminate()
+}
+
+type validatorTestConnection struct{ messages []Message }
+
+func (c *validatorTestConnection) LocalAddr() net.Addr { return nil }
+func (c *validatorTestConnection) WriteMsg(message Message) error {
+	c.messages = append(c.messages, message)
+	return nil
+}
+func (c *validatorTestConnection) Ref(int) int            { return 0 }
+func (c *validatorTestConnection) TryClose() (int, error) { return 0, nil }
+func (c *validatorTestConnection) Close() error           { return nil }
+
 func TestTransactionLayerClientTx(t *testing.T) {
 	if os.Getenv("TEST_INTEGRATION") == "" {
 		t.Skip("Use TEST_INTEGRATION env value to run this test")
@@ -178,4 +216,75 @@ func TestTransactionLayerClientTx(t *testing.T) {
 	require.EqualValues(t, 1, atomic.LoadInt32(&count))
 	require.Equal(t, 2, tp.udp.pool.Size())
 	assert.True(t, tp.udp.pool.Get("127.0.0.1:9876") != nil)
+}
+
+// 现场报文：GB28181 设备的 Via branch **不带** RFC3261 magic cookie，且 From **漏了 tag**。
+// 两个缺陷叠加时，事务层必须仍能建出事务键 —— 否则请求会在业务处理之前被判成畸形报文，
+// 回一条 stateless 400，设备永远注册不上（2026-10-13 实测：某 luna 系 SDK 模拟客户端
+// 往平台注册，每条都被 400 打回，平台侧没有 401 挑战、没有 register.* 事件、没有安全事件）。
+//
+// 这条用例锁的是"键可算"，**不是**"报文合规"：合规判定归业务层。
+func TestServerTxKeyToleratesNonRFC3261BranchAndMissingFromTag(t *testing.T) {
+	raw := strings.Join([]string{
+		"REGISTER sip:37010000002000000001@192.168.10.220:51064 SIP/2.0",
+		"Via: SIP/2.0/UDP 192.168.1.101:5061;branch=lunaProxy1937319883",
+		"From: <sip:34020000001320000011@192.168.1.101:5061>",
+		"To: <sip:37010000002000000001@192.168.10.220:51064>",
+		"Call-ID: 459c36ca5e89ee24b1b5f27ffda55a55@0:0:0:0:0:0:0:0",
+		"CSeq: 6185 REGISTER",
+		"Contact: <sip:34020000001320000011@192.168.1.101:5061>",
+		"Expires: 3600",
+		"Content-Length: 0",
+		"",
+		"",
+	}, "\r\n")
+
+	msg, err := ParseMessage([]byte(raw))
+	require.NoError(t, err)
+	req, ok := msg.(*Request)
+	require.True(t, ok)
+
+	key, err := ServerTxKeyMake(req)
+	require.NoError(t, err, "branch 无 z9hG4bK + From 无 tag 不应再被判成畸形报文")
+	require.NotEmpty(t, key)
+
+	// 重传要稳定命中同一个键，否则同一请求会被当成新事务重复处理。
+	retransKey, err := ServerTxKeyMake(req)
+	require.NoError(t, err)
+	require.Equal(t, key, retransKey, "同一请求重传必须算出同一个键")
+
+	// 平台回包走同一条计算路径（响应用请求的 Via/From/Call-ID/CSeq），键必须一致，
+	// 否则事务层找不到 server transaction，连 401 挑战都发不出去。
+	res := NewResponseFromRequest(req, 401, "Unauthorized", nil)
+	resKey, err := ServerTxKeyMake(res)
+	require.NoError(t, err, "响应侧算了同一个键才算真的修好")
+	require.Equal(t, key, resKey)
+
+	// 放宽不能放宽到"不同请求撞键"：只改 Call-ID 就必须算出不同的键。
+	otherRaw := strings.Replace(raw,
+		"Call-ID: 459c36ca5e89ee24b1b5f27ffda55a55@0:0:0:0:0:0:0:0",
+		"Call-ID: 00000000000000000000000000000000@0:0:0:0:0:0:0:0", 1)
+	require.NotEqual(t, raw, otherRaw)
+	otherMsg, err := ParseMessage([]byte(otherRaw))
+	require.NoError(t, err)
+	otherKey, err := ServerTxKeyMake(otherMsg.(*Request))
+	require.NoError(t, err)
+	require.NotEqual(t, key, otherKey, "不同 Call-ID 的请求不能撞同一个事务键")
+
+	// From 缺失仍然是畸形报文（From 是 RFC 强制头，缺了连回包都构造不出来）。
+	noFromRaw := strings.Join([]string{
+		"REGISTER sip:37010000002000000001@192.168.10.220:51064 SIP/2.0",
+		"Via: SIP/2.0/UDP 192.168.1.101:5061;branch=lunaProxy1937319883",
+		"To: <sip:37010000002000000001@192.168.10.220:51064>",
+		"Call-ID: 459c36ca5e89ee24b1b5f27ffda55a55@0:0:0:0:0:0:0:0",
+		"CSeq: 6185 REGISTER",
+		"Content-Length: 0",
+		"",
+		"",
+	}, "\r\n")
+	noFromMsg, err := ParseMessage([]byte(noFromRaw))
+	require.NoError(t, err)
+	_, err = ServerTxKeyMake(noFromMsg.(*Request))
+	require.Error(t, err, "From 整体缺失仍应判为畸形报文")
+	assert.Contains(t, err.Error(), "From")
 }

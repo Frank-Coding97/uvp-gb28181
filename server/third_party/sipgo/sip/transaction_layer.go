@@ -10,6 +10,7 @@ import (
 )
 
 type TransactionRequestHandler func(req *Request, tx *ServerTx)
+type CancelValidator func(req *Request, tx *ServerTx) bool
 type UnhandledResponseHandler func(req *Response)
 type ErrorHandler func(err error)
 
@@ -61,6 +62,7 @@ type TransactionLayer struct {
 	fsmWork               *lifecycleGate
 	serverAdmissionClosed bool
 	clientAdmissionClosed bool
+	cancelValidator       CancelValidator
 	closeOnce             sync.Once
 
 	log *slog.Logger
@@ -136,6 +138,13 @@ func (txl *TransactionLayer) OnRequest(h TransactionRequestHandler) {
 
 func (txl *TransactionLayer) SetRequestLifecycle(lifecycle RequestLifecycle) {
 	txl.requestLifecycle = lifecycle
+}
+
+// SetCancelValidator installs an optional validator for CANCEL requests that
+// match an existing INVITE transaction. Returning false rejects the CANCEL
+// before the transaction layer sends 200 OK or terminates the INVITE.
+func (txl *TransactionLayer) SetCancelValidator(validator CancelValidator) {
+	txl.cancelValidator = validator
 }
 
 // QuiesceRequests closes only new server-transaction admission. Existing
@@ -220,6 +229,12 @@ func (txl *TransactionLayer) handleRequest(req *Request) error {
 
 		tx, exists := txl.getServerTx(key)
 		if exists {
+			if txl.cancelValidator != nil && !txl.cancelValidator(req, tx) {
+				if err := tx.conn.WriteMsg(NewResponseFromRequest(req, StatusForbidden, "Forbidden", nil)); err != nil {
+					return fmt.Errorf("Failed to respond 403 for rejected CANCEL: %w", err)
+				}
+				return nil
+			}
 			// Send 200 OK for CANCEL first, then terminate the INVITE.
 			// The CANCEL client transaction retransmits until it receives
 			// a response; sending 200 OK before the 487 ensures the UAC

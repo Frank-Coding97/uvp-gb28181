@@ -11,6 +11,7 @@ require (
 	github.com/gin-contrib/pprof v1.5.3
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-redis/redis/v8 v8.11.5
+	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/gookit/validate v1.5.5
 	github.com/icholy/digest v1.1.0
@@ -61,7 +62,6 @@ require (
 	github.com/gobwas/pool v0.2.1 // indirect
 	github.com/gobwas/ws v1.3.2 // indirect
 	github.com/goccy/go-yaml v1.18.0 // indirect
-	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/gookit/filter v1.2.2 // indirect
 	github.com/gookit/goutil v0.6.18 // indirect
 	github.com/hashicorp/go-version v1.7.0 // indirect

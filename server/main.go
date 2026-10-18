@@ -12,16 +12,19 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"uvplatform.com/uvp-gb28181/app/controllers"
 	"uvplatform.com/uvp-gb28181/app/gb28181"
 	"uvplatform.com/uvp-gb28181/app/gb28181/migration"
 	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/middleware"
 	"uvplatform.com/uvp-gb28181/app/openapi/processauthority"
 	openapiroutes "uvplatform.com/uvp-gb28181/app/openapi/routes"
 	"uvplatform.com/uvp-gb28181/app/routes"
 	"uvplatform.com/uvp-gb28181/app/scheduler"
 	"uvplatform.com/uvp-gb28181/app/utils/ginhelper"
 	"uvplatform.com/uvp-gb28181/app/utils/logging"
-	_ "uvplatform.com/uvp-gb28181/bootstrap"
+	bootstrap "uvplatform.com/uvp-gb28181/bootstrap"
+	upgrade "uvplatform.com/uvp-gb28181/internal/upgrade"
 
 	_ "uvplatform.com/uvp-gb28181/docs/swagger" // swagger docs
 	_ "uvplatform.com/uvp-gb28181/plugins"
@@ -45,6 +48,13 @@ func main() {
 }
 
 func finishApplication(err error) {
+	if upgradePreflightRequested(os.Args[1:]) || upgradeReadinessRequested(os.Args[1:]) {
+		if err != nil {
+			logging.ReportStartupFailure(os.Stderr, nil, "dependency", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if app.LogRuntime != nil {
 		app.LogRuntime.Repeats().Close()
 	}
@@ -90,6 +100,18 @@ func stopApplication(ctx context.Context) error {
 }
 
 func runApplication() (err error) {
+	if upgradePreflightRequested(os.Args[1:]) {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		return upgrade.WritePreflightSnapshot(ctx, os.Stdout, controllers.CollectUpgradePreflight)
+	}
+	for _, arg := range os.Args[1:] {
+		if arg == "-upgrade-readiness" {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			return upgrade.WriteRuntimeReadiness(ctx, app.ConfigYml.GetString("httpserver.port"), os.Stdout)
+		}
+	}
 	// 迁移入口同样等待配置回调退出，然后由 main 关闭根日志。
 	migrateUp := migrateUpRequested(os.Args[1:])
 	downFile := parseArgs(os.Args[1:])
@@ -131,24 +153,57 @@ func runApplication() (err error) {
 		logProcessAuthorityStartupFailure(reason, err)
 		return errors.Join(fmt.Errorf("进程授权注册失败: %w", err), authorityLock.Close())
 	}
-	app.JobScheduler.Start()
+	candidateMode, err := upgrade.CandidateModeFromEnv()
+	if err != nil {
+		return fmt.Errorf("读取升级候选门禁失败: %w", err)
+	}
 	// 获取Gin引擎实例
 	engine := ginhelper.GetEngine()
+	// Candidate validation must cover every ingress registered below, including
+	// hook, OpenAPI, and plugin routes that do not sit in the admin group.
+	// Normal mode passes through without changing the existing route behavior.
+	engine.Use(middleware.UpgradeCandidateMiddleware())
 	// 初始化系统路由
 	openAPI := routes.InitRoutes(engine)
 	// 初始化插件路由
 	ginhelper.InitPluginRoutes(engine)
-	// 启动 GB28181 SIP 服务(双栈 UDP+TCP,在 HTTP 阻塞前旁挂)
-	gb28181.Start(authority)
 	maintenanceContext, cancelMaintenance := context.WithCancel(context.Background())
 	defer cancelMaintenance()
 	maintenanceDone := make(chan struct{})
-	go func() {
-		defer close(maintenanceDone)
-		openAPI.RunMaintenance(maintenanceContext, func(err error) {
-			app.ZapLog.Error("OpenAPI maintenance unavailable", zap.String("event", "startup.openapi_maintenance_failed"), zap.Error(err))
-		})
-	}()
+	var maintenanceDoneOnce sync.Once
+	finishMaintenance := func() { maintenanceDoneOnce.Do(func() { close(maintenanceDone) }) }
+	initializeBusinessJobs := func() error {
+		if !candidateMode {
+			return nil
+		}
+		// bootstrap deliberately skipped the DB-backed system-job upsert and
+		// load while the release was a candidate. The updater has now admitted
+		// the release, so complete that write/read boundary before starting the
+		// scheduler or device runtime.
+		return bootstrap.InitializeBusinessJobs()
+	}
+	startBusinessRuntime := upgrade.NewBusinessRuntimeStarter(maintenanceContext, initializeBusinessJobs,
+		routes.StartAutoScheduler,
+		app.JobScheduler.Start,
+		func(ctx context.Context) {
+			defer finishMaintenance()
+			openAPI.RunMaintenance(ctx, func(err error) {
+				app.ZapLog.Error("OpenAPI maintenance unavailable", zap.String("event", "startup.openapi_maintenance_failed"), zap.Error(err))
+			})
+		},
+		// 启动 GB28181 SIP 服务(双栈 UDP+TCP,在 HTTP 阻塞前旁挂)
+		func() { gb28181.Start(authority) },
+	)
+	if candidateMode {
+		go func() {
+			if upgrade.WaitForNormalGate(maintenanceContext, 250*time.Millisecond, startBusinessRuntime) {
+				return
+			}
+			finishMaintenance()
+		}()
+	} else {
+		startBusinessRuntime()
+	}
 	// 启动服务器(阻塞直到收到退出信号)
 	var stopOnce sync.Once
 	stopOpenAPI := func(ctx context.Context) error {
@@ -173,6 +228,24 @@ func runApplication() (err error) {
 		return authorityLock.Close()
 	}
 	return ginhelper.StartServer(engine, shutdown)
+}
+
+func upgradePreflightRequested(args []string) bool {
+	for _, arg := range args {
+		if arg == "-upgrade-preflight" {
+			return true
+		}
+	}
+	return false
+}
+
+func upgradeReadinessRequested(args []string) bool {
+	for _, arg := range args {
+		if arg == "-upgrade-readiness" {
+			return true
+		}
+	}
+	return false
 }
 
 func processAuthorityFailureReason(err error) string {
