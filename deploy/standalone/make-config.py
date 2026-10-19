@@ -115,7 +115,8 @@ def set_in_section(text: str, section: str, key: str, value: str) -> str:
 
 
 def build(source: Path, target: Path, http_port: str, redis_port: str,
-          zlm_secret: str = "", zlm_media_server_id: str = "") -> None:
+          zlm_secret: str = "", zlm_media_server_id: str = "",
+          zlm_api_port: str = "", hook_port: str = "") -> None:
     text = source.read_text(encoding="utf-8")
 
     # 1) 数据库：默认 SQLite
@@ -157,6 +158,22 @@ def build(source: Path, target: Path, http_port: str, redis_port: str,
         text = set_in_section(text, "zlm", "secret", zlm_secret)
     if zlm_media_server_id:
         text = set_in_section(text, "zlm", "mediaserverid", zlm_media_server_id)
+
+    # 5) ZLM HTTP API 端口 与 hook 回调端口
+    #
+    # ⛔⛔ 这两项只影响**首次 seed** 的节点记录（zlm.httpport → meta_node.api_port），
+    #   但它决定了「第一次启动时后端能不能连上 ZLM」——
+    #   连不上就 seed 不成功、节点永久离线，之后改 UI 也没用（前提是先能进得去）。
+    #
+    # ⛔ 容器版与绿色包的区别：绿色包端口是 ctl.sh 统一规划的固定值
+    #   （51004 / 51002），模板默认的 18080 / 8280 在绿色包**从不生效**；
+    #   容器版允许客户改端口段（UVP_*_PORT），所以必须把实际值写进来。
+    #   不写的话：ZLM 在 53004 而 config.yml 说 18080 ⇒
+    #   `zlm.probe.failed endpoint=http://127.0.0.1:18080`，节点一直离线。
+    if zlm_api_port:
+        text = set_in_section(text, "zlm", "httpport", zlm_api_port)
+    if hook_port:
+        text = set_in_section(text, "media", "hookport", hook_port)
 
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text, encoding="utf-8")
@@ -702,6 +719,10 @@ def main() -> None:
                         help="ZLM API secret（建议固定值；留空则保留示例里的占位符）")
     parser.add_argument("--zlm-media-server-id", default="",
                         help="ZLM 节点标识 mediaserverid（建议固定 UUID；留空=每次 seed 随机）")
+    parser.add_argument("--zlm-api-port", default="",
+                        help="ZLM HTTP API 端口（写入 gb28181.zlm.httpport；留空=保留模板值）")
+    parser.add_argument("--hook-port", default="",
+                        help="hook 回调端口（写入 gb28181.media.hookport；留空=保留模板值）")
     parser.add_argument("--qr-provision-host", default="",
                         help="扫码接入基址里的设备可达地址；留空则取本机主 IP")
     parser.add_argument("--openapi-audience", default="",
@@ -714,7 +735,8 @@ def main() -> None:
     args = parser.parse_args()
 
     build(args.source, args.target, args.http_port, args.redis_port,
-          args.zlm_secret, args.zlm_media_server_id)
+          args.zlm_secret, args.zlm_media_server_id,
+          zlm_api_port=args.zlm_api_port, hook_port=args.hook_port)
     add_sqlite_section(args.target, args.db_path)
     set_log_filepath(args.target, args.log_path)
     add_qr_provision_section(args.target, args.qr_provision_host or _detect_lan_ip(),
