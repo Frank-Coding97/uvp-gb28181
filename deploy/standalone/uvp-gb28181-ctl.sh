@@ -683,8 +683,10 @@ check_ports_free() {
   # 顺序与 PORTS.md 的规划段一致（51000-51064 连续无空洞；51064 SIP 由引导页自检）
   if [ "$NGINX_HTTPS_ENABLED" = "1" ]; then
     _check_one 51000 tcp "HTTPS（浏览器访问管理页面）" NGINX_HTTPS_PORT
+    _check_one 51001 tcp "HTTP（跳 HTTPS + 保留明文 API）" NGINX_HTTP_PORT
+  else
+    _check_one 51001 tcp "HTTP（浏览器访问管理页面 + 明文 API）" NGINX_HTTP_PORT
   fi
-  _check_one 51001 tcp "HTTP（跳 HTTPS + 保留明文 API）" NGINX_HTTP_PORT
   _check_one 51002 tcp "后端 HTTP（API + 扫码接入地址）"  HTTP_PORT
   _check_one 51003 tcp "Redis（仅回环）"                  REDIS_PORT
   _check_one 51004 tcp "ZLM HTTP API（平台开关流）"       ZLM_HTTP_PORT
@@ -1152,7 +1154,11 @@ NGINX_KEY="$ROOT/vendor/nginx/conf/uvp.key"
 # HTTPS 端口：给客户换端口时只改这里（同时也在 config.env 里）
 NGINX_HTTPS_PORT="${UVP_HTTPS_PORT:-$(read_port_env UVP_HTTPS_PORT)}"
 NGINX_HTTPS_PORT="${NGINX_HTTPS_PORT:-51000}"
-NGINX_HTTPS_ENABLED=1
+# ⛔ 默认不开 HTTPS：新装的管理页走明文 HTTP，由管理员在「系统配置 → HTTPS」
+#   里自行开启。后端 uvp-setup https-render 首次启动会把这份默认落盘到
+#   data/https/settings.json，之后的启停与端口规划都以落盘值为准。
+#   （存量实例已落盘的不受影响；不要为了"默认开"改回 1。）
+NGINX_HTTPS_ENABLED=0
 if [ -f "$DATA/https/settings.json" ]; then
   [ -n "$PY_BIN" ] || fail "读取 HTTPS 配置需要 python3"
   _https_state="$("$PY_BIN" - "$DATA/https/settings.json" <<'HTTPS_STATE'

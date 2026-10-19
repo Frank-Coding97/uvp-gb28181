@@ -252,7 +252,11 @@ function Get-Config {
     }
     # ⛔ 必须 `@(...)` 包一层：`Resolve-Port` 一次都没命中时 `$ref.Value` 可能仍是
     #   空数组（也可能被 `+=` 折成单个字符串），包一层后 `.Count` 才可靠。
-    $script:HttpsEnabled = $true
+    # ⛔ 默认不开 HTTPS：新装的管理页走明文 HTTP，由管理员在「系统配置 → HTTPS」
+    #   里自行开启。后端 uvp-setup https-render 首次启动会把这份默认落盘到
+    #   data\https\settings.json，之后的启停与端口规划都以落盘值为准。
+    #   （存量实例已落盘的不受影响；不要为了"默认开"改回 $true。）
+    $script:HttpsEnabled = $false
     $httpsState = Join-Path $DataDir 'https\settings.json'
     if (Test-Path -LiteralPath $httpsState) {
         $savedHttps = Get-Content -LiteralPath $httpsState -Raw -Encoding UTF8 | ConvertFrom-Json
