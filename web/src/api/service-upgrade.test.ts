@@ -53,4 +53,14 @@ describe("服务升级 API", () => {
     await getServiceUpgradeImport("job/1");
     expect(request).toHaveBeenLastCalledWith("get", "/api/system/upgrade/import/job%2F1");
   });
+
+  it("上传进度回调接收 HTTP 的实际字节事件", async () => {
+    const onProgress = vi.fn();
+    await importServiceUpgrade(new File(["archive"], "upgrade.tar"), onProgress);
+    const options = request.mock.calls.at(-1)![2];
+    expect(options.onUploadProgress).toBeTypeOf("function");
+    const event = { loaded: 4, total: 10, lengthComputable: true };
+    options.onUploadProgress(event);
+    expect(onProgress).toHaveBeenCalledWith(event);
+  });
 });

@@ -67,23 +67,33 @@
           >
         </a-descriptions>
       </a-card>
+      <UpgradeProgress
+        v-if="uploadTransfer || importJob"
+        data-testid="import-progress"
+        class="upgrade-progress-panel"
+        v-bind="importProgress"
+        :upload="uploadTransfer"
+        :show-upload-bar="Boolean(uploadTransfer && !importJob)"
+        :reconnecting="Boolean(importJobError && !importJobFinished)"
+      >
+        <p v-if="importJob && !importJobFinished" class="upgrade-caption">校验在后台继续执行，刷新页面后可恢复查看。</p>
+      </UpgradeProgress>
+      <UpgradeProgress
+        v-if="progressTask"
+        data-testid="task-progress"
+        class="upgrade-progress-panel"
+        v-bind="taskProgress(progressTask)"
+        :reconnecting="Boolean(statusError)"
+      >
+        <template #action><a-link @click="showTaskDetails(progressTask.task_id)">查看详情</a-link></template>
+        <p class="upgrade-caption">{{ taskHint(progressTask) }}</p>
+      </UpgradeProgress>
       <a-alert v-if="migrationPlan && !migrationPlan.can_apply" class="upgrade-alert" type="warning" title="升级预检未通过">
         {{ migrationBlockLabel }}<template #action><a-link @click="migrationDetailsVisible = true">查看原因</a-link></template>
       </a-alert>
       <a-alert v-if="statusError" class="upgrade-alert" type="warning"
         >服务状态暂不可用，正在重连。保留的任务信息为上次结果，不代表升级成功；{{ statusError }}</a-alert
       >
-      <a-alert v-if="importJob" class="upgrade-alert" :type="importJobFailed ? 'error' : importJobFinished ? 'success' : 'info'">
-        <div>
-          离线升级包：{{ importPhaseLabel(importJob.phase || importJob.status || "queued") }}。<span v-if="!importJobFinished"
-            >校验在后台继续执行，刷新页面后可恢复查看。</span
-          ><span v-if="importJob.job_id || importJob.upload_id">任务 {{ importJob.job_id || importJob.upload_id }}</span>
-        </div>
-        <div v-if="importJobFailed" class="diagnostic-log">
-          {{ importJob.error || importJob.message || importJobError || "未返回失败原因" }}
-        </div>
-        <div v-else-if="importJobError" class="upgrade-detail">{{ importJobError }}</div>
-      </a-alert>
       <a-alert v-if="policyError" class="upgrade-alert" type="warning">无人值守策略暂不可用：{{ policyError }}</a-alert>
       <a-alert v-if="migrationError" class="upgrade-alert" type="warning"
         >迁移信息暂不可用，应用升级前需重新检查：{{ migrationError }}</a-alert
@@ -100,16 +110,6 @@
             >立即刷新前端</a-button
           ></a-space
         >
-      </a-alert>
-      <a-alert
-        v-if="status?.activeTask"
-        class="upgrade-alert"
-        :type="status.activeTask.phase === 'recovery_required' ? 'error' : 'info'"
-      >
-        {{ status.activeTask.version || "目标版本待校验" }}：{{ phaseLabel(status.activeTask.phase) }}。{{
-          taskHint(status.activeTask)
-        }}
-        <template #action><a-link @click="showTaskDetails(status.activeTask.task_id)">查看进度</a-link></template>
       </a-alert>
       <a-card v-if="update" class="uvp-system-panel available-update" :bordered="false">
         <template #title>待升级版本 v{{ update.manifest.version }}</template>
@@ -370,12 +370,22 @@
       </section>
       <footer class="upgrade-footnote"><span>签名校验 · SHA-256 完整性校验</span><span>时间按浏览器本地时区显示</span></footer>
     </div>
-    <a-drawer :visible="Boolean(selectedTask)" width="min(560px, 100vw)" :footer="false" @cancel="selectedTaskID = ''">
+    <a-drawer
+      class="uvp-system-drawer"
+      :visible="Boolean(selectedTask)"
+      width="min(560px, 100vw)"
+      :footer="false"
+      @cancel="selectedTaskID = ''"
+    >
       <template #title>任务详情</template>
       <template v-if="selectedTask"
-        ><a-tag :color="phaseColor(selectedTask.phase)">{{ phaseLabel(selectedTask.phase) }}</a-tag>
+        ><UpgradeProgress
+          data-testid="task-detail-progress"
+          v-bind="taskProgress(selectedTask)"
+          :reconnecting="Boolean(statusError)"
+        />
         <p class="task-hint">{{ taskHint(selectedTask) }}</p>
-        <a-descriptions :column="1" class="task-descriptions"
+        <a-descriptions :column="1" bordered class="uvp-system-description uvp-system-description--compact task-descriptions"
           ><a-descriptions-item label="目标版本">{{ selectedTask.version || "待校验" }}</a-descriptions-item
           ><a-descriptions-item label="升级方式">{{
             selectedTask.policy_version ? `自动升级 · 策略 v${selectedTask.policy_version}` : "管理员手动操作"
@@ -443,6 +453,7 @@ import {
 } from "@/api/service-upgrade";
 import { hasPermission } from "@/hooks/usePermission";
 import { APP_BUILD_ID, APP_VERSION, checkRuntimeBuildIdentity } from "@/config/version";
+import UpgradeProgress, { type ProgressDisplay, type UploadTransfer } from "./UpgradeProgress.vue";
 
 const canManage = computed(() => hasPermission("system:upgrade:manage"));
 
@@ -454,6 +465,12 @@ const creating = ref(false);
 const taskAction = ref("");
 const sortedTasks = computed(() =>
   [...(status.value?.tasks || [])].sort((a, b) => (b.updated_at || "").localeCompare(a.updated_at || ""))
+);
+const lastActiveTaskID = ref("");
+const progressTask = computed(
+  () =>
+    status.value?.activeTask ||
+    (lastActiveTaskID.value ? status.value?.tasks.find(task => task.task_id === lastActiveTaskID.value) : sortedTasks.value[0])
 );
 const activeTab = ref("history");
 const environmentExpanded = ref(false);
@@ -537,6 +554,42 @@ const phaseLabels: Record<string, string> = {
   recovery_required: "需要恢复处理"
 };
 const phaseLabel = (phase: string) => phaseLabels[phase] || `未知阶段（${phase}）`;
+const taskSteps = ["准备与授权", "备份数据", "执行迁移", "切换与验证", "完成"];
+const taskStepIndex: Record<string, number> = {
+  fetching: 0,
+  verifying: 0,
+  preparing: 0,
+  awaiting_confirmation: 0,
+  stopping: 0,
+  backing_up: 1,
+  migrating: 2,
+  activating: 3,
+  validating: 3,
+  committing: 3,
+  succeeded: 4
+};
+const taskProgress = (task: UpgradeTask): ProgressDisplay => {
+  const interrupted = ["failed", "rolled_back", "recovery_required"].includes(task.phase);
+  return {
+    title: `服务升级${task.version ? ` · v${task.version}` : ""}`,
+    detail: `${phaseLabel(task.phase)}${interrupted && task.failure_phase ? ` · 失败阶段：${phaseLabel(task.failure_phase)}` : ""}`,
+    steps: taskSteps,
+    current: taskStepIndex[interrupted ? task.failure_phase || "" : task.phase] ?? -1,
+    state:
+      task.phase === "succeeded"
+        ? "success"
+        : task.phase === "rolled_back"
+          ? "warning"
+          : interrupted
+            ? "error"
+            : task.phase === "awaiting_confirmation"
+              ? "waiting"
+              : task.phase in taskStepIndex
+                ? "active"
+                : "unknown",
+    error: task.error
+  };
+};
 const phaseColor = (phase: string) =>
   phase === "succeeded"
     ? "green"
@@ -555,6 +608,7 @@ const taskHint = (task: UpgradeTask) => {
       ? "制品已准备，由已保存策略在维护窗口内再次预检并授权应用。"
       : "制品已准备，确认应用后才进入可能中断业务的阶段。";
   if (["fetching", "verifying", "preparing"].includes(task.phase)) return "正在获取或检查制品，当前服务继续运行。";
+  if (!(task.phase in taskStepIndex)) return "当前阶段无法识别，请查看任务详情并刷新状态。";
   return "助手正在执行升级，业务可能中断；刷新或关闭页面不会取消任务。";
 };
 const checking = ref(false);
@@ -562,6 +616,8 @@ const status = ref<UpgradeStatus>();
 const update = ref<Awaited<ReturnType<typeof checkServiceUpgrade>>["data"]>();
 const errorMessage = ref("");
 const importing = ref(false);
+const uploadTransfer = ref<UploadTransfer>();
+let importGeneration = 0;
 const importJob = ref<UpgradeImportJob>();
 const importJobError = ref("");
 const importJobID = computed(() => importJob.value?.job_id || importJob.value?.task_id || importJob.value?.upload_id || "");
@@ -606,6 +662,44 @@ const importPhaseLabel = (phase: string) =>
       abandoned: "上传未完成"
     }) as Record<string, string>
   )[phase.toLowerCase()] || `处理中（${phase}）`;
+const importProgress = computed<ProgressDisplay>(() => {
+  if (!importJob.value) {
+    const failed = uploadTransfer.value?.state === "failed";
+    const waiting = uploadTransfer.value?.state === "waiting";
+    return {
+      title: "导入离线升级包",
+      steps: ["上传升级包", "后台校验", "升级包就绪"],
+      current: 0,
+      detail: failed ? "上传未完成" : waiting ? "文件已传输，等待服务端受理" : "正在上传升级包",
+      state: failed ? "error" : waiting ? "waiting" : "active",
+      error: uploadTransfer.value?.error
+    };
+  }
+  const failed = importJobFailed.value || (importJobFinished.value && Boolean(importJobError.value));
+  const ready = importJobFinished.value && !failed;
+  const phase = importPhase.value;
+  const known = ["queued", "pending", "received", "verifying", "validating"].includes(phase) || importJobFinished.value;
+  return {
+    title: "导入离线升级包",
+    steps: ["上传升级包", "后台校验", "升级包就绪"],
+    current: ready ? 2 : phase === "abandoned" ? 0 : known ? 1 : -1,
+    detail: ready
+      ? `升级包已就绪${importedArtifactFromJob(importJob.value).version ? ` · v${importedArtifactFromJob(importJob.value).version}` : ""}`
+      : failed && !importJobFailed.value
+        ? "升级包信息不完整，无法就绪"
+        : importPhaseLabel(phase),
+    state: failed
+      ? "error"
+      : ready
+        ? "success"
+        : !known
+          ? "unknown"
+          : ["queued", "pending", "received"].includes(phase)
+            ? "waiting"
+            : "active",
+    error: importJob.value.error || importJob.value.message || importJobError.value
+  };
+});
 const importJobStorageKey = "uvp.service-upgrade.import-job";
 const readStoredImportJobID = () => {
   if (typeof window === "undefined") return "";
@@ -755,6 +849,7 @@ const importedArtifactFromJob = (job: UpgradeImportJob): Partial<UpgradeImportAr
 const applyImportedArtifact = (job: UpgradeImportJob) => {
   const artifact = importedArtifactFromJob(job);
   if (!artifact.version || !artifact.sha256 || !artifact.filename || !artifact.build_id) {
+    update.value = undefined;
     importJobError.value = "校验已完成，但服务端没有返回完整的升级包信息";
     return;
   }
@@ -789,8 +884,10 @@ const applyImportedArtifact = (job: UpgradeImportJob) => {
 const refreshImportJob = async (id = importJobID.value) => {
   if (!id || pollingImport) return;
   pollingImport = true;
+  const generation = importGeneration;
   try {
     const response = await getServiceUpgradeImport(id);
+    if (generation !== importGeneration) return;
     const job = ((response.data as any)?.job || response.data) as UpgradeImportJob;
     if (!job.phase && !job.status && job.version && job.sha256 && job.filename && job.build_id) job.phase = "verified";
     importJob.value = job;
@@ -808,6 +905,7 @@ const refreshImportJob = async (id = importJobID.value) => {
     }
     importing.value = true;
   } catch (error: any) {
+    if (generation !== importGeneration) return;
     // The server job survives page refresh; retain its ID and retry transient failures.
     importJobError.value = error?.message || "读取离线升级包校验状态失败，正在重试";
   } finally {
@@ -873,6 +971,7 @@ const loadStatus = async () => {
     ]);
     if (statusResult.status === "fulfilled") {
       status.value = statusResult.value.data;
+      if (status.value.activeTask) lastActiveTaskID.value = status.value.activeTask.task_id;
       statusError.value = "";
       if (!runtimeIdentityMismatch.value) clearClientRefreshTarget();
       else maybeRefreshClient();
@@ -949,9 +1048,21 @@ const importOffline = async (file: File) => {
   errorMessage.value = "";
   importJobError.value = "";
   importJob.value = undefined;
+  update.value = undefined;
+  storeImportJobID("");
+  const generation = ++importGeneration;
+  uploadTransfer.value = { filename: file.name, loaded: 0, total: file.size || undefined, state: "uploading" };
   importing.value = true;
   try {
-    const result = await importServiceUpgrade(file);
+    const result = await importServiceUpgrade(file, event => {
+      if (generation !== importGeneration || !uploadTransfer.value) return;
+      const total =
+        event.lengthComputable && event.total && Number.isFinite(event.total) && event.total > 0 ? event.total : undefined;
+      uploadTransfer.value.loaded = Number.isFinite(event.loaded) ? Math.max(0, event.loaded) : 0;
+      uploadTransfer.value.total = total;
+      uploadTransfer.value.state = total && event.loaded >= total ? "waiting" : "uploading";
+    });
+    if (generation !== importGeneration) return;
     const job = result.data;
     const id = job.job_id || job.task_id || job.upload_id;
     if (!id && job.version && job.sha256 && job.filename && job.build_id) {
@@ -967,8 +1078,13 @@ const importOffline = async (file: File) => {
     storeImportJobID(job.job_id || job.task_id || job.upload_id || id);
     await refreshImportJob(job.job_id || job.task_id || job.upload_id || id);
   } catch (error: any) {
+    if (generation !== importGeneration) return;
     importing.value = false;
     errorMessage.value = error?.message || "导入离线升级包失败";
+    if (uploadTransfer.value) {
+      uploadTransfer.value.state = "failed";
+      uploadTransfer.value.error = errorMessage.value;
+    }
   }
 };
 
@@ -1122,6 +1238,7 @@ onMounted(async () => {
   }, 2500);
 });
 onUnmounted(() => {
+  importGeneration += 1;
   if (refreshTimer) clearInterval(refreshTimer);
   if (importRefreshTimer) clearInterval(importRefreshTimer);
 });
@@ -1136,6 +1253,12 @@ onUnmounted(() => {
   min-width: 0;
   max-width: none;
   margin: 0;
+}
+.upgrade-progress-panel {
+  margin-bottom: 16px;
+  > .upgrade-caption {
+    margin-top: 12px;
+  }
 }
 .version-panel {
   margin-bottom: 16px;
@@ -1409,6 +1532,16 @@ onUnmounted(() => {
   color: var(--color-text-2);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+.task-hint {
+  margin: 16px 0;
+}
+.task-descriptions :deep(.arco-descriptions-table) {
+  width: 100%;
+  table-layout: fixed;
+}
+.task-descriptions :deep(.arco-descriptions-item-label) {
+  width: 88px;
 }
 .task-descriptions :deep(.arco-descriptions-item-value) {
   overflow-wrap: anywhere;

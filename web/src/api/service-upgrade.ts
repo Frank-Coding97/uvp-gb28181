@@ -1,6 +1,7 @@
 import { http } from "@/utils/http";
 import { baseUrlApi } from "@/api/utils";
 import type { BaseResult } from "@/api/types";
+import type { AxiosProgressEvent } from "axios";
 
 export interface UpgradeArtifact {
   deployment: string;
@@ -150,12 +151,13 @@ export const checkServiceUpgrade = () =>
     baseUrlApi("system/upgrade/check")
   );
 
-export const importServiceUpgrade = (file: File) => {
+export const importServiceUpgrade = (file: File, onUploadProgress?: (event: AxiosProgressEvent) => void) => {
   const data = new FormData();
   data.append("file", file);
   return http.request<BaseResult<UpgradeImportJob>>("post", baseUrlApi("system/upgrade/import"), {
     data,
     headers: { "Content-Type": "multipart/form-data" },
+    onUploadProgress,
     timeout: 30 * 60 * 1000
   });
 };

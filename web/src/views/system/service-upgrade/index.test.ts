@@ -150,8 +150,11 @@ describe("service upgrade page", () => {
     Object.defineProperty(input.element, "files", { configurable: true, value: [file] });
     await input.trigger("change");
     await flushPromises();
-    expect(api.importPackage).toHaveBeenCalledWith(file);
+    expect(api.importPackage).toHaveBeenCalledWith(file, expect.any(Function));
     expect(api.importStatus).toHaveBeenCalledWith("job-1");
+    const reason = wrapper.get('[data-testid="import-progress"] details');
+    (reason.element as HTMLDetailsElement).open = true;
+    await reason.trigger("toggle");
     expect(wrapper.text()).toContain("升级包签名无效");
     await input.trigger("change");
     await flushPromises();
@@ -244,6 +247,179 @@ describe("service upgrade page", () => {
     wrapper.unmount();
   });
 
+  it("上传展示实际字节，100% 后等待受理且不提前允许升级", async () => {
+    let finish!: (value: unknown) => void;
+    api.importPackage.mockReturnValue(new Promise(resolve => (finish = resolve)));
+    api.importStatus.mockResolvedValue({ data: { upload_id: "new-import", phase: "verifying" } });
+    const wrapper = mountPage();
+    await flushPromises();
+    const vm = wrapper.vm as any;
+    vm.update = { manifest: { version: "1.9.0" }, artifact: { sha256: "old" }, hasUpdate: true };
+    const pending = vm.importOffline(new File(["archive"], "upgrade.tar"));
+    await flushPromises();
+    expect(vm.update).toBeUndefined();
+    const progress = wrapper.get('[data-testid="import-progress"]');
+    expect(progress.text()).toContain("upgrade.tar");
+    const onProgress = api.importPackage.mock.calls.at(-1)![1];
+    onProgress({ loaded: 4 * 1024 * 1024, total: 10 * 1024 * 1024, lengthComputable: true });
+    await flushPromises();
+    expect(progress.text()).toContain("4 MiB / 10 MiB");
+    expect(progress.get('[role="progressbar"]').attributes("aria-valuenow")).toBe("40");
+    onProgress({ loaded: 10, total: 10, lengthComputable: true });
+    await flushPromises();
+    expect(progress.text()).toContain("等待服务端受理");
+    expect(api.createTask).not.toHaveBeenCalled();
+    expect(api.applyTask).not.toHaveBeenCalled();
+    finish({ data: { upload_id: "new-import", phase: "queued" } });
+    await pending;
+    await flushPromises();
+    expect(progress.text()).toContain("正在校验签名与完整性");
+    expect(progress.find('[role="progressbar"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("缺少可靠总大小不编造百分比，上传失败后重新选包清除旧状态", async () => {
+    let reject!: (error: Error) => void;
+    api.importPackage.mockReturnValueOnce(new Promise((_resolve, fail) => (reject = fail)));
+    const wrapper = mountPage();
+    await flushPromises();
+    const vm = wrapper.vm as any;
+    const pending = vm.importOffline(new File(["a"], "first.tar"));
+    const onProgress = api.importPackage.mock.calls.at(-1)![1];
+    expect(onProgress).toBeTypeOf("function");
+    onProgress({ loaded: 2048, lengthComputable: false });
+    await flushPromises();
+    const progress = wrapper.get('[data-testid="import-progress"]');
+    expect(progress.text()).toContain("已传 2 KiB");
+    expect(progress.get('[role="progressbar"]').attributes("aria-valuenow")).toBeUndefined();
+    reject(new Error("上传连接中断"));
+    await pending;
+    const reason = progress.get("details");
+    (reason.element as HTMLDetailsElement).open = true;
+    await reason.trigger("toggle");
+    expect(progress.text()).toContain("上传连接中断");
+    api.importPackage.mockReturnValueOnce(new Promise(vi.fn()));
+    void vm.importOffline(new File(["b"], "second.tar"));
+    await flushPromises();
+    expect(progress.text()).toContain("second.tar");
+    expect(progress.text()).not.toContain("first.tar");
+    expect(progress.text()).not.toContain("上传连接中断");
+    wrapper.unmount();
+  });
+
+  it("重新上传时忽略旧导入查询的迟到结果", async () => {
+    storage.set("uvp.service-upgrade.import-job", "old-job");
+    let finishOld!: (value: unknown) => void;
+    api.importStatus.mockReturnValueOnce(new Promise(resolve => (finishOld = resolve)));
+    const wrapper = mountPage();
+    await flushPromises();
+    const vm = wrapper.vm as any;
+    // A completed old job can still have a manual status refresh in flight.
+    vm.importing = false;
+    api.importPackage.mockReturnValueOnce(new Promise(vi.fn()));
+    void vm.importOffline(new File(["new"], "new.tar"));
+    finishOld({ data: { upload_id: "old-job", phase: "failed", error: "旧校验失败" } });
+    await flushPromises();
+    expect(wrapper.get('[data-testid="import-progress"]').text()).toContain("new.tar");
+    expect(wrapper.text()).not.toContain("旧校验失败");
+    expect(vm.importing).toBe(true);
+    expect(storage.has("uvp.service-upgrade.import-job")).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("导入查询断线保留阶段，刷新恢复后不虚构上传进度", async () => {
+    storage.set("uvp.service-upgrade.import-job", "restore-job");
+    api.importStatus.mockRejectedValueOnce(new Error("网络中断"));
+    const wrapper = mountPage();
+    await flushPromises();
+    const progress = wrapper.get('[data-testid="import-progress"]');
+    expect(progress.text()).toContain("正在重连");
+    expect(progress.find('[role="progressbar"]').exists()).toBe(false);
+    api.importStatus.mockResolvedValueOnce({ data: { upload_id: "restore-job", phase: "verifying" } });
+    await (wrapper.vm as any).refreshImportJob();
+    expect(progress.text()).toContain("正在校验签名与完整性");
+    expect(progress.text()).not.toContain("正在重连");
+    expect(api.applyTask).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it.each([
+    ["fetching", "下载中", 0],
+    ["verifying", "校验中", 0],
+    ["preparing", "准备与预检", 0],
+    ["awaiting_confirmation", "等待应用授权", 0],
+    ["stopping", "停止服务", 0],
+    ["backing_up", "备份数据", 1],
+    ["migrating", "执行迁移", 2],
+    ["activating", "切换版本", 3],
+    ["validating", "验证启动", 3],
+    ["committing", "提交升级结果", 3],
+    ["succeeded", "升级成功", 4],
+    ["rolled_back", "已恢复旧版本", 3],
+    ["recovery_required", "需要恢复处理", 3],
+    ["failed", "任务失败或已取消", 3],
+    ["future-phase", "未知阶段（future-phase）", -1]
+  ])("升级阶段 %s 如实显示且不会自动授权", async (phase, label, index) => {
+    const task = { task_id: "current", phase, version: "1.2.0", failure_phase: "validating", committed: phase === "succeeded" };
+    api.getStatus.mockResolvedValue({ data: { ...status(), activeTask: task, tasks: [task] } });
+    const wrapper = mountPage();
+    await flushPromises();
+    const progress = wrapper.get('[data-testid="task-progress"]');
+    expect(progress.text()).toContain(label);
+    const current = progress.find('[aria-current="step"]');
+    if (index < 0) expect(current.exists()).toBe(false);
+    else expect(current.attributes("data-step")).toBe(String(index));
+    expect(progress.find('[role="progressbar"]').exists()).toBe(false);
+    if (phase !== "succeeded") expect(progress.text()).not.toContain("升级成功");
+    expect(api.applyTask).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("活动任务断线后保留进度，同任务恢复后显示终态，详情独立显示历史任务", async () => {
+    const old = { task_id: "old", version: "1.0.0", phase: "succeeded", committed: true };
+    const current = { task_id: "current", version: "1.2.0", phase: "backing_up", committed: false };
+    api.getStatus.mockResolvedValueOnce({ data: { ...status(), activeTask: current, tasks: [old, current] } });
+    const wrapper = mountPage();
+    await flushPromises();
+    const vm = wrapper.vm as any;
+    expect(wrapper.get('[data-testid="task-progress"]').text()).toContain("备份数据");
+    api.getStatus.mockRejectedValueOnce(new Error("服务重启中"));
+    await vm.loadStatus();
+    expect(wrapper.get('[data-testid="task-progress"]').text()).toContain("正在重连");
+    vm.showTaskDetails("old");
+    await flushPromises();
+    expect(wrapper.get('[data-testid="task-detail-progress"]').text()).toContain("升级成功");
+    expect(wrapper.get('[data-testid="task-progress"]').text()).not.toContain("升级成功");
+    api.getStatus.mockResolvedValueOnce({
+      data: { ...status(), tasks: [old, { ...current, phase: "succeeded", committed: true, updated_at: "2026-10-19T01:00:00Z" }] }
+    });
+    await vm.loadStatus();
+    expect(wrapper.get('[data-testid="task-progress"]').text()).toContain("升级成功");
+    expect(wrapper.get('[data-testid="task-progress"]').text()).not.toContain("正在重连");
+    wrapper.unmount();
+  });
+
+  it("空闲页面不增加进度占位", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    expect(wrapper.find('[data-testid="import-progress"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="task-progress"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("旧包重新查询失败后清除可应用的旧制品，并展示真实原因", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    const vm = wrapper.vm as any;
+    vm.update = { manifest: { version: "1.2.0" }, artifact: { sha256: "old" }, hasUpdate: true };
+    vm.importJob = { upload_id: "job", phase: "verifying" };
+    api.importStatus.mockResolvedValueOnce({ data: { upload_id: "job", phase: "succeeded", version: "1.2.0" } });
+    await vm.refreshImportJob();
+    expect(vm.update).toBeUndefined();
+    expect(wrapper.get('[data-testid="import-progress"]').text()).not.toContain("升级包已就绪 · v1.2.0");
+    wrapper.unmount();
+  });
+
   it("默认展示升级记录，自动升级配置按需进入", async () => {
     const wrapper = mountPage();
     await flushPromises();
@@ -289,6 +465,20 @@ describe("service upgrade page", () => {
     vm.showReleaseNotes("1.2.0", "");
     await flushPromises();
     expect(wrapper.text()).toContain("该版本未提供更新说明");
+    wrapper.unmount();
+  });
+
+  it("任务详情沿用系统抽屉和详情表格样式", async () => {
+    const task = { task_id: "detail-style", version: "1.1.6", phase: "backing_up", committed: false };
+    api.getStatus.mockResolvedValue({ data: { ...status(), tasks: [task] } });
+    const wrapper = mountPage();
+    await flushPromises();
+    (wrapper.vm as any).showTaskDetails(task.task_id);
+    await flushPromises();
+    expect(wrapper.get("aside").classes()).toContain("uvp-system-drawer");
+    const details = wrapper.get(".task-descriptions");
+    expect(details.classes()).toContain("uvp-system-description");
+    expect(details.attributes()).toHaveProperty("bordered");
     wrapper.unmount();
   });
 
