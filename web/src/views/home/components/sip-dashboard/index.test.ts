@@ -63,4 +63,29 @@ describe("SIP dashboard card", () => {
     expect(wrapper.text()).toContain("4,902");
     expect(wrapper.text()).toContain("统计部分覆盖");
   });
+
+  it("passes the server snapshot time to the pulse chart", async () => {
+    apiMocks.fetchSnapshot.mockResolvedValue({
+      data: {
+        health: 100,
+        todayTotal: 0,
+        todayAbnormal: 0,
+        pending: 0,
+        transactions: [],
+        pulse: {
+          windowMinutes: 60,
+          samples: [{ t: 60, msgPerSec: 4, failPct: 0 }],
+          abnormalWindows: []
+        },
+        partial: false,
+        asOf: 185
+      }
+    });
+
+    const wrapper = mount(SipDashboardCard);
+    await flushPromises();
+
+    expect(wrapper.findComponent({ name: "PulseChart" }).props("asOf")).toBe(185);
+    wrapper.unmount();
+  });
 });

@@ -3,20 +3,28 @@
     <div class="pulse__head">
       <div class="pulse__title">
         信令脉搏 · 最近 60 分钟
-        <span v-if="hasData" class="pulse__stats">
-          峰值 <b>{{ maxMsg }}</b> · 当前 <b>{{ currentMsg }}</b>
+        <span v-if="hasSamples" class="pulse__stats">
+          峰值 <b>{{ maxMsg }}</b> · 最近完整分钟 <b>{{ currentMsg }}</b>
+          <span v-if="currentBucket">
+            · 本分钟累计 <b>{{ currentBucket.known === false ? "--" : currentBucket.msgPerSec }}</b> 条</span
+          >
         </span>
       </div>
       <div class="pulse__legend">
-        <span><i class="pulse__legend-line pulse__legend-line--blue" />事务数 / 分钟</span>
-        <span><i class="pulse__legend-line pulse__legend-line--red" />失败率</span>
+        <span><i class="pulse__legend-line pulse__legend-line--blue" />事务数 / 分钟（左轴）</span>
+        <span><i class="pulse__legend-line pulse__legend-line--red" />失败率（右轴）</span>
       </div>
     </div>
     <div class="pulse__chart">
-      <DashboardChart v-if="hasData" :spec="spec" title="SIP 信令脉搏" :summary="`峰值 ${maxMsg}，当前 ${currentMsg} 条/分钟`" />
-      <div v-else class="pulse__empty">暂无信令</div>
+      <DashboardChart
+        v-if="hasData"
+        :spec="spec"
+        title="SIP 信令脉搏"
+        :summary="`峰值 ${maxMsg}，最近完整分钟 ${currentMsg} 条/分钟`"
+      />
+      <div v-else class="pulse__empty">{{ currentBucket ? "等待首个完整分钟" : "暂无信令" }}</div>
     </div>
-    <div class="pulse__hint">采样 1m · {{ hasGap ? "统计存在缺口" : "仅显示 GB28181 事务" }}</div>
+    <div class="pulse__hint">采样 1m · 曲线仅含完整分钟 · {{ hasGap ? "统计存在缺口" : "仅显示 GB28181 事务" }}</div>
   </div>
 </template>
 
@@ -26,13 +34,24 @@ import type { PulseSample, AbnormalWindow } from "@/api/gb28181";
 import type { MediaChartSpec } from "@/views/gb28181/zlm/workbench/chart/overviewChart";
 import DashboardChart from "../dashboard/DashboardChart.vue";
 
-const props = defineProps<{ samples: PulseSample[]; abnormalWindows: AbnormalWindow[] }>();
-const knownSamples = computed(() => props.samples.filter(sample => sample.known !== false));
+const props = defineProps<{ samples: PulseSample[]; abnormalWindows: AbnormalWindow[]; asOf?: number }>();
+// Use server snapshot time so client clock skew cannot turn a partial bucket into a full minute.
+const completeSamples = computed(() => {
+  const asOf = props.asOf;
+  return asOf == null ? props.samples : props.samples.filter(sample => sample.t + 60 <= asOf);
+});
+const currentBucket = computed(() => {
+  const sample = props.samples.at(-1);
+  return sample && props.asOf != null && sample.t <= props.asOf && props.asOf < sample.t + 60 ? sample : null;
+});
+const hasSamples = computed(() => props.samples.length > 0);
+const knownSamples = computed(() => completeSamples.value.filter(sample => sample.known !== false));
 const hasGap = computed(() => props.samples.some(sample => sample.known === false));
-const hasData = computed(() => knownSamples.value.some(sample => sample.msgPerSec > 0 || sample.failPct > 0));
-const maxMsg = computed(() => Math.max(1, ...knownSamples.value.map(sample => sample.msgPerSec)));
+const hasData = computed(() => knownSamples.value.length > 0);
+const maxMsg = computed(() => Math.max(0, ...knownSamples.value.map(sample => sample.msgPerSec)));
+const axisMax = computed(() => Math.max(1, Math.ceil(maxMsg.value * 1.1)));
 const currentMsg = computed(() => {
-  const current = props.samples.at(-1);
+  const current = completeSamples.value.at(-1);
   return current && current.known !== false ? current.msgPerSec : "--";
 });
 
@@ -47,7 +66,7 @@ function timeLabel(datum: PulseDatum): string {
 }
 
 const spec = computed<MediaChartSpec>(() => {
-  const values = props.samples.map(sample => {
+  const values = completeSamples.value.map(sample => {
     const known = sample.known !== false;
     return {
       time: sample.t * 1000,
@@ -62,11 +81,12 @@ const spec = computed<MediaChartSpec>(() => {
     type: "common",
     background: "transparent",
     animation: false,
-    padding: { left: 4, right: 4, top: 5, bottom: 5 },
+    padding: { left: 8, right: 12, top: 8, bottom: 8 },
     data: [{ id: "pulse", values }],
     series: [
       {
         type: "area",
+        invalidType: "break",
         data: { id: "pulse" },
         xField: "time",
         yField: "messages",
@@ -74,7 +94,6 @@ const spec = computed<MediaChartSpec>(() => {
         area: {
           style: {
             curveType: "monotone",
-            fillOpacity: 0.28,
             fill: {
               gradient: "linear",
               x0: 0,
@@ -82,9 +101,9 @@ const spec = computed<MediaChartSpec>(() => {
               x1: 0,
               y1: 1,
               stops: [
-                { offset: 0, color: "var(--uvp-brand)", opacity: 0.78 },
-                { offset: 0.68, color: "var(--uvp-brand)", opacity: 0.24 },
-                { offset: 1, color: "var(--uvp-brand)", opacity: 0.04 }
+                { offset: 0, color: "var(--uvp-chart-area-start)" },
+                { offset: 0.68, color: "var(--uvp-chart-area-middle)" },
+                { offset: 1, color: "transparent" }
               ]
             }
           }
@@ -92,7 +111,7 @@ const spec = computed<MediaChartSpec>(() => {
         point: {
           visible: true,
           style: {
-            size: (datum: PulseDatum) => (datum.known && datum.time === last ? 5.6 : 0),
+            size: (datum: PulseDatum) => (datum.known && datum.time === last ? 6 : 0),
             fill: "var(--uvp-brand)",
             stroke: "var(--uvp-panel-bg)",
             lineWidth: 1
@@ -110,6 +129,7 @@ const spec = computed<MediaChartSpec>(() => {
       },
       {
         type: "line",
+        invalidType: "break",
         data: { id: "pulse" },
         xField: "time",
         yField: "failure",
@@ -132,26 +152,52 @@ const spec = computed<MediaChartSpec>(() => {
     axes: [
       {
         orient: "bottom",
-        type: "linear",
-        visible: false,
+        type: "time",
+        visible: true,
+        layers: [{ tickCount: 3, timeFormat: "%H:%M", timeFormatMode: "local" }],
+        label: {
+          autoHide: true,
+          autoRotate: false,
+          style: { fill: "var(--uvp-text-tertiary)", fontSize: 10 }
+        },
+        domainLine: { visible: false },
+        tick: { visible: false },
+        grid: { visible: false },
         min: first === last ? first - 60000 : first,
         max: last,
         zero: false,
         nice: false
       },
-      { orient: "left", type: "linear", visible: false, seriesIndex: [0], min: 0, max: maxMsg.value, nice: false },
-      { orient: "right", type: "linear", visible: false, seriesIndex: [1], min: 0, max: 100, nice: false }
+      {
+        orient: "left",
+        type: "linear",
+        visible: true,
+        seriesIndex: [0],
+        min: 0,
+        max: axisMax.value,
+        nice: false,
+        tickCount: 3,
+        noDecimals: true,
+        label: { autoHide: true, style: { fill: "var(--uvp-text-tertiary)", fontSize: 10 } },
+        domainLine: { visible: false },
+        tick: { visible: false },
+        grid: { visible: true, style: { stroke: "var(--uvp-panel-border)" } }
+      },
+      {
+        orient: "right",
+        type: "linear",
+        visible: true,
+        seriesIndex: [1],
+        min: 0,
+        max: 100,
+        nice: false,
+        tickCount: 3,
+        label: { formatMethod: (value: number) => `${value}%`, style: { fill: "var(--uvp-text-tertiary)", fontSize: 10 } },
+        domainLine: { visible: false },
+        tick: { visible: false },
+        grid: { visible: false }
+      }
     ],
-    markArea: props.abnormalWindows
-      .filter(win => win.endT * 1000 > first && win.startT * 1000 < last)
-      .map(win => ({
-        x: Math.max(first, win.startT * 1000),
-        x1: Math.min(last, win.endT * 1000),
-        relativeSeriesIndex: 0,
-        area: { style: { fill: "var(--uvp-danger-soft)" } },
-        label: { visible: false },
-        interactive: false
-      })),
     crosshair: {
       xField: { visible: true, line: { type: "line", style: { stroke: "var(--uvp-text-tertiary)", lineDash: [2, 2] } } }
     },
@@ -166,14 +212,15 @@ const spec = computed<MediaChartSpec>(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px 14px;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 10px;
+  min-width: 0;
+  min-height: 150px;
+  overflow: hidden;
 }
 
 .pulse__head {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
   align-items: center;
   justify-content: space-between;
 }
@@ -200,6 +247,7 @@ const spec = computed<MediaChartSpec>(() => {
 
 .pulse__legend {
   display: flex;
+  flex-wrap: wrap;
   gap: 14px;
   font-size: 11px;
   color: var(--uvp-text-tertiary);
@@ -215,20 +263,22 @@ const spec = computed<MediaChartSpec>(() => {
 }
 
 .pulse__legend-line--red {
-  background: var(--uvp-danger);
+  height: 0;
+  background: transparent;
+  border-top: 2px dashed var(--uvp-danger);
 }
-
 .pulse__chart {
-  position: relative;
+  display: grid;
   flex: 1;
+  grid-template-rows: minmax(0, 1fr);
   width: 100%;
-  height: 90px;
-  min-height: 90px;
+  min-height: 150px;
+  overflow: hidden;
 }
 
 .pulse__chart > .dashboard-chart {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  min-height: 150px;
 }
 
 .pulse__empty {
@@ -236,7 +286,7 @@ const spec = computed<MediaChartSpec>(() => {
   align-items: center;
   justify-content: center;
   height: 100%;
-  min-height: 90px;
+  min-height: 150px;
   font-size: 12px;
   color: var(--uvp-text-tertiary);
 }

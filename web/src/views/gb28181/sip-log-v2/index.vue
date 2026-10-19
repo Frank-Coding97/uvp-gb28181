@@ -30,6 +30,7 @@ import {
   type TraceHealth,
   type TraceMessageDetail,
   type TraceMessageSummary,
+  type TraceBusinessCode,
   type TraceDiagnosisCode,
   type TraceSessionQuery,
   type TraceSessionStats,
@@ -40,6 +41,40 @@ type FilterScope = "all" | "anomaly" | "register_failure" | "play_stuck";
 type ViewMode = "table" | "terminal";
 type TraceWindowMinutes = 5 | 10 | 30 | 60;
 type TraceWindowPreset = TraceWindowMinutes | "custom";
+type RefreshBatch = {
+  filterVersion: number;
+  foreground: boolean;
+  includeStats: boolean;
+  includeHealth: boolean;
+  query: TraceSessionQuery;
+  statsQuery: TraceSessionQuery;
+};
+
+const businessCodeOptions: Array<{ value: TraceBusinessCode; label: string }> = [
+  { value: "register", label: "注册" },
+  { value: "keepalive", label: "心跳保持" },
+  { value: "transport_keepalive", label: "传输保活" },
+  { value: "catalog", label: "目录查询" },
+  { value: "device_info", label: "设备信息" },
+  { value: "device_status", label: "设备状态" },
+  { value: "device_control", label: "设备控制" },
+  { value: "alarm", label: "报警" },
+  { value: "ptz", label: "云台控制" },
+  { value: "realtime_play", label: "实时点播" },
+  { value: "record_query", label: "录像查询" },
+  { value: "playback", label: "回放" },
+  { value: "download", label: "下载" },
+  { value: "config_download", label: "配置查询" },
+  { value: "playback_control", label: "回放控制" },
+  { value: "talk", label: "语音对讲" },
+  { value: "broadcast", label: "语音广播" },
+  { value: "mobile_position", label: "移动位置" },
+  { value: "subscription", label: "订阅/通知" },
+  { value: "ack", label: "会话确认" },
+  { value: "hangup", label: "挂断" },
+  { value: "stun_binding", label: "STUN探测" },
+  { value: "unknown", label: "未知业务" }
+];
 
 const route = useRoute();
 const router = useRouter();
@@ -78,6 +113,7 @@ const filters = ref({
   range: [] as string[],
   scope: "all" as FilterScope,
   diagnosisCode: "" as TraceDiagnosisCode | "",
+  businessCode: "" as TraceBusinessCode | "",
   keyword: ""
 });
 const traceWindowPreset = ref<TraceWindowPreset>(DEFAULT_TRACE_WINDOW_MINUTES);
@@ -93,6 +129,14 @@ const detailLoading = ref(false);
 const selectedEventId = ref<string>("");
 const currentMessageDetail = ref<TraceMessageDetail | null>(null);
 const viewMode = ref<ViewMode>("table");
+const selectedSession = ref<TraceSessionSummary | null>(null);
+let pageMounted = false;
+let filterVersion = 0;
+let refreshRunning = false;
+let pendingRefresh: RefreshBatch | null = null;
+const refreshWaiters: Array<{ filterVersion: number; resolve: () => void }> = [];
+let detailLoadVersion = 0;
+let messageDetailVersion = 0;
 
 // 会话时序详情:表格视图点击某行进入,详情内部 CallId
 const drillCallId = ref<string>("");
@@ -100,7 +144,7 @@ const drillMessages = ref<TraceMessageSummary[]>([]);
 
 const drillSession = computed<TraceSessionSummary | null>(() => {
   if (!drillCallId.value) return null;
-  return sessions.value.find(s => s.callId === drillCallId.value) || null;
+  return selectedSession.value;
 });
 
 // 详情面板显示条件:只有会话时序详情页需要
@@ -114,6 +158,7 @@ function buildBaseSessionQuery(): TraceSessionQuery {
     from: dayjs(from).toISOString(),
     to: dayjs(to).toISOString(),
     keyword: filters.value.keyword.trim() || undefined,
+    businessCode: filters.value.businessCode || undefined,
     limit: 200
   };
 }
@@ -152,37 +197,100 @@ const diagnosisCodeOptions = computed<Array<{ value: TraceDiagnosisCode; label: 
   return [];
 });
 
-async function loadSessions() {
-  sessionLoading.value = true;
-  try {
-    const response = await listTraceSessions(buildSessionQuery());
-    if (response.code === 0) {
-      sessions.value = response.data.items || [];
-    } else {
-      Message.warning(response.message || "SIP 会话查询失败");
+function enqueueRefresh(options: { foreground?: boolean; includeStats?: boolean; includeHealth?: boolean } = {}) {
+  const foreground = options.foreground ?? true;
+  const includeStats = (options.includeStats ?? true) || statsLoading.value;
+  const includeHealth = options.includeHealth ?? false;
+  if (foreground) {
+    filterVersion += 1;
+    sessionLoading.value = true;
+    if (includeStats) {
+      statsLoading.value = true;
+      statsError.value = false;
     }
-  } catch (e: any) {
-    Message.error(e?.message || "SIP 会话查询失败");
-  } finally {
-    sessionLoading.value = false;
+  }
+
+  const batch: RefreshBatch = {
+    filterVersion,
+    foreground,
+    includeStats,
+    includeHealth,
+    query: buildSessionQuery(),
+    statsQuery: buildBaseSessionQuery()
+  };
+  if (pendingRefresh) {
+    batch.foreground ||= pendingRefresh.foreground;
+    batch.includeStats ||= pendingRefresh.includeStats;
+    batch.includeHealth ||= pendingRefresh.includeHealth;
+  }
+  pendingRefresh = batch;
+
+  const completion = new Promise<void>(resolve => refreshWaiters.push({ filterVersion, resolve }));
+  void drainRefreshQueue();
+  return completion;
+}
+
+function completeRefreshWaiters(completedVersion: number) {
+  for (let index = refreshWaiters.length - 1; index >= 0; index -= 1) {
+    if (refreshWaiters[index].filterVersion <= completedVersion) {
+      refreshWaiters[index].resolve();
+      refreshWaiters.splice(index, 1);
+    }
   }
 }
 
-async function loadStats() {
-  statsLoading.value = true;
-  statsError.value = false;
-  stats.value = null;
+async function drainRefreshQueue() {
+  if (refreshRunning || !pageMounted) return;
+  refreshRunning = true;
   try {
-    const response = await fetchTraceSessionStats(buildBaseSessionQuery());
-    if (response.code === 0) {
-      stats.value = response.data;
-    } else {
-      statsError.value = true;
+    while (pendingRefresh && pageMounted) {
+      const batch = pendingRefresh;
+      pendingRefresh = null;
+      const current = () => pageMounted && batch.filterVersion === filterVersion;
+      const sessionsPromise = listTraceSessions(batch.query);
+      const statsPromise = batch.includeStats ? fetchTraceSessionStats(batch.statsQuery) : Promise.resolve(null);
+      const healthPromise = batch.includeHealth ? fetchTraceHealth() : Promise.resolve(null);
+      const [sessionsResult, statsResult, healthResult] = await Promise.allSettled([
+        sessionsPromise,
+        statsPromise,
+        healthPromise
+      ]);
+      if (!pageMounted) break;
+
+      if (current()) {
+        if (sessionsResult.status === "fulfilled" && sessionsResult.value.code === 0) {
+          sessions.value = sessionsResult.value.data.items || [];
+        } else if (batch.foreground) {
+          const response = sessionsResult.status === "fulfilled" ? sessionsResult.value : null;
+          const error = sessionsResult.status === "rejected" ? sessionsResult.reason : null;
+          if (response) Message.warning(response.message || "SIP 会话查询失败");
+          else Message.error(error?.message || "SIP 会话查询失败");
+        }
+
+        if (batch.includeStats) {
+          if (statsResult.status === "fulfilled" && statsResult.value?.code === 0) {
+            stats.value = statsResult.value.data;
+            statsError.value = false;
+          } else if (batch.foreground) {
+            statsError.value = true;
+          }
+        }
+
+        if (batch.includeHealth) {
+          if (healthResult.status === "fulfilled" && healthResult.value?.code === 0) {
+            health.value = healthResult.value.data;
+          } else if (healthResult.status === "rejected") {
+            health.value = { state: "degraded", queueDepth: 0, queueCapacity: 0, dropped: 0, lastError: "健康接口不可用" };
+          }
+        }
+        sessionLoading.value = false;
+        statsLoading.value = false;
+      }
+      completeRefreshWaiters(batch.filterVersion);
     }
-  } catch {
-    statsError.value = true;
   } finally {
-    statsLoading.value = false;
+    refreshRunning = false;
+    if (pageMounted && pendingRefresh) void drainRefreshQueue();
   }
 }
 
@@ -200,28 +308,30 @@ const diagnosisIncomplete = computed(
     (health.value.diagnosis?.failed || 0) > 0
 );
 
-async function loadHealth() {
-  try {
-    const response = await fetchTraceHealth();
-    if (response.code === 0) health.value = response.data;
-  } catch {
-    health.value = { state: "degraded", queueDepth: 0, queueCapacity: 0, dropped: 0, lastError: "健康接口不可用" };
-  }
-}
-
 async function loadDrillMessages() {
   if (!drillCallId.value) return;
+  const version = ++detailLoadVersion;
+  const callId = drillCallId.value;
   detailLoading.value = true;
   try {
+    if (selectedSession.value?.eventId) {
+      const eventId = selectedSession.value.eventId;
+      selectedEventId.value = eventId;
+      await loadMessageDetail(eventId);
+      if (pageMounted && version === detailLoadVersion && currentMessageDetail.value) {
+        drillMessages.value = [currentMessageDetail.value];
+      }
+      return;
+    }
     const [from, to] = autoTraceRange.value
       ? createLatestTraceRange(traceWindowPreset.value as TraceWindowMinutes)
       : filters.value.range;
-    const response = await listTraceSessionMessages(drillCallId.value, {
+    const response = await listTraceSessionMessages(callId, {
       from: dayjs(from).toISOString(),
       to: dayjs(to).toISOString(),
       limit: 500
     });
-    if (response.code === 0) {
+    if (pageMounted && version === detailLoadVersion && drillCallId.value === callId && response.code === 0) {
       const items = response.data.items || [];
       drillMessages.value = items.slice().sort((a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime());
       // 进入详情后默认选中第一条报文
@@ -231,13 +341,15 @@ async function loadDrillMessages() {
       }
     }
   } catch (e: any) {
-    Message.error(e?.message || "会话报文加载失败");
+    if (pageMounted && version === detailLoadVersion) Message.error(e?.message || "会话报文加载失败");
   } finally {
-    detailLoading.value = false;
+    if (pageMounted && version === detailLoadVersion) detailLoading.value = false;
   }
 }
 
 async function loadMessageDetail(eventId: string) {
+  const version = ++messageDetailVersion;
+  const callId = drillCallId.value;
   if (!eventId) {
     currentMessageDetail.value = null;
     return;
@@ -245,29 +357,50 @@ async function loadMessageDetail(eventId: string) {
   detailLoading.value = true;
   try {
     const response = await getTraceMessage(eventId);
-    if (response.code === 0) {
+    if (
+      pageMounted &&
+      version === messageDetailVersion &&
+      callId === drillCallId.value &&
+      selectedEventId.value === eventId &&
+      response.code === 0
+    ) {
       currentMessageDetail.value = response.data;
-    } else {
+    } else if (
+      pageMounted &&
+      version === messageDetailVersion &&
+      callId === drillCallId.value &&
+      selectedEventId.value === eventId
+    ) {
       currentMessageDetail.value = null;
     }
   } catch {
-    currentMessageDetail.value = null;
+    if (pageMounted && version === messageDetailVersion && callId === drillCallId.value && selectedEventId.value === eventId) {
+      currentMessageDetail.value = null;
+    }
   } finally {
-    detailLoading.value = false;
+    if (pageMounted && version === messageDetailVersion && callId === drillCallId.value) detailLoading.value = false;
   }
 }
 
 const currentMessage = computed<TraceMessageDetail | null>(() => currentMessageDetail.value);
 
 function onSelectSession(session: TraceSessionSummary) {
-  drillCallId.value = session.callId;
+  messageDetailVersion += 1;
+  selectedEventId.value = "";
+  currentMessageDetail.value = null;
+  selectedSession.value = session;
+  drillCallId.value = session.callId || (session.eventId ? `event:${session.eventId}` : "");
 }
 
 function onBackToList() {
+  detailLoadVersion += 1;
+  messageDetailVersion += 1;
   drillCallId.value = "";
+  selectedSession.value = null;
   drillMessages.value = [];
   currentMessageDetail.value = null;
   selectedEventId.value = "";
+  detailLoading.value = false;
 }
 
 async function onSelectMessage(message: TraceMessageSummary) {
@@ -287,9 +420,8 @@ function stepMessage(delta: 1 | -1) {
   }
 }
 
-async function refresh() {
-  await Promise.all([loadSessions(), loadStats(), loadHealth()]);
-  if (drillCallId.value) await loadDrillMessages();
+function refresh() {
+  return enqueueRefresh({ foreground: true, includeStats: true, includeHealth: true });
 }
 
 function resetFilters() {
@@ -297,6 +429,7 @@ function resetFilters() {
   filters.value.range = [];
   filters.value.scope = "all";
   filters.value.diagnosisCode = "";
+  filters.value.businessCode = "";
   filters.value.keyword = "";
 }
 
@@ -319,10 +452,14 @@ function search() {
   return refresh();
 }
 
+function applyFilters() {
+  return enqueueRefresh({ foreground: true, includeStats: false });
+}
+
 function selectScope(scope: FilterScope) {
   filters.value.scope = scope;
   filters.value.diagnosisCode = "";
-  return loadSessions();
+  return enqueueRefresh({ foreground: true, includeStats: false });
 }
 
 // 进入详情页时加载报文
@@ -338,11 +475,10 @@ let liveDebounceTimer: number | null = null;
 
 function scheduleLiveRefresh() {
   if (liveDebounceTimer !== null) return; // 已经在等,不重复排
-  liveDebounceTimer = window.setTimeout(async () => {
+  liveDebounceTimer = window.setTimeout(() => {
     liveDebounceTimer = null;
-    // 仅在表格视图且没进详情页时才刷新
     if (viewMode.value === "table" && !drillCallId.value) {
-      await Promise.all([loadSessions(), loadStats()]);
+      void enqueueRefresh({ foreground: false, includeStats: true });
     }
   }, 500);
 }
@@ -381,6 +517,7 @@ watch(
 );
 
 onMounted(async () => {
+  pageMounted = true;
   // 从 URL 读取预填参数(来自设备管理页的诊断按钮)
   const { deviceIds, callId, from, to } = route.query;
   if (deviceIds && typeof deviceIds === "string") {
@@ -394,7 +531,8 @@ onMounted(async () => {
     traceWindowPreset.value = "custom";
   }
 
-  await Promise.all([loadHealth(), loadSessions(), loadStats()]);
+  await enqueueRefresh({ foreground: true, includeStats: true, includeHealth: true });
+  if (!pageMounted) return;
   if (callId && typeof callId === "string") {
     const session = sessions.value.find(item => item.callId === callId);
     if (session) onSelectSession(session);
@@ -406,6 +544,10 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  pageMounted = false;
+  pendingRefresh = null;
+  for (const waiter of refreshWaiters) waiter.resolve();
+  refreshWaiters.length = 0;
   closeLiveSubscription();
 });
 </script>
@@ -533,9 +675,14 @@ onBeforeUnmount(() => {
             allow-clear
             placeholder="全部失败类型"
             style="width: 220px"
-            @change="loadSessions"
+            @change="applyFilters"
           >
             <a-option v-for="item in diagnosisCodeOptions" :key="item.value" :value="item.value">
+              {{ item.label }}
+            </a-option>
+          </a-select>
+          <a-select v-model="filters.businessCode" allow-clear placeholder="全部业务类型" style="width: 180px" @change="search">
+            <a-option v-for="item in businessCodeOptions" :key="item.value" :value="item.value">
               {{ item.label }}
             </a-option>
           </a-select>

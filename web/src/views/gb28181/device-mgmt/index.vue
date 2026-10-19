@@ -6,6 +6,7 @@ import maplibregl, { LngLatBounds, Marker as MapLibreMarker, type Map as MapLibr
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
   Activity,
+  ArrowLeft,
   BarChart3,
   Copy,
   Eye,
@@ -103,7 +104,8 @@ import {
   directoryQuery,
   findDirectoryNode,
   normalizeDirectoryView,
-  selectDirectory
+  selectDirectory,
+  type DirectoryState
 } from "./directoryState";
 import { normalizeProtocolOverride, protocolOverrideAfterSave } from "./protocolOverrideState";
 import { consumeDeviceMgmtReturnSnapshot, saveDeviceMgmtReturnSnapshot } from "../device-record-playback/returnSnapshot";
@@ -113,6 +115,22 @@ import { useDictLabel } from "@/hooks/useDictOptions";
 
 type ViewMode = "list" | "card" | "map";
 type DrawerTarget = { type: "channel"; id: number } | { type: "device"; id: number };
+type DeviceListReturnSnapshot = {
+  assetKind: AssetKind;
+  viewMode: ViewMode;
+  navigationMode: "device" | "directory";
+  selectedDevice: DeviceVO | null;
+  selectedDeviceSummary: DirectoryDevice | null;
+  keyword: string;
+  deviceIdFilter: string;
+  statusFilter: OnlineStatus | undefined;
+  directoryState: DirectoryState;
+  selectedDirectories: Record<"administrative" | "department" | "business", DirectoryNode | null>;
+  page: number;
+  listPageSize: number;
+  cardPageSize: number;
+  selectedRowKeys: number[];
+};
 
 const viewModeStorageKey = "uvp.gb28181.device-mgmt.view-mode";
 const AUTO_REFRESH_INTERVAL_SECONDS = 10;
@@ -134,6 +152,8 @@ const navigationMode = ref<"device" | "directory">("directory");
 const selectedDevice = ref<DeviceVO | null>(null);
 const selectedDeviceSummary = ref<DirectoryDevice | null>(null);
 const selectedDeviceContext = computed(() => selectedDevice.value || selectedDeviceSummary.value);
+const deviceListReturnSnapshot = ref<DeviceListReturnSnapshot | null>(null);
+let restoringDeviceListSnapshot = false;
 let directoryDeviceRequestVersion = 0;
 const channelScope = computed(() =>
   navigationMode.value === "device" ? { deviceId: deviceIdFilter.value || undefined } : directoryQuery(directoryState.value)
@@ -191,7 +211,7 @@ const rowsLoading = ref(false);
 const mapLoading = ref(false);
 const page = ref(1);
 const listPageSize = ref(10);
-const cardPageSize = ref(12);
+const cardPageSize = ref(9);
 if (returnSnapshot) {
   viewMode.value = returnSnapshot.viewMode;
   navigationMode.value = returnSnapshot.navigationMode || (returnSnapshot.deviceIdFilter ? "device" : "directory");
@@ -458,7 +478,9 @@ const viewOptions: Array<{ label: string; value: ViewMode; icon: any }> = [
   { label: "地图", value: "map", icon: MapIcon }
 ];
 const hasFilters = computed(() =>
-  Boolean(keyword.value || deviceIdFilter.value || statusFilter.value || selectedDirectory.value)
+  Boolean(
+    keyword.value || (deviceIdFilter.value && !deviceListReturnSnapshot.value) || statusFilter.value || selectedDirectory.value
+  )
 );
 const selectedCount = computed(() => selectedRowKeys.value.length);
 const tablePagination = computed(() => ({
@@ -472,6 +494,7 @@ const tablePagination = computed(() => ({
 }));
 
 watch(viewMode, async mode => {
+  deviceListReturnSnapshot.value = null;
   ++channelRequestVersion;
   ++deviceRequestVersion;
   rowsLoading.value = false;
@@ -509,6 +532,7 @@ watch(darkMode, value => {
   });
 });
 watch(statusFilter, () => {
+  if (restoringDeviceListSnapshot) return;
   page.value = 1;
   refreshMainData();
   refreshStats();
@@ -667,11 +691,66 @@ function keepaliveIntervalText(seconds?: number) {
 }
 function showDeviceChannels(record: DeviceVO) {
   if (!canViewDevices.value) return;
+  if (assetKind.value === "device") {
+    deviceListReturnSnapshot.value = {
+      assetKind: assetKind.value,
+      viewMode: viewMode.value,
+      navigationMode: navigationMode.value,
+      selectedDevice: selectedDevice.value,
+      selectedDeviceSummary: selectedDeviceSummary.value,
+      keyword: keyword.value,
+      deviceIdFilter: deviceIdFilter.value,
+      statusFilter: statusFilter.value,
+      directoryState: {
+        ...directoryState.value,
+        selectedKey: { ...directoryState.value.selectedKey },
+        expandedKeys: { ...directoryState.value.expandedKeys },
+        listReset: { ...directoryState.value.listReset }
+      },
+      selectedDirectories: { ...selectedDirectories.value },
+      page: page.value,
+      listPageSize: listPageSize.value,
+      cardPageSize: cardPageSize.value,
+      selectedRowKeys: [...selectedRowKeys.value]
+    };
+  }
   drawerVisible.value = false;
   setKeywordWithoutSearch("");
   statusFilter.value = undefined;
   assetKind.value = "channel";
   onDeviceSelect(record);
+}
+async function returnToDeviceList() {
+  const snapshot = deviceListReturnSnapshot.value;
+  if (!snapshot) return;
+
+  deviceListReturnSnapshot.value = null;
+  restoringDeviceListSnapshot = true;
+  ++directoryDeviceRequestVersion;
+  ++channelRequestVersion;
+  ++deviceRequestVersion;
+  assetKind.value = snapshot.assetKind;
+  navigationMode.value = snapshot.navigationMode;
+  selectedDevice.value = snapshot.selectedDevice;
+  selectedDeviceSummary.value = snapshot.selectedDeviceSummary;
+  deviceIdFilter.value = snapshot.deviceIdFilter;
+  statusFilter.value = snapshot.statusFilter;
+  directoryState.value = {
+    ...snapshot.directoryState,
+    selectedKey: { ...snapshot.directoryState.selectedKey },
+    expandedKeys: { ...snapshot.directoryState.expandedKeys },
+    listReset: { ...snapshot.directoryState.listReset }
+  };
+  selectedDirectories.value = { ...snapshot.selectedDirectories };
+  setKeywordWithoutSearch(snapshot.keyword);
+  viewMode.value = snapshot.viewMode;
+  listPageSize.value = snapshot.listPageSize;
+  cardPageSize.value = snapshot.cardPageSize;
+  await nextTick();
+  restoringDeviceListSnapshot = false;
+  page.value = snapshot.page;
+  selectedRowKeys.value = [...snapshot.selectedRowKeys];
+  await Promise.all([refreshMainData(), refreshStats()]);
 }
 function deviceSummary(device: DeviceVO): DirectoryDevice {
   return {
@@ -770,7 +849,6 @@ async function loadPtzTypeDict() {
 
 function onDirectorySelect(node: DirectoryNode) {
   if (!canViewDevices.value) return;
-  assetKind.value = "channel";
   navigationMode.value = "directory";
   ++directoryDeviceRequestVersion;
   selectedDevice.value = null;
@@ -781,7 +859,6 @@ function onDirectorySelect(node: DirectoryNode) {
 }
 async function onDirectoryViewChange() {
   if (!canViewDevices.value) return;
-  assetKind.value = "channel";
   ++directoryDeviceRequestVersion;
   navigationMode.value = "directory";
   selectedDevice.value = null;
@@ -844,9 +921,17 @@ function focusKeyword(event: KeyboardEvent) {
   }
 }
 function clearDeviceFilter() {
+  if (deviceListReturnSnapshot.value && assetKind.value === "channel") {
+    void returnToDeviceList();
+    return;
+  }
   onDeviceSelect(null);
 }
 function resetFilters() {
+  if (deviceListReturnSnapshot.value && assetKind.value === "channel") {
+    void returnToDeviceList();
+    return;
+  }
   setKeywordWithoutSearch("");
   ++directoryDeviceRequestVersion;
   navigationMode.value = "directory";
@@ -859,6 +944,7 @@ function resetFilters() {
 }
 function setAssetKind(kind: AssetKind) {
   if (kind === assetKind.value) return;
+  deviceListReturnSnapshot.value = null;
   ++directoryDeviceRequestVersion;
   navigationMode.value = "directory";
   selectedDevice.value = null;
@@ -1173,8 +1259,7 @@ async function loadDevicesData() {
       ...directoryQuery(directoryState.value),
       status: statusFilter.value,
       page: page.value,
-      pageSize: pageSize.value,
-      sort: "heartbeat:desc"
+      pageSize: pageSize.value
     });
     if (version !== deviceRequestVersion) return;
     if (response.code === 0) {
@@ -2502,7 +2587,17 @@ onUnmounted(() => {
           {{ maintenanceActivity.label(selectedDevice.id) }} · 查看
         </button>
         <div class="filter-chips">
-          <span v-if="deviceIdFilter" class="filter-chip">
+          <button
+            v-if="deviceIdFilter && deviceListReturnSnapshot && assetKind === 'channel'"
+            class="filter-chip device-drilldown-chip"
+            type="button"
+            aria-label="返回设备列表"
+            @click="returnToDeviceList"
+          >
+            <span>所属设备: {{ selectedDeviceContext ? displayName(selectedDeviceContext) : deviceIdFilter }}</span>
+            <ArrowLeft :size="12" aria-hidden="true" />
+          </button>
+          <span v-else-if="deviceIdFilter" class="filter-chip">
             <span>所属设备: {{ selectedDeviceContext ? displayName(selectedDeviceContext) : deviceIdFilter }}</span>
             <button class="close" type="button" aria-label="清除所属设备筛选" @click="clearDeviceFilter"><X :size="12" /></button>
           </span>
@@ -3281,7 +3376,7 @@ onUnmounted(() => {
             :current="page"
             :page-size="pageSize"
             :total="total"
-            :page-size-options="[12, 24, 48]"
+            :page-size-options="[9, 12, 24, 48]"
             show-page-size
             show-total
             show-jumper

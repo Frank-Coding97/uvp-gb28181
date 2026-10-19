@@ -1,12 +1,15 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import type { TraceBusinessCode, TraceSessionSummary as TraceSession } from "@/api/gb28181-trace";
 import { formatDuration, formatFullTime, sessionStateLabel } from "../helpers";
 
-defineProps<{
+const props = defineProps<{
   sessions: TraceSession[];
   selectedCallId: string;
   loading?: boolean;
 }>();
+
+const rows = computed(() => props.sessions.map(session => ({ ...session, rowKey: session.callId || session.eventId })));
 
 const emit = defineEmits<{
   (e: "selectSession", session: TraceSession): void;
@@ -38,9 +41,10 @@ function toUri(session: TraceSession): string {
 
 function businessTone(code: TraceBusinessCode): string {
   if (["realtime_play", "playback", "download", "talk", "broadcast"].includes(code)) return "media";
-  if (["keepalive", "register", "subscription", "ack"].includes(code)) return "connection";
+  if (["keepalive", "register", "subscription", "ack", "transport_keepalive", "stun_binding"].includes(code)) return "connection";
   if (["alarm", "hangup"].includes(code)) return "warning";
-  if (["catalog", "device_info", "device_status", "record_query", "mobile_position"].includes(code)) return "query";
+  if (["catalog", "device_info", "device_status", "record_query", "mobile_position", "config_download"].includes(code))
+    return "query";
   if (["device_control", "ptz", "playback_control"].includes(code)) return "control";
   return "unknown";
 }
@@ -67,14 +71,14 @@ function methodTone(method: string): string {
   <div class="table-view">
     <a-table
       class="uvp-data-table sip-log-table"
-      row-key="callId"
-      :data="sessions"
+      row-key="rowKey"
+      :data="rows"
       :columns="columns"
       :loading="loading"
       :bordered="false"
       :pagination="false"
       :scroll="{ x: 1540, y: '100%' }"
-      :row-class="(record: TraceSession) => (record.callId === selectedCallId ? 'row-active' : '')"
+      :row-class="(record: TraceSession) => ((record.callId || `event:${record.eventId}`) === selectedCallId ? 'row-active' : '')"
       @row-click="(record: TraceSession) => emit('selectSession', record)"
     >
       <template #idx="{ rowIndex }">

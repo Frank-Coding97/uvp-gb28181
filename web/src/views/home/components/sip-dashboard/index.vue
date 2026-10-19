@@ -29,7 +29,11 @@
         :today-total="snapshot?.todayTotal ?? 0"
         :today-abnormal="snapshot?.todayAbnormal ?? 0"
       />
-      <PulseChart :samples="snapshot?.pulse?.samples ?? []" :abnormal-windows="snapshot?.pulse?.abnormalWindows ?? []" />
+      <PulseChart
+        :samples="snapshot?.pulse?.samples ?? []"
+        :abnormal-windows="snapshot?.pulse?.abnormalWindows ?? []"
+        :as-of="snapshot?.asOf"
+      />
       <TransactionGrid :transactions="snapshot?.transactions ?? []" />
     </template>
   </div>

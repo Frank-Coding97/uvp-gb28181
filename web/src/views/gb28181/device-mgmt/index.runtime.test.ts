@@ -218,6 +218,13 @@ function okList(total = 0, list: unknown[] = []) {
   return { code: 0, message: "", data: { total, list } };
 }
 
+function lastDevicePageRequest() {
+  return api.listDevices.mock.calls
+    .map(([params]) => params)
+    .filter(params => params.pageSize !== 1)
+    .at(-1);
+}
+
 /**
  * 读页面源码本身。用于"样式挂在哪"这类只能从源码判断的断言(运行时拿不到
  * scoped 编译结果)。兼容从仓库根或 web/ 启动 vitest 两种 cwd。
@@ -264,12 +271,39 @@ function mountPage() {
       stubs: {
         DirectoryPanel: {
           name: "DirectoryPanel",
-          props: ["modelValue", "resourceFilter"],
+          props: ["modelValue", "resourceFilter", "selectedDeviceId"],
           emits: ["select", "deviceSelect", "clearSelection", "update:modelValue", "viewChange"],
-          setup(_props: unknown, { emit }: { emit: (event: string, device: unknown) => void }) {
+          setup(props: any, { emit }: { emit: (event: string, ...args: any[]) => void }) {
+            const chooseView = (view: string) => {
+              emit("update:modelValue", {
+                ...props.modelValue,
+                view,
+                listReset: { page: 1, clearSelection: true }
+              });
+              emit("viewChange", view);
+            };
+            const chooseDirectory = () => {
+              const node = {
+                key: `${props.modelValue.view}:test-root`,
+                name: "测试目录",
+                type: "area",
+                count: 12,
+                onlineCount: 8,
+                depth: 1,
+                children: []
+              };
+              emit("update:modelValue", {
+                ...props.modelValue,
+                selectedKey: { ...props.modelValue.selectedKey, [props.modelValue.view]: node.key },
+                listReset: { page: 1, clearSelection: true }
+              });
+              emit("select", node);
+            };
             return {
               refresh: vi.fn(),
               sync: vi.fn(),
+              chooseView,
+              chooseDirectory,
               chooseDevice: () =>
                 emit("deviceSelect", {
                   id: 31,
@@ -283,7 +317,13 @@ function mountPage() {
                 })
             };
           },
-          template: `<section><button data-testid="select-device-a" @click="chooseDevice">目录内设备 A</button></section>`
+          template: `<section>
+            <button data-testid="select-device-a" @click="chooseDevice">目录内设备 A</button>
+            <button data-testid="select-directory" @click="chooseDirectory">选择目录</button>
+            <button data-testid="directory-administrative" @click="chooseView('administrative')">行政区划</button>
+            <button data-testid="directory-department" @click="chooseView('department')">部门目录</button>
+            <button data-testid="directory-business" @click="chooseView('business')">业务分组</button>
+          </section>`
         },
         SubscriptionDialog: true,
         CustomGroupEditor: true,
@@ -298,10 +338,20 @@ function mountPage() {
         "a-input": passthroughStub,
         "a-input-password": passthroughStub,
         "a-button": { props: ["disabled"], template: `<button :disabled="disabled"><slot /></button>` },
-        "a-select": passthroughStub,
+        "a-select": {
+          props: ["modelValue"],
+          emits: ["update:modelValue"],
+          template: `<div><button type="button" data-testid="select-online" @click="$emit('update:modelValue', 'online')">在线</button><slot /></div>`
+        },
         "a-option": passthroughStub,
         "a-doption": { props: ["disabled"], template: `<button :disabled="disabled"><slot /></button>` },
-        "a-pagination": passthroughStub,
+        "a-pagination": {
+          props: ["current", "pageSize", "total", "pageSizeOptions"],
+          emits: ["change", "pageSizeChange"],
+          template: `<div class="stub-pagination" :data-current="current" :data-page-size="pageSize" :data-page-size-options="pageSizeOptions?.join(',')">
+            <button type="button" data-testid="go-page-10" @click="$emit('change', 10)">10</button>
+          </div>`
+        },
         "a-tooltip": passthroughStub,
         "a-dropdown": { template: "<div><slot /><slot name='content' /></div>" },
         "a-spin": passthroughStub,
@@ -401,12 +451,151 @@ describe("device-mgmt round-2 修复回归", () => {
   });
 
   it("没有历史偏好时默认选中卡片视图", async () => {
+    api.listDevices.mockResolvedValue(okList(32, []));
     const wrapper = mountPage();
     await flushPromises();
 
     const cardButton = wrapper.get('[aria-label="卡片视图"]');
     expect(cardButton.attributes("aria-pressed")).toBe("true");
     expect(wrapper.find(".card-view").exists()).toBe(true);
+    expect(lastDevicePageRequest()).toMatchObject({ page: 1, pageSize: 9 });
+    expect(lastDevicePageRequest()).not.toHaveProperty("sort");
+    expect(wrapper.get(".card-pagination").attributes("data-page-size-options")).toContain("9");
+    wrapper.unmount();
+  });
+
+  it("keeps device asset type while switching directory views and selecting directory nodes", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    const channelCallsBefore = api.listChannels.mock.calls.length;
+
+    for (const view of ["department", "business", "administrative"]) {
+      await wrapper.get(`[data-testid="directory-${view}"]`).trigger("click");
+      await flushPromises();
+      expect(wrapper.get('[data-asset-kind="device"]').classes()).toContain("active");
+      expect(lastDevicePageRequest()).toMatchObject({ page: 1, pageSize: 9 });
+    }
+
+    await wrapper.get('[data-testid="select-directory"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[data-asset-kind="device"]').classes()).toContain("active");
+    expect(lastDevicePageRequest()).toMatchObject({
+      directoryView: "administrative",
+      directoryKey: "administrative:test-root"
+    });
+    expect(api.listChannels).toHaveBeenCalledTimes(channelCallsBefore);
+
+    await wrapper.get('[data-testid="select-device-a"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[data-asset-kind="channel"]').classes()).toContain("active");
+    expect(api.listChannels.mock.calls.at(-1)?.[0]).toMatchObject({ deviceId: "34020000002000000031" });
+    wrapper.unmount();
+  });
+
+  it("returns from a device card to the exact device-list page and filters", async () => {
+    api.listDevices.mockResolvedValue(
+      okList(100, [
+        {
+          id: 31,
+          deviceId: "34020000002000000031",
+          name: "园区 NVR",
+          online: true,
+          status: 1,
+          channelCount: 4,
+          channelOnlineCount: 3
+        }
+      ])
+    );
+    const wrapper = mountPage();
+    await flushPromises();
+
+    await wrapper.get('[aria-label="搜索设备名称或通道名称或编码"]').setValue("门口");
+    await wrapper.get('[aria-label="搜索设备名称或通道名称或编码"]').trigger("keydown.enter");
+    await wrapper.get('[data-testid="select-online"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-testid="directory-department"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-testid="select-directory"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-testid="go-page-10"]').trigger("click");
+    await flushPromises();
+
+    expect(lastDevicePageRequest()).toMatchObject({
+      q: "门口",
+      status: "online",
+      directoryView: "department",
+      directoryKey: "department:test-root",
+      page: 10,
+      pageSize: 9
+    });
+    await wrapper.get("article.device-summary-card").trigger("dblclick");
+    await flushPromises();
+    expect(wrapper.find('[aria-label="返回设备列表"]').exists()).toBe(true);
+    const returnChip = wrapper.get('.filter-chips [aria-label="返回设备列表"]');
+    expect(returnChip.classes()).toContain("device-drilldown-chip");
+    expect(wrapper.find('[aria-label="清除所属设备筛选"]').exists()).toBe(false);
+    expect(wrapper.find(".clear-all").exists()).toBe(false);
+    expect(api.listChannels.mock.calls.at(-1)?.[0]).toMatchObject({ deviceId: "34020000002000000031" });
+
+    await returnChip.trigger("click");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(500);
+    await flushPromises();
+    expect(wrapper.get('[data-asset-kind="device"]').classes()).toContain("active");
+    expect(lastDevicePageRequest()).toMatchObject({
+      q: "门口",
+      status: "online",
+      directoryView: "department",
+      directoryKey: "department:test-root",
+      page: 10,
+      pageSize: 9
+    });
+    expect(wrapper.get('[data-testid="directory-department"]')).toBeTruthy();
+    wrapper.unmount();
+  });
+
+  it("clearing channel filters after device drilldown returns to the original device page", async () => {
+    api.listDevices.mockResolvedValue(
+      okList(100, [{ id: 31, deviceId: "34020000002000000031", name: "园区 NVR", online: true }])
+    );
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get('[data-testid="go-page-10"]').trigger("click");
+    await flushPromises();
+    await wrapper.get("article.device-summary-card").trigger("dblclick");
+    await flushPromises();
+    await wrapper.get('[data-testid="select-online"]').trigger("click");
+    await flushPromises();
+    await wrapper.get(".clear-all").trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[data-asset-kind="device"]').classes()).toContain("active");
+    expect(lastDevicePageRequest()).toMatchObject({ page: 10, pageSize: 9 });
+    wrapper.unmount();
+  });
+
+  it("discards a pending device-list return snapshot when the user changes the presentation view", async () => {
+    api.listDevices.mockResolvedValue(
+      okList(1, [
+        {
+          id: 31,
+          deviceId: "34020000002000000031",
+          name: "园区 NVR",
+          online: true,
+          status: 1,
+          channelCount: 4,
+          channelOnlineCount: 3
+        }
+      ])
+    );
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get("article.device-summary-card").trigger("dblclick");
+    await flushPromises();
+    expect(wrapper.find('[aria-label="返回设备列表"]').exists()).toBe(true);
+
+    await wrapper.get('[aria-label="列表视图"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[aria-label="返回设备列表"]').exists()).toBe(false);
     wrapper.unmount();
   });
 

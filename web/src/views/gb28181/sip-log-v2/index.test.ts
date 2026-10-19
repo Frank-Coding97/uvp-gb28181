@@ -1,3 +1,4 @@
+import { nextTick } from "vue";
 import { flushPromises, shallowMount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import dayjs from "dayjs";
@@ -14,7 +15,7 @@ const traceApi = vi.hoisted(() => ({
 }));
 
 vi.mock("@/api/gb28181-trace", () => traceApi);
-vi.mock("vue-router", () => ({ useRoute: () => ({ query: {} }) }));
+vi.mock("vue-router", () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("@arco-design/web-vue", () => ({ Message: { warning: vi.fn(), error: vi.fn() } }));
 
 class FakeEventSource {
@@ -88,7 +89,7 @@ describe("SIP log workbench storage replacement regression", () => {
     expect(wrapper.find(".toolbar").exists()).toBe(true);
     expect(wrapper.find(".stat-band").exists()).toBe(true);
     expect(wrapper.find(".sip-log-search").exists()).toBe(true);
-    expect(wrapper.findAll("a-select-stub")).toHaveLength(1);
+    expect(wrapper.findAll("a-select-stub")).toHaveLength(2);
     expect(wrapper.get("a-input-stub").attributes("placeholder")).toBe("搜索设备 ID、名称或 Call-ID");
     expect(wrapper.find(".view-switch").exists()).toBe(true);
     expect(wrapper.findAll(".view-btn").map(button => button.text())).toEqual(["表格", "终端"]);
@@ -269,10 +270,10 @@ describe("SIP log workbench storage replacement regression", () => {
 
     const vm = wrapper.vm as unknown as {
       filters: { diagnosisCode: string };
-      loadSessions: () => Promise<void>;
+      applyFilters: () => Promise<void>;
     };
     vm.filters.diagnosisCode = "media_timeout";
-    await vm.loadSessions();
+    await vm.applyFilters();
 
     expect(traceApi.listTraceSessions).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -326,7 +327,227 @@ describe("SIP log workbench storage replacement regression", () => {
     wrapper.unmount();
     expect(FakeEventSource.instances[0].close).toHaveBeenCalledOnce();
   });
+
+  it("keeps the initial load visible, but leaves existing rows and stats interactive during live refresh", async () => {
+    vi.useFakeTimers();
+    const initialSessions = deferred<{ code: number; data: { items: any[] } }>();
+    const initialStats = deferred<{ code: number; data: any }>();
+    traceApi.listTraceSessions.mockReturnValueOnce(initialSessions.promise);
+    traceApi.fetchTraceSessionStats.mockReturnValueOnce(initialStats.promise);
+
+    const wrapper = mountPage();
+    await flushPromises();
+    expect((wrapper.vm as unknown as { sessionLoading: boolean }).sessionLoading).toBe(true);
+    initialSessions.resolve({ code: 0, data: { items: [testSession("initial-call")] } });
+    initialStats.resolve({ code: 0, data: { total: 7, anomaly: 2, registerFail: 1, playStuck: 0, invitePending: 0 } });
+    await flushPromises();
+
+    const nextSessions = deferred<{ code: number; data: { items: any[] } }>();
+    const nextStats = deferred<{ code: number; data: any }>();
+    traceApi.listTraceSessions.mockReturnValueOnce(nextSessions.promise);
+    traceApi.fetchTraceSessionStats.mockReturnValueOnce(nextStats.promise);
+    FakeEventSource.instances[0].emit("message");
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(wrapper.findComponent({ name: "TableView" }).props("loading")).toBe(false);
+    expect(wrapper.findComponent({ name: "TableView" }).props("sessions")).toEqual([testSession("initial-call")]);
+    expect(wrapper.findAll(".stat-num").map(item => item.text())).toEqual(["7", "2", "1", "0"]);
+
+    wrapper.findComponent({ name: "TableView" }).vm.$emit("selectSession", testSession("initial-call"));
+    await flushPromises();
+    expect(wrapper.findComponent({ name: "SessionDetail" }).props("session").callId).toBe("initial-call");
+    expect(FakeEventSource.instances[0].close).toHaveBeenCalledOnce();
+
+    nextSessions.resolve({ code: 0, data: { items: [testSession("updated-call")] } });
+    nextStats.resolve({ code: 0, data: { total: 8, anomaly: 3, registerFail: 1, playStuck: 1, invitePending: 0 } });
+    await flushPromises();
+    expect(wrapper.findComponent({ name: "SessionDetail" }).props("session").callId).toBe("initial-call");
+    wrapper.findComponent({ name: "SessionDetail" }).vm.$emit("back");
+    await flushPromises();
+    expect(wrapper.findComponent({ name: "TableView" }).props("sessions")).toEqual([testSession("updated-call")]);
+    expect(FakeEventSource.instances).toHaveLength(2);
+    wrapper.unmount();
+  });
+
+  it("serializes live refresh batches and coalesces events received while a batch is running", async () => {
+    vi.useFakeTimers();
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const firstSessions = deferred<{ code: number; data: { items: any[] } }>();
+    const firstStats = deferred<{ code: number; data: any }>();
+    traceApi.listTraceSessions.mockReturnValueOnce(firstSessions.promise);
+    traceApi.fetchTraceSessionStats.mockReturnValueOnce(firstStats.promise);
+    FakeEventSource.instances[0].emit("message");
+    FakeEventSource.instances[0].emit("message");
+    FakeEventSource.instances[0].emit("message");
+    await vi.advanceTimersByTimeAsync(500);
+    expect(traceApi.listTraceSessions).toHaveBeenCalledTimes(2);
+
+    const queuedSessions = deferred<{ code: number; data: { items: any[] } }>();
+    const queuedStats = deferred<{ code: number; data: any }>();
+    traceApi.listTraceSessions.mockReturnValueOnce(queuedSessions.promise);
+    traceApi.fetchTraceSessionStats.mockReturnValueOnce(queuedStats.promise);
+    FakeEventSource.instances[0].emit("message");
+    await vi.advanceTimersByTimeAsync(500);
+    FakeEventSource.instances[0].emit("message");
+    FakeEventSource.instances[0].emit("message");
+    await vi.advanceTimersByTimeAsync(500);
+    expect(traceApi.listTraceSessions).toHaveBeenCalledTimes(2);
+
+    firstSessions.resolve({ code: 0, data: { items: [] } });
+    firstStats.resolve({ code: 0, data: { total: 1, anomaly: 0, registerFail: 0, playStuck: 0, invitePending: 0 } });
+    await flushPromises();
+    expect(traceApi.listTraceSessions).toHaveBeenCalledTimes(3);
+
+    queuedSessions.resolve({ code: 0, data: { items: [] } });
+    queuedStats.resolve({ code: 0, data: { total: 2, anomaly: 0, registerFail: 0, playStuck: 0, invitePending: 0 } });
+    await flushPromises();
+    wrapper.unmount();
+  });
+
+  it("applies business type to both session and stats queries and keeps the table responsive while changing filters", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    expect(wrapper.findAll("a-select-stub").map(select => select.attributes("placeholder"))).toContain("全部业务类型");
+
+    const nextSessions = deferred<{ code: number; data: { items: any[] } }>();
+    const nextStats = deferred<{ code: number; data: any }>();
+    traceApi.listTraceSessions.mockReturnValueOnce(nextSessions.promise);
+    traceApi.fetchTraceSessionStats.mockReturnValueOnce(nextStats.promise);
+    const vm = wrapper.vm as unknown as {
+      filters: { businessCode: string };
+      search: () => Promise<void>;
+    };
+    vm.filters.businessCode = "unknown";
+    const search = vm.search();
+    await nextTick();
+
+    expect(wrapper.findComponent({ name: "TableView" }).props("loading")).toBe(true);
+    expect(traceApi.listTraceSessions).toHaveBeenLastCalledWith(expect.objectContaining({ businessCode: "unknown" }));
+    expect(traceApi.fetchTraceSessionStats).toHaveBeenLastCalledWith(expect.objectContaining({ businessCode: "unknown" }));
+    nextSessions.resolve({ code: 0, data: { items: [] } });
+    nextStats.resolve({ code: 0, data: { total: 4, anomaly: 0, registerFail: 0, playStuck: 0, invitePending: 0 } });
+    await search;
+    wrapper.unmount();
+  });
+
+  it("does not let an older query overwrite a newer filter result, and pauses live updates inside session detail", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    const oldSessions = deferred<{ code: number; data: { items: any[] } }>();
+    const oldStats = deferred<{ code: number; data: any }>();
+    traceApi.listTraceSessions.mockReturnValueOnce(oldSessions.promise);
+    traceApi.fetchTraceSessionStats.mockReturnValueOnce(oldStats.promise);
+
+    const vm = wrapper.vm as unknown as {
+      filters: { businessCode: string };
+      search: () => Promise<void>;
+    };
+    vm.filters.businessCode = "register";
+    const olderSearch = vm.search();
+    expect(traceApi.listTraceSessions).toHaveBeenLastCalledWith(expect.objectContaining({ businessCode: "register" }));
+
+    vm.filters.businessCode = "unknown";
+    const newerSearch = vm.search();
+    await nextTick();
+    expect(wrapper.findComponent({ name: "TableView" }).props("loading")).toBe(true);
+    const newestSessions = deferred<{ code: number; data: { items: any[] } }>();
+    const newestStats = deferred<{ code: number; data: any }>();
+    traceApi.listTraceSessions.mockReturnValueOnce(newestSessions.promise);
+    traceApi.fetchTraceSessionStats.mockReturnValueOnce(newestStats.promise);
+    oldSessions.resolve({ code: 0, data: { items: [testSession("stale-call")] } });
+    oldStats.resolve({ code: 0, data: { total: 99, anomaly: 0, registerFail: 0, playStuck: 0, invitePending: 0 } });
+    await flushPromises();
+    expect(traceApi.listTraceSessions).toHaveBeenLastCalledWith(expect.objectContaining({ businessCode: "unknown" }));
+    newestSessions.resolve({ code: 0, data: { items: [testSession("current-call")] } });
+    newestStats.resolve({ code: 0, data: { total: 3, anomaly: 0, registerFail: 0, playStuck: 0, invitePending: 0 } });
+    await Promise.all([olderSearch, newerSearch]);
+
+    const table = wrapper.findComponent({ name: "TableView" });
+    table.vm.$emit("selectSession", testSession("current-call"));
+    await flushPromises();
+    expect(wrapper.findComponent({ name: "SessionDetail" }).exists()).toBe(true);
+    expect(FakeEventSource.instances[0].close).toHaveBeenCalledOnce();
+    expect(wrapper.findComponent({ name: "SessionDetail" }).props("session").callId).toBe("current-call");
+
+    wrapper.findComponent({ name: "SessionDetail" }).vm.$emit("back");
+    await flushPromises();
+    expect(wrapper.findComponent({ name: "TableView" }).exists()).toBe(true);
+    expect(FakeEventSource.instances).toHaveLength(2);
+    wrapper.unmount();
+  });
+
+  it("opens a transport event without inventing a SIP Call-ID", async () => {
+    const session = { ...testSession(""), eventId: "transport-a", businessCode: "transport_keepalive" };
+    traceApi.listTraceSessions.mockResolvedValue({ code: 0, data: { items: [session] } });
+    traceApi.getTraceMessage.mockResolvedValue({ code: 0, data: { eventId: "transport-a", callId: "", payload: "\r\n" } });
+    const wrapper = mountPage();
+    await flushPromises();
+    wrapper.findComponent({ name: "TableView" }).vm.$emit("selectSession", session);
+    await flushPromises();
+    expect(wrapper.findComponent({ name: "SessionDetail" }).exists()).toBe(true);
+    expect(traceApi.getTraceMessage).toHaveBeenCalledWith("transport-a");
+    expect(traceApi.listTraceSessionMessages).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("does not write state after unmount while a live batch is still pending", async () => {
+    vi.useFakeTimers();
+    const wrapper = mountPage();
+    await flushPromises();
+    const pendingSessions = deferred<{ code: number; data: { items: any[] } }>();
+    const pendingStats = deferred<{ code: number; data: any }>();
+    traceApi.listTraceSessions.mockReturnValueOnce(pendingSessions.promise);
+    traceApi.fetchTraceSessionStats.mockReturnValueOnce(pendingStats.promise);
+    FakeEventSource.instances[0].emit("message");
+    await vi.advanceTimersByTimeAsync(500);
+    const vm = wrapper.vm as unknown as { sessions: any[]; stats: any };
+    const previousSessions = vm.sessions;
+    const previousStats = vm.stats;
+    wrapper.unmount();
+
+    pendingSessions.resolve({ code: 0, data: { items: [testSession("after-unmount")] } });
+    pendingStats.resolve({ code: 0, data: { total: 100, anomaly: 0, registerFail: 0, playStuck: 0, invitePending: 0 } });
+    await flushPromises();
+    expect(vm.sessions).toBe(previousSessions);
+    expect(vm.stats).toBe(previousStats);
+  });
 });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function testSession(callId: string) {
+  return {
+    day: "2026-08-24T00:00:00Z",
+    deviceId: "device-a",
+    callId,
+    firstAt: "2026-08-24T09:00:00Z",
+    lastAt: "2026-08-24T09:00:01Z",
+    messageCount: 2,
+    inboundCount: 1,
+    outboundCount: 1,
+    methods: ["REGISTER"],
+    finalStatus: 200,
+    firstMethod: "REGISTER",
+    requestCount: 1,
+    finalResponseCount: 1,
+    businessCode: "register" as const,
+    businessType: "注册",
+    originalAvailable: true,
+    originalExpiresAt: "2026-08-31T09:00:01Z",
+    missingResponse: false,
+    anomaly: false
+  };
+}
 
 describe("SIP session diagnosis labels", () => {
   const baseSession = {

@@ -33,6 +33,22 @@ const session: TraceSessionSummary = {
 };
 
 describe("SIP trace table business semantics", () => {
+  it("gives standalone transport events distinct table row keys", () => {
+    const wrapper = mount(TableView, {
+      props: {
+        sessions: [
+          { ...session, callId: "", eventId: "transport-1" },
+          { ...session, callId: "", eventId: "transport-2" }
+        ],
+        selectedCallId: ""
+      },
+      global: { stubs: { "a-table": { name: "TraceTableStub", props: ["data", "rowKey"], template: "<div />" } } }
+    });
+    const table = wrapper.findComponent({ name: "TraceTableStub" });
+    expect(table.props("rowKey")).toBe("rowKey");
+    expect(table.props("data").map((row: { rowKey: string }) => row.rowKey)).toEqual(["transport-1", "transport-2"]);
+  });
+
   it("keeps the SIP method and renders business type plus national IDs", () => {
     const wrapper = mount(TableView, {
       props: { sessions: [session], selectedCallId: "" },
