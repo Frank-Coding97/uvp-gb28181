@@ -850,12 +850,16 @@ func runRegistration(args []string) {
 	if enabled {
 		registration.DatabaseBackup = databaseBackup
 	}
+	sqlitePath, err := registrationSQLiteDatabase(config, *deployment, *root, *sqliteDatabase)
+	if err != nil {
+		fatalRegistration(err.Error())
+	}
 	switch *deployment {
 	case "standalone", "systemd":
-		registration.Standalone = upgrade.RegisteredLayout{Root: *root, State: *state, Control: *control, ReadinessURL: probeURL, SQLiteDatabase: *sqliteDatabase}
+		registration.Standalone = upgrade.RegisteredLayout{Root: *root, State: *state, Control: *control, ReadinessURL: probeURL, SQLiteDatabase: sqlitePath}
 		registration.SystemdUnit = *unit
 	case "compose":
-		registration.Compose = upgrade.RegisteredLayout{Root: *root, State: *state, ProjectDir: *projectDir, Project: *project, MigrationService: *migrationService, ReadinessURL: probeURL, SQLiteDatabase: *sqliteDatabase}
+		registration.Compose = upgrade.RegisteredLayout{Root: *root, State: *state, ProjectDir: *projectDir, Project: *project, MigrationService: *migrationService, ReadinessURL: probeURL, SQLiteDatabase: sqlitePath}
 		registration.ComposeFile = *composeFile
 	default:
 		fatalRegistration(fmt.Sprintf("unsupported deployment %q", *deployment))
@@ -863,6 +867,32 @@ func runRegistration(args []string) {
 	if err := writeRegistration(*registrationPath, registration); err != nil {
 		fatalRegistration(err.Error())
 	}
+}
+
+func registrationSQLiteDatabase(config upgrade.ConfigLookup, deployment, root, explicit string) (string, error) {
+	if path := strings.TrimSpace(explicit); path != "" {
+		if !filepath.IsAbs(path) {
+			return "", errors.New("registered sqlite database path must be absolute")
+		}
+		return filepath.Clean(path), nil
+	}
+	if upgrade.NormalizeDatabaseDialect(config.GetString("gormv2.usedbtype")) != "sqlite" {
+		return "", nil
+	}
+	if deployment == "compose" {
+		return "", errors.New("sqlite compose deployment requires --sqlite-database with the host database path")
+	}
+	path := strings.TrimSpace(config.GetString("gormv2.sqlite.write.database"))
+	if path == "" {
+		return "", errors.New("SQLite database path is not configured (gormv2.sqlite.write.database)")
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(root, path)
+	}
+	if !filepath.IsAbs(path) {
+		return "", errors.New("registered deployment root must be absolute")
+	}
+	return filepath.Clean(path), nil
 }
 
 func registrationExternalBackupMaxBytes(value string) (uint64, error) {

@@ -444,3 +444,56 @@ func TestRegistrationExternalBackupMaxBytes(t *testing.T) {
 		}
 	}
 }
+
+func TestRegistrationSQLiteDatabaseResolvesInstallationConfig(t *testing.T) {
+	root := t.TempDir()
+	configDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(configDir, "config.yml"), []byte("gormv2:\n  usedbtype: sqlite\n  sqlite:\n    isinitglobalgormsqlite: 1\n    write:\n      database: ./custom/installed.db\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	config, err := ymlconfig.LoadYamlFactory(configDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, deployment := range []string{"standalone", "systemd"} {
+		t.Run(deployment, func(t *testing.T) {
+			path := filepath.Join(configDir, deployment+".json")
+			runRegistration([]string{"--config-dir", configDir, "--registration", path, "--root", root, "--deployment", deployment, "--readiness-url", "http://127.0.0.1:51002/internal/updater/readiness"})
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var registration upgrade.Registration
+			if err := json.Unmarshal(data, &registration); err != nil {
+				t.Fatal(err)
+			}
+			if got, want := registration.Standalone.SQLiteDatabase, filepath.Join(root, "custom", "installed.db"); got != want {
+				t.Fatalf("persisted sqlite database = %q, want %q", got, want)
+			}
+		})
+	}
+	for _, tt := range []struct {
+		name, deployment, configured, explicit, want string
+		wantError                                    bool
+	}{
+		{name: "absolute", deployment: "standalone", configured: filepath.Join(root, "elsewhere.db"), want: filepath.Join(root, "elsewhere.db")},
+		{name: "explicit", deployment: "standalone", configured: "./data/uvp.db", explicit: filepath.Join(root, "registered.db"), want: filepath.Join(root, "registered.db")},
+		{name: "missing", deployment: "standalone", wantError: true},
+		{name: "relative override", deployment: "standalone", explicit: "data/uvp.db", wantError: true},
+		{name: "compose requires host path", deployment: "compose", configured: "/app/data/uvp.db", wantError: true},
+		{name: "compose host override", deployment: "compose", configured: "/app/data/uvp.db", explicit: filepath.Join(root, "host.db"), want: filepath.Join(root, "host.db")},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			config.Set("gormv2.sqlite.write.database", tt.configured)
+			got, err := registrationSQLiteDatabase(config, tt.deployment, root, tt.explicit)
+			if (err != nil) != tt.wantError || got != tt.want {
+				t.Fatalf("path = %q, error = %v; want %q, error %v", got, err, tt.want, tt.wantError)
+			}
+		})
+	}
+	config.Set("gormv2.usedbtype", "mysql")
+	got, err := registrationSQLiteDatabase(config, "standalone", root, "")
+	if err != nil || got != "" {
+		t.Fatalf("external database unexpectedly selected sqlite: %q, %v", got, err)
+	}
+}

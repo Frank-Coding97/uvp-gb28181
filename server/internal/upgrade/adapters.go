@@ -152,12 +152,15 @@ func (a *StandaloneAdapter) Stop(ctx context.Context, _ TaskRecord) error {
 	return a.runner().Run(ctx, a.Layout.Control, "stop")
 }
 
-// PreparePackage validates the external-database backup plan before the
+// PreparePackage validates database backup prerequisites before the
 // workflow closes ingress or stops the service. The actual export is deferred
 // to Backup, after Stop has completed, so the snapshot cannot race with
 // writes from the old service.
 func (a *StandaloneAdapter) PreparePackage(_ context.Context, record TaskRecord) error {
 	if err := a.Layout.validate(); err != nil {
+		return err
+	}
+	if err := validateSQLiteBackupSource(a.Layout, record); err != nil {
 		return err
 	}
 	return validateExternalBackupPlan(a.Layout.State, record, a.ExternalBackup, a.BackupRunner)
@@ -210,6 +213,25 @@ func (a *StandaloneAdapter) Backup(ctx context.Context, record TaskRecord) error
 		}
 	}
 	return writeBackupComplete(backupRoot)
+}
+
+func validateSQLiteBackupSource(layout RegisteredLayout, record TaskRecord) error {
+	database, err := registeredSQLiteDatabase(layout, record)
+	if err != nil || database == "" {
+		return err
+	}
+	info, err := os.Stat(database)
+	if err != nil {
+		return fmt.Errorf("stat registered sqlite database before stop: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("registered sqlite database is not a regular file")
+	}
+	file, err := os.Open(database)
+	if err != nil {
+		return fmt.Errorf("open registered sqlite database before stop: %w", err)
+	}
+	return file.Close()
 }
 
 func registeredSQLiteDatabase(layout RegisteredLayout, record TaskRecord) (string, error) {
@@ -1416,6 +1438,9 @@ func sqliteSidecarExclusions(dataRoot, database string) (map[string]struct{}, er
 // later migration and activation only consume it.
 func (a *ComposeAdapter) PreparePackage(ctx context.Context, record TaskRecord) error {
 	if err := a.validate(); err != nil {
+		return err
+	}
+	if err := validateSQLiteBackupSource(a.Layout, record); err != nil {
 		return err
 	}
 	if err := reserveComposeBackupCapacity(a.File, a.Layout.State, probeFilesystemCapacity); err != nil {
