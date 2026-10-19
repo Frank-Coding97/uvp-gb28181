@@ -454,6 +454,10 @@ func parseMessageFilter(c *gin.Context) (gbtrace.MessageFilter, error) {
 		return gbtrace.MessageFilter{}, err
 	}
 	filter := gbtrace.MessageFilter{From: from, To: to, DeviceID: strings.TrimSpace(c.Query("deviceId")), CallID: strings.TrimSpace(c.Query("callId")), Keyword: strings.TrimSpace(c.Query("keyword")), Cursor: c.Query("cursor")}
+	filter.BusinessCode = gbtrace.BusinessCode(strings.TrimSpace(c.Query("businessCode")))
+	if filter.BusinessCode != "" && !gbtrace.IsValidBusinessCode(filter.BusinessCode) {
+		return gbtrace.MessageFilter{}, errors.New("businessCode 参数非法")
+	}
 	deviceIDs := strings.TrimSpace(c.Query("deviceIds"))
 	if deviceIDs != "" {
 		for _, value := range strings.Split(deviceIDs, ",") {
@@ -533,6 +537,10 @@ func parseSessionFilter(c *gin.Context) (gbtrace.SessionFilter, error) {
 		return gbtrace.SessionFilter{}, err
 	}
 	filter := gbtrace.SessionFilter{From: from, To: to, DeviceID: strings.TrimSpace(c.Query("deviceId")), CallID: strings.TrimSpace(c.Query("callId")), Keyword: strings.TrimSpace(c.Query("keyword"))}
+	filter.BusinessCode = gbtrace.BusinessCode(strings.TrimSpace(c.Query("businessCode")))
+	if filter.BusinessCode != "" && !gbtrace.IsValidBusinessCode(filter.BusinessCode) {
+		return gbtrace.SessionFilter{}, errors.New("businessCode 参数非法")
+	}
 	if deviceIDs := strings.TrimSpace(c.Query("deviceIds")); deviceIDs != "" {
 		for _, value := range strings.Split(deviceIDs, ",") {
 			value = strings.TrimSpace(value)

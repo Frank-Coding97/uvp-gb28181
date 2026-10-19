@@ -28,14 +28,16 @@ type fakeTraceQueryService struct {
 	detail            gbtrace.MessageDetail
 	err               error
 	listCalls         int
+	lastMessageFilter gbtrace.MessageFilter
 	sessionCalls      int
 	lastSessionFilter gbtrace.SessionFilter
 	detailAccess      gbtrace.DisclosureContext
 }
 
 func (s *fakeTraceQueryService) Health() gbtrace.HealthSnapshot { return s.health }
-func (s *fakeTraceQueryService) ListMessages(context.Context, gbtrace.MessageFilter) (gbtrace.MessagePage, error) {
+func (s *fakeTraceQueryService) ListMessages(_ context.Context, filter gbtrace.MessageFilter) (gbtrace.MessagePage, error) {
 	s.listCalls++
+	s.lastMessageFilter = filter
 	return s.messages, s.err
 }
 func (s *fakeTraceQueryService) GetMessage(_ context.Context, _ string, sensitive bool, audit gbtrace.DisclosureContext) (gbtrace.MessageDetail, error) {
@@ -104,6 +106,27 @@ func TestTraceControllerValidatesMessageFilters(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, recorder.Code, target)
 	}
 	require.Zero(t, service.listCalls)
+}
+
+func TestTraceControllerParsesAndValidatesBusinessCode(t *testing.T) {
+	service := &fakeTraceQueryService{}
+	r := newTraceControllerRouter(service, fakeTraceAccess{allowed: true})
+	base := "/messages?from=2026-07-19T00:00:00Z&to=2026-07-19T01:00:00Z"
+	valid := httptest.NewRecorder()
+	r.ServeHTTP(valid, httptest.NewRequest(http.MethodGet, base+"&businessCode=config_download", nil))
+	require.Equal(t, http.StatusOK, valid.Code)
+	require.Equal(t, "config_download", string(service.lastMessageFilter.BusinessCode))
+
+	invalid := httptest.NewRecorder()
+	r.ServeHTTP(invalid, httptest.NewRequest(http.MethodGet, base+"&businessCode=guess_me", nil))
+	require.Equal(t, http.StatusBadRequest, invalid.Code)
+	require.Equal(t, 1, service.listCalls)
+
+	session := httptest.NewRecorder()
+	r.ServeHTTP(session, httptest.NewRequest(http.MethodGet,
+		"/sessions?from=2026-07-19T00:00:00Z&to=2026-07-19T01:00:00Z&businessCode=transport_keepalive", nil))
+	require.Equal(t, http.StatusOK, session.Code)
+	require.Equal(t, "transport_keepalive", string(service.lastSessionFilter.BusinessCode))
 }
 
 func TestTraceControllerReturnsDisabledHealthAndEmptyList(t *testing.T) {

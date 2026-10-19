@@ -45,6 +45,7 @@ type StoredEvent struct {
 	BusinessCode       BusinessCode
 	BusinessType       string
 	BusinessConfidence string
+	ResponseBodyEmpty  bool
 	UserAgent          string
 	Malformed          bool
 	ParseError         string

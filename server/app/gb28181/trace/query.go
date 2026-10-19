@@ -24,19 +24,20 @@ var (
 )
 
 type MessageFilter struct {
-	From       time.Time
-	To         time.Time
-	DeviceID   string
-	DeviceIDs  []string
-	CallID     string
-	Keyword    string
-	Direction  Direction
-	Method     string
-	StatusCode uint16
-	StatusMin  uint16
-	StatusMax  uint16
-	Cursor     string
-	Limit      int
+	From         time.Time
+	To           time.Time
+	DeviceID     string
+	DeviceIDs    []string
+	CallID       string
+	Keyword      string
+	Direction    Direction
+	Method       string
+	StatusCode   uint16
+	StatusMin    uint16
+	StatusMax    uint16
+	BusinessCode BusinessCode
+	Cursor       string
+	Limit        int
 }
 
 type MessageCursor struct {

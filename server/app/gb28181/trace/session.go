@@ -23,6 +23,7 @@ type SessionFilter struct {
 	Anomaly           bool
 	DiagnosisCategory diagnosis.Category
 	DiagnosisCode     diagnosis.Code
+	BusinessCode      BusinessCode
 	Limit             int
 }
 
@@ -50,6 +51,7 @@ type SessionDerivedState struct {
 }
 
 type SessionSummary struct {
+	EventID            string            `json:"eventId,omitempty"`
 	Day                time.Time         `json:"day"`
 	DeviceID           string            `json:"deviceId"`
 	CallID             string            `json:"callId"`

@@ -1,6 +1,8 @@
 package trace
 
 import (
+	"bytes"
+	"encoding/binary"
 	"net"
 	"regexp"
 	"strings"
@@ -15,26 +17,29 @@ import (
 type BusinessCode string
 
 const (
-	BusinessRegister        BusinessCode = "register"
-	BusinessKeepalive       BusinessCode = "keepalive"
-	BusinessCatalog         BusinessCode = "catalog"
-	BusinessDeviceInfo      BusinessCode = "device_info"
-	BusinessDeviceStatus    BusinessCode = "device_status"
-	BusinessDeviceControl   BusinessCode = "device_control"
-	BusinessAlarm           BusinessCode = "alarm"
-	BusinessPTZ             BusinessCode = "ptz"
-	BusinessRealtimePlay    BusinessCode = "realtime_play"
-	BusinessRecordQuery     BusinessCode = "record_query"
-	BusinessPlayback        BusinessCode = "playback"
-	BusinessDownload        BusinessCode = "download"
-	BusinessPlaybackControl BusinessCode = "playback_control"
-	BusinessTalk            BusinessCode = "talk"
-	BusinessBroadcast       BusinessCode = "broadcast"
-	BusinessMobilePosition  BusinessCode = "mobile_position"
-	BusinessSubscription    BusinessCode = "subscription"
-	BusinessAck             BusinessCode = "ack"
-	BusinessHangup          BusinessCode = "hangup"
-	BusinessUnknown         BusinessCode = "unknown"
+	BusinessRegister           BusinessCode = "register"
+	BusinessKeepalive          BusinessCode = "keepalive"
+	BusinessCatalog            BusinessCode = "catalog"
+	BusinessDeviceInfo         BusinessCode = "device_info"
+	BusinessDeviceStatus       BusinessCode = "device_status"
+	BusinessDeviceControl      BusinessCode = "device_control"
+	BusinessAlarm              BusinessCode = "alarm"
+	BusinessPTZ                BusinessCode = "ptz"
+	BusinessRealtimePlay       BusinessCode = "realtime_play"
+	BusinessRecordQuery        BusinessCode = "record_query"
+	BusinessPlayback           BusinessCode = "playback"
+	BusinessDownload           BusinessCode = "download"
+	BusinessPlaybackControl    BusinessCode = "playback_control"
+	BusinessTalk               BusinessCode = "talk"
+	BusinessBroadcast          BusinessCode = "broadcast"
+	BusinessMobilePosition     BusinessCode = "mobile_position"
+	BusinessSubscription       BusinessCode = "subscription"
+	BusinessAck                BusinessCode = "ack"
+	BusinessHangup             BusinessCode = "hangup"
+	BusinessConfigDownload     BusinessCode = "config_download"
+	BusinessTransportKeepalive BusinessCode = "transport_keepalive"
+	BusinessSTUNBinding        BusinessCode = "stun_binding"
+	BusinessUnknown            BusinessCode = "unknown"
 )
 
 type businessClassification struct {
@@ -45,8 +50,55 @@ type businessClassification struct {
 
 var sdpSessionPattern = regexp.MustCompile(`(?im)^s=([^\r\n]*)`)
 
+func IsValidBusinessCode(code BusinessCode) bool {
+	switch code {
+	case BusinessRegister, BusinessKeepalive, BusinessCatalog, BusinessDeviceInfo, BusinessDeviceStatus,
+		BusinessDeviceControl, BusinessAlarm, BusinessPTZ, BusinessRealtimePlay, BusinessRecordQuery,
+		BusinessPlayback, BusinessDownload, BusinessPlaybackControl, BusinessTalk, BusinessBroadcast,
+		BusinessMobilePosition, BusinessSubscription, BusinessAck, BusinessHangup, BusinessConfigDownload,
+		BusinessTransportKeepalive, BusinessSTUNBinding, BusinessUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+func classifyTransportPayload(raw []byte) (businessClassification, bool) {
+	if len(raw) == 0 {
+		return businessClassification{}, false
+	}
+	whitespace := true
+	hasCRLF := false
+	for i, value := range raw {
+		if value != '\r' && value != '\n' && value != ' ' && value != '\t' {
+			whitespace = false
+			break
+		}
+		if value == '\r' && i+1 < len(raw) && raw[i+1] == '\n' {
+			hasCRLF = true
+		}
+	}
+	if whitespace && hasCRLF {
+		return businessClassification{BusinessTransportKeepalive, "传输保活", "high"}, true
+	}
+	if isSTUNBindingRequest(raw) {
+		return businessClassification{BusinessSTUNBinding, "STUN探测", "high"}, true
+	}
+	return businessClassification{}, false
+}
+
+func isSTUNBindingRequest(raw []byte) bool {
+	if len(raw) != 20 || raw[0]&0xc0 != 0 || binary.BigEndian.Uint16(raw[:2]) != 0x0001 {
+		return false
+	}
+	return binary.BigEndian.Uint16(raw[2:4]) == 0 && bytes.Equal(raw[4:8], []byte{0x21, 0x12, 0xa4, 0x42})
+}
+
 func classifySIPBusiness(raw []byte) businessClassification {
 	unknown := businessClassification{Code: BusinessUnknown, Label: "未知业务", Confidence: "none"}
+	if business, ok := classifyTransportPayload(raw); ok {
+		return business
+	}
 	message, err := sip.NewParser().ParseSIP(raw)
 	if err != nil {
 		return unknown
@@ -152,6 +204,8 @@ func classifyMANSCDP(cmdType string, body []byte) businessClassification {
 		return businessClassification{BusinessBroadcast, "语音广播", "high"}
 	case "mobileposition":
 		return businessClassification{BusinessMobilePosition, "移动位置", "high"}
+	case "configdownload":
+		return businessClassification{BusinessConfigDownload, "配置查询", "high"}
 	default:
 		return businessClassification{BusinessUnknown, "未知业务", "none"}
 	}

@@ -48,6 +48,38 @@ func applyTraceKeywordFilter(query *gorm.DB, keyword, traceTable string) *gorm.D
 	return query.Where(predicate, like, like, like, like)
 }
 
+func legacyMethodFallbacks(code BusinessCode) []string {
+	switch code {
+	case BusinessRegister:
+		return []string{"REGISTER"}
+	case BusinessSubscription:
+		return []string{"SUBSCRIBE", "NOTIFY"}
+	case BusinessHangup:
+		return []string{"BYE", "CANCEL"}
+	case BusinessAck:
+		return []string{"ACK"}
+	default:
+		return nil
+	}
+}
+
+func applyBusinessCodeFilter(query *gorm.DB, code BusinessCode, table string) *gorm.DB {
+	if code == "" {
+		return query
+	}
+	if code == BusinessUnknown {
+		return query.Where("("+table+".business_code = ? OR "+table+".business_code = '' OR "+table+".business_type = '') AND "+table+".method NOT IN ?",
+			string(BusinessUnknown), []string{"REGISTER", "SUBSCRIBE", "NOTIFY", "BYE", "CANCEL", "ACK"})
+	}
+	methods := legacyMethodFallbacks(code)
+	if len(methods) == 0 {
+		return query.Where(table+".business_code = ? AND "+table+".business_type <> ''", string(code))
+	}
+	return query.Where("("+table+".business_code = ? AND "+table+".business_type <> '') OR (("+
+		table+".business_code = ? OR "+table+".business_code = '' OR "+table+".business_type = '') AND "+table+".method IN ?)",
+		string(code), string(BusinessUnknown), methods)
+}
+
 func applyMessageFilter(db *gorm.DB, filter MessageFilter) (*gorm.DB, error) {
 	if err := validateMessageFilter(filter); err != nil {
 		return nil, err
@@ -80,6 +112,7 @@ func applyMessageFilter(db *gorm.DB, filter MessageFilter) (*gorm.DB, error) {
 		}
 		db = db.Where("status_code >= ? AND status_code <= ?", min, max)
 	}
+	db = applyBusinessCodeFilter(db, filter.BusinessCode, "gb_sip_trace_message")
 	db = applyTraceKeywordFilter(db, filter.Keyword, "gb_sip_trace_message")
 	return db, nil
 }
@@ -189,9 +222,10 @@ func businessPriority(code BusinessCode) int {
 }
 
 type sessionCandidate struct {
-	Day    time.Time
-	CallID string
-	LastAt time.Time
+	EventID string
+	Day     time.Time
+	CallID  string
+	LastAt  time.Time
 }
 
 type databaseTime time.Time
@@ -269,16 +303,18 @@ func (s *RelationalStore) listSessionCandidates(
 	from time.Time,
 	to time.Time,
 	limit int,
+	offset int,
 ) ([]sessionCandidate, error) {
-	candidates := make([]sessionCandidate, 0, limit)
+	candidates := make([]sessionCandidate, 0)
 	for day := from; day.Before(to); day = day.AddDate(0, 0, 1) {
 		dayEnd := day.AddDate(0, 0, 1)
 		if dayEnd.After(to) {
 			dayEnd = to
 		}
 		var rows []struct {
-			CallID string       `gorm:"column:call_id"`
-			LastAt databaseTime `gorm:"column:last_at"`
+			CallID  string       `gorm:"column:call_id"`
+			EventID string       `gorm:"column:standalone_event_id"`
+			LastAt  databaseTime `gorm:"column:last_at"`
 		}
 		query := applySessionFilter(
 			s.db.WithContext(ctx).Model(&gbmodels.GbSipTraceMessage{}),
@@ -287,25 +323,32 @@ func (s *RelationalStore) listSessionCandidates(
 			dayEnd,
 		)
 		if err := query.
-			Select("call_id, MAX(occurred_at) AS last_at").
-			Group("call_id").
-			Order("MAX(occurred_at) DESC").Order("call_id DESC").
-			Limit(limit).
+			Select("call_id, CASE WHEN call_id = '' THEN event_id ELSE '' END AS standalone_event_id, MAX(occurred_at) AS last_at").
+			Group("call_id, CASE WHEN call_id = '' THEN event_id ELSE '' END").
+			Order("MAX(occurred_at) DESC").Order("call_id DESC").Order("standalone_event_id DESC").
+			Limit(limit + offset).
 			Scan(&rows).Error; err != nil {
 			return nil, fmt.Errorf("query relational SIP trace session candidates: %w", err)
 		}
 		for _, row := range rows {
 			candidates = append(candidates, sessionCandidate{
-				Day: day, CallID: row.CallID, LastAt: time.Time(row.LastAt).UTC(),
+				Day: day, CallID: row.CallID, EventID: row.EventID, LastAt: time.Time(row.LastAt).UTC(),
 			})
 		}
 	}
 	sort.Slice(candidates, func(i, j int) bool {
 		if candidates[i].LastAt.Equal(candidates[j].LastAt) {
+			if candidates[i].CallID == candidates[j].CallID {
+				return candidates[i].EventID > candidates[j].EventID
+			}
 			return candidates[i].CallID > candidates[j].CallID
 		}
 		return candidates[i].LastAt.After(candidates[j].LastAt)
 	})
+	if offset >= len(candidates) {
+		return []sessionCandidate{}, nil
+	}
+	candidates = candidates[offset:]
 	if len(candidates) > limit {
 		candidates = candidates[:limit]
 	}
@@ -313,17 +356,49 @@ func (s *RelationalStore) listSessionCandidates(
 }
 
 func applySessionCandidates(query *gorm.DB, candidates []sessionCandidate) *gorm.DB {
-	var scope *gorm.DB
+	// Group dialog IDs by their time window instead of generating an OR for
+	// every candidate: SQLite limits expression depth even for bound queries.
+	type window struct {
+		day     time.Time
+		callIDs []string
+	}
+	var windows []window
+	windowIndexes := make(map[time.Time]int)
+	var eventIDs []string
 	for _, candidate := range candidates {
+		if candidate.EventID != "" {
+			eventIDs = append(eventIDs, candidate.EventID)
+			continue
+		}
+		index, ok := windowIndexes[candidate.Day]
+		if !ok {
+			index = len(windows)
+			windowIndexes[candidate.Day] = index
+			windows = append(windows, window{day: candidate.Day})
+		}
+		windows[index].callIDs = append(windows[index].callIDs, candidate.CallID)
+	}
+	var scope *gorm.DB
+	for _, window := range windows {
 		// Call-ID identifies the SIP dialog. Device ID is a collector-side hint and
 		// may change between INVITE and ACK/BYE when both directions are observed.
-		condition := "call_id = ? AND occurred_at >= ? AND occurred_at < ?"
-		args := []any{candidate.CallID, candidate.Day, candidate.Day.AddDate(0, 0, 1)}
+		condition := "call_id IN ? AND occurred_at >= ? AND occurred_at < ?"
+		args := []any{window.callIDs, window.day, window.day.AddDate(0, 0, 1)}
 		if scope == nil {
 			scope = query.Session(&gorm.Session{NewDB: true}).Where(condition, args...)
 		} else {
 			scope = scope.Or(condition, args...)
 		}
+	}
+	if len(eventIDs) > 0 {
+		if scope == nil {
+			scope = query.Session(&gorm.Session{NewDB: true}).Where("event_id IN ?", eventIDs)
+		} else {
+			scope = scope.Or("event_id IN ?", eventIDs)
+		}
+	}
+	if scope == nil {
+		return query.Where("1 = 0")
 	}
 	return query.Where(scope)
 }
@@ -429,6 +504,9 @@ func summarizeRows(rows []gbmodels.GbSipTraceMessage, retention time.Duration) [
 			toID = extractNationalID(row.ToURI)
 		}
 		key := sessionConversationIdentity(day, row.CallID, fromID, toID, row.DeviceID)
+		if row.CallID == "" {
+			key += "\x00event\x00" + row.EventID
+		}
 		if row.CallID != "" {
 			callAlias := day.UTC().Format("2006-01-02") + "\x00" + row.CallID
 			if alias, ok := conversationAliases[callAlias]; ok {
@@ -453,6 +531,9 @@ func summarizeRows(rows []gbmodels.GbSipTraceMessage, retention time.Duration) [
 				FromID: fromID, ToID: toID, BusinessCode: business.Code, BusinessType: business.Label, BusinessConfidence: business.Confidence,
 				SourceAddr: source, DestinationAddr: destination,
 			}, methods: make(map[string]struct{})}
+			if row.CallID == "" {
+				acc.summary.EventID = row.EventID
+			}
 			accumulators[key] = acc
 		}
 		acc.summary.LastAt = at
@@ -561,9 +642,12 @@ func (s *RelationalStore) reduceSessions(ctx context.Context, filter SessionFilt
 		return nil, err
 	}
 	from, to := sessionQueryRange(filter)
+	if filter.BusinessCode != "" && candidateLimit > 0 {
+		return s.reduceBusinessSessions(ctx, filter, diagnosisRows, from, to, candidateLimit)
+	}
 	query := applySessionFilter(s.db.WithContext(ctx).Model(&gbmodels.GbSipTraceMessage{}), filter, from, to)
 	if candidateLimit > 0 {
-		candidates, err := s.listSessionCandidates(ctx, filter, from, to, candidateLimit)
+		candidates, err := s.listSessionCandidates(ctx, filter, from, to, candidateLimit, 0)
 		if err != nil {
 			return nil, err
 		}
@@ -578,13 +662,75 @@ func (s *RelationalStore) reduceSessions(ctx context.Context, filter SessionFilt
 	}
 	sessions := summarizeRows(rows, s.rawMessageRetention())
 	sessions = attachSessionDiagnoses(sessions, diagnosisRows, filter)
+	sessions = filterSessionsByBusiness(sessions, filter.BusinessCode)
 	sort.Slice(sessions, func(i, j int) bool {
 		if sessions[i].LastAt.Equal(sessions[j].LastAt) {
+			if sessions[i].CallID == sessions[j].CallID {
+				return sessions[i].EventID > sessions[j].EventID
+			}
 			return sessions[i].CallID > sessions[j].CallID
 		}
 		return sessions[i].LastAt.After(sessions[j].LastAt)
 	})
 	return sessions, nil
+}
+
+func filterSessionsByBusiness(sessions []SessionSummary, code BusinessCode) []SessionSummary {
+	if code == "" {
+		return sessions
+	}
+	filtered := make([]SessionSummary, 0, len(sessions))
+	for _, session := range sessions {
+		if session.BusinessCode == code {
+			filtered = append(filtered, session)
+		}
+	}
+	return filtered
+}
+
+func (s *RelationalStore) reduceBusinessSessions(
+	ctx context.Context,
+	filter SessionFilter,
+	diagnosisRows []gbmodels.GbSipTraceSessionDiagnosis,
+	from time.Time,
+	to time.Time,
+	candidateLimit int,
+) ([]SessionSummary, error) {
+	const candidatePageSize = 200
+	matched := make([]SessionSummary, 0, candidateLimit)
+	for offset := 0; ; offset += candidatePageSize {
+		candidates, err := s.listSessionCandidates(ctx, filter, from, to, candidatePageSize, offset)
+		if err != nil {
+			return nil, err
+		}
+		if len(candidates) == 0 {
+			break
+		}
+		query := applySessionFilter(s.db.WithContext(ctx).Model(&gbmodels.GbSipTraceMessage{}), filter, from, to)
+		rows, err := s.loadSessionRows(applySessionCandidates(query, candidates))
+		if err != nil {
+			return nil, err
+		}
+		sessions := summarizeRows(rows, s.rawMessageRetention())
+		sessions = attachSessionDiagnoses(sessions, diagnosisRows, filter)
+		matched = append(matched, filterSessionsByBusiness(sessions, filter.BusinessCode)...)
+		if len(matched) >= candidateLimit || len(candidates) < candidatePageSize {
+			break
+		}
+	}
+	sort.Slice(matched, func(i, j int) bool {
+		if matched[i].LastAt.Equal(matched[j].LastAt) {
+			if matched[i].CallID == matched[j].CallID {
+				return matched[i].EventID > matched[j].EventID
+			}
+			return matched[i].CallID > matched[j].CallID
+		}
+		return matched[i].LastAt.After(matched[j].LastAt)
+	})
+	if len(matched) > candidateLimit {
+		matched = matched[:candidateLimit]
+	}
+	return matched, nil
 }
 
 func (s *RelationalStore) ListSessions(ctx context.Context, filter SessionFilter) ([]SessionSummary, error) {

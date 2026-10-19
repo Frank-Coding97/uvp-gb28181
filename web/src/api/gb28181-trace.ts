@@ -25,6 +25,9 @@ export type TraceBusinessCode =
   | "subscription"
   | "ack"
   | "hangup"
+  | "config_download"
+  | "transport_keepalive"
+  | "stun_binding"
   | "unknown";
 export type TraceDiagnosisCategory = "register_failure" | "play_stuck";
 export type TraceDiagnosisCode =
@@ -122,6 +125,7 @@ export interface TraceMessageQuery {
 }
 
 export interface TraceSessionSummary {
+  eventId?: string;
   day: string;
   deviceId: string;
   callId: string;
@@ -182,6 +186,7 @@ export interface TraceSessionQuery {
   deviceIds?: string;
   callId?: string;
   keyword?: string;
+  businessCode?: TraceBusinessCode;
   anomaly?: boolean;
   diagnosisCategory?: TraceDiagnosisCategory;
   diagnosisCode?: TraceDiagnosisCode;

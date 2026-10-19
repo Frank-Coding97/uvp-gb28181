@@ -226,6 +226,7 @@ func (m *Module) encryptBatch(events []Event) ([]StoredEvent, error) {
 			BusinessCode:       metadata.BusinessCode,
 			BusinessType:       metadata.BusinessType,
 			BusinessConfidence: metadata.BusinessConfidence,
+			ResponseBodyEmpty:  metadata.ResponseBodyEmpty,
 			UserAgent:          metadata.UserAgent,
 			Malformed:          event.Malformed,
 			ParseError:         metadata.ParseError,

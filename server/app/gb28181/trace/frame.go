@@ -72,8 +72,18 @@ func (a *FrameAssembler) Push(props sip.TransportReadProps, data []byte) []Frame
 		}
 		if start := findSIPStart(stream.buffer, 0); start != 0 {
 			if start > 0 {
-				frames = append(frames, malformedFrame(props, stream.buffer[:start], "invalid SIP start line"))
+				prefix := stream.buffer[:start]
+				if _, ok := classifyTransportPayload(prefix); ok {
+					frames = append(frames, Frame{Props: props, Data: append([]byte(nil), prefix...)})
+				} else {
+					frames = append(frames, malformedFrame(props, prefix, "invalid SIP start line"))
+				}
 				stream.buffer = stream.buffer[start:]
+				continue
+			}
+			if _, ok := classifyTransportPayload(stream.buffer); ok {
+				frames = append(frames, Frame{Props: props, Data: append([]byte(nil), stream.buffer...)})
+				stream.buffer = nil
 				continue
 			}
 			if bytes.Contains(stream.buffer, []byte("\r\n\r\n")) || len(stream.buffer) > a.maxSize {

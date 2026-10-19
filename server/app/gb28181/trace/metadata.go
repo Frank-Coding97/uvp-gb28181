@@ -20,11 +20,15 @@ type SIPMetadata struct {
 	BusinessCode       BusinessCode
 	BusinessType       string
 	BusinessConfidence string
+	ResponseBodyEmpty  bool
 	UserAgent          string
 	ParseError         string
 }
 
 func extractSIPMetadata(raw []byte, direction Direction) SIPMetadata {
+	if business, ok := classifyTransportPayload(raw); ok {
+		return SIPMetadata{BusinessCode: business.Code, BusinessType: business.Label, BusinessConfidence: business.Confidence}
+	}
 	message, err := sip.NewParser().ParseSIP(raw)
 	if err != nil {
 		return SIPMetadata{ParseError: "parse SIP message failed"}
@@ -59,6 +63,7 @@ func extractSIPMetadata(raw []byte, direction Direction) SIPMetadata {
 		}
 	case *sip.Response:
 		metadata.Method = metadata.CSeqMethod
+		metadata.ResponseBodyEmpty = len(strings.TrimSpace(string(message.Body()))) == 0
 		if typed.StatusCode >= 0 && typed.StatusCode <= int(^uint16(0)) {
 			metadata.StatusCode = uint16(typed.StatusCode)
 		}
