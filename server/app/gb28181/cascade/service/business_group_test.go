@@ -268,3 +268,22 @@ func (s *businessGroupResourceStoreFake) ReplaceBusinessGroupWithResourceChanges
 	}
 	return s.managementStoreFake.ReplaceBusinessGroup(ctx, platformID, revision, nodes, bindings)
 }
+
+func TestManagementBusinessGroupMetadataReloadsAfterCommit(t *testing.T) {
+	store := newManagementStoreFake()
+	runtime := &managementRuntimeFake{}
+	svc := NewManagementService(store, nil, runtime, fakeClock{})
+	input := validPlatformInput(nil)
+	input.Enabled = false
+	p, err := svc.Create(context.Background(), input)
+	require.NoError(t, err)
+	nodes := []repository.BusinessNodeInput{{Code: "34020000002150000001", Name: "目录", Kind: "group"}}
+	require.NoError(t, svc.ReplaceBusinessGroup(context.Background(), p.ID, 0, nodes, nil))
+	require.Equal(t, 1, runtime.reloads)
+	runtime.err = errors.New("runtime unavailable")
+	err = svc.ReplaceBusinessGroup(context.Background(), p.ID, 1, nodes, nil)
+	require.ErrorIs(t, err, ErrRuntimeSyncFailed)
+	require.Equal(t, uint64(2), store.projections[p.ID].Revision)
+	require.ErrorIs(t, svc.ReplaceBusinessGroup(context.Background(), p.ID, 0, nodes, nil), repository.ErrRevisionConflict)
+	require.Equal(t, 2, runtime.reloads)
+}

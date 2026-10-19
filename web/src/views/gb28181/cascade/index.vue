@@ -73,7 +73,7 @@
           :data="filteredPlatforms"
           :bordered="false"
           :pagination="false"
-          :scroll="{ x: '100%', minWidth: 1850 }"
+          :scroll="{ x: '100%', minWidth: 2130 }"
         >
           <template #columns>
             <a-table-column title="上级平台" :width="220">
@@ -114,6 +114,11 @@
                 <a-tooltip :content="cascadeStatus(record).detail">
                   <a-tag :color="cascadeStatus(record).color">{{ cascadeStatus(record).label }}</a-tag>
                 </a-tooltip>
+              </template>
+            </a-table-column>
+            <a-table-column title="上级订阅" :width="280">
+              <template #cell="{ record }">
+                <UpstreamSubscriptions :subscriptions="record.subscriptions" :stale="Boolean(errorMessage)" />
               </template>
             </a-table-column>
             <a-table-column title="启用" :width="86" align="center">
@@ -640,6 +645,7 @@ import {
 } from "./cascadeState";
 
 import { deriveDomain } from "../sip/sipSetupRules";
+import UpstreamSubscriptions from "./UpstreamSubscriptions.vue";
 
 const { isMobile } = useDevicesSize();
 const router = useRouter();

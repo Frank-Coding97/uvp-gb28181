@@ -269,6 +269,27 @@ export type CascadeRegistrationState = "unregistered" | "registered" | "expired"
 export type CascadeHeartbeatState = "unknown" | "healthy" | "stale" | string;
 export type CascadeOverallState = "online" | "offline" | string;
 
+export interface CascadeSubscriptionSession {
+  target: string;
+  event: string;
+  subscribedAt: string;
+  renewedAt: string;
+  expiresAt: string;
+  lastNotifyAt?: string;
+  lastNotifyStatus: "pending" | "success" | "failed";
+  lastNotifyCode?: number;
+}
+export interface CascadeSubscriptionStatus {
+  state: "active" | "inactive" | "unsupported" | "unavailable";
+  sessions: CascadeSubscriptionSession[] | null;
+}
+export interface CascadeSubscriptions {
+  catalog: CascadeSubscriptionStatus;
+  mobilePosition: CascadeSubscriptionStatus;
+  ptzPosition: CascadeSubscriptionStatus;
+  alarm: CascadeSubscriptionStatus;
+}
+
 export interface CascadePlatform {
   id: number;
   name: string;
@@ -317,6 +338,7 @@ export interface CascadePlatform {
   /** mutation responses set this only after runtime reload has completed */
   runtimeSynced?: boolean;
   warning?: string;
+  subscriptions?: CascadeSubscriptions;
 }
 
 export type CascadeMutationResult<T> = T | { platform: T; runtimeSynced: false; warning: string };

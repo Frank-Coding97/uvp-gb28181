@@ -115,7 +115,15 @@ aliases:
 | D01–D14、D16 | 已有本地修复 | 注册/目录审查再次确认关键修复存在；本轮不声称真实上级验收 |
 | D15 回放 | 部分完成 | 本级 RTP-Info URL、完整样本检查和 reset 成功契约已补齐；真实终点、定位后首包关联与部署互操作仍未验证 |
 | M01 DeviceStatus | 本地已贯通 | 实际 MESSAGE 分派、授权下接查询、关联应答与发布映射已实现；设备转移/通道删除/撤权测试通过，相关三包 race 通过；详见 `docs/tasks/cascade-device-status.md`，实机未验收 |
-| M02–M04 订阅与报警 | 未贯通 | 主动 Catalog MESSAGE 和设备侧订阅均不替代上级 SUBSCRIBE/NOTIFY 生命周期 |
+| M02 目录订阅 | 基础链路本地贯通 | SUBSCRIBE/NOTIFY、增删改/ON/OFF、续订/取消/到期、隔离/撤权/关闭已实现；异常源事实及真实上级互操作待验收，见 docs/tasks/cascade-catalog-subscription.md |
+| M03–M04 报警及其他订阅 | 未贯通 | 本次仅支持 Catalog Event，不表示报警、位置订阅已接通 |
 | M05–M07 扩展控制和查询 | 未贯通 | 保留基础 PTZ，尚缺上级任务及下接业务结果的映射 |
 | M08 录像下载 | 未贯通 | Download SDP、下载模式映射和完成通知待实施 |
 | M09–M13 语音、抓拍、升级、授时、重定向 | 未贯通 | 按原功能边界继续安排；不自动修改宿主机时钟 |
+
+
+## 2026-10-19 M02 进展
+
+目录 SUBSCRIBE 入口与独立级联订阅 runtime 已接入生产装配和 Reload/Shutdown；NOTIFY 保留 dialog/tag/CSeq/Event id/SN，按发布快照差分发送 ADD/UPDATE/DEL/ON/OFF，逐批确认并复核授权。相关 14 包全量测试与 5 包筛选 race 通过，包含本地 UDP 入站收包测试。详见 docs/tasks/cascade-catalog-subscription.md。
+
+M02 基础链路仅标为本地贯通：真实上级、2016/2022 互操作、跨级转发、大目录压力、初始上报管理配置以及 VLOST/DEFECT 可靠事实来源均不在本轮已验收范围。原始 M02 发现行保留为 2026-10-15 静态快照。

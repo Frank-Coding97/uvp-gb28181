@@ -249,3 +249,11 @@ describe("cascade platform editor layout", () => {
     expect(inputsMissingClear).toEqual([]);
   });
 });
+
+describe("upstream subscription integration", () => {
+  it("renders the per-platform snapshot in the ledger with refresh-failure handling", () => {
+    expect(source).toContain('<a-table-column title="上级订阅"');
+    expect(source).toContain('<UpstreamSubscriptions :subscriptions="record.subscriptions" :stale="Boolean(errorMessage)" />');
+    expect(source).toContain('import UpstreamSubscriptions from "./UpstreamSubscriptions.vue"');
+  });
+});

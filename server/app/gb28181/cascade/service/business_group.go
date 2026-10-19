@@ -14,7 +14,7 @@ func (s *ManagementService) ReplaceBusinessGroup(ctx context.Context, platformID
 	if err := s.store.ReplaceBusinessGroup(ctx, platformID, revision, nodes, bindings); err != nil {
 		return mapBusinessGroupError(err)
 	}
-	return nil
+	return s.reloadBusinessGroupRuntime(ctx)
 }
 
 func (s *ManagementService) ReplaceBusinessGroupWithShares(ctx context.Context, platformID, revision uint64, nodes []repository.BusinessNodeInput, bindings []repository.BusinessBindingInput, shareChannelIDs []uint64, authorize repository.BusinessGroupSourceAuthorizer) error {

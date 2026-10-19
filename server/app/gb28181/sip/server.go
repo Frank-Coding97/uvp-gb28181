@@ -32,6 +32,7 @@ type Server struct {
 	cascadeDialog      func(*siplib.Request, siplib.ServerTransaction) bool
 	cascadeMessageMu   sync.RWMutex
 	cascadeMessage     func(*siplib.Request, siplib.ServerTransaction) bool
+	cascadeSubscribe   func(*siplib.Request, siplib.ServerTransaction) bool
 	logger             *slog.Logger
 	cfg                gbconfig.Config
 	ua                 *sipgo.UserAgent
@@ -488,6 +489,7 @@ func (s *Server) registerHandlers() {
 	})
 	s.notifyH = handler.NewNotifyHandler(nil)
 	s.srv.OnNotify(s.notifyH.Handle)
+	s.srv.OnSubscribe(s.dispatchCascadeSubscription)
 	s.srv.OnInvite(s.dispatchCascadeDialog(s.handleBroadcastInvite))
 	s.srv.OnAck(s.dispatchCascadeDialog(s.handleBroadcastAck))
 	s.srv.OnBye(s.dispatchCascadeDialog(s.handleBye))
@@ -945,4 +947,21 @@ func (s *Server) dispatchCascadeDialog(fallback func(*siplib.Request, siplib.Ser
 		}
 		fallback(req, tx)
 	}
+}
+
+// SetCascadeSubscribeHandler installs the upstream directory subscription UAS.
+func (s *Server) SetCascadeSubscribeHandler(hook func(*siplib.Request, siplib.ServerTransaction) bool) {
+	s.cascadeMessageMu.Lock()
+	s.cascadeSubscribe = hook
+	s.cascadeMessageMu.Unlock()
+}
+
+func (s *Server) dispatchCascadeSubscription(req *siplib.Request, tx siplib.ServerTransaction) {
+	s.cascadeMessageMu.RLock()
+	hook := s.cascadeSubscribe
+	s.cascadeMessageMu.RUnlock()
+	if hook != nil && hook(req, tx) {
+		return
+	}
+	_ = tx.Respond(siplib.NewResponseFromRequest(req, 489, "Bad Event", nil))
 }

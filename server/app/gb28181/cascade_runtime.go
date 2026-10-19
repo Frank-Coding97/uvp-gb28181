@@ -323,8 +323,19 @@ func startCascadeRuntime(cfg gbconfig.Config, server sipRuntimeServer, credentia
 	}); ok {
 		receiver.SetCascadeMessageHandler(newCascadeMessageHandler(store, clients))
 	}
-	cascadeRuntimeManager = manager
-	setupCascadeManagement(manager, cipher, pusher)
+
+	receiver, ok := server.(interface {
+		SetCascadeSubscribeHandler(func(*sipwire.Request, sipwire.ServerTransaction) bool)
+	})
+	if !ok {
+		_ = manager.Shutdown(ctx)
+		return fmt.Errorf("shared SIP server does not expose cascade SUBSCRIBE")
+	}
+	subscriptions := newCascadeCatalogSubscriptions(store, clients, 5*time.Second)
+	receiver.SetCascadeSubscribeHandler(subscriptions.Handle)
+	runtime := &cascadeSubscriptionRuntime{cascadeRuntimeLifecycle: manager, subscriptions: subscriptions}
+	cascadeRuntimeManager = runtime
+	setupCascadeManagement(runtime, cipher, pusher)
 	return nil
 }
 
@@ -334,6 +345,13 @@ var _ cascaderuntime.ResourceAcquirer = (*cascadeResourceAcquirer)(nil)
 // Management changes invalidate media dialogs whose upstream identity changed.
 type cascadeVideoManagementRuntime struct {
 	cascadeservice.ManagementRuntime
+}
+
+func (r cascadeVideoManagementRuntime) Subscriptions(p model.GbCascadePlatform) cascadeservice.PlatformSubscriptions {
+	if reader, ok := r.ManagementRuntime.(cascadeservice.SubscriptionReader); ok {
+		return reader.Subscriptions(p)
+	}
+	return cascadeservice.NewPlatformSubscriptions("unavailable")
 }
 
 func (r cascadeVideoManagementRuntime) Reload(ctx context.Context) error {

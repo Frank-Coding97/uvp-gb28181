@@ -129,6 +129,39 @@ type PlatformView struct {
 	CreatedAt            time.Time                    `json:"createdAt"`
 	UpdatedAt            time.Time                    `json:"updatedAt"`
 	RuntimeSynced        *bool                        `json:"runtimeSynced,omitempty"`
+	Subscriptions        PlatformSubscriptions        `json:"subscriptions"`
+}
+
+type SubscriptionSession struct {
+	Target           string     `json:"target"`
+	Event            string     `json:"event"`
+	SubscribedAt     time.Time  `json:"subscribedAt"`
+	RenewedAt        time.Time  `json:"renewedAt"`
+	ExpiresAt        time.Time  `json:"expiresAt"`
+	LastNotifyAt     *time.Time `json:"lastNotifyAt,omitempty"`
+	LastNotifyStatus string     `json:"lastNotifyStatus"`
+	LastNotifyCode   int        `json:"lastNotifyCode,omitempty"`
+}
+type SubscriptionTypeStatus struct {
+	State    string                `json:"state"`
+	Sessions []SubscriptionSession `json:"sessions"`
+}
+type PlatformSubscriptions struct {
+	Catalog        SubscriptionTypeStatus `json:"catalog"`
+	MobilePosition SubscriptionTypeStatus `json:"mobilePosition"`
+	PTZPosition    SubscriptionTypeStatus `json:"ptzPosition"`
+	Alarm          SubscriptionTypeStatus `json:"alarm"`
+}
+
+func NewPlatformSubscriptions(catalogState string) PlatformSubscriptions {
+	if catalogState == "" {
+		catalogState = "unavailable"
+	}
+	return PlatformSubscriptions{Catalog: SubscriptionTypeStatus{State: catalogState}, MobilePosition: SubscriptionTypeStatus{State: "unsupported"}, PTZPosition: SubscriptionTypeStatus{State: "unsupported"}, Alarm: SubscriptionTypeStatus{State: "unsupported"}}
+}
+
+type SubscriptionReader interface {
+	Subscriptions(model.GbCascadePlatform) PlatformSubscriptions
 }
 
 // DeleteResult keeps the durable deletion result separate from runtime reload.
@@ -456,6 +489,10 @@ func (s *ManagementService) view(platform model.GbCascadePlatform) PlatformView 
 			needsReset = true
 		}
 	}
+	subscriptions := NewPlatformSubscriptions("unavailable")
+	if reader, ok := s.runtime.(SubscriptionReader); ok {
+		subscriptions = reader.Subscriptions(platform)
+	}
 	return PlatformView{
 		CredentialNeedsReset: needsReset,
 		ID:                   platform.ID, Name: platform.Name, UpstreamServerID: platform.UpstreamServerID, UpstreamDomain: platform.UpstreamDomain,
@@ -472,6 +509,7 @@ func (s *ManagementService) view(platform model.GbCascadePlatform) PlatformView 
 		RegisterAt: platform.RegisterAt, RegisterExpiresAt: platform.RegisterExpiresAt, HeartbeatAt: platform.HeartbeatAt,
 		LastErrorCode: platform.LastErrorCode, LastErrorMessage: platform.LastErrorMessage, LastErrorAt: platform.LastErrorAt,
 		CreatedAt: platform.CreatedAt, UpdatedAt: platform.UpdatedAt,
+		Subscriptions: subscriptions,
 	}
 }
 
