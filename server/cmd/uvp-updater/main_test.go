@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"uvplatform.com/uvp-gb28181/app/utils/ymlconfig"
 	upgrade "uvplatform.com/uvp-gb28181/internal/upgrade"
 )
 
@@ -363,6 +365,48 @@ func TestRegistrationCopiesOnlyValidReleasePublicKeys(t *testing.T) {
 		if len(keys) != 1 || keys["release-1"] != encoded {
 			t.Fatalf("registered keys: %#v", keys)
 		}
+	}
+}
+
+func TestRegistrationLoadsTrustedKeysFromApplicationConfig(t *testing.T) {
+	public, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := base64.StdEncoding.EncodeToString(public)
+	configDir := t.TempDir()
+	configPath := filepath.Join(configDir, "config.yml")
+	configText := fmt.Sprintf("upgrade:\n  trusted_keys:\n    release-generated: %q\n", encoded)
+	if err := os.WriteFile(configPath, []byte(configText), 0600); err != nil {
+		t.Fatal(err)
+	}
+	config, err := ymlconfig.LoadYamlFactory(configDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := registrationTrustedKeys(config.Get("upgrade.trusted_keys"))
+	if len(keys) != 1 || keys["release-generated"] != encoded {
+		t.Fatalf("registration keys from config = %#v", keys)
+	}
+
+	registrationPath := filepath.Join(configDir, "updater-registration.json")
+	if err := writeRegistration(registrationPath, upgrade.Registration{
+		Deployment:  "standalone",
+		TrustedKeys: keys,
+		Standalone:  upgrade.RegisteredLayout{Root: configDir},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(registrationPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var registration upgrade.Registration
+	if err := json.Unmarshal(data, &registration); err != nil {
+		t.Fatal(err)
+	}
+	if len(registration.TrustedKeys) != 1 || registration.TrustedKeys["release-generated"] != encoded {
+		t.Fatalf("persisted registration keys = %#v", registration.TrustedKeys)
 	}
 }
 

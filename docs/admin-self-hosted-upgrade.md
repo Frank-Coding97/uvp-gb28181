@@ -105,6 +105,20 @@ upgrade:
   deployment: "standalone"
 ```
 
+绿色安装包构建时可用 `UVP_UPGRADE_TRUSTED_KEYS` 注入同一组发行公钥，值为 JSON 对象，键是签名清单使用的 `key_id`，值为 Base64 或十六进制 Ed25519 公钥。例如 Linux 构建：
+
+```bash
+UVP_UPGRADE_TRUSTED_KEYS='{"release-2026":"<Ed25519 public key>"}' bash deploy/standalone/build-standalone.sh
+```
+
+Windows 构建前在 PowerShell 设置同名环境变量即可。Compose 包在安装时生成配置，安装时也可用同名变量注入：
+
+```bash
+sudo UVP_UPGRADE_TRUSTED_KEYS='{"release-2026":"<Ed25519 public key>"}' ./install.sh
+```
+
+该输入用于配置发行公钥；发行私钥仍只交给签名工具，不能放进包或构建配置。未设置时保留源配置的 `upgrade.trusted_keys`；当前默认模板为空，因此不传公钥时离线升级不可用。`upgrade.release_source` 仍可按实例单独配置。
+
 `deployment` 只能使用该实例已经注册的 `standalone`、`systemd` 或 `compose` 方式。不要让页面或调用者提交任意下载地址、unit 名称、Compose 文件或宿主机命令。
 
 首次把历史安装纳入在线升级前，需要先完成实例注册并验证助手 socket、共享状态目录、数据目录、业务用户以及部署适配器。升级助手会在停止业务前检查来源构建、迁移声明、配置摘要、备份条件和候选启动条件；通过在线检查不等于可以直接应用。

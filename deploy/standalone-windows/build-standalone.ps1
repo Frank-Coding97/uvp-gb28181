@@ -530,6 +530,9 @@ $mkArgs = @(
     '--openapi-master-key-id', $OpenApiMasterKeyId
 )
 if ($QrProvisionHost) { $mkArgs += @('--qr-provision-host', $QrProvisionHost) }
+if (-not [string]::IsNullOrWhiteSpace($env:UVP_UPGRADE_TRUSTED_KEYS)) {
+    $mkArgs += @('--upgrade-trusted-keys', $env:UVP_UPGRADE_TRUSTED_KEYS)
+}
 Invoke-Native -FilePath $PythonExe -What '生成 config.yml（make-config.py）' -Arguments $mkArgs
 Ok 'config.yml 已生成（SQLite + 本机 Redis + ZLM 身份 + 扫码基址）'
 

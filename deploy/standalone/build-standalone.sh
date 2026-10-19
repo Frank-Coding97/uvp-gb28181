@@ -613,7 +613,8 @@ $PY \
   --zlm-media-server-id "$ZLM_MEDIA_SERVER_ID" \
   --qr-provision-host "$QR_PROVISION_HOST" \
   --openapi-enabled "${UVP_OPENAPI_ENABLED:-true}" \
-  --openapi-master-key-id "${UVP_OPENAPI_MASTER_KEY_ID:-uvp-openapi-k1}"
+  --openapi-master-key-id "${UVP_OPENAPI_MASTER_KEY_ID:-uvp-openapi-k1}" \
+  --upgrade-trusted-keys "${UVP_UPGRADE_TRUSTED_KEYS:-}"
 # ⛔⛔ 这里**不要**引用后面才定义的 $OPENAPI_MASTER_KEY_ENV / $SIP_TRACE_KEY_ENV：
 #   本函数（生成 config.yml）在它们定义之前就调用了 ⇒ 展开成空串 ⇒
 #   make-config.py 收到空值且**不报错**。（本项目已栽过一次同型坑：

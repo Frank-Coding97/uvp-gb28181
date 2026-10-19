@@ -24,6 +24,10 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
+import json
+import os
 import re
 from pathlib import Path
 
@@ -38,6 +42,40 @@ INIT_SWITCHES = (
 # 绿色包的后端只通过本机 Nginx 接收请求；外层代理可能运行在任意私有网段。
 # 后端只监听本机，因此信任 RFC1918 代理网段不会把后端直接暴露给公网。
 TRUSTED_PROXIES = ["127.0.0.1", "::1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+UPGRADE_KEY_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+def parse_upgrade_trusted_keys(value: str) -> dict[str, str] | None:
+    """Validate the optional build-time JSON map and normalize public keys to Base64.
+
+    An empty value preserves the existing ``upgrade.trusted_keys`` from the source
+    config. This lets package builds use their normal config input when no override
+    is needed, while release pipelines can inject their public key without a private
+    signing key ever entering the package builder.
+    """
+    if not value:
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise SystemExit("UVP_UPGRADE_TRUSTED_KEYS must be a JSON object") from exc
+    if not isinstance(parsed, dict):
+        raise SystemExit("upgrade trusted keys must be a JSON object")
+
+    normalized = {}
+    for key_id, encoded in parsed.items():
+        if not isinstance(key_id, str) or not UPGRADE_KEY_ID.fullmatch(key_id):
+            raise SystemExit("upgrade trusted key id is invalid")
+        if not isinstance(encoded, str):
+            raise SystemExit("upgrade trusted public key must be a Base64 or hex string")
+        try:
+            raw = bytes.fromhex(encoded) if len(encoded) == 64 else base64.b64decode(encoded, validate=True)
+        except (ValueError, binascii.Error):
+            raise SystemExit("upgrade trusted public key must be a Base64 or hex string") from None
+        if len(raw) != 32:
+            raise SystemExit("upgrade trusted public key must decode to 32 bytes")
+        normalized[key_id] = base64.b64encode(raw).decode("ascii")
+    return normalized
 
 
 def set_scalar(text: str, key_path: str, value: str) -> str:
@@ -116,8 +154,16 @@ def set_in_section(text: str, section: str, key: str, value: str) -> str:
 
 def build(source: Path, target: Path, http_port: str, redis_port: str,
           zlm_secret: str = "", zlm_media_server_id: str = "",
+          upgrade_trusted_keys_json: str = "",
           zlm_api_port: str = "", hook_port: str = "") -> None:
     text = source.read_text(encoding="utf-8")
+
+    upgrade_trusted_keys = parse_upgrade_trusted_keys(upgrade_trusted_keys_json)
+    if upgrade_trusted_keys is not None:
+        text = set_in_section(
+            text, "upgrade", "trusted_keys",
+            json.dumps(upgrade_trusted_keys, separators=(",", ":")),
+        )
 
     # 1) 数据库：默认 SQLite
     #    键名只写末级，且用「段落内替换」避免同名键被误伤。
@@ -732,10 +778,16 @@ def main() -> None:
     parser.add_argument("--openapi-enabled", default="true",
                         choices=("true", "false"),
                         help="是否默认开启 OpenAPI（老板 2026-10-09 定：默认开）")
+    parser.add_argument(
+        "--upgrade-trusted-keys",
+        default=os.environ.get("UVP_UPGRADE_TRUSTED_KEYS", ""),
+        help="发行公钥 JSON 映射（key_id 到 Base64/hex 公钥），默认读取 UVP_UPGRADE_TRUSTED_KEYS",
+    )
     args = parser.parse_args()
 
     build(args.source, args.target, args.http_port, args.redis_port,
           args.zlm_secret, args.zlm_media_server_id,
+          args.upgrade_trusted_keys,
           zlm_api_port=args.zlm_api_port, hook_port=args.hook_port)
     add_sqlite_section(args.target, args.db_path)
     set_log_filepath(args.target, args.log_path)
