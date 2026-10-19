@@ -29,14 +29,28 @@ import type { BaseResult } from "@/api/types";
 //       就失败、SIP 永远注册不上），所以避开 50000 那段；② 起步段原选 15000，被
 //       深信服终端软件占用（SangforPromoteService 监 127.0.0.1:15000），再上移 500。
 //       见 deploy/standalone-windows/README.md 第三节。
+//
+// ⭐ 三个来源，优先级从高到低（判据实现见 validPort / packedSipPort / applyStatus）：
+//   ① 后端 status 下发的 defaultSipPort —— **部署层**给的值（容器版 install.sh 按段基址
+//      算出来 → .env → compose → 后端）。段可以平移，所以它才是"当前这套部署的正确答案"。
+//   ② 构建期注入的 VITE_DEFAULT_SIP_PORT —— 打镜像/出包那一刻的常量，**不随段平移**。
+//      绿色包的段是固定的，所以它够用；容器版换了段就得靠 ①。
+//   ③ 5061 —— 前两者都没有时的兜底（普通源码构建）。
 const FALLBACK_SIP_PORT = 5061;
 
-function defaultSipPort(): number {
-  const raw = import.meta.env.VITE_DEFAULT_SIP_PORT as string | undefined;
+// 端口合法性判据只写一处：两个来源（后端下发 / 构建期注入）必须用同一把尺子，
+// 否则会出现"后端值被判非法、构建期值被判合法"这种单边漂移。
+function validPort(raw: unknown): number | null {
+  if (raw === undefined || raw === null || raw === "") return null;
   const parsed = Number(raw);
-  // 非法值（空 / 非数字 / 越界）一律回落：预填一个必然保存失败的端口
-  // 会让现场以为是"平台不允许这个端口"，而真正的原因是打包注入写错了。
-  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 65535 ? parsed : FALLBACK_SIP_PORT;
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 65535 ? parsed : null;
+}
+
+// 构建期兜底：非法值（空 / 非数字 / 越界）一律回落 —— 预填一个必然保存失败的端口
+// 会让现场以为是"平台不允许这个端口"，而真正的原因是打包注入写错了。
+function packedSipPort(): number {
+  const packed = validPort(import.meta.env.VITE_DEFAULT_SIP_PORT);
+  return packed === null ? FALLBACK_SIP_PORT : packed;
 }
 
 export interface SipSetupForm {
@@ -87,7 +101,7 @@ function initialForm(): SipSetupForm {
     hookIp: "",
     sdpIp: "",
     streamIp: "",
-    port: defaultSipPort(),
+    port: packedSipPort(),
     domain: "",
     serverId: "",
     password: ""
@@ -109,7 +123,20 @@ export function useSipSetup(api: SipSetupApi = defaultApi) {
 
   function applyStatus(next: SipSetupStatus) {
     status.value = next;
-    if (!next.config) return;
+    if (!next.config) {
+      // 还没有配置 → 默认端口优先取**部署层**下发的段内值。
+      //
+      // ⛔ 不能只信构建期常量：安装脚本允许整段平移端口（`--https-port 53000`
+      //    ⇒ 规划段 53000-53064），而 VITE_DEFAULT_SIP_PORT 是**打镜像那一刻**烤进去的
+      //    51064 —— 平移之后它落在段外，防火墙只放行了段内一段（一条规则），
+      //    设备注册必然不通，现场看到的只是"注册不上"，查不到端口段这层原因。
+      //    踩过：220 上用 53000 段部署，引导页默认值仍是 51064。
+      //
+      // 部署层没告知（非容器/绿色包）时字段缺席 ⇒ 保留构建期默认值，行为不变。
+      const deployed = validPort(next.defaultSipPort);
+      if (deployed !== null) form.port = deployed;
+      return;
+    }
     Object.assign(form, {
       deploymentMode: next.config.deploymentMode,
       listenIp: next.config.listenIp,

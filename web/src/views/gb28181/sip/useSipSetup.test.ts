@@ -191,5 +191,69 @@ describe("useSipSetup", () => {
         expect(useSipSetup(fakeApi()).form.port).toBe(5061);
       }
     });
+
+    // ⛔⛔ 构建期常量是**打镜像那一刻**定的，安装脚本平移整段后它落在段外：
+    //    220 上用 53000 段部署，引导页默认值仍是 51064（防火墙一条规则只放行段内），
+    //    设备注册必然不通。所以部署层一旦下发了端口，必须以它为准。
+    it("prefers the deployment-provided port over the packed default", async () => {
+      vi.stubEnv("VITE_DEFAULT_SIP_PORT", "51064");
+      const api = fakeApi({
+        status: vi.fn().mockResolvedValue({
+          code: 0,
+          message: "",
+          data: { configStatus: "unconfigured", runtime: { state: "unconfigured", updatedAt: "" }, defaultSipPort: 53064 }
+        })
+      });
+      const setup = useSipSetup(api);
+      expect(setup.form.port).toBe(51064);
+      await setup.loadStatus();
+      expect(setup.form.port).toBe(53064);
+    });
+
+    it("keeps the packed default when the deployment does not provide a port", async () => {
+      vi.stubEnv("VITE_DEFAULT_SIP_PORT", "15564");
+      const api = fakeApi({
+        status: vi.fn().mockResolvedValue({
+          code: 0,
+          message: "",
+          data: { configStatus: "unconfigured", runtime: { state: "unconfigured", updatedAt: "" } }
+        })
+      });
+      const setup = useSipSetup(api);
+      await setup.loadStatus();
+      expect(setup.form.port).toBe(15564);
+    });
+
+    it("ignores an invalid deployment-provided port", async () => {
+      vi.stubEnv("VITE_DEFAULT_SIP_PORT", "15564");
+      for (const bad of [0, 70000, -1, 15564.5]) {
+        const api = fakeApi({
+          status: vi.fn().mockResolvedValue({
+            code: 0,
+            message: "",
+            data: { configStatus: "unconfigured", runtime: { state: "unconfigured", updatedAt: "" }, defaultSipPort: bad }
+          })
+        });
+        const setup = useSipSetup(api);
+        await setup.loadStatus();
+        expect(setup.form.port).toBe(15564);
+      }
+    });
+
+    // 已有配置时，界面必须显示**库里存的**端口，不能被部署默认值覆盖 ——
+    // 否则运维改过的端口每次打开页面都会被"改回去"，保存一次就把 SIP 挪到段外。
+    it("keeps the configured port instead of the deployment default", async () => {
+      vi.stubEnv("VITE_DEFAULT_SIP_PORT", "51064");
+      const api = fakeApi({
+        status: vi.fn().mockResolvedValue({
+          code: 0,
+          message: "",
+          data: { ...configuredStatus, defaultSipPort: 53064 }
+        })
+      });
+      const setup = useSipSetup(api);
+      await setup.loadStatus();
+      expect(setup.form.port).toBe(5061);
+    });
   });
 });

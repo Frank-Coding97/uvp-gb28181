@@ -1927,6 +1927,10 @@ export interface SipSetupStatus {
   configStatus: "configured" | "unconfigured";
   config?: SipConfigSummary;
   runtime: SipRuntimeStatus;
+  // 部署层给的引导页默认 SIP 端口（段基址 + 64）。
+  // 字段缺席 = 部署层没告知（非容器/绿色包等），前端退回构建期默认值。
+  // ⛔ 只能用于「还没有配置」的场景；已有配置时以 config.port 为准。
+  defaultSipPort?: number;
 }
 
 export interface SipNetworkAddress {

@@ -36,6 +36,10 @@ type SetupStatusResponse struct {
 	ConfigStatus string                  `json:"configStatus"`
 	Config       *gbsetup.SIPConfigView  `json:"config,omitempty"`
 	Runtime      gbsetup.RuntimeSnapshot `json:"runtime"`
+	// DefaultSIPPort 是**部署层**给的引导页默认 SIP 端口（段基址 + 64）。
+	// 为 0 表示部署层没告知（非容器/绿色包等形态），前端退回自己的构建期默认值。
+	// ⛔ 只在 config 为空时有意义：已有配置时前端应该显示数据库里的端口，不是默认值。
+	DefaultSIPPort int `json:"defaultSipPort,omitempty"`
 }
 
 type NetworkInterfacesResponse struct {
@@ -82,9 +86,10 @@ func (sc *SetupController) Status(c *gin.Context) {
 		configStatus = "configured"
 	}
 	sc.Success(c, SetupStatusResponse{
-		ConfigStatus: configStatus,
-		Config:       config,
-		Runtime:      sc.runtime.Snapshot(),
+		ConfigStatus:   configStatus,
+		Config:         config,
+		Runtime:        sc.runtime.Snapshot(),
+		DefaultSIPPort: gbsetup.DeploymentDefaultSIPPort(),
 	})
 }
 
