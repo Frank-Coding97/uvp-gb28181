@@ -168,14 +168,34 @@ func RenderStartup(root, platform string) error {
 	if err != nil {
 		return err
 	}
-	if err := AtomicWrite(m.basePath(), base, 0600); err != nil {
+	// Keep the pristine template as the base. A rendered configuration no
+	// longer carries the standalone HTTP section (it is merged into the entry
+	// server) and is recognisable by the probe endpoint, so storing it as the
+	// base would make the next HTTP <-> HTTPS switch fail to resolve ports.
+	// The platform script regenerates the file from the template on every
+	// start, so this keeps the base current without losing either section.
+	source := base
+	if strings.Contains(string(base), probeEndpoint) {
+		// Already rendered: re-render from the stored base instead.
+		if source, err = os.ReadFile(m.basePath()); err != nil {
+			return err
+		}
+	} else if err := AtomicWrite(m.basePath(), base, 0600); err != nil {
 		return err
 	}
 	s, err := m.Settings()
 	if err != nil {
 		return err
 	}
-	rendered, err := Render(string(base), s)
+	// Persist the resolved default on the first start. Without it the next
+	// start would have to recognise the port from an already rendered
+	// (possibly TLS-free) configuration, which is not always unambiguous.
+	if _, statErr := os.Stat(m.settingsPath()); os.IsNotExist(statErr) {
+		if err := writeJSON(m.settingsPath(), s); err != nil {
+			return err
+		}
+	}
+	rendered, err := Render(string(source), s)
 	if err != nil {
 		return err
 	}
@@ -194,11 +214,13 @@ func readSettings(path string) (Settings, error) {
 	return s, err
 }
 
+const probeEndpoint = "/__uvp_https_probe"
+
 func addProbe(block, mode string) string {
 	i := strings.Index(block, "server_name _;")
 	if i < 0 {
 		return block
 	}
 	i += len("server_name _;")
-	return block[:i] + "\n        location = /__uvp_https_probe { add_header X-UVP-HTTPS-Mode " + mode + " always; return 204; }\n" + block[i:]
+	return block[:i] + "\n        location = " + probeEndpoint + " { add_header X-UVP-HTTPS-Mode " + mode + " always; return 204; }\n" + block[i:]
 }

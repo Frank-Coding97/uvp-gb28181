@@ -49,6 +49,41 @@ describe("HTTPS settings", () => {
     expect(api.apply).not.toHaveBeenCalled();
     w.unmount();
   });
+  it("switches the displayed port and address while retaining the editable HTTPS port", async () => {
+    const w = render();
+    await flushPromises();
+    const port = w.get('input[type="number"]');
+    await port.setValue(51443);
+    expect(w.get('[data-testid="access-preview"]').text()).toContain("https://localhost:51443");
+    await w.get('input[type="checkbox"]').setValue(false);
+    expect((port.element as HTMLInputElement).value).toBe("51001");
+    expect(port.attributes("disabled")).toBeDefined();
+    expect(w.get('[data-testid="access-preview"]').text()).toContain("http://localhost:51001");
+    await w.get('[data-testid="apply"]').trigger("click");
+    const confirm = modal.confirm.mock.calls.at(-1)![0];
+    expect(confirm.content).toContain("http://localhost:51001");
+    await confirm.onOk();
+    expect(api.apply).toHaveBeenCalledWith({ enabled: false, port: 51443, syncZlm: false }, undefined, undefined);
+    api.status.mockResolvedValue({ code: 0, data: { ...status(), settings: { enabled: false, port: 51443 } } });
+    await w.get('[data-testid="refresh"]').trigger("click");
+    await flushPromises();
+    await w.get('input[type="checkbox"]').setValue(true);
+    expect((port.element as HTMLInputElement).value).toBe("51443");
+    expect(port.attributes("disabled")).toBeUndefined();
+    w.unmount();
+  });
+  it("shows the configured HTTP port immediately when HTTPS is already disabled", async () => {
+    api.status.mockResolvedValue({
+      code: 0,
+      data: { ...status(), settings: { enabled: false, port: 51443 }, httpPort: 51801 }
+    });
+    const w = render();
+    await flushPromises();
+    expect((w.get('input[type="number"]').element as HTMLInputElement).value).toBe("51801");
+    expect(w.get('[data-testid="access-preview"]').text()).toContain("http://localhost:51801");
+    expect(api.apply).not.toHaveBeenCalled();
+    w.unmount();
+  });
   it("validates uploads and warns about ZLM restart only when selected", async () => {
     const w = render();
     await flushPromises();
@@ -66,6 +101,48 @@ describe("HTTPS settings", () => {
     expect(confirm.content).not.toContain("重启 ZLMediaKit");
     await confirm.onOk();
     expect(api.apply.mock.calls[0][0].syncZlm).toBe(false);
+    w.unmount();
+  });
+  it("accepts dropped files, shows their names and invalidates validation when removed", async () => {
+    const w = render();
+    await flushPromises();
+    const cert = new File(["certificate"], "server.crt");
+    const key = new File(["private key"], "server.key");
+    await w.get('[data-testid="certificate-dropzone"]').trigger("drop", { dataTransfer: { files: [cert] } });
+    await w.get('[data-testid="privateKey-dropzone"]').trigger("drop", { dataTransfer: { files: [key] } });
+    await flushPromises();
+    expect(api.certificate).toHaveBeenCalledWith(cert, key);
+    expect(w.text()).toContain("server.crt");
+    expect(w.text()).toContain("server.key");
+    await w.get('[data-testid="remove-certificate"]').trigger("click");
+    expect(w.text()).not.toContain("server.crt");
+    expect(w.text()).not.toContain("新证书：");
+    expect(w.get('[data-testid="apply"]').attributes("disabled")).toBeDefined();
+    w.unmount();
+  });
+  it("rejects multiple, oversized and wrong-format drops before validation", async () => {
+    const w = render();
+    await flushPromises();
+    const zone = w.get('[data-testid="certificate-dropzone"]');
+    const cert = new File(["pem"], "server.crt");
+    await zone.trigger("drop", { dataTransfer: { files: [cert, cert] } });
+    expect(w.text()).toContain("每次只能选择一个文件");
+    await zone.trigger("drop", { dataTransfer: { files: [new File(["text"], "wrong.txt")] } });
+    expect(w.text()).toContain("请选择 PEM、CRT 或 CER 格式的证书");
+    await zone.trigger("drop", { dataTransfer: { files: [new File([new Uint8Array(1024 * 1024 + 1)], "large.crt")] } });
+    expect(w.text()).toContain("每个证书或私钥文件不能超过 1 MiB");
+    expect(api.certificate).not.toHaveBeenCalled();
+    w.unmount();
+  });
+  it("ignores file drops when the installation is unsupported", async () => {
+    api.status.mockResolvedValue({ code: 0, data: { supported: false, reason: "仅支持绿色包" } });
+    const w = render();
+    await flushPromises();
+    await w.get('[data-testid="certificate-dropzone"]').trigger("drop", {
+      dataTransfer: { files: [new File(["pem"], "server.crt")] }
+    });
+    expect(w.text()).not.toContain("server.crt");
+    expect(api.certificate).not.toHaveBeenCalled();
     w.unmount();
   });
   it("shows a new address without declaring a disconnect successful", async () => {

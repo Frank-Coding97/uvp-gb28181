@@ -123,14 +123,32 @@ func (m *Manager) Settings() (Settings, error) {
 	if err != nil {
 		return s, err
 	}
-	matches := sslListen.FindStringSubmatch(string(b))
-	if len(matches) == 0 {
-		return s, errors.New("无法识别当前 HTTPS 端口")
+	return m.defaultSettings(string(b))
+}
+
+// defaultSettings resolves the state of an installation that has never saved
+// one. Fresh installations serve the management entry over plain HTTP until an
+// administrator enables TLS from the settings page.
+func (m *Manager) defaultSettings(base string) (Settings, error) {
+	_, _, tlsBlock, err := section(base, tlsBegin, tlsEnd)
+	if err != nil {
+		return Settings{}, err
 	}
 	// Capture the numeric port separately from the IPv6 prefix.
-	p := regexp.MustCompile(`(\d+) ssl;`).FindStringSubmatch(matches[0])
-	port, _ := strconv.Atoi(p[1])
-	return Settings{true, port}, nil
+	if matches := sslListen.FindStringSubmatch(tlsBlock); len(matches) > 0 {
+		p := regexp.MustCompile(`(\d+) ssl;`).FindStringSubmatch(matches[0])
+		port, _ := strconv.Atoi(p[1])
+		return Settings{false, port}, nil
+	}
+	// The base can already be a rendered disabled configuration, which no
+	// longer carries an `ssl` listener. Reuse its plain listener so restarts
+	// never fail on an unrecognised base.
+	if match := httpListen.FindStringSubmatch(tlsBlock); len(match) == 2 {
+		if port, _ := strconv.Atoi(match[1]); port > 0 && port != m.httpPort() {
+			return Settings{false, port}, nil
+		}
+	}
+	return Settings{}, errors.New("无法识别当前 HTTPS 端口")
 }
 func (m *Manager) httpPort() int {
 	b, _ := os.ReadFile(m.basePath())

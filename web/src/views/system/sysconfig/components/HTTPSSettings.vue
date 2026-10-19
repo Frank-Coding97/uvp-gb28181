@@ -17,35 +17,61 @@
       <a-form :model="draft" layout="vertical" class="uvp-system-form">
         <a-form-item label="是否启用 HTTPS">
           <a-switch v-model="draft.enabled" :disabled="disabled" />
-          <template #extra>关闭后使用 HTTP 管理入口；ZLMediaKit 的 HTTPS/WSS 仍保持开启。</template>
+          <template #extra>切换后需点击“应用 HTTPS 配置”才会生效；ZLMediaKit 的 HTTPS/WSS 仍保持开启。</template>
         </a-form-item>
-        <a-form-item label="HTTPS 端口">
+        <div v-if="status?.supported" data-testid="access-preview" class="https-settings__access-preview">
+          <strong>应用后访问地址</strong>
+          <span>{{ draft.enabled ? "HTTPS 已选择开启" : "HTTPS 已选择关闭，将使用 HTTP" }}</span>
+          <code>{{ previewAddress }}</code>
+        </div>
+        <a-form-item :label="draft.enabled ? 'HTTPS 端口' : 'HTTP 端口'">
           <a-space>
-            <a-input-number v-model="draft.port" :min="1" :max="65535" :precision="0" :disabled="disabled" />
-            <a-button :loading="checking" :disabled="disabled" @click="checkPort">检测端口</a-button>
+            <a-input-number v-model="displayPort" :min="1" :max="65535" :precision="0" :disabled="disabled || !draft.enabled" />
+            <a-button v-if="draft.enabled" :loading="checking" :disabled="disabled" @click="checkPort">检测端口</a-button>
           </a-space>
-          <template #extra>HTTP 管理端口：{{ status?.httpPort || "—" }}。应用成功后生效。</template>
+          <template #extra>
+            <span v-if="draft.enabled">关闭 HTTPS 后使用 HTTP 端口 {{ status?.httpPort || "—" }}。</span>
+            <span v-else>HTTP 端口由安装配置提供，此处只读；再次开启将恢复 HTTPS 端口 {{ draft.port }}。</span>
+          </template>
         </a-form-item>
         <div :key="uploadVersion" class="https-settings__files">
-          <a-form-item label="证书文件（PEM / CRT）">
-            <input
-              data-testid="certificate"
-              aria-label="证书文件"
-              type="file"
-              accept=".pem,.crt,.cer"
-              :disabled="disabled"
-              @change="chooseFile($event, 'certificate')"
-            />
-          </a-form-item>
-          <a-form-item label="私钥文件（未加密 PEM / KEY）">
-            <input
-              data-testid="privateKey"
-              aria-label="私钥文件"
-              type="file"
-              accept=".pem,.key"
-              :disabled="disabled"
-              @change="chooseFile($event, 'privateKey')"
-            />
+          <a-form-item v-for="field in uploadFields" :key="field.key" :label="field.label">
+            <div class="https-settings__upload">
+              <label
+                :data-testid="`${field.key}-dropzone`"
+                class="https-settings__dropzone"
+                :class="{ 'is-dragover': dragging === field.key, 'is-disabled': disabled }"
+                @dragover.prevent="!disabled && (dragging = field.key)"
+                @dragleave.prevent="dragging = undefined"
+                @drop.prevent="dropFile($event, field.key)"
+              >
+                <input
+                  :data-testid="field.key"
+                  :aria-label="field.label"
+                  type="file"
+                  :accept="field.accept"
+                  :disabled="disabled"
+                  @change="chooseFile($event, field.key)"
+                />
+                <IconUpload class="https-settings__upload-icon" aria-hidden="true" />
+                <span class="https-settings__upload-text">拖拽文件到此处 或 <strong>点击选择文件</strong></span>
+                <span class="https-settings__upload-hint">{{ field.hint }}，单文件最大 1 MiB</span>
+              </label>
+              <div v-if="field.file" class="https-settings__selected-file">
+                <IconFile aria-hidden="true" />
+                <span class="https-settings__file-name" :title="field.file.name">{{ field.file.name }}</span>
+                <span class="https-settings__file-size">{{ Math.max(1, Math.ceil(field.file.size / 1024)) }} KB</span>
+                <a-button
+                  :data-testid="`remove-${field.key}`"
+                  :aria-label="`移除${field.label}`"
+                  type="text"
+                  size="small"
+                  :disabled="disabled"
+                  @click="selectFile(undefined, field.key)"
+                  >移除</a-button
+                >
+              </div>
+            </div>
           </a-form-item>
         </div>
         <p v-if="validating">正在校验证书与私钥…</p>
@@ -92,14 +118,28 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { Message, Modal } from "@arco-design/web-vue";
+import { IconFile, IconUpload } from "@arco-design/web-vue/es/icon";
 import { hasPermission } from "@/hooks/usePermission";
 import { applyHTTPS, checkHTTPSPort, getHTTPSStatus, validateHTTPSCertificate } from "@/api/https-management";
 import type { HTTPSCertificate, HTTPSOperation, HTTPSStatus } from "@/api/https-management";
 
 const status = ref<HTTPSStatus>();
-const draft = reactive({ enabled: true, port: 51000 });
+// 与后端默认保持一致：新装的管理页是明文 HTTP，开关由管理员在这里打开。
+const draft = reactive({ enabled: false, port: 51000 });
 const certificate = ref<File>();
 const privateKey = ref<File>();
+type UploadField = "certificate" | "privateKey";
+const dragging = ref<UploadField>();
+const uploadFields = computed(() => [
+  {
+    key: "certificate" as const,
+    label: "证书文件",
+    accept: ".pem,.crt,.cer",
+    hint: "支持 PEM / CRT / CER",
+    file: certificate.value
+  },
+  { key: "privateKey" as const, label: "私钥文件", accept: ".pem,.key", hint: "支持未加密 PEM / KEY", file: privateKey.value }
+]);
 const uploaded = ref<HTTPSCertificate>();
 const syncZlm = ref(true);
 const loading = ref(false);
@@ -122,12 +162,18 @@ const serviceLabel = (state: string) =>
   ({ pending: "等待应用", unchanged: "未变更", applied: "已应用", restored: "已恢复", recovery_required: "需要检查恢复" })[
     state
   ] || state;
-const address = () => {
+const displayPort = computed({
+  get: () => (draft.enabled ? draft.port : status.value?.httpPort),
+  set: (port: number | undefined) => {
+    if (draft.enabled && port !== undefined) draft.port = port;
+  }
+});
+const previewAddress = computed(() => {
   const url = new URL(window.location.href);
   url.protocol = draft.enabled ? "https:" : "http:";
   url.port = String(draft.enabled ? draft.port : status.value?.httpPort);
   return url.href;
-};
+});
 async function refresh() {
   loading.value = true;
   clearTimeout(timer);
@@ -173,7 +219,32 @@ async function checkPort() {
   }
 }
 async function chooseFile(event: Event, field: "certificate" | "privateKey") {
-  const file = (event.target as HTMLInputElement).files?.[0];
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (file) await selectFile(file, field);
+}
+async function dropFile(event: DragEvent, field: UploadField) {
+  dragging.value = undefined;
+  if (disabled.value) return;
+  const files = event.dataTransfer?.files;
+  if (!files?.length) return;
+  if (files.length !== 1) {
+    error.value = "每次只能选择一个文件";
+    return;
+  }
+  await selectFile(files[0], field);
+}
+async function selectFile(file: File | undefined, field: UploadField) {
+  if (disabled.value) return;
+  if (file && !(field === "certificate" ? /\.(pem|crt|cer)$/i : /\.(pem|key)$/i).test(file.name)) {
+    error.value = field === "certificate" ? "请选择 PEM、CRT 或 CER 格式的证书" : "请选择未加密 PEM 或 KEY 格式的私钥";
+    return;
+  }
+  if (file && file.size > 1024 * 1024) {
+    error.value = "每个证书或私钥文件不能超过 1 MiB";
+    return;
+  }
   if (field === "certificate") certificate.value = file;
   else privateKey.value = file;
   uploaded.value = undefined;
@@ -181,10 +252,6 @@ async function chooseFile(event: Event, field: "certificate" | "privateKey") {
   const generation = ++validationGeneration;
   validating.value = false;
   if (!certificate.value || !privateKey.value) return;
-  if (certificate.value.size > 1024 * 1024 || privateKey.value.size > 1024 * 1024) {
-    error.value = "每个证书或私钥文件不能超过 1 MiB";
-    return;
-  }
   validating.value = true;
   try {
     const response = await validateHTTPSCertificate(certificate.value, privateKey.value);
@@ -205,12 +272,13 @@ function confirmApply() {
   const options = { ...draft, syncZlm: synchronize };
   const files = { certificate: certificate.value, privateKey: privateKey.value };
   const generation = validationGeneration;
-  const nextAddress = address();
+  const nextAddress = previewAddress.value;
   Modal.confirm({
     title: "应用 HTTPS 配置",
-    content: synchronize
-      ? "本次将重载 Nginx 并重启 ZLMediaKit。预览、回放、推流及对讲可能中断，需要重新连接。是否继续？"
-      : "本次将重载 Nginx，管理页面连接可能断开。是否继续？",
+    content:
+      (synchronize
+        ? "本次将重载 Nginx 并重启 ZLMediaKit。预览、回放、推流及对讲可能中断，需要重新连接。"
+        : "本次将重载 Nginx，管理页面连接可能断开。") + `应用后请访问：${nextAddress}。是否继续？`,
     onOk: async () => {
       if (disabled.value) return;
       busy.value = true;
@@ -260,14 +328,110 @@ fieldset {
   margin: 20px 0 0;
   border: 0;
 }
+.https-settings__access-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  margin-bottom: 20px;
+  color: var(--color-text-1);
+  background: var(--color-primary-light-1);
+  border: 1px solid rgb(var(--primary-6));
+  border-radius: 8px;
+}
+.https-settings__access-preview code {
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
 .https-settings__files {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 24px;
 }
-input[type="file"] {
-  max-width: 100%;
+.https-settings__files > :deep(.arco-form-item),
+.https-settings__upload {
+  width: 100%;
+  min-width: 0;
+}
+.https-settings__dropzone {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  min-height: 160px;
+  padding: 24px 16px;
+  text-align: center;
+  background: var(--uvp-list-panel-bg);
+  border: 1.5px dashed var(--uvp-panel-border);
+  border-radius: 10px;
+  transition:
+    background 0.2s,
+    border-color 0.2s;
+
+  &:hover:not(.is-disabled),
+  &:focus-within,
+  &.is-dragover {
+    outline: 2px solid var(--uvp-brand-soft);
+    background: var(--uvp-brand-soft);
+    border-color: var(--uvp-brand);
+  }
+
+  &.is-disabled {
+    opacity: 0.5;
+  }
+
+  input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    cursor: pointer;
+    opacity: 0;
+
+    &:disabled {
+      cursor: not-allowed;
+    }
+  }
+}
+.https-settings__upload-icon {
+  font-size: 32px;
+  color: var(--uvp-text-tertiary);
+}
+.https-settings__upload-text {
+  font-size: 14px;
   color: var(--uvp-text-secondary);
+
+  strong {
+    font-weight: 500;
+    color: var(--uvp-brand);
+  }
+}
+.https-settings__upload-hint,
+.https-settings__file-size {
+  font-size: 12px;
+  color: var(--uvp-text-tertiary);
+}
+.https-settings__selected-file {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  margin-top: 10px;
+  background: var(--uvp-list-panel-bg);
+  border-radius: 8px;
+}
+.https-settings__file-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.https-settings__file-size {
+  flex-shrink: 0;
 }
 .https-settings__notice {
   margin-bottom: 12px;

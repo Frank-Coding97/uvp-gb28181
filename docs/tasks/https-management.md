@@ -83,6 +83,9 @@ created: 2026-10-18
 | H05-2 | 确认前取消；重复点击应用 | 取消不执行；执行期间防重复，后端也拒绝并发变更。 |
 | H05-3 | 协议或端口切换使旧连接断开 | 不把断连直接判为成功；显示新入口，重新连接后读取最终状态。 |
 | H05-4 | 保存完成但探测未通过；部分成功 | 清楚显示未生效或各服务结果，不用“保存成功”代替运行成功。 |
+| H05-5 | 开关反复切换；已有自定义 HTTPS/HTTP 端口 | 关闭时输入框显示只读 HTTP 端口，开启时恢复可编辑的 HTTPS 端口；关闭提交不覆盖已保存的 HTTPS 端口。开关下方突出显示应用后的完整访问地址，确认弹窗同步展示。 |
+| H05-6 | 点击或拖拽选择证书/私钥；移除；错误后缀、多个文件、超 1 MiB；窄屏与禁用状态 | 参照文件管理的大文件上传虚线框样式；展示名称、大小与移除；两个文件齐全才调用原证书校验，非法文件不覆盖现有选择；移除使校验失效；禁用时不接收文件；窄屏无横向溢出。 |
+| H05-7 | 系统配置页在桌面、矮窗口与手机宽度下选择证书和私钥后滚动到底部 | 页面可滚动，两个上传区、移除按钮、同步提示和应用按钮均可完整访问；应用按钮可点击并打开确认弹窗。 |
 
 # H06 — 包级回归与实际验收
 
@@ -99,7 +102,7 @@ created: 2026-10-18
 
 H01 → H02 → H03 → H04 → H05 → H06。每项先写可运行的失败测试，再实现并执行相关回归；不以静态测试代替目标系统运行验收。
 
-当前：H01—H05 源码实现完成，H06 本地回归、浏览器组件验证及交叉编译完成；目标系统安装包及媒体流验收待执行。尚未提交、推送或部署。
+当前：H01—H05 源码实现完成，H06 本地回归、浏览器组件验证及交叉编译完成；Linux amd64 已在 220 出包、安装并完成入口检查，页面功能与媒体流验收待老板测试。
 
 ## 实施结果
 
@@ -125,8 +128,86 @@ H01 → H02 → H03 → H04 → H05 → H06。每项先写可运行的失败测�
 
 - 全量 vue-tsc 被既有设备固件升级及固件仓库等文件类型错误阻断；本功能文件未出现在错误列表。未据此宣称完整前端发布构建通过。
 - 关联 Go 包全量测试存在既有失败（日志配置/升级导入测试、历史迁移资源、setup 基线数量等）；本次未修改这些问题。
-- 本机无 Nginx、ZLM 目标系统运行环境和 PowerShell；尚未执行真实 Nginx -t/reload、ZLM 重启及媒体中断恢复验收。模板及固定命令的单元测试、交叉编译不能代替这部分验收。
+- 本机无 Nginx、ZLM 目标系统运行环境和 PowerShell；220 已验证实际启动及 TLS，页面触发的 Nginx reload、ZLM 重启及媒体中断恢复仍待验收。模板及固定命令的单元测试、交叉编译不能代替这部分验收。
 - H06-1：待 Linux amd64/arm64 和 Windows 中文/空格路径绿色包的首次启动、开关、换端口、证书同步与重启持久化。
 - H06-2：待真实 HTTP/HTTPS 登录、业务 API、上传及媒体代理回归。
 - H06-3：待有媒体流时核对取消同步不重启、勾选同步重启后的预览/回放/推流/对讲重连。
 - H06-4：单元测试已覆盖恢复失败及中断保护；仍待目标机权限不足、磁盘写满等故障注入。
+
+## 220 出包与安装（2026-10-18）
+
+- 构建来源：提交 `70760ff42159d3c1fe0de25496eaed6de2fd8ca5` 的干净源码归档，不包含本地未提交修改；在 192.168.10.220 实际编译后端、setup、updater 和前端。
+- 版本：1.1.4；包路径：`/home/superadmin/uvp-build-https-70760ff4-20261018/release-output/uvp-gb28181-linux-amd64-1.1.4.tar.gz`；SHA-256：`0244de3cea4d4e4a43790104da5db5604af75a4799c1ee61c033b9d7f111a23a`。
+- 包校验通过；data/logs/run 无运行文件；14 个 ELF 可移植性门禁通过；SQLite 基线 114 表、315 索引、451 授权策略及完整性检查通过。
+- 安装目录：`/home/superadmin/uvp-https-1.1.4-20261018/uvp-gb28181-linux-amd64-1.1.4`。停止原 51000 测试实例后，复制其配置、数据、上传文件及证书；原目录完整保留且停止，未重置账号密码。
+- 安装脚本退出 0；Redis、ZLM、后端、Nginx 和 updater 已运行。运行中后端与本次产物摘要一致，ZLM 独立 PEM 与旧实例一致。
+- 局域网入口 `https://192.168.10.220:51000/` 返回 200；HTTP 51001 返回 301；页面 JS/CSS 返回 200；HTTPS 探针返回 204 且模式为 https；HTTPS 状态接口未登录返回 401；公开配置接口返回 200。
+- Nginx 51000、ZLM HTTPS 51007、WSS 51010 的 TLS 握手成功，证书指纹一致。页面开关、证书同步及实际预览/回放/推流/对讲由老板继续测试，未据此宣称业务验收通过。
+
+## 端口展示调整（2026-10-18）
+
+- H05-5 已完成：输入框随开关展示 HTTP/HTTPS 端口；HTTP 端口只读；HTTPS 端口单独保留。开关下增加完整访问地址提示，提交确认同步显示该地址。
+- 新增两项组件测试先失败后通过；sysconfig 与 API 共 4 文件 22 项回归通过；组件与测试文件 ESLint、Prettier、diff 检查通过。
+- 实际组件配合 Arco UI 在独立 Chrome 验证切换、端口保留与确认地址；390px 窄屏无横向溢出、无 pageerror。该验证使用模拟 API，未替代实际登录验收。
+- 在 220 基于原安装包源码仅替换 HTTPSSettings.vue 后重新构建前端，退出 0。已备份原页面资源并应用至当前测试实例，保留旧静态文件供已打开的页面使用；未重打原 tar.gz。构建/安装记录：`/home/superadmin/uvp-build-https-70760ff4-20261018/https-port-web-install.json`。
+- 实际 HTTP 51001 首页、新入口 JS/CSS 及 HTTPSSettings-B5etZWE7.js 返回 200，组件包含新提示，HTTP 模式探针返回 204。后端/ZLM/Nginx PID、Nginx 配置摘要、ZLM PEM 摘要保持一致；HTTPS 仍为老板设置的关闭状态。
+
+## 证书上传区样式调整（2026-10-18）
+
+- H05-6 已完成：证书与私钥改为虚线拖拽区，沿用文件管理上传区的图标、主题色和点击选择提示；选中后显示文件名、大小及移除按钮。仍各限一个 1 MiB 文件，调用原 HTTPS 校验接口，不接入普通附件上传。
+- 新增三项组件测试先失败后通过；sysconfig 与 API 共 4 文件 25 项测试通过。组件 ESLint、Stylelint、Prettier 与相关 diff 检查通过。
+- 使用真实组件与 Arco UI、模拟接口在独立 Chrome 验证点击选择、拖入私钥、配对校验、移除清校验、长文件名、键盘聚焦及 390px 窄屏；无横向溢出、无 pageerror。原同步确认与完成后清空材料的浏览器回归通过；实际登录业务由老板测试。
+- 220 前端构建退出 0，生成 `dist-https-upload-20261018`；实际构建组件 SHA-256 为 `f8647770ab9423ce94c6493b993012232131ff830ad808b0d2d5c64399f46f26`。本地随后仅调整 CSS 属性顺序以满足 Stylelint，未改变样式值或行为。
+- 已备份原页面并替换当前测试实例的前端，保留 uploads 和旧静态资源；原完整 tar.gz 未修改。记录为 `/home/superadmin/uvp-build-https-70760ff4-20261018/https-upload-web-install.json`，备份为同目录 `https-upload-web-before.tar.gz`。
+- HTTP 51001 首页、入口 JS/CSS 和 `HTTPSSettings-Dao0b18m.js` 返回 200；首页及组件响应与安装文件一致。首页 SHA-256 为 `fbe5e6c69d029154c7339dd4615000b38b86df061721f6dce602e33aaa50dbef`。部署前后后端/ZLM/Nginx PID、Nginx 配置、ZLM PEM 与 HTTPS 设置摘要一致。
+
+## 页面底部遮挡修复（2026-10-18）
+
+- H05-7 根因：系统配置页沿用的 snow-fill 与 snow-fill-inner 均隐藏溢出，HTTPS 内容超过可用高度时无法滚动；此前独立组件验证未覆盖页面容器。
+- 仅为系统配置页内层容器设置 overflow: auto，保留其他页面布局。浏览器回归先复现失败：800px 窗口内层高 750px、内容高 1172px、overflowY 为 hidden。
+- 使用实际全局样式、系统配置页局部样式与相同页签容器结构、真实 HTTPS 组件和 Arco UI，模拟 API 验证 1440×800 暗色、1280×600 亮色、390×720 暗色：均可滚动，移除文件及重新选择正常，应用按钮完整显示且可打开确认弹窗；无横向溢出、无 pageerror。该验证不代替真实登录业务验收。
+- sysconfig 与 HTTPS API 共 4 文件 25 项测试通过；修改的系统配置页通过 ESLint、Stylelint 和 Prettier。
+- 220 前端构建成功并安装，备份与记录分别为构建目录下的 `https-scroll-web-before.tar.gz`、`https-scroll-web-install.json`；保留 uploads 与旧静态资源。HTTP 首页和入口资源返回 200，新 `sysconfig-CNqiuWrG.css` 响应与磁盘一致且包含滚动规则；HTTP 探针返回 204。服务 PID、HTTPS 设置、Nginx 配置及 ZLM PEM 摘要均未改变；未重打完整包。
+
+## 默认改为明文 HTTP（2026-10-18）
+
+需求：新装包**默认不开管理页 HTTPS**，改为在「系统设置 → 系统配置 → HTTPS」由管理员自行开启。
+
+### 改动
+
+| 位置 | 改动 |
+| --- | --- |
+| `server/internal/httpsconfig/manager.go` | `Settings()` 兜底（无 `data/https/settings.json` 时）由「启用」改为**关闭**；端口解析改为只看 HTTPS 段，并兼容已被渲染成关闭态（无 `ssl;`）的 base。 |
+| `server/internal/httpsconfig/config.go` | `RenderStartup` ①首次启动把解析出的默认**落盘** `settings.json`，后续启停不再依赖解析；②**不再用已渲染的 conf 覆盖 base**——渲染结果删掉了独立的 `UVP_HTTP_*` 段，再次渲染会因解析不到 HTTP 端口报「无法识别当前 HTTPS 端口」而**让整包起不来**。 |
+| `deploy/standalone/uvp-gb28181-ctl.sh` | `NGINX_HTTPS_ENABLED` 默认 `1` → `0`；端口预检在关闭态下只查 HTTP 入口。 |
+| `deploy/standalone-windows/uvp-gb28181-ctl.ps1` | `$script:HttpsEnabled` 默认 `$true` → `$false`。 |
+| `web/.../HTTPSSettings.vue` | `draft` 初始 `enabled: true` → `false`，与后端默认一致（接口返回后仍以返回值为准）。 |
+| 两份 `README.md`（Linux / Windows） | 首次启动地址改为 `http://<本机IP>:51001`（Windows 15501），端口表标注 51000/15500「默认关闭」，常见问题里的排错提示同步。 |
+
+### 顺带修掉的启动故障（默认关闭后必踩）
+
+关闭态的渲染结果会把独立 HTTP 段合并进入口 server 并删掉 `UVP_HTTP_BEGIN..END`。
+旧逻辑每次启动都把**当前 conf** 当 base 存下来 ⇒ 第二次启动时 base 里已经没有 HTTP 段，
+`Render` 解析不到端口，`uvp-setup https-render` 失败 ⇒ `ctl.sh` 停在这一步「应用 HTTPS 配置失败」。
+根因与表现完全对不上（既不是证书也不是端口占用）。已改为只在 conf **未渲染**（不含
+`/__uvp_https_probe`）时才更新 base。
+
+### 新增测试（均先复现失败再修复）
+
+- `TestStartupDefaultsToPlainHTTPAndPersistsChoice`：两平台，新装默认为关闭、渲染出明文入口、
+  落盘 `settings.json`、第二次启动不再改变配置。
+- `TestStartupReusesBaseWhenConfigurationAlreadyRendered`：conf 已是渲染态时启动不失败、
+  base 仍是含两个分段的原始模板。
+
+### 已执行回归
+
+- `go test -race ./internal/httpsconfig` 通过；`go vet` 通过；`app/controllers` 的 `TestHTTPS*`、`cmd/uvp-setup` 通过。
+- 前端 `src/views/system/sysconfig/` 3 文件 24 项通过；改动文件 ESLint、Prettier 通过。
+- `deploy/test` 下 Python 22 项通过；两个 shell 脚本 `bash -n` 通过。
+- ⛔ 未改动 ZLM 的 HTTPS/WSS：管理页开关不影响流媒体证书。
+
+### 待验收
+
+- Linux / Windows 绿色包**首次启动**实际走明文 HTTP 入口，界面开启 HTTPS 后重载、换端口、重启持久化。
+- ⚠️ 兼容性提示：更老的存量实例若从未保存过 `data/https/settings.json`，升级后管理页会由 HTTPS 变为
+  HTTP（与"默认不开"一致）；已保存过的实例不受影响。

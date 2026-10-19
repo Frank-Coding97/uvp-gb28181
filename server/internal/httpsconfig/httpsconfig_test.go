@@ -260,6 +260,94 @@ func TestStartupPreservesDisabledStateAndSeparateZLMCertificate(t *testing.T) {
 		})
 	}
 }
+func TestStartupDefaultsToPlainHTTPAndPersistsChoice(t *testing.T) {
+	for _, platform := range []string{"linux", "windows"} {
+		t.Run(platform, func(t *testing.T) {
+			m := fixture(t)
+			m.platform = platform
+			// The platform script writes the substituted template before the
+			// render step runs.
+			if err := os.MkdirAll(filepath.Dir(m.confPath()), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(m.confPath(), mustRead(t, m.basePath()), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(m.settingsPath()); !os.IsNotExist(err) {
+				t.Fatal("fixture must not ship saved HTTPS settings")
+			}
+			settings, err := m.Settings()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if settings.Enabled {
+				t.Fatal("fresh installation must default to plain HTTP")
+			}
+			if settings.Port != 51000 {
+				t.Fatalf("default HTTPS port = %d, want 51000", settings.Port)
+			}
+			if err := RenderStartup(m.root, platform); err != nil {
+				t.Fatal(err)
+			}
+			first, err := os.ReadFile(m.confPath())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(first), " ssl;") || strings.Contains(string(first), "return 301 https:") {
+				t.Fatal("startup rendered a TLS management entry by default")
+			}
+			if !strings.Contains(string(first), "X-UVP-HTTPS-Mode http") {
+				t.Fatal("startup did not render the plain HTTP entry")
+			}
+			if _, err := os.Stat(m.settingsPath()); err != nil {
+				t.Fatalf("default settings not persisted: %v", err)
+			}
+			// The second start reads back the rendered configuration; it must
+			// neither fail nor silently flip the entry back to TLS.
+			if err := RenderStartup(m.root, platform); err != nil {
+				t.Fatalf("second startup failed: %v", err)
+			}
+			second, _ := os.ReadFile(m.confPath())
+			if string(second) != string(first) {
+				t.Fatal("second startup rendered a different configuration")
+			}
+			if saved, err := readSettings(m.settingsPath()); err != nil || saved.Enabled || saved.Port != 51000 {
+				t.Fatalf("saved settings changed: %+v %v", saved, err)
+			}
+		})
+	}
+}
+
+func TestStartupReusesBaseWhenConfigurationAlreadyRendered(t *testing.T) {
+	m := fixture(t)
+	rendered, err := Render(string(mustRead(t, m.confPath())), Settings{false, 51000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(m.confPath(), []byte(rendered), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := RenderStartup(m.root, "linux"); err != nil {
+		t.Fatalf("startup on a rendered configuration: %v", err)
+	}
+	base := string(mustRead(t, m.basePath()))
+	if !strings.Contains(base, httpBegin) || !strings.Contains(base, tlsBegin) {
+		t.Fatal("rendered configuration replaced the pristine base")
+	}
+	if !strings.Contains(string(mustRead(t, m.confPath())), "X-UVP-HTTPS-Mode http") {
+		t.Fatal("disabled entry lost after restart")
+	}
+}
+
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
 func TestZLMFailurePreservesAppliedNginxAndRestoresOldPEM(t *testing.T) {
 	m := fixture(t)
 	old, _ := os.ReadFile(m.zlmPEM())

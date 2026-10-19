@@ -381,6 +381,10 @@ onMounted(() => {
 </script>
 
 <style lang="scss" scoped>
+.sysconfig-page > .snow-fill-inner {
+  overflow: auto;
+}
+
 .sysconfig-page :deep(.uvp-system-form .arco-input-wrapper) {
   box-sizing: border-box;
   background: var(--uvp-search-control-bg) !important;
