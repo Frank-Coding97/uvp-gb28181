@@ -42,10 +42,14 @@ func loadStatements(t *testing.T) []string {
 
 // TestBaselineGoldenCounts 钉住「基线能切出多少个对象」。
 //
-// ⛔ 这三个数字是 Linux 绿色包安装时打印的那三个（`112 张表 · 313 个索引 ·
+// ⛔ 这三个数字是 Linux 绿色包安装时打印的那三个（`114 张表 · 315 个索引 ·
 //
 //	38 条种子语句`）。数字变了就说明 baseline.sql 换了版本 —— 那时应当**显式**
 //	更新本用例，而不是让它悄悄漂移。
+//
+// ⚠️ 2026-10-19 对齐：基线在 b8051d62（菜单排序/图标去重）里重新生成过
+//	（manifest.json 的 tables 已经是 114），而本用例当时没跟着改 ⇒ 一直是红的。
+//	以后核对的捷径：`jq .tables manifest.json` 必须等于这里的建表数。
 func TestBaselineGoldenCounts(t *testing.T) {
 	stmts := loadStatements(t)
 	phases, counted, dupes, total := planStatements(stmts)
@@ -56,11 +60,11 @@ func TestBaselineGoldenCounts(t *testing.T) {
 			counts[phases[i]]++
 		}
 	}
-	if got := counts[phaseTable]; got != 112 {
-		t.Errorf("建表语句数 = %d，期望 112", got)
+	if got := counts[phaseTable]; got != 114 {
+		t.Errorf("建表语句数 = %d，期望 114", got)
 	}
-	if got := counts[phaseIndex]; got != 313 {
-		t.Errorf("能真正建出的索引数 = %d，期望 313", got)
+	if got := counts[phaseIndex]; got != 315 {
+		t.Errorf("能真正建出的索引数 = %d，期望 315", got)
 	}
 	if got := counts[phaseSeed]; got != 38 {
 		t.Errorf("种子数据语句数 = %d，期望 38", got)
@@ -81,10 +85,9 @@ func TestBaselineGoldenCounts(t *testing.T) {
 
 // TestSplitDigestMatchesPython 与基线生成器 generate.py 的 split_sql() 对拍。
 //
-// ⛔⛔ 这是**三份实现**（generate.py / ctl.sh 内嵌 Python / 本 Go 版）之间唯一的
-//
-//	硬锁：指纹格式与 ctl.sh 的 UVP_DB_SPLIT_DIGEST=1 完全相同，
-//	任何一处切分规则漂移都会立刻红。
+// ⛔⛔ 这是**两份实现**（generate.py / 本 Go 版）之间唯一的硬锁：任何一处切分
+// 规则漂移都会立刻红。指纹格式沿用老版 ctl.sh 的 `UVP_DB_SPLIT_DIGEST=1`
+// （那份内嵌 Python 已删除，格式保留只为让这个用例的命令一眼认得出来）。
 func TestSplitDigestMatchesPython(t *testing.T) {
 	stmts := loadStatements(t)
 	goDigest := "stmts=" + itoa(len(stmts)) + " sha256=" + splitDigest(stmts)

@@ -37,7 +37,8 @@ func runDBInit(args []string) error {
 		return errors.New("建库失败：从 baseline.sql 里切不出任何语句（文件被截断？）")
 	}
 	if *splitDigestOnly {
-		// 与 ctl.sh 的 UVP_DB_SPLIT_DIGEST=1 同格式，供契约测试对拍。
+		// 指纹格式沿用老版 ctl.sh 的 UVP_DB_SPLIT_DIGEST=1（那份已删除），
+		// 只为让 baseline_test.go 的对拍命令一眼能认出来。
 		fmt.Printf("stmts=%d sha256=%s\n", len(stmts), splitDigest(stmts))
 		return nil
 	}
@@ -68,9 +69,10 @@ func sqliteDSN(path string) string {
 	}, "&") + "&_txlock=immediate"
 }
 
-// initDatabase 与 Linux 版 ctl.sh 的 DB_INIT_PY 逐条等价。
+// initDatabase 与老版 Linux ctl.sh 的 DB_INIT_PY 逐条等价（那份内嵌 Python 已删除，
+// 现在两个平台都走这里；等价性由 dbinit_test.go 端到端锁住）。
 func initDatabase(dbPath string, stmts []string, verbose bool) error {
-	// 幂等：库已在且 sys_users 表在 ⇒ 直接跳过（与 ctl.sh 同判据）。
+	// 幂等：库已在且 sys_users 表在 ⇒ 直接跳过（与老版同判据）。
 	if done, err := databaseReady(dbPath); err == nil && done {
 		success("数据库已就绪（%s），跳过初始化", dbPath)
 		return nil

@@ -100,6 +100,12 @@ fail() { printf '[fail] %s\\n' "$*" >&2; return 1; }
 ZLM_HTTP_PORT=${zlmPort}
 ZLM_BIN="$UVP_T_ZLM_BIN"
 NGINX_HTTPS_PORT=${nginxPort}
+# ⛔ nginx_healthy 会按 NGINX_HTTPS_ENABLED 选探测端口（关掉 HTTPS 时探明文口）。
+#   以前这个变量由 ctl.sh 里的 https 状态探测块赋值，harness 抄不到 ⇒
+#   set -u 下直接 unbound variable（127），看起来像"断言失败"、实则是 harness 缺变量。
+#   2026-10-19 起该值改由 bin/uvp-setup https-state 给出，这里显式钉成"开着 HTTPS"。
+NGINX_HTTPS_ENABLED=1
+NGINX_HTTP_PORT=${nginxPort}
 NGINX_BIN="$UVP_T_NGINX_BIN"
 ${HELPERS}
 ${ZLM}

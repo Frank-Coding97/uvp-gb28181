@@ -26,8 +26,8 @@ spec: ../specs/log-database-retention.md
 | 前端字段 | 持久化键 | 默认值 |
 | --- | --- | --- |
 | sipRetentionDays | gb28181.trace.retention_days | 沿用已有有效值，缺省 7 |
-| operationRetentionDays | log_cleanup.operation_retention_days | 180 |
-| loginRetentionDays | log_cleanup.login_retention_days | 180 |
+| operationRetentionDays | log_cleanup.operation_retention_days | 7（2026-10-19 起；此前 180） |
+| loginRetentionDays | log_cleanup.login_retention_days | 7（2026-10-19 起；此前 180） |
 | jobRetentionDays | log_cleanup.job_retention_days | 30 |
 | playbackRetentionDays | log_cleanup.playback_retention_days | 7 |
 | schedulerRetentionDays | log_cleanup.scheduler_retention_days | 7 |

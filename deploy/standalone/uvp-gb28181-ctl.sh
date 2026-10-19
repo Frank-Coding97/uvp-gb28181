@@ -41,15 +41,11 @@ if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
 else
   C_TAG=''; C_OK=''; C_WARN=''; C_ERR=''; C_RST=''
 fi
-# 建库进度条 / 自检汇总由 python 打印，让它复用**同一套**颜色与缩进，
-# 否则会出现「shell 的 ✓ 是绿的、python 的 ✓ 是白的」这种同页两种样式。
-export UVP_C_TAG="$C_TAG" UVP_C_OK="$C_OK" UVP_C_WARN="$C_WARN" \
-       UVP_C_ERR="$C_ERR" UVP_C_RST="$C_RST"
 
 log()  { printf '%s[uvp]%s %s\n' "$C_TAG" "$C_RST" "$*"; }
 fail() { printf '%s[uvp][ERROR]%s %s\n' "$C_ERR" "$C_RST" "$*" >&2; exit 1; }
 
-# ⭐ 两级缩进约定（改宽度要连 python 里的 UVP_INDENT 一起改）：
+# ⭐ 两级缩进约定（改宽度要连 server/cmd/uvp-setup 里的 indent 常量一起改）：
 #   [uvp] xxx        —— 阶段/事件行（由 log 输出）
 #         ✓ xxx       —— 该阶段的**结果**行（6 格缩进 = "[uvp] " 的宽度）
 #         · xxx       —— 结果之下的补充明细（不抢眼，长行让它自然折行）
@@ -58,22 +54,13 @@ fail() { printf '%s[uvp][ERROR]%s %s\n' "$C_ERR" "$C_RST" "$*" >&2; exit 1; }
 det()  { printf '      %s\n' "$*"; }
 ok()   { printf '      %s✓%s %s\n' "$C_OK" "$C_RST" "$*"; }
 
-# _render_detail_block 渲染「首行=结论、其余=补充明细」的多行文本：
-#   首行配 ✓，其余配 · 并再缩进两格。
-# ⛔ 调用方必须**分两条语句**取值（先 local、再赋值），写成 `local x="$(...)"`
-#   会把命令替换的退出码吞掉（local 自身恒返回 0）—— 于是 python 里
-#   sys.exit("...") 换来的"中止启动"就失效了，同步失败也照常往下跑。
-_render_detail_block() {
-  local msg="$1"
-  [ -n "$msg" ] || return 0
-  local -a lines=()
-  mapfile -t lines <<< "$msg"
-  ok "${lines[0]}"
-  local i
-  for (( i = 1; i < ${#lines[@]}; i++ )); do
-    if [ -n "${lines[i]}" ]; then det "  · ${lines[i]}"; fi
-  done
-}
+# ⛔ 本脚本从 2026-10-19 起**不再内嵌任何 Python**：建库、端口同步、secret 对齐、
+#   读配置、重置口令全部由包内 `bin/uvp-setup`（纯 Go、静态链接）完成。
+#   原因：客户那台 CentOS 7 只带 python2.7，装 Python3 要装一堆依赖 ——
+#   而"解压即用"是这个包唯一的卖点。
+# ⛔ 也别再把这类逻辑写回 shell 的 heredoc：Python 有"整段一次性编译"的坑
+#   （一句语法不认识 ⇒ 一行都不执行、报错行还指向那句语法），
+#   而 Go 二进制没有解释器版本这一层，编译期就能发现问题。
 
 # ------------------------------------------------------ 横幅 / 收尾汇总 ----
 
@@ -161,6 +148,14 @@ _firewall_hint() {
 #   以"是否需要对局域网开放"分类，最后附放行命令。
 print_port_plan() {
   local to="${ZLM_RTP_RANGE#*-}" fw="" fw_to=""
+  # 段起点取两个 nginx 端口的**较小值**，不写死、也不假设"HTTPS 一定是第一个"。
+  # ⛔ 2026-10-19 端口互换后就栽在这：原来直接拿 $NGINX_HTTPS_PORT 当起点，
+  #   于是提示变成「连续段 51001-51064」—— 默认入口 51000 反倒被排除在"规划段"之外，
+  #   客户照着放行就会漏掉自己正在用的那个端口。互换了顺序也照样对。
+  local fw_from="$NGINX_HTTP_PORT"
+  if [ "$NGINX_HTTPS_PORT" -lt "$fw_from" ]; then
+    fw_from="$NGINX_HTTPS_PORT"
+  fi
   # 国标信令端口由**引导页**录入（存 gb_sip_config 表），本脚本无从得知；
   # 这里按规划段末尾的预留位（51064）给出提示，放行命令也把它带上。
   local sip_hint=51064
@@ -171,7 +166,7 @@ print_port_plan() {
   fw_to="$to"
   if [ "$fw_to" -lt "$sip_hint" ]; then fw_to="$sip_hint"; fi
 
-  printf '%s[uvp]%s 端口规划（连续段 %s-%s）\n' "$C_TAG" "$C_RST" "$NGINX_HTTPS_PORT" "$fw_to"
+  printf '%s[uvp]%s 端口规划（连续段 %s-%s）\n' "$C_TAG" "$C_RST" "$fw_from" "$fw_to"
   ok "需要对局域网开放"
   if [ "$NGINX_HTTPS_ENABLED" = "1" ]; then
     det "  · 管理页面   ${NGINX_HTTPS_PORT}/tcp（HTTPS） · ${NGINX_HTTP_PORT}/tcp（HTTP 自动跳转）"
@@ -187,7 +182,7 @@ print_port_plan() {
   ok "仅本机，无需放行"
   det "  · Redis      ${REDIS_PORT}/tcp（只监听 ${REDIS_BIND}）"
 
-  fw="$(_firewall_hint "$NGINX_HTTPS_PORT" "$fw_to")"
+  fw="$(_firewall_hint "$fw_from" "$fw_to")"
   if [ -n "$fw" ]; then
     ok "防火墙放行（本机若开了防火墙，执行下面这条）"
     det "  · ${fw}"
@@ -225,9 +220,7 @@ print_start_summary() {
     det "  · 未识别到对外网卡地址，其它电脑请用本机 IP 访问"
   fi
   local demo_pw=""
-  if [ -n "$PY_BIN" ]; then
-    demo_pw="$(read_conf_scalar demoaccount defaultpassword 2>/dev/null || true)"
-  fi
+  demo_pw="$(read_conf_scalar demoaccount defaultpassword 2>/dev/null || true)"
   if [ -n "$demo_pw" ]; then
     det "  · 登录账号  admin / ${demo_pw}（登录后请立即修改）"
   else
@@ -272,12 +265,6 @@ UPDATER_REGISTRATION="$ROOT/config/updater-registration.json"
 # 优先级：环境变量 > 包内 config.env > 默认值。
 # 首次运行把最终生效的端口写进 config.env，之后 start/stop/status 都以它为准 ——
 # 这样"改端口"只发生一次，不会出现"改了A 处忘了 B 处"。
-# python 解释器（端口同步要改config.yml；建库也要它）。
-# ⛔ 不能写死路径：构建机是 macOS、目标机是 Ubuntu，写死本机路径必然 command not found。
-PY_BIN=""
-for _c in "${UVP_BUILD_PY:-}" python3 python; do
-  if [ -n "$_c" ] && command -v "$_c" >/dev/null 2>&1; then PY_BIN="$(command -v "$_c")"; break; fi
-done
 
 ENV_FILE="$ROOT/config/config.env"
 
@@ -563,6 +550,9 @@ REDIS_LOG="$LOGS/redis.log"
 
 # ---- 自家程序 / 第三方运行时（2026-10-10 起分家）----
 SERVER_BIN="$BIN/uvp-server"
+# 安装助手：建库 / 端口同步 / secret 对齐 / 读配置 / 证书 / 重置口令全走它。
+# ⛔ 它是**纯 Go 静态二进制**（CGO_ENABLED=0），不依赖 python、openssl、libc 之外的任何东西。
+SETUP_BIN="$BIN/uvp-setup"
 UPDATER_BIN="$ROOT/updater/uvp-updater"
 REDIS_BIN="$VENDOR/redis/redis-server"
 REDIS_CLI="$VENDOR/redis/redis-cli"
@@ -666,6 +656,14 @@ ensure_dirs() {
 #   只报「启动失败」没用 —— 用户需要知道去停掉谁、或者改哪个端口。
 check_ports_free() {
   local busy="" busy_count=0
+  local cannot_judge=0
+
+  # ⛔ 缺 ss 时**必须先告知**：port_holder 一律返回 2（无法判断），下面的循环会
+  #   一个占用都报不出来 —— 不说明的话，用户看到的是"预检通过"，而事实是
+  #   "一个端口都没检查"（详见 note_no_ss_once 的注释）。
+  #   放在这里而不是 port_holder 里：只有当前 shell 才能让"只提示一次"生效。
+  note_no_ss_once
+  has_ss || cannot_judge=1
 
   # ---- 逐个检查单端口 ----
   # $1=默认端口 $2=协议 tcp|udp $3=用途 $4=可覆盖的变量名
@@ -681,11 +679,16 @@ check_ports_free() {
   }
 
   # 顺序与 PORTS.md 的规划段一致（51000-51064 连续无空洞；51064 SIP 由引导页自检）
+  #
+  # ⛔⛔ 2026-10-19 端口互换：**51000 是明文入口、51001 才是 HTTPS**（上一版相反）。
+  #   这里的端口字面量只是「变量为空时的兜底」，但仍必须与真实默认值一致：
+  #   否则哪天变量没取到，预检就去查一个根本没人监听的端口 ⇒ 报"通过"，
+  #   而真正的监听端口可能正被别的程序占着（正是这套预检要防的事）。
   if [ "$NGINX_HTTPS_ENABLED" = "1" ]; then
-    _check_one 51000 tcp "HTTPS（浏览器访问管理页面）" NGINX_HTTPS_PORT
-    _check_one 51001 tcp "HTTP（跳 HTTPS + 保留明文 API）" NGINX_HTTP_PORT
+    _check_one 51000 tcp "HTTP（默认入口 + 明文 API）" NGINX_HTTP_PORT
+    _check_one 51001 tcp "HTTPS（浏览器访问管理页面）" NGINX_HTTPS_PORT
   else
-    _check_one 51001 tcp "HTTP（浏览器访问管理页面 + 明文 API）" NGINX_HTTP_PORT
+    _check_one 51000 tcp "HTTP（浏览器访问管理页面 + 明文 API）" NGINX_HTTP_PORT
   fi
   _check_one 51002 tcp "后端 HTTP（API + 扫码接入地址）"  HTTP_PORT
   _check_one 51003 tcp "Redis（仅回环）"                  REDIS_PORT
@@ -731,10 +734,46 @@ check_ports_free() {
   # ⛔ 段尾只到 RTP 段尾 —— SIP（默认 51064）**不在本预检内**：它的端口值由
   #   **引导页**录入（存 gb_sip_config 表），出包脚本与启动脚本都无从得知。
   #   完整端口清单在收尾的「端口规划」里给出，这里只报结论。
+  # ⛔ 缺 ss 时**不能**报"通过"：那是把"没检查"说成"没问题" ——
+  #   宁可少报一句，也不能给一个假的绿灯（上面已用 stderr 说明预检被跳过）。
+  if [ "$cannot_judge" -eq 1 ]; then
+    log "端口预检：已跳过（本机没有 ss，见上面那条提示）"
+    return 0
+  fi
   ok "端口预检通过（${NGINX_HTTPS_PORT}-${ZLM_RTP_RANGE#*-} 无冲突）"
 }
 
-# port_holder 返回占用某端口的进程描述；返回码 0=被占用，1=空闲。
+# has_ss 探测本机有没有 ss（由 iproute2 提供）。
+#
+# ⛔⛔ 缺它时**绝不能静默放行**：port_holder 的"查不到"会被调用方解释成"端口空闲"，
+#   于是整个端口预检变成"全部通过"，而真实情况是**根本没法判断**。
+#   最典型的现场是目标机没装 iproute2 —— 预检全绿，真起服务时 nginx 连到别人的
+#   服务上，status 反而报「运行中」（见 check_ports_free 顶部那段）。
+#   绿色包契约不要求目标机装 iproute2，所以这里只**明确告知已跳过**，不阻断安装。
+has_ss() { command -v ss >/dev/null 2>&1; }
+
+_no_ss_noted=""
+
+# note_no_ss_once 就"缺 ss、预检已跳过"告知用户，**只告知一次**。
+#
+# ⛔⛔ 这个函数只能由 check_ports_free 在**当前 shell**里调，不能写在 port_holder 里：
+#   所有调用点都是 `holder="$(port_holder …)"`，命令替换会 fork 子 shell ⇒
+#   子 shell 里设的 `_no_ss_noted=1` **传不回父 shell**，于是每查一个端口就重复
+#   打一遍（RTP 段 50 个端口 × 2 协议 ⇒ 一百多行）。这条是实测出来的。
+# ⛔ 提示走 **stderr**：check_ports_free 的调用方会把 stdout 归到"明细"里，
+#   而这条是"需要人看一眼"的告知，必须跳出来。
+note_no_ss_once() {
+  has_ss && return 0
+  [ -z "$_no_ss_noted" ] || return 0
+  _no_ss_noted=1
+  printf '%s[uvp]%s ℹ️  本机没有 ss（未装 iproute2），**端口预检已跳过**。\n' \
+    "$C_TAG" "$C_RST" >&2
+  printf '     · 不影响安装：服务照常启动，只是不再提前发现端口冲突。\n' >&2
+  printf '     · 若启动后页面打不开或内容不对，请先怀疑端口被别的程序占了。\n' >&2
+  printf '     · 想恢复预检：apt install iproute2（Debian/Ubuntu）或 yum install iproute（RHEL/CentOS/麒麟）。\n' >&2
+}
+
+# port_holder 返回占用某端口的进程描述；返回码 0=被占用，1=空闲，2=无法判断。
 #
 # ⛔ 不用 lsof：绿色包不保证目标机装了它。
 # ⛔⛔ ss 非 root 时**看不到别人的进程名** —— 而"被谁占的"恰恰是用户最需要的信息
@@ -744,6 +783,10 @@ check_ports_free() {
 port_holder() {
   local port="$1" proto="$2" flag="-tln"
   [ "$proto" = "udp" ] && flag="-uln"
+
+  # ⛔ 没有 ss 就返回"无法判断"(2)，而不是"空闲"(1)：后者会让预检假装全绿。
+  #   （对应的"已跳过"提示由 check_ports_free 统一打，理由见 note_no_ss_once。）
+  has_ss || return 2
 
   if ! ss "$flag" 2>/dev/null | awk -v pat=":$port\$" '$4 ~ pat {found=1} END{exit !found}'; then
     return 1
@@ -1095,47 +1138,20 @@ check_preconditions() {
     fi
   fi
   [ -f "$CONF" ] || fail "缺少 $CONF —— 解压是否完整？"
-  check_python
+  check_setup_bin
 }
 
-# check_python 校验解释器存在且 >= 3.5。
+# check_setup_bin 确认包内安装助手可用。
 #
-# ⛔⛔ 为什么必须**前置**校验版本：本脚本把 Python 代码用 heredoc 喂给解释器，
-#   而 Python 是**整段一次性编译**的 —— 只要有一句是「当前解释器不认识的语法」，
-#   它会直接抛 SyntaxError（报错行指向那句语法），**整段一行都不执行**。
-#   于是症状变成「建库失败 / 改配置失败」这种指向完全无关位置的红字，
-#   现场根本联想不到是解释器太老（真实案例：Ubuntu 16 自带 py3.5 遇到 f-string）。
-#   ⇒ 与其让它以 SyntaxError 炸，不如在这里用**人话**说清楚。
-# ⛔ 判据是「>= 3.5」而不是「>= 3.6」：本文件的内嵌 Python 已全部去 f-string，
-#   刻意兼容 3.5（Ubuntu 16 / Debian 9 的默认 python3）。见契约测试
-#   scripts/standalone-py35-compat.test.mjs。
-check_python() {
-  [ -n "$PY_BIN" ] || fail "找不到 python3 —— 本包需要它（Ubuntu/Debian 请先 apt install python3）"
-  local ver major minor
-  # ⛔ 探测代码本身必须**同时**是 py2/py3 合法语法（否则在太老的解释器上
-  #   又是同一个 SyntaxError 陷阱）；只读 sys.version_info，不碰任何新语法。
-  ver="$("$PY_BIN" -c 'import sys; sys.stdout.write("%d.%d" % sys.version_info[:2])' 2>/dev/null)"
-  major="${ver%%.*}"
-  minor="${ver##*.}"
-  # 版本读不出来（非数字）按「过旧」处理，别放行。
-  case "$major" in
-    ''|*[!0-9]*) _python_too_old "$ver" "$PY_BIN" ;;
-  esac
-  case "$minor" in
-    ''|*[!0-9]*) minor=0 ;;
-  esac
-  if [ "$major" -lt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -lt 5 ]; }; then
-    _python_too_old "$ver" "$PY_BIN"
-  fi
-}
-
-_python_too_old() {
-  fail "本机 Python 版本过旧（$2 = ${1:-未知}），本包需要 Python 3.5 及以上。
-      请安装较新的 python3 后重试，例如：
-        · Ubuntu 16.04/18.04：sudo apt install python3.6  （或用 deadsnakes PPA）
-        · 或把 python3 指向 3.6+ 的解释器
-      若已装好新版，可用环境变量指定：
-        UVP_BUILD_PY=/usr/bin/python3.6 ./uvp-gb28181-ctl.sh start"
+# ⛔ 它是启动链上**唯一**的外部能力来源（建库/端口同步/secret/证书/重置口令），
+#   缺了就等于整个包不可用，必须在开动任何组件之前说清楚 —— 而不是等到
+#   "页面能开、登录报 no such table" 才让人去猜。
+# ⛔ 不能给它 chmod +x 兜底：目标机若挂载了 noexec（不少政企的安全基线会这么做），
+#   chmod 之后照样不能执行，反而把真因藏起来。这里只报清楚。
+check_setup_bin() {
+  [ -f "$SETUP_BIN" ] || fail "缺少 ${SETUP_BIN} —— 包不完整（请重新解压整个压缩包）"
+  [ -x "$SETUP_BIN" ] || fail "${SETUP_BIN} 没有执行权限 —— 多半是解压工具丢了权限位。
+      请执行：chmod +x ${SETUP_BIN} 后重试"
 }
 
 # ------------------------------------------------------------ nginx ----
@@ -1152,23 +1168,25 @@ NGINX_CRT="$ROOT/vendor/nginx/conf/uvp.crt"
 NGINX_KEY="$ROOT/vendor/nginx/conf/uvp.key"
 
 # HTTPS 端口：给客户换端口时只改这里（同时也在 config.env 里）
+#
+# ⛔⛔ 2026-10-19 端口重排（老板定）：**HTTP 51000 / HTTPS 51001**。
+#   上一版正好相反（HTTPS 51000 / HTTP 51001）。换回来不是为了好看：
+#   客户拿到的地址里 51000 是最短最好记的那个，明文是默认入口，
+#   该给它。⇒ 两个默认值**成对**改，只改一个就等于让两个 listen 抢同一端口。
+NGINX_HTTPS_PORT_DEFAULT=51001
+NGINX_HTTP_PORT_DEFAULT=51000
 NGINX_HTTPS_PORT="${UVP_HTTPS_PORT:-$(read_port_env UVP_HTTPS_PORT)}"
-NGINX_HTTPS_PORT="${NGINX_HTTPS_PORT:-51000}"
+NGINX_HTTPS_PORT="${NGINX_HTTPS_PORT:-$NGINX_HTTPS_PORT_DEFAULT}"
 # ⛔ 默认不开 HTTPS：新装的管理页走明文 HTTP，由管理员在「系统配置 → HTTPS」
 #   里自行开启。后端 uvp-setup https-render 首次启动会把这份默认落盘到
 #   data/https/settings.json，之后的启停与端口规划都以落盘值为准。
 #   （存量实例已落盘的不受影响；不要为了"默认开"改回 1。）
 NGINX_HTTPS_ENABLED=0
 if [ -f "$DATA/https/settings.json" ]; then
-  [ -n "$PY_BIN" ] || fail "读取 HTTPS 配置需要 python3"
-  _https_state="$("$PY_BIN" - "$DATA/https/settings.json" <<'HTTPS_STATE'
-import json, sys
-s = json.load(open(sys.argv[1], encoding='utf-8'))
-if type(s.get('enabled')) is not bool or type(s.get('port')) is not int or not 1 <= s['port'] <= 65535:
-    raise ValueError('invalid HTTPS settings')
-print(int(s['enabled']), s['port'])
-HTTPS_STATE
-  )" || fail "HTTPS 配置文件无效"
+  # ⛔ 分两条语句：写成一整行时命令替换的退出码会被 read 吞掉，
+  #   配置文件坏掉也会"读成 0 0"继续往下跑，最后 nginx 去监听 0 号端口。
+  _https_state="$("$SETUP_BIN" https-state --root "$ROOT" --default-port "$NGINX_HTTPS_PORT")" \
+    || fail "读取 HTTPS 配置失败（${DATA}/https/settings.json）"
   read -r NGINX_HTTPS_ENABLED NGINX_HTTPS_PORT <<< "$_https_state"
 fi
 # ⛔⛔ 变量名必须与后端的 UVP_HTTP_PORT 区分开。实测踩过：nginx 的明文端口
@@ -1176,7 +1194,27 @@ fi
 #   `bind() to 0.0.0.0:8390 failed: Address already in use`，
 #   而报错完全看不出是「两个组件抢同一个端口」。
 NGINX_HTTP_PORT="${UVP_NGINX_HTTP_PORT:-$(read_port_env UVP_NGINX_HTTP_PORT)}"
-NGINX_HTTP_PORT="${NGINX_HTTP_PORT:-51001}"
+NGINX_HTTP_PORT="${NGINX_HTTP_PORT:-$NGINX_HTTP_PORT_DEFAULT}"
+
+# ---- 存量实例的 HTTPS 端口迁移（端口重排的一次性收尾）----
+#
+# ⛔⛔ 为什么必须有这一段：`data/https/settings.json` 在**首次启动时无条件落盘**
+#   （httpsconfig.RenderStartup），存量实例里存的是上一版的 HTTPS 端口 51000。
+#   而 51000 现在成了本包的**明文 HTTP 端口** ⇒ 两个 listen 抢同一端口：
+#     · HTTPS 开着   → nginx `duplicate listen` / bind 失败，页面直接打不开；
+#     · HTTPS 关着   → Render 把两段都渲染成 51000，同样重复。
+#   若交给 https-render 报错，客户看到的是「HTTPS 端口不能与 HTTP 端口相同」，
+#   完全指不到"升级导致的"这一层。⇒ 在读出来之后、渲染 nginx 之前就地纠正。
+#
+# ⛔ 只在**落盘端口 == 本包明文端口**时才动：这是唯一无法共存的组合。
+#   用户手工设过别的值（如 8443）一律不碰 —— 那是他的选择，不是历史残留。
+if [ "$NGINX_HTTPS_PORT" = "$NGINX_HTTP_PORT" ]; then
+  log "HTTPS 端口 ${NGINX_HTTPS_PORT} 与本包明文端口相同（旧版遗留），自动迁移到 ${NGINX_HTTPS_PORT_DEFAULT}"
+  "$SETUP_BIN" https-repair-port --root "$ROOT" \
+    --conflict "$NGINX_HTTP_PORT" --fallback "$NGINX_HTTPS_PORT_DEFAULT" \
+    || fail "HTTPS 端口迁移失败（${DATA}/https/settings.json）—— 两个监听不能同端口"
+  NGINX_HTTPS_PORT="$NGINX_HTTPS_PORT_DEFAULT"
+fi
 
 # ⛔ nginx 的目录与端口**只在上面那段定义一次**，此处不再重复
 #   （原有一份完全相同的目录变量定义块，2026-10-10 删除）。
@@ -1262,40 +1300,45 @@ render_nginx_conf() {
   return 0
 }
 
-# ensure_self_signed_cert 没有证书时生成自签名。
+# ensure_self_signed_cert 没有证书时安装证书。
 #
-# ⛔ 一次签发 10 年：客户现场一旦部署，几年内不会重签；
-#   而短期证书过期会让整个系统突然"打不开"且原因极难自查。
-# ⛔ CN 填 _（通配占位）：自签名证书浏览器本来就会警告，
-#   写具体主机名反而制造「IP 访问 + CN 不匹配」这种更硬的拦截。
-#   ⭐ 根本解法仍是换真证书 —— 交付说明里必须写清楚。
+# ⛔⛔ 2026-10-19 起：**证书随包自带**（resource/cert/uvp.crt + uvp.key），
+#   安装时只做"拷贝"，不再现场生成。原因：
+#   ① 客户那台 CentOS 7 上什么都可能没有，而 openssl 也不是必装件；
+#   ② 现场生成 = 又一个可能失败/超时的步骤，失败了还得靠日志才看得出；
+#   ③ 内置证书的**有效期起点可以写在过去**（见构建仓里那份），
+#      现场机器时间不准（内网机器很常见）也不会被判"证书尚未生效"。
+#   ⚠️ 代价：所有实例共用同一把私钥 ⇒ 它只能用于"内网自签、浏览器点继续"。
+#   需要每台机器一把唯一私钥的客户，执行：
+#       ./bin/uvp-setup certgen --dir vendor/nginx/conf --zlm-pem data/secrets/zlm-ssl.pem --force
+#   之后 restart 即可（本函数只在证书缺失时才动手，不会覆盖它）。
 # ⛔ 生成成功**不出声**（老板 2026-10-10 定：这属于"本该就有"的步骤，
 #   写在启动输出里是噪音）；失败才报，且必须先试 nginx 再报。
+BUNDLED_CRT="$RESOURCE/cert/uvp.crt"
+BUNDLED_KEY="$RESOURCE/cert/uvp.key"
 ensure_self_signed_cert() {
   [ -f "$NGINX_CRT" ] && [ -f "$NGINX_KEY" ] && return 0
   mkdir -p "$(dirname "$NGINX_CRT")"
-  if command -v openssl >/dev/null 2>&1; then
-    # ⛔⛔ `-addext` 是 **OpenSSL 1.1.1+** 才有的选项，而 Ubuntu 16.04 自带的是
-    #   1.0.2 ⇒ 直接带上它会让整条命令**失败**（"unknown option -addext"），
-    #   而失败信息只在 nginx 日志里 ⇒ 现场表现就是"nginx 起不来"，
-    #   与"证书"这个真因完全对不上（本项目已多次栽在"谎报/错报"上）。
-    #   ⇒ 先带 SAN 试一次，老版本不支持就退回不带 SAN 的写法（CN 仍有效，
-    #     浏览器只是多一次"名称不匹配"的告警，不影响使用）。
-    if ! openssl req -x509 -nodes -newkey rsa:2048 \
-          -keyout "$NGINX_KEY" -out "$NGINX_CRT" \
-          -days 3650 -subj "/CN=uvp-local" \
-          -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" >>"$NGINX_LOG" 2>&1; then
-      rm -f "$NGINX_CRT" "$NGINX_KEY"
-      openssl req -x509 -nodes -newkey rsa:2048 \
-        -keyout "$NGINX_KEY" -out "$NGINX_CRT" \
-        -days 3650 -subj "/CN=uvp-local" >>"$NGINX_LOG" 2>&1 || {
-        log "⚠️  自签证书生成失败，nginx 不会启动（详见 ${NGINX_LOG}）"
-        return 1
-      }
-    fi
+
+  # ① 包内自带（正常路径）
+  if [ -f "$BUNDLED_CRT" ] && [ -f "$BUNDLED_KEY" ]; then
+    cp -f "$BUNDLED_CRT" "$NGINX_CRT" || { log "⚠️  写入 ${NGINX_CRT} 失败"; return 1; }
+    cp -f "$BUNDLED_KEY" "$NGINX_KEY" || { log "⚠️  写入 ${NGINX_KEY} 失败"; return 1; }
+    chmod 644 "$NGINX_CRT" 2>/dev/null || true
+    chmod 600 "$NGINX_KEY" 2>/dev/null || true
     return 0
   fi
-  log "⚠️  未找到 openssl，无法生成自签证书 —— 请自行放入 ${NGINX_CRT} 与 ${NGINX_KEY}"
+
+  # ② 兜底：包内的 Go 助手现场签一张（老包没有 resource/cert 时走这里）。
+  if [ -x "$SETUP_BIN" ]; then
+    if "$SETUP_BIN" certgen --dir "$(dirname "$NGINX_CRT")" --cn uvp-local --days 3650 \
+         >>"$NGINX_LOG" 2>&1; then
+      return 0
+    fi
+    log "⚠️  自签证书生成失败，nginx 不会启动（详见 ${NGINX_LOG}）"
+    return 1
+  fi
+  log "⚠️  包内既没有证书（${BUNDLED_CRT}）也没有 ${SETUP_BIN} —— 请重新解压完整安装包"
   return 1
 }
 
@@ -1452,252 +1495,49 @@ sync_zlm_secret() {
   [ -f "$ZLM_INI" ] || return 0
   [ -f "$CONF" ] || return 0
 
-  local zlm_secret
-  zlm_secret="$("$PY_BIN" - "$ZLM_INI" <<'SECRET_PY'
-import re
-import sys
-
-# 只认 [api] 段里的 secret —— config.ini 有 11 个段，别处也可能出现同名键。
-section = None
-for line in open(sys.argv[1], encoding="utf-8", newline="").read().split("\n"):
-    t = line.strip()
-    if t.startswith("[") and t.endswith("]"):
-        section = t[1:-1].strip().lower()
-    elif section == "api" and re.match(r"^secret\s*=", line, re.I):
-        # 值可能带引号，两种都剥掉
-        print(line.split("=", 1)[1].strip().strip("\"'").strip())
-        break
-SECRET_PY
-)"
-  [ -n "$zlm_secret" ] || return 0
-
-  # config.yml 的 zlm.secret：只在它是占位符或为空时才写，
-  # 绝不覆盖运维手工填过的真值。
-  # python 只负责"改文件 + 输出一句**纯文本结论**"，前缀/缩进/配色由 shell 统一施加
-  # （见文件顶部"输出样式"一节）。这样脚本里排版只有一个来源，不会出现
-  # 「shell 的行有前缀、python 的行没有」这种半成品观感。
-  local secret_msg
-  secret_msg="$("$PY_BIN" - "$CONF" "$zlm_secret" <<'SECRET_SYNC_PY'
-import re
-import sys
-
-path, secret = sys.argv[1], sys.argv[2]
-lines = open(path, encoding="utf-8").read().split("\n")
-
-# ⛔⛔ 必须按**缩进层级**定位 zlm 段，不能只认「顶格 + 结尾冒号」。
-#   实测踩过：config.yml 里 zlm 是**嵌套**段（gb28181: → zlm:，2 空格缩进），
-#   顶级段判据永远不成立⇒ 静默不替换 ⇒ 后端仍拿 CHANGE_ME 去连 ZLM。
-#   这是"配置文件是静默的"又一例：改不成功也不报错，只是功能不工作。
-zlm_indent = None
-changed = False
-for i, line in enumerate(lines):
-    t = line.strip()
-    if not t or t.startswith("#"):
-        continue
-    m = re.match(r"^(\s*)zlm\s*:\s*(#.*)?$", line)
-    if m and zlm_indent is None:
-        zlm_indent = len(m.group(1))
-        continue
-    if zlm_indent is None:
-        continue
-    # 遇到同级或更浅的非注释行 ⇒ 已走出 zlm 段，停。
-    # ⛔ 不加这一句就会顺着文件往下扫，把 media/ 等其它段的 secret 也改掉。
-    cur = len(line) - len(line.lstrip())
-    if cur <= zlm_indent:
-        break
-    sm = re.match(r"^(\s*)secret(\s*:\s*)(.*?)(\r?)$", line)
-    if not sm:
-        continue
-    indent, sep, raw, cr = sm.groups()
-    # ⛔⛔ 必须先剥掉**行尾注释**再判值。实测踩过：
-    #   config.yml 里这行长这样——
-    #       secret: "CHANGE_ME"           # ZLM API secret(部署时填 ZLM 实际 secret)
-    #   正则的 `(.*?)$` 会把注释一起吞进值里，判读成
-    #   `CHANGE_ME"  # ZLM API secret(...)` ⇒ 不等于占位符 ⇒ **静默跳过**。
-    #   而启动脚本照常打印「ZLM secret 与 config.ini 一致，无需改动」——
-    #   **谎报成功**，后端仍然拿 CHANGE_ME 去连 ZLM。
-    #   这类"配置文件是静默的 + 脚本还报成功"是最坏的组合：骗过了所有人。
-    tail = ""
-    vm = re.match(r"^\s*(.*?)\s*(#.*)?$", raw)
-    if vm:
-        raw, tail = vm.group(1), (vm.group(2) or "")
-    old = raw.strip().strip("\"'").strip()
-    # 只替换占位符/空值；已有真值说明运维填过，尊重它（幂等的关键）
-    if old and old.upper() not in ("CHANGE_ME", "CHANGE-ME", "TODO", "YOUR_SECRET"):
-        continue
-    # 保留行尾注释：那是给现场运维看的说明，不能被我们抹掉
-    # ⛔⛔ 不用 f-string：目标机可能是 Ubuntu 16（自带 python3 = 3.5），
-    #   而 f-string 是 **3.6+** 语法 ⇒ 整个 heredoc 在编译期就 SyntaxError，
-    #   报错行还指向这里（"建库/改配置失败"），与真因（解释器版本）完全无关。
-    #   本文件所有内嵌 Python 一律只用 `%` 或字符串拼接。见契约测试
-    #   scripts/standalone-py35-compat.test.mjs（会拦住回退）。
-    lines[i] = ('%ssecret%s"%s"%s' % (indent, sep, secret, cr)) + ("    " + tail if tail else "")
-    changed = True
-    break
-
-if changed:
-    open(path, "w", encoding="utf-8", newline="").write("\n".join(lines))
-    print("ZLM secret 已按 config.ini 对齐写入 config.yml（%d 字符）" % len(secret))
-else:
-    print("ZLM secret 与 config.ini 一致，无需改动")
-SECRET_SYNC_PY
-)"
-  _render_detail_block "$secret_msg"
+  # ⛔ 取值必须分成两条语句（先声明、再赋值）：写成 `local rc="$(...)"` 会把命令替换
+  #   的退出码吞掉（local 自身恒返回 0），于是"对齐失败"被当成成功继续往下跑 ——
+  #   而这条链一断，平台调 ZLM 全部返回 -100，症状却指向"录像缓存未装配"。
+  local rc=0
+  "$SETUP_BIN" secret-sync --ini "$ZLM_INI" --yml "$CONF" || rc=$?
+  [ "$rc" -eq 0 ] || fail "ZLM secret 对齐失败（退出码 ${rc}）—— 平台调 ZLM 会全部被拒"
 }
 
+# ---------------------------------------------------- ZLM 端口同步到 config.ini ----
 
+# sync_zlm_ports_ini 把端口写进 vendor/zlm/config.ini 的对应段。
+#
+# ⛔⛔ 必须**按段落**改，绝不能全局替换 `port=` —— config.ini 里有 11 个段各带
+#   port/sslport（http / rtmp / rtp_proxy / rtc / srt / rtsp / shell / onvif …），
+#   全局替换会把它们全改成同一个值，表现为「一堆协议抢同一个端口」。
+# ⛔ 不能用 ini 解析库：这份 ini **有重名段**（[general] 出现两次），
+#   标准 ini 库会直接抛"重复段"错误（Linux 版当年用 Python configparser 实测踩过）。
+#   ⇒ uvp-setup 里同样是行扫描：记住当前段名，只在目标段内改目标键
+#     （实现见 server/cmd/uvp-setup/portsync.go 的 syncZLMIni）。
 sync_zlm_ports_ini() {
   [ -f "$ZLM_INI" ] || return 0      # 没有 ini 就用 ZLM 默认值，不阻塞启动
 
-  # ⛔ 取值必须分成两条语句（先声明、再赋值）：写成 `local msg="$(...)"`
-  #   会把命令替换的退出码吞掉 —— 下面 python 里那句 sys.exit("❌ ...")
-  #   本来是要**中止启动**的（端口没同步成功 = ZLM 会跑到规划段外），
-  #   被吞掉之后就会带着错误端口继续启动。
-  #
-  # python 只输出纯文本（首行结论 + 其后明细），排版由 _render_detail_block 施加。
-  local port_msg
-  port_msg="$("$PY_BIN" - "$ZLM_INI" "$ZLM_HTTP_PORT" "$ZLM_SSL_PORT" "$ZLM_RTSP_PORT" \
-                    "$ZLM_RTMP_PORT" "$ZLM_RTC_PORT" "$ZLM_RTP_PROXY_PORT" "$ZLM_RTP_RANGE" \
-"$ZLM_SIGNALING_PORT" "$ZLM_SIGNALING_SSL_PORT" "$ZLM_SRT_PORT" "$ZLM_ONVIF_PORT" "$ZLM_ICE_PORT" \
-"$ZLM_ENABLE_TURN" <<'ZLM_INI_PY'
-import re
-import sys
-
-(path, http_port, ssl_port, rtsp_port, rtmp_port, rtc_port, rtp_proxy_port, rtp_range,
- signaling_port, signaling_ssl_port, srt_port, onvif_port, ice_port, enable_turn) = sys.argv[1:15]
-
-# 段名（小写） → {键: 新值}。端口规划见 deploy/standalone/PORTS.md。
-# ⛔ **只列真正要对外的段**：onvif/shell 这类管理端口默认关掉（port=0），
-#   改它们没意义；而且它们在本机回环上，不属于防火墙要开的范围。
-targets = {
-    "http":   {"port": http_port, "sslport": ssl_port},
-    "rtsp":   {"port": rtsp_port, "sslport": "0"},      # sslport=0 = 不启用
-    "rtmp":   {"port": rtmp_port, "sslport": "0"},
-    "rtc":    {"port": rtc_port,
-               # ⛔⛔ WebRTC over TCP 的媒体端口同样**不叫 port**（叫 tcpPort）。
-               #   `[rtc] port` 走 UDP、`tcpPort` 走 TCP —— 两个都得写，
-               #   和下面 icePort/iceTcpPort 同理（**同号、不同协议栈，不冲突**）。
-               #   ⛔⛔ 漏了它的后果（2026-10-12 客户 Ubuntu 16 实机踩到）：
-               #     tcpPort 一直留在 ZLM 出厂默认 **8000**（规划段外），
-               #     而 8000 是极常见的冲突端口 ⇒ 目标机上被别的服务占住时，
-               #     ZLM 启动时 `rtcSrv_tcp->start(8000)` 抛异常，只打一行
-               #     `Start server failed: Listen on :: 8000 failed: address already in use`
-               #     就**直接退出**（见 ZLMediaKit server/main.cpp 的 catch 分支），
-               #     用户看到的是本包那句笼统兜底提示 ⇒ 极易误判成"缺依赖"。
-               #   铁证：本包在开发机上跑起来后 `ss -lntp` 里有一条 `*:8000`
-               #   —— 它就是 config.ini 里唯一一处 8000，即这个键没被同步。
-               "tcpPort": rtc_port,
-               # ⛔⛔ WebRTC 的信令端口**键名不叫 port**（叫 signalingPort），
-               #   所以按"段名 + 键名 port"去匹配是抓不到它们的 ——
-               #   实测漏掉后 ZLM 报 `Listen on :: 3001 failed: address already in use`：
-               #   3001 是容器默认值、这台机器已被占用，ZLM 起不来。
-               #   而 status 只看 http 端口(30100) ⇒ 报「运行中」但推流/WebRTC 全废。
-               "signalingPort": signaling_port,
-               "signalingSslPort": signaling_ssl_port,
-               # STUN/TURN：容器默认 3478 同样在规划段外，且 3478/3479 常被别的服务占
-               "icePort": ice_port,
-               "iceTcpPort": ice_port,
-               # ⛔ TURN 默认关（=0）。它**不是端口**，所以不参与端口预检；
-               #   但必须写进 ini —— 原因见文件上方 ZLM_ENABLE_TURN 处的长注释
-               #   （平台只下发 STUN、从不下发 turn:，这个中继是死功能，
-               #    而它的 [rtc] port_range 占着 Linux 临时端口区）。
-               "enableTurn": enable_turn},
-    # ⛔⛔ RTP 动态段的**真源是 [rtp_proxy] port_range**，不是 [rtp] ——
-    #   ZLM 源码 src/Common/config.cpp: RtpProxy::kPortRange = "rtp_proxy.port_range"
-    #   （默认 "30000-35000"）。
-    #   曾把 port_range 写到 [rtp] 段，而该段只有 audioMtuSize/videoMtuSize/
-    #   rtpMaxSize/lowLatency/h264_stap_a —— **根本没有 port_range 这个键** ⇒
-    #   行扫描匹配不到 ⇒ 静默不生效，ZLM 实际仍用 30000-35000（5001 个端口）。
-    #   症状极具误导性：PORTS.md 写着"RTP 段 = 51200-51299"、端口预检也照这段查，
-    #   而 ZLM 收流实际开在 30000-35000 —— 规划与运行完全对不上，且**零报错**。
-    # ⭐ 平台侧另有自己的登记值（meta_node.rtp_port_start/end，节点列表/编辑页显示的就是它）。
-    #   它只是上面这个键的**镜像**，平台会在首启 seed、保存服务配置、以及每次启动探活时
-    #   自动对齐 —— 本脚本**不要**去改平台库（两边各写各的正是这次缺陷的成因）。
-    "rtp_proxy": {"port": rtp_proxy_port, "port_range": rtp_range},
-    # SRT 与 onvif 也不改就会被容器默认值(9000/3702)拖住，
-    # 而这两个在目标机上很可能已被别的服务占用。
-    "srt":    {"port": srt_port},
-    "onvif":  {"port": onvif_port},
+  # ⛔ 这里的每个键都必须真的写进 config.ini：ZLM 只认文件，不认我们的变量。
+  #   漏一个的后果是「平台按 A 端口调它、它却听 B 端口」⇒ 推流/取流静默失败。
+  #   ⛔ [rtc] 的两个媒体键不叫 port（是 tcpPort / signalingPort），
+  #     RTP 段的真源是 [rtp_proxy] 而不是 [rtp] —— 这些都由 uvp-setup 处理。
+  local rc=0
+  "$SETUP_BIN" ports-sync --ini "$ZLM_INI" \
+    --zlm-http "$ZLM_HTTP_PORT" \
+    --zlm-ssl "$ZLM_SSL_PORT" \
+    --zlm-rtsp "$ZLM_RTSP_PORT" \
+    --zlm-rtmp "$ZLM_RTMP_PORT" \
+    --zlm-rtc "$ZLM_RTC_PORT" \
+    --zlm-signaling "$ZLM_SIGNALING_PORT" \
+    --zlm-signaling-ssl "$ZLM_SIGNALING_SSL_PORT" \
+    --zlm-srt "$ZLM_SRT_PORT" \
+    --zlm-onvif "$ZLM_ONVIF_PORT" \
+    --zlm-ice "$ZLM_ICE_PORT" \
+    --zlm-rtp-proxy "$ZLM_RTP_PROXY_PORT" \
+    --zlm-rtp-range "$ZLM_RTP_RANGE" || rc=$?
+  [ "$rc" -eq 0 ] || fail "ZLM 端口同步失败（退出码 ${rc}）—— 端口跑出规划段会导致收流全废"
 }
 
-section = None
-changed = []
-out = []
-# ⛔ 不能用 splitlines()：它会**吃掉** \r\n 的行尾信息，写回时行尾就变了
-#   （ini 里混行尾虽然多数能解析，但会让 diff 变脏、且下次再匹配又对不上）。
-for line in open(path, encoding="utf-8", newline="").read().split("\n"):
-    stripped = line.strip()
-    if stripped.startswith("[") and stripped.endswith("]"):
-        section = stripped[1:-1].strip().lower()
-        out.append(line)
-        continue
-    # ⛔⛔ 正则必须容忍 **CRLF**：ZLM 的 config.ini 是 Windows 行尾，
-    #   \`(.*)$\` 里的 \`.\` 会吃掉 \r，于是键名后跟 \r 匹配不上
-    #   \`([a-z_]+)(\s*=)\` ⇒ **signalingPort 这类驼峰键一个都改不到**。
-    #   实测症状：日志仍显示 `Listen on :: 3001 failed: address already in use`
-    #   而同步脚本报告"已改"[rtc] port —— 看着改了、实际没改。
-    m = re.match(r"^(\s*)([A-Za-z_]+)(\s*=\s*)(.*?)(\r?)$", line)
-    if m and section in targets and m.group(2) in targets[section]:
-        indent, key, eq, old_val, cr = m.groups()
-        new_val = targets[section][key]
-        if old_val.strip() != new_val:
-            changed.append("[%s] %s %s→%s" % (section, key, old_val.strip(), new_val))
-        out.append("%s%s%s%s%s" % (indent, key, eq, new_val, cr))
-        continue
-    out.append(line)
-
-
-# 只输出**纯文本**结论：前缀/缩进/配色由 shell 统一施加（见 ctl 顶部"输出样式"）。
-# ⛔ 不再逐条打印"哪个键从多少改成多少"：12 个映射挤一大坨，而**有效端口**
-#   在收尾的「端口规划」里已经分类列全了，重复输出只会让输出更乱
-#   （老板 2026-10-10 定）。这里只报"改了几处"。
-if changed:
-    open(path, "w", encoding="utf-8", newline="").write("\n".join(out))
-    print("ZLM 端口已同步到规划段（%d 处）" % len(changed))
-else:
-    print("ZLM 端口已与规划一致，无需改动")
-
-# ⛔⛔ 读回校验 —— 上面打印 changed 只能证明"改到了某个同名键"，
-#   不能证明**改到了 ZLM 真正读的那个键**。段名/键名任一不匹配时它静默不改，
-#   日志照样显示"无需改动"（本项目已多次栽在"谎报成功"上，见 PORTS.md 附注）。
-#   ⇒ 这里按 ZLM 的键路径回读一次，不对就**中止启动**（配合脚本顶部的 set -e）。
-def _read_key(section_want, key):
-    sec = None
-    for line in open(path, encoding="utf-8", newline="").read().split("\n"):
-        s = line.strip()
-        if s.startswith("[") and s.endswith("]"):
-            sec = s[1:-1].strip().lower()
-        elif sec == section_want:
-            m = re.match(r"^\s*" + re.escape(key) + r"\s*=\s*(.*?)\s*\r?$", line)
-            if m:
-                return m.group(1)
-    return None
-
-_got = _read_key("rtp_proxy", "port_range")
-if _got != rtp_range:
-    sys.exit("❌ [rtp_proxy] port_range 未生效（期望 %s，实际 %s）"
-             " —— ZLM 收流端口会跑出规划段，端口预检与实际监听对不上" % (rtp_range, _got))
-
-# ⛔ TURN 开关同样回读，但**策略刻意与上面不同**：
-#   · 键在、却写不进去 ⇒ 是**我们自己的同步逻辑坏了**（段名/键名/行尾不匹配 ——
-#     历史上 signalingPort 就栽在这上面：报告"已改"、实际一个都没改到）⇒ 必须中止启动。
-#   · 键**根本不存在** ⇒ 是未知配置形态（旧版 ini / 客户手改过）。
-#     为一个"死开关"拦住整个平台上线不划算 ⇒ 大声告警 + 给出补救命令，继续启动。
-#     判据为什么不统一：port_range 影响**实际监听端口与收流功能**，写不进去会直接坏功能；
-#     enableTurn 只是关掉一个没人会用的中继，没写进去不改变任何可用性。
-_got_turn = _read_key("rtc", "enableTurn")
-if _got_turn is None:
-    print("   ⚠️ [rtc] enableTurn 键不存在，TURN 状态未知 —— 请在该段手工补一行 "
-          "`enableTurn=0`（TURN 是死功能：平台只下发 STUN，从不下发 turn:；"
-          "而它的 port_range 占着 49152-65535 临时端口区）", file=sys.stderr)
-elif _got_turn != enable_turn:
-    sys.exit("❌ [rtc] enableTurn 未生效（期望 %s，实际 %s）"
-             " —— 同步逻辑写不动这个键，ZLM 会继续开着中继并占用临时端口区"
-             % (enable_turn, _got_turn))
-ZLM_INI_PY
-)"
-  _render_detail_block "$port_msg"
-}
 
 # ---------------------------------------------------------------- ZLM ----
 
@@ -1832,376 +1672,30 @@ ensure_database() {
   local baseline="$RESOURCE/baseline/baseline.sql"
 
   [ -f "$baseline" ] || fail "缺少建库脚本 ${baseline}（包不完整？请重新解压）"
+  mkdir -p "$(dirname "$db_path")"
 
-  # ⛔ python 路径不能写死：构建机是 macOS、目标机是 Ubuntu，
-  #   写死本机路径的话包发到客户机上必然 command not found。
-  local py=""
-  if [ -n "${UVP_BUILD_PY:-}" ] && [ -x "${UVP_BUILD_PY}" ]; then
-    py="$UVP_BUILD_PY"
-  else
-    local c
-    for c in python3 python; do
-      if command -v "$c" >/dev/null 2>&1; then py="$(command -v "$c")"; break; fi
-    done
+  # 幂等（看 sys_users 在不在）、进度、建库后对账、重名索引告警都在 uvp-setup 里，
+  # 与 Windows 版**同一份实现**：同一份 baseline.sql、同一种语句切分、
+  # 同样「PRAGMA 必须在事务外」、同样把被静默跳过的重名索引显式报出来。
+  #
+  # ⛔ 不接管道（tee/tail）：`set -o pipefail` 下管道会把真实退出码盖掉，
+  #   而这里必须让建库失败**直接中止启动** —— 否则页面能开、登录报 no such table。
+  if ! "$SETUP_BIN" db-init --baseline "$baseline" --db "$db_path"; then
+    fail "数据库初始化失败（详见上面的输出；只在还没录入业务数据时才可删库重来）"
   fi
-  [ -n "$py" ] || fail "找不到 python3 —— 本包建库需要它（Ubuntu/Debian 请先 apt install python3）"
-
-  # 已建好就直接跳过（幂等）
-  if [ -f "$db_path" ]; then
-    local has_table
-    has_table="$("$py" - "$db_path" <<'PY' 2>/dev/null || true
-import sqlite3, sys
-try:
-    db = sqlite3.connect(sys.argv[1])
-    print(db.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='sys_users'").fetchone()[0])
-    db.close()
-except Exception:
-    print(0)
-PY
-)"
-    if [ "$has_table" = "1" ]; then
-      ok "数据库已就绪（${db_path}），跳过初始化"
-      return 0
-    fi
-    log "检测到 $db_path 存在但库不完整（可能是上次建库中断），将重建"
-  fi
-
-  log "首次运行：正在初始化数据库…"
-  # ⛔⛔ 下面这段 python 有三条硬约束，任一条破了都出过事故（行内注释写了原因）：
-  #
-  #   ① **切分规则必须与基线生成器同源**。baseline.sql 里既有 MySQL 转义换行（\n）、
-  #      又有菜单标题/回调 URL 里的分号 ⇒ 想当然的切法会切坏语句，
-  #      而且报的错与真实原因毫无关系（三种错法都踩过，见 verify_baseline.py 顶部）。
-  #      ⇒ 内嵌的 split_sql() 与 server/resource/database/sqlitebaseline/generate.py
-  #        里的同名函数**逐字一致**；verify_baseline.py 就是拿它验收基线的，
-  #        所以"包里跑的切分"与"验收过的切分"是同一条规则。
-  #      ⛔ 改这边必须同步改那边 —— 契约锁在 scripts/standalone-baseline-loader.test.mjs。
-  #
-  #   ② **整库放在一个事务里**。executescript 是"每条语句各自提交"——
-  #      467 次 fsync 实测 2.5s；单事务 0.4s（6 倍），而且**原子**：中途失败回滚，
-  #      不会留下"表建了一半"的库（那种库下次启动只能靠"sys_users 在不在"去猜，
-  #      猜错的后果就是"页面能开、登录报 no such table"）。
-  #
-  #   ③ **进度条只在交互终端画**。输出被重定向或进 systemd journal 时改打阶段行，
-  #      否则 \r 会把日志刷成一堆半截行。
-  #
-  # ⛔ PYTHONIOENCODING=utf-8 是**必须的**：目标机（客户现场是 Ubuntu 16）LANG 常是
-  #   C/POSIX，此时 python 的 stdout 编码是 ASCII，一 print 中文/█/✓ 就
-  #   UnicodeEncodeError。而 bash 直接写字节反而是好的 ⇒ 症状是"shell 那几行正常、
-  #   python 这几行报错退出"，很难联想到是 locale。用环境变量而不是
-  #   sys.stdout.reconfigure()（那是 3.7+ 的 API，py3.5 上没有）。
-  PYTHONIOENCODING=utf-8 "$py" - "$baseline" "$db_path" <<'DB_INIT_PY'
-import hashlib
-import os
-import re
-import sqlite3
-import sys
-import time
-
-# ⛔ 输出编码：主要靠调用方设的 PYTHONIOENCODING=utf-8（见 shell 里的调用行，
-#   那是**版本无关**的做法 —— py3.5 上根本没有 reconfigure）。这里再兜一层，
-#   方便有人把这个 heredoc 抠出来单独跑（比如契约测试）时不至于炸编码。
-try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
-
-# shell 顶部把同一套颜色导进来了（非终端 / NO_COLOR 时为空串）。
-C_OK = os.environ.get("UVP_C_OK", "")
-C_WARN = os.environ.get("UVP_C_WARN", "")
-C_RST = os.environ.get("UVP_C_RST", "")
-IND = "      "        # 与 shell 的 det()/ok() 同宽（"[uvp] " 恰好 6 个字符）
-
-# ⛔⛔ 两个路径一律按 **str** 用着走，别改回 pathlib.Path：
-#   目标机可能是 Ubuntu 16（自带 python3.5），而 path-like（PEP 519）是 **3.6** 才
-#   进标准库的 —— 3.5 的 C 层入口（sqlite3.connect / open / os.remove / os.stat…）
-#   只认 str，拿到 Path 就抛 `TypeError: argument 1 must be str, not PosixPath`。
-#   现场真栽过（2026-10-10 客户第二次报障，就卡在建库这一步）：报错行是下面那句
-#   `db = sqlite3.connect(db_path)`，可它看着毫无问题 —— 是**这一行**埋的雷：
-#   `db_path` 一旦是 Path 对象，错误要到第一次把它交给 C 层函数时才爆出来。
-#   契约锁在 scripts/standalone-py35-compat.test.mjs（"内嵌 Python 不得用 pathlib"）。
-baseline_sql, db_path = sys.argv[1], sys.argv[2]
-
-
-def split_sql(text):
-    """按分号切分语句，跳过字符串字面量与注释里的分号。
-
-    ⛔ 不能直接 text.split(';')：菜单标题、回调 URL 里都可能带分号（带查询串的
-       回调地址就有），切出来的片段既不完整也不报错，表现为"少了几条 INSERT"。
-    ⛔ 也不能用 sqlite3.complete_statement 逐行累积：前一句的尾随注释会被算进
-       缓冲区导致误判，报 no such table —— 而表明明就在前面几行。
-
-    ⛔⛔ 本函数与 server/resource/database/sqlitebaseline/generate.py 的
-       split_sql() 必须**逐字一致**（那边是基线生成器、也是 verify_baseline.py
-       验收基线时用的切分器）。契约锁在 scripts/standalone-baseline-loader.test.mjs。
-    """
-    statements = []
-    buffer = []
-    quote = None
-    i, n = 0, len(text)
-
-    while i < n:
-        ch = text[i]
-
-        if quote is None and ch == "-" and text.startswith("--", i):
-            nl = text.find("\n", i)
-            i = n if nl < 0 else nl + 1
-            continue
-        if quote is None and ch == "/" and text.startswith("/*", i):
-            end = text.find("*/", i)
-            i = n if end < 0 else end + 2
-            continue
-
-        if quote is not None:
-            if ch == "\\" and quote == "'":
-                buffer.append(ch); i += 1
-                if i < n:
-                    buffer.append(text[i]); i += 1
-                continue
-            if ch == quote:
-                if i + 1 < n and text[i + 1] == quote:   # '' 转义
-                    buffer.append(ch); buffer.append(text[i + 1]); i += 2
-                    continue
-                quote = None
-            buffer.append(ch); i += 1
-            continue
-
-        if ch in "'\"":
-            quote = ch; buffer.append(ch); i += 1; continue
-        if ch == ";":
-            statements.append("".join(buffer)); buffer = []; i += 1; continue
-        buffer.append(ch); i += 1
-
-    tail = "".join(buffer).strip()
-    if tail:
-        statements.append(tail)
-    return [s.strip() for s in statements if s.strip()]
-
-
-with open(baseline_sql, encoding="utf-8") as _fh:
-    sql = _fh.read()
-stmts = split_sql(sql)
-if not stmts:
-    raise SystemExit("建库失败：从 baseline.sql 里切不出任何语句（文件被截断？）")
-
-# 仅用于对账：只打印切分指纹就退出，不碰数据库。
-# 契约测试拿它跟 generate.split_sql() 的结果比 —— 两边一旦漂移，指纹立刻对不上。
-if os.environ.get("UVP_DB_SPLIT_DIGEST") == "1":
-    digest = hashlib.sha256("\n\x1e\n".join(stmts).encode("utf-8")).hexdigest()
-    print("stmts=%d sha256=%s" % (len(stmts), digest))
-    sys.exit(0)
-
-
-def phase_of(statement):
-    head = statement[:40].upper()
-    if head.startswith("CREATE TABLE"):
-        return "table"
-    if head.startswith("CREATE INDEX") or head.startswith("CREATE UNIQUE INDEX"):
-        return "index"
-    if head.startswith("INSERT"):
-        return "seed"
-    if head.startswith("PRAGMA"):
-        return "pragma"
-    return "other"
-
-
-PHASE_LABEL = {"table": "建表", "index": "建索引", "seed": "灌种子数据",
-               "pragma": "设置", "other": "其它"}
-
-phases = [phase_of(s) for s in stmts]
-
-# ⛔⛔ 进度分母只算**真正会建出对象**的语句。
-#   原因：SQLite 里**表名和索引名都是库级唯一**，而 MySQL 的索引名只在**表内**唯一
-#   ⇒ 基线从 MySQL 转过来后，同一个索引名会在多张表上各出现一次（如 idx_deleted_at
-#   在 gb_device / gb_channel 等 5 张表上都有），这些重复的
-#   `CREATE INDEX IF NOT EXISTS` 会被 SQLite **静默跳过**（实测 9 条）。
-#   若按语句条数计进度，进度条跑到 "316/316" 而结尾对账只有 307 个索引 ——
-#   读者的第一反应是"对账写错了"，而不是"有 9 条压根没生效"。
-#   ⇒ 分母改用"去重后真正会建出来的对象数"，并把被跳过的那几条**显式报出来**。
-CREATE_OBJ_RE = re.compile(
-    r'(?is)^CREATE\s+(?:UNIQUE\s+)?(TABLE|INDEX)\s+(?:IF\s+NOT\s+EXISTS\s+)?"?([^"\s(]+)"?')
-
-counted = [True] * len(stmts)      # counted[i]=False ⇒ 该语句不会建出新对象，不计入进度
-obj_names = set()
-skipped_dup = []
-for _i, _stmt in enumerate(stmts):
-    if phases[_i] not in ("table", "index"):
-        continue
-    _m = CREATE_OBJ_RE.match(_stmt)
-    if not _m:
-        continue
-    _key = (_m.group(1).upper(), _m.group(2))
-    if _key in obj_names:
-        counted[_i] = False
-        skipped_dup.append(_m.group(2))
-    else:
-        obj_names.add(_key)
-
-total = sum(counted)
-counts = {name: sum(1 for c, p in zip(counted, phases) if c and p == name)
-          for name in PHASE_LABEL}
-seen = dict.fromkeys(PHASE_LABEL, 0)   # 逐条累加，避免每条都 phases[:i].count()（O(n²)）
-_done = [0]
-
-# ---- 进度渲染 ------------------------------------------------------------
-# ⛔ 进度写 stdout 而不是 stderr：本脚本其余输出都在 stdout，两个流混着走
-#   会出现"进度条与日志互相盖"的乱序（stdout 行缓冲、stderr 无缓冲）。
-BAR = 26
-show_bar = sys.stdout.isatty() and os.environ.get("UVP_NO_PROGRESS") != "1"
-_drawn = [0.0]
-_reported = set()
-
-
-def _bar(done, note):
-    filled = BAR * done // total
-    return "[%s%s] %3d%%  %s" % ("█" * filled, "░" * (BAR - filled),
-                                 done * 100 // total, note)
-
-
-def advance(idx, phase):
-    """idx: 本语句在 stmts 里的 1-based 序号。"""
-    if counted[idx - 1]:
-        _done[0] += 1
-        seen[phase] += 1
-    note = "%s %d/%d" % (PHASE_LABEL[phase], seen[phase], counts[phase])
-    if not show_bar:
-        # 非交互：只在每个主要阶段**跑完**时打一行 —— 467 行会把 journal 刷爆，
-        # 但一行都不打又让日志里"这段时间在干什么"变成空白。
-        if (phase in ("table", "index", "seed") and phase not in _reported
-                and seen[phase] == counts[phase]):
-            _reported.add(phase)
-            print(IND + note)
-        return
-    now = time.monotonic()
-    # 限流：逐条重绘在快机器上会闪成一片（467 条 ≤0.4s ⇒ 每秒上千帧）
-    if now - _drawn[0] < 0.05 and _done[0] < total:
-        return
-    _drawn[0] = now
-    sys.stdout.write("\r" + IND + _bar(_done[0], note))
-    sys.stdout.flush()
-
-
-# ---- 执行 ----------------------------------------------------------------
-# ⛔ 外键必须显式打开：SQLite 的 foreign_keys PRAGMA **默认为 OFF**，
-#   建表语句里那些 REFERENCES 在默认连接下全是摆设，表现为"引用完整性悄悄没了"
-#   —— 开发库验过、客户机上数据却能写成孤儿。
-# ⛔⛔ 而且必须在**事务外**执行：SQLite 里 `PRAGMA foreign_keys` 在事务内是
-#   **静默空操作**。基线文件开头那两句 PRAGMA 若不搬出事务，就等于没开。
-#
-# ⛔⛔⛔ `isolation_level=None` 是**给 python3.5 兜底**的（目标机 Ubuntu 16 自带的正是 3.5）：
-#   3.5 的模块在 isolation_level 非 None（默认是空串）时，**执行非 DML 语句
-#   （DDL / PRAGMA / COMMIT…）之前会先自动 COMMIT 一次** —— Modules/_sqlite/cursor.c：
-#     if (self->connection->begin_statement) switch (statement_type) {
-#         case …INSERT/UPDATE/DELETE/REPLACE: if (!inTransaction) BEGIN;
-#         case STATEMENT_OTHER:               if (inTransaction)  COMMIT; }
-#   ⇒ 下面那句显式 `BEGIN` 会被它无声结束：整库不再原子（失败也回滚不了，
-#     "已回滚（未留下半成品库）"这句就变成假话），循环末尾那句 `COMMIT` 还会报
-#     `cannot commit - no transaction is active`。
-#   置 None 即关掉模块的全部隐式事务（begin_statement = NULL），BEGIN/COMMIT 全由本脚本
-#   掌控 —— 3.5 与 3.6+ 的事务行为这才一致（3.6 只是去掉了"DDL 前隐式提交"，
-#   置 None 在两边都是纯"手动事务"模式，对现有环境是**零行为变化**）。
-db = sqlite3.connect(db_path, isolation_level=None)
-db.execute("PRAGMA foreign_keys = ON")
-db.execute("PRAGMA busy_timeout = 5000")
-
-processed = 0
-try:
-    db.execute("BEGIN")
-    for idx, statement in enumerate(stmts, start=1):
-        if phases[idx - 1] == "pragma":
-            if db.in_transaction:
-                db.execute("COMMIT")
-            db.execute(statement)          # PRAGMA 要事务外才生效
-            db.execute("BEGIN")
-        else:
-            db.execute(statement)
-        processed = idx
-        advance(idx, phases[idx - 1])
-    db.execute("COMMIT")
-except Exception as exc:
-    try:
-        db.execute("ROLLBACK")
-    except sqlite3.Error:
-        pass
-    db.close()
-    try:
-        os.remove(db_path)        # 别留半成品：下次启动会看到"文件在、库是空的"
-    except OSError:
-        pass
-    bad = stmts[processed][:200].replace("\n", " ") if processed < len(stmts) else ""
-    raise SystemExit(
-        "建库失败，已回滚（未留下半成品库）\n"
-        "  %s: %s\n"
-        "  第 %d 条语句: %s" % (type(exc).__name__, exc, processed + 1, bad)
-    )
-
-if show_bar:
-    # 把 100% 那一帧固定下来（补换行），免得它被后面的输出用 \r 擦掉
-    sys.stdout.write("\r" + IND + _bar(total, "完成") + "\n")
-    sys.stdout.flush()
-
-# ---- 建库后自检 ----------------------------------------------------------
-# ⛔ 判据不是"没报错"，而是逐项对账（与 verify_baseline.py 同口径）：
-#   少建表/漏灌种子都不会报错，只有对账才看得出来。
-def one(query):
-    return db.execute(query).fetchone()[0]
-
-
-tables = one("SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
-indexes = one("SELECT count(*) FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'")
-seeded = 0
-for (name,) in db.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"):
-    seeded += one('SELECT count(*) FROM "%s"' % name)
-admins = one("SELECT count(*) FROM sys_users WHERE username='admin'")
-fk_on = one("PRAGMA foreign_keys")
-integrity = one("PRAGMA integrity_check")
-dangling = db.execute("PRAGMA foreign_key_check").fetchall()
-db.close()
-
-if integrity != "ok":
-    raise SystemExit("建库后自检失败: integrity_check=%s" % integrity)
-if fk_on != 1:
-    raise SystemExit("建库后自检失败: 外键未开启（PRAGMA foreign_keys=%s）" % fk_on)
-if dangling:
-    raise SystemExit("建库后自检失败: 外键悬挂 %s" % dangling[:5])
-if admins != 1:
-    raise SystemExit("建库后自检失败: admin 账号数=%s（应为 1）" % admins)
-
-print(IND + C_OK + "✓" + C_RST + " %d 张表 · %d 个索引 · %d 行种子数据 · 管理员账号已就位"
-      % (tables, indexes, seeded))
-
-# ⛔ 被 SQLite 静默跳过的那几条必须报出来，不能只在进度分母里悄悄扣掉：
-#   少了索引不会报错，只会让软删表（gb_device 等）的查询在数据量上来后变慢，
-#   到时候没人能想起"装库时就少建了 9 个索引"。
-#   ⭐ 根治在 generate.py：索引名要带上表名（项目里新模型已经这么做了，
-#     如 idx_openapi_capability_group_deleted），而不是沿用 MySQL 的表内短名。
-if skipped_dup:
-    names = sorted(set(skipped_dup))
-    shown = " / ".join(names[:4]) + (" / …" if len(names) > 4 else "")
-    print(IND + C_WARN + "!" + C_RST + " %d 条 CREATE INDEX 未生效：SQLite 的索引名是库级唯一"
-          "（MySQL 只在表内唯一），同名只建第一个" % len(skipped_dup))
-    print(IND + "  · 重名索引：%s" % shown)
-DB_INIT_PY
 }
 
+
 sync_ports_into_config() {
-  # 把生效端口写回 config.env 与 config.yml。
+  # 把生效端口写回 config.env（持久化）、config.yml（后端读）、config.ini（ZLM 真源）。
   #
   # ⛔⛔ 不做这一步就会出现"Redis 听 A 端口、后端连 B 端口"这种**静默错配**：
   #   Redis 用 --port 参数启动（读 $REDIS_PORT），而后端连哪个端口是读 config.yml 的
-  #   redis.port。两者不同源 ⇒ 用户改了 env 变量后，后端连不上Redis，
+  #   redis.port。两者不同源 ⇒ 用户改了 env 变量后，后端连不上 Redis，
   #   症状是「启动日志只说 cache 连不上」，完全看不出是端口没同步。
   #
   # 首次运行（config.env 还不存在）用打包时写入 config.yml 的值作为权威，
   # 之后一律以 config.env 为准。
-  #
-  # ⛔⛔ 但「nginx 端口」有个例外：它**不写进 config.yml**（nginx 读的是自己的
-  #   conf），所以这里必须拿它和 config.env 里的值对照：
-  #   若 config.env 记录的是**上一版包的默认值**（本版已改），就该更新。
-  #   ⇒ 判据：值等于「非当前默认值」时，无法区分是"用户主动设的"还是
-  #   "老包留下的"。这个歧义必须消掉，否则升级包后客户会莫名停在旧端口。
-  #   ⇒ 做法：给 config.env 加一个"版本标记"，值变了就整体重写。
   if [ ! -f "$ENV_FILE" ]; then
     local yml_http yml_redis
     yml_http="$(sed -n 's/^[[:space:]]*port:[[:space:]]*:\([0-9]\+\).*/\1/p' "$CONF" | head -1)"
@@ -2210,132 +1704,34 @@ sync_ports_into_config() {
     REDIS_PORT="${yml_redis:-$REDIS_PORT}"
   fi
 
-  # ⛔ 写入版本标记：包升级后若规划变了（PORT_PLAN_REV），旧的 config.env 整体作废，
-  #   重新按新默认值起。⛔ 但**用户显式设过的端口要保留** ——
-  #   见下方 preserve_env_if_user_set()：只有"值等于旧默认值"才跟着升级，
-  #   用户手动改过的一律不动。
-  # ⛔⛔⛔ 这里**不能硬编码「上一版的默认值」**来判别"是不是用户设的"。
-  #   实测踩了两次：
-  #   ① 我把默认值改成 30010，却把"旧默认"仍写成 8280 —— 而8280 恰好是
-  #      上一版的真实默认值，判据本身没错，但我改代码时漏改这里就等于
-  #      **判据会随版本漂移**；下次改默认值时又错一次。
-  #   ② 调试残留（UVP_NGINX_HTTP_PORT=8280）被误判成"用户主动设的"，
-  #      于是 nginx 去 bind 后端的端口。
-  #
-  # ⭐ 正确判据：**config.env 里显式记录"这些值是默认还是用户设的"**。
-  #   写入时对每个键加一个 UVP_USER_SET_<键> 标记；只有带标记的才当用户设置。
-  #   缺标记的（老包写的）一律按新默认值处理 —— 老包本来就没有标记，
-  #   这正好与"跟着升级"的诉求一致。
-  #   ⚠️ 若用户手工编辑过 config.env，标记还在 ⇒ 依然尊重其设置。
-  # 端口值在文件头已由 read_port_env 决定（只认带 UVP_USER_SET_ 标记的键），
-  # 这里只负责把最终生效值落盘。
-  {
-    printf 'UVP_HTTP_PORT=%s\nUVP_REDIS_PORT=%s\n' "${HTTP_PORT}" "${REDIS_PORT}"
-    printf 'UVP_HTTPS_PORT=%s\nUVP_NGINX_HTTP_PORT=%s\n' "${NGINX_HTTPS_PORT}" "${NGINX_HTTP_PORT}"
-    # 记录"这四个值不是用户设的" ⇒ 下次读到它们时按默认值处理。
-    # ⛔ 环境变量显式传入时（${UVP_*}非空）才算用户设置，要写 1。
-    local port_key
-    for port_key in UVP_HTTP_PORT UVP_REDIS_PORT UVP_HTTPS_PORT UVP_NGINX_HTTP_PORT; do
-      # A persisted explicit choice remains explicit across helper restarts.
-      if [ -n "${!port_key:-}" ] || [ "$(read_env_file "UVP_USER_SET_$port_key")" = "1" ]; then
-        printf 'UVP_USER_SET_%s=1\n' "$port_key"
-      fi
-    done
-    local zlm_key runtime_key
-    for zlm_key in HTTP_PORT SSL_PORT RTSP_PORT RTMP_PORT RTC_PORT RTP_PROXY_PORT RTP_RANGE SIGNALING_PORT SIGNALING_SSL_PORT SRT_PORT ONVIF_PORT ICE_PORT; do
-      runtime_key="ZLM_$zlm_key"
-      printf 'UVP_ZLM_%s=%s\n' "$zlm_key" "${!runtime_key}"
-    done
-  } > "$ENV_FILE.new"
-  # ⛔⛔⛔ 必须把**非本函数托管的键原样搬回去**，否则用户手工加的键会被无声清掉。
-  #
-  #   实测踩过：`sync_ports_into_config` 用 `> "$ENV_FILE"` 全量覆盖、只写 4 个端口键，
-  #   而上一版的注释正教用户「在 config.env 里加一行
-  #   UVP_SIP_TRACE_ENCRYPTION_KEY=...  重启即生效」——
-  #   ⇒ 用户照做、重启、密钥消失、SIP 报文诊断永久degraded，
-  #   **全程零报错**（fail-closed 不落库，连日志都不一定明显）。
-  #
-  #   ⛔ 不能改成「只在文件不存在时才写」：那会让端口变更不再持久化。
-  #   ⛔ 也不能靠「追加」：`>` 是这里的既有语义（要重置 USER_SET 标记）。
-  #   ⇒ 做法：先备份旧文件里**所有非托管键**（含注释行），写完端口后再追加回去。
-  #
-  #   托管键清单要显式列出：只有这4 个端口键 + 对应的 UVP_USER_SET_ 标记会被接管。
-  local preserved
-  preserved="$(mktemp "$ROOT/config/.config.env.preserve.XXXXXX")"
-  if [ -f "$ENV_FILE" ]; then
-    grep -vE '^(UVP_HTTP_PORT|UVP_REDIS_PORT|UVP_HTTPS_PORT|UVP_NGINX_HTTP_PORT|UVP_USER_SET_UVP_HTTP_PORT|UVP_USER_SET_UVP_REDIS_PORT|UVP_USER_SET_UVP_HTTPS_PORT|UVP_USER_SET_UVP_NGINX_HTTP_PORT|UVP_ZLM_(HTTP_PORT|SSL_PORT|RTSP_PORT|RTMP_PORT|RTC_PORT|RTP_PROXY_PORT|RTP_RANGE|SIGNALING_PORT|SIGNALING_SSL_PORT|SRT_PORT|ONVIF_PORT|ICE_PORT))=' "$ENV_FILE" > "$preserved" || true
-  else
-    : > "$preserved"
-  fi
-  cat "$ENV_FILE.new" > "$ENV_FILE"
-  # Preserve the existing separator rather than adding one on every start.
-  if [ -s "$preserved" ]; then
-    cat "$preserved" >> "$ENV_FILE"
-  fi
-  rm -f "$ENV_FILE.new" "$preserved"
+  # ⛔ 只有「用户显式设过的」端口才写 UVP_USER_SET_ 标记：不带标记的老包值一律按
+  #   新默认值处理，这正好与"升级后跟着新端口规划走"的诉求一致。
+  #   判据 = 环境变量显式传入，或文件里已经有标记（用户手工改过）。
+  local user_set="" port_key
+  for port_key in UVP_HTTP_PORT UVP_REDIS_PORT UVP_HTTPS_PORT UVP_NGINX_HTTP_PORT; do
+    if [ -n "${!port_key:-}" ] || [ "$(read_env_file "UVP_USER_SET_$port_key")" = "1" ]; then
+      user_set="${user_set:+$user_set,}$port_key"
+    fi
+  done
 
-  # nginx 端口也持久化，否则 stop/status 阶段读到的是默认值
+  local -a args=(ports-sync
+    --env "$ENV_FILE" --yml "$CONF"
+    --http "$HTTP_PORT" --redis "$REDIS_PORT"
+    --https "$NGINX_HTTPS_PORT" --nginx-http "$NGINX_HTTP_PORT"
+    --zlm-http "$ZLM_HTTP_PORT" --zlm-ssl "$ZLM_SSL_PORT"
+    --zlm-rtsp "$ZLM_RTSP_PORT" --zlm-rtmp "$ZLM_RTMP_PORT"
+    --zlm-rtc "$ZLM_RTC_PORT" --zlm-signaling "$ZLM_SIGNALING_PORT"
+    --zlm-signaling-ssl "$ZLM_SIGNALING_SSL_PORT"
+    --zlm-srt "$ZLM_SRT_PORT" --zlm-onvif "$ZLM_ONVIF_PORT"
+    --zlm-ice "$ZLM_ICE_PORT"
+    --zlm-rtp-proxy "$ZLM_RTP_PROXY_PORT" --zlm-rtp-range "$ZLM_RTP_RANGE"
+    --user-set "$user_set")
 
-  # config.yml 里同步：后端是通过这两个键读端口的
-  if [ -f "$CONF" ]; then
-    "$PY_BIN" - "$CONF" "$HTTP_PORT" "$REDIS_PORT" "$ZLM_HTTP_PORT" "$ZLM_RTP_PROXY_PORT" <<'SYNC_PY'
-import re, sys
-path, http_port, redis_port, zlm_http, zlm_rtp_proxy = sys.argv[1:6]
-lines = open(path, encoding="utf-8").read().split("\n")
-
-def replace_in_section(section, key, value):
-    """只在指定段落内替换末级键 —— host/port 这类键在 gormv2 各段下重名，
-    全局替换会把 mysql 的也改掉。找不到段落或键就返回 False，不猜。
-
-    ⛔⛔ 本段与文件里其余内嵌 Python 一样，**禁用 f-string**：目标机可能是
-    Ubuntu 16（自带 python3 = 3.5），f-string 是 3.6+ 语法，会让整个 heredoc
-    在编译期 SyntaxError（报错行指向用到 f-string 的那句，与真因无关）。"""
-    start = None
-    for i, line in enumerate(lines):
-        if line.strip() == section + ":":
-            start = i
-            break
-    if start is None:
-        return False
-    indent_of = len(lines[start]) - len(lines[start].lstrip())
-    end = len(lines)
-    for i in range(start + 1, len(lines)):
-        line = lines[i]
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        if len(line) - len(line.lstrip()) <= indent_of:
-            end = i
-            break
-    pat = re.compile(r"^(?P<ind>\s*)" + key + r"\s*:\s*.*?(?P<trail>\s*)$")
-    for i in range(start + 1, end):
-        m = pat.match(lines[i])
-        if m:
-            lines[i] = "%s%s: %s" % (m.group("ind"), key, value)
-            return True
-    return False
-
-# 只在值真的变了才写盘，避免无谓地改 mtime（运维会误以为配置被动过）
-dirty = False
-if replace_in_section("httpserver", "port", ":" + http_port):
-    dirty = True
-if replace_in_section("redis", "port", redis_port):
-    dirty = True
-# ---- ZLM 相关端口（见 deploy/standalone/PORTS.md）----
-# ⛔ 这三处必须跟着 ZLM 实际监听的端口走，否则会出现
-#   「平台按 18080 调 ZLM、ZLM 却听 30100」⇒ 所有推流/取流静默失败。
-for _sec, _pairs in (
-    ("zlm", {"httpport": zlm_http, "rtpport": zlm_rtp_proxy}),
-    ("media", {"hookport": http_port}),      # ZLM hook 回调指向本机后端
-):
-    for _k, _v in _pairs.items():
-        if replace_in_section(_sec, _k, str(_v)):
-            dirty = True
-if dirty:
-    open(path, "w", encoding="utf-8").write("\n".join(lines))
-SYNC_PY
-  fi
-  ok "端口配置已写入 config.env / config.yml"
+  local rc=0
+  "$SETUP_BIN" "${args[@]}" || rc=$?
+  [ "$rc" -eq 0 ] || fail "端口同步失败（退出码 ${rc}）—— 三处配置必须同源，不能只改一半"
 }
+
 
 # ============================================ 忘记登录口令 ⇒ 还原出厂口令 ====
 #
@@ -2344,25 +1740,19 @@ SYNC_PY
 #   后端也只有 PUT /users/changeInitialPassword，前提是账号仍处于「待改密」）
 #   ⇒ 唯一出路是把库里的口令写回出厂值。
 #
-# ⛔ 语义与 Windows 包的 `uvp-setup reset-admin` **逐条一致**（那份用 Go 写，
-#   见 server/cmd/uvp-setup/resetadmin.go，两边各有测试）：
+# ⛔ 语义全在 server/cmd/uvp-setup/resetadmin.go 里，**两个平台调同一份实现**
+#   （Windows 版一直如此；Linux 版 2026-10-19 起也改成调它，不再各写一套 Python）：
 #     ① 口令 = 出厂口令（config.yml 的 server.demoaccount.defaultpassword）；
 #     ② must_change_password 置 1 ⇒ 下次登录强制改密；
 #     ③ 只动指定的那一个账号；不删库、不重建库、不改 status。
 #
-# ⛔⛔ 为什么这里写的是**哈希常量**、而不是现场算 bcrypt：
-#   bcrypt 不在 Python 标准库里 —— Linux 的 crypt 模块只认 $1$/$5$/$6$ 不认 $2a$
-#   （glibc 至今如此），目标机也不保证装了 passlib，而 Windows 有编译好的
-#   uvp-setup.exe 可以用 Go 现场算。所以这里存常量，并用**三道契约锁**保证它不漂移：
-#     · 本文件的 CTL_FACTORY_PASSWORD == config.example.yml 的 demoaccount.defaultpassword
-#     · 本文件的 CTL_FACTORY_HASH     == resource/baseline/baseline.sql 里 admin 的哈希
-#     · 该哈希就是该口令的 bcrypt（Go 侧 password_bootstrap_contract_test.go）
-#   锁在 scripts/standalone-factory-password.test.mjs，任一环漂移立刻红。
-#   运行时再挡一道：config.yml 里那个值一旦不等于常量就**直接拒绝执行** ——
+# ⛔ 运行时挡一道：config.yml 里那个值一旦不等于本常量就**直接拒绝执行** ——
 #   宁可让客户来找我们，也不能把口令重置成一个谁也猜不到的字符串
 #   （"重置完还是登不进去"是最贵的一类故障）。
+#   本常量与 config.example.yml 的同源关系由 scripts/standalone-factory-password.test.mjs 锁住；
+#   "这个口令 ↔ baseline 里 admin 的 bcrypt 哈希"由 Go 侧
+#   resource/database/password_bootstrap_contract_test.go 用真 bcrypt 锁住。
 CTL_FACTORY_PASSWORD='123456'
-CTL_FACTORY_HASH='$2a$10$bQef.b.0CL9rFokdAdTMIe0J.z1Ub0avdu7lyr3mnrh9FQacYQTuW'
 
 # read_conf_scalar 读 config.yml 里某段（可嵌套）下某个键的标量值（剥引号与行尾注释）。
 # ⛔ 必须按**缩进层级**定位段落：port/host 这类键在 httpserver/redis/zlm/gormv2
@@ -2372,68 +1762,11 @@ read_conf_scalar() {
   # ⛔⛔ 本脚本开头是 `set -Eeuo pipefail`：`value="$(cmd)"` 在命令替换**失败时会让整个
   #   脚本当场退出**（哪怕是赋值语句，它的退出码就是命令替换的退出码）。
   #   这里要的是"读不到就回空串、由调用方决定怎么办"，所以必须 `|| value=""` 兜住 ——
-  #   否则 config.yml 有任何异常（编码坏、权限不够）都会让 start 静默死在这一行，
-  #   连一句报错都没有。实测踩过：reset-password 报错信息就是这么被吞掉的。
-  value="$("$PY_BIN" - "$CONF" "$section" "$key" <<'CONF_SCALAR_PY'
-import re
-import sys
-
-path, section, key = sys.argv[1], sys.argv[2], sys.argv[3]
-
-
-def cut_comment(value):
-    # 砍掉**引号外**的行尾注释。顺序与下面 strip_quotes 不能反：
-    # 口令里带 # 是合法的（客户完全可能设成 P#ssw0rd），先剥引号就会把它当成
-    # 注释起点、把口令截断 —— 表现是"重置成了半个口令"，没人能猜到。
-    quote = ""
-    for i in range(len(value)):
-        ch = value[i]
-        if quote:
-            if ch == quote:
-                quote = ""
-        elif ch == '"' or ch == "'":
-            quote = ch
-        elif ch == "#":
-            return value[:i]
-    return value
-
-
-def strip_quotes(value):
-    value = value.strip()
-    if len(value) >= 2 and value[0] == value[-1] and (value[0] == '"' or value[0] == "'"):
-        return value[1:-1]
-    return value
-
-
-lines = open(path, encoding="utf-8").read().split("\n")
-start = -1
-indent = 0
-for i, line in enumerate(lines):
-    t = line.strip()
-    if not t or t.startswith("#"):
-        continue
-    m = re.match(r"^(\s*)" + re.escape(section) + r"\s*:\s*(#.*)?$", line)
-    if m:
-        start = i
-        indent = len(m.group(1))
-        break
-
-if start >= 0:
-    for line in lines[start + 1:]:
-        t = line.strip()
-        if not t or t.startswith("#"):
-            continue
-        # 走到同级或更浅的非注释行 ⇒ 已出段落，停（否则会顺着文件往下把别段的同名键也认了）
-        if len(line) - len(line.lstrip()) <= indent:
-            break
-        m = re.match(r"^" + re.escape(key) + r"\s*:\s*(.*)$", t)
-        if m:
-            print(strip_quotes(cut_comment(m.group(1))))
-            break
-CONF_SCALAR_PY
-)" || value=""
+  #   否则 config.yml 有任何异常都会让 start 静默死在这一行，连一句报错都没有。
+  value="$("$SETUP_BIN" config-get --yml "$CONF" --section "$section" --key "$key" 2>/dev/null)" || value=""
   printf '%s' "$value"
 }
+
 
 # reset_admin_password 把某个账号的口令还原成出厂口令，并重新标记「首次登录必须改密」。
 reset_admin_password() {
@@ -2444,10 +1777,11 @@ reset_admin_password() {
   local db_path="${UVP_DB_PATH:-./data/uvp.db}"
 
   printf '\n'
-  check_python
   [ -f "$db_path" ] || fail "找不到数据库 ${db_path} —— 这台机器还没执行过 start（库里还没有账号）"
   [ -f "$CONF" ]    || fail "找不到配置文件 ${CONF}"
 
+  # ⛔ 本机 config.yml 的出厂口令一旦被改过就**拒绝执行**：重置成一个谁也猜不到的
+  #   字符串，等于把"登不进去"变成"永远登不进去"（这是最贵的一类故障）。
   local configured
   configured="$(read_conf_scalar demoaccount defaultpassword)"
   if [ "$configured" != "$CTL_FACTORY_PASSWORD" ]; then
@@ -2458,77 +1792,13 @@ reset_admin_password() {
   fi
 
   log "重置账号 ${username} 的口令"
-  # ⛔⛔ 两条硬约束（都实测踩过，别改回去）：
-  #   ① 取值必须分两条语句（先声明、再赋值）：写成 `local out="$(...)"` 会把命令替换的
-  #      退出码吞掉（`local` 自己返回 0），于是"库里没有这个账号"也被当成成功。
-  #   ② `|| rc=$?` 不能省：本脚本是 `set -Eeuo pipefail`，而**赋值语句的退出码就是
-  #      命令替换的退出码** ⇒ python 非零退出会让脚本在赋值那一行直接结束，
-  #      下面的 fail 根本没机会打印 —— 现场看到的是"rc=1 且一句话都没有"。
-  local out="" rc=0
-  out="$("$PY_BIN" - "$db_path" "$username" "$CTL_FACTORY_HASH" "$CTL_FACTORY_PASSWORD" 2>&1 <<'RESET_ADMIN_PY'
-import sqlite3
-import sys
-
-db_path, username, factory_hash, factory_password = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-
-# timeout：平台正在运行时会短暂持有写锁，等一会儿比直接报 database is locked 好。
-db = sqlite3.connect(db_path, timeout=15)
-try:
-    rows = db.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='sys_users'").fetchone()
-    if rows[0] != 1:
-        sys.exit("%s 里没有 sys_users 表 —— 这不是本平台的数据库，已放弃（未改动任何数据）" % db_path)
-
-    # 老版本包（2026-10-08 之前出的）的库缺这一列。DDL 与平台侧迁移
-    # resource/database/gb28181/migrations/2026-10-08-initial-admin-password-change-sqlite.sql
-    # **逐字一致** —— 同一列由两处创建，差一个字就会出现"两种包建出的库不一样"。
-    cols = [row[1] for row in db.execute('PRAGMA table_info("sys_users")').fetchall()]
-    if "must_change_password" not in cols:
-        db.execute('ALTER TABLE "sys_users" ADD COLUMN "must_change_password" '
-                   'INTEGER NOT NULL DEFAULT 0 CHECK ("must_change_password" IN (0, 1))')
-
-    cur = db.execute('UPDATE "sys_users" SET "password" = ?, "must_change_password" = 1 '
-                     'WHERE "username" = ?', (factory_hash, username))
-    if cur.rowcount != 1:
-        names = [row[0] for row in db.execute(
-            'SELECT "username" FROM "sys_users" ORDER BY "id" LIMIT 20').fetchall()]
-        sys.exit("库里没有账号 %s（现有账号：%s）—— 未改动任何数据" % (username, ", ".join(names)))
-    db.commit()
-
-    # 落盘后回读：光看 UPDATE 不报错不够（被触发器改写、写错列都会"成功但没生效"），
-    # 而症状是"重置了还是登不进去"，现场只会去怀疑别的地方。
-    row = db.execute('SELECT "password" FROM "sys_users" WHERE "username" = ?', (username,)).fetchone()
-    if row is None or row[0] != factory_hash:
-        sys.exit("回读校验失败：库里的口令与预期不一致（本次写入未生效）")
-finally:
-    db.close()
-
-print("账号 %s 的口令已还原为出厂口令 %s，并已标记「首次登录必须改密」" % (username, factory_password))
-RESET_ADMIN_PY
-)" || rc=$?
-  if [ "$rc" -ne 0 ]; then
-    fail "重置口令失败（python 退出码 ${rc}）：
-      ${out}"
-  fi
-  _render_detail_block "$out"
-
-  # 清登录锁定键：连错 3 次（safe.loginlockthreshold）会锁 600 秒，
-  # 现场"重置完登不进去"的第一嫌疑就是它。⛔ 尽力而为：Redis 没起不算失败。
-  local indexdb
-  indexdb="$(read_conf_scalar redis indexdb)"
-  case "$indexdb" in
-    ''|*[!0-9]*) indexdb=1 ;;
-  esac
-  if [ -x "$REDIS_CLI" ]; then
-    if "$REDIS_CLI" -h "$REDIS_BIND" -p "$REDIS_PORT" -n "$indexdb" \
-         del "account_locked:${username}" "login_fail_count:${username}" >/dev/null 2>&1; then
-      det "  · 已清 Redis ${indexdb} 号库的登录锁定键（若有）"
-    else
-      det "  · Redis 未运行/连不上：若登录提示「账户已被锁定」，等 10 分钟再试"
-    fi
-  fi
-  det "  · 改完即可直接登录（无需重启）；仍登不上就执行 ./uvp-gb28181-ctl.sh restart 后再试"
-  return 0
+  # 语义（置 must_change_password=1、写后回读校验、清 Redis 锁定键）全在
+  # uvp-setup reset-admin 里 —— 与 Windows 版**同一份实现**，不允许两边各写一套。
+  local rc=0
+  "$SETUP_BIN" reset-admin --root "$ROOT" --username "$username" || rc=$?
+  [ "$rc" -eq 0 ] || fail "重置口令失败（uvp-setup 退出码 ${rc}）"
 }
+
 
 case "${1:-start}" in
   start)
@@ -2549,9 +1819,6 @@ case "${1:-start}" in
     ensure_database
     # ⛔ 端口必须先同步进 config.yml 再起服务：Redis 读 --port 参数、
     #   后端读 config.yml，两处不同源就是「Redis 起来了但后端连不上」。
-    if [ -z "$PY_BIN" ]; then
-      fail "找不到 python3 —— 改端口需要它（Ubuntu/Debian 请先 apt install python3）"
-    fi
     sync_ports_into_config
     # ⛔⛔ ZLM secret 必须对齐，且必须在**后端启动之前**：
     #   不对齐时平台调 ZLM 全被拒（-100 Please login first），

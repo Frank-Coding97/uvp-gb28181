@@ -174,11 +174,15 @@ function Quote-NativeArg {
 #     README 里有对照表。
 #
 # 结构仍是连续无空洞的 65 个端口，一条防火墙规则即可覆盖：
+# ⛔⛔ 2026-10-19 端口重排（老板定）：**明文 15500 / HTTPS 15501**。
+#   上一版正好相反（HTTPS 15500 / HTTP 15501）。这两个默认值必须**成对**改，
+#   只改一个就等于让两个 listen 抢同一端口；且 Windows 与 Linux 的语义要一致
+#   （Linux 是 51000 明文 / 51001 HTTPS），否则同一份文档两种说法。
 $PortDefault = @{
     HTTP           = 15502   # 后端 HTTP
     REDIS          = 15503   # Redis（仅回环）
-    HTTPS          = 15500   # nginx HTTPS（浏览器入口）
-    NGINX_HTTP     = 15501   # nginx HTTP（跳 HTTPS + 明文 API）
+    HTTPS          = 15501   # nginx HTTPS（浏览器入口，默认关闭）
+    NGINX_HTTP     = 15500   # nginx HTTP（默认入口；开 HTTPS 后跳转 + 明文 API）
     ZLM_HTTP       = 15504
     ZLM_SSL        = 15507
     ZLM_RTSP       = 15505
@@ -263,6 +267,19 @@ function Get-Config {
         if ($savedHttps.enabled -isnot [bool] -or $savedHttps.port -lt 1 -or $savedHttps.port -gt 65535) { Fail 'HTTPS 配置文件无效' }
         $script:HttpsEnabled = $savedHttps.enabled
         $ports.HTTPS = [int]$savedHttps.port
+
+        # ⛔⛔ 端口重排（2026-10-19：明文 15500 / HTTPS 15501）后的存量迁移：
+        #   上一版把 HTTPS 落盘成 15500，而 15500 现在是**明文端口** ⇒
+        #   两个 listen 抢同一端口，nginx 直接起不来（或 https-render 报
+        #   "HTTPS 端口不能与 HTTP 端口相同"），客户完全看不出是升级导致的。
+        #   ⇒ 只在**撞车**时迁移；手工设过的 8443 之类一律不碰。
+        if ($ports.HTTPS -eq $ports.NGINX_HTTP) {
+            Write-UvpLog "HTTPS 端口 $($ports.HTTPS) 与本包明文端口相同（旧版遗留），自动迁移到 $($PortDefault.HTTPS)"
+            & $SetupExe https-repair-port --root $Root `
+                --conflict ([string]$ports.NGINX_HTTP) --fallback ([string]$PortDefault.HTTPS)
+            if ($LASTEXITCODE -ne 0) { Fail "HTTPS 端口迁移失败（$httpsState）—— 两个监听不能同端口" }
+            $ports.HTTPS = [int]$PortDefault.HTTPS
+        }
     }
     return @{ Ports = $ports; EnvMap = $envMap; UserSet = @($ref.Value) }
 }
@@ -793,7 +810,19 @@ function Invoke-TlsMaterial {
     foreach ($dir in @((Split-Path -Parent $NginxCrt), (Split-Path -Parent $ZlmSslPem))) {
         if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
     }
+    # ⛔ 2026-10-19 起**优先用包内自带证书**（resource\cert）：安装时只做拷贝，
+    #   不再现场生成 —— 生成失败只写在日志里，现场表现就是"https 打不开"。
+    # ⛔ 只在目标文件缺失时拷贝：客户上传过真证书的机器，升级后不能被内置证书盖掉。
+    $bundledCrt = Join-Path $Root 'resource\cert\uvp.crt'
+    $bundledKey = Join-Path $Root 'resource\cert\uvp.key'
+    if ((-not (Test-Path -LiteralPath $NginxCrt)) -and (-not (Test-Path -LiteralPath $NginxKey)) -and
+        (Test-Path -LiteralPath $bundledCrt) -and (Test-Path -LiteralPath $bundledKey)) {
+        Copy-Item -LiteralPath $bundledCrt -Destination $NginxCrt -Force
+        Copy-Item -LiteralPath $bundledKey -Destination $NginxKey -Force
+    }
     $ips = @(Get-LanIP)
+    # ⛔ certgen 是**幂等**的：证书已存在就跳过生成，只负责把 ZLM 要的那份
+    #   "私钥+证书合一" PEM 补出来（ZLM 只认单文件）。所以内置证书就位后它也不会覆盖。
     & $SetupExe certgen --dir (Split-Path -Parent $NginxCrt) --zlm-pem $ZlmSslPem --cn 'uvp-local' --ip ($ips -join ',')
     if ($LASTEXITCODE -ne 0) { Write-UvpWarn '证书生成失败（不影响启动，但浏览器只能走 HTTP 明文端口）' }
 }

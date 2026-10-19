@@ -10,8 +10,8 @@ import (
 // splitSQL 按分号切分语句，跳过字符串字面量与注释里的分号。
 //
 // ⛔⛔ 本函数是 server/resource/database/sqlitebaseline/generate.py 的 split_sql()
-// 的逐字移植（也是 deploy/standalone/uvp-gb28181-ctl.sh 内嵌的那份），
-// **三处必须是同一条规则**：
+// 的逐字移植，**两处必须是同一条规则**（2026-10-19 起绿色包的建库全部走这里；
+// 老版 ctl.sh 里那份内嵌 Python 已删除，不再有第三份实现）：
 //   - 直接 split(";") 会在种子数据上炸掉：菜单标题、带查询串的回调 URL 里都有分号。
 //   - 逐行累积 + sqlite3.complete_statement 也不行：前一句的尾随注释会被算进下一句。
 //
@@ -99,17 +99,21 @@ func splitSQL(text string) []string {
 	return out
 }
 
-// splitDigest 与 Linux 版 ctl.sh 的 `UVP_DB_SPLIT_DIGEST=1` 分支**同格式**：
+// splitDigest 与基线生成器 generate.py 的对拍格式**同形**：
 //
 //	sha256("\n\x1e\n".join(stmts))
 //
 // 分隔符用 U+001E（Record Separator）：语句里不可能出现，拼接无歧义。
+// ⚠️ 这个格式最早是给 ctl.sh 的 `UVP_DB_SPLIT_DIGEST=1` 分支定的（那份已随内嵌
+// Python 一起删除），保留原样是为了 baseline_test.go 仍能用同一条命令对拍。
 func splitDigest(stmts []string) string {
 	sum := sha256.Sum256([]byte(strings.Join(stmts, "\n\x1e\n")))
 	return hex.EncodeToString(sum[:])
 }
 
-// 语句分相：与 ctl.sh 的 phase_of() 逐条对齐（只看前 40 个字符的大写前缀）。
+// 语句分相：把每条语句归到「建表 / 建索引 / 灌种子 / PRAGMA / 其它」之一，
+// 进度条按相分别推进。判据取前 40 个字符的大写前缀 —— 足够区分、且不会被
+// 语句中间的注释误伤（老版 ctl.sh 的 phase_of 用的就是这套判据，已随内嵌 Python 删除）。
 const (
 	phaseTable  = "table"
 	phaseIndex  = "index"

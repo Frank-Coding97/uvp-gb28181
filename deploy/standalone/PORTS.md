@@ -76,10 +76,19 @@
 # ---------------- ① 对外服务（防火墙需要开）----------------
 # 客户侧设备/手机/浏览器要能访问的就是这一段
 #
-#  51000      nginx HTTPS            （浏览器访问管理页面）
-#  51001      nginx HTTP             （跳 HTTPS；并为 /api/ 与
-#                                      /gb28181/ 保留明文转发，
+#  51000      nginx HTTP             （**默认入口**：新装直接开这个地址；
+#                                      并为 /api/ 与 /gb28181/ 做明文转发，
 #                                      供模拟器 App 等只用 HTTP 的客户端）
+#  51001      nginx HTTPS            （管理页面 TLS 入口；**默认关闭**，
+#                                      在「系统配置 → HTTPS」开启后才监听，
+#                                      开启后 51000 自动 301 跳到这里）
+#
+#  ⛔⛔ 2026-10-19 起这两个是**互换过**的（旧版 HTTPS 51000 / HTTP 51001）。
+#     客户拿到的地址里最短最好记的那个给默认入口用。存量实例升级时，
+#     `uvp-gb28181-ctl.sh` 会检查 data/https/settings.json 里落盘的 HTTPS 端口，
+#     与本包明文端口撞车就自动迁到 51001（`uvp-setup https-repair-port`）——
+#     否则两个 listen 抢同一端口，nginx 起不来。
+#     手工设过别的 HTTPS 端口（如 8443）不会被这条迁移碰。
 #
 #  51004      ZLM HTTP API           （平台调用：开关流、取配置）
 #  51005      ZLM RTSP               （设备拉流播放）
@@ -191,12 +200,16 @@
 #
 # 改 `config/config.env` 里的对应键（改动后 `./uvp-gb28181-ctl.sh start` 生效）：
 #
-#   UVP_HTTPS_PORT=51500            nginx HTTPS
-#   UVP_NGINX_HTTP_PORT=51501       nginx HTTP
+#   UVP_NGINX_HTTP_PORT=51500       nginx 明文（**默认 51000**，默认入口）
+#   UVP_HTTPS_PORT=51501            nginx HTTPS（**默认 51001**，默认关闭）
 #   UVP_HTTP_PORT=51502             后端
 #   UVP_REDIS_PORT=51503            Redis
 #   UVP_ZLM_HTTP_PORT=51504         ZLM 各协议（键名见上表端口右侧说明）
 #   UVP_ZLM_RTP_RANGE=51514-51563   ZLM RTP 动态段（默认 50 个）
+#
+# ⛔ 上面两个 nginx 端口**必须不同**：相同会让两个 listen 抢同一端口，nginx 起不来。
+#   改了 `UVP_HTTPS_PORT` 还要注意：data/https/settings.json 里落盘的端口优先 ——
+#   若你把它设成与明文端口相同，启动时会自动迁到本包默认的 51001（打一行日志）。
 #
 # ⛔ **SIP 例外：它不读 config.env**（见上「SIP 端口怎么定」）——
 #   改它在**引导页**里改（存 gb_sip_config 表）；改了要重启后端生效。

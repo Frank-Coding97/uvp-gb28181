@@ -90,8 +90,9 @@ func TestGetConfigReturnsLogCleanupDefaultsAndConfiguredState(t *testing.T) {
 	data := responseBody["data"].(map[string]interface{})
 	got := data["logCleanup"].(map[string]interface{})
 	require.Equal(t, float64(7), got["sipRetentionDays"])
-	require.Equal(t, float64(180), got["operationRetentionDays"])
-	require.Equal(t, float64(180), got["loginRetentionDays"])
+	// 2026-10-19 老板定：登录/操作日志出厂默认 7 天（上一版 180）。
+	require.Equal(t, float64(7), got["operationRetentionDays"])
+	require.Equal(t, float64(7), got["loginRetentionDays"])
 	require.Equal(t, float64(30), got["jobRetentionDays"])
 	require.Equal(t, float64(7), got["playbackRetentionDays"])
 	require.Equal(t, float64(7), got["schedulerRetentionDays"])

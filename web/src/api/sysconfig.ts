@@ -43,8 +43,12 @@ export type LogCleanupDraft = Omit<LogCleanupConfig, keyof LogCleanupUpdateConfi
 
 export const defaultLogCleanupConfig: LogCleanupConfig = {
   sipRetentionDays: 7,
-  operationRetentionDays: 180,
-  loginRetentionDays: 180,
+  // ⛔ 与后端 logcleanup/config.go 的 default*RetentionDays 及
+  //   server/config/config.example.yml 的 log_cleanup 段保持同一组值
+  //   （2026-10-19 老板定 7 天，上一版 180）。
+  //   这份只在前端拿到接口响应之前当占位；不一致会让页面先闪一下旧数字。
+  operationRetentionDays: 7,
+  loginRetentionDays: 7,
   jobRetentionDays: 30,
   playbackRetentionDays: 7,
   schedulerRetentionDays: 7,

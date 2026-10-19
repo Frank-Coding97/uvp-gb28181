@@ -1,9 +1,13 @@
 // Command uvp-setup 是绿色安装包的「首次运行辅助工具」。
 //
 // 为什么要有它（而不是继续用包内脚本）：
-//   - Linux 绿色包的内嵌 Python（deploy/standalone/uvp-gb28181-ctl.sh 的 DB_INIT_PY）
-//     依赖目标机有 python3；**Windows 客户机不能这么假设**。
-//   - Linux 版的自签证书用 openssl CLI 生成；Windows 自带没有 openssl。
+//   - Linux 绿色包原来那套内嵌 Python（deploy/standalone/uvp-gb28181-ctl.sh 的
+//     DB_INIT_PY / SYNC_PY / RESET_ADMIN_PY …）依赖目标机有 python3 ≥ 3.5；
+//     **Windows 客户机不能这么假设**，CentOS 7 更是只有 python2.7。
+//   - Linux 版的自签证书原来用 openssl CLI 生成；Windows 自带没有 openssl。
+//
+// ⇒ 2026-10-19 起两个平台**都**只调这个二进制：Linux 侧的 python/openssl 依赖
+//   已全部删除（证书改为随包内置），目标机不再需要任何解释器。
 //
 // 子命令：
 //
@@ -13,10 +17,10 @@
 //	uvp-setup reset-admin [--root <包根>] [--db <uvp.db>] [--username admin] [--password <明文>]
 //	                      # 忘记登录口令时把账号还原成出厂初始口令（见 resetadmin.go）
 //
-// ⛔ db-init 的建库语义必须与 Linux 版**逐条等价**（同一份 baseline.sql、同一种切分、
+// ⛔ db-init 的建库语义必须与**老版 Python 实现**逐条等价（同一份 baseline.sql、同一种切分、
 // 同样「PRAGMA 必须在事务外」、同样「重复索引名被 SQLite 静默跳过要显式报出」、
 // 同样的建库后对账）。契约锁在 baseline_test.go：切分指纹与 generate.py 的
-// split_sql() 逐字节比对（`stmts=N sha256=…`，与 ctl.sh 的 UVP_DB_SPLIT_DIGEST 同格式）。
+// split_sql() 逐字节比对（`stmts=N sha256=…`），端到端建库锁在 dbinit_test.go。
 package main
 
 import (
@@ -42,6 +46,14 @@ func main() {
 		err = runHTTPSRender(os.Args[2:])
 	case "ports-sync":
 		err = runPortsSync(os.Args[2:])
+	case "secret-sync":
+		err = runSecretSync(os.Args[2:])
+	case "https-state":
+		err = runHTTPSState(os.Args[2:])
+	case "https-repair-port":
+		err = runHTTPSRepairPort(os.Args[2:])
+	case "config-get":
+		err = runConfigGet(os.Args[2:])
 	case "reset-admin":
 		err = runResetAdmin(os.Args[2:])
 	case "-h", "--help", "help":
@@ -68,6 +80,11 @@ func usage() {
 		"  uvp-setup certgen --dir <目录> [--zlm-pem <file.pem>] [--cn uvp-local] [--ip A]... [--days 3650] [--force]",
 		"  uvp-setup ports-sync --env <config.env> --yml <config.yml> --ini <config.ini> \\",
 		"      --http P --redis P --https P --nginx-http P --zlm-http P --zlm-rtp-proxy P [--user-set K1,K2]",
+		"  uvp-setup secret-sync --ini <config.ini> --yml <config.yml>   # 以 ZLM 为准对齐 zlm.secret",
+		"  uvp-setup https-state --root <包根> [--default-port P]        # 打印 \"<0|1> <port>\"",
+		"  uvp-setup https-repair-port --root <包根> --conflict <旧端口> --fallback <新端口>",
+		"      # 端口重排后修存量 settings.json：只在落盘端口 == conflict 时改成 fallback",
+		"  uvp-setup config-get --yml <config.yml> --section S --key K   # 读段落内标量（可嵌套）",
 		"  uvp-setup https-render --root <包根>   # 应用页面保存的 HTTPS 配置",
 		"  uvp-setup reset-admin [--root <包根>] [--db <uvp.db>] [--config <config.yml>] [--username admin]",
 		"      [--password <明文>] [--no-force-change] [--no-unlock]",

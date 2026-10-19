@@ -1,7 +1,10 @@
 server:
   appdebug: true   # 调试模式开关：影响 gin Mode 和调试路由(swagger/pprof)；日志由 logs.level / logs.outputs 控制，与本开关无关
   cachetype: "redis" # 缓存模式 memory(单机/测试) OR redis(多实例必须)
-  syslog: false  # 是否记录 HTTP 操作日志到数据库(全局操作日志中间件)；与 logs.* 文件日志无关
+  syslog: true   # 是否记录 HTTP 操作日志到数据库(全局操作日志中间件)；与 logs.* 文件日志无关
+                 # ⛔ 出厂默认**开启**（老板 2026-10-19 定）：操作日志是合规与追责的依据，
+                 #    客户装完就该有，而不是等人去设置页发现还关着。关闭入口在
+                 #    「系统配置 → 日志清理」，与保留天数在同一页。
   notcheckuser: []    # 不检查权限的用户（api、菜单及数据权限均不检查），例如：[1]
   # 演示账号配置
   demoaccount:
@@ -25,11 +28,14 @@ system: # 品牌信息：登录页与系统设置展示，由配置接口下发�
   #系统图标
   systemicon: ""     # 浏览器页签 favicon
   #系统名称
-  systemname: "UVP-GB28181"
+  systemname: "UVP统一视频接入平台"
   #版权声明
-  systemcopyright: "Copyright © 2025 -2028  云南奇讯科技有限公司版权所有"
+  # ⛔ 下面是**占位值**：交付给客户前按实际主体替换（xxxxx 部分）。
+  #   只在登录页/页脚展示，不参与任何逻辑判断，改它无需重启业务逻辑（保存后前端立即生效）。
+  systemcopyright: "Copyright © 20xxxx-20xxxx xxxxxxxx科技有限公司版权所有"
   #备案号
-  systemrecordno: "滇ICP备16002997号"
+  # ⛔ 同样是占位值；没有备案就整行留空，页脚会自动不显示。
+  systemrecordno: "xICP备xxxxxxxx号"
 safe:
   #密码错误锁定阈值(指定时间内连续登录失败次数达到该值将锁定账号,0表示不锁定)
   loginlockthreshold: 3
@@ -42,7 +48,10 @@ safe:
   #密码是否必须包含特殊字符
   requirespecialchar: true
 captcha: # 登录验证码
-  open : false  # 是否开启验证码功能（开启后登录接口要求携带验证码ID与答案）
+  # ⛔ 出厂默认**开启**（老板 2026-10-19 定）：面向政企/公网可达的部署，
+  #    暴力破解与撞库是登录页最常见的攻击面，默认关着等于把风险交给客户去发现。
+  #    关闭入口在「系统配置 → 验证码配置」（a-switch），无需改本文件、无需重启。
+  open : true  # 是否开启验证码功能（开启后登录接口要求携带验证码ID与答案）
   length: 4   # 验证码生成时的长度
 httpserver:
   port: ":8080"    # 监听地址，冒号不能省略；改端口后注意同步 gb28181.media.hookport
@@ -106,6 +115,17 @@ logs:
   maxbackups: 7               # 归属当前 writer 的备份上限，旧历史文件保留
   maxage: 15                  # 备份保留天数
   compress: false             # 轮转出来的备份是否 gzip 压缩
+# 数据库日志保留天数（登录日志 / 操作日志等六类表的清理任务用）。
+#
+# 键名 = server/app/logcleanup 里的常量；范围 1-365，越界回落这里的默认值。
+# ⛔ 这里**只写登录与操作两项**：其余四类（SIP 报文 / 定时任务 / 回放 / 调度）
+#   沿用代码默认，不重复维护；一旦在「系统配置 → 日志清理」保存过一次，
+#   后端会把六项**全部**写回本段（Configured=true），到那时这里会变长，属正常。
+# ⛔ 默认 7 天（老板 2026-10-19 定）：登录/操作日志只用于近期审计与排障，
+#   长期堆积会把 SQLite 撑大、拖慢列表分页；需要长留的场景在页面上调大即可。
+log_cleanup:
+  operation_retention_days: 7   # 操作日志
+  login_retention_days: 7       # 登录日志
 casbin:                       # 权限模型（RBAC），策略存于数据库
   autoloadpolicyseconds: 120  # 扫描数据库策略的频率(单位：秒)
   tableprefix: "sys_"         # 策略表前缀，与迁移脚本保持一致

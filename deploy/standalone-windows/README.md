@@ -13,17 +13,18 @@
 首次启动会自动完成三件事（大约 1 分钟）：
 
 - 建库：创建 SQLite 数据库 `data\uvp.db`（111 张表 + 初始数据 + 管理员账号）
-- 发证书：生成 nginx 与流媒体用的自签名证书
+- 装证书：把包内自带的自签证书（`resource\cert\`）拷给 nginx 与流媒体，**不现场生成**
 - 写配置：把端口、ZLM 密钥等同步进 `config\` 下的配置文件
 
 启动完成后，按提示在浏览器打开：
 
 ```
-http://<本机IP>:15501
+http://<本机IP>:15500
 ```
 
 > **默认是明文 HTTP**（免证书、免浏览器安全提示）。要用 HTTPS，登录后到
-> **系统设置 → 系统配置 → HTTPS** 打开开关、指定端口并上传证书即可；
+> **系统设置 → 系统配置 → HTTPS** 打开开关、指定端口即可（**证书已随包内置**，不传也能用；
+> 只有想换成客户自己的证书时才需要上传）；
 > 改完平台会自动重载并给出新地址，重启后也保持你的选择。
 > 开 HTTPS 时若继续用自签名证书，浏览器会提示「不安全 / 证书不受信任」，选择**继续访问**即可。
 
@@ -57,8 +58,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\uvp-gb28181-ctl.ps1 start
 
 | 端口 | 用途 |
 |---|---|
-| 15500 | 管理页面（HTTPS，**默认关闭**，在系统配置里开启后才监听） |
-| 15501 | 管理页面（HTTP，**默认入口**）+ 明文 API 供设备扫码接入；开启 HTTPS 后自动跳转到 15500 |
+| 15500 | 管理页面（HTTP，**默认入口**）+ 明文 API 供设备扫码接入；开启 HTTPS 后自动跳转到 15501 |
+| 15501 | 管理页面（HTTPS，**默认关闭**，在系统配置里开启后才监听） |
 | 15502 | 后端 API（仅本机） |
 | 15503 | Redis（仅本机） |
 | 15504-15513 | 流媒体（ZLMediaKit）各协议 |
@@ -93,8 +94,8 @@ New-NetFirewallRule -DisplayName 'UVP-UDP' -Direction Inbound -Action Allow -Pro
 
 | 用途 | Windows 版 | Linux 版 |
 |---|---|---|
-| nginx HTTPS | 15500 | 51000 |
-| nginx HTTP | 15501 | 51001 |
+| nginx HTTPS | 15501 | 51001 |
+| nginx HTTP | 15500 | 51000 |
 | 后端 API | 15502 | 51002 |
 | Redis | 15503 | 51003 |
 | 流媒体各协议 | 15504-15513 | 51004-51013 |
@@ -115,8 +116,8 @@ New-NetFirewallRule -DisplayName 'UVP-UDP' -Direction Inbound -Action Allow -Pro
 只有 4 个端口允许自定义，其余端口由它们派生。编辑 `config\config.env`：
 
 ```ini
-UVP_HTTPS_PORT=15500
-UVP_NGINX_HTTP_PORT=15501
+UVP_NGINX_HTTP_PORT=15500
+UVP_HTTPS_PORT=15501
 UVP_HTTP_PORT=15502
 UVP_REDIS_PORT=15503
 ```
@@ -184,7 +185,8 @@ resource\               前端页面产物 + 建库脚本
 **浏览器打不开页面**
 
 1. 先执行 `status.cmd`，看四项是否都「运行中」。
-2. 四项都正常却打不开 → 检查地址是不是写成了 `http://`（要用 **https://**，端口 **15500**）。
+2. 四项都正常却打不开 → 以 `start.cmd` 打印的地址为准：**默认**是 **http://**、端口 **15500**；
+   只有在系统配置里开过 HTTPS 才是 **https://** + **15501**。写成后端端口（15502）也不对。
 3. 只有「管理页面」未运行 → 看 `logs\nginx-error.log`。
 
 **启动时提示「以下端口已被占用」**

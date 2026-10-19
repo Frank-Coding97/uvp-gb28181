@@ -10,8 +10,10 @@
 #   二维码里填 http://后端地址 即可，App 完全不碰 TLS。
 #
 # ⛔ 端口规划（与 uvp-gb28181-ctl.sh 的变量必须一致；完整表见同目录 PORTS.md）：
-#   51000 nginx HTTPS        ← 浏览器访问（端口由 uvp-gb28181-ctl.sh 填入 @HTTPS_PORT@）
-#   51001 nginx HTTP         ← 跳 HTTPS，并为 /api/ 与 /gb28181/ 留明文（@PLAIN_HTTP_PORT@）
+#   51000 nginx HTTP         ← **默认入口**；并为 /api/ 与 /gb28181/ 留明文（@PLAIN_HTTP_PORT@）
+#   51001 nginx HTTPS        ← 开启 HTTPS 后浏览器访问（@HTTPS_PORT@，默认关闭）
+#   ⛔ 2026-10-19 起这两个端口**互换过**（旧版 HTTPS 51000 / HTTP 51001）。
+#     存量实例的 data/https/settings.json 由 ctl.sh 在启动时自动迁移，见那段注释。
 #   51002 后端 HTTP          ← API + 二维码地址，**不设 TLS**（@BACKEND_PORT@）
 #   51003 Redis（仅回环）    51004-51013 ZLM 各协议
 #   51014-51063 ZLM RTP 动态段    51064 SIP（UDP+TCP，引导页预填）

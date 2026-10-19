@@ -6,8 +6,9 @@ const configApi = vi.hoisted(() => ({
   updateConfigAPI: vi.fn(),
   defaultLogCleanupConfig: {
     sipRetentionDays: 7,
-    operationRetentionDays: 180,
-    loginRetentionDays: 180,
+    // 与 web/src/api/sysconfig.ts 的真实默认值同形（2026-10-19 起 7 天）
+    operationRetentionDays: 7,
+    loginRetentionDays: 7,
     jobRetentionDays: 30,
     playbackRetentionDays: 7,
     schedulerRetentionDays: 7,

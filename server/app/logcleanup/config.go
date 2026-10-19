@@ -18,6 +18,19 @@ const (
 	SchedulerRetentionDaysConfigKey = "log_cleanup.scheduler_retention_days"
 	minRetentionDays                = 1
 	maxRetentionDays                = 365
+
+	// 登录日志 / 操作日志的**出厂默认保留天数**（老板 2026-10-19 定 7 天）。
+	//
+	// ⛔ 这两个值必须与 config.example.yml 的 `log_cleanup` 段一致：
+	//   config.yml 里没有该键时用这里的值；两处不一致会出现
+	//   「新装包 7 天、但把段删掉又变回另一个数」的鬼故事。
+	//   契约由 log_cleanup/config_test.go 与 controllers/config_log_cleanup_test.go 双锁。
+	//
+	// ⚠️ 这是**行为变更**：上一版默认 180 天。存量实例若从未在页面上保存过
+	//   「日志清理」，升级后会按 7 天清理 —— 这正是"默认值"的语义，
+	//   需要长留的客户在页面上调大即可（保存后 Configured=true，此后以落盘值为准）。
+	defaultOperationRetentionDays = 7
+	defaultLoginRetentionDays     = 7
 )
 
 // Config is the single retention snapshot used by log cleanup tasks.
@@ -55,8 +68,8 @@ func CurrentConfigUnlocked() Config {
 	c := app.ConfigYml
 	result := Config{
 		SIPRetentionDays:       gbconfig.DefaultSIPTraceRetentionDays,
-		OperationRetentionDays: 180,
-		LoginRetentionDays:     180,
+		OperationRetentionDays: defaultOperationRetentionDays,
+		LoginRetentionDays:     defaultLoginRetentionDays,
 		JobRetentionDays:       30,
 		PlaybackRetentionDays:  7,
 		SchedulerRetentionDays: 7,

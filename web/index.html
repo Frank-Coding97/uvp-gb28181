@@ -29,7 +29,9 @@
       })();
     </script>
     <link rel="stylesheet" href="/css/loading.css" type="text/css" />
-    <title>UVP-GB28181</title>
+    <!-- 首屏标题：App.vue 拿到系统配置后会立刻用 systemName 覆盖，这里只是加载前的兜底，
+         ⚠️ 不要与此处的 SIP userAgent/model（serviceConfigState.ts）混淆 —— 那两个是设备侧协议字段，不能改。 -->
+    <title>UVP统一视频接入平台</title>
     <!-- EasyPlayer.js 国标视频播放器(支持 H264/H265 + AAC/G711/PCMA, MSE/WCS/WASM 解码) -->
     <script src="/easyplayer/EasyPlayer-pro.js"></script>
   </head>

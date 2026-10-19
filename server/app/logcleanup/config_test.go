@@ -36,8 +36,9 @@ func TestCurrentConfigUsesExistingSIPValueAndRetentionDefaults(t *testing.T) {
 
 	got := CurrentConfig()
 	require.Equal(t, 21, got.SIPRetentionDays)
-	require.Equal(t, 180, got.OperationRetentionDays)
-	require.Equal(t, 180, got.LoginRetentionDays)
+	// 2026-10-19 老板定：登录/操作日志出厂默认 7 天（上一版 180）。
+	require.Equal(t, 7, got.OperationRetentionDays)
+	require.Equal(t, 7, got.LoginRetentionDays)
 	require.Equal(t, 30, got.JobRetentionDays)
 	require.Equal(t, 7, got.PlaybackRetentionDays)
 	require.Equal(t, 7, got.SchedulerRetentionDays)

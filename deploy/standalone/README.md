@@ -1,11 +1,14 @@
 # UVP-GB28181 统一视频接入平台 · Linux 绿色安装包
 
 解压即用。**不需要预装任何东西** —— 数据库（SQLite）、缓存（Redis）、流媒体
-（ZLMediaKit）、Web 服务器（nginx）全部随包自带。只需要：
+（ZLMediaKit）、Web 服务器（nginx）全部随包自带，**自签证书也随包自带**。只需要：
 
 - x86_64 或 aarch64 的 Linux，**glibc 2.28 及以上**（银河麒麟 V10 SP2 / 统信 UOS /
-  openEuler 等国产系统均可）；
-- **python3（3.5 及以上）** —— 首次启动建库、改端口要用它（多数发行版自带）。
+  openEuler 等国产系统均可）。
+
+> 从 v1.1.6 起**不再需要 Python**（也不再需要 openssl）：建库、改端口、对齐密钥、
+> 重置口令全部由包内 `bin/uvp-setup`（纯 Go 静态二进制）完成。老版本需要
+> python3 ≥ 3.5，这也是这版去掉它的原因 —— CentOS 7 只带 python2.7。
 
 ---
 
@@ -23,11 +26,12 @@ cd uvp-gb28181-*            # 解压出来的目录就是「包根」，后面�
 首次启动会自动建库（约 1 分钟，会打印进度），完成后输出访问地址：
 
 ```
-http://<本机IP>:51001
+http://<本机IP>:51000
 ```
 
 > **默认是明文 HTTP**（免证书、免浏览器安全提示）。要用 HTTPS，登录后到
-> **系统设置 → 系统配置 → HTTPS** 打开开关、指定端口并上传证书即可；
+> **系统设置 → 系统配置 → HTTPS** 打开开关、指定端口即可（**证书已随包内置**，不传也能用；
+> 只有想换成客户自己的证书时才需要上传）；
 > 改完平台会自动重载并给出新地址，重启后也保持你的选择。
 > 开 HTTPS 时若继续用自签名证书，浏览器会提示「不安全 / 证书不受信任」，选择**继续访问**即可。
 
@@ -67,8 +71,8 @@ http://<本机IP>:51001
 
 | 端口 | 用途 |
 |---|---|
-| 51000 | 管理页面（HTTPS，**默认关闭**，在系统配置里开启后才监听） |
-| 51001 | 管理页面（HTTP，**默认入口**）+ 明文 API 供设备扫码接入；开启 HTTPS 后自动跳转到 51000 |
+| 51000 | 管理页面（HTTP，**默认入口**）+ 明文 API 供设备扫码接入；开启 HTTPS 后自动跳转到 51001 |
+| 51001 | 管理页面（HTTPS，**默认关闭**，在系统配置里开启后才监听） |
 | 51002 | 后端 API（设备/App 接入地址） |
 | 51003 | Redis（只监听 127.0.0.1，无需放行） |
 | 51004-51013 | 流媒体（ZLM）各协议：HTTP/RTSP/RTMP/RTC/WebRTC 信令/SRT/ONVIF/STUN |
@@ -124,8 +128,8 @@ sudo ufw allow 51004:51064/udp
 只有 4 个端口允许自定义，其余由它们派生。编辑 `config/config.env`：
 
 ```ini
-UVP_HTTPS_PORT=51000
-UVP_NGINX_HTTP_PORT=51001
+UVP_NGINX_HTTP_PORT=51000
+UVP_HTTPS_PORT=51001
 UVP_HTTP_PORT=51002
 UVP_REDIS_PORT=51003
 ```
@@ -175,7 +179,7 @@ config/                 config.yml（后端配置）+ config.env（环境变量/
 data/                   uvp.db（数据库）+ redis AOF + secrets/（运行期密钥）
 logs/                   全部日志（含 app/ 后端业务日志、zlm/ 流媒体日志）
 run/                    运行期文件（pid 文件）
-resource/               前端产物 + 建库脚本（baseline.sql）
+resource/               前端产物 + 建库脚本（baseline.sql）+ 内置证书（cert/）
 ```
 
 ---
@@ -185,8 +189,8 @@ resource/               前端产物 + 建库脚本（baseline.sql）
 **页面打不开**
 
 1. 先 `./uvp-gb28181-ctl.sh status`，看四项是否都「运行中」。
-2. 都正常却打不开 → 以 `start` 打印的地址为准：**默认**是 **http://**、端口 **51001**；
-   只有在系统配置里开过 HTTPS 才是 **https://** + **51000**。写成后端端口（51002）也不对。
+2. 都正常却打不开 → 以 `start` 打印的地址为准：**默认**是 **http://**、端口 **51000**；
+   只有在系统配置里开过 HTTPS 才是 **https://** + **51001**。写成后端端口（51002）也不对。
 3. 只有「管理页面」未运行 → 看 `logs/nginx.log`。
 
 **登录页报 `no such table`**
@@ -195,12 +199,25 @@ resource/               前端产物 + 建库脚本（baseline.sql）
 （脚本检测到库不完整会自动重建）；仍不行就停服后删掉 `data/uvp.db` 再 `start`
 （**只在还没录入业务数据时**这么做 —— 删库等于清空业务数据）。
 
-**提示 python3 版本过旧 / 找不到 python3**
+**提示 `bin/uvp-setup 没有执行权限` / `Permission denied`**
+
+解压工具把可执行位丢了。执行一次即可（不需要装任何东西）：
 
 ```bash
-sudo apt install python3          # 或 yum install python3
-# 装了新版但默认 python3 仍偏旧时，可显式指定：
-UVP_BUILD_PY=/usr/bin/python3.6 ./uvp-gb28181-ctl.sh start
+chmod +x uvp-gb28181-ctl.sh bin/uvp-setup bin/uvp-server updater/uvp-updater
+```
+
+> 本包**不需要** Python、OpenSSL、Java、Docker，也不需要 root（注册开机自启才要）。
+
+**浏览器提示证书不受信任 / 证书已过期**
+
+包内自带一套自签证书（`resource/cert/`），装机时直接拷过去，**不再现场生成**。
+它只保证"链路加密"，浏览器仍会提示不安全（点「继续访问」即可）；要用真证书，
+登录后到 **系统设置 → 系统配置 → HTTPS** 上传。
+想让每台机器用一把唯一私钥，执行（然后 `restart`）：
+
+```bash
+./bin/uvp-setup certgen --dir vendor/nginx/conf --zlm-pem data/secrets/zlm-ssl.pem --force
 ```
 
 **启动时提示「端口已被占用」**

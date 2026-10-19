@@ -194,6 +194,23 @@ else
   log "⚠️ 未安装 shellcheck，跳过脚本静态检查（apt install shellcheck 可启用）"
 fi
 
+# ---- nginx 两个端口默认值：都存在、且**互不相同** ----
+#
+# ⛔⛔ 为什么单独加这一条（2026-10-19 端口互换时发现的门禁缺口）：
+#   这两个默认值在 ctl.sh 里是**成对**使用的（一个给 TLS 段、一个给明文段）。
+#   只改其中一个（或抄漏一行）时，最坏的结果不是"端口错了"，而是**两个 listen
+#   抢同一端口**：httpsconfig.Render 会报「HTTPS 端口不能与 HTTP 端口相同」，
+#   客户看到的是"装不上"，而真因在出包脚本里一个数字。
+#   上面那段 dup_ports 只抓"同一变量被定义两次"，抓不到"两个变量撞成同一个值"。
+# ⛔ 判据用取值比对，不用"出现过几次"（两行式赋值必然出现两次，数次数会误报）。
+nginx_https_default="$(sed -n 's/^NGINX_HTTPS_PORT_DEFAULT=//p' "$DEPLOY_DIR/uvp-gb28181-ctl.sh" | tail -1)"
+nginx_http_default="$(sed -n 's/^NGINX_HTTP_PORT_DEFAULT=//p' "$DEPLOY_DIR/uvp-gb28181-ctl.sh" | tail -1)"
+[ -n "$nginx_https_default" ] && [ -n "$nginx_http_default" ] \
+  || fail "uvp-gb28181-ctl.sh 里找不到 NGINX_HTTPS_PORT_DEFAULT / NGINX_HTTP_PORT_DEFAULT（默认值换写法了？）"
+[ "$nginx_https_default" != "$nginx_http_default" ] \
+  || fail "nginx 的 HTTPS 与明文端口默认值相同（${nginx_https_default}）—— 两个 listen 会抢同一端口"
+log "nginx 端口默认值：明文 ${nginx_http_default} / HTTPS ${nginx_https_default}"
+
 # ------------------------------------------------------------ 自动构建 ----
 #
 # ⛔⛔⛔ 为什么这里必须自己构建，而不是「复制预编译产物」（老板 2026-10-09 定）
@@ -536,6 +553,21 @@ log "复制后端资源（SQLite 建库脚本 + 静态资源）"
 cp -a "$SERVER_DIR/resource/database/sqlitebaseline" "$PKG/resource/baseline"
 [ -d "$SERVER_DIR/resource/public" ] && cp -a "$SERVER_DIR/resource/public/." "$PKG/resource/public/" || true
 
+# ---- 内置自签证书（安装时不再现场生成）----
+# ⛔⛔ 为什么要随包带：客户机（CentOS 7 等）不保证有 openssl，而"安装时生成"
+#   等于在交付链路上多加一个会失败、且失败了只写在日志里的步骤。
+# ⛔ 放在 resource/cert/ 而**不是** vendor/nginx/conf/：升级是原地 tar 覆盖，
+#   而 vendor/nginx/conf 会被整目录替换 —— 客户上传的真证书会被内置证书盖掉。
+#   ctl 只在目标文件缺失时才拷贝（见 ensure_self_signed_cert）。
+# ⛔ 有效期见 assets/cert 的生成说明：起点刻意写在过去，现场机器时间不准也不会被判失效。
+CERT_SRC="$DEPLOY_DIR/assets/cert"
+[ -f "$CERT_SRC/uvp.crt" ] && [ -f "$CERT_SRC/uvp.key" ] \
+  || fail "缺少内置证书 ${CERT_SRC}/uvp.{crt,key} —— 出包资产不全"
+mkdir -p "$PKG/resource/cert"
+install -m 0644 "$CERT_SRC/uvp.crt" "$PKG/resource/cert/uvp.crt"
+install -m 0600 "$CERT_SRC/uvp.key" "$PKG/resource/cert/uvp.key"
+log "  内置证书已随包（resource/cert/，安装时直接拷贝，不调用 openssl）"
+
 # ---- IP 归属地数据库（可选资源，缺失时运行时自动走远程或显示未知）----
 if [ -d "$SERVER_DIR/resource/ipdb" ]; then
   mkdir -p "$PKG/resource/ipdb"
@@ -801,6 +833,10 @@ chmod 0755 "$STAGE" "$PKG"
 # 构建机 umask 可能放宽目录和文件默认权限，不能把它带进交付包。
 chmod 0700 "$PKG/config"
 chmod 0600 "$PKG/config/config.yml" "$PKG/config/config.env"
+
+# Static vendor trees can contain nested repository metadata. Never include
+# .git directories in a customer release archive.
+find "$PKG" -name .git -exec rm -rf {} +
 
 log "打包 → ${ARCHIVE}"
 # ⛔⛔ 必须保证归档里**没有 Apple 扩展属性**（xattr / provenance / ACL）。

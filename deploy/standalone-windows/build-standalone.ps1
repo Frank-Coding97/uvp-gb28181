@@ -176,8 +176,8 @@ function New-RandomBase64Url {
 #     默认端口撞上它就"开箱即挂"，所以整段上移到 15500 避开这一带。
 #   ⚠️ 这四个值与 uvp-gb28181-ctl.ps1 的 $PortDefault 必须**完全一致**，
 #      否则出包时注入的端口与运行期脚本用的端口会对不上（出包阶段有交叉校验）。
-$HttpsPort       = 15500   # nginx HTTPS（浏览器入口）
-$PlainHttpPort   = 15501   # nginx HTTP（跳 HTTPS + 明文 API，供设备扫码）
+$HttpsPort       = 15501   # nginx HTTPS（浏览器入口，默认关闭）
+$PlainHttpPort   = 15500   # nginx HTTP（默认入口；开 HTTPS 后跳转 + 明文 API，供设备扫码）
 $HttpPort        = 15502   # 后端 HTTP
 $RedisPort       = 15503   # Redis（仅回环）
 $SipPort         = 15564   # SIP 信令（由平台引导页录入，不在端口预检内）
@@ -481,6 +481,23 @@ Copy-Tree -Source $SqliteDir -Destination (Join-Path $Pkg 'resource\baseline')
 Copy-Item -LiteralPath $VersionJson -Destination (Join-Path $Pkg 'version.json') -Force
 Det 'resource\baseline\（baseline.sql 等）· version.json'
 
+# ---- resource\cert：内置自签证书（安装时直接拷贝，不再现场生成）----
+# ⛔ 与 Linux 版共用同一份资产（deploy\standalone\assets\cert）：两个平台的自签证书
+#   本来是各自的，统一后现场排障只需认一个指纹。
+# ⛔ 放 resource\ 而不是 vendor\nginx\conf\：升级是原地覆盖，客户上传的真证书
+#   不能被包内证书盖掉；ctl 只在目标文件缺失时才拷贝。
+$certSrc = Join-Path $DeployDir 'assets\cert'
+$bundledCrt = Join-Path $certSrc 'uvp.crt'
+$bundledKey = Join-Path $certSrc 'uvp.key'
+if (-not (Test-Path -LiteralPath $bundledCrt) -or -not (Test-Path -LiteralPath $bundledKey)) {
+    Fail "缺少内置证书（$certSrc\uvp.crt / uvp.key）—— 出包资产不全"
+}
+$certDst = Join-Path $Pkg 'resource\cert'
+New-Item -ItemType Directory -Force -Path $certDst | Out-Null
+Copy-Item -LiteralPath $bundledCrt -Destination (Join-Path $certDst 'uvp.crt') -Force
+Copy-Item -LiteralPath $bundledKey -Destination (Join-Path $certDst 'uvp.key') -Force
+Det 'resource\cert\（内置自签证书，安装时不调用任何外部工具）'
+
 # ---- IP 归属地数据库（可选资源，缺失时运行时自动走远程或显示未知）----
 $ipdbDir = Join-Path $ServerDir 'resource\ipdb'
 if (Test-Path -LiteralPath $ipdbDir) {
@@ -623,6 +640,8 @@ foreach ($item in @(
         @{ P = 'config\config.yml';                  N = '后端配置' },
         @{ P = 'config\config.env';                  N = '环境变量（密钥）' },
         @{ P = 'resource\baseline\baseline.sql';     N = 'SQLite 建库脚本' },
+        @{ P = 'resource\cert\uvp.crt';              N = '内置证书' },
+        @{ P = 'resource\cert\uvp.key';              N = '内置证书私钥' },
         @{ P = 'resource\public\index.html';         N = '前端产物' },
         @{ P = 'vendor\redis\redis-server.exe';      N = 'Redis' },
         @{ P = 'vendor\zlm\MediaServer.exe';         N = 'ZLM' },

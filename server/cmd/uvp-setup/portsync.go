@@ -5,22 +5,31 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 )
 
 // managedEnvKeys 是 config.env 里由本工具**接管**的键。
 //
-// ⛔⛔ 只有这 4 个端口键 + 它们的 UVP_USER_SET_ 标记会被重写；**其余键（含注释行）
+// ⛔⛔ 只有这些键会被重写；**其余键（含注释行）必须原样搬回去**。
 //
-//	必须原样搬回去**。Linux 版在这里栽过：早期实现用 `> config.env` 全量覆盖、
-//	只写 4 个端口键，而上一版的文档正教用户在 config.env 里加一行
+//	Linux 版在这里栽过：早期实现用 `> config.env` 全量覆盖、只写 4 个端口键，
+//	而上一版的文档正教用户在 config.env 里加一行
 //	`UVP_SIP_TRACE_ENCRYPTION_KEY=…` —— 用户照做、重启、密钥消失、
 //	SIP 报文诊断永久 degraded，**全程零报错**。
+//
+// ⛔ ZLM 端口也必须落盘：ctl 启动时按 config.env 里的 UVP_ZLM_* 决定探测端口，
+// 不写就会每次启动都回到默认值 —— 用户改了端口、ZLM 也听新端口，
+// 而脚本仍拿默认值去探活 ⇒ 报「ZLM 未运行」。
 var managedEnvKeys = []string{
 	"UVP_HTTP_PORT", "UVP_REDIS_PORT", "UVP_HTTPS_PORT", "UVP_NGINX_HTTP_PORT",
 	"UVP_USER_SET_UVP_HTTP_PORT", "UVP_USER_SET_UVP_REDIS_PORT",
 	"UVP_USER_SET_UVP_HTTPS_PORT", "UVP_USER_SET_UVP_NGINX_HTTP_PORT",
+	"UVP_ZLM_HTTP_PORT", "UVP_ZLM_SSL_PORT", "UVP_ZLM_RTSP_PORT", "UVP_ZLM_RTMP_PORT",
+	"UVP_ZLM_RTC_PORT", "UVP_ZLM_RTP_PROXY_PORT", "UVP_ZLM_RTP_RANGE",
+	"UVP_ZLM_SIGNALING_PORT", "UVP_ZLM_SIGNALING_SSL_PORT", "UVP_ZLM_SRT_PORT",
+	"UVP_ZLM_ONVIF_PORT", "UVP_ZLM_ICE_PORT",
 }
 
 type portSet struct {
@@ -125,7 +134,7 @@ func runPortsSync(args []string) error {
 	return nil
 }
 
-// writeEnvFile 重写 config.env：托管的 4 个端口键 + 标记，其余**原样保留**。
+// writeEnvFile 重写 config.env：托管的端口键 + 标记，其余**原样保留**。
 func writeEnvFile(path string, ports portSet, markers map[string]bool) error {
 	resolved, err := resolvePath(path)
 	if err != nil {
@@ -134,9 +143,16 @@ func writeEnvFile(path string, ports portSet, markers map[string]bool) error {
 	if err := os.MkdirAll(filepath.Dir(resolved), 0o755); err != nil {
 		return fmt.Errorf("创建 config 目录失败: %w", err)
 	}
+	// ⛔ 行尾必须跟着**已有文件**走：Linux 上要是被写成 CRLF，
+	//   ctl 的 `sed -n 's/^UVP_HTTP_PORT=//p'` 会把 \r 一起带回变量里，
+	//   后续 `[ "$port" -gt 0 ]` 直接报 integer expression expected。
+	eol := "\n"
+	if runtime.GOOS == "windows" {
+		eol = "\r\n"
+	}
 	var preserved []string
 	if raw, err := os.ReadFile(resolved); err == nil {
-		eol := detectEOL(string(raw))
+		eol = detectEOL(string(raw))
 		for _, line := range splitLines(string(raw), eol) {
 			managed := false
 			for _, key := range managedEnvKeys {
@@ -150,6 +166,10 @@ func writeEnvFile(path string, ports portSet, markers map[string]bool) error {
 			}
 		}
 	}
+	// ⛔ 必须削掉首尾空行：本函数**每次启动**都会重写这个文件，
+	//   保留空行就等于"每启动一次多一行"，几百次之后没人愿意再看它。
+	preserved = trimBlankEdges(preserved)
+
 	var out []string
 	for _, key := range []string{"UVP_HTTP_PORT", "UVP_REDIS_PORT", "UVP_HTTPS_PORT", "UVP_NGINX_HTTP_PORT"} {
 		out = append(out, fmt.Sprintf("%s=%d", key, ports.managed()[key]))
@@ -161,18 +181,47 @@ func writeEnvFile(path string, ports portSet, markers map[string]bool) error {
 			out = append(out, "UVP_USER_SET_"+key+"=1")
 		}
 	}
+	out = append(out, zlmEnvLines(ports.zlm)...)
 	if len(preserved) > 0 {
 		out = append(out, "")
 		out = append(out, preserved...)
 	}
-	body := strings.Join(out, "\r\n")
-	if !strings.HasSuffix(body, "\r\n") {
-		body += "\r\n"
-	}
+	body := strings.Join(out, eol) + eol
 	if err := os.WriteFile(resolved, []byte(body), 0o644); err != nil {
 		return fmt.Errorf("写入 config.env 失败: %w", err)
 	}
 	return nil
+}
+
+// zlmEnvLines 把 ZLM 的生效端口写成 UVP_ZLM_* 键。
+//
+// ⛔ 顺序与 ctl 里的变量声明顺序一致（HTTP/SSL/RTSP/…），肉眼对账最快。
+func zlmEnvLines(z zlmPorts) []string {
+	return []string{
+		fmt.Sprintf("UVP_ZLM_HTTP_PORT=%d", z.http),
+		fmt.Sprintf("UVP_ZLM_SSL_PORT=%d", z.ssl),
+		fmt.Sprintf("UVP_ZLM_RTSP_PORT=%d", z.rtsp),
+		fmt.Sprintf("UVP_ZLM_RTMP_PORT=%d", z.rtmp),
+		fmt.Sprintf("UVP_ZLM_RTC_PORT=%d", z.rtc),
+		fmt.Sprintf("UVP_ZLM_RTP_PROXY_PORT=%d", z.rtpProxy),
+		fmt.Sprintf("UVP_ZLM_RTP_RANGE=%s", z.rtpRange),
+		fmt.Sprintf("UVP_ZLM_SIGNALING_PORT=%d", z.signaling),
+		fmt.Sprintf("UVP_ZLM_SIGNALING_SSL_PORT=%d", z.signalingSSL),
+		fmt.Sprintf("UVP_ZLM_SRT_PORT=%d", z.srt),
+		fmt.Sprintf("UVP_ZLM_ONVIF_PORT=%d", z.onvif),
+		fmt.Sprintf("UVP_ZLM_ICE_PORT=%d", z.ice),
+	}
+}
+
+func trimBlankEdges(lines []string) []string {
+	start, end := 0, len(lines)
+	for start < end && strings.TrimSpace(lines[start]) == "" {
+		start++
+	}
+	for end > start && strings.TrimSpace(lines[end-1]) == "" {
+		end--
+	}
+	return lines[start:end]
 }
 
 // syncYAMLPorts 只改「后端真正读的那 5 个端口键」，且**限定在所属段落内**。
@@ -275,6 +324,12 @@ type zlmIniEdit struct {
 	section string
 	key     string
 	value   string
+	// soft=true：键**不存在**时只告警、不阻断启动。
+	// 判据是「这处改动影响不影响收流/可用性」：
+	//   · enableTurn 是死开关（平台只下发 STUN），缺了不改变任何可用性；
+	//   · rtsp/rtmp 的 sslport 客户可能自己删过，缺了也不影响规划段。
+	// 其余键（端口、port_range）缺一个就是同步逻辑失效 —— 必须停。
+	soft bool
 }
 
 // syncZLMIni 同步 ZLM 的 config.ini。
@@ -300,26 +355,34 @@ func syncZLMIni(path string, z zlmPorts, secret, mediaServerID string) error {
 
 	edits := []zlmIniEdit{}
 	if secret != "" {
-		edits = append(edits, zlmIniEdit{"api", "secret", secret})
+		edits = append(edits, zlmIniEdit{section: "api", key: "secret", value: secret})
 	}
 	if mediaServerID != "" {
-		edits = append(edits, zlmIniEdit{"general", "mediaServerId", mediaServerID})
+		edits = append(edits, zlmIniEdit{section: "general", key: "mediaServerId", value: mediaServerID})
 	}
 	if z.http > 0 {
 		edits = append(edits,
-			zlmIniEdit{"http", "port", strconv.Itoa(z.http)},
-			zlmIniEdit{"http", "sslport", strconv.Itoa(z.ssl)},
+			zlmIniEdit{section: "http", key: "port", value: strconv.Itoa(z.http)},
+			zlmIniEdit{section: "http", key: "sslport", value: strconv.Itoa(z.ssl)},
 		)
 	}
 	if z.rtsp > 0 {
-		edits = append(edits, zlmIniEdit{"rtsp", "port", strconv.Itoa(z.rtsp)})
+		edits = append(edits,
+			zlmIniEdit{section: "rtsp", key: "port", value: strconv.Itoa(z.rtsp)},
+			// RTSP/RTMP over TLS 一律不启用：规划段只给一条明文口，
+			// 客户若自己配了证书可把这行删掉（soft：缺键不影响启动）。
+			zlmIniEdit{section: "rtsp", key: "sslport", value: "0", soft: true},
+		)
 	}
 	if z.rtmp > 0 {
-		edits = append(edits, zlmIniEdit{"rtmp", "port", strconv.Itoa(z.rtmp)})
+		edits = append(edits,
+			zlmIniEdit{section: "rtmp", key: "port", value: strconv.Itoa(z.rtmp)},
+			zlmIniEdit{section: "rtmp", key: "sslport", value: "0", soft: true},
+		)
 	}
 	if z.rtc > 0 {
 		edits = append(edits,
-			zlmIniEdit{"rtc", "port", strconv.Itoa(z.rtc)},
+			zlmIniEdit{section: "rtc", key: "port", value: strconv.Itoa(z.rtc)},
 			// ⛔⛔ WebRTC 媒体是 UDP + TCP **两套**监听：`port` 走 UDP、`tcpPort` 走 TCP。
 			//   两个都得写（同号、不同协议栈，不冲突；与 icePort/iceTcpPort 同一个道理）。
 			//   只改 port ⇒ tcpPort 留在 ZLM 出厂默认 **8000**（规划段外），
@@ -328,31 +391,33 @@ func syncZLMIni(path string, z zlmPorts, secret, mediaServerID string) error {
 			//   address already in use` 就退出 —— 而原因行还会被退出时那几十行
 			//   `~EventPoller` 析构日志挤出 tail 窗口，现场极易误判成"缺依赖"。
 			//   （2026-10-12 客户 Linux 包实机踩到；Linux 侧同步器同一处也漏，已一并修。）
-			zlmIniEdit{"rtc", "tcpPort", strconv.Itoa(z.rtc)},
-			zlmIniEdit{"rtc", "signalingPort", strconv.Itoa(z.signaling)},
-			zlmIniEdit{"rtc", "signalingSslPort", strconv.Itoa(z.signalingSSL)},
-			zlmIniEdit{"rtc", "icePort", strconv.Itoa(z.ice)},
-			zlmIniEdit{"rtc", "iceTcpPort", strconv.Itoa(z.ice)},
-			zlmIniEdit{"rtc", "enableTurn", "0"},
+			zlmIniEdit{section: "rtc", key: "tcpPort", value: strconv.Itoa(z.rtc)},
+			zlmIniEdit{section: "rtc", key: "signalingPort", value: strconv.Itoa(z.signaling)},
+			zlmIniEdit{section: "rtc", key: "signalingSslPort", value: strconv.Itoa(z.signalingSSL)},
+			zlmIniEdit{section: "rtc", key: "icePort", value: strconv.Itoa(z.ice)},
+			zlmIniEdit{section: "rtc", key: "iceTcpPort", value: strconv.Itoa(z.ice)},
+			// ⛔ TURN 是**死功能**（平台只下发 STUN），关掉只是省掉一段临时端口区。
+			//   ⇒ 键不存在时只告警、不阻断启动：为一个没人用的中继拦住整个平台上线不划算。
+			zlmIniEdit{section: "rtc", key: "enableTurn", value: "0", soft: true},
 		)
 	}
 	if z.rtpProxy > 0 {
-		edits = append(edits, zlmIniEdit{"rtp_proxy", "port", strconv.Itoa(z.rtpProxy)})
+		edits = append(edits, zlmIniEdit{section: "rtp_proxy", key: "port", value: strconv.Itoa(z.rtpProxy)})
 	}
 	if z.rtpRange != "" {
-		edits = append(edits, zlmIniEdit{"rtp_proxy", "port_range", z.rtpRange})
+		edits = append(edits, zlmIniEdit{section: "rtp_proxy", key: "port_range", value: z.rtpRange})
 	}
 	if z.srt > 0 {
-		edits = append(edits, zlmIniEdit{"srt", "port", strconv.Itoa(z.srt)})
+		edits = append(edits, zlmIniEdit{section: "srt", key: "port", value: strconv.Itoa(z.srt)})
 	}
 	if z.onvif > 0 {
-		edits = append(edits, zlmIniEdit{"onvif", "port", strconv.Itoa(z.onvif)})
+		edits = append(edits, zlmIniEdit{section: "onvif", key: "port", value: strconv.Itoa(z.onvif)})
 	}
 	if z.ffmpegBin != "" {
-		edits = append(edits, zlmIniEdit{"ffmpeg", "bin", z.ffmpegBin})
+		edits = append(edits, zlmIniEdit{section: "ffmpeg", key: "bin", value: z.ffmpegBin})
 	}
 
-	applied, missed := 0, []string{}
+	applied, missed, softMissed := 0, []string{}, []string{}
 	for _, e := range edits {
 		ok, err := replaceINIScalar(lines, e.section, e.key, e.value)
 		if err != nil {
@@ -360,9 +425,13 @@ func syncZLMIni(path string, z zlmPorts, secret, mediaServerID string) error {
 		}
 		if ok {
 			applied++
-		} else {
-			missed = append(missed, e.section+"."+e.key)
+			continue
 		}
+		if e.soft {
+			softMissed = append(softMissed, "["+e.section+"] "+e.key)
+			continue
+		}
+		missed = append(missed, e.section+"."+e.key)
 	}
 	if len(missed) > 0 {
 		// ⛔ 不静默：漏改一个键的后果是「平台按 A 端口调 ZLM、ZLM 听 B 端口」，
@@ -373,6 +442,12 @@ func syncZLMIni(path string, z zlmPorts, secret, mediaServerID string) error {
 		return fmt.Errorf("写入 ZLM config.ini 失败: %w", err)
 	}
 	note("ZLM config.ini 已同步（%d 处：端口 + 身份 + 关闭 TURN）", applied)
+	if len(softMissed) > 0 {
+		// ⛔ 走 stderr：ctl 会把 stdout 归到「明细」里，这类"要人看一眼"的提示
+		//   必须能跳出来（与 shell 侧 `det` 的缩进宽度一致）。
+		fmt.Fprintf(os.Stderr, "%s! ZLM config.ini 里没有这些可选键，已跳过：%s\n",
+			indent, strings.Join(softMissed, ", "))
+	}
 	return nil
 }
 

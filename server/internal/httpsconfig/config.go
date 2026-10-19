@@ -214,6 +214,41 @@ func readSettings(path string) (Settings, error) {
 	return s, err
 }
 
+// SettingsPath 是页面保存的 HTTPS 状态落盘位置（相对包根）。
+// ⛔ 启动脚本要按它决定 nginx 监听哪个端口，路径只能在**这里**定义一次。
+func SettingsPath(root string) string { return filepath.Join(root, "data/https/settings.json") }
+
+// ReadSettingsFile 读取落盘的 HTTPS 状态。
+//
+// exists=false 表示还没落盘（首次启动前）——调用方应回退到自己的默认端口，
+// 这不是错误。文件存在但内容非法则返回 error：那种情况下无法判断该听哪个端口，
+// 静默回退会让页面在"HTTPS 已开"和"以为没开"之间反复横跳。
+func ReadSettingsFile(path string) (s Settings, exists bool, err error) {
+	if _, statErr := os.Stat(path); statErr != nil {
+		if os.IsNotExist(statErr) {
+			return Settings{}, false, nil
+		}
+		return Settings{}, false, statErr
+	}
+	s, err = readSettings(path)
+	if err != nil {
+		return Settings{}, true, fmt.Errorf("HTTPS 配置文件无效（%s）: %w", path, err)
+	}
+	return s, true, nil
+}
+
+// WriteSettingsFile 把落盘的 HTTPS 状态原子写回（0600）。
+//
+// ⛔ 供 `uvp-setup https-repair-port` 做**端口重排后的存量迁移**用：
+//   写成 shell 里的 sed 会在 JSON 被格式化/换行后静默改错字段，
+//   而这里与 ReadSettingsFile 共用同一份结构体定义，字段名不可能漂移。
+func WriteSettingsFile(path string, s Settings) error {
+	if s.Port < 1 || s.Port > 65535 {
+		return fmt.Errorf("无效的 HTTPS 端口: %d", s.Port)
+	}
+	return writeJSON(path, s)
+}
+
 const probeEndpoint = "/__uvp_https_probe"
 
 func addProbe(block, mode string) string {
