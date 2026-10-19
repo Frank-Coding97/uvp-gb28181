@@ -132,6 +132,11 @@ func (r *GormRepo) ListCatalogReconcileStates(ctx context.Context) ([]models.GbR
 
 func (r *GormRepo) catalogFileQuery(ctx context.Context, query FileQuery) *gorm.DB {
 	db := r.db.WithContext(ctx).Model(&models.GbRecordingFile{})
+	// ⛔ channel_id=0 的行是录像缓存任务（设备录像下载）的分片内部记录：
+	// 下载流（pb-）不属于任何通道，hook 落库时归属为零，recordcache 靠它们
+	// 拿时长/大小推进度（recordcache/index.go）。它们只属于缓存页，
+	// 2026-10-03 拍板不进云端录像列表；合法录像（hook/对账两条路）必有通道主键。
+	db = db.Where("channel_id <> 0")
 	if !query.FullAccess {
 		if len(query.AllowedDeptIDs) == 0 {
 			return db.Where("1 = 0")

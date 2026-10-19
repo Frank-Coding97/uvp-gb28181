@@ -70,6 +70,42 @@ func TestCatalogRepoAvailabilityFiltersAndScopedDetail(t *testing.T) {
 	require.ErrorIs(t, err, ErrRecordingFileNotFound)
 }
 
+func TestCatalogRepoHidesUnattributedCacheSegments(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:catalog-cache-segments?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.GbRecordingFile{}))
+	now := time.Now().UTC()
+	length, size := 93.0, uint64(4096)
+	// 缓存任务分片：hook 落库、channel_id=0、归属全空 —— 只属于缓存页
+	segment := models.GbRecordingFile{
+		ChannelID: 0, DeviceID: "", NodeID: 10, VHost: models.DefaultRecordingVHost, App: models.DefaultRecordingApp,
+		Stream: "pb-abc", FileKey: BuildFileKey(10, "/record/pb/seg.mp4"), FileName: "seg.mp4", FilePath: "/record/pb/seg.mp4",
+		StartTime: &now, TimeLen: &length, FileSize: &size, Source: models.RecordingFileSourceHook,
+		MetadataState: models.RecordingMetadataComplete, DiscoveredAt: now, LastSeenAt: &now,
+	}
+	require.NoError(t, db.Create(&segment).Error)
+	legit := catalogFile(21, 1, 10, now, "camera.mp4")
+	require.NoError(t, db.Create(&legit).Error)
+
+	repo := NewGormRepo(db)
+	for _, query := range []FileQuery{
+		{Page: 1, PageSize: 20, FullAccess: true, KnownNodeIDs: []int64{10}, AccessibleNodeIDs: []int64{10}},
+		{Page: 1, PageSize: 20, AllowedDeptIDs: []uint{1}, KnownNodeIDs: []int64{10}, AccessibleNodeIDs: []int64{10}},
+	} {
+		page, listErr := repo.ListCatalogFiles(context.Background(), query)
+		require.NoError(t, listErr)
+		require.EqualValues(t, 1, page.Total)
+		require.Len(t, page.Files, 1)
+		require.Equal(t, legit.ID, page.Files[0].ID)
+	}
+	// 关键词搜索也不该把缓存分片捞出来
+	page, err := repo.ListCatalogFiles(context.Background(), FileQuery{
+		Page: 1, PageSize: 20, FullAccess: true, Keyword: "seg", KnownNodeIDs: []int64{10}, AccessibleNodeIDs: []int64{10},
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 0, page.Total)
+}
+
 func TestCatalogRepoDefaultsListWithoutDateFilter(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:catalog-default-window?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)

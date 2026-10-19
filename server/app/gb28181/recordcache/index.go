@@ -19,9 +19,10 @@ import (
 // on_record_mp4 hook（ZLM 自己发的，载荷里带 time_len / file_size）已经把
 // 真实数据写进这张表了，直接读即可 —— 不必再问设备，也不必问 ZLM。
 //
-// 关于归属：缓存流的记录在这张表里 channel_id=0 / device_id=”，
-// 因为 pb- 流不属于任何通道。它们因此**不会**出现在按通道过滤的云端录像列表里，
-// 不会污染用户的云端录像。
+// 关于归属：缓存流的记录在这张表里 channel_id=0 / device_id=''，
+// 因为 pb- 流不属于任何通道。它们不进云端录像列表是靠**列表查询排除
+// channel_id=0**（recording/catalog_repo.go），不是靠这里不写 —— 这里必须写，
+// 否则下面的时长/大小就没了，进度会退化成按墙钟推进。
 type GormSegmentFileIndex struct {
 	db *gorm.DB
 }
