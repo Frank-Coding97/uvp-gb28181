@@ -59,7 +59,7 @@ function tokenScopes() {
   return { light: declarations(source.slice(0, darkAt)), dark: declarations(source.slice(darkAt)) };
 }
 
-/** 找出「白字压 --uvp-brand 底色」的规则块 —— 暗色下必然糊。 */
+/** 找出「白字压品牌浅色底」的规则块 —— 暗色下必然糊。 */
 function whiteOnBrandOffenders() {
   const block = /([^{}]*)\{([^{}]*)\}/g;
   const offenders: string[] = [];
@@ -67,8 +67,13 @@ function whiteOnBrandOffenders() {
     const source = stripComments(readFileSync(file, "utf8"));
     for (const match of source.matchAll(block)) {
       const [, selector, body] = match;
-      if (!/color:\s*#ffffff/i.test(body)) continue;
-      if (!/background:\s*var\(--uvp-brand(-strong)?\)/.test(body)) continue;
+      // `(?:^|[;\s{])` 前缀是为了不把 `border-color` / `background-color` 当成 `color`
+      if (!/(?:^|[;\s{])color:\s*#fff(?:fff)?\b/i.test(body)) continue;
+      // ⛔ 2026-10-18 补：`--zlm-brand-500/600` 是 `--uvp-brand(-strong)` 的别名
+      //   （见 `style/model/uvp-ui-language.scss`），暗色下同样是**文字用的浅蓝**
+      //   ⇒ 白字压上去一样糊。漏判这两个别名，等于给「白字压浅蓝」留了后门
+      //   （节点管理「保存策略」按钮就是这么漏的）。
+      if (!/background:\s*var\(--(?:uvp|zlm)-brand(?:-strong|-500|-600)?\)/.test(body)) continue;
       offenders.push(`${relative(ROOT, file)} :: ${selector.trim().split("\n").pop()?.trim()}`);
     }
   }
@@ -111,5 +116,38 @@ describe("仪表盘运行态弹窗的标签页选中态", () => {
     expect(rule?.[1]).toMatch(/color:\s*var\(--uvp-solid-text\)/);
     expect(rule?.[1]).toMatch(/background:\s*var\(--uvp-solid-bg\)/);
     expect(rule?.[1]).not.toMatch(/var\(--uvp-brand\)/);
+  });
+});
+
+/*
+ * 节点管理 → 调度策略面板的「保存策略」按钮。
+ *
+ * ⛔ 起因（2026-10-18）：按钮写成 `color: #ffffff; background: var(--zlm-brand-600)`。
+ *   `--zlm-brand-600` 只是 `--uvp-brand-strong` 的别名，暗色下 = #93c5fd（文字用浅蓝），
+ *   白字压上去对比度 1.6:1，按钮整块糊成一团浅色；而且它绕过了上面的全局扫描
+ *   （那条扫描以前只认 `--uvp-brand`，不认 `--zlm-*` 别名）。
+ *   ⚠️ hover 也必须盯：同文件里 `.panel-actions button:hover` 会把文字染成 brand-600，
+ *   对实心按钮等于把字重新变浅 —— 必须被更高特异性的规则覆盖回白字。
+ */
+describe("节点管理 · 调度策略面板的保存按钮", () => {
+  const source = () =>
+    stripComments(readFileSync(resolve(SRC_DIR, "views/gb28181/zlm/workbench/scheduling/SchedulerStrategyPanel.vue"), "utf8"));
+
+  it("静止态走实心面 token，不再把 --zlm-brand-600 当底色、不再硬编码白字", () => {
+    const rule = source().match(/\.panel-actions\s+\.primary-button\s*\{([^{}]*)\}/);
+    expect(rule, "保存按钮的主规则不见了").toBeDefined();
+    expect(rule?.[1]).toMatch(/color:\s*var\(--uvp-solid-text\)/);
+    expect(rule?.[1]).toMatch(/background:\s*var\(--uvp-solid-bg\)/);
+    expect(rule?.[1]).not.toMatch(/--zlm-brand|#ffffff/);
+  });
+
+  it("hover 与按下态覆盖回白字和实心面色，不被通用 :hover 染成浅蓝", () => {
+    const hover = source().match(/\.panel-actions\s+\.primary-button:hover[^{]*\{([^{}]*)\}/);
+    expect(hover, "hover 规则不见了").toBeDefined();
+    expect(hover?.[1]).toMatch(/color:\s*var\(--uvp-solid-text\)/);
+    expect(hover?.[1]).toMatch(/background:\s*var\(--uvp-solid-hover-bg\)/);
+    const active = source().match(/\.panel-actions\s+\.primary-button:active[^{]*\{([^{}]*)\}/);
+    expect(active, "按下态规则不见了").toBeDefined();
+    expect(active?.[1]).toMatch(/background:\s*var\(--uvp-solid-active-bg\)/);
   });
 });

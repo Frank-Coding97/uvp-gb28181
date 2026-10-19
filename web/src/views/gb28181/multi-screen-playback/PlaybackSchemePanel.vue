@@ -496,10 +496,12 @@ watch(
   cursor: not-allowed;
   opacity: 0.45;
 }
+
+/* ⛔ 实心按钮走 --uvp-solid-*：--zlm-brand-600 暗色下是浅蓝(#93c5fd)，白字压上去只有 1.80:1 */
 .icon-button.primary {
-  color: #ffffff;
-  background: var(--zlm-brand-600);
-  border-color: var(--zlm-brand-600);
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
+  border-color: var(--uvp-solid-border);
 }
 .scheme-list-toolbar {
   gap: 8px;
@@ -538,6 +540,8 @@ watch(
   background: transparent;
   border: 0;
 }
+
+/* ⛔ 实心按钮走 --uvp-solid-*：--zlm-brand-600 暗色下是浅蓝(#93c5fd)，白字压上去只有 1.80:1 */
 .scheme-save,
 .scheme-apply {
   display: inline-flex;
@@ -548,10 +552,10 @@ watch(
   padding: 0 10px;
   font: inherit;
   font-size: 11px;
-  color: #ffffff;
+  color: var(--uvp-solid-text);
   cursor: pointer;
-  background: var(--zlm-brand-600);
-  border: 1px solid var(--zlm-brand-600);
+  background: var(--uvp-solid-bg);
+  border: 1px solid var(--uvp-solid-border);
   border-radius: var(--zlm-radius-sm);
 }
 .scheme-save-form {

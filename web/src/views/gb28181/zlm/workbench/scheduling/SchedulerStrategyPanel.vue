@@ -239,10 +239,27 @@ defineExpose({ refresh });
   cursor: wait;
   opacity: 0.6;
 }
+
+/*
+ * ⛔⛔ 实心主按钮只准用 `--uvp-solid-*`（深蓝），不许用 `--zlm-brand-600` 当底色。
+ *   暗色下 `--zlm-brand-600` 解析成 `--uvp-brand-strong` = #93c5fd（**文字用的浅蓝**），
+ *   白字压上去对比度只有 1.80:1，整个按钮糊成一片浅色块（老板 2026-10-18 截图反馈）。
+ *   注意下面的 `.panel-actions button:hover` 会把文字染成 brand-600 —— 对实心按钮必须覆盖回白字。
+ */
 .panel-actions .primary-button {
-  color: #ffffff;
-  background: var(--zlm-brand-600);
-  border-color: var(--zlm-brand-600);
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
+  border-color: var(--uvp-solid-border);
+}
+.panel-actions .primary-button:hover:not(:disabled) {
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-hover-bg);
+  border-color: var(--uvp-solid-hover-bg);
+}
+.panel-actions .primary-button:active:not(:disabled) {
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-active-bg);
+  border-color: var(--uvp-solid-active-bg);
 }
 .permission-state,
 .switch-error,

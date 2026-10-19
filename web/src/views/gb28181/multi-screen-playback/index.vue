@@ -1416,10 +1416,12 @@ onBeforeUnmount(() => {
   background: var(--zlm-card);
   border: 1px solid var(--zlm-border);
 }
+
+/* ⛔ 实心按钮走 --uvp-solid-*：--zlm-brand-600 暗色下是浅蓝(#93c5fd)，白字压上去只有 1.80:1 */
 .dialog-primary {
-  color: #ffffff;
-  background: var(--zlm-brand-600);
-  border: 1px solid var(--zlm-brand-600);
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
+  border: 1px solid var(--uvp-solid-border);
 }
 .spin {
   animation: spin 900ms linear infinite;

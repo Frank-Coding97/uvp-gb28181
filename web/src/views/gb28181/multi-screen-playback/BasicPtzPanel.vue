@@ -467,11 +467,13 @@ onBeforeUnmount(() => {
   background: var(--zlm-brand-50);
   border-color: var(--zlm-brand-100);
 }
+
+/* ⛔ 按下态是实心面，必须走 --uvp-solid-*：--zlm-brand-600 暗色下是浅蓝(#93c5fd)，白字压上去只有 1.80:1 */
 .ptz-pad button:active:not(:disabled),
 .lens-row button:active:not(:disabled) {
-  color: #ffffff;
-  background: var(--zlm-brand-600);
-  border-color: var(--zlm-brand-600);
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-active-bg);
+  border-color: var(--uvp-solid-active-bg);
 }
 .ptz-pad button:disabled,
 .lens-row button:disabled {
