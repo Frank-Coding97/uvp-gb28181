@@ -253,6 +253,9 @@ UPDATER_SOCKET="$RUN/updater.sock"
 UPDATER_STATE="$ROOT/updater-state"
 UPDATER_GATE_PATH="$ROOT/updater-gate/gate.json"
 UPDATER_REGISTRATION="$ROOT/config/updater-registration.json"
+# 助手被 install 成独立 systemd 单元时的单元名，与 uvp-gb28181-service-install.sh
+# 里的 UPDATER_UNIT_NAME 必须逐字一致（契约测试钉住）。
+UPDATER_UNIT_NAME="uvp-gb28181-updater.service"
 
 # ------------------------------------------------------ 端口（可在目标机改）----
 # ⛔⛔ 端口必须能在**目标机上**改，而不是只在打包时。
@@ -481,6 +484,16 @@ start_updater() {
     sleep 0.1
   done
   tail -30 "$LOGS/updater.log" >&2 || true
+  # ⛔⛔ 这条报错现场几乎必然看不懂：`updater registration parent must not be
+  #   group/world writable`。它说的是「**从 / 到 config/ 的每一层目录**都不能对
+  #   同组/其他人可写」，而现场最常见的来源是「包解压在一个 775 的目录里」
+  #   （自己 mkdir 的 umask、或 /opt 下 chmod 777）—— 2026-10-20 在 220 上
+  #   实测就是这样卡住的，报错完全指不到"目录权限"这一层。
+  #   助手这么严格是安全设计（它要以 root 身份替换程序文件），不能放宽 ⇒ 只能把话说清楚。
+  if grep -q "group/world writable" "$LOGS/updater.log" 2>/dev/null; then
+    det "原因：安装目录的某一层上级目录对同组/其他人可写，升级助手拒绝在这种位置运行。"
+    det "修法：chmod 755 \"${ROOT}\" \"$(dirname "$ROOT")\"（报错涉及的每一层都要 755），然后重试。"
+  fi
   fail "升级助手未能启动"
 }
 
@@ -501,6 +514,87 @@ serve_updater() {
   fi
   printf '%s\n' "$$" > "$UPDATER_PID_FILE"
   exec "$UPDATER_BIN" serve --socket "$UPDATER_SOCKET" --state "$UPDATER_STATE" --registration "$UPDATER_REGISTRATION"
+}
+
+# ---------------------------------------------------------- 升级助手 ----
+#
+# ⛔⛔ **设计契约（别翻）**：业务 `stop` / `restart` **不得**停掉升级助手。
+#   升级流程本身就是「先停业务 → 助手替换文件 → 再起业务」，助手被一起杀掉
+#   等于升级断在半路，还会留下半成品状态。
+#   ⇒ 所以 stop 只停业务四件套，助手只能由 `stop-updater` 单独停。
+#
+# ⛔⛔ 但「不在 stop 的管辖内」不等于「用户不需要知道它在跑」。
+#   2026-10-20 在 220 上真踩到：`ctl.sh stop` 之后 51000-51064 全释放、
+#   `status` 四行全是「未运行」—— 可 ps 里 `uvp-updater serve` 还在跑（ppid=1）。
+#   用户以为"整套停了"，实际还剩一个后台进程占着 socket。
+#   ⇒ 按「只能补维度、不能翻语义」处理：**status 必须显示它、stop 必须提示它**，
+#     并补一个显式的 `stop-updater` / `stop-all` 入口 —— 不改 stop 的语义。
+
+# updater_pid 打印助手 pid（pid 文件里那个还活着才算数）。
+updater_pid() {
+  local pid=""
+  if [ -f "$UPDATER_PID_FILE" ]; then
+    pid="$(cat "$UPDATER_PID_FILE" 2>/dev/null || true)"
+  fi
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    printf '%s' "$pid"
+    return 0
+  fi
+  return 1
+}
+
+# updater_running 判助手是否真的还活着。
+# ⛔ pid 文件优先，但**不能只看它**：助手由 systemd 托管时 pid 文件由 serve_updater
+#   写入，而绿色包场景下 pid 文件可能随 run/ 目录一起被清掉 ⇒ 必须有按可执行路径
+#   的兜底（与 stop_by_pidfile 同一个道理）。
+# ⛔ 也**不能只看 socket**：残留的 socket 文件在进程死后依然存在，只看它就会
+#   永远报「运行中」。socket 仅用于 status 的兜底描述，不参与判活。
+updater_running() {
+  updater_pid >/dev/null 2>&1 && return 0
+  local found=""
+  if [ -x "$UPDATER_BIN" ]; then
+    # || true：没找到进程是正常情况，而 pgrep 无匹配退出码是 1，
+    # 在 set -e 下会直接杀掉脚本（与 stop_by_pidfile 里同样的坑）。
+    found="$(proc_pids_by_exe "$UPDATER_BIN" || true)"
+  fi
+  [ -n "${found//$'\n'/ }" ]
+}
+
+# updater_systemd_managed 判断助手是不是由独立 systemd 单元托管的。
+# ⛔⛔ 托管时**绝对不能直接 kill**：单元里写着 `Restart=on-failure`，SIGTERM 被判成
+#   失败后 3 秒就拉回来 —— 症状就是「stop 说停了、两秒后又活了」，
+#   比不停更误导人。必须走 systemctl。
+updater_systemd_managed() {
+  [ -f "/etc/systemd/system/${UPDATER_UNIT_NAME}" ] || return 1
+  command -v systemctl >/dev/null 2>&1 || return 1
+  systemctl is-active --quiet "$UPDATER_UNIT_NAME" 2>/dev/null
+}
+
+# updater_status_line 给 status 用的单行描述。
+updater_status_line() {
+  local pid=""
+  if pid="$(updater_pid 2>/dev/null)"; then
+    printf '运行中（PID %s）' "$pid"
+  elif updater_systemd_managed; then
+    printf '运行中（systemd 单元 %s）' "$UPDATER_UNIT_NAME"
+  elif [ -S "$UPDATER_SOCKET" ]; then
+    printf '运行中（socket 存在，pid 文件缺失）'
+  else
+    printf '未运行'
+  fi
+}
+
+stop_updater() {
+  if updater_systemd_managed; then
+    systemctl stop "$UPDATER_UNIT_NAME" 2>/dev/null || fail "停止升级助手（${UPDATER_UNIT_NAME}）失败"
+  else
+    stop_by_pidfile "$UPDATER_PID_FILE" "$UPDATER_BIN" "升级助手"
+  fi
+  rm -f "$UPDATER_SOCKET"
+  if updater_running; then
+    fail "升级助手仍在运行，请检查 ${UPDATER_PID_FILE} 与 ${UPDATER_SOCKET}"
+  fi
+  ok "升级助手已停止"
 }
 
 # ⛔ 端口规划：整段 51000-51064 **连续无空洞**（老板 2026-10-10 定）。
@@ -847,17 +941,22 @@ proc_pids_by_exe() {
   #   测试时抓到：PIDS 里冒出来的正是测试进程自己的 pid）。
   #   $$ 是脚本主进程、$BASHPID 是当前（子）shell；命令替换会 fork 子 shell，
   #   两者 pid 不同，所以两个都要排。
+  # ⛔⛔ `BASHPID` 是 **bash 4.0+ 才有的变量**，bash 3.2（老 macOS / 部分精简系统）
+  #   里它不存在，而本脚本是 `set -u` ⇒ `$BASHPID` 直接 unbound variable 崩掉，
+  #   进程查找恒为空 ⇒ 兜底静默失效（症状又是「stop 说停了、进程还在」）。
+  #   ⇒ 一律写 `${BASHPID:-$$}`：有就用真值，没有就退回 $$（至少排掉主 shell）。
+  local self_a="$$" self_b="${BASHPID:-$$}"
   if has_pgrep; then
     while IFS= read -r p; do
       [ -n "$p" ] || continue
-      if [ "$p" = "$$" ] || [ "$p" = "$BASHPID" ]; then continue; fi
+      if [ "$p" = "$self_a" ] || [ "$p" = "$self_b" ]; then continue; fi
       printf '%s\n' "$p"
     done < <(pgrep -f "$exe" 2>/dev/null || true)
     return 0
   fi
   for d in /proc/[0-9]*; do
     pid="${d#/proc/}"
-    if [ "$pid" = "$$" ] || [ "$pid" = "$BASHPID" ]; then continue; fi
+    if [ "$pid" = "$self_a" ] || [ "$pid" = "$self_b" ]; then continue; fi
     if [ -r "$d/cmdline" ]; then
       # cmdline 是 NUL 分隔的 argv；用 bash 内建 read -d '' 逐段比对，
       # 全程不调外部命令（tr/grep 在精简系统里也不保证存在）。
@@ -1855,6 +1954,9 @@ case "${1:-start}" in
   start-updater)
     start_updater
     ;;
+  stop-updater)
+    stop_updater
+    ;;
   serve-updater)
     serve_updater
     ;;
@@ -1863,14 +1965,31 @@ case "${1:-start}" in
     stop_backend
     stop_zlm
     stop_redis
-    # 升级助手独立运行，业务 stop/restart 不得杀掉它。
-    log "已停止"
+    # 升级助手独立运行，业务 stop/restart 不得杀掉它（契约见 stop_updater 上方）。
+    # ⛔ 但它必须**被说出来**：不说的话现场只看到四行"没在跑"，以为整套停了。
+    #   restart 走 `stop --quiet`，避免这行提示夹在重启流程里当噪音。
+    if [ "${2:-}" != "--quiet" ] && updater_running; then
+      _upid="$(updater_pid 2>/dev/null || true)"
+      log "业务服务已停止"
+      det "升级助手仍在后台运行${_upid:+（PID ${_upid}）} —— 如要一并停止：$0 stop-updater"
+      det "（它是升级流程的执行者，stop 不杀它是刻意的；停业务时它会继续待命）"
+    else
+      log "已停止"
+    fi
+    ;;
+  stop-all)
+    stop_nginx
+    stop_backend
+    stop_zlm
+    stop_redis
+    stop_updater
+    log "已停止（含升级助手）"
     ;;
   migrate)
     migrate_backend
     ;;
   restart)
-    "$0" stop; "$0" start
+    "$0" stop --quiet; "$0" start
     ;;
   status)
     redis_healthy    && log "Redis:  运行中（端口 ${REDIS_PORT}）"  || log "Redis:  未运行"
@@ -1881,12 +2000,19 @@ case "${1:-start}" in
     else
       log "nginx:  未安装（可直接访问 http://127.0.0.1:${HTTP_PORT}）"
     fi
+    # ⛔ 升级助手必须出现在 status 里：它不归 stop 管，不显示就等于"看不见的常驻进程"。
+    if [ -x "$UPDATER_BIN" ]; then
+      log "升级助手: $(updater_status_line)"
+    fi
     ;;
   reset-password)
     reset_admin_password "${2:-}"
     ;;
   *)
-    echo "用法: $0 {start|stop|restart|status|migrate|start-updater|serve-updater|reset-password [账号名]}" >&2
+    echo "用法: $0 {start|stop|stop-all|restart|status|migrate|start-updater|stop-updater|serve-updater|reset-password [账号名]}" >&2
+    echo "  stop          ：停止业务服务（Redis / ZLM / 后端 / nginx），升级助手继续待命" >&2
+    echo "  stop-all      ：上面全停，再停升级助手（确实要整机下线时用）" >&2
+    echo "  stop-updater  ：只停升级助手（升级进行中请勿执行）" >&2
     echo "  reset-password：忘记了登录口令时，把账号（默认 admin）的口令还原成出厂口令" >&2
     exit 2
     ;;
