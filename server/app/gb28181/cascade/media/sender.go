@@ -34,8 +34,11 @@ type GBSenderClient interface {
 type SenderClientFactory func(*node.Node) GBSenderClient
 
 type SenderRequest struct {
-	Source        StartResult
-	SSRC          string
+	Source StartResult
+	SSRC   string
+	// RTPInfoURL is the local media resource URL advertised in MANSRTSP.
+	// RemoteIP/RemotePort remain the upstream RTP receiver address.
+	RTPInfoURL    string
 	PayloadType   int
 	RemoteIP      string
 	RemotePort    int
@@ -63,8 +66,67 @@ type SenderLease struct {
 	client     GBSenderClient
 	request    zlm.GBSendRTPRequest
 	nodeSecret string
+	rtpInfoMu  sync.Mutex
 	once       sync.Once
 	err        error
+}
+
+type gbRTPInfoReader interface {
+	GetGBSendRTPInfo(context.Context, zlm.GBSendRTPRequest) (*zlm.GBRTPInfo, error)
+}
+
+type gbRTPInfoResetter interface {
+	ResetGBSendRTPInfo(context.Context, zlm.GBSendRTPRequest) error
+}
+
+// RefreshRTPInfo obtains the first packet sample for this sender when the
+// backing ZLM implementation exposes it. Older nodes simply leave the cached
+// value unchanged and callers omit the optional RTP-Info header.
+func (l *SenderLease) RefreshRTPInfo(ctx context.Context) (*zlm.GBRTPInfo, error) {
+	if l == nil || l.client == nil {
+		return nil, nil
+	}
+	l.rtpInfoMu.Lock()
+	defer l.rtpInfoMu.Unlock()
+	reader, ok := l.client.(gbRTPInfoReader)
+	if ok {
+		info, err := reader.GetGBSendRTPInfo(ctx, l.request)
+		if err != nil {
+			return nil, fmt.Errorf("refresh sender RTP info: %s", redactNodeSecret(err.Error(), l.nodeSecret))
+		}
+		if info != nil {
+			l.RTPInfo = info
+		}
+	}
+	return cloneRTPInfo(l.RTPInfo), nil
+}
+
+// ResetRTPInfo clears the cached sample and asks an enhanced ZLM sender to
+// capture the next packet. The endpoint is optional so a legacy node remains
+// usable; the caller may then omit RTP-Info until a fresh value is available.
+func (l *SenderLease) ResetRTPInfo(ctx context.Context) error {
+	if l == nil || l.client == nil {
+		return nil
+	}
+	var err error
+	if resetter, ok := l.client.(gbRTPInfoResetter); ok {
+		err = resetter.ResetGBSendRTPInfo(ctx, l.request)
+	}
+	l.rtpInfoMu.Lock()
+	l.RTPInfo = nil
+	l.rtpInfoMu.Unlock()
+	if err != nil {
+		return fmt.Errorf("reset sender RTP info: %s", redactNodeSecret(err.Error(), l.nodeSecret))
+	}
+	return nil
+}
+
+func cloneRTPInfo(info *zlm.GBRTPInfo) *zlm.GBRTPInfo {
+	if info == nil {
+		return nil
+	}
+	copy := *info
+	return &copy
 }
 
 // IsActive checks the leased SSRC without changing other senders or the source.
@@ -114,6 +176,7 @@ func (s *Sender) Start(ctx context.Context, request SenderRequest) (*SenderLease
 	}
 	params := zlm.GBSendRTPRequest{
 		VHost: defaultSenderVHost, App: request.Source.App, Stream: request.Source.StreamID, SSRC: request.SSRC,
+		RTPInfoURL:  request.RTPInfoURL,
 		PayloadType: request.PayloadType, RemoteIP: request.RemoteIP, RemotePort: request.RemotePort, Transport: request.Transport,
 		RTCPKeepalive: request.RTCPKeepalive,
 	}

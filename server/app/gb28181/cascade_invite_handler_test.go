@@ -304,11 +304,15 @@ func newCascadeVideoTestRuntimeWithSource(t *testing.T, source media.SourceStart
 			}
 		}
 		if strings.HasSuffix(r.URL.Path, "listRtpSender") {
-			_, _ = fmt.Fprint(w, `{"code":0,"data":["0200000001","0200000002","1200000001","1200000002"]}`)
+			_, _ = fmt.Fprint(w, `{"code":0,"data":["0200000001","0200000002","1200000001","1200000002"],"rtp_info":{"0200000001":{"seq":9,"rtptime":9000},"1200000001":{"seq":9,"rtptime":9000}}}`)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "resetRtpSenderInfo") {
+			_, _ = fmt.Fprint(w, `{"code":0}`)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if _, err := fmt.Fprint(w, `{"code":0,"local_port":31000,"rtp_info":{"url":"rtsp://192.0.2.20/rtp/source-1","seq":9,"rtptime":9000}}`); err != nil {
+		if _, err := fmt.Fprint(w, `{"code":0,"local_port":31000}`); err != nil {
 			panic(err)
 		}
 	}))

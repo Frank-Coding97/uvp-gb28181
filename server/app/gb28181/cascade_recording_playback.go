@@ -36,6 +36,7 @@ type cascadePlaybackLease struct {
 	service       cascadePlaybackService
 	id, owner     string
 	row           *model.GbCascadeMediaSession
+	sender        *media.SenderLease
 	closing       bool
 	senderStopped bool
 }
@@ -70,7 +71,11 @@ func (l *cascadePlaybackLease) startSender(ctx context.Context, row model.GbCasc
 		return nil, context.Canceled
 	}
 	l.row = &row
-	return l.runtime.sender.Start(ctx, request)
+	sender, err := l.runtime.sender.Start(ctx, request)
+	if err == nil {
+		l.sender = sender
+	}
+	return sender, err
 }
 
 func (l *cascadePlaybackLease) release() {
@@ -152,11 +157,21 @@ func (h *cascadeVideoRuntime) playbackInfo(req *sip.Request, tx sip.ServerTransa
 		session.cancel()
 		return
 	}
-	_, err = lease.service.Action(ctx, lease.id, lease.owner, gbplayback.ActionRequest{Action: command.Action, PositionSeconds: command.PositionSeconds, Scale: command.Scale, RangeValue: command.RangeValue})
-	// A seek or resume starts a new media position. Any captured first packet
-	// from the previous position is invalid for this response.
-	if err == nil && (command.Action == "seek" || command.Action == "resume") {
+	refreshed := true
+	if command.Action == "seek" || command.Action == "resume" {
+		// A seek/resume changes the first packet that belongs to this PLAY
+		// response. Clear the old sample before forwarding the control command;
+		// enhanced ZLM nodes also reset their next-packet sampler.
 		session.rtpInfo = nil
+		if session.sender != nil {
+			refreshed = session.sender.ResetRTPInfo(ctx) == nil
+		}
+	}
+	_, err = lease.service.Action(ctx, lease.id, lease.owner, gbplayback.ActionRequest{Action: command.Action, PositionSeconds: command.PositionSeconds, Scale: command.Scale, RangeValue: command.RangeValue})
+	if err == nil && statusOKForPlaybackAction(command.Action) && refreshed && session.sender != nil {
+		if info, refreshErr := session.sender.RefreshRTPInfo(ctx); refreshErr == nil && info != nil && strings.TrimSpace(info.URL) != "" {
+			session.rtpInfo = &mansrtsp.RTPInfo{URL: info.URL, Seq: info.Seq, RTPTime: info.RTPTime}
+		}
 	}
 	status, reason := 200, "OK"
 	if err != nil {
@@ -178,6 +193,21 @@ func (h *cascadeVideoRuntime) playbackInfo(req *sip.Request, tx sip.ServerTransa
 	response := sip.NewResponseFromRequest(req, 200, "OK", body)
 	response.AppendHeader(sip.NewHeader("Content-Type", mansrtsp.ContentType))
 	_ = tx.Respond(response)
+}
+
+func statusOKForPlaybackAction(action string) bool {
+	return action != "pause" && action != "stop"
+}
+
+func cascadeRTPInfoURL(mediaIP, app, stream string) string {
+	host := strings.TrimSpace(mediaIP)
+	if host == "" || strings.TrimSpace(app) == "" || strings.TrimSpace(stream) == "" {
+		return ""
+	}
+	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
+		host = "[" + host + "]"
+	}
+	return "rtsp://" + host + "/" + strings.Trim(app, "/") + "/" + strings.Trim(stream, "/")
 }
 
 func (h *cascadeVideoRuntime) waitCascadeVideo(ctx context.Context, session *cascadeVideoSession, sender *media.SenderLease) {

@@ -298,9 +298,14 @@ type cascadeMonitorSender struct {
 	active     atomic.Bool
 	stopCalls  atomic.Int32
 	errorsLeft atomic.Int32
+	mu         sync.Mutex
+	last       zlm.GBSendRTPRequest
 }
 
-func (f *cascadeMonitorSender) StartGBSendRTP(context.Context, zlm.GBSendRTPRequest) (*zlm.GBSendRTPResult, error) {
+func (f *cascadeMonitorSender) StartGBSendRTP(_ context.Context, request zlm.GBSendRTPRequest) (*zlm.GBSendRTPResult, error) {
+	f.mu.Lock()
+	f.last = request
+	f.mu.Unlock()
 	return &zlm.GBSendRTPResult{LocalPort: 31000}, nil
 }
 func (f *cascadeMonitorSender) StopSendRtp(context.Context, string, string, string, string) error {
@@ -313,6 +318,35 @@ func (f *cascadeMonitorSender) IsGBSendRTPActive(context.Context, zlm.GBSendRTPR
 		return false, fmt.Errorf("temporary sender probe failure")
 	}
 	return f.active.Load(), nil
+}
+
+func TestCascadePlaybackAdvertisesLocalRTPInfoURL(t *testing.T) {
+	h, db, _ := newCascadeVideoTestRuntime(t)
+	defer cleanupCascadeSubjectRuntime(h)
+	require.NoError(t, db.Model(&model.GbCascadePlatform{}).Where("id = 1").Updates(map[string]interface{}{"media_advertise_ip": "192.0.2.10", "recording_enabled": true}).Error)
+	fake := &cascadePlaybackFake{sessions: map[string]*gbplayback.Session{}, stopped: make(chan string, 10)}
+	h.playback = fake
+	monitor := &cascadeMonitorSender{}
+	monitor.active.Store(true)
+	h.sender = media.NewSender(h.nodes, func(*node.Node) media.GBSenderClient { return monitor })
+	h.client.TxRequester = &siptest.ClientTxRequester{OnRequest: func(request *sip.Request) *sip.Response {
+		return sip.NewResponseFromRequest(request, 200, "OK", nil)
+	}}
+	req := cascadePlaybackRequest(15060, "1200000001")
+	tx := &cascadeInviteTestTx{siptest.NewServerTxRecorder(req), make(chan *sip.Response, 10)}
+	defer tx.Terminate()
+	go h.Handle(req, tx)
+	res := cascadeAwaitResponse(t, tx)
+	require.Equal(t, 200, res.StatusCode)
+	monitor.mu.Lock()
+	got := monitor.last.RTPInfoURL
+	monitor.mu.Unlock()
+	require.Equal(t, "rtsp://192.0.2.10/rtp/playback-1", got)
+	h.Handle(cascadeDialogRequest(req, res, sip.ACK), tx)
+	bye := cascadeDialogRequest(req, res, sip.BYE)
+	byeTx := siptest.NewServerTxRecorder(bye)
+	defer byeTx.Terminate()
+	require.True(t, h.Handle(bye, byeTx))
 }
 
 func TestCascadeRTCPInactiveSenderEndsUpstreamDialog(t *testing.T) {
@@ -506,7 +540,7 @@ func TestCascadePlaybackRangeReachesServiceAndReportsControlFailure(t *testing.T
 	scaleTx := siptest.NewServerTxRecorder(scaleInfo)
 	defer scaleTx.Terminate()
 	require.True(t, h.Handle(scaleInfo, scaleTx))
-	require.Contains(t, string(scaleTx.Result()[0].Body()), "RTP-Info: url=rtsp://192.0.2.20/rtp/source-1;seq=9;rtptime=9000")
+	require.Contains(t, string(scaleTx.Result()[0].Body()), "RTP-Info: url=rtsp://192.168.10.220/rtp/playback-1;seq=9;rtptime=9000")
 	pauseInfo := cascadeDialogRequest(req, res, sip.INFO)
 	pauseInfo.CSeq().SeqNo = 3
 	pauseInfo.AppendHeader(sip.NewHeader("Content-Type", "Application/MANSRTSP"))

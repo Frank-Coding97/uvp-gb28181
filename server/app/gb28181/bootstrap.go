@@ -1860,10 +1860,27 @@ func resolveSeedRTPRangeWith(ctx context.Context, cfg gbconfig.Config, read zlmC
 	candidate := node.Node{Host: cfg.ZLM.Host, APIPort: cfg.ZLM.HTTPPort, APISecret: cfg.ZLM.Secret}
 	config, err := read(probeCtx, &candidate)
 	if err != nil {
+		// ⛔ 这条 warn 必须留着：探测失败会**静默**回退出厂默认 30000-35000，
+		//   而节点照样登记成功、探活照样 pass ⇒ 现场只会看到「点播没画面」，
+		//   完全指不到"登记的收流段和 ZLM 实际段不一致"。
+		//   实测：容器版把 ZLM 起在 53004/53014-53063，seed 却登记 30000-35000。
+		if app.ZapLog != nil {
+			app.ZapLog.Warn("GB28181 ZLM 收流段探测失败,回退出厂默认",
+				zap.String("event", "zlm.seed.rtp_range_probe_failed"),
+				zap.String("endpoint", candidate.HTTPEndpoint()),
+				zap.Bool("secret_set", candidate.APISecret != ""),
+				zap.Error(err))
+		}
 		return start, end, "default"
 	}
 	if detected := node.ParseServerConfig(config); detected.RTPPortRangeStart > 0 {
 		return detected.RTPPortRangeStart, detected.RTPPortRangeEnd, "probe"
+	}
+	if app.ZapLog != nil {
+		app.ZapLog.Warn("GB28181 ZLM 收流段解析失败,回退出厂默认",
+			zap.String("event", "zlm.seed.rtp_range_parse_failed"),
+			zap.String("endpoint", candidate.HTTPEndpoint()),
+			zap.String("raw", config["rtp_proxy.port_range"]))
 	}
 	return start, end, "default"
 }

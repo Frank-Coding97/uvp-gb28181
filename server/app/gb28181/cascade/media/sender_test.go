@@ -23,14 +23,14 @@ func TestSenderStartsVideoPSOnSourceNode(t *testing.T) {
 	lease, err := sender.Start(context.Background(), SenderRequest{
 		Source: StartResult{StreamID: "source-1", App: "rtp", NodeID: 4},
 		SSRC:   "0200000001", PayloadType: 96, RemoteIP: "192.0.2.20", RemotePort: 30000,
-		Transport: zlm.GBSendRTPUDP,
+		Transport: zlm.GBSendRTPUDP, RTPInfoURL: "rtsp://192.0.2.10/rtp/source-1",
 	})
 	require.NoError(t, err)
 	require.Equal(t, 31000, lease.LocalPort)
 	require.Equal(t, &zlm.GBRTPInfo{URL: "rtsp://192.0.2.20/rtp/source-1", Seq: 9, RTPTime: 9000}, lease.RTPInfo)
 	require.Equal(t, zlm.GBSendRTPRequest{
 		VHost: "__defaultVhost__", App: "rtp", Stream: "source-1", SSRC: "0200000001",
-		PayloadType: 96, RemoteIP: "192.0.2.20", RemotePort: 30000, Transport: zlm.GBSendRTPUDP,
+		RTPInfoURL: "rtsp://192.0.2.10/rtp/source-1", PayloadType: 96, RemoteIP: "192.0.2.20", RemotePort: 30000, Transport: zlm.GBSendRTPUDP,
 	}, client.start)
 }
 
@@ -154,6 +154,27 @@ func TestSenderLeaseCheckFailurePreservesSender(t *testing.T) {
 	require.Zero(t, client.stopCalls)
 }
 
+func TestSenderLeaseRefreshesAndResetsOptionalRTPInfo(t *testing.T) {
+	client := &fakeGBSenderClient{
+		startResult: &zlm.GBSendRTPResult{LocalPort: 31000},
+		info:        &zlm.GBRTPInfo{URL: "rtsp://192.0.2.20/rtp/source-1", Seq: 17, RTPTime: 17000},
+	}
+	sender := NewSender(fakeSenderNodes{items: map[int64]*node.Node{1: {ID: 1}}}, func(*node.Node) GBSenderClient { return client })
+	lease, err := sender.Start(context.Background(), SenderRequest{
+		Source: StartResult{StreamID: "source-1", App: "rtp", NodeID: 1}, SSRC: "0200000001",
+		PayloadType: 96, RemoteIP: "192.0.2.20", RemotePort: 30000, Transport: zlm.GBSendRTPUDP,
+	})
+	require.NoError(t, err)
+	require.Nil(t, lease.RTPInfo)
+	info, err := lease.RefreshRTPInfo(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, client.info, info)
+	require.Equal(t, 1, client.infoCalls)
+	require.NoError(t, lease.ResetRTPInfo(context.Background()))
+	require.Nil(t, lease.RTPInfo)
+	require.Equal(t, 1, client.resetInfoCalls)
+}
+
 type fakeSenderNodes struct{ items map[int64]*node.Node }
 
 func (f fakeSenderNodes) Get(id int64) (*node.Node, bool) {
@@ -166,17 +187,22 @@ type senderStopCall struct {
 }
 
 type fakeGBSenderClient struct {
-	start       zlm.GBSendRTPRequest
-	startResult *zlm.GBSendRTPResult
-	startErr    error
-	startCalls  int
-	stop        senderStopCall
-	stopErr     error
-	stopCalls   int
-	active      bool
-	check       zlm.GBSendRTPRequest
-	checkErr    error
-	checkCalls  int
+	start          zlm.GBSendRTPRequest
+	startResult    *zlm.GBSendRTPResult
+	startErr       error
+	startCalls     int
+	stop           senderStopCall
+	stopErr        error
+	stopCalls      int
+	active         bool
+	check          zlm.GBSendRTPRequest
+	checkErr       error
+	checkCalls     int
+	info           *zlm.GBRTPInfo
+	infoErr        error
+	infoCalls      int
+	resetInfoErr   error
+	resetInfoCalls int
 }
 
 func (f *fakeGBSenderClient) StartGBSendRTP(_ context.Context, request zlm.GBSendRTPRequest) (*zlm.GBSendRTPResult, error) {
@@ -195,4 +221,14 @@ func (f *fakeGBSenderClient) IsGBSendRTPActive(_ context.Context, request zlm.GB
 	f.checkCalls++
 	f.check = request
 	return f.active, f.checkErr
+}
+
+func (f *fakeGBSenderClient) GetGBSendRTPInfo(_ context.Context, _ zlm.GBSendRTPRequest) (*zlm.GBRTPInfo, error) {
+	f.infoCalls++
+	return f.info, f.infoErr
+}
+
+func (f *fakeGBSenderClient) ResetGBSendRTPInfo(_ context.Context, _ zlm.GBSendRTPRequest) error {
+	f.resetInfoCalls++
+	return f.resetInfoErr
 }

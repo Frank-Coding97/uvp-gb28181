@@ -161,6 +161,7 @@ type cascadeVideoSession struct {
 	ssrc              string
 	senderMu          sync.Mutex
 	stopCurrentSender func(context.Context) error
+	sender            *media.SenderLease
 	done              chan struct{}
 	context           context.Context
 	transport         zlm.GBSendRTPTransport
@@ -519,6 +520,21 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 		fail(403, fmt.Errorf("channel sharing changed during INVITE"))
 		return
 	}
+	mediaNode, ok := h.nodes.Get(sourceMedia.NodeID)
+	if !ok {
+		fail(503, fmt.Errorf("media node disappeared"))
+		return
+	}
+	mediaIP := strings.TrimSpace(platform.MediaAdvertiseIP)
+	if mediaIP == "" {
+		mediaIP = mediaNode.EffectiveSDPIP()
+	}
+	if mediaIP == "" {
+		// 无可用 SDP 地址时宁可明确失败,也不下发 c=IN IP4 127.0.0.1 让上级
+		// 把 RTP 推向平台自己(表征是级联通了但没有画面)。
+		fail(503, fmt.Errorf("no usable SDP address for media node %d", mediaNode.ID))
+		return
+	}
 	key := fmt.Sprintf("%d/%s/%s/%s", sourceMedia.NodeID, sourceMedia.App, sourceMedia.StreamID, offer.SSRC)
 	h.mu.Lock()
 	busy := h.senders[key]
@@ -547,7 +563,7 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 	completed := false
 	byeSent := false
 	// Store ownership before starting: even an ambiguous HTTP timeout remains recoverable.
-	request := media.SenderRequest{Source: sourceMedia, SSRC: offer.SSRC, PayloadType: offer.PayloadType, RemoteIP: offer.RemoteIP, RemotePort: offer.RemotePort, Transport: offer.Transport, RTCPKeepalive: platform.RTCPKeepalive}
+	request := media.SenderRequest{Source: sourceMedia, SSRC: offer.SSRC, RTPInfoURL: cascadeRTPInfoURL(mediaIP, sourceMedia.App, sourceMedia.StreamID), PayloadType: offer.PayloadType, RemoteIP: offer.RemoteIP, RemotePort: offer.RemotePort, Transport: offer.Transport, RTCPKeepalive: platform.RTCPKeepalive}
 	var sender *media.SenderLease
 	senderStopped := false
 	stopRow := row
@@ -615,23 +631,9 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 		fail(503, err)
 		return
 	}
+	session.sender = sender
 	if sender.RTPInfo != nil && strings.TrimSpace(sender.RTPInfo.URL) != "" {
 		session.rtpInfo = &mansrtsp.RTPInfo{URL: sender.RTPInfo.URL, Seq: sender.RTPInfo.Seq, RTPTime: sender.RTPInfo.RTPTime}
-	}
-	mediaNode, ok := h.nodes.Get(sourceMedia.NodeID)
-	if !ok {
-		fail(503, fmt.Errorf("media node disappeared"))
-		return
-	}
-	mediaIP := strings.TrimSpace(platform.MediaAdvertiseIP)
-	if mediaIP == "" {
-		mediaIP = mediaNode.EffectiveSDPIP()
-	}
-	if mediaIP == "" {
-		// 无可用 SDP 地址时宁可明确失败,也不下发 c=IN IP4 127.0.0.1 让上级
-		// 把 RTP 推向平台自己(表征是级联通了但没有画面)。
-		fail(503, fmt.Errorf("no usable SDP address for media node %d", mediaNode.ID))
-		return
 	}
 	answer, err := sdp.BuildCascadeVideoAnswer(offer, platform.LocalDeviceID, mediaIP, sender.LocalPort)
 	if err != nil {

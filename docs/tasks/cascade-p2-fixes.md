@@ -300,7 +300,7 @@ GREEN：
 
 ## 阶段状态
 
-老板已确认规格、方案和任务并授权无人值守执行。已完成本地修复与测试；T15 只完成范围控制通路，保留真实终点与 RTP-Info 阻塞，不能整体标为完成。
+老板已确认规格、方案和任务并授权无人值守执行。已完成本地修复与测试；T15 的真实终点行为仍需下级设备证据，RTP-Info 已完成本地 ZLMediaKit/UVP 代码链路但未部署实机，不能整体标为端到端完成。
 
 ## 2026-10-16 实施结果
 
@@ -315,7 +315,7 @@ GREEN：
 | T12 | 本地完成 | 支持已发布业务节点入口，校验 To/Request-URI/XML 目标，拒绝冲突；2016/2022 业务组字段位置回归通过。 |
 | T13 | 本地完成 | 域名解析集合参与严格来源匹配，后续会话绑定实际 peer；补复现并修复地址配置变化后异源 CANCEL 被放行的问题。 |
 | T14 | 本地完成 | 完整 Subject 保存到内存和既有 SDPSummary；同槽替换先停旧 sender、等待旧资源释放后重建；重传幂等、停止失败、并发请求及源序列隔离通过竞态测试。 |
-| T15 | 部分完成 | npt/smpte 起终点解析、非法/越界/NaN 校验、service 与普通/durable INFO 下接均贯通；本机 UDP 校验完整报文。真实设备终点行为未验收，真实上行 RTP-Info 尚未实现。 |
+| T15 | 部分完成 | npt/smpte 起终点解析、非法/越界/NaN 校验、service 与普通/durable INFO 下接均贯通；ZLMediaKit sender 采集首个实际 RTP 包的 seq/rtptime，`listRtpSender` 以兼容字段返回，UVP 按 SSRC 查询并在 seek/resume 前重置；真实设备终点行为和部署后的 RTP-Info 互操作仍未验收。 |
 | T16 | 本地完成 | 正注册期限最小 3600 秒，普通配置拒绝 0，注销才使用 0；前后端边界及请求生成回归通过。 |
 
 ### 本轮明确观察的 RED 与修复
@@ -328,7 +328,7 @@ GREEN：
 ### D15 未完成项与阻塞证据
 
 1. 指定终点已进入下接 INFO 的实际 Range，缺能力的旧 adapter 返回 `ErrPlaybackRangeUnsupported`，设备拒绝不会更新本地位置；但当前没有真实设备媒体包证明其按终点停止。没有用本机墙钟定时器冒充设备播放时间。
-2. `zlm.GBSendRTPResult` 当前只有 `LocalPort`，`IsGBSendRTPActive` 仅返回 sender 存在状态；没有上行重新发流后首包 seq/rtptime 数据来源。下接 RTP 或 MANSRTSP 信息不能证明上行重新发流后的首包值，因此尚未生成 RTP-Info。
+2. 已在本地 ZLMediaKit fork 的 sender 捕获首个实际 RTP 包，并通过兼容的 `listRtpSender.rtp_info[ssrc]` 与 `resetRtpSenderInfo` 暴露给 UVP；UVP 未采到值时仍省略可选头部。当前只完成源代码和本地构建，尚未部署到测试节点验证真实上级收到的 seq/rtptime。
 3. SIP 200 与 RTSP 业务成功分别处理；现有设备兼容路径可能接受无 RTSP 消息体的 SIP 2xx，这仍不能证明实际定位或终点执行。fake 接受及本机 UDP 报文测试不等于真实设备动作或完整国标互操作验收。
 
 ### 已确认的回归结果
@@ -337,6 +337,8 @@ GREEN：
 - `go test -race ./app/gb28181 ./app/gb28181/playback ./app/gb28181/mansrtsp ./app/gb28181/uac ./app/gb28181/playauth -run 'Cascade|PlaybackRange|ParseRequestPlayback|DeviceSIPINFORange|TestPlaybackIntentINFOActualUDP' -count=1`：5 个包通过。
 - `go test -race ./app/gb28181 -run 'TestCascadeSubjectPlaybackReplacement|TestCascadeCancelKeepsOriginalPeer' -count=1`：通过；补充验证回放同源替换先释放旧源、停止失败不建立新源，以及配置变化后的 CANCEL 来源绑定。
 - `go test ./app/gb28181/zlm -run 'Test(StartGBSendRTP|IsGBSendRTPActive)' -count=1`：通过；仅证明 fake HTTP 参数、sender 状态与错误行为。
+- `go test -race ./app/gb28181 ./app/gb28181/cascade/... ./app/gb28181/playback ./app/gb28181/mansrtsp ./app/gb28181/zlm -run 'Cascade|Playback|RTPInfo|Range|GBSendRTP' -count=1`：通过；覆盖采样读取/重置及回放 INFO 贯通，仍不替代部署后的实机互操作。
+- `/Users/menglulu/code/uvp/ZLMediaKit-UVP`：`cmake --build build --target MediaServer -j2` 通过（`ENABLE_RTPPROXY=ON`），仅证明本地 fork 可编译。
 - `go test ./app/gb28181/routes -run Cascade -count=1`：通过；`go test ./app/gb28181/config -count=1`：通过（与 routes 全包联合执行时 config 的独立结果）。
 - `pnpm exec vitest run src/views/gb28181/cascade src/api/gb28181-cascade.test.ts`：7 个文件、163 项通过。
 - `git diff --check -- server/app/gb28181 docs/specs/cascade-p2-fixes.md docs/plans/cascade-p2-fixes.md docs/tasks/cascade-p2-fixes.md`：通过。
@@ -356,3 +358,15 @@ GREEN：
 - `pnpm exec vue-tsc --noEmit` 未通过，报错集中在既存 DeviceFirmwareUpgradePanel、firmware-repo 和 ZLM NodeForm 测试/类型；本轮 T06 文件不在错误列表中，未修改这些无关模块。
 - `git diff --check` 对 T06 涉及文件通过。仍未做浏览器实机呈现验收；该结论只覆盖本地服务、HTTP 和 Vitest 行为。
 
+
+## 2026-10-19 T15 复核补充
+
+- 确认 `cascadeRTPInfoURL` 仅一处定义，已格式化相关 Go 文件；级联发流显式传递本级媒体 URL，优先 `MediaAdvertiseIP`、再用媒体节点 `EffectiveSDPIP`，不把上级接收地址用作本级资源地址。
+- RED：`TestGetGBSendRTPInfoRequiresCompletePacketSample` 的 5 类不完整/空值样本原先均被当成真实的零值；`TestStartGBSendRTPRequiresCompletePacketSample` 的 3 类样本同样失败；`TestResetGBSendRTPInfoRequiresExplicitSuccess` 复现空响应被误认重置成功。
+- GREEN：采样解码分别检查 seq/rtptime 是否存在，缺失或 null 时省略样本，明确的 0 值保留；reset 必须返回显式 code=0。启动返回的完整样本也优先使用请求中的本级媒体 URL。
+- `go test -race ./app/gb28181 ./app/gb28181/cascade/media ./app/gb28181/playback ./app/gb28181/mansrtsp ./app/gb28181/zlm -run 'Cascade.*Playback|RTPInfo|Range|GBSendRTP' -count=1`：5 包通过（不完整样本修正前的收尾回归）。
+- 修正后 `go test -race ./app/gb28181/zlm ./app/gb28181/cascade/media ./app/gb28181 -run 'GBSendRTP|RTPInfo|Cascade.*Playback' -count=1`：3 包通过。
+- 范围边界继续保留：reset 与下接 seek/resume 之间可能仍有旧位置媒体包，当前采样没有与设备媒体位置切换建立 generation 关联，因此不能以“reset 后采到首包”证明它就是定位后的首包；真实终点和媒体首包互操作均未验收，T15 仍为部分完成。
+- 尚未提交、推送或部署 ZLMediaKit/UVP；未操作浏览器、真实上级、设备或开发级联台账。
+- 补充正向测试 `TestStartGBSendRTPKeepsCompleteSampleAndLocalMediaURL` 通过：启动响应中的 seq=0/rtptime=0 被保留，且优先使用显式本级媒体 URL。
+- 独立只读审查未发现本轮采样解码、URL 优先级或 reset 成功契约的新缺陷；目标测试及 race 通过。审查时完整 zlm 包仍有既存 `logging_client_test.go:80` 脱敏断言失败，不报告该包全量通过。

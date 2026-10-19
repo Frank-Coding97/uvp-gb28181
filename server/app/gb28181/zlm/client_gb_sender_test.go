@@ -64,6 +64,116 @@ func TestStartGBSendRTPParameters(t *testing.T) {
 	}
 }
 
+func TestGetGBSendRTPInfoReadsOptionalFirstPacketSample(t *testing.T) {
+	c, server := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/index/api/listRtpSender" {
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("ssrc"); got != "" {
+			t.Fatalf("listRtpSender must not use an unsupported ssrc query, got %q", got)
+		}
+		_, _ = w.Write([]byte(`{"code":0,"data":["0200000001"],"rtp_info":{"0200000001":{"seq":321,"rtptime":654321}}}`))
+	})
+	defer server.Close()
+
+	info, err := c.GetGBSendRTPInfo(context.Background(), GBSendRTPRequest{
+		VHost: "__defaultVhost__", App: "rtp", Stream: "source-1", SSRC: "0200000001", RemoteIP: "192.0.2.20",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info == nil {
+		t.Fatal("expected first packet sample")
+	}
+	if info.URL != "rtsp://192.0.2.20/rtp/source-1" || info.Seq != 321 || info.RTPTime != 654321 {
+		t.Fatalf("unexpected RTP info: %+v", info)
+	}
+}
+
+func TestGetGBSendRTPInfoUsesLocalMediaURLWhenProvided(t *testing.T) {
+	c, server := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/index/api/listRtpSender" {
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"code":0,"data":["0200000001"],"rtp_info":{"0200000001":{"seq":321,"rtptime":654321}}}`))
+	})
+	defer server.Close()
+
+	info, err := c.GetGBSendRTPInfo(context.Background(), GBSendRTPRequest{
+		VHost: "__defaultVhost__", App: "rtp", Stream: "source-1", SSRC: "0200000001",
+		RemoteIP: "198.51.100.20", RTPInfoURL: "rtsp://192.0.2.10/rtp/source-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info == nil || info.URL != "rtsp://192.0.2.10/rtp/source-1" || info.Seq != 321 || info.RTPTime != 654321 {
+		t.Fatalf("unexpected RTP info: %+v", info)
+	}
+}
+
+func TestGetGBSendRTPInfoOmitsSampleForLegacyNode(t *testing.T) {
+	c, server := newMockClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"code":0,"data":["0200000001"]}`))
+	})
+	defer server.Close()
+
+	info, err := c.GetGBSendRTPInfo(context.Background(), GBSendRTPRequest{
+		VHost: "v", App: "a", Stream: "s", SSRC: "0200000001", RemoteIP: "192.0.2.1",
+	})
+	if err != nil || info != nil {
+		t.Fatalf("legacy node must omit optional info: info=%+v err=%v", info, err)
+	}
+}
+
+func TestGetGBSendRTPInfoRequiresCompletePacketSample(t *testing.T) {
+	for _, sample := range []string{`{}`, `{"seq":321}`, `{"rtptime":654321}`, `{"seq":null,"rtptime":654321}`, `{"seq":321,"rtptime":null}`} {
+		t.Run(sample, func(t *testing.T) {
+			c, server := newMockClient(t, func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(`{"code":0,"rtp_info":{"0200000001":` + sample + `}}`))
+			})
+			defer server.Close()
+			info, err := c.GetGBSendRTPInfo(context.Background(), GBSendRTPRequest{
+				VHost: "v", App: "a", Stream: "s", SSRC: "0200000001", RTPInfoURL: "rtsp://192.0.2.10/a/s",
+			})
+			if err != nil || info != nil {
+				t.Fatalf("incomplete sample must not manufacture zero values: info=%+v err=%v", info, err)
+			}
+		})
+	}
+}
+
+func TestGetGBSendRTPInfoPreservesValidZeroPacketValues(t *testing.T) {
+	c, server := newMockClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"code":0,"rtp_info":{"0200000001":{"seq":0,"rtptime":0}}}`))
+	})
+	defer server.Close()
+	info, err := c.GetGBSendRTPInfo(context.Background(), GBSendRTPRequest{
+		VHost: "v", App: "a", Stream: "s", SSRC: "0200000001", RTPInfoURL: "rtsp://192.0.2.10/a/s",
+	})
+	if err != nil || info == nil || info.Seq != 0 || info.RTPTime != 0 {
+		t.Fatalf("explicit zero packet values are valid: info=%+v err=%v", info, err)
+	}
+}
+
+func TestResetGBSendRTPInfoUsesScopedSender(t *testing.T) {
+	c, server := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/index/api/resetRtpSenderInfo" {
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+		for key, want := range map[string]string{"vhost": "v", "app": "a", "stream": "s", "ssrc": "0200000001"} {
+			if got := r.URL.Query().Get(key); got != want {
+				t.Fatalf("%s=%q, want %q", key, got, want)
+			}
+		}
+		_, _ = w.Write([]byte(`{"code":0}`))
+	})
+	defer server.Close()
+
+	if err := c.ResetGBSendRTPInfo(context.Background(), GBSendRTPRequest{VHost: "v", App: "a", Stream: "s", SSRC: "0200000001"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestStartGBSendRTPValidatesRTCPPortBeforeHTTP(t *testing.T) {
 	for _, test := range []struct {
 		name      string
@@ -209,5 +319,52 @@ func TestIsGBSendRTPActiveConnectionFailureRemainsError(t *testing.T) {
 	})
 	if err == nil || active || strings.Contains(err.Error(), "test-secret") {
 		t.Fatalf("transport error must not be reported as stopped: active=%v err=%v", active, err)
+	}
+}
+
+func TestStartGBSendRTPRequiresCompletePacketSample(t *testing.T) {
+	for _, sample := range []string{`{}`, `{"url":"rtsp://192.0.2.10/a/s","seq":321}`, `{"url":"rtsp://192.0.2.10/a/s","rtptime":654321}`} {
+		t.Run(sample, func(t *testing.T) {
+			c, server := newMockClient(t, func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(`{"code":0,"local_port":31000,"rtp_info":` + sample + `}`))
+			})
+			defer server.Close()
+			result, err := c.StartGBSendRTP(context.Background(), GBSendRTPRequest{
+				VHost: "v", App: "a", Stream: "s", SSRC: "0200000001", Transport: GBSendRTPUDP,
+				RemoteIP: "192.0.2.20", RemotePort: 30000, RTPInfoURL: "rtsp://192.0.2.10/a/s",
+			})
+			if err != nil || result == nil || result.RTPInfo != nil {
+				t.Fatalf("incomplete sample must not manufacture packet values: result=%+v err=%v", result, err)
+			}
+		})
+	}
+}
+
+func TestResetGBSendRTPInfoRequiresExplicitSuccess(t *testing.T) {
+	c, server := newMockClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{}`))
+	})
+	defer server.Close()
+	if err := c.ResetGBSendRTPInfo(context.Background(), GBSendRTPRequest{
+		VHost: "v", App: "a", Stream: "s", SSRC: "0200000001",
+	}); err == nil {
+		t.Fatal("missing code must not acknowledge sampler reset")
+	}
+}
+
+func TestStartGBSendRTPKeepsCompleteSampleAndLocalMediaURL(t *testing.T) {
+	c, server := newMockClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"code":0,"local_port":31000,"rtp_info":{"url":"rtsp://198.51.100.20/a/s","seq":0,"rtptime":0}}`))
+	})
+	defer server.Close()
+	result, err := c.StartGBSendRTP(context.Background(), GBSendRTPRequest{
+		VHost: "v", App: "a", Stream: "s", SSRC: "0200000001", Transport: GBSendRTPUDP,
+		RemoteIP: "198.51.100.20", RemotePort: 30000, RTPInfoURL: "rtsp://192.0.2.10/a/s",
+	})
+	if err != nil || result == nil || result.RTPInfo == nil {
+		t.Fatalf("complete zero sample must be retained: result=%+v err=%v", result, err)
+	}
+	if result.RTPInfo.URL != "rtsp://192.0.2.10/a/s" || result.RTPInfo.Seq != 0 || result.RTPInfo.RTPTime != 0 {
+		t.Fatalf("incorrect RTP info: %+v", result.RTPInfo)
 	}
 }
