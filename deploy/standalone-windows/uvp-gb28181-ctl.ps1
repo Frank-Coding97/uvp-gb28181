@@ -76,7 +76,9 @@ $ZlmPidFile     = Join-Path $RunDir 'zlm.pid'
 $NginxPidFile   = Join-Path $RunDir 'nginx.pid'
 
 # ---------------------------------------------------------------- 输出样式 ----
-# 三级缩进：`[uvp] 阶段行` / `      ✓ 结果行` / `        · 明细行`（6 格 = "[uvp] " 宽度）
+# 三级缩进：`[uvp-gb28181] 阶段行` / `（14 格）✓ 结果行` / `（14 格）· 明细行`
+# ⛔ IND 必须等于标签宽度「[uvp-gb28181] 」= 14 格，三个平台（Linux/Windows/uvp-setup）共用这个宽度。
+$script:IND = '              '
 $script:UseColor = (-not [Console]::IsOutputRedirected) -and (-not $env:NO_COLOR)
 $C = @{ rst = ''; tag = ''; ok = ''; warn = ''; err = ''; dim = '' }
 if ($script:UseColor) {
@@ -88,15 +90,15 @@ if ($script:UseColor) {
     $C.dim  = [char]27 + '[90m'
 }
 
-function Write-UvpLog  { param([string]$Message) Write-Host ("{0}[uvp]{1} {2}" -f $C.tag, $C.rst, $Message) }
-function Write-UvpDet  { param([string]$Message) Write-Host ("      {0}" -f $Message) }
-function Write-UvpOk   { param([string]$Message) Write-Host ("      {0}✓{1} {2}" -f $C.ok, $C.rst, $Message) }
-function Write-UvpWarn { param([string]$Message) Write-Host ("      {0}!{1} {2}" -f $C.warn, $C.rst, $Message) }
-function Write-UvpErr  { param([string]$Message) Write-Host ("      {0}✗{1} {2}" -f $C.err, $C.rst, $Message) }
+function Write-UvpLog  { param([string]$Message) Write-Host ("{0}[uvp-gb28181]{1} {2}" -f $C.tag, $C.rst, $Message) }
+function Write-UvpDet  { param([string]$Message) Write-Host ("{0}{1}" -f $script:IND, $Message) }
+function Write-UvpOk   { param([string]$Message) Write-Host ("{0}{1}✓{2} {3}" -f $script:IND, $C.ok, $C.rst, $Message) }
+function Write-UvpWarn { param([string]$Message) Write-Host ("{0}{1}!{2} {3}" -f $script:IND, $C.warn, $C.rst, $Message) }
+function Write-UvpErr  { param([string]$Message) Write-Host ("{0}{1}✗{2} {3}" -f $script:IND, $C.err, $C.rst, $Message) }
 
 function Fail {
     param([string]$Message)
-    Write-Host ("{0}[uvp][ERROR]{1} {2}" -f $C.err, $C.rst, $Message)
+    Write-Host ("{0}[uvp-gb28181][ERROR]{1} {2}" -f $C.err, $C.rst, $Message)
     exit 1
 }
 
@@ -488,7 +490,7 @@ function Start-Child {
     #   "The argument is null, empty, or an element of the argument collection contains a null value."
     #   —— 而**后端恰恰是无参数启动的**（调用点传 `-Arguments @()`），所以这条在首次启动
     #   必然命中，症状极具误导性：ZLM / nginx / Redis 全绿，一到后端整个脚本就终止、
-    #   退出码 1，**却不打任何 `[uvp][ERROR]` 行**（因为异常在 Fail 之前就抛了）。
+    #   退出码 1，**却不打任何 `[uvp-gb28181][ERROR]` 行**（因为异常在 Fail 之前就抛了）。
     #   ⇒ 无参数时干脆**不传** -ArgumentList（改用 splat 组装）。
     #     数组里混进 $null 元素报的是同一句话，这里一并过滤掉。
     $argList = @($Arguments | Where-Object { $null -ne $_ })
@@ -743,11 +745,11 @@ function Test-PortsFree {
         $shown = $reserved | Select-Object -First 8
         Fail ("以下端口被 **Windows 系统保留**，任何程序都绑不上（不是被别的软件占用）：`n        - " +
               (($shown) -join "`n        - ") + "`n" +
-              "      原因：本机的「动态端口范围」覆盖了这一段。查看当前保留区（管理员 CMD）：`n" +
-              "        netsh int ipv4 show excludedportrange protocol=udp`n" +
-              "        netsh int ipv4 show excludedportrange protocol=tcp`n" +
-              "      ⇒ 把 config\config.env 里的端口段挪出保留区（见包内 README 第四节），`n" +
-              "        再执行 stop.cmd → start.cmd。")
+              "              原因：本机的「动态端口范围」覆盖了这一段。查看当前保留区（管理员 CMD）：`n" +
+              "                netsh int ipv4 show excludedportrange protocol=udp`n" +
+              "                netsh int ipv4 show excludedportrange protocol=tcp`n" +
+              "              ⇒ 把 config\config.env 里的端口段挪出保留区（见包内 README 第四节），`n" +
+              "                再执行 stop.cmd → start.cmd。")
     }
     Write-UvpOk ("端口预检通过（TCP $($Ports.HTTPS)-$SipPort + UDP " +
                  "$($Ports.ZLM_SRT)/$($Ports.ZLM_ICE)/$($ZlmRtpRange.Split('-')[0])-$SipPort，均实测可绑定）")
@@ -1025,9 +1027,9 @@ function Start-Zlm {
     if (Test-ZlmBindFailure -LogPath $log) { $why += '日志中出现端口绑定失败' }
     if ($why.Count -gt 0) {
         Fail ("流媒体服务（ZLM）启动后立即退出（$($why -join '；')），详见 $log`n" +
-              "      最常见原因：RTP / SIP 那一段 **UDP 端口被 Windows 保留**——不是被别的软件占用。`n" +
-              "      查：netsh int ipv4 show excludedportrange protocol=udp`n" +
-              "      处理：把 config\config.env 的端口段挪出保留区（见包内 README 第四节），再 stop → start。")
+              "              最常见原因：RTP / SIP 那一段 **UDP 端口被 Windows 保留**——不是被别的软件占用。`n" +
+              "              查：netsh int ipv4 show excludedportrange protocol=udp`n" +
+              "              处理：把 config\config.env 的端口段挪出保留区（见包内 README 第四节），再 stop → start。")
     }
     Write-UvpOk "流媒体服务已启动（ZLM HTTP $($Ports.ZLM_HTTP)）"
 }
@@ -1084,7 +1086,7 @@ function Invoke-Start {
 
     Write-StartSummary -Ports $config.Ports -LanIP (Get-LanIP)
     Write-PortPlan -Ports $config.Ports
-    Write-Host ("{0}[uvp]{1} 启动完成。" -f $C.ok, $C.rst)
+    Write-Host ("{0}[uvp-gb28181]{1} 启动完成。" -f $C.ok, $C.rst)
     Write-Host ''
 }
 

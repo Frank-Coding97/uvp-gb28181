@@ -93,9 +93,9 @@ func usage() {
 	}, "\n"))
 }
 
-// indent 与 Linux 版 ctl 的 det()/ok() 同宽（"[uvp] " 恰好 6 个字符），
-// 这样两个平台的安装输出缩进一致。
-const indent = "      "
+// indent 与 Linux 版 ctl 的 det()/ok() 同宽：那边标签是 "[uvp-gb28181] "，
+// 共 14 个字符 ⇒ 这里也必须是 14 格，否则两个程序的输出会互相错位。
+const indent = "              "
 
 func note(format string, a ...any) {
 	fmt.Fprintf(os.Stdout, indent+"· "+format+"\n", a...)

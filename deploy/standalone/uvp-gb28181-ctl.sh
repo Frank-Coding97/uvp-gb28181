@@ -22,7 +22,7 @@ ACTIVE_ROOT="$ROOT"
 if [ -L "$ROOT/current" ]; then
   ACTIVE_ROOT="$(readlink -f "$ROOT/current" 2>/dev/null || true)"
   if [ -z "$ACTIVE_ROOT" ]; then
-    printf '[uvp][ERROR] current 版本指针不可解析\n' >&2
+    printf '[uvp-gb28181][ERROR] current 版本指针不可解析\n' >&2
     exit 1
   fi
 fi
@@ -33,7 +33,7 @@ fi
 #   时一律不加转义序列 —— 否则日志里混进 \033[..m，grep/比对/贴给客户看全是噪声。
 #   想显式关掉（比如录屏、或终端配色奇怪）：NO_COLOR=1 启动即可（见 no-color.org）。
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
-  C_TAG=$'\033[36m'   # [uvp] 标签：青色
+  C_TAG=$'\033[36m'   # [uvp-gb28181] 标签：青色
   C_OK=$'\033[32m'    # 成功标记：绿色
   C_ERR=$'\033[31m'   # 错误标记：红色
   C_RST=$'\033[0m'
@@ -41,17 +41,21 @@ else
   C_TAG=''; C_OK=''; C_ERR=''; C_RST=''
 fi
 
-log()  { printf '%s[uvp]%s %s\n' "$C_TAG" "$C_RST" "$*"; }
-fail() { printf '%s[uvp][ERROR]%s %s\n' "$C_ERR" "$C_RST" "$*" >&2; exit 1; }
+log()  { printf '%s[uvp-gb28181]%s %s\n' "$C_TAG" "$C_RST" "$*"; }
+fail() { printf '%s[uvp-gb28181][ERROR]%s %s\n' "$C_ERR" "$C_RST" "$*" >&2; exit 1; }
 
-# ⭐ 两级缩进约定（改宽度要连 server/cmd/uvp-setup 里的 indent 常量一起改）：
-#   [uvp] xxx        —— 阶段/事件行（由 log 输出）
-#         ✓ xxx       —— 该阶段的**结果**行（6 格缩进 = "[uvp] " 的宽度）
-#         · xxx       —— 结果之下的补充明细（不抢眼，长行让它自然折行）
-#   这么分是因为原来的输出里有的行有 [uvp] 前缀、有的没有，读者无法判断
-#   哪一行是"步骤"哪一行是"结论"，扫一眼全是等价的碎句子。
-det()  { printf '      %s\n' "$*"; }
-ok()   { printf '      %s✓%s %s\n' "$C_OK" "$C_RST" "$*"; }
+# ⭐ 三级缩进约定（改标签宽度要同步改 deploy/standalone-windows 的 ps1
+#   与 server/cmd/uvp-setup 的 indent 常量，三个平台的输出才对得上）：
+#   [uvp-gb28181] xxx   —— 阶段/事件行（由 log 输出）
+#   IND ✓ xxx           —— 该阶段的**结果**行
+#   IND · xxx           —— 结果之下的补充明细（不抢眼，长行让它自然折行）
+# ⛔⛔ IND 必须**正好等于标签宽度**「[uvp-gb28181] 」= 14 格：结果行要落在阶段
+#   文字的正下方，否则一路错位，比不缩进还乱（原来标签是 "[uvp] "，6 格）。
+#   这么分是因为原来的输出里有的行有前缀、有的没有，读者无法判断哪一行是
+#   "步骤"哪一行是"结论"，扫一眼全是等价的碎句子。
+IND='              '
+det()  { printf '%s%s\n' "$IND" "$*"; }
+ok()   { printf '%s%s✓%s %s\n' "$IND" "$C_OK" "$C_RST" "$*"; }
 
 # ⛔ 本脚本从 2026-10-19 起**不再内嵌任何 Python**：建库、端口同步、secret 对齐、
 #   读配置、重置口令全部由包内 `bin/uvp-setup`（纯 Go、静态链接）完成。
@@ -165,7 +169,7 @@ print_port_plan() {
   fw_to="$to"
   if [ "$fw_to" -lt "$sip_hint" ]; then fw_to="$sip_hint"; fi
 
-  printf '%s[uvp]%s 端口规划（连续段 %s-%s）\n' "$C_TAG" "$C_RST" "$fw_from" "$fw_to"
+  printf '%s[uvp-gb28181]%s 端口规划（连续段 %s-%s）\n' "$C_TAG" "$C_RST" "$fw_from" "$fw_to"
   ok "需要对局域网开放"
   if [ "$NGINX_HTTPS_ENABLED" = "1" ]; then
     det "  · 管理页面   ${NGINX_HTTPS_PORT}/tcp（HTTPS） · ${NGINX_HTTP_PORT}/tcp（HTTP 自动跳转）"
@@ -203,7 +207,7 @@ print_start_summary() {
     local_url="http://127.0.0.1:${plain_port}"
   fi
 
-  printf '%s[uvp]%s 启动完成\n' "$C_TAG" "$C_RST"
+  printf '%s[uvp-gb28181]%s 启动完成\n' "$C_TAG" "$C_RST"
 
   lan="$(detect_lan_ip)"
   if [ -n "$lan" ]; then
@@ -930,7 +934,7 @@ note_no_ss_once() {
   has_ss && return 0
   [ -z "$_no_ss_noted" ] || return 0
   _no_ss_noted=1
-  printf '%s[uvp]%s ℹ️  本机没有 ss（未装 iproute2），**端口预检已跳过**。\n' \
+  printf '%s[uvp-gb28181]%s ℹ️  本机没有 ss（未装 iproute2），**端口预检已跳过**。\n' \
     "$C_TAG" "$C_RST" >&2
   printf '     · 不影响安装：服务照常启动，只是不再提前发现端口冲突。\n' >&2
   printf '     · 若启动后页面打不开或内容不对，请先怀疑端口被别的程序占了。\n' >&2
