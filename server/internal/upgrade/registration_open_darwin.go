@@ -60,14 +60,14 @@ func validateTrustedRegistrationInfo(path string, directory bool) error {
 		return err
 	}
 	if info.Mode()&os.ModeSymlink != 0 || directory && !info.IsDir() {
-		return errors.New("updater registration parent is not a real directory")
+		return fmt.Errorf("updater registration parent %q is not a real directory", path)
 	}
 	if info.Mode().Perm()&0022 != 0 {
-		return errors.New("updater registration parent must not be group/world writable")
+		return fmt.Errorf("updater registration parent %q must not be group/world writable", path)
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || !registrationOwnerTrusted(stat.Uid) {
-		return errors.New("updater registration parent owner is not trusted")
+		return fmt.Errorf("updater registration parent %q owner is not trusted", path)
 	}
 	return nil
 }

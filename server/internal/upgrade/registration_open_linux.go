@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"golang.org/x/sys/unix"
 )
@@ -23,7 +24,11 @@ func openTrustedRegistration(path string) (*os.File, error) {
 		return nil, err
 	}
 	defer func() { _ = unix.Close(dirFD) }()
-	if err := validateTrustedRegistrationDirectoryFD(dirFD); err != nil {
+	// current 只用于报错定位。⛔ 现场只看得到「parent must not be group/world
+	//   writable」时根本不知道是哪一层 —— 2026-10-20 实测就是靠人工逐层 stat
+	//   才找出真正元凶（安装目录所在的两个上级目录是 775）。
+	current := string(filepath.Separator)
+	if err := validateTrustedRegistrationDirectoryFD(dirFD, current); err != nil {
 		return nil, err
 	}
 	for _, part := range parts[:len(parts)-1] {
@@ -31,7 +36,8 @@ func openTrustedRegistration(path string) (*os.File, error) {
 		if openErr != nil {
 			return nil, openErr
 		}
-		if checkErr := validateTrustedRegistrationDirectoryFD(nextFD); checkErr != nil {
+		current = filepath.Join(current, part)
+		if checkErr := validateTrustedRegistrationDirectoryFD(nextFD, current); checkErr != nil {
 			_ = unix.Close(nextFD)
 			return nil, checkErr
 		}
@@ -59,19 +65,19 @@ func openTrustedRegistration(path string) (*os.File, error) {
 	return file, nil
 }
 
-func validateTrustedRegistrationDirectoryFD(fd int) error {
+func validateTrustedRegistrationDirectoryFD(fd int, path string) error {
 	var stat unix.Stat_t
 	if err := unix.Fstat(fd, &stat); err != nil {
 		return err
 	}
 	if stat.Mode&unix.S_IFMT != unix.S_IFDIR {
-		return errors.New("updater registration parent is not a directory")
+		return fmt.Errorf("updater registration parent %q is not a directory", path)
 	}
 	if stat.Mode&0022 != 0 {
-		return errors.New("updater registration parent must not be group/world writable")
+		return fmt.Errorf("updater registration parent %q must not be group/world writable", path)
 	}
 	if !registrationOwnerTrusted(stat.Uid) {
-		return fmt.Errorf("updater registration parent owner UID %d is not trusted", stat.Uid)
+		return fmt.Errorf("updater registration parent %q owner UID %d is not trusted", path, stat.Uid)
 	}
 	return nil
 }

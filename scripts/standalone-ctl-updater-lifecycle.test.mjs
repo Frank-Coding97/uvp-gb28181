@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
@@ -130,6 +130,39 @@ test('用法提示把两个新入口列出来了', () => {
   assert.match(script, /stop-updater\|serve-updater/, '用法行里没有 stop-updater');
 });
 
+// ------------------------------------------------- 目录信任（2026-10-20 现场）----
+// 现场症状：装到「阶段 3/3」才报
+//   open trusted updater registration: updater registration parent must not be
+//   group/world writable
+// —— 114 张表已经建完，报错是英文、不说哪一层、不说怎么改。
+// 根因：包解压在 umask 002 建出来的 775 目录里。助手要求「从 / 到 config/
+// 每一层都不能对同组/其他人可写」，这是它的安全设计（要以 root 身份替换
+// 程序文件），不能放宽 ⇒ 只能做到：**在阶段 1 检查、就地修好、说清楚**。
+
+test('阶段 1 就检查目录信任（不能等建完 114 张表才炸）', () => {
+  const b = branches();
+  const at = b.start.indexOf('check_updater_trusted_paths');
+  assert.ok(at > 0, 'start 分支没有调用 check_updater_trusted_paths');
+  const phase2 = b.start.indexOf('阶段 2/3');
+  assert.ok(phase2 > 0, '找不到阶段 2/3 的分界');
+  assert.ok(at < phase2, '目录信任检查必须在建库建表之前');
+});
+
+test('prepare_updater 也要查（systemd / start-updater 会绕过阶段检查）', () => {
+  assert.match(fn('prepare_updater'), /check_updater_trusted_paths/);
+});
+
+test('修权限只做 go-w，绝不放宽到人人可写', () => {
+  const body = fn('check_updater_trusted_paths');
+  assert.match(body, /chmod go-w/, '应当是 go-w（去掉组/其他写），不是 chmod 777');
+  // ⛔ 只看非注释行：注释里会举例说明"现场为什么是 775"，拿整篇匹配会假红。
+  const commands = script
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('#'))
+    .join('\n');
+  assert.doesNotMatch(commands, /chmod\s+(-R\s+)?7{3}/, 'ctl.sh 里不许出现 chmod 777');
+});
+
 // ---------------------------------------------------------------- 行为契约 ----
 
 const HELPERS = [
@@ -144,6 +177,7 @@ const HELPERS = [
   fn('updater_systemd_managed'),
   fn('updater_status_line'),
   fn('stop_updater'),
+  fn('check_updater_trusted_paths'),
 ].join('\n');
 
 // makePkg 造一个最小安装目录：真的可执行文件（停进程时兜底要求 -x）+ run/ 目录。
@@ -192,6 +226,7 @@ UPDATER_UNIT_NAME="uvp-gb28181-updater.service"
 UPDATER_PID_FILE="$UVP_T_PIDFILE"
 UPDATER_SOCKET="$UVP_T_SOCKET"
 UPDATER_BIN="$UVP_T_BIN"
+ROOT="$UVP_T_ROOT"
 ${HELPERS}
 ${action}
 `;
@@ -203,6 +238,7 @@ ${action}
       UVP_T_PIDFILE: pkg.pidFile,
       UVP_T_SOCKET: pkg.socket,
       UVP_T_BIN: pkg.bin,
+      UVP_T_ROOT: pkg.root,
     },
   });
 }
@@ -301,5 +337,36 @@ test('什么都没跑时 stop_updater 是幂等的（rc=0，不报错）', () =>
     assert.match(stop.stdout, /升级助手已停止/);
   } finally {
     pkg.cleanup();
+  }
+});
+
+// ⛔ 这个用例必须建在 $HOME 下，不能用 os.tmpdir()：/tmp 是 1777（root 所有），
+//   逐层往上走时会被判成"不可信且改不动"，那测的就不是我们要测的东西了。
+test('安装目录是 775 时自动收成 755（不再让助手起不来）', () => {
+  const base = mkdtempSync(join(homedir(), '.uvp-perm-'));
+  const root = join(base, 'uvp-gb28181');
+  mkdirSync(join(root, 'updater'), { recursive: true });
+  const bin = join(root, 'updater', 'uvp-updater');
+  writeFileSync(bin, '#!/bin/sh\nexit 0\n');
+  chmodSync(bin, 0o755);
+  chmodSync(root, 0o775);
+  const pkg = {
+    root,
+    bin,
+    pidFile: join(root, 'run', 'updater.pid'),
+    socket: join(root, 'run', 'updater.sock'),
+  };
+  try {
+    const r = runHarness(
+      pkg,
+      `check_updater_trusted_paths
+printf 'MODE=%s\\n' "$(stat -c '%a' "$ROOT" 2>/dev/null || stat -f '%Lp' "$ROOT")"`,
+    );
+    assert.equal(r.status, 0, `775 的安装目录应当被就地修好，而不是直接失败：${r.stderr}`);
+    assert.match(r.stdout, /已收紧目录权限/, '修权限必须留日志，不能悄悄改');
+    assert.match(r.stdout, /MODE=755/, '目录应被收成 755');
+  } finally {
+    chmodSync(base, 0o700);
+    rmSync(base, { recursive: true, force: true });
   }
 });

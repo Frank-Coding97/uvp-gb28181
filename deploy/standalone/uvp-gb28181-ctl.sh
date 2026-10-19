@@ -442,6 +442,9 @@ ensure_updater_registration() {
 }
 
 prepare_updater() {
+  # ⛔ 必须在生成注册文件之前：注册文件的"可信路径"校验就是从 / 逐层往下走，
+  #   目录不可信时 `serve` 起不来（详见 check_updater_trusted_paths 的注释）。
+  check_updater_trusted_paths
   ensure_updater_registration
   # 外置数据库备份口令只通过环境变量交给独立助手；默认不从
   # config.yml 读取并导出，避免升级助手启动时把配置口令带入进程环境。
@@ -455,6 +458,60 @@ prepare_updater() {
     if [ -n "$configured_password" ]; then
       export "$password_env=$configured_password"
     fi
+  fi
+}
+
+# ------------------------------------------------ 升级助手的目录信任 ----
+#
+# ⛔⛔ 升级助手（uvp-updater）启动时做「信任路径」校验：**从 / 到 config/ 的
+#   每一层目录都不能对同组/其他人可写**，且属主必须是 root 或当前用户 ——
+#   因为它要以 root 身份替换程序文件，上级目录被人可写就等于能被换掉整棵树。
+#   这是安全设计，不许放宽（`ReadRegistration` 的单测也锁着这个语义）。
+#
+# ⛔ 但它的失败表现极差：只报一句英文
+#     `updater registration parent must not be group/world writable`
+#   ——不说是哪一层、也不说该改什么，而且发生在**阶段 3/3**：114 张表都建完了
+#   才卡住。2026-10-20 实测就是包解压在 umask 002 建出来的 775 目录里，
+#   两个上级目录都"不可信"，装到一半失败，报错完全指不到"目录权限"这一层。
+#   ⇒ 在这里（阶段 1）就把话说清楚：自己拥有的目录直接 go-w 修好并留日志，
+#     别人的目录列出来 + 给出可直接粘贴的命令。
+check_updater_trusted_paths() {
+  [ -x "$UPDATER_BIN" ] || return 0
+  local me dir mode owner blocked=""
+  me="$(id -u)"
+  dir="$ROOT"
+  while [ -n "$dir" ] && [ "$dir" != "/" ]; do
+    if [ -L "$dir" ]; then
+      blocked="${blocked}${dir}（符号链接，升级助手拒绝穿过）"$'\n'
+    elif [ -d "$dir" ]; then
+      # ⛔ stat 的方言不统一：GNU 是 -c，BSD/macOS 是 -f ⇒ 两个都试，
+      #   都失败就当"判不了"跳过（绿色包的目标平台是 Linux，这层只是让
+      #   开发机上的契约测试也能跑）。
+      mode="$(stat -c '%a' "$dir" 2>/dev/null || stat -f '%Lp' "$dir" 2>/dev/null || true)"
+      owner="$(stat -c '%u' "$dir" 2>/dev/null || stat -f '%u' "$dir" 2>/dev/null || true)"
+      # 取末三位：setgid/sticky（如 2755、1777）不参与"可否被他人改写"的判断。
+      mode="${mode: -3}"
+      if [ -n "$mode" ] && { [ $(( ${mode:1:1} & 2 )) -ne 0 ] || [ $(( ${mode:2:1} & 2 )) -ne 0 ]; }; then
+        # root 能改任何目录；普通用户只能改自己的 ⇒ 其余的只能报出来。
+        if [ "$owner" = "$me" ] || [ "$me" = "0" ]; then
+          chmod go-w "$dir" 2>/dev/null \
+            && det "已收紧目录权限（升级助手要求同组/其他人不可写）：$dir"
+        else
+          blocked="${blocked}${dir}"$'\n'
+        fi
+      fi
+    fi
+    dir="$(dirname "$dir")"
+  done
+  if [ -n "$blocked" ]; then
+    det "升级助手要求：从 / 到安装目录的每一层都不能对同组/其他人可写。以下目录不满足，且当前用户改不动："
+    local line
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      det "  $line"
+    done <<< "$blocked"
+    det "修法：以这些目录的属主身份执行 chmod go-w <上面列出的每个目录>，然后重试。"
+    fail "安装目录的上级权限不安全（升级助手拒绝在此位置运行）"
   fi
 }
 
@@ -480,7 +537,12 @@ start_updater() {
   rm -f "$UPDATER_SOCKET"
   ( "$UPDATER_BIN" serve --socket "$UPDATER_SOCKET" --state "$UPDATER_STATE" --registration "$UPDATER_REGISTRATION" >"$LOGS/updater.log" 2>&1 & echo $! > "$UPDATER_PID_FILE" ) >/dev/null 2>&1
   for _ in $(seq 1 30); do
-    [ -S "$UPDATER_SOCKET" ] && return 0
+    if [ -S "$UPDATER_SOCKET" ]; then
+      # ⛔ 这里必须有一行成功提示：阶段 3 的另外四个组件都有自己的 ✓，
+      #   助手不吭声会让人以为它没起（它恰好又是最容易被忽略的常驻进程）。
+      ok "升级助手启动成功（PID $(updater_pid 2>/dev/null || echo '?')）"
+      return 0
+    fi
     sleep 0.1
   done
   tail -30 "$LOGS/updater.log" >&2 || true
@@ -489,10 +551,17 @@ start_updater() {
   #   同组/其他人可写」，而现场最常见的来源是「包解压在一个 775 的目录里」
   #   （自己 mkdir 的 umask、或 /opt 下 chmod 777）—— 2026-10-20 在 220 上
   #   实测就是这样卡住的，报错完全指不到"目录权限"这一层。
-  #   助手这么严格是安全设计（它要以 root 身份替换程序文件），不能放宽 ⇒ 只能把话说清楚。
+  #   助手这么严格是安全设计（它要以 root 身份替换程序文件），不能放宽 ⇒
+  #   常规情形已由 check_updater_trusted_paths 在阶段 1 拦下并就地修好，
+  #   这里只是兜底（systemd 直接拉起、跳过 ctl.sh 阶段检查的场景）。
   if grep -q "group/world writable" "$LOGS/updater.log" 2>/dev/null; then
     det "原因：安装目录的某一层上级目录对同组/其他人可写，升级助手拒绝在这种位置运行。"
-    det "修法：chmod 755 \"${ROOT}\" \"$(dirname "$ROOT")\"（报错涉及的每一层都要 755），然后重试。"
+    # 新版助手会把具体是哪一层写进报错（`... parent \"/path\" must not be ...`），
+    # 直接把它摘出来给用户，比让用户自己逐层 stat 快得多。
+    local culprit
+    culprit="$(sed -n 's/.*parent "\([^"]*\)".*/\1/p' "$LOGS/updater.log" 2>/dev/null | head -1)"
+    [ -n "$culprit" ] && det "定位：$culprit"
+    det "修法：chmod go-w <上面那一层>（从 / 到安装目录的每一层都要去掉同组/其他人写），然后重试。"
   fi
   fail "升级助手未能启动"
 }
@@ -1912,6 +1981,10 @@ case "${1:-start}" in
     #   nginx 会连到别人的服务上，而 status 仍报「运行中」——
     #   客户看到的是别的系统的页面，全程却没有任何报错（今天真实踩到）。
     check_ports_free
+    # ⛔⛔ 目录信任也在阶段 1 就查：升级助手的"可信路径"校验会从 / 逐层走到
+    #   config/，任一层对同组/其他人可写就起不来。放在阶段 3 才炸的话，
+    #   用户白等一轮建表（114 张表 · 315 个索引），报错还只有一句英文。
+    check_updater_trusted_paths
 
     log "阶段 2/3 · 初始化数据与配置"
     # ⛔ 必须先建库再起 Redis/后端：后端启动时会立刻查库，
