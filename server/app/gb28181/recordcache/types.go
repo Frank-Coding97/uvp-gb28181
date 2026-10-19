@@ -140,6 +140,9 @@ type Config struct {
 	// MergeTimeout 是收尾期把多分片合成一个文件的整体超时（<=0 时用 10 分钟）。
 	// 超时按失败处理：任务照常判定成功（分段仍可下载），只是没有现成产物。
 	MergeTimeout time.Duration
+	// TailTolerance 是设备录像尾部补拉的兼容容差（<=0 时用 2 秒）。
+	// 运行时可通过 Options.TailTolerance 动态覆盖。
+	TailTolerance time.Duration
 }
 
 func (c Config) withDefaults() Config {
@@ -160,6 +163,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.MergeTimeout <= 0 {
 		c.MergeTimeout = 10 * time.Minute
+	}
+	if c.TailTolerance <= 0 {
+		c.TailTolerance = 2 * time.Second
 	}
 	return c
 }

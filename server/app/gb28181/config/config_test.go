@@ -302,6 +302,36 @@ func TestPlaybackSettingsFromReadsLatestSourceValue(t *testing.T) {
 	require.Equal(t, 300000, PlaybackSettingsFrom(source).PlayTimeoutMs)
 }
 
+func TestRecordCacheTailToleranceReadsDefaultAndLatestValue(t *testing.T) {
+	source := fakeSource{}
+	require.Equal(t, DefaultRecordCacheTailToleranceSec, RecordCacheTailToleranceSecFrom(source))
+
+	source.values = map[string]interface{}{RecordCacheTailToleranceSecConfigKey: 5}
+	source.ints = map[string]int{RecordCacheTailToleranceSecConfigKey: 5}
+	require.Equal(t, 5, RecordCacheTailToleranceSecFrom(source))
+
+	source.values[RecordCacheTailToleranceSecConfigKey] = 0
+	source.ints[RecordCacheTailToleranceSecConfigKey] = 0
+	require.Equal(t, 0, RecordCacheTailToleranceSecFrom(source), "0 秒应明确关闭尾部容差")
+
+	source.values[RecordCacheTailToleranceSecConfigKey] = MaxRecordCacheTailToleranceSec + 1
+	source.ints[RecordCacheTailToleranceSecConfigKey] = MaxRecordCacheTailToleranceSec + 1
+	require.Equal(t, DefaultRecordCacheTailToleranceSec, RecordCacheTailToleranceSecFrom(source))
+}
+
+func TestValidateRecordCacheTailToleranceSec(t *testing.T) {
+	for _, value := range []int{MinRecordCacheTailToleranceSec, MaxRecordCacheTailToleranceSec} {
+		require.NoError(t, ValidateRecordCacheTailToleranceSec(value))
+	}
+	for _, value := range []int{-1, MaxRecordCacheTailToleranceSec + 1} {
+		err := ValidateRecordCacheTailToleranceSec(value)
+		require.Error(t, err)
+		var validationErr *ValidationError
+		require.ErrorAs(t, err, &validationErr)
+		require.Equal(t, RecordCacheTailToleranceSecConfigKey, validationErr.Field)
+	}
+}
+
 func TestFixedAddressPlaybackSettingsDefaultsAndValidStates(t *testing.T) {
 	source := fakeSource{}
 	require.Equal(t, FixedAddressPlaybackSettings{}, FixedAddressPlaybackSettingsFrom(source))

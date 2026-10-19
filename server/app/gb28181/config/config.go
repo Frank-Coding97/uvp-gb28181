@@ -43,6 +43,7 @@ const (
 	GlobalSubscriptionItemsConfigKey          = "gb28181.subscribe.global_items"
 	SIPTraceEnabledConfigKey                  = "gb28181.trace.enabled"
 	SIPTraceRetentionDaysConfigKey            = "gb28181.trace.retention_days"
+	RecordCacheTailToleranceSecConfigKey      = "gb28181.record_cache.tail_tolerance_sec"
 
 	DefaultRecordQueryTimezone           = "Asia/Shanghai"
 	DefaultRecordQueryTimeoutSec         = 15
@@ -75,6 +76,9 @@ const (
 	MaxPlaybackIdleSec       = 3600
 	MaxPlaybackSessionSec    = 86400
 	MaxSIPCommandTimeoutSec  = 300
+	DefaultRecordCacheTailToleranceSec = 2
+	MinRecordCacheTailToleranceSec     = 0
+	MaxRecordCacheTailToleranceSec     = 30
 
 	playAuthGeneratedKeyBytes = 32
 	DefaultPlayAuthTTLSeconds = 120
@@ -179,6 +183,32 @@ func PlaybackSettingsFrom(c valueSource) PlaybackSettings {
 
 func CurrentPlaybackSettings() PlaybackSettings {
 	return PlaybackSettingsFrom(app.ConfigYml)
+}
+
+// RecordCacheTailToleranceSecFrom returns the short tail tolerance used when
+// a device refuses the final, very short playback request. Zero disables the
+// compatibility fallback; missing or invalid values use the documented default.
+func RecordCacheTailToleranceSecFrom(c valueSource) int {
+	if c == nil || c.Get(RecordCacheTailToleranceSecConfigKey) == nil {
+		return DefaultRecordCacheTailToleranceSec
+	}
+	value := c.GetInt(RecordCacheTailToleranceSecConfigKey)
+	if value < MinRecordCacheTailToleranceSec || value > MaxRecordCacheTailToleranceSec {
+		return DefaultRecordCacheTailToleranceSec
+	}
+	return value
+}
+
+func CurrentRecordCacheTailToleranceSec() int {
+	return RecordCacheTailToleranceSecFrom(app.ConfigYml)
+}
+
+func ValidateRecordCacheTailToleranceSec(value int) error {
+	if value < MinRecordCacheTailToleranceSec || value > MaxRecordCacheTailToleranceSec {
+		return invalid(RecordCacheTailToleranceSecConfigKey, value,
+			fmt.Sprintf("must be between %d and %d", MinRecordCacheTailToleranceSec, MaxRecordCacheTailToleranceSec))
+	}
+	return nil
 }
 
 // ValidatePlaybackSettings validates the complete aggregate submitted by the

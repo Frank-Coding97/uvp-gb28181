@@ -84,6 +84,7 @@ func TestServiceConfigController_AggregateGetAndPut(t *testing.T) {
 	envelope.Data.PTZDefaultSpeed.Level = 8
 	envelope.Data.SIPCommandTimeout.TimeoutSec = 20
 	envelope.Data.GlobalSubscriptions.Items = []string{"catalog", "mobile_position"}
+	envelope.Data.RecordCacheTailToleranceSec = 5
 
 	put := httptest.NewRecorder()
 	router.ServeHTTP(put, httptest.NewRequest(http.MethodPut, "/service-config", jsonBody(t, envelope.Data)))
@@ -92,9 +93,23 @@ func TestServiceConfigController_AggregateGetAndPut(t *testing.T) {
 	require.Equal(t, 8, config.values[ptzDefaultSpeedLevelConfigKey])
 	require.Equal(t, 20, config.values[gbconfig.SIPCommandTimeoutSecConfigKey])
 	require.Equal(t, []string{"catalog", "mobile_position"}, config.values[gbconfig.GlobalSubscriptionItemsConfigKey])
+	require.Equal(t, 5, config.values[gbconfig.RecordCacheTailToleranceSecConfigKey])
 	require.Equal(t, "Gateway/1.0", config.values[gbconfig.CascadeUserAgentConfigKey])
 	require.Equal(t, "Regional platform", config.values[gbconfig.CascadePlatformNameConfigKey])
 	require.Equal(t, "340200", config.values[gbconfig.CascadeCivilCodeConfigKey])
+}
+
+func TestServiceConfigController_RejectsInvalidRecordCacheTailTolerance(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{}}
+	app.ConfigYml = config
+	request := NewServiceConfigController().currentServiceConfig()
+	request.RecordCacheTailToleranceSec = gbconfig.MaxRecordCacheTailToleranceSec + 1
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/service-config", jsonBody(t, request)))
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Zero(t, config.saveNum)
 }
 
 func TestServiceConfigController_LegacyRequestPreservesCascadeSettings(t *testing.T) {
@@ -115,6 +130,23 @@ func TestServiceConfigController_LegacyRequestPreservesCascadeSettings(t *testin
 	}
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &result))
 	require.Equal(t, "Existing platform", result.Data.Cascade.PlatformName)
+}
+
+func TestServiceConfigController_LegacyRequestPreservesTailTolerance(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{gbconfig.RecordCacheTailToleranceSecConfigKey: 5}}
+	app.ConfigYml = config
+	request := NewServiceConfigController().currentServiceConfig()
+	payload, err := json.Marshal(request)
+	require.NoError(t, err)
+	var legacy map[string]interface{}
+	require.NoError(t, json.Unmarshal(payload, &legacy))
+	delete(legacy, "recordCacheTailToleranceSec")
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/service-config", jsonBody(t, legacy)))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, 5, config.values[gbconfig.RecordCacheTailToleranceSecConfigKey])
 }
 
 func TestServiceConfigController_InvalidCascadeDoesNotSave(t *testing.T) {

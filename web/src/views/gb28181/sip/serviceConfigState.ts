@@ -17,6 +17,7 @@ export interface StaticServiceConfigDraft {
   saveAlarmMessages: boolean;
   sipTimeoutSec: number;
   preallocationMode: boolean;
+  recordCacheTailToleranceSec: number;
   playback: {
     defaultProtocol: "ws-flv" | "http-flv" | "hls" | "webrtc";
     fixedAddressEnabled: boolean;
@@ -46,7 +47,8 @@ export const staticServiceConfigLabels = [
   "心跳恢复设备在线状态",
   "是否存储报警消息",
   "SIP 命令超时时间（秒）",
-  "预分配模式"
+  "预分配模式",
+  "录像缓存尾部容差（秒）"
 ] as const;
 
 export const playbackServiceConfigLabels = [
@@ -108,6 +110,7 @@ export function createStaticServiceConfigDraft(): StaticServiceConfigDraft {
     saveAlarmMessages: true,
     sipTimeoutSec: 10,
     preallocationMode: false,
+    recordCacheTailToleranceSec: 2,
     playback: {
       defaultProtocol: "ws-flv",
       fixedAddressEnabled: false,

@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"sync"
@@ -129,8 +130,28 @@ type ServiceConfig struct {
 	PlaybackSettings                 gbconfig.PlaybackSettings              `json:"playbackSettings"`
 	FixedAddressPlayback             gbconfig.FixedAddressPlaybackSettings  `json:"fixedAddressPlayback"`
 	PlayAuth                         gbconfig.PlayAuthSettings              `json:"playAuth"`
+	RecordCacheTailToleranceSec      int                                    `json:"recordCacheTailToleranceSec"`
 	SIPLog                           SIPLogUpdateResult                     `json:"sipLog"`
 	Cascade                          *gbconfig.CascadeSettings              `json:"cascade,omitempty"`
+	recordCacheTailTolerancePresent  bool
+}
+
+// UnmarshalJSON remembers whether the optional compatibility field was sent.
+// Older clients may submit the aggregate without it; those requests retain the
+// current value instead of turning the tolerance into an unintended zero.
+func (s *ServiceConfig) UnmarshalJSON(data []byte) error {
+	type serviceConfigAlias ServiceConfig
+	var decoded serviceConfigAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*s = ServiceConfig(decoded)
+	_, s.recordCacheTailTolerancePresent = fields["recordCacheTailToleranceSec"]
+	return nil
 }
 
 func (sc *ServiceConfigController) GetServiceConfig(c *gin.Context) {
@@ -163,7 +184,7 @@ func (sc *ServiceConfigController) currentServiceConfig() ServiceConfig {
 		PTZDefaultSpeed: PTZDefaultSpeedConfig{Level: currentPTZDefaultSpeedLevel()}, DefaultChannelStreamTransport: DefaultChannelStreamTransportConfig{Transport: gbconfig.CurrentDefaultChannelStreamTransport()},
 		DefaultPlaybackProtocol: DefaultPlaybackProtocolConfig{Protocol: gbconfig.CurrentDefaultPlaybackProtocol()}, GlobalSubscriptions: GlobalSubscriptionConfig{Items: gbconfig.GlobalSubscriptionItems()},
 		DefaultChannelAudio: DefaultChannelAudioConfig{Enabled: gbconfig.DefaultChannelAudioEnabled()}, PlaybackSettings: gbconfig.CurrentPlaybackSettings(), FixedAddressPlayback: gbconfig.CurrentFixedAddressPlaybackSettings(),
-		PlayAuth: gbconfig.CurrentPlayAuthSettings(), SIPLog: SIPLogUpdateResult{Enabled: gbconfig.SIPTraceEnabled(), RetentionDays: gbconfig.SIPTraceRetentionDays(), Applied: sc.sipTraceApplied(gbconfig.SIPTraceEnabled())},
+		PlayAuth: gbconfig.CurrentPlayAuthSettings(), RecordCacheTailToleranceSec: gbconfig.CurrentRecordCacheTailToleranceSec(), SIPLog: SIPLogUpdateResult{Enabled: gbconfig.SIPTraceEnabled(), RetentionDays: gbconfig.SIPTraceRetentionDays(), Applied: sc.sipTraceApplied(gbconfig.SIPTraceEnabled())},
 		Cascade: &cascade,
 	}
 }
@@ -173,6 +194,9 @@ func (sc *ServiceConfigController) UpdateServiceConfig(c *gin.Context) {
 	if err := c.ShouldBindJSON(&request); err != nil {
 		sc.Fail(c, "保存国标服务配置失败：请求格式无效", err, http.StatusBadRequest)
 		return
+	}
+	if !request.recordCacheTailTolerancePresent {
+		request.RecordCacheTailToleranceSec = gbconfig.CurrentRecordCacheTailToleranceSec()
 	}
 	if err := validateServiceConfig(request); err != nil {
 		sc.Fail(c, "保存国标服务配置失败："+err.Error(), err, http.StatusBadRequest)
@@ -230,6 +254,9 @@ func validateServiceConfig(v ServiceConfig) error {
 		return err
 	}
 	if err := gbconfig.ValidatePlayAuthSettings(v.PlayAuth, v.FixedAddressPlayback); err != nil {
+		return err
+	}
+	if err := gbconfig.ValidateRecordCacheTailToleranceSec(v.RecordCacheTailToleranceSec); err != nil {
 		return err
 	}
 	if v.PositionHistory.RetentionDays < 1 || v.PositionHistory.RetentionDays > 365 || v.CloudRecordingRetention.RetentionDays < 1 || v.CloudRecordingRetention.RetentionDays > 365 {
@@ -295,6 +322,7 @@ func applyServiceConfig(v ServiceConfig) {
 	app.ConfigYml.Set(gbconfig.PlayAuthEnabledConfigKey, v.PlayAuth.Enabled)
 	app.ConfigYml.Set(gbconfig.PlayAuthBindClientIPConfigKey, v.PlayAuth.BindClientIP)
 	app.ConfigYml.Set(gbconfig.PlayAuthTTLSecondsConfigKey, v.PlayAuth.TTLSeconds)
+	app.ConfigYml.Set(gbconfig.RecordCacheTailToleranceSecConfigKey, v.RecordCacheTailToleranceSec)
 	app.ConfigYml.Set(gbconfig.SIPTraceEnabledConfigKey, v.SIPLog.Enabled)
 	app.ConfigYml.Set(gbconfig.SIPTraceRetentionDaysConfigKey, v.SIPLog.RetentionDays)
 }

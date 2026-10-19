@@ -374,7 +374,7 @@ describe("ServiceConfig edit mode", () => {
     expect(wrapper.findAll(".uvp-system-form")).toHaveLength(3);
     expect(wrapper.findAll(".uvp-config-view")).toHaveLength(0);
     expect(wrapper.findAll(".uvp-config-badge")).toHaveLength(0);
-    expect(wrapper.findAll("input[type='number']")).toHaveLength(5);
+    expect(wrapper.findAll("input[type='number']")).toHaveLength(6);
     expect(wrapper.findAll("input[type='number']").every(input => input.classes().includes("service-config-number-input"))).toBe(
       true
     );
@@ -384,11 +384,25 @@ describe("ServiceConfig edit mode", () => {
     const wrapper = mountPage();
     await flushPromises();
 
-    expect(wrapper.findAll("[data-tooltip]")).toHaveLength(31);
+    expect(wrapper.findAll("[data-tooltip]")).toHaveLength(32);
     expect(wrapper.find("[data-field='saveMobilePositionHistory']").attributes("data-tooltip")).toBe(
       "关闭后仍更新设备和通道的最新位置，不再新增轨迹点。"
     );
     expect(wrapper.find("[data-field='sipLogEnabled']").attributes("data-tooltip")).toContain("保存后会热重载 SIP 服务");
+  });
+
+  it("loads and saves the recording cache tail tolerance", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const field = wrapper.find("[data-field='recordCacheTailToleranceSec'] input[type='number']");
+    expect(field.element).toHaveProperty("value", "2");
+    await field.setValue("5");
+    const save = wrapper.findAll("button").find(button => button.text().includes("保存配置"))!;
+    await save.trigger("click");
+    await flushPromises();
+
+    expect(api.updateServiceConfig).toHaveBeenLastCalledWith(expect.objectContaining({ recordCacheTailToleranceSec: 5 }));
   });
 
   it("loads shared cascade metadata and resets or saves it with the page actions", async () => {

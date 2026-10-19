@@ -1375,7 +1375,10 @@ func setupRecordCacheRuntime() {
 		Speed:     recordcache.NewGormSpeedSource(app.DB()),
 		// 保留天数与服务配置页的「云端录像默认保留天数」是**同一个值**：
 		// 缓存产出与云端录像产出走同一条保留策略，不另起一套配置。
-		RetentionDays:   gbcontrollers.CloudRecordingRetentionDays,
+		RetentionDays: gbcontrollers.CloudRecordingRetentionDays,
+		TailTolerance: func() time.Duration {
+			return time.Duration(gbconfig.CurrentRecordCacheTailToleranceSec()) * time.Second
+		},
 		DefaultProtocol: gbconfig.CurrentDefaultPlaybackProtocol(),
 	})
 	gbroutes.SetRecordCacheSourceLeaseChecker(recordCacheLeases)

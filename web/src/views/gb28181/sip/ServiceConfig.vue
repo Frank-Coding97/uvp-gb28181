@@ -119,6 +119,7 @@ const savedIgnoreChannelOfflineStatusNotify = ref(false);
 const savedSIPLogEnabled = ref(false);
 const savedSIPLogRetentionDays = ref(7);
 const savedCloudRecordingRetentionDays = ref(7);
+const savedRecordCacheTailToleranceSec = ref(2);
 const savedCascadeSettings = reactive(createCascadeSettingsDraft());
 const cascadeChanged = computed(() => JSON.stringify(draft.cascade) !== JSON.stringify(savedCascadeSettings));
 const cascadeErrors = computed(() => validateCascadeSettings(draft.cascade));
@@ -129,12 +130,14 @@ const cloudRecordingRetentionField = ref<NumberFieldInstance | null>(null);
 const sipTimeoutField = ref<NumberFieldInstance | null>(null);
 const playAuthTTLField = ref<NumberFieldInstance | null>(null);
 const playTimeoutField = ref<NumberFieldInstance | null>(null);
+const recordCacheTailToleranceField = ref<NumberFieldInstance | null>(null);
 const numberFields = computed(() => [
   positionHistoryRetentionField,
   cloudRecordingRetentionField,
   sipTimeoutField,
   playAuthTTLField,
-  playTimeoutField
+  playTimeoutField,
+  recordCacheTailToleranceField
 ]);
 const numberFieldsValid = computed(() => numberFields.value.every(field => !field.value?.error));
 const positionHistoryChanged = computed(
@@ -186,11 +189,20 @@ const sipLogRetentionValid = computed(
 const cloudRecordingRetentionChanged = computed(
   () => draft.cloudRecordingRetentionDays !== savedCloudRecordingRetentionDays.value
 );
+const recordCacheTailToleranceChanged = computed(
+  () => draft.recordCacheTailToleranceSec !== savedRecordCacheTailToleranceSec.value
+);
 const cloudRecordingRetentionValid = computed(
   () =>
     Number.isInteger(draft.cloudRecordingRetentionDays) &&
     draft.cloudRecordingRetentionDays >= 1 &&
     draft.cloudRecordingRetentionDays <= 365
+);
+const recordCacheTailToleranceValid = computed(
+  () =>
+    Number.isInteger(draft.recordCacheTailToleranceSec) &&
+    draft.recordCacheTailToleranceSec >= 0 &&
+    draft.recordCacheTailToleranceSec <= 30
 );
 const playTimeoutValid = computed(
   () =>
@@ -224,6 +236,7 @@ const hasChanges = computed(
     ignoreChannelOfflineStatusNotifyChanged.value ||
     sipLogChanged.value ||
     cloudRecordingRetentionChanged.value ||
+    recordCacheTailToleranceChanged.value ||
     cascadeChanged.value
 );
 const configSaving = computed(() => aggregateSaving.value);
@@ -306,6 +319,7 @@ function resetDraft() {
   Object.assign(draft.cascade, savedCascadeSettings);
   draft.saveMobilePositionHistory = savedPositionHistoryEnabled.value;
   draft.positionHistoryRetentionDays = savedPositionHistoryRetentionDays.value;
+  draft.recordCacheTailToleranceSec = savedRecordCacheTailToleranceSec.value;
   draft.sdpExtension = savedSDPExtensionEnabled.value;
   draft.ptzSpeed = savedPTZDefaultSpeed.value;
   draft.defaultChannelStreamTransport = savedDefaultChannelStreamTransport.value;
@@ -352,7 +366,13 @@ async function saveConfig() {
     Message.warning(numberFieldError);
     return;
   }
-  if (!sipLogRetentionValid.value || !cloudRecordingRetentionValid.value || !playTimeoutValid.value || !playAuthTTLValid.value)
+  if (
+    !sipLogRetentionValid.value ||
+    !cloudRecordingRetentionValid.value ||
+    !recordCacheTailToleranceValid.value ||
+    !playTimeoutValid.value ||
+    !playAuthTTLValid.value
+  )
     return;
   if (!hasChanges.value) {
     return;
@@ -365,6 +385,7 @@ async function saveConfig() {
     const response = await updateServiceConfig({
       positionHistory: { enabled: draft.saveMobilePositionHistory, retentionDays: draft.positionHistoryRetentionDays },
       cloudRecordingRetention: { retentionDays: draft.cloudRecordingRetentionDays },
+      recordCacheTailToleranceSec: draft.recordCacheTailToleranceSec,
       sdpExtension: { enabled: draft.sdpExtension },
       syncChannelsOnOnline: { enabled: draft.syncChannelsOnOnline },
       onlineOnHeartbeat: { enabled: draft.onlineOnHeartbeat },
@@ -404,6 +425,7 @@ async function saveConfig() {
     draft.saveMobilePositionHistory = v.positionHistory.enabled;
     draft.positionHistoryRetentionDays = v.positionHistory.retentionDays ?? 7;
     draft.cloudRecordingRetentionDays = v.cloudRecordingRetention.retentionDays ?? 7;
+    draft.recordCacheTailToleranceSec = v.recordCacheTailToleranceSec ?? 2;
     draft.sdpExtension = v.sdpExtension.enabled;
     draft.syncChannelsOnOnline = v.syncChannelsOnOnline.enabled;
     draft.onlineOnHeartbeat = v.onlineOnHeartbeat.enabled;
@@ -425,6 +447,7 @@ async function saveConfig() {
     savedPositionHistoryEnabled.value = v.positionHistory.enabled;
     savedPositionHistoryRetentionDays.value = v.positionHistory.retentionDays ?? 7;
     savedCloudRecordingRetentionDays.value = v.cloudRecordingRetention.retentionDays ?? 7;
+    savedRecordCacheTailToleranceSec.value = v.recordCacheTailToleranceSec ?? 2;
     savedSDPExtensionEnabled.value = v.sdpExtension.enabled;
     savedPTZDefaultSpeed.value = v.ptzDefaultSpeed.level;
     savedDefaultChannelStreamTransport.value = v.defaultChannelStreamTransport.transport;
@@ -481,7 +504,9 @@ async function loadServiceConfig() {
     savedPositionHistoryEnabled.value = v.positionHistory.enabled;
     savedPositionHistoryRetentionDays.value = v.positionHistory.retentionDays ?? 7;
     draft.cloudRecordingRetentionDays = v.cloudRecordingRetention.retentionDays ?? 7;
+    draft.recordCacheTailToleranceSec = v.recordCacheTailToleranceSec ?? 2;
     savedCloudRecordingRetentionDays.value = v.cloudRecordingRetention.retentionDays ?? 7;
+    savedRecordCacheTailToleranceSec.value = v.recordCacheTailToleranceSec ?? 2;
     draft.sdpExtension = v.sdpExtension.enabled;
     savedSDPExtensionEnabled.value = v.sdpExtension.enabled;
     draft.ptzSpeed = v.ptzDefaultSpeed.level;
@@ -613,6 +638,7 @@ onMounted(async () => {
               !cascadeValid ||
               !numberFieldsValid ||
               !sipLogRetentionValid ||
+              !recordCacheTailToleranceValid ||
               !playTimeoutValid ||
               !playAuthTTLValid
             "
@@ -805,6 +831,27 @@ onMounted(async () => {
                   />
                   <template v-if="!cloudRecordingRetentionValid" #extra>
                     <span>请输入 1-365 之间的整数</span>
+                  </template>
+                </a-form-item>
+              </a-col>
+              <a-col :span="isMobile ? 24 : 12">
+                <a-form-item
+                  field="recordCacheTailToleranceSec"
+                  label="录像缓存尾部容差（秒）"
+                  tooltip="设备拒绝最后一小段回放请求时，只要已有录像文件且剩余时间不超过该值，就将任务按成功收尾；默认 2 秒，设置为 0 可关闭。"
+                  :validate-status="recordCacheTailToleranceValid ? undefined : 'error'"
+                >
+                  <s-number-field
+                    ref="recordCacheTailToleranceField"
+                    v-model="draft.recordCacheTailToleranceSec"
+                    class="service-config-number-input"
+                    :min="0"
+                    :max="30"
+                    required
+                    :disabled="aggregateLoading || aggregateSaving || !aggregateReady"
+                  />
+                  <template v-if="!recordCacheTailToleranceValid" #extra>
+                    <span>请输入 0-30 之间的整数</span>
                   </template>
                 </a-form-item>
               </a-col>

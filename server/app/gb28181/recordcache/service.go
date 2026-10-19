@@ -57,6 +57,9 @@ type Options struct {
 	// RetentionDays 动态返回产出文件的保留天数（改配置立即生效，不必重启）。
 	// 为空时退回 Config.RetentionDays。
 	RetentionDays func() int
+	// TailTolerance 动态返回尾部补拉容差（改配置立即生效，不必重启）。
+	// 为空时退回 Config.TailTolerance。
+	TailTolerance func() time.Duration
 	// DefaultProtocol 是建会话时希望的播放协议（仅影响会话里的 URL 选择，
 	// 缓存路径不播放，所以随便给一个合法的即可）。
 	DefaultProtocol string
@@ -77,6 +80,7 @@ type Service struct {
 	leases        SourceLeases
 	fileIndex     SegmentFileIndex
 	retention     func() int
+	tailTolerance func() time.Duration
 	protocol      string
 	config        Config
 	now           func() time.Time
@@ -124,7 +128,8 @@ func NewService(options Options) *Service {
 		repo: options.Repo, targets: options.Targets, playback: options.Playback,
 		snapshots: options.Snapshots, nodes: options.Nodes, client: options.Client,
 		content: options.Content, speed: options.Speed, retention: options.RetentionDays,
-		leases: options.Leases, fileIndex: options.FileIndex,
+		tailTolerance: options.TailTolerance,
+		leases:        options.Leases, fileIndex: options.FileIndex,
 		protocol: strings.TrimSpace(options.DefaultProtocol),
 		config:   options.Config.withDefaults(),
 		now:      options.Now, locks: newKeyedLocker(),
@@ -136,6 +141,9 @@ func NewService(options Options) *Service {
 	}
 	if service.now == nil {
 		service.now = time.Now
+	}
+	if service.tailTolerance == nil {
+		service.tailTolerance = func() time.Duration { return service.config.TailTolerance }
 	}
 	service.lifecycle, service.stop = context.WithCancel(context.Background())
 	return service
@@ -567,6 +575,11 @@ func (s *Service) startSegment(ctx context.Context, task *gbmodels.GbRecordCache
 		DownloadSpeed:   uint32(task.DownloadSpeed),
 	})
 	if err != nil {
+		if s.acceptShortTailTimeout(task, segStart, err) {
+			task.CursorAt = &task.EndTime
+			s.succeed(ctx, task)
+			return
+		}
 		s.fail(ctx, task, describePlaybackError(err))
 		return
 	}
@@ -621,6 +634,22 @@ func (s *Service) startSegment(ctx context.Context, task *gbmodels.GbRecordCache
 		s.stopSegment(context.Background(), task, "state persist failed")
 		return
 	}
+}
+
+// acceptShortTailTimeout preserves a usable cache when a device rejects the
+// final sub-second/short playback request after earlier files were recorded.
+// Only the media-wait timeout is tolerated; signaling, node, and device errors
+// remain failures even when the requested tail is short.
+func (s *Service) acceptShortTailTimeout(task *gbmodels.GbRecordCacheTask, segStart time.Time, err error) bool {
+	if task == nil || task.SourceFileCount() == 0 || !isMediaWaitTimeout(err) {
+		return false
+	}
+	remaining := task.EndTime.Sub(segStart)
+	if remaining <= 0 || s.tailTolerance == nil {
+		return false
+	}
+	tolerance := s.tailTolerance()
+	return tolerance > 0 && remaining <= tolerance
 }
 
 // pollSegment 检查本片进度：会话还在就更新实时速率，会话没了就收尾本片。
@@ -1157,4 +1186,13 @@ func describePlaybackError(err error) string {
 	default:
 		return "设备录像拉流失败"
 	}
+}
+
+func isMediaWaitTimeout(err error) bool {
+	var serviceErr *gbplayback.ServiceError
+	if !errors.As(err, &serviceErr) || serviceErr == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(serviceErr.Stage), "media_wait") &&
+		strings.EqualFold(strings.TrimSpace(serviceErr.Code), "timeout")
 }

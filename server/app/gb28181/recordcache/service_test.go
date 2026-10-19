@@ -614,6 +614,68 @@ func TestSegmentFailureMarksTaskFailed(t *testing.T) {
 	require.Contains(t, row.LastError, "推流超时", "失败原因要能让人看懂，而不是把 stage 原样抛给用户")
 }
 
+func TestShortTailMediaWaitTimeoutSucceedsWhenFilesExist(t *testing.T) {
+	h := newHarness(t, 4, 40*time.Minute)
+	task := h.create(t, 0)
+	row, err := h.repo.FindByTaskID(context.Background(), task.TaskID, nil)
+	require.NoError(t, err)
+	cursor := row.EndTime.Add(-1500 * time.Millisecond)
+	row.CursorAt = &cursor
+	require.NoError(t, row.EncodeSegments([]gbmodels.RecordCacheSegment{{
+		Stream: "old-stream", Name: "old.mp4", Path: "rtp/old-stream/old.mp4", Size: 10, MS: 1000,
+	}}))
+	require.NoError(t, h.repo.Update(context.Background(), row))
+	h.playback.createErr = &gbplayback.ServiceError{Stage: "media_wait", Code: "timeout"}
+	h.service.tailTolerance = func() time.Duration { return 2 * time.Second }
+
+	h.service.Tick(context.Background())
+
+	row, err = h.repo.FindByTaskID(context.Background(), task.TaskID, nil)
+	require.NoError(t, err)
+	require.Equal(t, gbmodels.RecordCacheStateSucceeded, row.State)
+	require.Equal(t, row.EndTime.UTC(), row.CursorAt.UTC())
+	require.Empty(t, row.LastError)
+}
+
+func TestLongTailMediaWaitTimeoutStillFails(t *testing.T) {
+	h := newHarness(t, 4, 40*time.Minute)
+	task := h.create(t, 0)
+	row, err := h.repo.FindByTaskID(context.Background(), task.TaskID, nil)
+	require.NoError(t, err)
+	cursor := row.EndTime.Add(-30 * time.Second)
+	row.CursorAt = &cursor
+	require.NoError(t, row.EncodeSegments([]gbmodels.RecordCacheSegment{{
+		Stream: "old-stream", Name: "old.mp4", Path: "rtp/old-stream/old.mp4", Size: 10, MS: 1000,
+	}}))
+	require.NoError(t, h.repo.Update(context.Background(), row))
+	h.playback.createErr = &gbplayback.ServiceError{Stage: "media_wait", Code: "timeout"}
+	h.service.tailTolerance = func() time.Duration { return 2 * time.Second }
+
+	h.service.Tick(context.Background())
+
+	row, err = h.repo.FindByTaskID(context.Background(), task.TaskID, nil)
+	require.NoError(t, err)
+	require.Equal(t, gbmodels.RecordCacheStateFailed, row.State)
+}
+
+func TestShortTailMediaWaitTimeoutWithoutFilesFails(t *testing.T) {
+	h := newHarness(t, 4, 40*time.Minute)
+	task := h.create(t, 0)
+	row, err := h.repo.FindByTaskID(context.Background(), task.TaskID, nil)
+	require.NoError(t, err)
+	cursor := row.EndTime.Add(-1500 * time.Millisecond)
+	row.CursorAt = &cursor
+	require.NoError(t, h.repo.Update(context.Background(), row))
+	h.playback.createErr = &gbplayback.ServiceError{Stage: "media_wait", Code: "timeout"}
+	h.service.tailTolerance = func() time.Duration { return 2 * time.Second }
+
+	h.service.Tick(context.Background())
+
+	row, err = h.repo.FindByTaskID(context.Background(), task.TaskID, nil)
+	require.NoError(t, err)
+	require.Equal(t, gbmodels.RecordCacheStateFailed, row.State)
+}
+
 func TestSegmentWithoutRecordingFails(t *testing.T) {
 	h := newHarness(t, 4, 40*time.Minute)
 	task := h.create(t, 0)

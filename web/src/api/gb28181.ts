@@ -1882,6 +1882,7 @@ export interface ServiceConfigAggregate {
   playbackSettings: PlaybackSettingsConfig;
   fixedAddressPlayback: FixedAddressPlaybackConfig;
   playAuth: PlayAuthConfig;
+  recordCacheTailToleranceSec: number;
   sipLog: SIPLogConfig;
   cascade?: CascadeSettingsConfig;
 }

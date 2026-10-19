@@ -16,7 +16,7 @@ describe("static service config draft", () => {
     expect(draft.defaultChannelAudioEnabled).toBe(true);
     expect(draft.cloudRecordingRetentionDays).toBe(7);
 
-    expect(staticServiceConfigLabels).toHaveLength(15);
+    expect(staticServiceConfigLabels).toHaveLength(16);
     expect(staticServiceConfigLabels).toContain("云端录像默认保留天数（天）");
     expect(staticServiceConfigLabels).toContain("新通道默认流传输模式");
     expect(staticServiceConfigLabels).toContain("全局订阅项目");
@@ -26,6 +26,7 @@ describe("static service config draft", () => {
     expect(staticServiceConfigLabels).toContain("忽略通道离线/异常通知");
     expect(staticServiceConfigLabels).toContain("心跳恢复设备在线状态");
     expect(staticServiceConfigLabels).toContain("SIP 命令超时时间（秒）");
+    expect(staticServiceConfigLabels).toContain("录像缓存尾部容差（秒）");
     expect(draft.positionHistoryRetentionDays).toBe(7);
     expect(draft.sipLogRetentionDays).toBe(7);
     expect(staticServiceConfigLabels).not.toContain("SIP 日志保留天数（天）");
