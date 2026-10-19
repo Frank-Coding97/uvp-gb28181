@@ -80,10 +80,14 @@ func (s *OfflineScanner) scanOnce() {
 		return
 	}
 	for _, d := range stale {
-		if err := gbmodels.MarkOffline(ctx, d.DeviceID); err != nil {
+		changed, err := gbmodels.MarkOfflineIfStale(ctx, d.DeviceID, s.timeoutCount, s.grace)
+		if err != nil {
 			logger.Warn("GB28181 离线扫描:置离线失败",
 				zap.String("event", "gb28181.device.scanner.mark_offline_failed"),
 				zap.String("device_id", d.DeviceID), logging.Error(err))
+			continue
+		}
+		if !changed {
 			continue
 		}
 		notifyStatusObserver(ctx, d.DeviceID, false, "HEARTBEAT_TIMEOUT")

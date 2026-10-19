@@ -381,11 +381,24 @@ func TestDeviceMgmt_ListDevices_DefaultSort(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	list := unmarshal(t, w)["data"].(map[string]any)["list"].([]any)
 	require.Len(t, list, 5)
-	assert.Equal(t, "online-bravo", list[0].(map[string]any)["deviceId"])
-	assert.Equal(t, "online-alpha-new-id", list[1].(map[string]any)["deviceId"])
-	assert.Equal(t, "online-alpha-old-id", list[2].(map[string]any)["deviceId"])
-	assert.Equal(t, "online-old", list[3].(map[string]any)["deviceId"])
-	assert.Equal(t, "offline-newest", list[4].(map[string]any)["deviceId"])
+	deviceIDs := func(list []any) []string {
+		ids := make([]string, len(list))
+		for i, value := range list {
+			ids[i] = value.(map[string]any)["deviceId"].(string)
+		}
+		return ids
+	}
+	want := []string{"online-alpha-new-id", "online-alpha-old-id", "online-bravo", "online-old", "offline-newest"}
+	assert.Equal(t, want, deviceIDs(list))
+
+	// Heartbeats and re-registration must not move a device within its status group.
+	require.NoError(t, db.Model(&gbmodels.GbDevice{}).Where("device_id = ?", "online-old").Updates(map[string]any{
+		"keepalive_time": now.Add(time.Minute), "register_time": now.Add(time.Minute), "name": "AAA",
+	}).Error)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/gb28181/device-mgmt/devices", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, want, deviceIDs(unmarshal(t, w)["data"].(map[string]any)["list"].([]any)))
 }
 
 func TestDeviceMgmt_ListDevices_FiltersByOwnerDept(t *testing.T) {

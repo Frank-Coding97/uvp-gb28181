@@ -16,6 +16,7 @@ import (
 	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
 	"uvplatform.com/uvp-gb28181/app/gb28181/handler"
 	"uvplatform.com/uvp-gb28181/app/gb28181/metrics"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 	"uvplatform.com/uvp-gb28181/app/gb28181/netif"
 	gbsecurity "uvplatform.com/uvp-gb28181/app/gb28181/security"
 	gbtrace "uvplatform.com/uvp-gb28181/app/gb28181/trace"
@@ -450,6 +451,7 @@ func (s *Server) registerHandlers() {
 			zap.String("event", "gb28181.sip.uac_init_failed"), logging.Error(err))
 	} else {
 		s.uac = u
+		u.SetDeviceEndpointLookup(gbmodels.FindByDeviceID)
 		catalogTrigger := handler.NewUACCatalogTrigger(u)
 		regHandler.SetCatalogTrigger(catalogTrigger)
 		msgHandler.SetCatalogTrigger(catalogTrigger)

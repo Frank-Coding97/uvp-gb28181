@@ -15,6 +15,7 @@ import (
 	"github.com/emiago/sipgo/sip"
 
 	"uvplatform.com/uvp-gb28181/app/gb28181/metrics"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 	gbtrace "uvplatform.com/uvp-gb28181/app/gb28181/trace"
 )
@@ -38,6 +39,7 @@ type UAC struct {
 	recorder              metrics.Recorder // 可选:埋点出向事务
 	doMessage             messageDoFunc    // MESSAGE 专用测试 seam;生产绑定 client.Do
 	inviteTransport       inviteDialogTransport
+	deviceEndpoint        func(context.Context, string) (*gbmodels.GbDevice, error)
 	playbackEndMu         sync.RWMutex
 	playbackEndHook       func(context.Context, PlaybackDialogMetadata, string) error
 	playbackIntentMu      sync.Mutex

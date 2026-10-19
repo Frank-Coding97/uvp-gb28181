@@ -434,7 +434,7 @@ func (dc *DeviceMgmtController) ListDevices(c *gin.Context) {
 			}
 		}
 	} else {
-		q = q.Order("status DESC, register_time DESC, name DESC, id DESC")
+		q = q.Order("status DESC, device_id ASC, id ASC")
 	}
 
 	var list []gbmodels.GbDevice

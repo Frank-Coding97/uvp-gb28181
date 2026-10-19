@@ -195,3 +195,12 @@ func Keepalive(ctx context.Context, deviceID string) (bool, error) {
 	}
 	return restored, err
 }
+
+// KeepaliveFrom handles an incoming heartbeat under the registered source binding.
+func KeepaliveFrom(ctx context.Context, deviceID string, source gbmodels.KeepaliveSource) (bool, error) {
+	restored, err := gbmodels.TouchKeepaliveFrom(ctx, deviceID, gbconfig.OnlineOnHeartbeat(), source)
+	if err == nil && restored {
+		notifyStatusObserver(ctx, deviceID, true, "HEARTBEAT_RECOVERED")
+	}
+	return restored, err
+}

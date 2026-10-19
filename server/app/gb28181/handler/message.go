@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	"uvplatform.com/uvp-gb28181/app/gb28181/device"
 	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 	"uvplatform.com/uvp-gb28181/app/gb28181/metrics"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 	"uvplatform.com/uvp-gb28181/app/utils/logging"
 
@@ -212,6 +214,7 @@ func txKindFromCmd(cmd string) metrics.TxKind {
 
 // Handle 处理 MESSAGE 请求
 func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
+	receivedAt := time.Now()
 	callID, cseq := sipPairKey(req)
 	ctx := context.Background()
 	logger := app.Log(ctx).Named("gb28181.message")
@@ -407,8 +410,12 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		}
 		switch head.CmdType {
 		case manscdp.CmdKeepalive:
-			restored, err := device.Keepalive(ctx, head.DeviceID)
-			if err != nil {
+			restored, err := device.KeepaliveFrom(ctx, head.DeviceID, gbmodels.KeepaliveSource{
+				SenderDeviceID: ptzDeviceCode(req, ""), Address: req.Source(), Transport: req.Transport(), ReceivedAt: receivedAt,
+			})
+			if errors.Is(err, gbmodels.ErrKeepaliveSourceRejected) {
+				logger.Info("GB28181 心跳来源与有效注册不匹配,忽略", zap.String("event", "gb28181.message.keepalive_source_rejected"), zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq))
+			} else if err != nil {
 				logger.Warn("GB28181 心跳处理失败",
 					zap.String("event", "gb28181.message.keepalive_failed"),
 					zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),

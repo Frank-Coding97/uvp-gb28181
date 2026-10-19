@@ -2,10 +2,15 @@ package models
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
+	"strconv"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 	"uvplatform.com/uvp-gb28181/app/models"
 )
@@ -152,33 +157,102 @@ func UpdateStatus(c context.Context, deviceID string, status int8) error {
 // TouchKeepalive 记录一次心跳；onlineOnHeartbeat 控制是否同步刷新 status 为在线。
 // 返回 true 表示本次心跳让设备从离线恢复,在线恢复方据此重新拉取 Catalog。
 func TouchKeepalive(c context.Context, deviceID string, onlineOnHeartbeat bool) (bool, error) {
+	return touchKeepalive(c, deviceID, onlineOnHeartbeat, nil)
+}
+
+// KeepaliveSource is captured from the received SIP request, never Contact/Via.
+type KeepaliveSource struct {
+	SenderDeviceID string
+	Address        string
+	Transport      string
+	ReceivedAt     time.Time
+}
+
+var ErrKeepaliveSourceRejected = errors.New("keepalive source does not match a current registration")
+
+// TouchKeepaliveFrom refreshes a registered source port. UDP MESSAGE does not
+// authenticate a new IP or transport: those changes require REGISTER.
+func TouchKeepaliveFrom(c context.Context, deviceID string, onlineOnHeartbeat bool, source KeepaliveSource) (bool, error) {
+	return touchKeepalive(c, deviceID, onlineOnHeartbeat, &source)
+}
+
+func touchKeepalive(c context.Context, deviceID string, onlineOnHeartbeat bool, source *KeepaliveSource) (bool, error) {
 	now := time.Now()
-	db := app.DB().WithContext(c)
+	if source != nil {
+		now = source.ReceivedAt
+	}
 	var restored bool
-	err := db.Transaction(func(tx *gorm.DB) error {
+	err := app.DB().WithContext(c).Transaction(func(tx *gorm.DB) error {
 		var d GbDevice
-		result := tx.Set("gorm:query_option", "FOR UPDATE").Where("device_id = ?", deviceID).Limit(1).Find(&d)
-		if result.Error != nil || result.RowsAffected == 0 {
+		result := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("device_id = ?", deviceID).Limit(1).Find(&d)
+		if result.Error != nil {
 			return result.Error
 		}
-		if !onlineOnHeartbeat {
-			return tx.Model(&GbDevice{}).Where("id = ?", d.ID).Update("keepalive_time", now).Error
-		}
-		metadata := StatusEventMetadata{IP: d.IP, Port: d.Port, Transport: d.Transport, KeepaliveInterval: intPtr(d.KeepaliveInterval)}
-		if d.Status != DeviceStatusOnline {
-			from := d.Status
-			if err := tx.Model(&GbDevice{}).Where("id = ?", d.ID).Updates(map[string]interface{}{"keepalive_time": now, "status": DeviceStatusOnline}).Error; err != nil {
-				return err
+		if result.RowsAffected == 0 {
+			if source != nil {
+				return ErrKeepaliveSourceRejected
 			}
-			if err := RecordStatusEvent(tx, &d, DeviceEventHeartbeatRecovered, DeviceEventSourceKeepalive, &from, DeviceStatusOnline, now, metadata); err != nil {
-				return err
-			}
-			restored = true
 			return nil
 		}
-		return tx.Model(&GbDevice{}).Where("id = ?", d.ID).Update("keepalive_time", now).Error
+		updates := map[string]interface{}{"keepalive_time": now}
+		update := tx.Model(&GbDevice{}).Where("id = ?", d.ID)
+		if source != nil {
+			host, portText, err := net.SplitHostPort(source.Address)
+			port, portErr := strconv.Atoi(portText)
+			ip, registeredIP := net.ParseIP(host), net.ParseIP(d.IP)
+			transport := strings.ToUpper(strings.TrimSpace(source.Transport))
+			if err != nil || portErr != nil || port < 1 || port > 65535 || ip == nil || ip.IsUnspecified() ||
+				registeredIP == nil || !ip.Equal(registeredIP) || source.SenderDeviceID != deviceID ||
+				(transport != "UDP" && transport != "TCP" && transport != "TLS") || !strings.EqualFold(transport, d.Transport) ||
+				now.IsZero() || d.RegisterTime == nil || d.RegisterTime.IsZero() || d.RegisterTime.After(now) ||
+				d.RegisterExpireAt == nil || !d.RegisterExpireAt.After(time.Now()) {
+				return ErrKeepaliveSourceRejected
+			}
+			// A delayed handler must not roll back a newer heartbeat or registration.
+			// Snapshot predicates also protect dialects without row-level locks.
+			if d.KeepaliveTime != nil && !d.KeepaliveTime.Before(now) {
+				return nil
+			}
+			update = update.Where("ip = ? AND port = ? AND transport = ? AND status = ?", d.IP, d.Port, d.Transport, d.Status)
+			if tx.Dialector.Name() == "sqlite" {
+				// Preserve the exact stored representation, including trailing zeros.
+				// SQLite's time conversion loses sub-millisecond precision.
+				var snapshot struct{ RegisterTime, RegisterExpireAt, KeepaliveTime *string }
+				if err := tx.Model(&GbDevice{}).Select("CAST(register_time AS TEXT) AS register_time, CAST(register_expire_at AS TEXT) AS register_expire_at, CAST(keepalive_time AS TEXT) AS keepalive_time").Where("id = ?", d.ID).Scan(&snapshot).Error; err != nil {
+					return err
+				}
+				update = update.Where(map[string]interface{}{"register_time": snapshot.RegisterTime, "register_expire_at": snapshot.RegisterExpireAt, "keepalive_time": snapshot.KeepaliveTime})
+			} else {
+				update = update.Where("register_time = ? AND register_expire_at = ?", d.RegisterTime, d.RegisterExpireAt)
+				if d.KeepaliveTime == nil {
+					update = update.Where("keepalive_time IS NULL")
+				} else {
+					update = update.Where("keepalive_time = ?", d.KeepaliveTime)
+				}
+			}
+			updates["port"] = port
+			d.Port = port
+		}
+		recovering := onlineOnHeartbeat && d.Status != DeviceStatusOnline
+		if recovering {
+			updates["status"] = DeviceStatusOnline
+		}
+		result = update.Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 || !recovering {
+			return nil
+		}
+		from := d.Status
+		metadata := StatusEventMetadata{IP: d.IP, Port: d.Port, Transport: d.Transport, KeepaliveInterval: intPtr(d.KeepaliveInterval)}
+		if err := RecordStatusEvent(tx, &d, DeviceEventHeartbeatRecovered, DeviceEventSourceKeepalive, &from, DeviceStatusOnline, now, metadata); err != nil {
+			return err
+		}
+		restored = true
+		return nil
 	})
-	return restored, err
+	return restored && err == nil, err
 }
 
 // MarkOffline 置离线:设备与所属通道必须原子翻转,避免列表出现设备离线但通道在线。
@@ -189,10 +263,21 @@ func MarkOffline(c context.Context, deviceID string) error {
 
 // MarkOfflineWithReason 置离线并记录具体离线原因。
 func MarkOfflineWithReason(c context.Context, deviceID string, eventType DeviceStatusEventType, source DeviceStatusEventSource) error {
+	_, err := markOffline(c, deviceID, eventType, source, nil)
+	return err
+}
+
+// MarkOfflineIfStale rechecks the timeout inside the state transaction.
+func MarkOfflineIfStale(c context.Context, deviceID string, timeoutCount, graceSeconds int) (bool, error) {
+	return markOffline(c, deviceID, DeviceEventHeartbeatTimeout, DeviceEventSourceOfflineScanner, []int{timeoutCount, graceSeconds})
+}
+
+func markOffline(c context.Context, deviceID string, eventType DeviceStatusEventType, source DeviceStatusEventSource, timeout []int) (bool, error) {
 	now := time.Now()
-	return app.DB().WithContext(c).Transaction(func(tx *gorm.DB) error {
+	changed := false
+	err := app.DB().WithContext(c).Transaction(func(tx *gorm.DB) error {
 		var d GbDevice
-		deviceQuery := tx.Set("gorm:query_option", "FOR UPDATE").Where("device_id = ?", deviceID).Limit(1).Find(&d)
+		deviceQuery := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("device_id = ?", deviceID).Limit(1).Find(&d)
 		if deviceQuery.Error != nil {
 			return deviceQuery.Error
 		}
@@ -202,8 +287,16 @@ func MarkOfflineWithReason(c context.Context, deviceID string, eventType DeviceS
 		if d.Status == DeviceStatusOffline {
 			return nil
 		}
-		if err := tx.Model(&GbDevice{}).Where("id = ?", d.ID).Updates(map[string]interface{}{"status": DeviceStatusOffline, "offline_at": now}).Error; err != nil {
-			return err
+		update := tx.Model(&GbDevice{}).Where("id = ? AND status = ?", d.ID, d.Status)
+		if timeout != nil {
+			update = staleOnlineQuery(update, timeout[0], timeout[1])
+		}
+		result := update.Updates(map[string]interface{}{"status": DeviceStatusOffline, "offline_at": now})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return nil
 		}
 		channelUpdate := tx.Model(&GbChannel{}).
 			Where("device_id = ? AND status <> ?", deviceID, ChannelStatusOffline).
@@ -213,51 +306,39 @@ func MarkOfflineWithReason(c context.Context, deviceID string, eventType DeviceS
 		}
 		metadata := StatusEventMetadata{IP: d.IP, Port: d.Port, Transport: d.Transport, KeepaliveInterval: intPtr(d.KeepaliveInterval)}
 		from := d.Status
+		changed = true
 		return RecordStatusEvent(tx, &d, eventType, source, &from, DeviceStatusOffline, now, metadata)
 	})
+	return changed && err == nil, err
 }
 
 func intPtr(value int) *int { return &value }
 
-// ListStaleOnline 查询 status=1(缓存在线)但心跳已超时的设备(扫描器用)
-// 注意:阈值按设备各自 keepalive_interval 计算,故在 SQL 里用字段表达式,不能用全局常量
-// cutoffBase = timeoutCount, grace = 宽限秒数
-//
-// ⛔⛔ 方言分支是必需的，不是防御性冗余：
-//   原实现用 MySQL 的 `DATE_SUB(NOW(), INTERVAL (keepalive_interval * ? + ?) SECOND)`，
-//   而 **DATE_SUB / NOW() / INTERVAL 三个都是 MySQL 专有**，SQLite 里
-//   `no such function: DATE_SUB` ⇒ 查询直接报错。
-//   症状极具误导性：日志只说「离线扫描:查询超时设备失败」，
-//   而**设备列表页面报的是「DB 未就绪」** —— 一个后台扫描的错，
-//   在前端表现为整个数据库连不上。实测踩过。
-//   ⇒ MySQL 保持原样（避免影响既有生产），SQLite 走等价表达式。
-//
-// ⭐ SQLite 侧为什么用 `datetime('now', ?)` 而非 `julianday(...)`：
-//   keepalive_time 列声明为 DATETIME，实际存的是 'YYYY-MM-DD HH:MM:SS' 文本，
-//   `julianday()` 对这种值返回 NULL（实测命中 0 行，静默错误）；
-//   而 datetime('now') 返回同格式文本，**字典序比较即时间序**（实测命中正确）。
+// ListStaleOnline compares instants, not SQLite's timezone-bearing text.
+// Keep the database dialect branches: DATE_SUB is not available in SQLite.
 func ListStaleOnline(c context.Context, timeoutCount, graceSeconds int) (GbDeviceList, error) {
 	var list GbDeviceList
-	// keepalive_time < now - (keepalive_interval * timeoutCount + grace) 秒
-	db := app.DB().WithContext(c).
+	err := staleOnlineQuery(app.DB().WithContext(c), timeoutCount, graceSeconds).Find(&list).Error
+	return list, err
+}
+
+func staleOnlineQuery(db *gorm.DB, timeoutCount, graceSeconds int) *gorm.DB {
+	db = db.
 		Where("status = ?", DeviceStatusOnline).
 		Where("keepalive_time IS NOT NULL")
 
 	if db.Dialector.Name() == "sqlite" {
-		// SQLite 的 datetime() 修饰符是字符串（'-30 seconds'），不能内联算式，
-		// 所以用 printf 拼出 '-N seconds'；N = interval*timeoutCount + grace。
-		// ⛔ printf 在 SQLite 里没有 —— 用 || 拼字符串。
+		// julianday normalizes offsets and accepts the driver's fractional seconds.
 		db = db.Where(
-			"keepalive_time < datetime('now', '-' || (keepalive_interval * ? + ?) || ' seconds')",
+			"julianday(keepalive_time) < julianday('now') - ((CASE WHEN keepalive_interval > 0 THEN keepalive_interval ELSE 60 END) * ? + ?) / 86400.0",
 			timeoutCount, graceSeconds)
 	} else {
 		db = db.Where(
-			"keepalive_time < DATE_SUB(NOW(), INTERVAL (keepalive_interval * ? + ?) SECOND)",
+			"keepalive_time < DATE_SUB(NOW(), INTERVAL ((CASE WHEN keepalive_interval > 0 THEN keepalive_interval ELSE 60 END) * ? + ?) SECOND)",
 			timeoutCount, graceSeconds)
 	}
 
-	err := db.Find(&list).Error
-	return list, err
+	return db
 }
 
 // ListOnline 查询所有在线设备

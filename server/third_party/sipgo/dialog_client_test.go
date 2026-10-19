@@ -529,3 +529,47 @@ func BenchmarkDialogDo(b *testing.B) {
 	})
 
 }
+
+func TestDialogClientRefreshDestinationPreservesDialogAndRoutes(t *testing.T) {
+	for _, route := range []string{"", "<sip:proxy.example.com;lr>"} {
+		t.Run(route, func(t *testing.T) {
+			client := testClientWithOptions(t, WithClientFallbackToResponseSource(true))
+			invite := sip.NewRequest(sip.INVITE, sip.Uri{User: "channel", Host: "192.0.2.20", Port: 51174})
+			invite.SetTransport("UDP")
+			require.NoError(t, clientRequestBuildReq(client, invite))
+			response := sip.NewResponseFromRequest(invite, sip.StatusOK, "OK", nil)
+			response.To().Params.Add("tag", "device-tag")
+			response.AppendHeader(sip.NewHeader("Contact", "<sip:channel@3402000000>"))
+			response.SetSource("192.0.2.20:51174")
+			if route != "" {
+				response.AppendHeader(sip.NewHeader("Record-Route", route))
+			}
+			called := 0
+			session := &DialogClientSession{Dialog: Dialog{InviteRequest: invite, InviteResponse: response}, UA: &DialogUA{Client: client}}
+			session.Init()
+			// A resolver may update the network destination, never the dialog URI/tags.
+			session.UA.ResolveDestination = func(context.Context, *sip.Request) (string, error) { called++; return "192.0.2.20:12230", nil }
+			client.TxRequester = &siptest.ClientTxRequester{OnRequest: func(req *sip.Request) *sip.Response {
+				require.Equal(t, "sip:channel@3402000000", req.Recipient.String())
+				require.Equal(t, invite.CallID().Value(), req.CallID().Value())
+				tag, _ := req.To().Params.Get("tag")
+				require.Equal(t, "device-tag", tag)
+				if route == "" {
+					require.Equal(t, "192.0.2.20:12230", req.Destination())
+				} else {
+					require.Equal(t, "proxy.example.com:5060", req.Destination())
+				}
+				return sip.NewResponseFromRequest(req, sip.StatusOK, "OK", nil)
+			}}
+			bye := newByeRequestUAC(invite, response, nil)
+			tx, err := session.TransactionRequest(context.Background(), bye)
+			require.NoError(t, err)
+			tx.Terminate()
+			if route == "" {
+				require.Equal(t, 1, called)
+			} else {
+				require.Zero(t, called)
+			}
+		})
+	}
+}

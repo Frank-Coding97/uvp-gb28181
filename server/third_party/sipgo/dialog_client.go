@@ -74,6 +74,15 @@ func (s *DialogClientSession) Do(ctx context.Context, req *sip.Request) (*sip.Re
 // This ensures that you have proper request done within dialog. You should avoid setting any Dialog header (cseq, from, to, callid)
 func (s *DialogClientSession) TransactionRequest(ctx context.Context, req *sip.Request) (sip.ClientTransaction, error) {
 	s.buildReq(req)
+	if s.UA.ResolveDestination != nil && req.Route() == nil && len(s.InviteRequest.GetHeaders("Route")) == 0 {
+		destination, err := s.UA.ResolveDestination(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		if destination != "" {
+			req.SetDestination(destination)
+		}
+	}
 
 	// Passing option to avoid CSEQ apply
 	return s.UA.Client.TransactionRequest(ctx, req, s.requestValidate)

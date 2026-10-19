@@ -169,6 +169,9 @@ func (u *UAC) InviteTracked(ctx context.Context, m *SessionManager, s *Session, 
 		return outcome, err
 	}
 	outcome.RequestSent = true
+	if direct, ok := dialog.(*sipgoInviteDialog); ok && u.deviceEndpoint != nil {
+		direct.session.UA.ResolveDestination = u.liveDialogDestination(s.DeviceID, s.Dest, s.Transport)
+	}
 	outcome.SentAt = time.Now()
 
 	// WaitAnswer 不保证监听外部 ctx，使用 channel + select 保持总超时边界。

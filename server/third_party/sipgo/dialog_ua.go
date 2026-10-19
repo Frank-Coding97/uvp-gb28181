@@ -19,6 +19,11 @@ type DialogUA struct {
 
 	// RewriteContact sends request on source IP instead Contact. Should be used when behind NAT.
 	RewriteContact bool
+
+	// ResolveDestination optionally refreshes the direct peer's transport target.
+	// It never changes the remote URI and is skipped when a Route set exists.
+	// Set it before concurrent use of the session.
+	ResolveDestination func(context.Context, *sip.Request) (string, error)
 }
 
 func (c *DialogUA) ReadInvite(inviteRequest *sip.Request, tx sip.ServerTransaction) (*DialogServerSession, error) {
