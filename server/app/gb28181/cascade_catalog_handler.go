@@ -290,9 +290,13 @@ func newCascadeCatalogHandler(store *repository.GormRepository, clients *cascade
 func newCascadeMessageHandler(store *repository.GormRepository, clients *cascadePlatformClientFactory) func(*sip.Request, sip.ServerTransaction) bool {
 	catalogHandler := newCascadeCatalogHandler(store, clients)
 	infoHandler := newCascadeInfoHandler(store, clients)
+	deviceStatusHandler := newCascadeDeviceStatusHandler(store, clients)
 	recordInfoHandler := newCascadeRecordInfoHandler(store, clients)
 	return func(req *sip.Request, tx sip.ServerTransaction) bool {
 		if recordInfoHandler(req, tx) {
+			return true
+		}
+		if deviceStatusHandler(req, tx) {
 			return true
 		}
 		if infoHandler(req, tx) {
