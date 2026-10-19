@@ -398,6 +398,9 @@ func syncZLMIni(path string, z zlmPorts, secret, mediaServerID string) error {
 			zlmIniEdit{section: "rtc", key: "iceTcpPort", value: strconv.Itoa(z.ice)},
 			// ⛔ TURN 是**死功能**（平台只下发 STUN），关掉只是省掉一段临时端口区。
 			//   ⇒ 键不存在时只告警、不阻断启动：为一个没人用的中继拦住整个平台上线不划算。
+			// ⚠️ 将来真要开中继，**改的就是这一行**（ctl.sh 里已没有 ZLM_ENABLE_TURN 变量），
+			//   同时还要把 [rtc] port_range 挪出 Linux 临时端口区并放开防火墙，
+			//   只把这里改成 "1" 等于把 port_range 埋回临时端口段。详见 ctl.sh 的同名注释。
 			zlmIniEdit{section: "rtc", key: "enableTurn", value: "0", soft: true},
 		)
 	}

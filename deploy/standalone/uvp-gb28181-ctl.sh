@@ -35,11 +35,10 @@ fi
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
   C_TAG=$'\033[36m'   # [uvp] 标签：青色
   C_OK=$'\033[32m'    # 成功标记：绿色
-  C_WARN=$'\033[33m'  # 告警标记：黄色
   C_ERR=$'\033[31m'   # 错误标记：红色
   C_RST=$'\033[0m'
 else
-  C_TAG=''; C_OK=''; C_WARN=''; C_ERR=''; C_RST=''
+  C_TAG=''; C_OK=''; C_ERR=''; C_RST=''
 fi
 
 log()  { printf '%s[uvp]%s %s\n' "$C_TAG" "$C_RST" "$*"; }
@@ -622,11 +621,13 @@ ZLM_ICE_PORT="${ZLM_ICE_PORT:-51013}"
 #   enableTurn 打开，就会和出站连接抢端口，表现为偶发 bind 失败、重启就好。
 #   ⇒ 关掉后端口规划仍是 51000-51064，不必再为它划段（原「51065-51099」方案作废）。
 #   ⚠️ 将来真要开中继（浏览器在严格 NAT 后面 + 必须用 WebRTC 低延迟），**三步缺一不可**：
-#      ① 这里改成 "1"；② `[rtc] port_range` 挪出临时端口区（如 51065-51099）；
+#      ① 把 server/cmd/uvp-setup/portsync.go 里 `[rtc] enableTurn` 那条的值改成 "1"
+#         （原来还有个 ZLM_ENABLE_TURN 变量在这里，但 Python 内嵌段下线后它没有消费者，
+#          留着只会让人以为改它能生效 —— 实际写入 config.ini 的是 Go 里那条 edit）；
+#      ② `[rtc] port_range` 挪出临时端口区（如 51065-51099）；
 #      ③ 防火墙上放开该段 UDP。只做 ① 等于又埋一次同样的雷。
 #   ⚠️ 不给它做 config.env 开关：config.env 里的键**不会自动成为环境变量**
 #      （见本文件 392 行附近的说明），写进去会让运维以为改了却没生效。
-ZLM_ENABLE_TURN="0"
 
 # ⛔ ZLM 的证书文件：由 nginx 的 crt+key 合成（见 ensure_tls_material），
 #   启动时用 `-s` 指给 ZLM。放在 data/secrets/ 而不是 vendor/zlm/ ——
