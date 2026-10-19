@@ -68,25 +68,35 @@
         </a-descriptions>
       </a-card>
       <UpgradeProgress
-        v-if="uploadTransfer || importJob"
-        data-testid="import-progress"
+        v-if="showImportProgress || (progressTask && progressTask.phase !== 'succeeded')"
+        :data-testid="showImportProgress ? 'import-progress' : 'task-progress'"
         class="upgrade-progress-panel"
-        v-bind="importProgress"
-        :upload="uploadTransfer"
-        :show-upload-bar="Boolean(uploadTransfer && !importJob)"
-        :reconnecting="Boolean(importJobError && !importJobFinished)"
+        v-bind="showImportProgress ? { ...importProgress, title: '服务升级' } : taskProgress(progressTask!)"
+        :upload="showImportProgress ? uploadTransfer : undefined"
+        :show-upload-bar="Boolean(showImportProgress && uploadTransfer && !importJob)"
+        :reconnecting="showImportProgress ? Boolean(importJobError && !importJobFinished) : Boolean(statusError)"
       >
-        <p v-if="importJob && !importJobFinished" class="upgrade-caption">校验在后台继续执行，刷新页面后可恢复查看。</p>
-      </UpgradeProgress>
-      <UpgradeProgress
-        v-if="progressTask"
-        data-testid="task-progress"
-        class="upgrade-progress-panel"
-        v-bind="taskProgress(progressTask)"
-        :reconnecting="Boolean(statusError)"
-      >
-        <template #action><a-link @click="showTaskDetails(progressTask.task_id)">查看详情</a-link></template>
-        <p class="upgrade-caption">{{ taskHint(progressTask) }}</p>
+        <template v-if="!showImportProgress && progressTask" #action
+          ><a-space wrap>
+            <a-button
+              v-if="
+                canManage &&
+                status?.capabilities.apply &&
+                progressTask.phase === 'awaiting_confirmation' &&
+                pendingUpgrade?.taskID !== progressTask.task_id
+              "
+              type="primary"
+              :loading="taskAction === progressTask.task_id"
+              :disabled="Boolean(taskAction || statusError) || migrationBlocked"
+              @click="confirmApply(progressTask.task_id)"
+              >立即升级</a-button
+            ><a-link @click="showTaskDetails(progressTask.task_id)">查看详情</a-link>
+          </a-space></template
+        >
+        <p v-if="showImportProgress && importJob && !importJobFinished" class="upgrade-caption">
+          校验在后台继续执行，刷新页面后可恢复查看。
+        </p>
+        <p v-else-if="!showImportProgress && progressTask" class="upgrade-caption">{{ taskHint(progressTask) }}</p>
       </UpgradeProgress>
       <a-alert v-if="migrationPlan && !migrationPlan.can_apply" class="upgrade-alert" type="warning" title="升级预检未通过">
         {{ migrationBlockLabel }}<template #action><a-link @click="migrationDetailsVisible = true">查看原因</a-link></template>
@@ -111,7 +121,7 @@
           ></a-space
         >
       </a-alert>
-      <a-card v-if="update" class="uvp-system-panel available-update" :bordered="false">
+      <a-card v-if="update?.hasUpdate" class="uvp-system-panel available-update" :bordered="false">
         <template #title>待升级版本 v{{ update.manifest.version }}</template>
         <template #extra
           ><a-tag>{{ update.manifest.channel === "offline" ? "离线升级包" : "在线更新" }}</a-tag></template
@@ -128,13 +138,17 @@
             v-if="canManage"
             type="primary"
             :loading="creating"
-            :disabled="!update.hasUpdate || Boolean(status?.activeTask) || Boolean(statusError) || migrationBlocked"
-            @click="submitTask"
-            >创建升级任务</a-button
+            :disabled="
+              !status?.capabilities.apply ||
+              !update.hasUpdate ||
+              Boolean(status?.activeTask || taskAction || pendingUpgrade) ||
+              Boolean(statusError) ||
+              migrationBlocked
+            "
+            @click="confirmStartUpgrade"
+            >开始升级</a-button
           ><a-link @click="showReleaseNotes(update.manifest.version, update.manifest.release_notes, update.manifest.published_at)"
             >查看完整更新说明</a-link
-          ><span v-if="!update.hasUpdate" class="upgrade-detail"
-            >当前已是该版本，不能重复创建普通升级任务（目标版本必须高于当前版本）</span
           ></a-space
         >
         <details class="package-details">
@@ -206,31 +220,43 @@
                 <a-table-column title="更新时间" :width="165"
                   ><template #cell="{ record }">{{ formatTime(record.updated_at) }}</template></a-table-column
                 >
-                <a-table-column title="详情 / 操作" :width="250"
+                <a-table-column title="操作" :width="360" align="center"
                   ><template #cell="{ record }"
-                    ><a-space wrap>
-                      <a-link @click="showReleaseNotes(record.version || '待校验', record.release_notes, record.published_at)"
-                        >更新说明</a-link
-                      ><a-link @click="showTaskDetails(record.task_id)">任务详情</a-link>
+                    ><div class="uvp-table-actions">
                       <a-link
+                        class="uvp-table-action uvp-table-action--logs"
+                        @click="showReleaseNotes(record.version || '待校验', record.release_notes, record.published_at)"
+                        ><template #icon><icon-file /></template>更新说明</a-link
+                      ><a-link class="uvp-table-action uvp-table-action--detail" @click="showTaskDetails(record.task_id)"
+                        ><template #icon><icon-eye /></template>任务详情</a-link
+                      >
+                      <a-link
+                        class="uvp-table-action uvp-table-action--stop"
                         v-if="canManage && canCancel(record.phase)"
                         :disabled="Boolean(taskAction || statusError)"
                         @click="cancel(record.task_id)"
-                        >取消</a-link
+                        ><template #icon><icon-close-circle /></template>取消</a-link
                       >
                       <a-link
-                        v-if="canManage && status?.capabilities.apply && record.phase === 'awaiting_confirmation'"
+                        class="uvp-table-action uvp-table-action--execute"
+                        v-if="
+                          canManage &&
+                          status?.capabilities.apply &&
+                          record.phase === 'awaiting_confirmation' &&
+                          pendingUpgrade?.taskID !== record.task_id
+                        "
                         :disabled="Boolean(taskAction || statusError) || migrationBlocked"
                         @click="confirmApply(record.task_id)"
-                        >确认应用</a-link
+                        ><template #icon><icon-arrow-up /></template>立即升级</a-link
                       >
                       <a-link
+                        class="uvp-table-action uvp-table-action--scope"
                         v-if="canManage && status?.capabilities.rollback && canRollback(record)"
                         :disabled="Boolean(taskAction || statusError)"
                         @click="confirmRollback(record.task_id)"
-                        >回退</a-link
+                        ><template #icon><icon-undo /></template>回退</a-link
                       >
-                    </a-space></template
+                    </div></template
                   ></a-table-column
                 >
               </template>
@@ -406,13 +432,19 @@
         </template>
       </template>
     </a-drawer>
-    <a-drawer :visible="releaseNotesVisible" width="min(560px, 100vw)" :footer="false" @cancel="releaseNotesVisible = false"
+    <a-drawer
+      class="uvp-system-drawer"
+      :visible="releaseNotesVisible"
+      width="min(560px, 100vw)"
+      :footer="false"
+      @cancel="releaseNotesVisible = false"
       ><template #title>版本更新说明</template>
       <h2 class="release-version">v{{ releaseNotesDetail.version }}</h2>
       <p v-if="releaseNotesDetail.publishedAt" class="upgrade-caption">发布于 {{ formatTime(releaseNotesDetail.publishedAt) }}</p>
       <p class="release-notes-text">{{ releaseNotesDetail.notes || "该版本未提供更新说明" }}</p></a-drawer
     >
     <a-drawer
+      class="uvp-system-drawer"
       :visible="migrationDetailsVisible"
       width="min(560px, 100vw)"
       :footer="false"
@@ -604,9 +636,13 @@ const taskHint = (task: UpgradeTask) => {
   if (task.phase === "recovery_required") return "尚未证明恢复成功，请查看本机助手诊断并处理；不可视为已回退。";
   if (task.phase === "failed") return "请查看失败原因；如已进入停服阶段，以助手恢复结果为准。";
   if (task.phase === "awaiting_confirmation")
-    return task.policy_version
-      ? "制品已准备，由已保存策略在维护窗口内再次预检并授权应用。"
-      : "制品已准备，确认应用后才进入可能中断业务的阶段。";
+    return Boolean(task.task_id) && pendingUpgrade.value?.taskID === task.task_id
+      ? "已确认升级，准备完成后自动开始应用。"
+      : task.policy_version
+        ? "制品已准备，由已保存策略在维护窗口内再次预检并授权应用。"
+        : canManage.value && status.value?.capabilities.apply
+          ? "升级包已就绪，点击「立即升级」并确认后开始；升级期间服务可能短暂中断。"
+          : "升级包已就绪，等待管理员确认应用。";
   if (["fetching", "verifying", "preparing"].includes(task.phase)) return "正在获取或检查制品，当前服务继续运行。";
   if (!(task.phase in taskStepIndex)) return "当前阶段无法识别，请查看任务详情并刷新状态。";
   return "助手正在执行升级，业务可能中断；刷新或关闭页面不会取消任务。";
@@ -638,6 +674,18 @@ const importJobFinished = computed(() =>
     "abandoned"
   ].includes(importPhase.value)
 );
+// Once a task owns this artifact, continue the same panel with its execution
+// state. A new import must not be hidden by an unrelated historical task.
+const showImportProgress = computed(() => {
+  if (!uploadTransfer.value && !importJob.value) return false;
+  if (!importJob.value || !importJobFinished.value || importJobFailed.value || importJobError.value) return true;
+  const artifact = importedArtifactFromJob(importJob.value);
+  const task = progressTask.value;
+  return !(
+    task &&
+    ((artifact.sha256 && artifact.sha256 === task.target_digest) || (artifact.build_id && artifact.build_id === task.build_id))
+  );
+});
 const importJobFailed = computed(() => ["failed", "rejected", "cancelled", "canceled", "abandoned"].includes(importPhase.value));
 const importPhaseLabel = (phase: string) =>
   (
@@ -781,6 +829,29 @@ const writeSessionValue = (key: string, value: string) => {
   }
 };
 
+type PendingUpgrade = { taskID: string; digest: string; buildID: string };
+const pendingUpgradeKey = "uvp.service-upgrade.auto-apply";
+const readPendingUpgrade = (): PendingUpgrade | undefined => {
+  try {
+    const value = JSON.parse(readSessionValue(pendingUpgradeKey));
+    if (
+      typeof value?.taskID === "string" &&
+      value.taskID &&
+      /^[a-f0-9]{64}$/i.test(value.digest) &&
+      typeof value.buildID === "string"
+    )
+      return value;
+  } catch {
+    // A missing or malformed session value never authorizes an application.
+  }
+  return undefined;
+};
+const pendingUpgrade = ref<PendingUpgrade | undefined>(readPendingUpgrade());
+const clearPendingUpgrade = () => {
+  pendingUpgrade.value = undefined;
+  writeSessionValue(pendingUpgradeKey, "");
+};
+
 clientRefreshTarget.value = readSessionValue(clientRefreshTargetStorageKey);
 clientRefreshAttempt.value = readSessionValue(clientRefreshAttemptStorageKey);
 
@@ -834,13 +905,38 @@ const compareProductVersions = (left: string, right: string) => {
   }
   const leftRC = leftMatch[4] === undefined ? Number.POSITIVE_INFINITY : Number(leftMatch[4]);
   const rightRC = rightMatch[4] === undefined ? Number.POSITIVE_INFINITY : Number(rightMatch[4]);
-  return leftRC - rightRC;
+  return leftRC === rightRC ? 0 : leftRC > rightRC ? 1 : -1;
 };
 
 const isNewerProductVersion = (target: string, current: string) => {
   if (!target.trim() || !current.trim()) return false;
   const comparison = compareProductVersions(target, current);
   return Number.isFinite(comparison) && comparison > 0;
+};
+
+// Reconcile against a fresh runtime status, including restored browser imports.
+// Keep release notes in task history; browser storage only tracks pending work.
+const reconcileUpdate = () => {
+  if (statusError.value || !status.value?.current?.version) return;
+  const currentVersion = status.value.current.version;
+  if (update.value) {
+    const comparison = compareProductVersions(update.value.manifest.version, currentVersion);
+    if (!Number.isNaN(comparison)) {
+      update.value.currentVersion = currentVersion;
+      update.value.hasUpdate = comparison > 0;
+    }
+  }
+  if (
+    importJob.value &&
+    importJobFinished.value &&
+    !importJobFailed.value &&
+    compareProductVersions(importedArtifactFromJob(importJob.value).version || "", currentVersion) <= 0
+  ) {
+    importJob.value = undefined;
+    uploadTransfer.value = undefined;
+    importJobError.value = "";
+    storeImportJobID("");
+  }
 };
 
 const importedArtifactFromJob = (job: UpgradeImportJob): Partial<UpgradeImportArtifact> =>
@@ -879,6 +975,7 @@ const applyImportedArtifact = (job: UpgradeImportJob) => {
     hasUpdate: isNewerProductVersion(artifact.version, status.value?.current?.version || "")
   };
   importJobError.value = "";
+  reconcileUpdate();
 };
 
 const refreshImportJob = async (id = importJobID.value) => {
@@ -973,6 +1070,7 @@ const loadStatus = async () => {
       status.value = statusResult.value.data;
       if (status.value.activeTask) lastActiveTaskID.value = status.value.activeTask.task_id;
       statusError.value = "";
+      reconcileUpdate();
       if (!runtimeIdentityMismatch.value) clearClientRefreshTarget();
       else maybeRefreshClient();
     } else {
@@ -997,6 +1095,7 @@ const loadStatus = async () => {
   } finally {
     loading.value = false;
   }
+  await continueConfirmedUpgrade();
 };
 
 const savePolicy = async () => {
@@ -1035,6 +1134,7 @@ const check = async () => {
   checking.value = true;
   try {
     update.value = (await checkServiceUpgrade()).data;
+    reconcileUpdate();
     Message.success(update.value.hasUpdate ? "发现可用更新" : "当前已是最新版本");
   } catch (error: any) {
     errorMessage.value = error?.message || "检查更新失败";
@@ -1088,12 +1188,22 @@ const importOffline = async (file: File) => {
   }
 };
 
-const submitTask = async () => {
+function createIdempotencyKey() {
+  if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+  return `service-upgrade-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+const submitTask = async (target = update.value) => {
   if (
     !canManage.value ||
     creating.value ||
-    !update.value?.hasUpdate ||
+    !status.value?.capabilities.apply ||
+    !target?.hasUpdate ||
+    target.artifact.sha256 !== update.value?.artifact.sha256 ||
+    target.manifest.build_id !== update.value?.manifest.build_id ||
     status.value?.activeTask ||
+    taskAction.value ||
+    pendingUpgrade.value ||
     statusError.value ||
     migrationBlocked.value
   )
@@ -1101,14 +1211,45 @@ const submitTask = async () => {
   creating.value = true;
   errorMessage.value = "";
   try {
-    await createServiceUpgradeTask(crypto.randomUUID(), update.value.artifact.sha256);
-    Message.success("升级任务已受理");
+    const response = await createServiceUpgradeTask(createIdempotencyKey(), target.artifact.sha256);
+    if (!response.data?.task_id) throw new Error("服务端未返回升级任务 ID，请刷新状态查看任务是否已创建。");
+    pendingUpgrade.value = {
+      taskID: response.data.task_id,
+      digest: target.artifact.sha256,
+      buildID: target.manifest.build_id || ""
+    };
+    writeSessionValue(pendingUpgradeKey, JSON.stringify(pendingUpgrade.value));
+    Message.success("升级已受理，准备完成后将自动应用");
     await loadStatus();
   } catch (error: any) {
     errorMessage.value = error?.message || "创建升级任务失败";
   } finally {
     creating.value = false;
   }
+};
+
+const confirmStartUpgrade = () => {
+  if (
+    !canManage.value ||
+    !status.value?.capabilities.apply ||
+    creating.value ||
+    taskAction.value ||
+    pendingUpgrade.value ||
+    !update.value?.hasUpdate ||
+    status.value.activeTask ||
+    statusError.value ||
+    migrationBlocked.value
+  )
+    return;
+  const target = update.value;
+  Modal.confirm({
+    title: "确认开始服务升级？",
+    modalClass: "uvp-system-dialog",
+    content: `将升级至 ${target.manifest.version}（${target.manifest.build_id}）。准备完成后自动开始应用，SIP 注册、点播、回放及录像可能短暂中断。应用前会再次检查数据库迁移和备份；程序回切不能撤销不兼容的数据迁移。`,
+    okText: "开始升级",
+    cancelText: "暂不升级",
+    onOk: () => submitTask(target)
+  });
 };
 
 const canCancel = (phase: string) => ["fetching", "verifying", "preparing", "awaiting_confirmation"].includes(phase);
@@ -1122,6 +1263,7 @@ const cancel = async (id: string) => {
   taskAction.value = id;
   errorMessage.value = "";
   try {
+    if (pendingUpgrade.value?.taskID === id) clearPendingUpgrade();
     await cancelServiceUpgradeTask(id);
     Message.success("升级任务已取消");
     await loadStatus();
@@ -1144,6 +1286,7 @@ const apply = async (id: string) => {
   )
     return;
   taskAction.value = id;
+  if (pendingUpgrade.value?.taskID === id) clearPendingUpgrade();
   errorMessage.value = "";
   try {
     // Persist before the RPC: the old backend may stop before its response
@@ -1158,6 +1301,33 @@ const apply = async (id: string) => {
   } finally {
     taskAction.value = "";
   }
+};
+
+const continueConfirmedUpgrade = async () => {
+  const pending = pendingUpgrade.value;
+  if (!pending || statusError.value || taskAction.value) return;
+  const task = taskByID(pending.taskID);
+  if (!task) return;
+  if (!canManage.value || !status.value?.capabilities.apply || task.policy_version || !canCancel(task.phase)) {
+    clearPendingUpgrade();
+    return;
+  }
+  if (
+    task.target_digest !== pending.digest ||
+    (pending.buildID && (task.build_id || task.phase === "awaiting_confirmation") && task.build_id !== pending.buildID)
+  ) {
+    clearPendingUpgrade();
+    errorMessage.value = "升级目标与已确认的升级包不一致，请重新确认。";
+    return;
+  }
+  if (task.phase !== "awaiting_confirmation") return;
+  if (migrationBlocked.value) {
+    clearPendingUpgrade();
+    return;
+  }
+  // Consume before submission: a lost response must not trigger repeated POSTs.
+  clearPendingUpgrade();
+  await apply(task.task_id);
 };
 
 const confirmApply = (id: string) => {
@@ -1333,9 +1503,9 @@ onUnmounted(() => {
   align-items: center;
   padding: 4px;
   margin: 20px 0 16px;
-  background: var(--color-fill-2);
-  border: 1px solid var(--color-border-2);
-  border-radius: 12px;
+  background: var(--uvp-list-toolbar-bg);
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 8px;
   button {
     display: flex;
     gap: 8px;
@@ -1345,11 +1515,11 @@ onUnmounted(() => {
     padding: 7px 14px;
     font: inherit;
     font-size: 14px;
-    color: var(--color-text-3);
+    color: var(--uvp-text-secondary);
     cursor: pointer;
     background: transparent;
     border: 0;
-    border-radius: 9px;
+    border-radius: 6px;
     transition:
       color 0.2s ease,
       background-color 0.2s ease,
@@ -1357,8 +1527,11 @@ onUnmounted(() => {
   }
   button.active {
     color: var(--uvp-brand-strong);
-    background: var(--color-bg-2);
-    box-shadow: 0 6px 16px rgb(37 99 235 / 10%);
+    background: var(--uvp-brand-soft);
+  }
+  button:hover:not(.active) {
+    color: var(--uvp-text-primary);
+    background: var(--uvp-secondary-action-bg);
   }
   button:focus-visible {
     outline: 2px solid rgb(var(--primary-6));
@@ -1368,8 +1541,8 @@ onUnmounted(() => {
 .tab-state {
   padding: 1px 5px;
   font-size: 12px;
-  color: var(--color-text-3);
-  background: var(--color-fill-2);
+  color: var(--uvp-text-tertiary);
+  background: var(--uvp-secondary-action-bg);
   border-radius: 4px;
 }
 .section-subtitle {
@@ -1596,9 +1769,13 @@ onUnmounted(() => {
     font-size: 30px;
   }
   .upgrade-tabs {
-    gap: 18px;
+    display: flex;
+    gap: 4px;
     button {
+      flex: 1;
       flex-wrap: wrap;
+      min-width: 0;
+      padding: 8px;
       font-size: 13px;
     }
   }

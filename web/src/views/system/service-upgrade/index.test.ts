@@ -1,4 +1,5 @@
 import { flushPromises, mount } from "@vue/test-utils";
+import { defineComponent, h, provide, inject, type Ref, toRef } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
@@ -65,7 +66,25 @@ const status = () => ({
   events: []
 });
 
-function mountPage(realUpload = false) {
+const TableStub = defineComponent({
+  props: ["data"],
+  setup(props, { slots }) {
+    provide("upgrade-test-records", toRef(props, "data"));
+    return () => h("div", slots.columns?.());
+  }
+});
+const TableColumnStub = defineComponent({
+  setup(_, { slots }) {
+    const records = inject<Ref<any[]>>("upgrade-test-records");
+    return () =>
+      h(
+        "div",
+        records?.value?.map(record => h("div", slots.cell?.({ record })))
+      );
+  }
+});
+
+function mountPage(realUpload = false, renderRows = false) {
   return mount(ServiceUpgradePage, {
     global: {
       components: { AUpload: Upload },
@@ -87,9 +106,9 @@ function mountPage(realUpload = false) {
         "a-form-item": { template: "<label><slot /></label>" },
         "a-alert": { props: ["type"], template: "<div role='alert'><slot /></div>" },
         "a-typography-paragraph": { template: "<p><slot /></p>" },
-        "a-table": { template: "<div><slot name='columns' /></div>" },
-        "a-table-column": { template: "<div />" },
-        "a-link": { template: "<a><slot /></a>" },
+        "a-table": renderRows ? TableStub : { template: "<div><slot name='columns' /></div>" },
+        "a-table-column": renderRows ? TableColumnStub : { template: "<div />" },
+        "a-link": { props: ["disabled"], template: "<a :aria-disabled='disabled'><slot name='icon' /><slot /></a>" },
         "a-divider": { template: "<hr />" },
         "a-list": { template: "<div><slot name='header' /></div>" },
         "a-list-item": { template: "<div><slot /></div>" },
@@ -97,7 +116,12 @@ function mountPage(realUpload = false) {
         "a-input-number": { props: ["modelValue", "disabled"], template: "<input :value='modelValue' :disabled='disabled' />" },
         "a-select": { props: ["modelValue", "disabled"], template: "<select :disabled='disabled'><slot /></select>" },
         "a-option": { props: ["value"], template: "<option :value='value'><slot /></option>" },
-        "icon-refresh": true
+        "icon-refresh": true,
+        "icon-file": true,
+        "icon-eye": true,
+        "icon-close-circle": true,
+        "icon-arrow-up": true,
+        "icon-undo": true
       }
     }
   });
@@ -106,6 +130,7 @@ function mountPage(realUpload = false) {
 describe("service upgrade page", () => {
   beforeEach(() => {
     storage.clear();
+    window.sessionStorage.clear();
     Object.defineProperty(window, "localStorage", {
       configurable: true,
       value: {
@@ -131,7 +156,10 @@ describe("service upgrade page", () => {
     api.rollbackTask.mockReset();
   });
 
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 
   it("点击导入打开文件选择，上传后轮询异步任务并显示失败原因", async () => {
     api.importPackage.mockResolvedValue({ code: 0, data: { upload_id: "upload-1", job_id: "job-1", phase: "queued" } });
@@ -364,7 +392,14 @@ describe("service upgrade page", () => {
     api.getStatus.mockResolvedValue({ data: { ...status(), activeTask: task, tasks: [task] } });
     const wrapper = mountPage();
     await flushPromises();
-    const progress = wrapper.get('[data-testid="task-progress"]');
+    if (phase === "succeeded") {
+      expect(wrapper.find('[data-testid="task-progress"]').exists()).toBe(false);
+      (wrapper.vm as any).showTaskDetails("current");
+      await flushPromises();
+    }
+    const progress = wrapper.get(
+      phase === "succeeded" ? '[data-testid="task-detail-progress"]' : '[data-testid="task-progress"]'
+    );
     expect(progress.text()).toContain(label);
     const current = progress.find('[aria-current="step"]');
     if (index < 0) expect(current.exists()).toBe(false);
@@ -373,6 +408,219 @@ describe("service upgrade page", () => {
     if (phase !== "succeeded") expect(progress.text()).not.toContain("升级成功");
     expect(api.applyTask).not.toHaveBeenCalled();
     wrapper.unmount();
+  });
+
+  it("开始升级先确认业务中断风险，任务准备完成后自动应用", async () => {
+    const task = {
+      task_id: "ready",
+      version: "1.2.0",
+      build_id: "build-ready",
+      target_digest: "a".repeat(64),
+      phase: "awaiting_confirmation"
+    };
+    api.createTask.mockResolvedValue({ data: { ...task, phase: "fetching" } });
+    const wrapper = mountPage();
+    await flushPromises();
+    const vm = wrapper.vm as any;
+    vm.update = {
+      manifest: { version: "1.2.0", build_id: "build-ready" },
+      artifact: { sha256: "a".repeat(64) },
+      hasUpdate: true
+    };
+    await flushPromises();
+    const start = wrapper.findAll("button").find(button => button.text() === "开始升级");
+    expect(start).toBeDefined();
+    await start!.trigger("click");
+    const confirmation = modal.confirm.mock.calls.at(-1)?.[0];
+    expect(confirmation.content).toContain("短暂中断");
+    expect(confirmation.content).toContain("不能撤销");
+    expect(confirmation.content).toContain("build-ready");
+    expect(api.createTask).not.toHaveBeenCalled();
+    api.getStatus.mockResolvedValue({
+      data: { ...status(), activeTask: { ...task, phase: "preparing" }, tasks: [{ ...task, phase: "preparing" }] }
+    });
+    await confirmation.onOk();
+    expect(api.createTask).toHaveBeenCalledOnce();
+    expect(api.applyTask).not.toHaveBeenCalled();
+    expect(window.sessionStorage.getItem("uvp.service-upgrade.auto-apply")).toContain("ready");
+    api.getStatus.mockResolvedValue({ data: { ...status(), activeTask: task, tasks: [task] } });
+    await vm.loadStatus();
+    expect(api.applyTask).toHaveBeenCalledExactlyOnceWith("ready");
+    expect(window.sessionStorage.getItem("uvp.service-upgrade.auto-apply")).toBeNull();
+    await vm.loadStatus();
+    expect(api.applyTask).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+  });
+
+  it("升级记录操作沿用系统图标文字和彩色样式，并保留正确点击行为", async () => {
+    const ready = { task_id: "ready", phase: "awaiting_confirmation", version: "1.2.0", release_notes: "更新内容" };
+    const failed = { task_id: "failed", phase: "recovery_required", failure_phase: "validating", committed: false };
+    api.getStatus.mockResolvedValue({ data: { ...status(), activeTask: ready, tasks: [ready, failed] } });
+    const wrapper = mountPage(false, true);
+    await flushPromises();
+    const actions = wrapper.findAll(".uvp-table-actions");
+    expect(actions).toHaveLength(2);
+    for (const [tone, label, icon] of [
+      ["logs", "更新说明", "icon-file-stub"],
+      ["detail", "任务详情", "icon-eye-stub"],
+      ["stop", "取消", "icon-close-circle-stub"],
+      ["execute", "立即升级", "icon-arrow-up-stub"]
+    ]) {
+      const action = actions[0].get(`.uvp-table-action--${tone}`);
+      expect(action.text()).toBe(label);
+      expect(action.find(icon).exists()).toBe(true);
+    }
+    expect(actions[1].get(".uvp-table-action--scope").find("icon-undo-stub").exists()).toBe(true);
+    await actions[0].get(".uvp-table-action--logs").trigger("click");
+    expect(wrapper.get("aside").text()).toContain("更新内容");
+    (wrapper.vm as any).releaseNotesVisible = false;
+    await actions[0].get(".uvp-table-action--detail").trigger("click");
+    expect(wrapper.get('[data-testid="task-detail-progress"]').text()).toContain("等待应用授权");
+    wrapper.unmount();
+  });
+
+  it("弹窗期间更换升级包后不会沿用旧确认创建新任务", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    const vm = wrapper.vm as any;
+    vm.update = { manifest: { version: "1.2.0", build_id: "build-a" }, artifact: { sha256: "a".repeat(64) }, hasUpdate: true };
+    vm.confirmStartUpgrade();
+    const confirmation = modal.confirm.mock.calls.at(-1)?.[0];
+    vm.update = { manifest: { version: "1.3.0", build_id: "build-b" }, artifact: { sha256: "b".repeat(64) }, hasUpdate: true };
+    await confirmation.onOk();
+    expect(api.createTask).not.toHaveBeenCalled();
+    expect(api.applyTask).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("创建响应缺少任务 ID 时明确提示而不自动应用", async () => {
+    api.createTask.mockResolvedValue({ data: {} });
+    const wrapper = mountPage();
+    await flushPromises();
+    const vm = wrapper.vm as any;
+    vm.update = { manifest: { version: "1.2.0", build_id: "build-a" }, artifact: { sha256: "a".repeat(64) }, hasUpdate: true };
+    await vm.submitTask();
+    expect(wrapper.text()).toContain("未返回升级任务 ID");
+    expect(api.applyTask).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("准备期间主动取消会清理本次确认，不会在后续轮询误应用", async () => {
+    const task = { task_id: "cancel", phase: "preparing", target_digest: "a".repeat(64), build_id: "build-ready" };
+    window.sessionStorage.setItem(
+      "uvp.service-upgrade.auto-apply",
+      JSON.stringify({ taskID: task.task_id, digest: task.target_digest, buildID: task.build_id })
+    );
+    api.getStatus.mockResolvedValue({ data: { ...status(), activeTask: task, tasks: [task] } });
+    const wrapper = mountPage();
+    await flushPromises();
+    await (wrapper.vm as any).cancel(task.task_id);
+    expect(window.sessionStorage.getItem("uvp.service-upgrade.auto-apply")).toBeNull();
+    api.getStatus.mockResolvedValue({
+      data: {
+        ...status(),
+        activeTask: { ...task, phase: "awaiting_confirmation" },
+        tasks: [{ ...task, phase: "awaiting_confirmation" }]
+      }
+    });
+    await (wrapper.vm as any).loadStatus();
+    expect(api.applyTask).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("准备过程中刷新页面，只恢复本次明确授权的任务", async () => {
+    const task = { task_id: "restore", phase: "preparing", target_digest: "a".repeat(64), build_id: "build-ready" };
+    window.sessionStorage.setItem(
+      "uvp.service-upgrade.auto-apply",
+      JSON.stringify({ taskID: task.task_id, digest: task.target_digest, buildID: task.build_id })
+    );
+    api.getStatus.mockResolvedValue({ data: { ...status(), activeTask: task, tasks: [task] } });
+    const wrapper = mountPage();
+    await flushPromises();
+    expect(api.applyTask).not.toHaveBeenCalled();
+    api.getStatus.mockResolvedValue({
+      data: {
+        ...status(),
+        activeTask: { ...task, phase: "awaiting_confirmation" },
+        tasks: [{ ...task, phase: "awaiting_confirmation" }]
+      }
+    });
+    await (wrapper.vm as any).loadStatus();
+    expect(api.applyTask).toHaveBeenCalledExactlyOnceWith("restore");
+    wrapper.unmount();
+  });
+
+  it.each(["wrong-digest", "wrong-build", "failed", "cancelled", "policy", "preflight"])(
+    "已确认意图遇到 %s 不自动应用",
+    async scenario => {
+      const task: any = {
+        task_id: "restore",
+        phase: "awaiting_confirmation",
+        target_digest: "a".repeat(64),
+        build_id: "build-ready"
+      };
+      window.sessionStorage.setItem(
+        "uvp.service-upgrade.auto-apply",
+        JSON.stringify({ taskID: task.task_id, digest: task.target_digest, buildID: task.build_id })
+      );
+      if (scenario === "wrong-digest") task.target_digest = "b".repeat(64);
+      if (scenario === "wrong-build") task.build_id = "other";
+      if (scenario === "failed") task.phase = "failed";
+      if (scenario === "cancelled") task.phase = "rolled_back";
+      if (scenario === "policy") task.policy_version = 2;
+      if (scenario === "preflight") api.getMigrationPlan.mockResolvedValue({ data: { can_apply: false } });
+      api.getStatus.mockResolvedValue({ data: { ...status(), activeTask: task, tasks: [task] } });
+      const wrapper = mountPage();
+      await flushPromises();
+      expect(api.applyTask).not.toHaveBeenCalled();
+      expect(window.sessionStorage.getItem("uvp.service-upgrade.auto-apply")).toBeNull();
+      wrapper.unmount();
+    }
+  );
+
+  it("应用响应失败后不自动重复提交，并保留手动重试入口", async () => {
+    const task = { task_id: "restore", phase: "awaiting_confirmation", target_digest: "a".repeat(64), build_id: "build-ready" };
+    window.sessionStorage.setItem(
+      "uvp.service-upgrade.auto-apply",
+      JSON.stringify({ taskID: task.task_id, digest: task.target_digest, buildID: task.build_id })
+    );
+    api.getStatus.mockResolvedValue({ data: { ...status(), activeTask: task, tasks: [task] } });
+    api.applyTask.mockRejectedValue(new Error("连接断开"));
+    const wrapper = mountPage();
+    await flushPromises();
+    await (wrapper.vm as any).loadStatus();
+    expect(api.applyTask).toHaveBeenCalledTimes(1);
+    expect(wrapper.text()).toContain("连接断开");
+    expect(wrapper.text()).toContain("立即升级");
+    wrapper.unmount();
+  });
+
+  it("开始升级沿用权限、助手能力、预检及断线限制", async () => {
+    api.check.mockResolvedValue({
+      data: { manifest: { version: "1.2.0" }, artifact: { sha256: "a".repeat(64) }, hasUpdate: true }
+    });
+    const wrapper = mountPage();
+    await flushPromises();
+    const vm = wrapper.vm as any;
+    const button = () => wrapper.findAll("button").find(button => button.text() === "开始升级");
+    await vm.check();
+    expect(button()).toBeDefined();
+    vm.statusError = "blocked";
+    await flushPromises();
+    expect(button()!.attributes("disabled")).toBeDefined();
+    vm.statusError = "";
+    vm.migrationPlan = { can_apply: false, pending: [], applied: [], unknown: [], destructive: [] };
+    await flushPromises();
+    expect(button()!.attributes("disabled")).toBeDefined();
+    vm.status.capabilities.apply = false;
+    await flushPromises();
+    expect(button()!.attributes("disabled")).toBeDefined();
+    wrapper.unmount();
+    permissions.value = ["system:upgrade:read"];
+    const readonly = mountPage();
+    await flushPromises();
+    expect(readonly.findAll("button").some(item => item.text() === "开始升级")).toBe(false);
+    readonly.unmount();
   });
 
   it("活动任务断线后保留进度，同任务恢复后显示终态，详情独立显示历史任务", async () => {
@@ -394,8 +642,7 @@ describe("service upgrade page", () => {
       data: { ...status(), tasks: [old, { ...current, phase: "succeeded", committed: true, updated_at: "2026-10-19T01:00:00Z" }] }
     });
     await vm.loadStatus();
-    expect(wrapper.get('[data-testid="task-progress"]').text()).toContain("升级成功");
-    expect(wrapper.get('[data-testid="task-progress"]').text()).not.toContain("正在重连");
+    expect(wrapper.find('[data-testid="task-progress"]').exists()).toBe(false);
     wrapper.unmount();
   });
 
@@ -649,7 +896,189 @@ describe("service upgrade page", () => {
     });
     await vm.importOffline(new File(["release"], "release.tar"));
     expect(vm.update.hasUpdate).toBe(false);
-    expect(wrapper.text()).toContain("当前已是该版本，不能重复创建普通升级任务");
+    expect(wrapper.find(".available-update").exists()).toBe(false);
+    expect(wrapper.find('[data-testid="import-progress"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("升级成功后收起已安装包，刷新页面不会恢复待升级提示", async () => {
+    const job = {
+      job_id: "installed-import",
+      phase: "succeeded",
+      filename: "release.tar",
+      size: 12,
+      sha256: "a".repeat(64),
+      version: "1.2.0",
+      build_id: "installed-build"
+    };
+    api.importPackage.mockResolvedValue({ data: job });
+    api.importStatus.mockResolvedValue({ data: job });
+    const wrapper = mountPage();
+    await flushPromises();
+    const vm = wrapper.vm as any;
+    await vm.importOffline(new File(["package"], "release.tar"));
+    await flushPromises();
+    expect(wrapper.text()).toContain("待升级版本 v1.2.0");
+    const completed = {
+      ...status(),
+      current: { version: "1.2.0", build_id: "installed-build" },
+      tasks: [
+        {
+          task_id: "installed",
+          phase: "succeeded",
+          version: "1.2.0",
+          build_id: "installed-build",
+          committed: true,
+          release_notes: "已安装版本说明"
+        }
+      ]
+    };
+    api.getStatus.mockResolvedValue({ data: completed });
+    await vm.loadStatus();
+    await flushPromises();
+    expect(wrapper.find(".available-update").exists()).toBe(false);
+    expect(wrapper.find('[data-testid="import-progress"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="task-progress"]').exists()).toBe(false);
+    expect(vm.currentRelease.phase).toBe("succeeded");
+    expect(storage.has("uvp.service-upgrade.import-job")).toBe(false);
+    vm.showReleaseNotes("1.2.0", vm.currentRelease.release_notes);
+    await flushPromises();
+    expect(wrapper.text()).toContain("已安装版本说明");
+    wrapper.unmount();
+
+    // Also reconcile old browser storage left by the pre-fix frontend.
+    storage.set("uvp.service-upgrade.import-job", "installed-import");
+    api.importStatus.mockResolvedValue({ data: job });
+    const restored = mountPage();
+    await flushPromises();
+    expect(restored.find(".available-update").exists()).toBe(false);
+    expect(restored.find('[data-testid="import-progress"]').exists()).toBe(false);
+    expect(storage.has("uvp.service-upgrade.import-job")).toBe(false);
+    restored.unmount();
+  });
+
+  it("同一升级流程从导入切换到执行，只展示一个进度区域", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    const vm = wrapper.vm as any;
+    api.importPackage.mockResolvedValue({
+      data: {
+        job_id: "flow-import",
+        phase: "succeeded",
+        filename: "release.tar",
+        size: 12,
+        sha256: "a".repeat(64),
+        version: "1.2.0",
+        build_id: "flow-build"
+      }
+    });
+    api.importStatus.mockImplementation(async () => api.importPackage.mock.results.at(-1)!.value);
+    await vm.importOffline(new File(["package"], "release.tar"));
+    await flushPromises();
+    expect(wrapper.findAll(".upgrade-progress-panel")).toHaveLength(1);
+    expect(wrapper.find('[data-testid="import-progress"]').exists()).toBe(true);
+    const task = {
+      task_id: "flow-task",
+      version: "1.2.0",
+      build_id: "flow-build",
+      target_digest: "a".repeat(64),
+      phase: "awaiting_confirmation",
+      committed: false
+    };
+    api.getStatus.mockResolvedValue({ data: { ...status(), activeTask: task, tasks: [task] } });
+    await vm.loadStatus();
+    await flushPromises();
+    expect(wrapper.findAll(".upgrade-progress-panel")).toHaveLength(1);
+    expect(wrapper.find('[data-testid="import-progress"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="task-progress"]').text()).toContain("立即升级");
+    expect(api.applyTask).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("新包导入不会被上一轮已完成任务覆盖，状态失败也不丢失包", async () => {
+    api.getStatus.mockResolvedValue({
+      data: {
+        ...status(),
+        tasks: [{ task_id: "old-task", version: "0.9.0", build_id: "old-build", phase: "succeeded", committed: true }]
+      }
+    });
+    const wrapper = mountPage();
+    await flushPromises();
+    const vm = wrapper.vm as any;
+    api.importPackage.mockResolvedValue({
+      data: {
+        job_id: "next-import",
+        phase: "succeeded",
+        filename: "next.tar",
+        size: 12,
+        sha256: "b".repeat(64),
+        version: "1.3.0",
+        build_id: "next-build"
+      }
+    });
+    api.importStatus.mockImplementation(async () => api.importPackage.mock.results.at(-1)!.value);
+    await vm.importOffline(new File(["package"], "next.tar"));
+    api.getStatus.mockRejectedValue(new Error("断线"));
+    await vm.loadStatus();
+    await flushPromises();
+    expect(wrapper.findAll(".upgrade-progress-panel")).toHaveLength(1);
+    expect(wrapper.get('[data-testid="import-progress"]').text()).toContain("v1.3.0");
+    expect(wrapper.text()).toContain("待升级版本 v1.3.0");
+    expect(storage.get("uvp.service-upgrade.import-job")).toBe("next-import");
+    wrapper.unmount();
+  });
+
+  it("检查到已安装在线版本时保留另一个待升级的导入包进度", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    const vm = wrapper.vm as any;
+    const job = {
+      job_id: "newer-import",
+      phase: "succeeded",
+      filename: "release.tar",
+      version: "1.3.0",
+      build_id: "next-build",
+      sha256: "b".repeat(64)
+    };
+    api.importPackage.mockResolvedValue({ data: job });
+    api.importStatus.mockResolvedValue({ data: job });
+    await vm.importOffline(new File(["package"], "release.tar"));
+    api.check.mockResolvedValue({ data: { manifest: { version: "1.0.0" }, artifact: {}, hasUpdate: false } });
+    await vm.check();
+    await flushPromises();
+    expect(storage.get("uvp.service-upgrade.import-job")).toBe("newer-import");
+    expect(wrapper.get('[data-testid="import-progress"]').text()).toContain("v1.3.0");
+    wrapper.unmount();
+  });
+
+  it.each([
+    ["1.1.0-rc.1", "1.1.0", true],
+    ["1.1.0", "1.1.0-rc.1", false],
+    ["1.1.0-rc.1", "1.1.0-rc.1", false],
+    ["1.1.0-rc.1", "1.1.0-rc.2", true]
+  ])("当前版本 %s 导入 %s 时是否可升级为 %s", async (current, target, expected) => {
+    api.getStatus.mockResolvedValue({ data: { ...status(), current: { version: current, build_id: "current" } } });
+    api.importPackage.mockResolvedValue({
+      data: { version: target, filename: "release.tar", build_id: "target", sha256: "a".repeat(64) }
+    });
+    const wrapper = mountPage();
+    await flushPromises();
+    await (wrapper.vm as any).importOffline(new File(["package"], "release.tar"));
+    expect((wrapper.vm as any).update.hasUpdate).toBe(expected);
+    wrapper.unmount();
+  });
+
+  it("版本说明与预检抽屉使用系统统一外观", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    const vm = wrapper.vm as any;
+    vm.showReleaseNotes("1.2.0", "版本说明");
+    await flushPromises();
+    expect(wrapper.get("aside").classes()).toContain("uvp-system-drawer");
+    vm.releaseNotesVisible = false;
+    vm.migrationDetailsVisible = true;
+    await flushPromises();
+    expect(wrapper.get("aside").classes()).toContain("uvp-system-drawer");
     wrapper.unmount();
   });
 
@@ -769,6 +1198,40 @@ describe("service upgrade page", () => {
     vm.status.tasks = [{ task_id: "task-a", phase: "awaiting_confirmation" }];
     await vm.apply("task-a");
     expect(api.applyTask).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it.each([{}, undefined])("HTTP 环境没有 randomUUID 时仍能创建任务且不同请求使用不同幂等键：%s", async crypto => {
+    vi.stubGlobal("crypto", crypto);
+    api.createTask.mockResolvedValue({ code: 0, data: {} });
+    const wrapper = mountPage();
+    await flushPromises();
+    const vm = wrapper.vm as any;
+    vm.update = { manifest: { version: "1.2.0" }, artifact: { sha256: "a".repeat(64) }, hasUpdate: true };
+    await vm.submitTask();
+    await vm.submitTask();
+    expect(api.createTask).toHaveBeenCalledTimes(2);
+    const keys = api.createTask.mock.calls.map(([key, digest]) => {
+      expect(key).toEqual(expect.any(String));
+      expect(key.length).toBeGreaterThan(0);
+      expect(digest).toBe("a".repeat(64));
+      return key;
+    });
+    expect(new Set(keys).size).toBe(2);
+    expect(wrapper.text()).not.toContain("randomUUID is not a function");
+    wrapper.unmount();
+  });
+
+  it("HTTPS 环境继续使用浏览器 UUID 创建升级任务", async () => {
+    const key = "1f9a6c1e-0000-4000-8000-000000000000";
+    vi.stubGlobal("crypto", { randomUUID: () => key });
+    api.createTask.mockResolvedValue({ code: 0, data: {} });
+    const wrapper = mountPage();
+    await flushPromises();
+    const vm = wrapper.vm as any;
+    vm.update = { manifest: { version: "1.2.0" }, artifact: { sha256: "a".repeat(64) }, hasUpdate: true };
+    await vm.submitTask();
+    expect(api.createTask).toHaveBeenCalledWith(key, "a".repeat(64));
     wrapper.unmount();
   });
 
