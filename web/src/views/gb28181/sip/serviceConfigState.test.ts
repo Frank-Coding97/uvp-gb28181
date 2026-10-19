@@ -28,7 +28,6 @@ describe("static service config draft", () => {
     expect(staticServiceConfigLabels).toContain("SIP 命令超时时间（秒）");
     expect(staticServiceConfigLabels).toContain("录像缓存尾部容差（秒）");
     expect(draft.positionHistoryRetentionDays).toBe(7);
-    expect(draft.sipLogRetentionDays).toBe(7);
     expect(staticServiceConfigLabels).not.toContain("SIP 日志保留天数（天）");
     expect(draft.ptzSpeed).toBe(6);
     expect(draft.syncChannelsOnOnline).toBe(true);

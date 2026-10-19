@@ -110,7 +110,7 @@ function installAggregateApiMocks() {
               : section === "defaultPlaybackProtocol"
                 ? value.protocol
                 : section === "sipLog"
-                  ? { enabled: value.enabled, retentionDays: value.retentionDays }
+                  ? { enabled: value.enabled }
                   : section === "sipCommandTimeout"
                     ? value.timeoutSec
                     : section === "globalSubscriptions"
@@ -347,11 +347,11 @@ describe("ServiceConfig edit mode", () => {
     api.updateSIPCommandTimeoutConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { timeoutSec: 30 } });
     api.fetchPreallocationModeConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: false } });
     api.updatePreallocationModeConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: true } });
-    api.fetchSIPLogConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: false, retentionDays: 7, applied: true } });
+    api.fetchSIPLogConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: false, applied: true } });
     api.updateSIPLogConfig.mockResolvedValue({
       code: 0,
       message: "保存成功",
-      data: { enabled: true, retentionDays: 7, applied: true }
+      data: { enabled: true, applied: true }
     });
     api.fetchCloudRecordingRetentionConfig.mockResolvedValue({ code: 0, message: "", data: { retentionDays: 7 } });
     api.updateCloudRecordingRetentionConfig.mockResolvedValue({
@@ -384,7 +384,7 @@ describe("ServiceConfig edit mode", () => {
     const wrapper = mountPage();
     await flushPromises();
 
-    expect(wrapper.findAll("[data-tooltip]")).toHaveLength(32);
+    expect(wrapper.findAll("[data-tooltip]")).toHaveLength(31);
     expect(wrapper.find("[data-field='saveMobilePositionHistory']").attributes("data-tooltip")).toBe(
       "关闭后仍更新设备和通道的最新位置，不再新增轨迹点。"
     );
@@ -1039,37 +1039,21 @@ describe("ServiceConfig edit mode", () => {
     await saveButton?.trigger("click");
     await flushPromises();
 
-    expect(api.updateSIPLogConfig).toHaveBeenCalledWith({ enabled: true, retentionDays: 7 });
+    expect(api.updateSIPLogConfig).toHaveBeenCalledWith({ enabled: true });
   });
 
-  it("shows SIP trace retention read-only and saves the latest value from the aggregate API", async () => {
-    api.fetchSIPLogConfig
-      .mockResolvedValueOnce({ code: 0, message: "", data: { enabled: false, retentionDays: 30, applied: true } })
-      .mockResolvedValueOnce({ code: 0, message: "", data: { enabled: false, retentionDays: 60, applied: true } });
+  it("no longer renders the SIP retention entry on the service config page", async () => {
+    api.fetchSIPLogConfig.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: { enabled: false, retentionDays: 30, applied: true }
+    });
     const wrapper = mountPage();
     await flushPromises();
 
-    expect(wrapper.find("[data-field='sipLogRetentionDays']").text()).toContain("30 天");
-    expect(wrapper.find("[data-field='sipLogRetentionDays'] a").attributes("href")).toBe("/system/sysconfig");
-    expect(wrapper.find("[data-field='sipLogRetentionDays'] input[type='number']").exists()).toBe(false);
-    const sipLogSwitch = wrapper
-      .findAll("label")
-      .find(label => label.text().includes("是否开启 SIP 日志"))
-      ?.find("button");
-    await sipLogSwitch?.trigger("click");
-    const saveButton = wrapper.findAll("button").find(button => button.text().includes("保存"));
-    await saveButton?.trigger("click");
-    await flushPromises();
-
-    expect(api.updateSIPLogConfig).toHaveBeenCalledWith({ enabled: true, retentionDays: 60 });
-  });
-
-  it("uses the default retention when loading an old SIP log response", async () => {
-    api.fetchSIPLogConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true, applied: true } });
-    const wrapper = mountPage();
-    await flushPromises();
-
-    expect(wrapper.find("[data-field='sipLogRetentionDays']").text()).toContain("7 天");
+    expect(wrapper.find("[data-field='sipLogRetentionDays']").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("SIP 日志保留天数");
+    expect(wrapper.text()).not.toContain("前往日志清理配置");
   });
 
   it("loads and saves the ignore channel offline status notify switch", async () => {

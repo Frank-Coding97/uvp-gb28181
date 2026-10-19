@@ -1872,7 +1872,6 @@ export interface DefaultChannelAudioConfig {
 
 export interface SIPLogConfig {
   enabled: boolean;
-  retentionDays: number;
   applied: boolean;
   applyError?: string;
 }

@@ -96,11 +96,12 @@ type PTZDefaultSpeedConfig struct {
 }
 
 // SIPLogUpdateResult 是 SIP 原始报文 Trace 开关及运行时应用结果。
+// 保留天数不在这里配置：唯一入口是系统配置的日志清理页签，由它写入
+// gbconfig.SIPTraceRetentionDaysConfigKey 并负责重载 SIP 运行时。
 type SIPLogUpdateResult struct {
-	Enabled       bool   `json:"enabled"`
-	RetentionDays int    `json:"retentionDays"`
-	Applied       bool   `json:"applied"`
-	ApplyError    string `json:"applyError,omitempty"`
+	Enabled    bool   `json:"enabled"`
+	Applied    bool   `json:"applied"`
+	ApplyError string `json:"applyError,omitempty"`
 }
 
 type SIPTraceReloader func() error
@@ -184,7 +185,7 @@ func (sc *ServiceConfigController) currentServiceConfig() ServiceConfig {
 		PTZDefaultSpeed: PTZDefaultSpeedConfig{Level: currentPTZDefaultSpeedLevel()}, DefaultChannelStreamTransport: DefaultChannelStreamTransportConfig{Transport: gbconfig.CurrentDefaultChannelStreamTransport()},
 		DefaultPlaybackProtocol: DefaultPlaybackProtocolConfig{Protocol: gbconfig.CurrentDefaultPlaybackProtocol()}, GlobalSubscriptions: GlobalSubscriptionConfig{Items: gbconfig.GlobalSubscriptionItems()},
 		DefaultChannelAudio: DefaultChannelAudioConfig{Enabled: gbconfig.DefaultChannelAudioEnabled()}, PlaybackSettings: gbconfig.CurrentPlaybackSettings(), FixedAddressPlayback: gbconfig.CurrentFixedAddressPlaybackSettings(),
-		PlayAuth: gbconfig.CurrentPlayAuthSettings(), RecordCacheTailToleranceSec: gbconfig.CurrentRecordCacheTailToleranceSec(), SIPLog: SIPLogUpdateResult{Enabled: gbconfig.SIPTraceEnabled(), RetentionDays: gbconfig.SIPTraceRetentionDays(), Applied: sc.sipTraceApplied(gbconfig.SIPTraceEnabled())},
+		PlayAuth: gbconfig.CurrentPlayAuthSettings(), RecordCacheTailToleranceSec: gbconfig.CurrentRecordCacheTailToleranceSec(), SIPLog: SIPLogUpdateResult{Enabled: gbconfig.SIPTraceEnabled(), Applied: sc.sipTraceApplied(gbconfig.SIPTraceEnabled())},
 		Cascade: &cascade,
 	}
 }
@@ -230,7 +231,7 @@ func (sc *ServiceConfigController) UpdateServiceConfig(c *gin.Context) {
 		}
 	}
 	unlock()
-	if previous.SIPLog.Enabled != request.SIPLog.Enabled || previous.SIPLog.RetentionDays != request.SIPLog.RetentionDays {
+	if previous.SIPLog.Enabled != request.SIPLog.Enabled {
 		if sc.reload != nil {
 			if err := sc.reload(); err != nil {
 				request.SIPLog.Applied = false
@@ -281,9 +282,6 @@ func validateServiceConfig(v ServiceConfig) error {
 		}
 		seenSubscriptions[item] = struct{}{}
 	}
-	if v.SIPLog.RetentionDays < gbconfig.MinSIPTraceRetentionDays || v.SIPLog.RetentionDays > gbconfig.MaxSIPTraceRetentionDays {
-		return errors.New("SIP日志保留天数必须为1-365")
-	}
 	if v.SIPCommandTimeout.TimeoutSec < 1 || v.SIPCommandTimeout.TimeoutSec > gbconfig.MaxSIPCommandTimeoutSec {
 		return errors.New("SIP命令超时时间无效")
 	}
@@ -324,7 +322,6 @@ func applyServiceConfig(v ServiceConfig) {
 	app.ConfigYml.Set(gbconfig.PlayAuthTTLSecondsConfigKey, v.PlayAuth.TTLSeconds)
 	app.ConfigYml.Set(gbconfig.RecordCacheTailToleranceSecConfigKey, v.RecordCacheTailToleranceSec)
 	app.ConfigYml.Set(gbconfig.SIPTraceEnabledConfigKey, v.SIPLog.Enabled)
-	app.ConfigYml.Set(gbconfig.SIPTraceRetentionDaysConfigKey, v.SIPLog.RetentionDays)
 }
 
 func SetPlayAuthRuntimeReady(ready bool) {

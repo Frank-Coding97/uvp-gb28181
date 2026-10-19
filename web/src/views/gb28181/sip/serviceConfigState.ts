@@ -10,7 +10,6 @@ export interface StaticServiceConfigDraft {
   ptzSpeed: number;
   syncChannelsOnOnline: boolean;
   sipLogEnabled: boolean;
-  sipLogRetentionDays: number;
   cloudRecordingRetentionDays: number;
   ignoreChannelOfflineStatusNotify: boolean;
   onlineOnHeartbeat: boolean;
@@ -103,7 +102,6 @@ export function createStaticServiceConfigDraft(): StaticServiceConfigDraft {
     ptzSpeed: 6,
     syncChannelsOnOnline: true,
     sipLogEnabled: false,
-    sipLogRetentionDays: 7,
     cloudRecordingRetentionDays: 7,
     ignoreChannelOfflineStatusNotify: false,
     onlineOnHeartbeat: true,

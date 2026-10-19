@@ -15,7 +15,6 @@ import {
 } from "@/api/gb28181";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import SNumberField from "@/components/s-number-field/index.vue";
-import { logCleanupPageRoute } from "@/views/system/sysconfig/sysconfigState";
 import { PLAYBACK_PROTOCOL_DICT_CODE, playbackProtocolOptionsFromDictionary } from "../playbackProtocol";
 import {
   createCascadeSettingsDraft,
@@ -117,7 +116,6 @@ const savedSIPCommandTimeoutSec = ref(10);
 const savedPreallocationMode = ref(false);
 const savedIgnoreChannelOfflineStatusNotify = ref(false);
 const savedSIPLogEnabled = ref(false);
-const savedSIPLogRetentionDays = ref(7);
 const savedCloudRecordingRetentionDays = ref(7);
 const savedRecordCacheTailToleranceSec = ref(2);
 const savedCascadeSettings = reactive(createCascadeSettingsDraft());
@@ -180,12 +178,7 @@ const preallocationModeChanged = computed(() => draft.preallocationMode !== save
 const ignoreChannelOfflineStatusNotifyChanged = computed(
   () => draft.ignoreChannelOfflineStatusNotify !== savedIgnoreChannelOfflineStatusNotify.value
 );
-const sipLogChanged = computed(
-  () => draft.sipLogEnabled !== savedSIPLogEnabled.value || draft.sipLogRetentionDays !== savedSIPLogRetentionDays.value
-);
-const sipLogRetentionValid = computed(
-  () => Number.isInteger(draft.sipLogRetentionDays) && draft.sipLogRetentionDays >= 1 && draft.sipLogRetentionDays <= 365
-);
+const sipLogChanged = computed(() => draft.sipLogEnabled !== savedSIPLogEnabled.value);
 const cloudRecordingRetentionChanged = computed(
   () => draft.cloudRecordingRetentionDays !== savedCloudRecordingRetentionDays.value
 );
@@ -336,7 +329,6 @@ function resetDraft() {
   draft.preallocationMode = savedPreallocationMode.value;
   draft.ignoreChannelOfflineStatusNotify = savedIgnoreChannelOfflineStatusNotify.value;
   draft.sipLogEnabled = savedSIPLogEnabled.value;
-  draft.sipLogRetentionDays = savedSIPLogRetentionDays.value;
 }
 
 watch(
@@ -367,7 +359,6 @@ async function saveConfig() {
     return;
   }
   if (
-    !sipLogRetentionValid.value ||
     !cloudRecordingRetentionValid.value ||
     !recordCacheTailToleranceValid.value ||
     !playTimeoutValid.value ||
@@ -379,9 +370,6 @@ async function saveConfig() {
   }
   aggregateSaving.value = true;
   try {
-    const latestSipLogConfig = await fetchServiceConfig();
-    if (latestSipLogConfig.code !== 0) throw new Error(latestSipLogConfig.message || "读取最新 SIP 日志配置失败");
-
     const response = await updateServiceConfig({
       positionHistory: { enabled: draft.saveMobilePositionHistory, retentionDays: draft.positionHistoryRetentionDays },
       cloudRecordingRetention: { retentionDays: draft.cloudRecordingRetentionDays },
@@ -414,7 +402,6 @@ async function saveConfig() {
       },
       sipLog: {
         enabled: draft.sipLogEnabled,
-        retentionDays: latestSipLogConfig.data.sipLog.retentionDays,
         applied: sipLogApplied.value
       },
       cascade: { ...draft.cascade }
@@ -442,7 +429,6 @@ async function saveConfig() {
     applyFixedAddressPlaybackConfig(v.fixedAddressPlayback);
     applyPlayAuthConfig(v.playAuth);
     draft.sipLogEnabled = v.sipLog.enabled;
-    draft.sipLogRetentionDays = v.sipLog.retentionDays ?? 7;
     sipLogApplied.value = v.sipLog.applied ?? true;
     savedPositionHistoryEnabled.value = v.positionHistory.enabled;
     savedPositionHistoryRetentionDays.value = v.positionHistory.retentionDays ?? 7;
@@ -461,7 +447,6 @@ async function saveConfig() {
     savedPreallocationMode.value = v.preallocationMode.enabled;
     savedIgnoreChannelOfflineStatusNotify.value = v.ignoreChannelOfflineStatusNotify.enabled;
     savedSIPLogEnabled.value = v.sipLog.enabled;
-    savedSIPLogRetentionDays.value = v.sipLog.retentionDays ?? 7;
     Message.success("国标服务配置已更新");
     return;
   } catch (error: any) {
@@ -532,10 +517,8 @@ async function loadServiceConfig() {
     draft.ignoreChannelOfflineStatusNotify = v.ignoreChannelOfflineStatusNotify.enabled;
     savedIgnoreChannelOfflineStatusNotify.value = v.ignoreChannelOfflineStatusNotify.enabled;
     draft.sipLogEnabled = v.sipLog.enabled;
-    draft.sipLogRetentionDays = v.sipLog.retentionDays ?? 7;
     sipLogApplied.value = v.sipLog.applied ?? true;
     savedSIPLogEnabled.value = v.sipLog.enabled;
-    savedSIPLogRetentionDays.value = v.sipLog.retentionDays ?? 7;
     applyPlaybackSettings(v.playbackSettings);
     applyFixedAddressPlaybackConfig(v.fixedAddressPlayback);
     applyPlayAuthConfig(v.playAuth);
@@ -637,7 +620,6 @@ onMounted(async () => {
               !hasChanges ||
               !cascadeValid ||
               !numberFieldsValid ||
-              !sipLogRetentionValid ||
               !recordCacheTailToleranceValid ||
               !playTimeoutValid ||
               !playAuthTTLValid
@@ -799,18 +781,6 @@ onMounted(async () => {
                     <template #checked>开启</template>
                     <template #unchecked>关闭</template>
                   </a-switch>
-                </a-form-item>
-              </a-col>
-              <a-col :span="isMobile ? 24 : 12">
-                <a-form-item
-                  field="sipLogRetentionDays"
-                  label="SIP 日志保留天数"
-                  tooltip="保留天数请前往系统配置的日志清理页签修改。"
-                >
-                  <div class="sip-log-retention-display">
-                    <span>{{ draft.sipLogRetentionDays }} 天</span>
-                    <router-link :to="logCleanupPageRoute"> 前往日志清理配置 </router-link>
-                  </div>
                 </a-form-item>
               </a-col>
               <a-col :span="isMobile ? 24 : 12">
