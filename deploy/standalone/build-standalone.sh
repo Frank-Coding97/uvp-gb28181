@@ -49,6 +49,20 @@ DEPLOY_DIR="$REPO_ROOT/deploy/standalone"
 HTTP_PORT="${UVP_HTTP_PORT:-51002}"
 REDIS_PORT="${UVP_REDIS_PORT:-51003}"
 
+# ---- 浏览器入口端口（nginx 明文口）----
+#
+# ⛔⛔ 收尾提示里「访问 http://<IP>:端口」必须写这个，**不能写 $HTTP_PORT**：
+#   后端只服务 /public 与 API，**不服务 SPA** —— 照后端端口打开只会得到 404，
+#   而客户会以为"装失败了"。这个坑在 README 里也踩过一次（当时写成 51002）。
+# ⛔ 不在本文件另写一份字面量：端口默认值只在 uvp-gb28181-ctl.sh 里定义，
+#   这里现读，避免"改了 ctl.sh 却忘了改这里"的第二份真相。
+NGINX_HTTP_PORT_DEFAULT="$(sed -n 's/^NGINX_HTTP_PORT_DEFAULT=//p' "$DEPLOY_DIR/uvp-gb28181-ctl.sh" | tail -1)"
+# ⚠️ 这里还不能调 fail()：它定义在下面（解析完参数之后）。就地报错并退出。
+if [ -z "$NGINX_HTTP_PORT_DEFAULT" ]; then
+  printf 'ERROR: 读不到 nginx 明文端口（ctl.sh 的 NGINX_HTTP_PORT_DEFAULT 没定义？）\n' >&2
+  exit 1
+fi
+
 # ---- SIP 端口（引导页默认值，构建期注入到前端）----
 #
 # ⛔⛔ SIP 端口**不走 config.env** —— 2026-07-20 起 SIP 明文配置从 YAML 移进了
@@ -887,4 +901,4 @@ EOF
 log "完成：${ARCHIVE}（${SIZE}）"
 log "校验：${SHA}"
 printf '\n下一步：\n  1. 上传到目标机并解压：tar -xzf %s\n  2. 进目录启动（首次会自动建库，无需单独跑建库脚本）：cd %s && ./uvp-gb28181-ctl.sh start\n  3. 访问：http://<目标机IP>:%s\n' \
-  "${PKG_STEM}.tar.gz" "${PKG_STEM}" "$HTTP_PORT"
+  "${PKG_STEM}.tar.gz" "${PKG_STEM}" "$NGINX_HTTP_PORT_DEFAULT"
