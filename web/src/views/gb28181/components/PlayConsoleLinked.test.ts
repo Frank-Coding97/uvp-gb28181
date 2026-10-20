@@ -249,7 +249,7 @@ vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => userState }));
 vi.mock("./PlayWindow.vue", () => ({
   default: {
     name: "PlayWindowStub",
-    props: ["url", "zlmWebrtc", "hasAudio"],
+    props: ["url", "zlmWebrtc", "hasAudio", "prepare"],
     emits: ["error", "videosize", "first-frame", "player-error"],
     template:
       "<button class='play-window' data-testid='play-window' :data-url='url' :data-zlm-webrtc='String(Boolean(zlmWebrtc))' :data-has-audio='String(Boolean(hasAudio))' @click=\"$emit('error', '拉流超时')\" />",
@@ -746,6 +746,57 @@ describe("PlayConsoleLinked 双区联动", () => {
     vi.useRealTimers();
     vi.clearAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it("点播请求期间提前准备播放器，地址返回后复用实例立即播放", async () => {
+    let resolvePlay!: (value: any) => void;
+    api.startPlay.mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          resolvePlay = resolve;
+        })
+    );
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    const prepared = wrapper.findComponent({ name: "PlayWindowStub" });
+    expect(prepared.exists()).toBe(true);
+    expect(prepared.props()).toMatchObject({ url: "", prepare: true });
+    const instance = prepared.vm;
+    resolvePlay({
+      code: 0,
+      data: {
+        lifecycleId: "prepared-life",
+        clientFeedbackToken: "prepared-feedback",
+        streamId: "prepared-stream",
+        ssrc: "0102030405",
+        app: "rtp",
+        urls: { wsFlv: "ws://zlm/prepared.live.flv" },
+        expireAt: 0
+      }
+    });
+    await flushPromises();
+    const playing = wrapper.findComponent({ name: "PlayWindowStub" });
+    expect(playing.vm).toBe(instance);
+    expect(playing.props()).toMatchObject({ url: "ws://zlm/prepared.live.flv", prepare: false });
+    wrapper.unmount();
+  });
+
+  it("点播请求失败时卸载预初始化播放器", async () => {
+    let rejectPlay!: (reason: Error) => void;
+    api.startPlay.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectPlay = reject;
+        })
+    );
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    expect(wrapper.findComponent({ name: "PlayWindowStub" }).exists()).toBe(true);
+    rejectPlay(new Error("device unavailable"));
+    await flushPromises();
+    expect(wrapper.findComponent({ name: "PlayWindowStub" }).exists()).toBe(false);
+    expect(wrapper.find(".placeholder.error").exists()).toBe(true);
+    wrapper.unmount();
   });
 
   it("最小化后保留同一个播放器和点播会话，并支持拖动与恢复", async () => {

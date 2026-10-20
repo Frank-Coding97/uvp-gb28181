@@ -6,6 +6,8 @@ import { PlayerSmoothness, type SmoothnessSnapshot } from "./playerSmoothness";
 interface Props {
   /** 流地址(http-flv / ws-flv / hls 等),传空字符串关闭播放器 */
   url: string;
+  /** 在点播接口返回前初始化解码器，不建立媒体连接。 */
+  prepare?: boolean;
   /** 录像回放页嵌入模式：填满父容器，由外层提供业务控制栏。 */
   playback?: boolean;
   /**
@@ -158,7 +160,7 @@ function reportPlayerError(code: "player_error" | "player_timeout") {
 
 async function play(u: string, token: number) {
   errorMsg.value = "";
-  if (!u) {
+  if (!u && !props.prepare) {
     await destroy();
     return;
   }
@@ -170,6 +172,7 @@ async function play(u: string, token: number) {
   }
 
   if (player.value) {
+    if (!u) return;
     try {
       await player.value.play(u);
       if (token !== playToken) return;
@@ -243,7 +246,9 @@ async function play(u: string, token: number) {
       smoothness.value = badge;
     }
 
+    if (!u) return;
     await p.play(u);
+    if (token !== playToken) return;
     applyAudioState(p);
     startSizePolling();
   } catch (e) {
@@ -306,7 +311,7 @@ let playToken = 0;
  */
 async function switchTo(u: string, force = false): Promise<void> {
   const token = ++playToken;
-  const nextFamily = demuxFamily(u, props.zlmWebrtc);
+  const nextFamily = u ? demuxFamily(u, props.zlmWebrtc) : "flv";
   if (player.value && (force || nextFamily !== playerFamily)) {
     // ⛔ 必须等 destroy 落定再重建（库的容器占用标记是异步清掉的），
     //    否则构造函数会抛 `EasyPlayerPro err container`。
@@ -318,7 +323,7 @@ async function switchTo(u: string, force = false): Promise<void> {
 }
 
 watch(
-  [() => props.url, () => props.zlmWebrtc],
+  [() => props.url, () => props.zlmWebrtc, () => props.prepare],
   ([u]) => {
     playbackSession += 1;
     playbackStartedAt = performance.now();
@@ -341,6 +346,7 @@ watch(canScreenshot, () => {
   void switchTo(props.url, true);
 });
 onBeforeUnmount(() => {
+  playToken += 1;
   void destroy();
 });
 
@@ -381,7 +387,7 @@ defineExpose({ stop: destroy, getSmoothness, getVideoSize, refreshVideoSize: rea
       <span>正在连接视频流，等待首帧…</span>
     </div>
     <div v-if="errorMsg" class="err">{{ errorMsg }}</div>
-    <div v-else-if="!url" class="placeholder">点击左侧通道开始播放</div>
+    <div v-else-if="!url && !prepare" class="placeholder">点击左侧通道开始播放</div>
   </div>
 </template>
 

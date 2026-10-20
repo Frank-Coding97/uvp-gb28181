@@ -11,6 +11,62 @@ const userState = vi.hoisted(() => ({
 vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => userState }));
 
 describe("PlayWindow playback embedding", () => {
+  it("prepares the decoder without pulling a stream and reuses it when the URL arrives", async () => {
+    const instances: FakeEasyPlayer[] = [];
+    class FakeEasyPlayer {
+      constructor() {
+        instances.push(this);
+      }
+      on = vi.fn();
+      play = vi.fn();
+      destroy = vi.fn();
+    }
+    (globalThis as { EasyPlayerPro?: unknown }).EasyPlayerPro = FakeEasyPlayer;
+    const wrapper = mount(PlayWindow, { props: { url: "", prepare: true, hasAudio: false } });
+    await flushPromises();
+    expect(instances).toHaveLength(1);
+    expect(instances[0].play).not.toHaveBeenCalled();
+    expect(wrapper.emitted("firstFrame")).toBeUndefined();
+    await wrapper.setProps({ url: "ws://zlm/live.flv", prepare: false });
+    await flushPromises();
+    expect(instances).toHaveLength(1);
+    expect(instances[0].play).toHaveBeenCalledWith("ws://zlm/live.flv");
+    wrapper.unmount();
+    expect(instances[0].destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases a prepared player if the request fails or preparation is cancelled", async () => {
+    const destroy = vi.fn();
+    class FakeEasyPlayer {
+      on = vi.fn();
+      play = vi.fn();
+      destroy = destroy;
+    }
+    (globalThis as { EasyPlayerPro?: unknown }).EasyPlayerPro = FakeEasyPlayer;
+    const wrapper = mount(PlayWindow, { props: { url: "", prepare: true } });
+    await flushPromises();
+    await wrapper.setProps({ prepare: false });
+    await flushPromises();
+    expect(destroy).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+  });
+
+  it("does not construct a prepared player after it has been unmounted", async () => {
+    const construct = vi.fn();
+    class FakeEasyPlayer {
+      constructor() {
+        construct();
+      }
+      on = vi.fn();
+      destroy = vi.fn();
+    }
+    (globalThis as { EasyPlayerPro?: unknown }).EasyPlayerPro = FakeEasyPlayer;
+    const wrapper = mount(PlayWindow, { props: { url: "", prepare: true } });
+    wrapper.unmount();
+    await flushPromises();
+    expect(construct).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     userState.account = reactive({ permissions: ["*:*:*"] });
   });

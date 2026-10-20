@@ -5245,18 +5245,20 @@ provide(PLAY_CONSOLE_CONTEXT, {
                 <template v-else>在画面上框住要跟踪的目标 · Esc 退出</template>
               </span>
             </div>
+            <PlayWindow
+              v-if="phase === 'requesting' || phase === 'playing' || phase === 'paused'"
+              :key="channelContextKey()"
+              ref="playWindowRef"
+              :url="phase === 'requesting' ? '' : currentProtocolUrl"
+              :prepare="phase === 'requesting'"
+              :zlm-webrtc="currentProtocolUsesZlmWebRtc"
+              :has-audio="channel?.audioEnabled === true"
+              @error="handlePlayerError"
+              @first-frame="reportClientPlaybackFact"
+              @player-error="reportClientPlaybackFact"
+              @videosize="onPlayerVideoSize"
+            />
             <template v-if="phase === 'playing' || phase === 'paused'">
-              <PlayWindow
-                :key="clientFeedbackSessionKey || playResult?.streamId || 'player'"
-                ref="playWindowRef"
-                :url="currentProtocolUrl"
-                :zlm-webrtc="currentProtocolUsesZlmWebRtc"
-                :has-audio="channel?.audioEnabled === true"
-                @error="handlePlayerError"
-                @first-frame="reportClientPlaybackFact"
-                @player-error="reportClientPlaybackFact"
-                @videosize="onPlayerVideoSize"
-              />
               <div v-if="phase === 'paused'" class="paused-mask"><Pause :size="42" /><span>已暂停</span></div>
             </template>
             <template v-else-if="phase === 'requesting'">
