@@ -507,7 +507,10 @@ function writeTarNumber(header, offset, length, value) {
   header.write(encoded, offset, length, "ascii");
 }
 
-function tarHeader(name, size, type = "0") {
+// ⛔ mtime 不能写 0。tar 头的 mtime=0 就是 1970-01-01，CentOS 7 的 GNU tar
+// 解包时会刷一行「implausibly old time stamp 1970-01-01」（中文即「不可信的旧
+// 时间戳」），现场会误判成包坏了。用制品的实际 mtime 填，既真实又稳定。
+function tarHeader(name, size, type = "0", mtime = Math.floor(Date.now() / 1000)) {
   if (Buffer.byteLength(name, "utf8") > 100) throw new Error("tar 条目名称过长");
   const header = Buffer.alloc(TAR_BLOCK_SIZE);
   header.write(name, 0, 100, "utf8");
@@ -515,7 +518,7 @@ function tarHeader(name, size, type = "0") {
   writeTarNumber(header, 108, 8, 0);
   writeTarNumber(header, 116, 8, 0);
   writeTarNumber(header, 124, 12, size);
-  writeTarNumber(header, 136, 12, 0);
+  writeTarNumber(header, 136, 12, mtime);
   header.fill(0x20, 148, 156);
   header.write(type, 156, 1, "ascii");
   header.write("ustar\0", 257, 6, "ascii");
@@ -550,9 +553,9 @@ async function writeTarData(output, source, size, expectedSHA256) {
   if (padding > 0) await writeChunk(output, Buffer.alloc(padding));
 }
 
-async function writeTarEntry(output, name, source, size, type = "0", expectedSHA256) {
+async function writeTarEntry(output, name, source, size, type = "0", expectedSHA256, mtime) {
   if (Buffer.byteLength(name, "utf8") > 100) throw new Error("离线升级包 tar 条目名称不得超过 100 字节");
-  await writeChunk(output, tarHeader(name, size, type));
+  await writeChunk(output, tarHeader(name, size, type, mtime));
   await writeTarData(output, source, size, expectedSHA256);
 }
 
@@ -566,6 +569,14 @@ export async function createOfflinePackage({ outputPath, envelopeBytes, artifact
   const filename = assertSafeFilename(artifact.filename);
   if (!Number.isSafeInteger(artifact.size) || artifact.size < 0) throw new Error("离线制品大小无效");
   if (typeof artifact.sha256 !== "string" || !SHA256.test(artifact.sha256)) throw new Error("离线制品 SHA-256 无效");
+  // 两个条目共用制品 mtime，避免条目之间出现先后不一致。
+  let mtime = Math.floor(Date.now() / 1000);
+  try {
+    const info = await stat(artifact.filePath);
+    if (Number.isFinite(info.mtimeMs) && info.mtimeMs > 0) mtime = Math.floor(info.mtimeMs / 1000);
+  } catch {
+    // 制品读不到时交给下面的流式读取报错，这里保留当前时间即可
+  }
   const temporary = `${outputPath}.tmp-${process.pid}-${randomUUID()}`;
   let output;
   let outputFinished;
@@ -574,8 +585,8 @@ export async function createOfflinePackage({ outputPath, envelopeBytes, artifact
     outputFinished = finished(output);
     outputFinished.catch(() => {});
     await once(output, "open");
-    await writeTarEntry(output, "manifest.json", envelopeBytes, envelopeBytes.length);
-    await writeTarEntry(output, filename, artifact.filePath, artifact.size, "0", artifact.sha256);
+    await writeTarEntry(output, "manifest.json", envelopeBytes, envelopeBytes.length, "0", undefined, mtime);
+    await writeTarEntry(output, filename, artifact.filePath, artifact.size, "0", artifact.sha256, mtime);
     await writeChunk(output, Buffer.alloc(TAR_BLOCK_SIZE * 2));
     output.end();
     await outputFinished;

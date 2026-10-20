@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, verify } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -77,11 +77,14 @@ function tarEntries(data) {
     const name = header.subarray(0, 100).toString("utf8").replace(/\0.*$/, "");
     const sizeText = header.subarray(124, 136).toString("utf8").replace(/\0.*$/, "").trim();
     const size = Number.parseInt(sizeText || "0", 8);
+    const mtimeText = header.subarray(136, 148).toString("utf8").replace(/\0.*$/, "").trim();
+    const mtime = Number.parseInt(mtimeText || "0", 8);
     const type = header.subarray(156, 157).toString("utf8") || "0";
     const bodyStart = offset + 512;
     entries.push({
       name,
       type,
+      mtime,
       data: data.subarray(bodyStart, bodyStart + size)
     });
     offset = bodyStart + Math.ceil(size / 512) * 512;
@@ -397,6 +400,15 @@ test("离线输出遵守 ImportArchive 的 manifest 加单制品 tar 契约", as
       ]
     );
     assert.deepEqual(entries[1].data, await readFile(artifact));
+
+    // ⛔ 之前 mtime 被写成 0，CentOS 7 的 GNU tar 解包会刷
+    //    「implausibly old time stamp 1970-01-01」（不可信的旧时间戳），现场当成包坏了。
+    //    这里钉死：两个条目都要用制品的真实 mtime，且不能是 0。
+    const artifactMtime = Math.floor((await stat(artifact)).mtimeMs / 1000);
+    for (const entry of entries) {
+      assert.notEqual(entry.mtime, 0, `${entry.name} 的 mtime 不能是 1970-01-01`);
+      assert.equal(entry.mtime, artifactMtime, `${entry.name} 应使用制品 mtime`);
+    }
 
     const envelope = JSON.parse(entries[0].data.toString("utf8"));
     const signedPayload = Buffer.from(envelope.payload, "base64");
