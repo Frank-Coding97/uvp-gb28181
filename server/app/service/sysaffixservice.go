@@ -69,14 +69,19 @@ func (s *SysAffixService) ValidateChunkSize(chunkSize int64) error {
 }
 
 // InitChunkUpload 初始化分片上传（秒传检测 + 断点续传）
-func (s *SysAffixService) InitChunkUpload(ctx context.Context, req *models.ChunkInitRequest) (*models.ChunkInitResult, error) {
+//
+// ⛔⛔ 秒传与续传都**只能命中当前用户自己的**文件/会话：
+//
+//	过去按 file_md5 查全表，任何登录用户只要知道别人的 MD5 就能拿到
+//	对方的 uploadId（续传）或直接拿到对方的文件 path/url（秒传）。
+func (s *SysAffixService) InitChunkUpload(ctx context.Context, req *models.ChunkInitRequest, userID uint) (*models.ChunkInitResult, error) {
 	// 验证分片上传的文件类型和大小
 	if err := s.ValidateChunkFile(req.FileName, req.FileSize); err != nil {
 		return nil, err
 	}
 
-	// 秒传检测：根据MD5查找是否已有相同文件
-	existAffix, _ := models.GetAffixByMd5(ctx, req.FileMd5, req.FileSize)
+	// 秒传检测：根据MD5查找**本人**是否已有相同文件
+	existAffix, _ := models.GetAffixByMd5(ctx, req.FileMd5, req.FileSize, userID)
 	if existAffix != nil && existAffix.ID > 0 {
 		return &models.ChunkInitResult{
 			UploadId:       "",
@@ -88,11 +93,11 @@ func (s *SysAffixService) InitChunkUpload(ctx context.Context, req *models.Chunk
 	// 生成唯一uploadId
 	uploadId := fmt.Sprintf("upload_%d_%s", time.Now().Unix(), uuid.New().String()[:8])
 
-	// 查询该fileMd5是否已有上传中的分片（断点续传）
+	// 查询该fileMd5是否已有**本人**上传中的分片（断点续传）
 	uploadedChunks := []int{}
 	existingChunks := models.NewSysAffixChunkList()
 	if err := app.DBContext(ctx).
-		Where("file_md5 = ? AND status = 0", req.FileMd5).
+		Where("file_md5 = ? AND status = 0 AND created_by = ?", req.FileMd5, userID).
 		Find(existingChunks).Error; err == nil && len(*existingChunks) > 0 {
 		// 找到已有分片，复用第一个uploadId
 		first := (*existingChunks)[0]
@@ -116,18 +121,31 @@ func (s *SysAffixService) SaveChunk(ctx context.Context, req *models.ChunkUpload
 		return err
 	}
 
+	// ⛔ 会话归属：uploadId 由客户端回传，必须先确认它属于当前用户。
+	//   否则可以往别人的会话目录里塞分片，再由对方（或自己）合并成"自己"的附件。
+	if err := ensureChunkSessionOwner(ctx, req.UploadId, userID); err != nil {
+		return err
+	}
+
 	// 获取上传配置
 	uploadConfig := app.UploadService.GetUploadConfig()
 	localPath := uploadConfig.LocalPath
 
 	// 创建临时分片目录
-	tmpDir := filepath.Join(localPath, "tmp", req.UploadId)
+	// ⛔ uploadID 来自请求，必须先过形态校验 + 目录边界断言，见 sysaffix_uploadid.go
+	tmpDir, err := chunkTmpDir(localPath, req.UploadId)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(tmpDir, 0755); err != nil {
 		return fmt.Errorf("创建临时目录失败: %v", err)
 	}
 
 	// 保存分片文件
 	chunkPath := filepath.Join(tmpDir, fmt.Sprintf("chunk_%d", req.ChunkIndex))
+	if err := ensurePathWithin(tmpDir, chunkPath); err != nil {
+		return err
+	}
 	src, err := req.File.Open()
 	if err != nil {
 		return fmt.Errorf("打开分片文件失败: %v", err)
@@ -196,8 +214,8 @@ func (s *SysAffixService) MergeChunks(ctx context.Context, req *models.ChunkMerg
 		return nil, err
 	}
 
-	// 获取所有分片记录
-	chunkList, err := models.GetChunksByUploadId(ctx, req.UploadId)
+	// 获取所有分片记录（**仅限当前用户**，见 models.GetChunksByUploadId）
+	chunkList, err := models.GetChunksByUploadId(ctx, req.UploadId, userID)
 	if err != nil {
 		return nil, fmt.Errorf("获取分片记录失败: %v", err)
 	}
@@ -247,11 +265,18 @@ func (s *SysAffixService) MergeChunks(ctx context.Context, req *models.ChunkMerg
 		}
 	}()
 
-	tmpDir := filepath.Join(localPath, "tmp", req.UploadId)
+	tmpDir, err := chunkTmpDir(localPath, req.UploadId)
+	if err != nil {
+		return nil, err
+	}
 	var totalSize int64 = 0
 
 	for _, chunk := range *chunkList {
 		chunkFilePath := filepath.Join(tmpDir, fmt.Sprintf("chunk_%d", chunk.ChunkIndex))
+		if err := ensurePathWithin(tmpDir, chunkFilePath); err != nil {
+			removeFinal()
+			return nil, err
+		}
 		chunkFile, err := os.Open(chunkFilePath)
 		if err != nil {
 			removeFinal()
@@ -321,13 +346,25 @@ func (s *SysAffixService) MergeChunks(ctx context.Context, req *models.ChunkMerg
 }
 
 // CancelChunkUpload 取消分片上传（清理临时文件 + 更新状态）
-func (s *SysAffixService) CancelChunkUpload(ctx context.Context, uploadId string) error {
+//
+// ⛔⛔ 顺序很重要：先校验 uploadId 形态 → 再确认会话归属 → 最后才 RemoveAll。
+//
+//	历史形态是「拿 uploadId 直接拼路径就删」，既没校验形态（可穿越到安装根），
+//	也没确认归属（可删别人的上传会话）。
+func (s *SysAffixService) CancelChunkUpload(ctx context.Context, uploadId string, userID uint) error {
 	// 获取上传配置
 	uploadConfig := app.UploadService.GetUploadConfig()
 	localPath := uploadConfig.LocalPath
 
+	tmpDir, err := chunkTmpDir(localPath, uploadId)
+	if err != nil {
+		return err
+	}
+	if err := ensureChunkSessionOwner(ctx, uploadId, userID); err != nil {
+		return err
+	}
+
 	// 删除临时分片目录
-	tmpDir := filepath.Join(localPath, "tmp", uploadId)
 	var resultErr error
 	if err := os.RemoveAll(tmpDir); err != nil {
 		resultErr = errors.Join(resultErr, err)

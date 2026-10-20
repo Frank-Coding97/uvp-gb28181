@@ -157,9 +157,9 @@ func (ac *SysAffixController) Delete(c *gin.Context) {
 		ac.FailAndAbort(c, err.Error(), err)
 	}
 
-	// 查找文件记录
+	// 查找文件记录（套数据权限：越权时一律按"文件不存在"处理）
 	affix := models.NewSysAffix()
-	if err := affix.GetByID(c.Request.Context(), req.ID); err != nil {
+	if err := affix.GetByIDScoped(c.Request.Context(), req.ID, datascope.GetDataScope(c)); err != nil {
 		ac.FailAndAbort(c, "文件不存在", err)
 	}
 
@@ -208,9 +208,9 @@ func (ac *SysAffixController) UpdateName(c *gin.Context) {
 		ac.FailAndAbort(c, err.Error(), err)
 	}
 
-	// 查找文件记录
+	// 查找文件记录（套数据权限）
 	affix := models.NewSysAffix()
-	if err := affix.GetByID(c.Request.Context(), req.ID); err != nil {
+	if err := affix.GetByIDScoped(c.Request.Context(), req.ID, datascope.GetDataScope(c)); err != nil {
 		ac.FailAndAbort(c, "文件不存在", err)
 	}
 
@@ -297,9 +297,9 @@ func (ac *SysAffixController) GetByID(c *gin.Context) {
 		ac.FailAndAbort(c, "无效的文件ID", err)
 	}
 
-	// 查找文件记录
+	// 查找文件记录（套数据权限）
 	affix := models.NewSysAffix()
-	if err := affix.GetByID(c.Request.Context(), uint(id)); err != nil {
+	if err := affix.GetByIDScoped(c.Request.Context(), uint(id), datascope.GetDataScope(c)); err != nil {
 		ac.FailAndAbort(c, "文件不存在", err)
 	}
 
@@ -334,9 +334,9 @@ func (ac *SysAffixController) Download(c *gin.Context) {
 		ac.FailAndAbort(c, "无效的文件ID", err)
 	}
 
-	// 查找文件记录
+	// 查找文件记录（套数据权限：越权时返回"文件不存在"，不泄露 URL/路径）
 	affix := models.NewSysAffix()
-	if err := affix.GetByID(c.Request.Context(), uint(id)); err != nil {
+	if err := affix.GetByIDScoped(c.Request.Context(), uint(id), datascope.GetDataScope(c)); err != nil {
 		ac.FailAndAbort(c, "文件不存在", err)
 	}
 
@@ -367,8 +367,8 @@ func (ac *SysAffixController) ChunkInit(c *gin.Context) {
 		ac.FailAndAbort(c, err.Error(), err)
 	}
 
-	// 调用 Service 处理初始化逻辑
-	result, err := ac.affixService.InitChunkUpload(c.Request.Context(), &req)
+	// 调用 Service 处理初始化逻辑（续传/秒传都按当前用户隔离）
+	result, err := ac.affixService.InitChunkUpload(c.Request.Context(), &req, ac.GetCurrentUserID(c))
 	if err != nil {
 		ac.FailAndAbort(c, err.Error(), err)
 	}
@@ -484,8 +484,8 @@ func (ac *SysAffixController) ChunkCancel(c *gin.Context) {
 		ac.FailAndAbort(c, err.Error(), err)
 	}
 
-	// 调用 Service 取消上传
-	if err := ac.affixService.CancelChunkUpload(c.Request.Context(), req.UploadId); err != nil {
+	// 调用 Service 取消上传（内部校验会话归属，只清自己的临时目录）
+	if err := ac.affixService.CancelChunkUpload(c.Request.Context(), req.UploadId, ac.GetCurrentUserID(c)); err != nil {
 		ac.FailAndAbort(c, err.Error(), err)
 	}
 

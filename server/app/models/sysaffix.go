@@ -43,9 +43,38 @@ func (SysAffix) TableName() string {
 	return "sys_affix"
 }
 
-// GetByID 根据ID获取文件附件
+// GetByID 根据ID获取文件附件（**不套数据权限**，仅供内部/后台任务使用）
+//
+// ⛔⛔ 面向用户的按 ID 接口一律用 GetByIDScoped：
+//
+//	列表接口走 datascope、按 ID 接口却直查 —— 这个不对称就是越权本身
+//	（枚举 ID 读别人附件的 path/url，甚至改名、删除）。
 func (m *SysAffix) GetByID(c context.Context, id uint) error {
 	return app.DB().WithContext(c).First(m, id).Error
+}
+
+// GetByIDScoped 按 ID 查询，并强制套用调用方给出的数据权限范围。
+//
+// scope 为 nil 时等价于不加范围（调用方通常是没拿到 claims 的兜底分支）；
+// 面向用户的控制器必须传 datascope.GetDataScope(c)。
+func (m *SysAffix) GetByIDScoped(c context.Context, id uint, scope func(*gorm.DB) *gorm.DB) error {
+	return m.getByIDScoped(app.DB().WithContext(c), id, scope)
+}
+
+// getByIDScoped 是查询本身（与全局连接解耦，便于单测）。
+func (m *SysAffix) getByIDScoped(db *gorm.DB, id uint, scope func(*gorm.DB) *gorm.DB) error {
+	if scope != nil {
+		db = db.Scopes(scope)
+	}
+	if err := db.First(m, id).Error; err != nil {
+		return err
+	}
+	// ⛔ 全仓的 GORM 回调可能把 not-found 掩成「零值 + nil error」，
+	//   这里显式再判一次主键，避免"查不到"被当成"查到了 ID=0 的记录"。
+	if m.ID == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 // Create 创建文件附件记录
