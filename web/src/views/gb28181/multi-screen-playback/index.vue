@@ -812,7 +812,7 @@ onBeforeUnmount(() => {
 .workspace {
   display: grid;
   flex: 1 1 auto;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 340px minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
   background: var(--zlm-card);
@@ -1435,7 +1435,7 @@ onBeforeUnmount(() => {
 
 @media (width <= 1024px) {
   .workspace {
-    grid-template-columns: 240px minmax(0, 1fr);
+    grid-template-columns: 280px minmax(0, 1fr);
   }
 }
 
