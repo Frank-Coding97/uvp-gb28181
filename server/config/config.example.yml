@@ -1,5 +1,7 @@
 server:
-  appdebug: true   # 调试模式开关：影响 gin Mode 和调试路由(swagger/pprof)；日志由 logs.level / logs.outputs 控制，与本开关无关
+  appdebug: false  # 调试模式开关：影响 gin Mode 和调试路由(swagger/pprof/viewCache)；日志由 logs.level / logs.outputs 控制，与本开关无关
+                   # ⛔ 出厂默认**关闭**：开着会注册免鉴权的 /viewCache（整库缓存转储）与 /debug/pprof。
+                   #   本地排障时再临时改 true；另有兜底 —— token.jwttokensignkey 为空/占位时调试面强制不生效。
   cachetype: "redis" # 缓存模式 memory(单机/测试) OR redis(多实例必须)
   syslog: true   # 是否记录 HTTP 操作日志到数据库(全局操作日志中间件)；与 logs.* 文件日志无关
                  # ⛔ 出厂默认**开启**（老板 2026-10-19 定）：操作日志是合规与追责的依据，
@@ -56,6 +58,12 @@ captcha: # 登录验证码
 httpserver:
   port: ":8080"    # 监听地址，冒号不能省略；改端口后注意同步 gb28181.media.hookport
   allowcrossdomain: true    #是否允许跨域
+  # 允许跨域的来源白名单（如 ["https://ops.example.com"]）。
+  # 留空 = 回显请求的 Origin（保持既有部署习惯，仅在本开关打开时生效）；
+  # 配置后只有名单内的来源能拿到 CORS 响应头。
+  # ⛔ 不要填 "*"：跨域请求无法携带 Cookie/Authorization 之外的凭据语义，
+  #    而 `*` 与 Allow-Credentials 并存会被浏览器整段拒绝。
+  corsallowedorigins: []
   serverrootpath: "/public" # 静态资源路由路径
   serverroot: "./resource/public" # 静态资源根目录
   read_timeout: 30    # TCP读取超时(秒)

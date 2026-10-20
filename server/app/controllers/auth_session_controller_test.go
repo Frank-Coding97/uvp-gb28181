@@ -214,3 +214,51 @@ func TestAuthControllerLoginRecordsAccountLock(t *testing.T) {
 	require.Len(t, recorder.events, 1)
 	require.Equal(t, service.LoginFailureAccountLocked, recorder.events[0].FailureReason)
 }
+
+// 账号不存在与口令错误必须**逐字节相同**的响应 —— 否则接口本身就是一枚用户名探针。
+func TestAuthControllerLoginDoesNotRevealUsernameExistence(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, recorder := setupLoginControllerTest(t, 0)
+	hash, err := passwordhelper.HashPassword("correct-password")
+	require.NoError(t, err)
+	require.NoError(t, db.Create(&models.User{BaseModel: models.BaseModel{ID: 7}, Username: "alice", Password: hash, Status: 1}).Error)
+	tokens := &tokenhelper.TokenService{JWTSecret: "test_secret", TokenExpire: 3600, RefreshExpire: 86400}
+	controller := newAuthControllerWithDependencies(&fakeAuthSessionLifecycle{}, tokens, time.Hour)
+
+	unknownUser := invokeLogin(t, controller, "nobody", "wrong-password")
+	wrongPassword := invokeLogin(t, controller, "alice", "wrong-password")
+
+	require.Equal(t, wrongPassword.Code, unknownUser.Code)
+	require.Equal(t, wrongPassword.Body.String(), unknownUser.Body.String(),
+		"两种失败必须返回同一句话术，否则可据此枚举有效用户名")
+	require.NotContains(t, unknownUser.Body.String(), "用户不存在")
+	require.NotContains(t, unknownUser.Body.String(), "剩余尝试次数")
+
+	// 审计侧仍然分得清（管理员看登录日志时才需要知道真实原因）。
+	require.Len(t, recorder.events, 2)
+	require.Equal(t, service.LoginFailureUserNotFound, recorder.events[0].FailureReason)
+	require.Equal(t, service.LoginFailurePasswordIncorrect, recorder.events[1].FailureReason)
+}
+
+// 禁用状态只有在口令正确时才可见：否则匿名用户输个用户名就能确认账号存在。
+func TestAuthControllerLoginHidesDisabledStatusBehindPassword(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, recorder := setupLoginControllerTest(t, 0)
+	hash, err := passwordhelper.HashPassword("correct-password")
+	require.NoError(t, err)
+	require.NoError(t, db.Create(&models.User{BaseModel: models.BaseModel{ID: 7}, Username: "alice", Password: hash, Status: 1}).Error)
+	require.NoError(t, db.Model(&models.User{}).Where("id = ?", 7).Update("status", 0).Error)
+	tokens := &tokenhelper.TokenService{JWTSecret: "test_secret", TokenExpire: 3600, RefreshExpire: 86400}
+	controller := newAuthControllerWithDependencies(&fakeAuthSessionLifecycle{}, tokens, time.Hour)
+
+	missing := invokeLogin(t, controller, "nobody", "wrong-password")
+	disabledWrongPassword := invokeLogin(t, controller, "alice", "wrong-password")
+	require.Equal(t, missing.Body.String(), disabledWrongPassword.Body.String(),
+		"口令错误时不能暴露「该账号存在但被禁用」")
+
+	disabledRightPassword := invokeLogin(t, controller, "alice", "correct-password")
+	require.Contains(t, disabledRightPassword.Body.String(), "用户未启用",
+		"口令正确的本人应当看到确切原因")
+	last := recorder.events[len(recorder.events)-1]
+	require.Equal(t, service.LoginFailureUserDisabled, last.FailureReason)
+}

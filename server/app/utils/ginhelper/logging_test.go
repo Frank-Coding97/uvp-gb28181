@@ -309,7 +309,14 @@ func TestLoggingHTTPDebugRoutes(t *testing.T) {
 		for _, routes := range []bool{false, true} {
 			t.Run(fmt.Sprintf("debug=%v/routes=%v", debug, routes), func(t *testing.T) {
 				dir := t.TempDir()
-				content := fmt.Sprintf("server:\n  appdebug: %v\nlogs:\n  routes: %v\n", debug, routes)
+				// ⛔ 必须给一把**强**签名密钥：调试面（pprof）现在有两个前置条件
+				//   （appdebug + 密钥不是占位符），本用例只关心「日志配置有没有改变
+				//   调试暴露」，不关心密钥判据（那是 debug_surface_test.go 的职责）。
+				//   漏了这行会让 debug=true 的分支因为空密钥被强制降级，测出来的是假阴性。
+				content := fmt.Sprintf(
+					"server:\n  appdebug: %v\nlogs:\n  routes: %v\ntoken:\n  jwttokensignkey: %q\n",
+					debug, routes, strings.Repeat("9", 64),
+				)
 				if err := os.WriteFile(filepath.Join(dir, "config.yml"), []byte(content), 0600); err != nil {
 					t.Fatal(err)
 				}

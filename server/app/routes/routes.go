@@ -16,6 +16,7 @@ import (
 	openapiauth "uvplatform.com/uvp-gb28181/app/openapi/auth"
 	openapicontrollers "uvplatform.com/uvp-gb28181/app/openapi/controllers"
 	openapiroutes "uvplatform.com/uvp-gb28181/app/openapi/routes"
+	"uvplatform.com/uvp-gb28181/app/utils/ginhelper"
 	upgrade "uvplatform.com/uvp-gb28181/internal/upgrade"
 )
 
@@ -90,18 +91,16 @@ func InitRoutes(engine *gin.Engine) *openapiauth.Gateway {
 	gbroutes.RegisterContentRoutes(engine)
 
 	//	调试模式下注册Swagger路由、查看内存缓存项
-	if app.ConfigYml.GetBool("server.appdebug") {
+	//
+	// ⛔⛔ 判据不是 `server.appdebug` 而是 ginhelper.DebugSurfaceAllowed()：
+	//   已有安装的 config.yml 升级时不会被覆盖，老现场可能仍带 `appdebug: true`
+	//   与占位签名密钥 ⇒ 这里必须再挡一道，否则 /viewCache 继续对全网开放。
+	if ginhelper.DebugSurfaceAllowed() {
 		// 注册Swagger路由
 		engine.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
-		// 查看内存缓存项
-		engine.GET("/viewCache", func(ctx *gin.Context) {
-			items, err := app.Cache.GetAll(context.Background())
-			if err != nil {
-				ctx.JSON(500, gin.H{"error": "获取缓存项失败", "details": err.Error()})
-				return
-			}
-			ctx.JSON(200, items)
-		})
+		// 查看缓存项：**必须**带登录态，且值按敏感键脱敏
+		//   （历史形态是裸挂 + 原样返回，refresh token 就是原文存的 ⇒ 未登录即可冒用账号）。
+		engine.GET("/viewCache", middleware.JWTAuthMiddleware(), ginhelper.ViewCacheHandler())
 	}
 
 	// 全局操作日志中间件

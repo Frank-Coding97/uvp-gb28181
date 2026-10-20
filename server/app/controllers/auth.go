@@ -21,6 +21,14 @@ import (
 	"gorm.io/gorm"
 )
 
+// loginInvalidCredentialMessage 是「账号不存在」与「口令错误」共用的统一话术。
+//
+// ⛔ 不要拆成两句（例如"用户不存在"/"密码错误"）：那是标准的用户名枚举入口，
+// 配合按用户名计的锁定额度还能被反过来用来锁别人账号。
+// 需要区分真实原因的场景一律看登录日志的 failure_reason（sys_dict 里有 user_not_found /
+// password_incorrect 两项，仅供管理员查看）。
+const loginInvalidCredentialMessage = "用户名或密码错误"
+
 // LoginRequest 登录请求结构
 
 type AuthController struct {
@@ -97,13 +105,16 @@ func (ac *AuthController) Login(c *gin.Context) {
 		ac.FailAndAbort(c, "用户查询错误", err)
 	}
 
+	// ⛔⛔ 账号不存在与口令错误必须返回**同一句话术**（loginInvalidCredentialMessage）。
+	// 回"用户不存在"等于直接告诉攻击者"这个用户名有效"，配合下面按用户名计的锁定阈值，
+	// 还能被反向利用去锁别人的账号。真实原因只进登录日志（LoginFailureUserNotFound /
+	// LoginFailurePasswordIncorrect），审计侧仍然分得清，接口侧不区分。
 	if user.IsEmpty() {
+		// 抹平时间差：账号不存在时也走一遍等价耗时的 bcrypt，否则
+		// "<1ms 返回"与"~60ms 返回"本身就是可测量的枚举通道（不用看任何文案）。
+		passwordhelper.CompareDummy(req.Password)
 		ac.recordLogin(c, nil, req.Username, service.LoginResultFailure, service.LoginFailureUserNotFound)
-		ac.FailAndAbort(c, "用户不存在", nil)
-	}
-	if user.Status != 1 {
-		ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailureUserDisabled)
-		ac.FailAndAbort(c, "用户未启用", nil)
+		ac.FailAndAbort(c, loginInvalidCredentialMessage, nil)
 	}
 
 	// 获取安全配置
@@ -153,10 +164,10 @@ func (ac *AuthController) Login(c *gin.Context) {
 				return
 			}
 
-			// 返回密码错误，并提示剩余尝试次数
-			remainingAttempts := loginLockThreshold - failCount
+			// 统一话术：不再回"剩余尝试次数" —— 该数字只在账号存在时才出现，
+			// 本身就是一枚存在性探针。锁定行为本身保持不变。
 			ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailurePasswordIncorrect)
-			ac.FailAndAbort(c, "密码错误，剩余尝试次数: "+strconv.Itoa(remainingAttempts), nil)
+			ac.FailAndAbort(c, loginInvalidCredentialMessage, nil)
 			return
 		}
 
@@ -170,8 +181,15 @@ func (ac *AuthController) Login(c *gin.Context) {
 		// 验证密码
 		if err = passwordhelper.ComparePassword(user.Password, req.Password); err != nil {
 			ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailurePasswordIncorrect)
-			ac.FailAndAbort(c, "密码错误", err)
+			ac.FailAndAbort(c, loginInvalidCredentialMessage, nil)
 		}
+	}
+
+	// ⛔ 状态检查必须**在口令校验之后**：放在前面的话，随便输一个用户名就能通过
+	// "用户未启用"得知该账号存在（连口令都不用知道）。口令正确的本人仍然看得到确切原因。
+	if user.Status != 1 {
+		ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailureUserDisabled)
+		ac.FailAndAbort(c, "用户未启用", nil)
 	}
 
 	// 会话落库成功后才向客户端返回 token。

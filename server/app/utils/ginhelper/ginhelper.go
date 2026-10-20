@@ -21,14 +21,24 @@ import (
 
 func GetEngine() *gin.Engine {
 	debug := app.ConfigYml.GetBool("server.appdebug")
+	root := app.ZapLog
+	if root == nil {
+		root = zap.NewNop()
+	}
+	// ⛔⛔ 只信 appdebug 不够：已有安装的 config.yml 不会被升级覆盖，
+	//   老现场带着 `appdebug: true` + 占位签名密钥跑到线上时，
+	//   pprof/swagger/viewCache 会重新暴露出来。⇒ 密钥不像密钥就强制降级。
+	//   详见 debug_surface.go 的 DebugSurfaceAllowed。
+	if debug && !DebugSurfaceAllowed() {
+		root.Named("security").Warn(
+			"调试面被强制关闭：token.jwttokensignkey 为空/占位/过短，拒绝注册 pprof 与调试路由",
+			zap.String("event", "security.debug_surface.disabled_weak_sign_key"))
+		debug = false
+	}
 	if debug {
 		gin.SetMode(gin.DebugMode)
 	} else {
 		gin.SetMode(gin.ReleaseMode)
-	}
-	root := app.ZapLog
-	if root == nil {
-		root = zap.NewNop()
 	}
 	gin.DefaultWriter = io.Discard
 	gin.DefaultErrorWriter = io.Discard
