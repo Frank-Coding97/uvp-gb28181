@@ -1993,7 +1993,6 @@ CREATE TABLE "meta_node" (
   "revision" BIGINT NOT NULL DEFAULT 1,
   "name" VARCHAR(64) NOT NULL DEFAULT '',
   "host" VARCHAR(64) NOT NULL DEFAULT '',
-  "receive_host" VARCHAR(255) NOT NULL DEFAULT '',
   "sdp_ip" VARCHAR(253) NOT NULL DEFAULT '',
   "playback_host" VARCHAR(255) NOT NULL DEFAULT '',
   "api_port" INTEGER NOT NULL DEFAULT 18080,

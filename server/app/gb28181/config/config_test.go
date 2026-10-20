@@ -93,12 +93,13 @@ func TestLoadFromPlayConfig(t *testing.T) {
 func TestLoadFromZLMAddressOverrides(t *testing.T) {
 	src := fakeSource{strings: map[string]string{
 		"gb28181.zlm.host":         "10.0.0.2",
-		"gb28181.zlm.receivehost":  "203.0.113.10",
+		"gb28181.zlm.sdpip":        "203.0.113.10",
 		"gb28181.zlm.playbackhost": "play.example.com",
 	}}
 	cfg := LoadFrom(src)
 	require.Equal(t, "10.0.0.2", cfg.ZLM.Host)
-	require.Equal(t, "203.0.113.10", cfg.ZLM.EffectiveReceiveHost())
+	require.Equal(t, "203.0.113.10", cfg.ZLM.SDPIP, "sdpip 键必须能被读到（example.yml 与本断言同一口径）")
+	require.Equal(t, "203.0.113.10", cfg.ZLM.EffectiveSDPIP())
 	require.Equal(t, "play.example.com", cfg.ZLM.EffectivePlaybackHost())
 }
 

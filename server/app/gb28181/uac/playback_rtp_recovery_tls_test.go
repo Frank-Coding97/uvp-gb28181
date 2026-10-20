@@ -103,7 +103,7 @@ func TestPlaybackRTPRecoveryActualTLSWorker(t *testing.T) {
 		}
 	}))
 	t.Cleanup(peer.Close)
-	n := &node.Node{ID: 7, Revision: 1, MediaServerUUID: i.NodeUUID, ReceiveHost: i.LocalIP, APISecret: "fixture-secret", State: node.StateActive}
+	n := &node.Node{ID: 7, Revision: 1, MediaServerUUID: i.NodeUUID, SDPIP: i.LocalIP, APISecret: "fixture-secret", State: node.StateActive}
 	roots := x509.NewCertPool()
 	roots.AddCert(peer.Certificate())
 	control, err := zlm.NewOpenAPIRuntimeControl(*n, zlm.OpenAPIControlTLS{Endpoint: peer.URL + "/index/api", Roots: roots, SPKISHA256: sha256.Sum256(peer.Certificate().RawSubjectPublicKeyInfo)})

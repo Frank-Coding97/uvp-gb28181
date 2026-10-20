@@ -64,7 +64,7 @@ func TestPlaybackIntentRTPUsesActualPinnedCallsAndDurableFixedIdentity(t *testin
 		}
 	}))
 	defer server.Close()
-	selected := &node.Node{ID: 7, Revision: 3, MediaServerUUID: "fixture-node", APISecret: "fixture-secret", ReceiveHost: "127.0.0.1", State: node.StateActive}
+	selected := &node.Node{ID: 7, Revision: 3, MediaServerUUID: "fixture-node", APISecret: "fixture-secret", SDPIP: "127.0.0.1", State: node.StateActive}
 	roots := x509.NewCertPool()
 	roots.AddCert(server.Certificate())
 	control, err := zlm.NewOpenAPIRuntimeControl(*selected, zlm.OpenAPIControlTLS{Endpoint: server.URL + "/index/api", Roots: roots, SPKISHA256: sha256.Sum256(server.Certificate().RawSubjectPublicKeyInfo)})

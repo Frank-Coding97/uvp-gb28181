@@ -161,11 +161,11 @@ func TestNodeService_Create_ProbesZLM_ThenWritesUUID(t *testing.T) {
 	svc := newSvc(repo, probe)
 
 	n, err := svc.Create(context.Background(), service.CreateNodeReq{
-		Name: "n1", Host: "1.2.3.4", ReceiveHost: "203.0.113.10", PlaybackHost: "play.example.com", APIPort: 18080, APISecret: "s",
+		Name: "n1", Host: "1.2.3.4", SDPIP: "203.0.113.10", PlaybackHost: "play.example.com", APIPort: 18080, APISecret: "s",
 	})
 	require.NoError(t, err)
 	require.NotEmpty(t, n.MediaServerUUID)
-	require.Equal(t, "203.0.113.10", n.ReceiveHost)
+	require.Equal(t, "203.0.113.10", n.SDPIP)
 	require.Equal(t, "play.example.com", n.PlaybackHost)
 	require.Equal(t, []string{"GetServerConfig", "SetServerConfig", "GetServerConfig"}, probe.calls)
 	require.Equal(t, n.MediaServerUUID, probe.lastSetParams["general.mediaServerId"])
@@ -464,10 +464,10 @@ func TestNodeService_Update_MediaHosts(t *testing.T) {
 	repo := newMemoryRepo()
 	svc := newSvc(repo, &mockProbe{})
 	n, _ := svc.Create(context.Background(), service.CreateNodeReq{Name: "n1", Host: "1.2.3.4", APIPort: 18080, APISecret: "s"})
-	receiveHost, playbackHost := "203.0.113.10", "play.example.com"
-	updated, err := svc.Update(context.Background(), n.ID, service.UpdateNodeReq{ReceiveHost: &receiveHost, PlaybackHost: &playbackHost})
+	sdpIP, playbackHost := "203.0.113.10", "play.example.com"
+	updated, err := svc.Update(context.Background(), n.ID, service.UpdateNodeReq{SDPIP: &sdpIP, PlaybackHost: &playbackHost})
 	require.NoError(t, err)
-	require.Equal(t, receiveHost, updated.ReceiveHost)
+	require.Equal(t, sdpIP, updated.SDPIP)
 	require.Equal(t, playbackHost, updated.PlaybackHost)
 }
 
@@ -511,7 +511,7 @@ func TestNodeService_ReloadPlatformMediaDefaults_ReappliesActiveNodes(t *testing
 	updated, ok := registry.Get(created.ID)
 	require.True(t, ok)
 	require.Equal(t, "media.example.com", updated.EffectivePlaybackHost())
-	// 平台 SDP IP 是运行时兜底，不落库；节点未配 sdp_ip/receive_host 时由它兜底。
+	// 平台 SDP IP 是运行时兜底，不落库；节点未配 sdp_ip 时由它兜底。
 	require.Empty(t, updated.SDPIP)
 	require.Equal(t, "sdp.example.com", updated.EffectiveSDPIP())
 }

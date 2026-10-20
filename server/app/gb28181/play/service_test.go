@@ -398,10 +398,8 @@ func TestStartUsesSeparateReceiveAndPlaybackHosts(t *testing.T) {
 	sm := uac.NewSessionManager()
 	channels := &fakeChannels{c: ch}
 	cfg := testCfg()
-	// 本例专测「收流地址 vs 播放地址分离」，所以清掉 sdp_ip 让它回落到
-	// receive_host；sdp_ip 优先级更高，由 TestSDPIPOverridesReceiveHost 单独覆盖。
-	cfg.ZLM.SDPIP = ""
-	cfg.ZLM.ReceiveHost = "203.0.113.10"
+	// 本例专测「收流地址 vs 播放地址分离」：2026-10-20 起 sdp_ip 是收流地址的唯一来源。
+	cfg.ZLM.SDPIP = "203.0.113.10"
 	cfg.ZLM.PlaybackHost = "play.example.com"
 	s := New(cfg, z, inv, sm, notifier, fakeDevices{dev}, channels)
 	s.SetReadyTimings(800*time.Millisecond, 50*time.Millisecond)
@@ -422,36 +420,6 @@ func TestStartUsesSeparateReceiveAndPlaybackHosts(t *testing.T) {
 	}
 	if !strings.HasPrefix(result.WSFlvURL, "ws://play.example.com:") {
 		t.Fatalf("播放地址应使用播放访问地址: %q", result.WSFlvURL)
-	}
-}
-
-// sdp_ip 是专用字段，优先级高于历史的 receive_host —— 两者不同时必须用 sdp_ip。
-func TestSDPIPOverridesReceiveHost(t *testing.T) {
-	z := &mockZLM{port: 40000}
-	inv := &mockInviter{}
-	dev, ch := onlineDevice(), aChannel()
-	notifier := stream.NewNotifier()
-	sm := uac.NewSessionManager()
-	channels := &fakeChannels{c: ch}
-	cfg := testCfg()
-	cfg.ZLM.SDPIP = "198.51.100.30"
-	cfg.ZLM.ReceiveHost = "203.0.113.10"
-	cfg.ZLM.PlaybackHost = "play.example.com"
-	s := New(cfg, z, inv, sm, notifier, fakeDevices{dev}, channels)
-	s.SetReadyTimings(800*time.Millisecond, 50*time.Millisecond)
-	inv.onInvite = func(sess *uac.Session) {
-		go func(streamID string) {
-			time.Sleep(50 * time.Millisecond)
-			z.online.Store(true)
-			notifier.Publish(streamID)
-		}(sess.StreamID)
-	}
-
-	if _, err := s.Start(context.Background(), dev.DeviceID, ch.ChannelID); err != nil {
-		t.Fatalf("Start 应成功: %v", err)
-	}
-	if !strings.Contains(inv.lastBody, "c=IN IP4 198.51.100.30\r\n") {
-		t.Fatalf("SDP 应优先使用 sdp_ip:\n%s", inv.lastBody)
 	}
 }
 

@@ -123,7 +123,7 @@ func TestPlaybackParentActualServiceRTPAndSIPShareOneIntent(t *testing.T) {
 					_, _ = peer.WriteTo([]byte(response.String()), address)
 				}
 			}()
-			selected := &node.Node{ID: 7, Revision: 3, MediaServerUUID: "parent-fixture", APISecret: "fixture-secret", ReceiveHost: "127.0.0.1", State: node.StateActive}
+			selected := &node.Node{ID: 7, Revision: 3, MediaServerUUID: "parent-fixture", APISecret: "fixture-secret", SDPIP: "127.0.0.1", State: node.StateActive}
 			roots := x509.NewCertPool()
 			roots.AddCert(https.Certificate())
 			control, err := zlm.NewOpenAPIRuntimeControl(*selected, zlm.OpenAPIControlTLS{Endpoint: https.URL + "/index/api", Roots: roots, SPKISHA256: sha256.Sum256(https.Certificate().RawSubjectPublicKeyInfo)})

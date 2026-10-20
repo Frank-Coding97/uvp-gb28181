@@ -1982,7 +1982,6 @@ CREATE TABLE `meta_node` (
   `revision` bigint unsigned NOT NULL DEFAULT 1,
   `name` varchar(64) NOT NULL DEFAULT '',
   `host` varchar(64) NOT NULL DEFAULT '',
-  `receive_host` varchar(255) NOT NULL DEFAULT '',
   `sdp_ip` varchar(253) NOT NULL DEFAULT '',
   `playback_host` varchar(255) NOT NULL DEFAULT '',
   `api_port` int NOT NULL DEFAULT 18080,

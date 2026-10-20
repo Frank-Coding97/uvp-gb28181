@@ -784,8 +784,7 @@ type TraceConfig struct {
 // ZLMConfig ZLMediaKit 媒体服务器配置(数据面)
 type ZLMConfig struct {
 	Host         string // ZLM API 地址
-	ReceiveHost  string // 设备收流地址,写入 SDP 的 c= 地址
-	SDPIP        string // SDP 通告地址,写入 SDP 的 c= 地址
+	SDPIP        string // 设备收流地址,写入 SDP 的 c= 地址(唯一来源,原 receive_host 已并入)
 	PlaybackHost string // 播放访问地址,返回给浏览器/客户端
 	HTTPPort     int    // ZLM HTTP API 端口
 	Secret       string // API secret
@@ -807,22 +806,14 @@ type ZLMConfig struct {
 	MediaServerID string
 }
 
-func (c ZLMConfig) EffectiveReceiveHost() string {
-	if host := strings.TrimSpace(c.ReceiveHost); host != "" {
-		return host
-	}
-	return c.Host
-}
-
 // EffectiveSDPIP 返回写进 SDP c= 行的地址。
+//
+// 2026-10-20 起 receive_host 已并入 sdp_ip:两者原本都写同一个 c= 行、只是名字不同。
 //
 // ⛔⛔ 刻意不兜底到 c.Host:单机部署下 Host 是 127.0.0.1,写进 SDP 会让设备
 // 把 RTP 推向平台自己(信令成功但没有画面)。留空让调用方显式失败。
 func (c ZLMConfig) EffectiveSDPIP() string {
 	if host := strings.TrimSpace(c.SDPIP); host != "" {
-		return host
-	}
-	if host := strings.TrimSpace(c.ReceiveHost); host != "" {
 		return host
 	}
 	return strings.TrimSpace(c.PlaybackHost)
@@ -982,8 +973,7 @@ func loadFrom(c valueSource) (Config, error) {
 		},
 		ZLM: ZLMConfig{
 			Host:          c.GetString("gb28181.zlm.host"),
-			ReceiveHost:   c.GetString("gb28181.zlm.receivehost"),
-			SDPIP:        c.GetString("gb28181.zlm.sdpip"),
+			SDPIP:         c.GetString("gb28181.zlm.sdpip"),
 			PlaybackHost:  c.GetString("gb28181.zlm.playbackhost"),
 			HTTPPort:      c.GetInt("gb28181.zlm.httpport"),
 			Secret:        c.GetString("gb28181.zlm.secret"),

@@ -15956,15 +15956,6 @@
           "collation": "utf8mb4_general_ci"
         },
         {
-          "name": "receive_host",
-          "type": "varchar(255)",
-          "nullable": false,
-          "default": "",
-          "extra": "",
-          "comment": "",
-          "collation": "utf8mb4_general_ci"
-        },
-        {
           "name": "sdp_ip",
           "type": "varchar(253)",
           "nullable": false,

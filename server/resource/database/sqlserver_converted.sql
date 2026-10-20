@@ -2254,7 +2254,6 @@ BEGIN
     [revision] BIGINT NOT NULL DEFAULT 1,
     [name] NVARCHAR(64) NOT NULL DEFAULT N'',
     [host] NVARCHAR(64) NOT NULL DEFAULT N'',
-    [receive_host] NVARCHAR(255) NOT NULL DEFAULT N'',
     [sdp_ip] NVARCHAR(253) NOT NULL DEFAULT N'',
     [playback_host] NVARCHAR(255) NOT NULL DEFAULT N'',
     [api_port] INT NOT NULL DEFAULT 18080,

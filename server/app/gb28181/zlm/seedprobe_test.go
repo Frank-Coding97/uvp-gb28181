@@ -62,7 +62,7 @@ func TestDefaultNodeSeedOnGreenPackageBaseline(t *testing.T) {
 
 	// 与 bootstrap.go:1722 的调用参数一致（绿色包的实际取值）。
 	seeded, err := reg.Add(context.Background(), node.Node{
-		Name: "zlm-default", Host: "127.0.0.1", ReceiveHost: "", PlaybackHost: "",
+		Name: "zlm-default", Host: "127.0.0.1", PlaybackHost: "",
 		APIPort: 51100, APISecret: "uvp-9f3c7a1e5d84b206c1a9e4f7b2d6c805",
 		MediaServerUUID: "uvp-media-server-0001", Weight: 50,
 		State: node.StateActive, RTPPortStart: 30000, RTPPortEnd: 35000,

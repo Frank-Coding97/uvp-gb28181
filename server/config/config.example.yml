@@ -316,7 +316,7 @@ gb28181:
   # 运行时通过"流媒体节点"UI 管理多节点。yaml 改值不会影响已 seed 节点。
   zlm:
     host: "127.0.0.1"             # ZLM 地址
-    receivehost: ""               # 设备收流地址,留空跟随 host
+    sdpip: ""                     # 设备收流地址(写入 SDP 的 c= 行,设备据此回推 RTP);留空用平台「媒体网络」里的 SDP 地址,不跟随 host
     playbackhost: ""              # 播放访问地址,可填公网 IP 或域名,留空跟随 host
     httpport: 18080               # ZLM HTTP API 端口
     secret: "CHANGE_ME"           # ZLM API secret(部署时填 ZLM 实际 secret)

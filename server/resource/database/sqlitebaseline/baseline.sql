@@ -1558,7 +1558,6 @@ CREATE TABLE IF NOT EXISTS "meta_node" (
   "revision" INTEGER NOT NULL CHECK ("revision" IS NULL OR (typeof("revision") = 'integer' AND "revision" >= 0)) DEFAULT 1,
   "name" TEXT NOT NULL CHECK ("name" IS NULL OR length("name") <= 64) DEFAULT '',
   "host" TEXT NOT NULL CHECK ("host" IS NULL OR length("host") <= 64) DEFAULT '',
-  "receive_host" TEXT NOT NULL CHECK ("receive_host" IS NULL OR length("receive_host") <= 255) DEFAULT '',
   "sdp_ip" TEXT NOT NULL CHECK ("sdp_ip" IS NULL OR length("sdp_ip") <= 253) DEFAULT '',
   "playback_host" TEXT NOT NULL CHECK ("playback_host" IS NULL OR length("playback_host") <= 255) DEFAULT '',
   "api_port" INTEGER NOT NULL CHECK ("api_port" IS NULL OR typeof("api_port") = 'integer') DEFAULT 18080,

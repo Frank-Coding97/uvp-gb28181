@@ -18,7 +18,6 @@ type MetaNode struct {
 	Name                string    `gorm:"column:name;size:64;not null;default:''"`
 	Host                string    `gorm:"column:host;size:64;not null;default:''"`
 	HookIP              string    `gorm:"column:hook_ip;size:45;not null;default:''"`
-	ReceiveHost         string    `gorm:"column:receive_host;size:255;not null;default:''"`
 	SDPIP               string    `gorm:"column:sdp_ip;size:253;not null;default:''"`
 	PlaybackHost        string    `gorm:"column:playback_host;size:255;not null;default:''"`
 	APIPort             int       `gorm:"column:api_port;not null;default:18080"`
@@ -61,7 +60,6 @@ func (m MetaNode) ToDomain() node.Node {
 		Name:                m.Name,
 		Host:                m.Host,
 		HookIP:              m.HookIP,
-		ReceiveHost:         m.ReceiveHost,
 		SDPIP:               m.SDPIP,
 		PlaybackHost:        m.PlaybackHost,
 		APIPort:             m.APIPort,
@@ -96,7 +94,6 @@ func fromDomain(n node.Node) MetaNode {
 		Name:                n.Name,
 		Host:                n.Host,
 		HookIP:              n.HookIP,
-		ReceiveHost:         n.ReceiveHost,
 		SDPIP:               n.SDPIP,
 		PlaybackHost:        n.PlaybackHost,
 		APIPort:             n.APIPort,
@@ -198,7 +195,6 @@ func (r *MetaNodeRepo) UpdateCAS(ctx context.Context, n node.Node, expectedRevis
 		"name":                 row.Name,
 		"host":                 row.Host,
 		"hook_ip":              row.HookIP,
-		"receive_host":         row.ReceiveHost,
 		"sdp_ip":               row.SDPIP,
 		"playback_host":        row.PlaybackHost,
 		"api_port":             row.APIPort,

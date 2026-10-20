@@ -53,7 +53,7 @@ func rtpRecoveryTLSFixture(t *testing.T) (*gorm.DB, *playauth.DeviceOperationBar
 	o.cancel()
 	o.lease.Release()
 	require.NoError(t, db.Exec("UPDATE gb_device SET access_epoch=2 WHERE id=1").Error)
-	n := &node.Node{ID: 7, Revision: 3, MediaServerUUID: "fixture-node", APISecret: "fixture-secret", ReceiveHost: "127.0.0.1", State: node.StateActive}
+	n := &node.Node{ID: 7, Revision: 3, MediaServerUUID: "fixture-node", APISecret: "fixture-secret", SDPIP: "127.0.0.1", State: node.StateActive}
 	return db, b, store, o.id, identity, n
 }
 
@@ -218,7 +218,7 @@ func TestPlaybackRTPRecoveryTLSRejectsChangedNodeAndBootWithoutClose(t *testing.
 			case "node-recovery":
 				n.RecoveryRequired = true
 			case "node-address":
-				n.ReceiveHost = "127.0.0.2"
+				n.SDPIP = "127.0.0.2"
 			}
 			resolver := NewZLMRTPCleanupResolver(fakePlaybackNodes{n}, intentRTPCleanupResolverFunc(func(context.Context, string) (IntentRTPRuntime, error) {
 				resolved.Add(1)

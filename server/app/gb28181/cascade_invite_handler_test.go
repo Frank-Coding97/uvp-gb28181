@@ -320,7 +320,7 @@ func newCascadeVideoTestRuntimeWithSource(t *testing.T, source media.SourceStart
 	address := strings.TrimPrefix(api.URL, "http://")
 	host, portString, _ := net.SplitHostPort(address)
 	port, _ := strconv.Atoi(portString)
-	nodes := cascadeInviteTestNodes{&node.Node{ID: 1, Host: host, APIPort: port, ReceiveHost: "192.168.10.220"}}
+	nodes := cascadeInviteTestNodes{&node.Node{ID: 1, Host: host, APIPort: port, SDPIP: "192.168.10.220"}}
 	ua, err := sipgo.NewUA()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ua.Close() })

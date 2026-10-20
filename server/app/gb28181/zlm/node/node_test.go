@@ -20,8 +20,7 @@ func TestNode_HTTPEndpoint(t *testing.T) {
 }
 
 func TestNode_EffectiveMediaHostsFallbackAndOverride(t *testing.T) {
-	n := node.Node{Host: "10.0.0.2", ReceiveHost: "  ", PlaybackHost: "play.example.com", PlatformPlaybackHost: "platform.example.com"}
-	require.Equal(t, "10.0.0.2", n.EffectiveReceiveHost())
+	n := node.Node{Host: "10.0.0.2", PlaybackHost: "play.example.com", PlatformPlaybackHost: "platform.example.com"}
 	require.Equal(t, "play.example.com", n.EffectivePlaybackHost())
 
 	n.PlaybackHost = ""
@@ -29,9 +28,6 @@ func TestNode_EffectiveMediaHostsFallbackAndOverride(t *testing.T) {
 
 	n.PlatformPlaybackHost = ""
 	require.Equal(t, "10.0.0.2", n.EffectivePlaybackHost())
-
-	n.ReceiveHost = "203.0.113.10"
-	require.Equal(t, "203.0.113.10", n.EffectiveReceiveHost())
 }
 
 func TestNode_EffectivePlaybackHostSkipsLoopbackOverrideWhenPlatformHostExists(t *testing.T) {
@@ -46,9 +42,12 @@ func TestNode_EffectivePlaybackHostSkipsLoopbackOverrideWhenPlatformHostExists(t
 }
 
 // The SDP resolution order is the contract that keeps "signalling succeeds but
-// no picture" from happening: node sdp_ip → node receive_host → platform sdp_ip
-// → platform stream_ip. It must NEVER fall back to Host, because a single-host
+// no picture" from happening: node sdp_ip → platform sdp_ip → platform stream_ip
+// → node playback host. It must NEVER fall back to Host, because a single-host
 // deployment has Host == 127.0.0.1.
+//
+// 2026-10-20：旧的 receive_host 已并入 sdp_ip（两者本来都是「写入 SDP 的 c= 地址」），
+// 兜底链里不再有它；这里同步删掉那一档，避免有人以为它还生效。
 func TestNode_EffectiveSDPIPResolutionOrder(t *testing.T) {
 	n := node.Node{Host: "127.0.0.1", PlatformSDPIP: "203.0.113.30", PlatformPlaybackHost: "198.51.100.9"}
 	require.Equal(t, "203.0.113.30", n.EffectiveSDPIP(), "platform sdp_ip wins over playback host")
@@ -58,11 +57,7 @@ func TestNode_EffectiveSDPIPResolutionOrder(t *testing.T) {
 	require.Equal(t, "192.0.2.77", n.EffectiveSDPIP(), "node sdp_ip is authoritative")
 
 	n.SDPIP = ""
-	n.ReceiveHost = "192.0.2.88"
-	require.Equal(t, "192.0.2.88", n.EffectiveSDPIP(), "legacy receive_host still honoured")
-
-	n.ReceiveHost = "  "
-	require.Equal(t, "203.0.113.30", n.EffectiveSDPIP(), "blank receive_host must fall through")
+	require.Equal(t, "203.0.113.30", n.EffectiveSDPIP(), "blank node sdp_ip falls through to platform sdp_ip")
 
 	n.PlatformSDPIP = ""
 	require.Equal(t, "198.51.100.9", n.EffectiveSDPIP(), "platform stream_ip is the last resort")

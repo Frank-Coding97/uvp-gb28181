@@ -49,7 +49,7 @@ func (f *zlmRTPCleanupResolver) ResolveRTPCleanup(ctx context.Context, i playaut
 
 func rtpCleanupNodeMatches(n *node.Node, i playauth.DeviceRTPResourceIdentity) bool {
 	return n != nil && n.ID == i.NodePK && n.MediaServerUUID == i.NodeUUID && n.Revision == uint64(i.NodeRevision) &&
-		n.State == node.StateActive && !n.RecoveryRequired && n.EffectiveReceiveHost() == i.LocalIP
+		n.State == node.StateActive && !n.RecoveryRequired && n.EffectiveSDPIP() == i.LocalIP
 }
 
 type zlmRTPCleanupRuntime struct {

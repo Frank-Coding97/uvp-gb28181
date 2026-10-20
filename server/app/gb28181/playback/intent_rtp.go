@@ -46,7 +46,10 @@ func (f *zlmIntentRTPOpener) PrepareIntent(ctx context.Context, store *playauth.
 		return nil, ErrRTPUnavailable
 	}
 	selected, ok := f.nodes.Get(pk)
-	if !ok || selected == nil || selected.State != node.StateActive || selected.RecoveryRequired || selected.MediaServerUUID != picked.NodeUUID || selected.Revision != picked.NodeRevision || selected.EffectiveReceiveHost() != picked.RecvIP {
+	// ⛔ 这里的比对必须与 Pick 阶段**同一个算法**：picked.RecvIP 来自
+	// EffectiveSDPIP()（见 zlm_runtime.go 的 Pick）。若改成自己再算一遍别的字段，
+	// "只填 SDP IP、不填收流地址"的节点会在每次回放时被判成"配置被改过"而拒单。
+	if !ok || selected == nil || selected.State != node.StateActive || selected.RecoveryRequired || selected.MediaServerUUID != picked.NodeUUID || selected.Revision != picked.NodeRevision || selected.EffectiveSDPIP() != picked.RecvIP {
 		return nil, ErrRTPUnavailable
 	}
 	// The exact-resource intent protocol currently supports dedicated receivers

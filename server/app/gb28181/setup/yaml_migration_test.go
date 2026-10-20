@@ -54,7 +54,7 @@ func completeYAMLSource() fakeYAMLSource {
 		"gb28181.sip.serverid":       "34020000002000000001",
 		"gb28181.sip.password":       "Sec12345Aa!!",
 		// legacy YAML 段里没有 sdp_ip，从 zlm 段推导。
-		"gb28181.zlm.receivehost": "192.168.1.20",
+		"gb28181.zlm.sdpip": "192.168.1.20",
 	}
 }
 
@@ -77,7 +77,7 @@ func TestMigrateYAMLToDB_SeedsWhenLegacyDeviceExists(t *testing.T) {
 func TestMigrateYAMLToDB_SkipsWhenNoUsableSDPIP(t *testing.T) {
 	db := newMigrationTestDB(t, true)
 	source := completeYAMLSource()
-	source["gb28181.zlm.receivehost"] = "127.0.0.1"
+	source["gb28181.zlm.sdpip"] = "127.0.0.1"
 	migrated, err := MigrateYAMLToDB(context.Background(), db, source)
 	require.NoError(t, err)
 	require.False(t, migrated, "回环 SDP 地址不得被静默固化")

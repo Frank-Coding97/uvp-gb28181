@@ -321,7 +321,7 @@ gb28181:
     reconcile_interval_sec: 0
   zlm:
     host: 127.0.0.1
-    receivehost: 127.0.0.1
+    sdpip: 127.0.0.1
     playbackhost: 127.0.0.1
     httpport: 18080
     secret: fixture

@@ -463,8 +463,8 @@ func (r *Registry) withRuntimeDefaults(n Node) Node {
 }
 
 // SetPlatformSDPIP sets the platform-level SDP announcement address used when a
-// node declares no sdp_ip and no receive_host. It is intentionally kept out of
-// repository rows so changing it does not rewrite every node.
+// node declares no sdp_ip. It is intentionally kept out of repository rows so
+// changing it does not rewrite every node.
 func (r *Registry) SetPlatformSDPIP(host string) {
 	r.mu.Lock()
 	r.platformSDPIP = host
