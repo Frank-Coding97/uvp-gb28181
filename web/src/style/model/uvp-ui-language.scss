@@ -659,6 +659,9 @@ body,
   --zlm-space-2: 8px;
   --zlm-space-3: 12px;
   --zlm-space-4: 16px;
+
+  /* ⛔ 与 zlm-tokens.css 同步补齐档位：缺档不会报错，只会让引用它的声明整条失效。 */
+  --zlm-space-5: 20px;
   --zlm-space-6: var(--uvp-main-padding);
   --zlm-space-12: 48px;
   --zlm-fs-caption: 12px;

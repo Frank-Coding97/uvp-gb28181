@@ -70,10 +70,15 @@
   --zlm-lh-loose: 1.75;
 
   /* ========== Spacing ========== */
+  /* ⛔ 档位必须连续补齐(4px 栅格)：引用不存在的档位时，整条声明会被浏览器丢弃、
+     而不是退化成 0 —— 表面「没报错」，实际该间距直接没了。
+     已踩坑(2026-10-20)：NodeForm 的 ZL 信息确认页用了第 5 档，
+     但该档位没定义 ⇒ 状态卡与明细表之间的 gap 整条失效、两者贴成一体。 */
   --zlm-space-1: 4px;
   --zlm-space-2: 8px;
   --zlm-space-3: 12px;
   --zlm-space-4: 16px;
+  --zlm-space-5: 20px;
   --zlm-space-6: 24px;
   --zlm-space-8: 32px;
   --zlm-space-12: 48px;
