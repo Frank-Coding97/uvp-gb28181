@@ -233,6 +233,10 @@ func extractOpenAPIPermissionSection(t *testing.T, body string) string {
 func runOpenAPIPermissionSQL(t *testing.T, db *gorm.DB, body, suffix string) {
 	t.Helper()
 	sql := strings.ReplaceAll(body, "N'", "'")
+	// MySQL 迁移用 BINARY 一元运算符绕开库内 collation 混杂导致的 1267；
+	// SQLite 没有该运算符（TEXT 默认就是 BINARY 排序规则），比较语义相同，
+	// 这里剥掉后再在 SQLite 上执行，保留对同一份 SQL 的幂等与数据断言。
+	sql = regexp.MustCompile(`(?i)\bBINARY\s+`).ReplaceAllString(sql, "")
 	if suffix == "-sqlserver" {
 		sql = strings.ReplaceAll(sql, "'role_' + CAST(rm.[role_id] AS varchar(20))", "'role_' || CAST(rm.[role_id] AS TEXT)")
 		sql = strings.ReplaceAll(sql, "'role_' + CAST(rm.role_id AS varchar(20))", "'role_' || CAST(rm.role_id AS TEXT)")
