@@ -494,9 +494,28 @@ prepare_updater() {
 #   两个上级目录都"不可信"，装到一半失败，报错完全指不到"目录权限"这一层。
 #   ⇒ 在这里（阶段 1）就把话说清楚：自己拥有的目录直接 go-w 修好并留日志，
 #     别人的目录列出来 + 给出可直接粘贴的命令。
+#
+# ⛔⛔ 还有**第二类现场**（2026-10-20 客户机 CentOS 7）：目录权限位全是 755，
+#   只有**属主**是 1000（包被普通用户解压，tar 默认还原归档里的属主）⇒
+#   助手以 root 跑时只认 root 属主的路径：
+#     `... parent "/opt/uvp/uvp-gb28181-linux-amd64-1.1.11" owner UID 1000 is not trusted`
+#   属主比"组可写"更松：owner 能 chmod 自己拥有的目录，等于能换掉整棵树。
+#   ⇒ root 运行时就地收回（安装根含子树 -R；祖先层只动"系统安装根的直接子
+#     目录"，绝不碰 /home/<某人>），改不动才报错。
+# install_root_child 判「这一层确实是本产品自己的目录」，可以放心被 root 收回。
+# ⛔ 只认**系统安装根的直接子目录**（/opt/uvp、/usr/local/uvp…）。绝不能对所有
+#   祖先层无条件 chown：安装目录一旦落在 /home/<某人>/... 下，就会把别人的
+#   家目录改成 root 属主 —— 那是比装不上严重得多的事故。
+install_root_child() {
+  case "$(dirname "$1")" in
+    /opt|/usr/local|/srv|/var/lib|/var/opt|/data|/app) return 0 ;;
+  esac
+  return 1
+}
+
 check_updater_trusted_paths() {
   [ -x "$UPDATER_BIN" ] || return 0
-  local me dir mode owner blocked=""
+  local me dir mode owner blocked="" alien="" fixed=""
   me="$(id -u)"
   dir="$ROOT"
   while [ -n "$dir" ] && [ "$dir" != "/" ]; do
@@ -510,6 +529,34 @@ check_updater_trusted_paths() {
       owner="$(stat -c '%u' "$dir" 2>/dev/null || stat -f '%u' "$dir" 2>/dev/null || true)"
       # 取末三位：setgid/sticky（如 2755、1777）不参与"可否被他人改写"的判断。
       mode="${mode: -3}"
+
+      # ① 属主（2026-10-20 客户机 CentOS 7 现场的真凶）
+      #   助手只认 root 或「当前用户」属主的路径；root 跑时**只认 root**。
+      #   包被普通用户解压时 tar 会还原归档里的属主 ⇒ 安装目录属主是 1000，
+      #   但目录仍是 755 ⇒ 只查"组/其他人可写"根本查不出来，一路装到阶段
+      #   3/3 才报 `... owner UID 1000 is not trusted`。
+      #   ⛔ 属主是普通用户其实比"组可写"更松：owner 能 chmod 自己拥有的
+      #      目录，等于能换掉整棵树 —— 所以这里必须修，不能放过。
+      if [ -n "$owner" ] && [ "$owner" != "0" ] && [ "$owner" != "$me" ]; then
+        if [ "$me" = "0" ] && { [ "$dir" = "$ROOT" ] || install_root_child "$dir"; }; then
+          # 安装根连子树一起收回：被人拥有的目录里，程序文件同样能被他替换。
+          if [ "$dir" = "$ROOT" ]; then
+            chown -R 0:0 "$ROOT" 2>/dev/null || true
+          else
+            chown 0:0 "$dir" 2>/dev/null || true
+          fi
+          owner="$(stat -c '%u' "$dir" 2>/dev/null || stat -f '%u' "$dir" 2>/dev/null || true)"
+          if [ "$owner" = "0" ]; then
+            fixed="${fixed}${dir}"$'\n'
+          fi
+        fi
+        # 改不动（非 root、或不在可自动收回的安装根下）⇒ 只能报出来。
+        if [ -n "$owner" ] && [ "$owner" != "0" ] && [ "$owner" != "$me" ]; then
+          alien="${alien}${dir}（属主 UID ${owner}，不是 root）"$'\n'
+        fi
+      fi
+
+      # ② 权限位
       if [ -n "$mode" ] && { [ $(( ${mode:1:1} & 2 )) -ne 0 ] || [ $(( ${mode:2:1} & 2 )) -ne 0 ]; }; then
         # root 能改任何目录；普通用户只能改自己的 ⇒ 其余的只能报出来。
         if [ "$owner" = "$me" ] || [ "$me" = "0" ]; then
@@ -522,6 +569,24 @@ check_updater_trusted_paths() {
     fi
     dir="$(dirname "$dir")"
   done
+  if [ -n "$fixed" ]; then
+    det "已把安装目录的属主改回 root（升级助手只认 root / 当前用户属主的路径）："
+    local fixed_line
+    while IFS= read -r fixed_line; do
+      [ -n "$fixed_line" ] || continue
+      det "  $fixed_line"
+    done <<< "$fixed"
+  fi
+  if [ -n "$alien" ]; then
+    det "升级助手要求：从 / 到安装目录的每一层，属主必须是 root 或当前用户。以下不满足："
+    local alien_line
+    while IFS= read -r alien_line; do
+      [ -n "$alien_line" ] || continue
+      det "  $alien_line"
+    done <<< "$alien"
+    det "修法：以 root 执行 chown root:root <上面列出的每个目录>，然后重试。"
+    fail "安装目录的上级目录属主不可信（升级助手拒绝在此位置运行）"
+  fi
   if [ -n "$blocked" ]; then
     det "升级助手要求：从 / 到安装目录的每一层都不能对同组/其他人可写。以下目录不满足，且当前用户改不动："
     local line
@@ -581,6 +646,16 @@ start_updater() {
     culprit="$(sed -n 's/.*parent "\([^"]*\)".*/\1/p' "$LOGS/updater.log" 2>/dev/null | head -1)"
     [ -n "$culprit" ] && det "定位：$culprit"
     det "修法：chmod go-w <上面那一层>（从 / 到安装目录的每一层都要去掉同组/其他人写），然后重试。"
+  elif grep -q "is not trusted" "$LOGS/updater.log" 2>/dev/null; then
+    # ⛔ 2026-10-20 客户机 CentOS 7 现场：包被普通用户解压（tar 默认还原归档
+    #   里的属主 1000），root 启动时助手报 `... owner UID 1000 is not trusted`。
+    #   目录是 755、权限位检查全过，只有属主不对 —— 单看报错完全指不到"属主"。
+    det "原因：安装目录（或它的某一层上级）属主是普通用户，不是 root。"
+    det "      升级助手要以 root 身份替换程序文件，只认 root 属主的路径。"
+    local culprit_owner
+    culprit_owner="$(sed -n 's/.*parent "\([^"]*\)".*/\1/p' "$LOGS/updater.log" 2>/dev/null | head -1)"
+    [ -n "$culprit_owner" ] && det "定位：$culprit_owner"
+    det "修法：chown -R root:root <安装目录>，然后重试。"
   fi
   fail "升级助手未能启动"
 }

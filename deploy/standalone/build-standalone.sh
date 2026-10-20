@@ -910,6 +910,28 @@ if ! tar --format=gnu --version >/dev/null 2>&1; then
   fi
 fi
 
+# ⛔⛔ 归档里每个条目的属主必须钉成 root:root（2026-10-20 客户机 CentOS 7 现场）：
+#   在 220 上以 superadmin 出包 ⇒ 823 个条目全记成 1000/1000；客户用 root
+#   `tar -xzf` 解压时**默认 --same-owner**，安装目录属主就变成 1000（普通用户）。
+#   而升级助手以 root 运行时只认 root 属主的路径（它要以 root 身份替换程序
+#   文件），于是装到「阶段 3/3」才炸：
+#     open trusted updater registration: updater registration parent
+#     "/opt/uvp/uvp-gb28181-linux-amd64-1.1.11" owner UID 1000 is not trusted
+#   ⛔ 这比"组可写"更隐蔽：目录是 755、权限位检查全过，只有**属主**不对；
+#      而 owner 能 chmod 自己拥有的目录 ⇒ 等于能换掉整棵树。
+#   打包时写死 0:0，解压到哪台机器、谁解压都不会错位。
+TAR_OWNER_FLAGS=""
+# ⛔ 别用 `--help | grep` 探测：bsdtar 3.5.3（macOS 自带）**支持** --owner/--uid，
+#   但 --help 里一个字都不列 ⇒ 会误判成"不支持"。直接试跑一次才准。
+if "$TAR_BIN" --owner=0 --group=0 --version >/dev/null 2>&1; then
+  TAR_OWNER_FLAGS="--owner=0 --group=0"                 # GNU tar 与新版 bsdtar
+elif "$TAR_BIN" --uid 0 --gid 0 --version >/dev/null 2>&1; then
+  TAR_OWNER_FLAGS="--uid 0 --gid 0"                     # 老版 bsdtar
+else
+  # 极老的打包器：退化为"不改写属主"，但要让出包人知道后果。
+  log "  ⚠ 打包器不支持改写归档属主 ⇒ 客户机若以 root 解压，安装目录属主会是出包机 UID"
+fi
+
 if [ "$TAR_BIN" = "tar" ]; then
   # bsdtar：ustar 格式本身不带扩展头，再显式关掉 xattr/acl 双保险。
   # --no-xattrs 在旧版 bsdtar 上不存在，故先探测再传。
@@ -917,13 +939,22 @@ if [ "$TAR_BIN" = "tar" ]; then
   if tar --no-xattrs --version >/dev/null 2>&1; then
     TAR_XATTR_FLAG="--no-xattrs"
   fi
-  log "  打包器: bsdtar（${TAR_XATTR_FLAG:-无扩展属性开关}）"
-  "$TAR_BIN" --format=ustar ${TAR_XATTR_FLAG} -czf "${ARCHIVE}" -C "${STAGE}" "${PKG_STEM}"
+  log "  打包器: bsdtar（${TAR_XATTR_FLAG:-无扩展属性开关}，${TAR_OWNER_FLAGS:-无属主改写}）"
+  "$TAR_BIN" --format=ustar ${TAR_XATTR_FLAG} ${TAR_OWNER_FLAGS} -czf "${ARCHIVE}" -C "${STAGE}" "${PKG_STEM}"
 else
-  log "  打包器: ${TAR_BIN}（GNU tar，--format=gnu）"
-  "$TAR_BIN" --format=gnu -czf "${ARCHIVE}" -C "${STAGE}" "${PKG_STEM}"
+  log "  打包器: ${TAR_BIN}（GNU tar，--format=gnu，${TAR_OWNER_FLAGS:-无属主改写}）"
+  "$TAR_BIN" --format=gnu ${TAR_OWNER_FLAGS} -czf "${ARCHIVE}" -C "${STAGE}" "${PKG_STEM}"
 fi
 test -s "$ARCHIVE" || fail "产物为空"
+
+# 抽一行给现场看：属主列必须是 0/0（GNU tar）或 0 0（bsdtar）。这一行能一眼
+# 看出"包是不是又被出包机的普通用户身份染上了"。
+# ⛔ 不要写成 `tar tvzf ... | head -1`：本脚本开了 pipefail，tar 被 SIGPIPE 打断
+#   会返回 141 ⇒ 整行失败、脚本直接退出（而它只是打印日志）。
+if [ -n "$TAR_OWNER_FLAGS" ]; then
+  tar_listing="$("$TAR_BIN" --numeric-owner -tvzf "${ARCHIVE}" 2>/dev/null || true)"
+  log "  归档属主抽查: ${tar_listing%%$'\n'*}"
+fi
 
 SIZE="$(du -h "$ARCHIVE" | cut -f1)"
 SHA="$(shasum -a 256 "$ARCHIVE" | cut -d' ' -f1)"

@@ -163,6 +163,42 @@ test('修权限只做 go-w，绝不放宽到人人可写', () => {
   assert.doesNotMatch(commands, /chmod\s+(-R\s+)?7{3}/, 'ctl.sh 里不许出现 chmod 777');
 });
 
+// ⛔⛔ 第二类现场（2026-10-20 客户机 CentOS 7）：权限位全是 755，只有**属主**是
+//   1000（包被普通用户解压，tar 默认还原归档里的属主）。助手以 root 跑时只认
+//   root 属主的路径 ⇒ 阶段 3/3 报
+//     `... parent "/opt/uvp/uvp-gb28181-linux-amd64-1.1.11" owner UID 1000 is not trusted`
+//   属主比"组可写"更松：owner 能 chmod 自己拥有的目录，等于能换掉整棵树。
+
+test('阶段 1 也查属主：root 运行时把安装根整棵收回 root', () => {
+  const body = fn('check_updater_trusted_paths');
+  assert.match(body, /stat -c '%u'/, '没有读属主 ⇒ 只查权限位查不出「属主是普通用户」');
+  assert.match(body, /chown -R 0:0/, '安装根必须连子树一起收回（程序文件也能被 owner 替换）');
+  assert.match(body, /install_root_child/, '祖先层不能无条件 chown —— 会误伤 /home/<某人>');
+  assert.match(body, /属主 UID|不是 root/, '报错里要指出属主，否则现场还是看不懂');
+});
+
+test('install_root_child 只认系统安装根的直接子目录（绝不碰别人的家目录）', () => {
+  const pkg = makePkg();
+  try {
+    const probe = runHarness(
+      pkg,
+      `for p in /opt/uvp /usr/local/uvp /srv/uvp /var/lib/uvp /home/alice /home/alice/uvp /root/uvp; do
+  if install_root_child "$p"; then printf 'YES %s\\n' "$p"; else printf 'NO %s\\n' "$p"; fi
+done`,
+    );
+    assert.equal(probe.status, 0, probe.stderr);
+    for (const p of ['/opt/uvp', '/usr/local/uvp', '/srv/uvp', '/var/lib/uvp']) {
+      assert.match(probe.stdout, new RegExp(`^YES ${p}$`, 'm'), `${p} 应当可以自动收回 root`);
+    }
+    // ⛔ 安全底线：把别人的家目录 chown 成 root 比"装不上"严重得多。
+    assert.match(probe.stdout, /^NO \/home\/alice$/m);
+    assert.match(probe.stdout, /^NO \/home\/alice\/uvp$/m);
+    assert.match(probe.stdout, /^NO \/root\/uvp$/m);
+  } finally {
+    pkg.cleanup();
+  }
+});
+
 // ---------------------------------------------------------------- 行为契约 ----
 
 const HELPERS = [
@@ -177,6 +213,7 @@ const HELPERS = [
   fn('updater_systemd_managed'),
   fn('updater_status_line'),
   fn('stop_updater'),
+  fn('install_root_child'),
   fn('check_updater_trusted_paths'),
 ].join('\n');
 
