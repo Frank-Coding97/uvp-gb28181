@@ -1636,8 +1636,11 @@ render_nginx_conf() {
 #      现场机器时间不准（内网机器很常见）也不会被判"证书尚未生效"。
 #   ⚠️ 代价：所有实例共用同一把私钥 ⇒ 它只能用于"内网自签、浏览器点继续"。
 #   需要每台机器一把唯一私钥的客户，执行：
-#       ./bin/uvp-setup certgen --dir vendor/nginx/conf --zlm-pem data/secrets/zlm-ssl.pem --force
+#       ./bin/uvp-setup certgen --dir vendor/nginx/conf --zlm-pem data/secrets/zlm-ssl.pem --force \
+#         --ip <本机IP> [--ip <公网映射IP>]
 #   之后 restart 即可（本函数只在证书缺失时才动手，不会覆盖它）。
+#   ⭐ --ip 把地址写进证书 SAN；设备/严格客户端按「IP 直连 + 校验证书」访问时
+#      必须命中 SAN 之一，公网 NAT 部署要额外把映射后的公网 IP 也传进去。
 # ⛔ 生成成功**不出声**（老板 2026-10-10 定：这属于"本该就有"的步骤，
 #   写在启动输出里是噪音）；失败才报，且必须先试 nginx 再报。
 BUNDLED_CRT="$RESOURCE/cert/uvp.crt"
@@ -1656,8 +1659,14 @@ ensure_self_signed_cert() {
   fi
 
   # ② 兜底：包内的 Go 助手现场签一张（老包没有 resource/cert 时走这里）。
+  #    ⛔⛔ 2026-10-20 起 --ip 传本机物理网卡 IPv4：证书 SAN 若只有
+  #    localhost/127.0.0.1，设备/浏览器用「IP 直连 + 校验证书」必失败
+  #    （现场实测：摄像头回连 https://<公网IP>:<port> 因 SAN 不含该 IP 被拒）。
   if [ -x "$SETUP_BIN" ]; then
-    if "$SETUP_BIN" certgen --dir "$(dirname "$NGINX_CRT")" --cn uvp-local --days 3650 \
+    local extra_ip cert_args=""
+    extra_ip="$(detect_lan_ip)"
+    [ -n "$extra_ip" ] && cert_args="--ip $extra_ip"
+    if "$SETUP_BIN" certgen --dir "$(dirname "$NGINX_CRT")" --cn uvp-local --days 3650 $cert_args \
          >>"$NGINX_LOG" 2>&1; then
       return 0
     fi
