@@ -51,10 +51,11 @@ describe("NetworkStep media addresses", () => {
   it.each(["lan", "public"] as const)("shows the media address fields in %s mode", deploymentMode => {
     const wrapper = mountStep(createForm(deploymentMode));
 
-    expect(wrapper.text()).toContain("媒体网络地址");
-    expect(wrapper.text()).toContain("Hook IP");
-    expect(wrapper.text()).toContain("SDP IP");
-    expect(wrapper.text()).toContain("Stream IP");
+    // 术语与 ZLM 节点弹窗一致：hook=平台回调地址 / sdp=设备推流地址 / stream=播放地址。
+    expect(wrapper.text()).toContain("网络地址");
+    expect(wrapper.text()).toContain("平台回调地址");
+    expect(wrapper.text()).toContain("设备推流地址");
+    expect(wrapper.text()).toContain("播放地址");
     expect(wrapper.find(HOOK_INPUT).exists()).toBe(true);
     expect(wrapper.find(SDP_INPUT).exists()).toBe(true);
     expect(wrapper.find(STREAM_INPUT).exists()).toBe(true);

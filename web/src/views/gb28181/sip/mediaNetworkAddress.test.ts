@@ -53,7 +53,7 @@ describe("optional media network addresses", () => {
   });
 });
 
-// SDP IP 决定设备把 RTP 推向哪里。留空是否安全取决于「能否推断出兜底地址」，
+// SDP IP（界面名「设备推流地址」）决定设备把 RTP 推向哪里。留空是否安全取决于「能否推断出兜底地址」，
 // 但**填了值就必须可用** —— 回环地址的故障表征是「信令全成功但没有画面」，
 // 现场看不出是配置问题，所以必须当场拦。
 describe("SDP IP format rules", () => {
@@ -145,7 +145,7 @@ describe("resolveMediaAddressPolicy", () => {
     expect(policy.streamIp).toEqual({ optional: true, fallback: "203.0.113.10" });
   });
 
-  // 公网模式下 SDP/Stream 与网卡无关，所以虚拟网卡只影响 Hook。
+  // 公网模式下 SDP/Stream 与网卡无关，所以虚拟网卡只影响 Hook（平台回调地址）。
   it("only requires Hook IP in public mode with a virtual NIC", () => {
     const policy = resolveMediaAddressPolicy({
       deploymentMode: "public",

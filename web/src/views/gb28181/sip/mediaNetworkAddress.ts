@@ -123,22 +123,22 @@ export function resolveMediaAddressPolicy(input: MediaAddressPolicyInput): Media
 // 校验
 // ---------------------------------------------------------------------------
 
-/** Hook IP：具体 IP（不含域名），允许留空（见规则）。 */
+/** Hook IP（界面名「平台回调地址」）：具体 IP（不含域名），允许留空（见规则）。 */
 export function validateHookIp(value: string, rule: MediaAddressRule): string {
   const address = value.trim();
-  if (!address) return rule.optional ? "" : "请填写 Hook IP：当前监听网卡无法自动推断，需手填 ZLMediaKit 能回调到的地址";
+  if (!address) return rule.optional ? "" : "请填写平台回调地址：当前监听网卡无法自动推断，需手填流媒体服务器能回调到的地址";
   return isConcreteIp(address) ? "" : "请输入具体的 IPv4 或 IPv6 地址";
 }
 
-/** Stream IP：IP 或域名，不含协议/端口/路径。 */
+/** Stream IP（界面名「播放地址」）：IP 或域名，不含协议/端口/路径。 */
 export function validateStreamIp(value: string, rule: MediaAddressRule): string {
   const address = value.trim();
-  if (!address) return rule.optional ? "" : "请填写 Stream IP：当前监听网卡无法自动推断，需手填播放地址";
+  if (!address) return rule.optional ? "" : "请填写播放地址：当前监听网卡无法自动推断，需手填浏览器能访问到的地址";
   return isConcreteIp(address) || isDnsHostname(address) ? "" : "请输入具体 IP 地址或域名，不含协议、端口和路径";
 }
 
 /**
- * SDP IP —— 设备按这个地址回推 RTP 流。
+ * SDP IP（界面名「设备推流地址」）—— 设备按这个地址把 RTP 流推回来。
  *
  * 为什么规则比 Stream IP 严：留空或填成回环地址时，故障表征是
  * 「信令全成功但没有画面」(INVITE 被接受、SDP 正常协商，10 秒后 play_timeout)，
@@ -149,7 +149,7 @@ export function validateSdpIp(value: string, rule: MediaAddressRule): string {
   // 缺字段时按「未填写」处理，绝不能把整个引导页渲染崩掉。
   const address = (value ?? "").trim();
   if (!address) {
-    return rule.optional ? "" : "请填写 SDP IP：设备按此地址把视频流推回平台，不填则无法点播";
+    return rule.optional ? "" : "请填写设备推流地址：设备按此地址把视频流推回平台，不填则无法点播";
   }
   if (isLoopbackAddress(address) || address === "::") {
     return "不能填 127.0.0.1 或 0.0.0.0：设备会把流推向平台自身，导致注册成功但没有画面";

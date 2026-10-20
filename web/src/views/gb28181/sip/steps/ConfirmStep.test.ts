@@ -69,8 +69,8 @@ describe("ConfirmStep SIP domain", () => {
       }
     });
     const rows = wrapper.findAll(".confirm-row");
-    const hookRow = rows.find(item => item.find(".confirm-row__label").text() === "Hook IP（平台默认）");
-    const streamRow = rows.find(item => item.find(".confirm-row__label").text() === "Stream IP（平台默认）");
+    const hookRow = rows.find(item => item.find(".confirm-row__label").text() === "平台回调地址（平台默认）");
+    const streamRow = rows.find(item => item.find(".confirm-row__label").text() === "播放地址（平台默认）");
     expect(hookRow?.find("code").text()).toBe("192.0.2.12");
     expect(streamRow?.find("code").text()).toBe("media.example.com");
     await streamRow?.find("button").trigger("click");

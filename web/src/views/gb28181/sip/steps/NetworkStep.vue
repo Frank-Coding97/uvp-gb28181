@@ -171,10 +171,10 @@ watch(
       </a-form-item>
 
       <section class="media-address-section" aria-labelledby="media-address-title">
-        <h3 id="media-address-title">媒体网络地址</h3>
+        <h3 id="media-address-title">网络地址</h3>
         <div class="media-address-grid">
           <a-form-item
-            label="Hook IP"
+            label="平台回调地址"
             :required="!mediaPolicy.hookIp.optional"
             :validate-status="hookIpError ? 'error' : undefined"
             :help="hookIpError || ruleHelp('hookIp')"
@@ -187,11 +187,11 @@ watch(
               :placeholder="placeholderFor('hookIp', '具体 IPv4 或 IPv6')"
               @update:model-value="updateHookIp"
             />
-            <template #extra>ZLMediaKit 回调平台时使用的地址；媒体节点可单独覆盖。</template>
+            <template #extra>ZLM 把事件回调给平台时连接的地址，即平台自己的地址；媒体节点可单独覆盖。</template>
           </a-form-item>
 
           <a-form-item
-            label="SDP IP"
+            label="设备推流地址"
             :required="!mediaPolicy.sdpIp.optional"
             :validate-status="sdpIpError ? 'error' : undefined"
             :help="sdpIpError || ruleHelp('sdpIp')"
@@ -204,11 +204,11 @@ watch(
               :placeholder="placeholderFor('sdpIp', '设备可访问的 IP 或域名')"
               @update:model-value="updateSdpIp"
             />
-            <template #extra>写入点播 INVITE 的 SDP 地址（设备据此回推 RTP 流）；不能填 127.0.0.1，媒体节点可单独覆盖。</template>
+            <template #extra>设备把视频流推送到这个地址（写进 SDP 的 c= 行），不能填 127.0.0.1；媒体节点可单独覆盖。</template>
           </a-form-item>
 
           <a-form-item
-            label="Stream IP"
+            label="播放地址"
             :required="!mediaPolicy.streamIp.optional"
             :validate-status="streamIpError ? 'error' : undefined"
             :help="streamIpError || ruleHelp('streamIp')"
@@ -218,10 +218,10 @@ watch(
               :model-value="form.streamIp"
               allow-clear
               :max-length="253"
-              :placeholder="placeholderFor('streamIp', '播放地址（IP 或域名）')"
+              :placeholder="placeholderFor('streamIp', 'IP 或域名')"
               @update:model-value="updateStreamIp"
             />
-            <template #extra>浏览器播放媒体时使用的主机名，不含协议、端口或路径；媒体节点可单独覆盖。</template>
+            <template #extra>浏览器或客户端看视频时连接的地址（不含协议、端口或路径）；媒体节点可单独覆盖。</template>
           </a-form-item>
         </div>
       </section>

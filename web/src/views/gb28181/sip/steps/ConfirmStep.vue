@@ -71,9 +71,9 @@ function mediaField(key: string, label: string, raw: string, rule: MediaAddressR
 }
 
 const mediaFields = computed(() => [
-  mediaField("hook-ip", "Hook IP（平台默认）", props.form.hookIp, mediaPolicy.value.hookIp),
-  mediaField("sdp-ip", "SDP IP（平台默认）", props.form.sdpIp, mediaPolicy.value.sdpIp),
-  mediaField("stream-ip", "Stream IP（平台默认）", props.form.streamIp, mediaPolicy.value.streamIp)
+  mediaField("hook-ip", "平台回调地址（平台默认）", props.form.hookIp, mediaPolicy.value.hookIp),
+  mediaField("sdp-ip", "设备推流地址（平台默认）", props.form.sdpIp, mediaPolicy.value.sdpIp),
+  mediaField("stream-ip", "播放地址（平台默认）", props.form.streamIp, mediaPolicy.value.streamIp)
 ]);
 </script>
 
