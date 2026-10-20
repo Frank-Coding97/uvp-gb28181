@@ -245,6 +245,17 @@ func (r *Registry) recordFinished(senderDeviceID, deviceID, sessionID string, fi
 	if deviceID != session.DeviceCode && deviceID != session.ChannelCode {
 		return fmt.Errorf("snapshot notify device mismatch: sender=%q device=%q", senderDeviceID, deviceID)
 	}
+	// ⭐ A.2.5.7 标准语义：空清单 = "全部抓拍或上传操作异常失败"（私有形态解析器保证非空，
+	// 走不到这里）。2026-10-20 客户现场实锤：不落终态的话，设备明确报了整批失败的会话
+	// 会**永远停在 receiving**，前端一直转圈等不到结果。
+	// 不 return：状态机允许"先失败后翻盘"——同一会话若随后又收到带标识的完成通知
+	// （如重发指令引发的重复任务先报空、真任务后报全量），completeLocked 仍能推进到 completed。
+	if len(fileIDs) == 0 {
+		session.State = StateFailed
+		session.Error = "设备上报抓拍全部失败（无任何文件标识）"
+		session.UpdatedAt = time.Now()
+		return nil
+	}
 	for _, raw := range fileIDs {
 		id := strings.TrimSpace(raw)
 		if id == "" {

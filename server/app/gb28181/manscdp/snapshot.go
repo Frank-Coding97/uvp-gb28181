@@ -79,8 +79,13 @@ type snapShotListWire struct {
 // 信号本身弄丢，而丢掉的后果是 `devicecapture` 的会话**永远到不了 `completed`**（前端会一直
 // 显示未完成）。所以：
 //   - 标准写 ≤10 个标识，真机可能重复元素或超量 —— **照收，不按标准拒绝**；
-//   - 只对"CmdType 不对""没有 `SessionID`""一个文件标识都没有"判非法：这三种无法关联到会话、
-//     也无法推进完成计数，属于"解析出来也没用"。
+//   - **空清单（`<SnapShotList/>` 或整个缺席）也是合法且语义完整的报文**：标准原话
+//     "无文件标识……表示全部抓拍或上传操作异常失败"。2026-10-20 客户现场实锤
+//     （模拟器被平台 UDP 重发的 DeviceConfig 触发出重复任务，重复任务 0 张成功 ⇒ 发空清单）：
+//     把它判非法直接丢，会让"设备明确说了整批失败"的会话**永远停在 receiving**，
+//     前端一直转圈。终态判定交给 [devicecapture.Registry.recordFinished]（0 张 ⇒ failed）。
+//   - 只对"CmdType 不对""没有 `SessionID`"判非法：这两种无法关联到会话，属于
+//     "解析出来也没用"。
 func ParseUploadSnapShotFinished(body []byte) (UploadSnapShotFinished, error) {
 	var wire uploadSnapShotFinishedWire
 	result := UploadSnapShotFinished{}
@@ -112,9 +117,8 @@ func ParseUploadSnapShotFinished(body []byte) (UploadSnapShotFinished, error) {
 			result.FileIDs = append(result.FileIDs, id)
 		}
 	}
-	if len(result.FileIDs) == 0 {
-		return result, fmt.Errorf("图像抓拍传输完成通知没有任何 SnapShotFileID")
-	}
+	// ⛔ 空 FileIDs 不再判非法（见函数头注释）：标准语义 = 整批失败，
+	// 会话终态由 devicecapture 落成 failed。
 	return result, nil
 }
 

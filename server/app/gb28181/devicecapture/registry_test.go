@@ -178,6 +178,53 @@ func TestRegistryFinishedNotifyUnknownSession(t *testing.T) {
 	require.ErrorIs(t, registry.OnSnapshotNotify(context.Background(), "34020000001320000001", private), ErrNotFound)
 }
 
+// TestRegistryEmptyFinishedNotifyFailsSession 空清单 = A.2.5.7 标准语义"整批失败"。
+//
+// ⛔ 2026-10-20 客户现场实锚：平台 UDP 重发 DeviceConfig 触发模拟器起了重复抓拍任务，
+// 重复任务 0 张成功 ⇒ 按标准发**空清单**完成通知。若只是放行解析而会话不落终态，
+// 前端会一直轮询"进行中"等不到结果 —— 所以空清单必须把会话推进到 failed。
+func TestRegistryEmptyFinishedNotifyFailsSession(t *testing.T) {
+	registry := NewRegistry(t.TempDir())
+	session := registry.Create(CreateRequest{
+		OwnerID: "12", ChannelID: "31", ChannelCode: "34020000001320000001",
+		DeviceCode: "34020000002000000001", SnapNum: 1, Interval: 1,
+	})
+	registry.MarkWaiting(session.ID)
+
+	body := uploadSnapShotFinishedBody(session.ID, "34020000001320000001") // 零个文件标识
+	require.NoError(t, registry.OnUploadSnapShotFinished(context.Background(), session.DeviceCode, body))
+
+	got, _ := registry.GetForOwner(session.ID, "12")
+	require.Equal(t, StateFailed, got.State, "空清单必须落失败终态，不许停在 waiting/receiving")
+	require.NotEmpty(t, got.Error, "失败原因必须可读")
+	require.Equal(t, 0, got.NotifiedCount)
+}
+
+// TestRegistryFailedSessionRecoversOnLateNotify "先失败后翻盘"：同一会话先收到空清单
+// （重复任务的 0 张成功报文）、随后又收到带标识的完成通知（真任务传完了）——
+// 后者必须仍能把会话推进到 completed。现场 2026-10-20 实锤的完整时间线就是
+// 空清单(20:54:21.9) → 真上传(20:54:33) → 带标识通知(20:54:34.4)。
+func TestRegistryFailedSessionRecoversOnLateNotify(t *testing.T) {
+	registry := NewRegistry(t.TempDir())
+	session := registry.Create(CreateRequest{
+		OwnerID: "12", ChannelID: "31", ChannelCode: "34020000001320000001",
+		DeviceCode: "34020000002000000001", SnapNum: 1, Interval: 1,
+	})
+
+	empty := uploadSnapShotFinishedBody(session.ID, "34020000001320000001")
+	require.NoError(t, registry.OnUploadSnapShotFinished(context.Background(), session.DeviceCode, empty))
+	got, _ := registry.GetForOwner(session.ID, "12")
+	require.Equal(t, StateFailed, got.State, "先落失败")
+
+	uploadJPEG(t, registry, session, "shot-1.jpg")
+	full := uploadSnapShotFinishedBody(session.ID, "34020000001320000001", "id-1")
+	require.NoError(t, registry.OnUploadSnapShotFinished(context.Background(), session.DeviceCode, full))
+
+	got, _ = registry.GetForOwner(session.ID, "12")
+	require.Equal(t, StateCompleted, got.State, "迟到的真完成通知必须能翻盘到 completed")
+	require.Equal(t, 1, got.NotifiedCount)
+}
+
 // TestUploadRecordsRelativePathAndDigest 上传时必须同时产出**落库要用**的两样东西：
 // 相对路径（`rel_path`）与图片摘要（`md5`）。
 //

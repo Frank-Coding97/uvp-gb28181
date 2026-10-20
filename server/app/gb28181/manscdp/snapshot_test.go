@@ -228,11 +228,17 @@ func TestParseUploadSnapShotFinishedDedupesFileIDs(t *testing.T) {
 	require.Equal(t, []string{"a"}, finished.FileIDs)
 }
 
-// TestParseUploadSnapShotFinishedRejectsUnusable 只有"解析出来也没用"的三种才判非法。
+// TestParseUploadSnapShotFinishedRejectsUnusable 只有"解析出来也没用"的才判非法。
 //
 // ⛔ 刻意**不**按标准校验"≤10 个标识"：这是入站数据，设备说几个就是几个。收严了会把
 // "抓拍完成"这个信号本身弄丢（会话永远完不成），代价远大于收益。越界的处置留给
 // `devicecapture` 的完成判定（E-5 那条"部分失败语义"）。
+//
+// ⚠️ 2026-10-20 契约演进（老板拍板）：**空清单不再判非法**。A.2.5.7 原话"无文件标识
+// 表示全部抓拍或上传操作异常失败"——空清单是合法且语义完整的报文（客户现场实锤：
+// 模拟器被 UDP 重发指令触发重复任务，重复任务 0 张成功 ⇒ 发空清单），判非法直接丢会让
+// 会话永远停在 receiving。空清单的终态判定移交给 `devicecapture.recordFinished`（0 张 ⇒ failed）。
+// 新契约由 [TestParseUploadSnapShotFinishedAcceptsEmptyList] 钉住。
 func TestParseUploadSnapShotFinishedRejectsUnusable(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -241,14 +247,30 @@ func TestParseUploadSnapShotFinishedRejectsUnusable(t *testing.T) {
 	}{
 		{"CmdType 不对", `<Notify><CmdType>Notify</CmdType><DeviceID>D</DeviceID><SessionID>s</SessionID><SnapShotList><SnapShotFileID>a</SnapShotFileID></SnapShotList></Notify>`, "CmdType"},
 		{"缺 SessionID", `<Notify><CmdType>UploadSnapShotFinished</CmdType><DeviceID>D</DeviceID><SnapShotList><SnapShotFileID>a</SnapShotFileID></SnapShotList></Notify>`, "SessionID"},
-		{"没有文件标识", `<Notify><CmdType>UploadSnapShotFinished</CmdType><DeviceID>D</DeviceID><SessionID>s</SessionID></Notify>`, "SnapShotFileID"},
-		{"空标签的文件标识", `<Notify><CmdType>UploadSnapShotFinished</CmdType><DeviceID>D</DeviceID><SessionID>s</SessionID><SnapShotList><SnapShotFileID>  </SnapShotFileID></SnapShotList></Notify>`, "SnapShotFileID"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := ParseUploadSnapShotFinished([]byte(tc.body))
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tc.errMsg)
+		})
+	}
+}
+
+// TestParseUploadSnapShotFinishedAcceptsEmptyList 钉住空清单的**合法**语义
+// （2026-10-20 现场实锚：`<SnapShotList/>` 自闭合与元素整个缺席两种写法都真机/模拟器出现过）。
+// 空清单 = 标准语义"整批失败"，解析层必须放行、把终态判定留给 devicecapture。
+func TestParseUploadSnapShotFinishedAcceptsEmptyList(t *testing.T) {
+	for name, body := range map[string]string{
+		"自闭合空标签": `<Notify><CmdType>UploadSnapShotFinished</CmdType><SN>2</SN><DeviceID>D</DeviceID><SessionID>s</SessionID><SnapShotList/></Notify>`,
+		"元素整个缺席":  `<Notify><CmdType>UploadSnapShotFinished</CmdType><SN>2</SN><DeviceID>D</DeviceID><SessionID>s</SessionID></Notify>`,
+		"空白文件标识":  `<Notify><CmdType>UploadSnapShotFinished</CmdType><SN>2</SN><DeviceID>D</DeviceID><SessionID>s</SessionID><SnapShotList><SnapShotFileID>  </SnapShotFileID></SnapShotList></Notify>`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			finished, err := ParseUploadSnapShotFinished([]byte(body))
+			require.NoError(t, err, "空清单是 A.2.5.7 的合法报文，不得判非法")
+			require.Empty(t, finished.FileIDs)
+			require.Equal(t, "s", finished.SessionID, "会话关联字段必须照常解析")
 		})
 	}
 }
