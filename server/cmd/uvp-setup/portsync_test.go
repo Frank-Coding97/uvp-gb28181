@@ -521,3 +521,153 @@ func iniValue(t *testing.T, path, section, key string) string {
 	}
 	return ""
 }
+
+// TestWriteEnvFilePersistsZlmPortMarkers 钉住「ZLM 的 12 个端口也能被认定为用户设置」。
+//
+// ⛔⛔ 2026-10-20（老板要求"所有端口都能改，尤其 ZLM 那些"）：之前只有 4 个主端口
+// 会写 UVP_USER_SET_ 标记，ZLM 的 12 个键没有 —— 后果是客户改过 SRT/ONVIF 端口后，
+// 下一次换包被新默认值顶掉，而他改主端口却能保住。现场只会看到"推流又不行了"。
+func TestWriteEnvFilePersistsZlmPortMarkers(t *testing.T) {
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, "config.env")
+	markers := map[string]bool{
+		"UVP_ZLM_HTTP_PORT": true,
+		"UVP_ZLM_SRT_PORT":  true,
+		"UVP_ZLM_RTP_RANGE": true,
+	}
+	if err := writeEnvFile(envPath, testPorts(), markers); err != nil {
+		t.Fatalf("writeEnvFile 失败: %v", err)
+	}
+	raw, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	for _, must := range []string{
+		"UVP_USER_SET_UVP_ZLM_HTTP_PORT=1",
+		"UVP_USER_SET_UVP_ZLM_SRT_PORT=1",
+		"UVP_USER_SET_UVP_ZLM_RTP_RANGE=1",
+		"UVP_ZLM_HTTP_PORT=51004",
+		"UVP_ZLM_SRT_PORT=51011",
+		"UVP_ZLM_RTP_RANGE=51014-51063",
+	} {
+		if !strings.Contains(text, must) {
+			t.Errorf("config.env 缺少 %q\n---\n%s", must, text)
+		}
+	}
+	// 没被标成用户设置的 ZLM 键不能凭空长出标记（否则升级后就再也跟不上新规划）。
+	for _, never := range []string{
+		"UVP_USER_SET_UVP_ZLM_RTSP_PORT",
+		"UVP_USER_SET_UVP_ZLM_ONVIF_PORT",
+	} {
+		if strings.Contains(text, never) {
+			t.Errorf("没有标记的键不该被写成用户设置：%s", never)
+		}
+	}
+}
+
+// TestWriteBaselineFileRecordsEveryPort 钉住基线内容 —— 它是"手改识别"的唯一依据。
+//
+// ⛔ 少写一个键 ⇒ 那个键永远判不出"用户改过"，而客户不会知道自己踩了哪个。
+func TestWriteBaselineFileRecordsEveryPort(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".port-baseline")
+	if err := writeBaselineFile(path, testPorts()); err != nil {
+		t.Fatalf("writeBaselineFile 失败: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			t.Fatalf("基线里出现无等号的行：%q", line)
+		}
+		got[key] = value
+	}
+	want := map[string]string{
+		"UVP_HTTP_PORT": "51002", "UVP_REDIS_PORT": "51003",
+		"UVP_HTTPS_PORT": "51000", "UVP_NGINX_HTTP_PORT": "51001",
+		"UVP_ZLM_HTTP_PORT": "51004", "UVP_ZLM_SSL_PORT": "51007",
+		"UVP_ZLM_RTSP_PORT": "51005", "UVP_ZLM_RTMP_PORT": "51006",
+		"UVP_ZLM_RTC_PORT": "51008", "UVP_ZLM_RTP_PROXY_PORT": "51014",
+		"UVP_ZLM_RTP_RANGE": "51014-51063", "UVP_ZLM_SIGNALING_PORT": "51009",
+		"UVP_ZLM_SIGNALING_SSL_PORT": "51010", "UVP_ZLM_SRT_PORT": "51011",
+		"UVP_ZLM_ONVIF_PORT": "51012", "UVP_ZLM_ICE_PORT": "51013",
+	}
+	for key, value := range want {
+		if got[key] != value {
+			t.Errorf("基线 %s = %q，期望 %q", key, got[key], value)
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("基线键数 %d，期望 %d（%v）", len(got), len(want), got)
+	}
+}
+
+// TestWriteEnvFileReplacesPackagedPortBlock 钉住「出包写的端口区」与「运行时重写」的共存。
+//
+// ⛔⛔ 出包时 build-standalone.sh 会把 16 个端口连注释一起写进 config.env；
+// 每次 start 又由本函数整体重写。两件事叠在一起最容易出的问题：
+//
+//	· 注释块每启动一次多一份（注释行不属于"托管键"，会被当用户内容保留）；
+//	· 端口值行重复出现（后写的覆盖先写的，读到最后一条，看似正常）。
+//
+// 前者几百次启动后文件就没法看了，后者会在 grep 时给出两个值、让人以为配置被改过。
+func TestWriteEnvFileReplacesPackagedPortBlock(t *testing.T) {
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, "config.env")
+	preloaded := strings.Join([]string{
+		"# [uvp-ports] ============================================================",
+		"# [uvp-ports] 端口（**全部可改**）",
+		"# [uvp-ports] ---- 管理页 / 后端 / Redis ----",
+		"UVP_NGINX_HTTP_PORT=51000",
+		"UVP_HTTPS_PORT=51001",
+		"UVP_HTTP_PORT=51002",
+		"UVP_REDIS_PORT=51003",
+		"# [uvp-ports] ---- 流媒体（ZLMediaKit）----",
+		"UVP_ZLM_HTTP_PORT=51004",
+		"UVP_ZLM_RTP_RANGE=51014-51063",
+		"",
+		"# ---- SIP 报文诊断加密密钥（打包时生成，每份包不同）----",
+		"UVP_SIP_TRACE_ENCRYPTION_KEY=keep-me",
+		"",
+	}, "\n")
+	if err := os.WriteFile(envPath, []byte(preloaded), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := writeEnvFile(envPath, testPorts(), nil); err != nil {
+			t.Fatalf("第 %d 次 writeEnvFile 失败: %v", i+1, err)
+		}
+	}
+	raw, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if got := strings.Count(text, "UVP_SIP_TRACE_ENCRYPTION_KEY=keep-me"); got != 1 {
+		t.Errorf("用户密钥应原样保留且只出现一次，实际 %d 次", got)
+	}
+	if got := strings.Count(text, "UVP_NGINX_HTTP_PORT="); got != 1 {
+		t.Errorf("UVP_NGINX_HTTP_PORT 应只出现一次，实际 %d 次\n---\n%s", got, text)
+	}
+	// 出包块里的说明行必须被整体替换（前缀相同），不能越写越多。
+	if got := strings.Count(text, portHeaderPrefix+" ---- 管理页"); got != 1 {
+		t.Errorf("端口区标题重复了 %d 次（每次启动都在追加？）\n---\n%s", got, text)
+	}
+	if got := strings.Count(text, portHeaderPrefix); got != 11 {
+		t.Errorf("端口区注释行应为 11 行（9 行说明 + 2 行分组），实际 %d\n---\n%s", got, text)
+	}
+	// ⛔ RTP 段与 proxy「必须同起点」是这份文件里**唯一反直觉**的规则，也是最常见的
+	//   改法（客户往往只改段或只改 proxy）。本函数每次启动都整体重写说明区，
+	//   少写这一句 = 客户重启一次就再也看不到它。
+	if !strings.Contains(text, "UVP_ZLM_RTP_RANGE 与 UVP_ZLM_RTP_PROXY_PORT 必须同一起点") {
+		t.Errorf("端口区说明丢了「RTP 段与 proxy 同起点」这条规则\n---\n%s", text)
+	}
+}

@@ -152,10 +152,111 @@ def set_in_section(text: str, section: str, key: str, value: str) -> str:
     return "\n".join(lines)
 
 
+JWT_SIGN_KEY_MIN_LEN = 32
+JWT_SIGN_KEY_PLACEHOLDER_FRAGMENTS = (
+    "change_me", "change-me", "changeme",
+    "your_secret", "your-secret", "placeholder",
+    "random_secret", "todo",
+)
+
+
+def _normalize_scalar(raw: str) -> str:
+    return raw.strip().strip('"').strip("'").strip()
+
+
+def sign_key_looks_placeholder(value: str) -> bool:
+    """判据与后端 ``ginhelper.SignKeyLooksPlaceholder`` 保持一致。
+
+    ⛔ 两处判据必须同构：出包侧只负责「别把占位符发出去」，运行侧负责
+       「老现场升级后即便还带着占位符也不暴露调试面」。判据漂移的表现是
+       包校验通过、运行时却仍然放行 —— 所以两边的特征串与长度阈值要一起改。
+    """
+    normalized = _normalize_scalar(value)
+    if len(normalized) < JWT_SIGN_KEY_MIN_LEN:
+        return True
+    lowered = normalized.lower()
+    return any(fragment in lowered for fragment in JWT_SIGN_KEY_PLACEHOLDER_FRAGMENTS)
+
+
+def harden_security_defaults(text: str, jwt_sign_key: str = "") -> tuple[str, str]:
+    """出厂安全默认值：关调试面 + 把占位 JWT 密钥换成随机值。
+
+    ⛔⛔ 为什么必须在**出包时**做，而不是让现场去改：
+      · ``config.example.yml`` 的 ``appdebug: true`` 会注册**免鉴权**的
+        ``/viewCache``（整库缓存转储，refresh token 是原文存的）；
+      · ``jwttokensignkey`` 若是模板占位符，等于全世界的包共用同一把签名密钥。
+      这两项随包发给客户后，现场没有任何提示要求改 —— 实测 1.1.10 的包里
+      两者都还是模板值。
+
+    ⛔ 显式传入的 ``--jwt-sign-key`` 也要过同一套判据：占位符就**拒绝出包**，
+      不能"传了就当合法"。
+    """
+    import secrets
+
+    text = set_in_section(text, "server", "appdebug", "false")
+
+    current = ""
+    match = re.search(r"(?m)^\s*jwttokensignkey\s*:\s*(?P<value>[^#\n]*)", text)
+    if match:
+        current = _normalize_scalar(match.group("value"))
+
+    chosen = _normalize_scalar(jwt_sign_key)
+    if chosen:
+        if sign_key_looks_placeholder(chosen):
+            raise SystemExit(
+                "传入的 JWT 签名密钥不合格（长度需 ≥32 且不含占位特征）—— 拒绝出包"
+            )
+    elif sign_key_looks_placeholder(current):
+        chosen = secrets.token_hex(32)
+    else:
+        chosen = current
+
+    text = set_in_section(text, "token", "jwttokensignkey", f'"{chosen}"')
+    _assert_security_defaults(text, chosen)
+    return text, chosen
+
+
+def _assert_security_defaults(text: str, jwt_sign_key: str) -> None:
+    """解析后断言两项默认值真的生效。
+
+    ⛔ 只查「字符串出现过」会漏掉真正的失效形态：
+       ``appdebug: true`` 与 ``appdebug: false`` 在文件里都"出现过"，
+       而 ``set_in_section`` 匹配不到时是**静默不替换**、仍照常打印成功。
+    """
+    try:
+        import yaml
+    except ImportError:
+        if "appdebug: false" not in text:
+            raise SystemExit("调试开关写入失败：结果里找不到 appdebug: false")
+        print("   ⚠️ 未安装 PyYAML，跳过安全默认值结构校验（pip install pyyaml 可启用）")
+        return
+
+    try:
+        parsed = yaml.safe_load(text) or {}
+    except Exception as exc:
+        raise SystemExit(
+            f"安全默认值写入后配置无法解析（{type(exc).__name__}）—— 多半是缩进或插入位置错了"
+        ) from None
+
+    problems = []
+    if (parsed.get("server") or {}).get("appdebug") is not False:
+        problems.append(
+            f"server.appdebug={(parsed.get('server') or {}).get('appdebug')!r}（应为 False）"
+        )
+    got_key = str((parsed.get("token") or {}).get("jwttokensignkey") or "")
+    if got_key != jwt_sign_key:
+        problems.append("token.jwttokensignkey 与期望值不一致（写入没生效）")
+    if sign_key_looks_placeholder(got_key):
+        problems.append("token.jwttokensignkey 仍是空/占位/过短的值")
+    if problems:
+        raise SystemExit("安全默认值校验失败：\n  - " + "\n  - ".join(problems))
+
+
 def build(source: Path, target: Path, http_port: str, redis_port: str,
           zlm_secret: str = "", zlm_media_server_id: str = "",
           upgrade_trusted_keys_json: str = "",
-          zlm_api_port: str = "", hook_port: str = "") -> None:
+          zlm_api_port: str = "", hook_port: str = "",
+          jwt_sign_key: str = "") -> None:
     text = source.read_text(encoding="utf-8")
 
     upgrade_trusted_keys = parse_upgrade_trusted_keys(upgrade_trusted_keys_json)
@@ -221,12 +322,18 @@ def build(source: Path, target: Path, http_port: str, redis_port: str,
     if hook_port:
         text = set_in_section(text, "media", "hookport", hook_port)
 
+    # 6) 出厂安全默认值：关调试面 + JWT 密钥不许留占位符
+    #    放在最后：前面几步只动库/缓存/端口，这一步会改写 server 与 token 段。
+    text, jwt_sign_key = harden_security_defaults(text, jwt_sign_key)
+
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text, encoding="utf-8")
     print(f"✅ 已生成 {target}")
     print(f"   数据库 sqlite / 缓存 redis(127.0.0.1:{redis_port}) / HTTP :{http_port}")
     if zlm_secret and zlm_media_server_id:
         print(f"   ZLM secret / 节点标识已固定（各 {len(zlm_secret)}/{len(zlm_media_server_id)} 字符）")
+    # ⛔ 只报「已生成」不打印密钥本身：出包日志会被归档/外发，密钥进日志等于泄露。
+    print(f"   调试开关: 关闭 / JWT 签名密钥: 已就绪（{len(jwt_sign_key)} 位随机串）")
 
 
 def add_sqlite_section(target: Path, db_path: str) -> None:
@@ -363,7 +470,14 @@ def set_log_filepath(target: Path, log_path: str) -> None:
 def add_qr_provision_section(target: Path, host: str, port: str) -> None:
     """写入「扫码接入基址」段（``gb28181.qr_provision``）。
 
-    ⛔⛔ 为什么必须在**出包时**就写好，而不能让前端自己推断：
+    ⛔⛔ 默认**留空出包**（host 为空 ⇒ base_url 为空），由客户机首次启动时
+       uvp-gb28181-ctl.sh 用本机实际地址兜底生成。理由是：出包机探到的 IP 是
+       **我们打包机**的地址，写进包里发出去，客户机上那个地址永远指向一台不存在
+       的主机 —— 2026-10-20 客户现场 `http://192.168.10.220:51002` 的残留就是
+       这么来的：页面看起来"地址填好了"，设备扫了却连不上，且平台零报错。
+       传了 ``--qr-provision-host`` 时仍按传入值写（我方预配置场景）。
+
+    ⛔⛔ 为什么这个值必须有一个明确落点，而不能让前端自己推断：
       二维码是给**设备**扫的,它要访问的是后端地址,而不是「用户打开平台的地址」。
       绿色包的前端走 nginx 自签 HTTPS（SAN 只有 localhost/127.0.0.1），
       前端若用 ``window.location.origin`` 当默认值，二维码里就带上了那个自签地址 ⇒
@@ -381,7 +495,7 @@ def add_qr_provision_section(target: Path, host: str, port: str) -> None:
          因为 example 那份还在，校验根本分不清包内配置到底有没有生效值。）
     """
     text = target.read_text(encoding="utf-8")
-    want = f"http://{host}:{port}"
+    want = f"http://{host}:{port}" if host else ""
 
     if _has_section(text, "qr_provision"):
         text = _rewrite_section(text, "qr_provision", {
@@ -405,7 +519,7 @@ def add_qr_provision_section(target: Path, host: str, port: str) -> None:
     _assert_qr_provision_valid(text, host, port)
     _assert_qr_provision_not_duplicated(text)
     target.write_text(text, encoding="utf-8")
-    print(f"   扫码接入基址: {want}（已写入并通过结构校验）")
+    print(f"   扫码接入基址: {want or '（留空，首启按本机地址生成）'}（已写入并通过结构校验）")
 
 
 def _section_lines(lines: list[str], name: str) -> tuple[int, int] | None:
@@ -436,6 +550,65 @@ def _section_lines(lines: list[str], name: str) -> tuple[int, int] | None:
             end = i
             break
     return start, end
+
+
+def add_snapshot_upload_section(target: Path, base_url: str = "") -> None:
+    """写入「图像抓拍回传基址」段（``gb28181.snapshot_upload.base_url``）。
+
+    GB/T 28181-2022 §9.14：平台下发 SnapShotConfig 时把 UploadURL 交给设备，
+    设备把拍好的图 POST 回这个地址。
+
+    ⛔⛔ 默认**留空出包**，首启由 uvp-gb28181-ctl.sh 生成（指向 nginx 明文口）。
+       理由与 qr_provision 完全相同：出包机 IP ≠ 客户机 IP。
+    ⛔⛔ 而且这个地址**必须明文**：自签 HTTPS 的证书设备不认，TLS 握手直接失败，
+       失败发生在握手层、不产生任何访问日志 —— 2026-10-20 客户现场就是
+       「设备回了 OK、平台零报错、一张图都没有」。所以默认端口取 nginx 的
+       明文口（有访问日志可查），而不是浏览器入口。
+    """
+    text = target.read_text(encoding="utf-8")
+    want = base_url.strip()
+
+    if _has_section(text, "snapshot_upload"):
+        text = _rewrite_section(text, "snapshot_upload", {"base_url": f'"{want}"'})
+    else:
+        text = _append_to_gb28181(text, [
+            "",
+            "# ---- 图像抓拍回传基址（绿色安装包；本段由打包脚本生成）----",
+            "# 设备把拍好的图 POST 回来的地址。设备不认自签证书，公网部署请填明文口。",
+            "# 留空 = 未配置：首启由 uvp-gb28181-ctl.sh 按本机地址生成。",
+            "snapshot_upload:",
+            f'    base_url: "{want}"',
+        ])
+
+    _assert_simple_section_value(text, "snapshot_upload", "base_url", want)
+    target.write_text(text, encoding="utf-8")
+    print(f"   抓拍回传基址: {want or '（留空，首启按本机地址生成）'}（已写入并通过结构校验）")
+
+
+def _assert_simple_section_value(text: str, section: str, key: str, want: str) -> None:
+    """解析后断言 ``gb28181.<section>.<key>`` 等于 want，且该段只出现一次。
+
+    ⛔ 断言的是「等于期望值」而不是「非空」：只判非空时，example 里那份占位段
+       就能骗过校验，而包内配置压根没写进去（变异自证抓到的就是这个）。
+    """
+    hits = sum(1 for line in text.split("\n") if line.strip() == f"{section}:")
+    if hits != 1:
+        raise SystemExit(f"{section} 段出现了 {hits} 次（应为 1 次）—— "
+                         "重复段会让现场改错地方：YAML 只认后者。")
+    try:
+        import yaml
+    except ImportError:
+        print("   ⚠️ 未安装 PyYAML，跳过结构校验（pip install pyyaml 可启用）")
+        return
+    try:
+        parsed = yaml.safe_load(text) or {}
+    except Exception as exc:
+        raise SystemExit(
+            f"{section} 写入后配置无法解析（{type(exc).__name__}）—— 多半是插入位置或缩进错了。"
+        ) from None
+    got = str((parsed.get("gb28181") or {}).get(section, {}).get(key, ""))
+    if got != want:
+        raise SystemExit(f"gb28181.{section}.{key}={got!r}（应为 {want!r}）")
 
 
 def _has_section(text: str, name: str) -> bool:
@@ -571,38 +744,15 @@ def _assert_qr_provision_valid(text: str, host: str, port: str) -> None:
     gb = parsed.get("gb28181") or {}
     qr = gb.get("qr_provision") or {}
     problems = []
-    want = f"http://{host}:{port}"
+    # 留空时 want 也是空串：断言「等于 want」同时锁住两种契约 ——
+    #   传了 host ⇒ 必须写成那个地址；没传 ⇒ 必须是空（不许偷偷写死出包机 IP）。
+    want = f"http://{host}:{port}" if host else ""
     if "qr_provision" not in gb:
         problems.append("qr_provision 不在 gb28181 段下（缩进错了）")
     if str(qr.get("base_url", "")) != want:
         problems.append(f"gb28181.qr_provision.base_url={qr.get('base_url')!r}（应为 {want!r}）")
     if problems:
         raise SystemExit("qr_provision 段结构校验失败：\n  - " + "\n  - ".join(problems))
-
-
-def _detect_lan_ip() -> str:
-    """探测出包机的局域网 IPv4。
-
-    ⛔⛔ 出包时探测 ≠ 客户机上的地址。绿色包在客户机上跑时这个值可能不对,
-    所以它**只是兜底**:现场可改 config.yml 的 ``gb28181.qr_provision.base_url``。
-    写成127.0.0.1 会让二维码指向客户机自己 ⇒ 手机必然连不上,
-    因此这里明确拒绝回环地址。
-    """
-    import socket
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        # 不发包,只是让内核按路由表选出「出去」的源地址
-        sock.connect(("192.0.2.1", 9))     # TEST-NET-1,保证不会真发出去
-        ip = sock.getsockname()[0]
-    except OSError:
-        ip = ""
-    finally:
-        sock.close()
-    if not ip or ip.startswith("127."):
-        # 连路由都探测不到时给一个占位值,由出包断言/现场配置兜住
-        return "127.0.0.1"
-    return ip
 
 
 def _detect_openapi_audience() -> str:
@@ -769,8 +919,15 @@ def main() -> None:
                         help="ZLM HTTP API 端口（写入 gb28181.zlm.httpport；留空=保留模板值）")
     parser.add_argument("--hook-port", default="",
                         help="hook 回调端口（写入 gb28181.media.hookport；留空=保留模板值）")
+    parser.add_argument(
+        "--jwt-sign-key",
+        default=os.environ.get("UVP_JWT_SIGN_KEY", ""),
+        help="JWT 签名密钥（≥32 位随机串）；留空=占位符时自动生成。默认读 UVP_JWT_SIGN_KEY",
+    )
     parser.add_argument("--qr-provision-host", default="",
-                        help="扫码接入基址里的设备可达地址；留空则取本机主 IP")
+                        help="扫码接入基址里的设备可达地址；留空=出包留空，由客户机首启自动生成")
+    parser.add_argument("--snapshot-upload-base-url", default="",
+                        help="抓拍回传基址；留空=出包留空，由客户机首启自动生成（nginx 明文口）")
     parser.add_argument("--openapi-audience", default="",
                         help="OpenAPI 部署环境标识（不同环境不得共享）")
     parser.add_argument("--openapi-master-key-id", default="uvp-openapi-k1",
@@ -788,11 +945,12 @@ def main() -> None:
     build(args.source, args.target, args.http_port, args.redis_port,
           args.zlm_secret, args.zlm_media_server_id,
           args.upgrade_trusted_keys,
-          zlm_api_port=args.zlm_api_port, hook_port=args.hook_port)
+          zlm_api_port=args.zlm_api_port, hook_port=args.hook_port,
+          jwt_sign_key=args.jwt_sign_key)
     add_sqlite_section(args.target, args.db_path)
     set_log_filepath(args.target, args.log_path)
-    add_qr_provision_section(args.target, args.qr_provision_host or _detect_lan_ip(),
-                             args.http_port)
+    add_qr_provision_section(args.target, args.qr_provision_host, args.http_port)
+    add_snapshot_upload_section(args.target, args.snapshot_upload_base_url)
     add_openapi_section(args.target, args.openapi_enabled == "true",
                         args.openapi_audience or _detect_openapi_audience(),
                         args.openapi_master_key_id)

@@ -46,6 +46,9 @@ $RunDir      = Join-Path $Root 'run'
 $ConfDir     = Join-Path $Root 'config'
 $ConfFile    = Join-Path $ConfDir 'config.yml'
 $EnvFile     = Join-Path $ConfDir 'config.env'
+# ⭐ 2026-10-20：上次落盘的端口值。端口"改没改过"靠它与 config.env 比对判定，
+#   客户因此**不用**手写 UVP_USER_SET_ 标记（见 Resolve-Port 注释）。
+$BaselineFile = Join-Path $ConfDir '.port-baseline'
 
 $ServerExe   = Join-Path $BinDir 'uvp-server.exe'
 $SetupExe    = Join-Path $BinDir 'uvp-setup.exe'
@@ -201,13 +204,27 @@ $PortDefault = @{
 $ZlmRtpRange = '15514-15563'
 $SipPort     = 15564
 
-# 用户可改的只有这 4 个（与 Linux 版一致）：其余由这几个派生。
+# 用户可改的端口键：**全部 16 个**（4 主 + ZLM 的 11 个数字端口）。
+# RTP 段是字符串（"15514-15563"），不能走 [int] 转换，单独在 Get-Config 里判。
+# ⛔ 这份表必须与 uvp-setup/portsync.go 的 markerKeys 逐字一致。
 $PortEnvKeys = @{
     HTTP       = 'UVP_HTTP_PORT'
     REDIS      = 'UVP_REDIS_PORT'
     HTTPS      = 'UVP_HTTPS_PORT'
     NGINX_HTTP = 'UVP_NGINX_HTTP_PORT'
+    ZLM_HTTP           = 'UVP_ZLM_HTTP_PORT'
+    ZLM_SSL            = 'UVP_ZLM_SSL_PORT'
+    ZLM_RTSP           = 'UVP_ZLM_RTSP_PORT'
+    ZLM_RTMP           = 'UVP_ZLM_RTMP_PORT'
+    ZLM_RTC            = 'UVP_ZLM_RTC_PORT'
+    ZLM_SIGNALING      = 'UVP_ZLM_SIGNALING_PORT'
+    ZLM_SIGNALING_SSL  = 'UVP_ZLM_SIGNALING_SSL_PORT'
+    ZLM_SRT            = 'UVP_ZLM_SRT_PORT'
+    ZLM_ONVIF          = 'UVP_ZLM_ONVIF_PORT'
+    ZLM_ICE            = 'UVP_ZLM_ICE_PORT'
+    ZLM_RTP_PROXY      = 'UVP_ZLM_RTP_PROXY_PORT'
 }
+$ZlmRtpRangeKey = 'UVP_ZLM_RTP_RANGE'
 
 function Read-EnvFileMap {
     param([string]$Path)
@@ -223,11 +240,19 @@ function Read-EnvFileMap {
     return $map
 }
 
-# Resolve-Port：环境变量 > config.env（**只认带 UVP_USER_SET_ 标记的**）> 默认值。
-# ⛔ 为什么必须看标记：老包写进去的旧默认值不能当成「用户设的」，
+# Resolve-Port：环境变量 > config.env（用户设过的）> 默认值。
+#
+# 「用户设过」的判据（任一成立）：
+#   ① `UVP_USER_SET_<KEY>=1` 标记 —— 历史机制，一旦写上就永久生效；
+#   ② 文件里的值 **≠** config\.port-baseline 里记的上次落盘值。
+#
+# ⛔ 为什么必须看标记/基线：老包写进去的旧默认值不能当成「用户设的」，
 #   否则升级包以后客户会莫名停在旧端口规划上（Linux 版为此踩过两次）。
+# ⭐ 2026-10-20 加 ②（与 Linux 版同一套）：客户改端口只需改值，
+#   不用再记"还要补一行 UVP_USER_SET_…=1"，漏写就静默失效并被覆盖。
+#   老包没有 .port-baseline ⇒ ② 恒不成立 ⇒ 升级语义与之前完全一致。
 function Resolve-Port {
-    param([string]$Name, [hashtable]$EnvMap, [ref]$UserSetKeys)
+    param([string]$Name, [hashtable]$EnvMap, [ref]$UserSetKeys, [hashtable]$Baseline)
     $envKey = $PortEnvKeys[$Name]
     $fromEnv = [Environment]::GetEnvironmentVariable($envKey)
     if ($fromEnv) {
@@ -238,24 +263,87 @@ function Resolve-Port {
         $UserSetKeys.Value += $envKey
         return [int]$EnvMap[$envKey]
     }
+    if ($Baseline -and $Baseline.ContainsKey($envKey) -and $EnvMap.ContainsKey($envKey) -and
+        $Baseline[$envKey] -ne $EnvMap[$envKey]) {
+        $UserSetKeys.Value += $envKey
+        return [int]$EnvMap[$envKey]
+    }
     return [int]$PortDefault[$Name]
+}
+
+function Resolve-RtpRange {
+    param([hashtable]$EnvMap, [ref]$UserSetKeys, [hashtable]$Baseline)
+    $fromEnv = [Environment]::GetEnvironmentVariable($ZlmRtpRangeKey)
+    if ($fromEnv) {
+        $UserSetKeys.Value += $ZlmRtpRangeKey
+        return $fromEnv
+    }
+    if ($EnvMap.ContainsKey('UVP_USER_SET_' + $ZlmRtpRangeKey) -and $EnvMap.ContainsKey($ZlmRtpRangeKey)) {
+        $UserSetKeys.Value += $ZlmRtpRangeKey
+        return $EnvMap[$ZlmRtpRangeKey]
+    }
+    if ($Baseline -and $Baseline.ContainsKey($ZlmRtpRangeKey) -and $EnvMap.ContainsKey($ZlmRtpRangeKey) -and
+        $Baseline[$ZlmRtpRangeKey] -ne $EnvMap[$ZlmRtpRangeKey]) {
+        $UserSetKeys.Value += $ZlmRtpRangeKey
+        return $EnvMap[$ZlmRtpRangeKey]
+    }
+    return $script:ZlmRtpRange
 }
 
 function Get-Config {
     $envMap = Read-EnvFileMap -Path $EnvFile
+    # 基线：上次落盘的端口值（uvp-setup ports-sync --baseline 写的）。
+    # ⛔ 不存在是**正常**的：老包升级上来第一次启动就是这种状态
+    #   ⇒ 判据 ② 不成立，全部按本包默认值走（正是"跟着新端口规划"的语义）。
+    $baseline = @{}
+    if (Test-Path -LiteralPath $BaselineFile) {
+        $baseline = Read-EnvFileMap -Path $BaselineFile
+    }
     $userSet = @()
     $ref = [ref]$userSet
     $ports = @{
-        HTTP          = Resolve-Port -Name 'HTTP'       -EnvMap $envMap -UserSetKeys $ref
-        REDIS         = Resolve-Port -Name 'REDIS'      -EnvMap $envMap -UserSetKeys $ref
-        HTTPS         = Resolve-Port -Name 'HTTPS'      -EnvMap $envMap -UserSetKeys $ref
-        NGINX_HTTP    = Resolve-Port -Name 'NGINX_HTTP' -EnvMap $envMap -UserSetKeys $ref
+        HTTP          = Resolve-Port -Name 'HTTP'       -EnvMap $envMap -UserSetKeys $ref -Baseline $baseline
+        REDIS         = Resolve-Port -Name 'REDIS'      -EnvMap $envMap -UserSetKeys $ref -Baseline $baseline
+        HTTPS         = Resolve-Port -Name 'HTTPS'      -EnvMap $envMap -UserSetKeys $ref -Baseline $baseline
+        NGINX_HTTP    = Resolve-Port -Name 'NGINX_HTTP' -EnvMap $envMap -UserSetKeys $ref -Baseline $baseline
     }
     foreach ($key in @('ZLM_HTTP','ZLM_SSL','ZLM_RTSP','ZLM_RTMP','ZLM_RTC','ZLM_SIGNALING',
                        'ZLM_SIGNALING_SSL','ZLM_SRT','ZLM_ONVIF','ZLM_ICE','ZLM_RTP_PROXY')) {
-        $envName = 'UVP_' + $key
-        $value = [Environment]::GetEnvironmentVariable($envName)
-        if ($value) { $ports[$key] = [int]$value } else { $ports[$key] = [int]$PortDefault[$key] }
+        $ports[$key] = Resolve-Port -Name $key -EnvMap $envMap -UserSetKeys $ref -Baseline $baseline
+    }
+    $script:ZlmRtpRange = Resolve-RtpRange -EnvMap $envMap -UserSetKeys $ref -Baseline $baseline
+    if ($script:ZlmRtpRange -notmatch '^\d+-\d+$') {
+        Fail "UVP_ZLM_RTP_RANGE 格式无效：$($script:ZlmRtpRange)（应形如 15514-15563）"
+    }
+    $rangeParts = ([string]$script:ZlmRtpRange).Split('-')
+    $rangeStart = [int]$rangeParts[0]
+    $rangeEnd = [int]$rangeParts[1]
+    if ($rangeStart -lt 1024 -or $rangeEnd -gt 65535 -or $rangeStart -gt $rangeEnd) {
+        Fail "UVP_ZLM_RTP_RANGE 超出合法范围：$($script:ZlmRtpRange)（要求 1024 ≤ 起点 ≤ 终点 ≤ 65535）"
+    }
+    # ⛔⛔ 段起点必须 = rtp_proxy 端口（客户最容易只改其中一个）。规则与 Linux 版
+    #   ctl.sh 的 resolve_rtp_pair **逐条一致**，不猜：
+    #     ① 两个都改过且不一致 ⇒ 失败（矛盾指令，替客户选哪个都是错的）
+    #     ② 只改段            ⇒ proxy 跟随段起点
+    #     ③ 只改 proxy        ⇒ 段以 proxy 为起点平移、保持原段长
+    $proxySet = (@($ref.Value) -contains $PortEnvKeys['ZLM_RTP_PROXY'])
+    $rangeSet = (@($ref.Value) -contains $ZlmRtpRangeKey)
+    if ($ports['ZLM_RTP_PROXY'] -ne $rangeStart) {
+        if ($proxySet -and $rangeSet) {
+            Fail "UVP_ZLM_RTP_PROXY_PORT=$($ports['ZLM_RTP_PROXY']) 与 UVP_ZLM_RTP_RANGE=$($script:ZlmRtpRange) 的起点冲突：两者必须同一个端口。"
+        }
+        if ($rangeSet) {
+            $ports['ZLM_RTP_PROXY'] = $rangeStart
+            Write-UvpLog "rtp_proxy 端口跟随 RTP 段起点：$rangeStart"
+        } else {
+            $len = $rangeEnd - $rangeStart + 1
+            $newEnd = [int]$ports['ZLM_RTP_PROXY'] + $len - 1
+            if ($newEnd -gt 65535) {
+                Fail "UVP_ZLM_RTP_PROXY_PORT=$($ports['ZLM_RTP_PROXY']) 配上原段长 $len 会越过 65535（段尾 $newEnd）。"
+            }
+            $script:ZlmRtpRange = "$($ports['ZLM_RTP_PROXY'])-$newEnd"
+            Write-UvpLog "RTP 段跟随 rtp_proxy 端口平移：$($script:ZlmRtpRange)"
+        }
     }
     # ⛔ 必须 `@(...)` 包一层：`Resolve-Port` 一次都没命中时 `$ref.Value` 可能仍是
     #   空数组（也可能被 `+=` 折成单个字符串），包一层后 `.Count` 才可靠。
@@ -802,6 +890,8 @@ function Invoke-PortsSync {
     $syncArgs = @(
         'ports-sync',
         '--env', $EnvFile, '--yml', $ConfFile, '--ini', $ZlmIni,
+        # ⭐ 基线必须落盘：它是"客户手改了哪个端口"的唯一依据（见 Resolve-Port）。
+        '--baseline', $BaselineFile,
         '--http', [string]$ports.HTTP, '--redis', [string]$ports.REDIS,
         '--https', [string]$ports.HTTPS, '--nginx-http', [string]$ports.NGINX_HTTP,
         '--zlm-http', [string]$ports.ZLM_HTTP, '--zlm-ssl', [string]$ports.ZLM_SSL,
@@ -874,6 +964,35 @@ function Invoke-NginxConfRender {
 }
 
 # ---------------------------------------------------------------- 阶段 3 ---- ----
+function Invoke-DeviceAccessAddress {
+    # 首启兜底生成「设备接入地址」两项（页面 → 国标服务配置 → 国标相关）：
+    #   ① qr_provision.base_url    —— 二维码里交给设备的地址
+    #   ② snapshot_upload.base_url —— 2022 抓拍时下发给设备的上传地址
+    #
+    # ⛔⛔ 必须在**客户机首启**生成，不能打包时写死：打包机探到的 IP 是出包机的地址，
+    #   写进包里发出去，客户机上那个地址永远指向一台不存在的主机
+    #   （2026-10-20 客户现场 http://192.168.10.220:51002 的残留就是这么来的）。
+    # ⛔⛔ --if-empty：现场改成公网地址后，重启绝不能被本机 IP 覆盖回去。
+    #   真被覆盖的症状极难查：抓拍「突然又不行了」、设备连的是旧地址、平台零报错。
+    # ⛔ 端口取 nginx 明文口而不是后端端口：Windows 版后端只绑 127.0.0.1，
+    #   设备**只能**通过 nginx 进来（Linux 版后端对外监听，故那边用后端端口）。
+    param([hashtable]$Ports)
+
+    if (-not (Test-Path -LiteralPath $ConfFile)) { return }
+    $ip = Get-LanIP
+    if ([string]::IsNullOrWhiteSpace($ip) -or $ip -eq '127.0.0.1') {
+        Write-UvpWarn '未识别到本机对外地址，跳过设备接入地址兜底（可在页面「国标服务配置」里手工填写）'
+        return
+    }
+    $url = 'http://{0}:{1}' -f $ip, $Ports.NGINX_HTTP
+    foreach ($section in @('qr_provision', 'snapshot_upload')) {
+        & $SetupExe config-set --yml $ConfFile --section $section --key base_url --value $url --if-empty
+        if ($LASTEXITCODE -ne 0) {
+            Write-UvpWarn ("设备接入地址兜底失败（{0}，uvp-setup 退出码 {1}）—— 可在页面手工填写" -f $section, $LASTEXITCODE)
+        }
+    }
+}
+
 function Start-Redis {
     param([hashtable]$Ports)
     $redisDataDir = Join-Path $DataDir 'redis'
@@ -1114,6 +1233,8 @@ function Invoke-Start {
     }
     Invoke-DatabaseInit
     Invoke-PortsSync -Config $config
+    # ⛔ 两个设备接入地址必须在端口同步之后生成：要用**最终**端口拼 URL。
+    Invoke-DeviceAccessAddress -Ports $config.Ports
     Invoke-NginxConfRender
     Invoke-TlsMaterial
 

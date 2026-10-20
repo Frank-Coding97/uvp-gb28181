@@ -57,11 +57,31 @@ REDIS_PORT="${UVP_REDIS_PORT:-51003}"
 # ⛔ 不在本文件另写一份字面量：端口默认值只在 uvp-gb28181-ctl.sh 里定义，
 #   这里现读，避免"改了 ctl.sh 却忘了改这里"的第二份真相。
 NGINX_HTTP_PORT_DEFAULT="$(sed -n 's/^NGINX_HTTP_PORT_DEFAULT=//p' "$DEPLOY_DIR/uvp-gb28181-ctl.sh" | tail -1)"
+NGINX_HTTPS_PORT_DEFAULT="$(sed -n 's/^NGINX_HTTPS_PORT_DEFAULT=//p' "$DEPLOY_DIR/uvp-gb28181-ctl.sh" | tail -1)"
 # ⚠️ 这里还不能调 fail()：它定义在下面（解析完参数之后）。就地报错并退出。
 if [ -z "$NGINX_HTTP_PORT_DEFAULT" ]; then
   printf 'ERROR: 读不到 nginx 明文端口（ctl.sh 的 NGINX_HTTP_PORT_DEFAULT 没定义？）\n' >&2
   exit 1
 fi
+if [ -z "$NGINX_HTTPS_PORT_DEFAULT" ]; then
+  printf 'ERROR: 读不到 nginx HTTPS 端口（ctl.sh 的 NGINX_HTTPS_PORT_DEFAULT 没定义？）\n' >&2
+  exit 1
+fi
+
+# ctl_port_default 从 uvp-gb28181-ctl.sh 里取某个端口的**兜底默认值**。
+#
+# ⛔ 只认 `VAR="${VAR:-<数字或段>}"` 这种形态（ctl.sh 里 ZLM 那 12 个键都是这么写的）。
+#   不复制字面量的理由与上面 nginx 端口完全相同：默认值只能有一个真源，
+#   否则出包时写进 config.env 的值会和运行期默认值悄悄分家 ——
+#   客户打开文件看到 51004，实际跑的却是别的端口。
+ctl_port_default() {
+  local var="$1" out
+  out="$(sed -n "s/^$var=\"[\$]{$var:-\([0-9][0-9-]*\)[}]\"/\1/p" "$DEPLOY_DIR/uvp-gb28181-ctl.sh" | tail -1)"
+  if [ -z "$out" ]; then
+    return 1
+  fi
+  printf '%s' "$out"
+}
 
 # ---- SIP 端口（引导页默认值，构建期注入到前端）----
 #
@@ -81,7 +101,10 @@ SIP_PORT="${UVP_SIP_PORT:-51064}"
 #   绿色包前端走 nginx 自签 HTTPS（SAN 只有 localhost/127.0.0.1），
 #   之前前端拿 window.location.origin 当默认值 ⇒ 二维码里带自签地址 ⇒
 #   手机侧 Ktor CIO 校验证书失败 ⇒ 失败被报成「连不上平台,请检查 Wi-Fi」。
-#   这个值会被写进 config.yml，现场可用 gb28181.qr_provision.base_url 改。
+#   ⭐ 默认**留空**：出包机的 IP 写进客户配置 = 一个永远连不上的地址
+#      （2026-10-20 客户现场 http://192.168.10.220:51002 的残留就是这么来的）。
+#      留空后由客户机首启 uvp-gb28181-ctl.sh 按本机地址生成，之后可在
+#      页面「国标服务配置 → 国标相关 → 设备接入地址」里改成公网地址。
 QR_PROVISION_HOST="${UVP_QR_PROVISION_HOST:-}"
 
 # ---- ZLM 的两个身份：secret 与节点标识（老板定的：都用固定值）----
@@ -690,6 +713,7 @@ $PY \
   --zlm-secret "$ZLM_SECRET" \
   --zlm-media-server-id "$ZLM_MEDIA_SERVER_ID" \
   --qr-provision-host "$QR_PROVISION_HOST" \
+  --snapshot-upload-base-url "${UVP_SNAPSHOT_UPLOAD_BASE_URL:-}" \
   --openapi-enabled "${UVP_OPENAPI_ENABLED:-true}" \
   --openapi-master-key-id "${UVP_OPENAPI_MASTER_KEY_ID:-uvp-openapi-k1}" \
   --upgrade-trusted-keys "${UVP_UPGRADE_TRUSTED_KEYS:-}"
@@ -723,11 +747,14 @@ print("✅ ZLM 身份配置已固定（secret %d 字符 / 节点标识 %d 字符
       % (len(want_secret), len(want_uuid)))
 ZLM_ID_CHECK_PY
 
-# ⛔ 出包前断言「扫码接入基址」真的写进去了。
-#   这一条的价值不在于「值对不对」，而在于**杜绝二维码指向错误地址**：
-#   地址不对时二维码照样出得来、扫得动，只是设备换不到接入信息，
-#   而失败现场在手机上，现场根本查不到是包的问题（2026-10-08 就是这样坏的）。
-log "校验扫码接入基址"
+# ⛔ 出包前断言「设备接入地址」两段的落点正确。
+#   这一条的价值不在于「值对不对」，而在于**杜绝二维码/抓拍回传指向错误地址**：
+#   地址不对时二维码照样出得来、扫得动，只是设备换不到接入信息或传不回图片，
+#   而失败现场在设备侧，现场根本查不到是包的问题（2026-10-08 / 10-20 都是这样坏的）。
+#
+# ⭐ 默认契约是**留空**：出包机的 IP 写进客户配置 = 一个永远连不上的地址。
+#   留空后由客户机首启 uvp-gb28181-ctl.sh 按本机地址生成，之后可在页面上改。
+log "校验设备接入地址"
 "$PY" - "$PKG/config/config.yml" "$HTTP_PORT" <<'QR_BASE_CHECK_PY'
 import re
 import sys
@@ -736,29 +763,42 @@ import yaml
 
 path, http_port = sys.argv[1:3]
 text = open(path, encoding="utf-8").read()
-qr = (yaml.safe_load(text) or {}).get("gb28181", {}).get("qr_provision", {})
+gb = (yaml.safe_load(text) or {}).get("gb28181", {})
 
 problems = []
-# ① 段只能出现一次 —— 重复键 YAML 不报错，只是后者静默覆盖前者，
-#   但文件里两份配置会让现场运维改错地方。
-hits = sum(1 for line in text.split("\n") if line.strip() == "qr_provision:")
-if hits != 1:
-    problems.append("qr_provision 段出现 %d 次（应为 1 次）" % hits)
-# ② 必须是非空基址，且指向后端明文端口
+
+def section_hits(name):
+    # 重复键 YAML 不报错，只是后者静默覆盖前者，
+    # 但文件里两份配置会让现场运维改错地方。
+    return sum(1 for line in text.split("\n") if line.strip() == name + ":")
+
+qr = gb.get("qr_provision", {})
+if section_hits("qr_provision") != 1:
+    problems.append("qr_provision 段出现 %d 次（应为 1 次）" % section_hits("qr_provision"))
 base_url = str(qr.get("base_url") or "")
-if not base_url:
-    problems.append("base_url 为空（没传 --qr-provision-host？）——"
-                    "后端会拒绝出码，扫码页面永远转圈")
-elif (":" + http_port) not in base_url:
-    problems.append("base_url=%r 未指向后端端口 %s" % (base_url, http_port))
-elif base_url.startswith("https://"):
-    # 不是必然错，但绿色包默认不该这样 —— nginx 是自签证书，设备侧必然验不过
-    print("   ⚠️ base_url 用了 https（" + base_url + "）——设备侧必须信任该证书才能扫通")
+if base_url:
+    if (":" + http_port) not in base_url:
+        problems.append("qr_provision.base_url=%r 未指向后端端口 %s" % (base_url, http_port))
+    if base_url.startswith("https://"):
+        # 不是必然错，但绿色包默认不该这样 —— nginx 是自签证书，设备侧必然验不过
+        print("   ⚠️ 扫码接入基址用了 https（" + base_url + "）——设备侧必须信任该证书才能扫通")
+else:
+    print("   扫码接入基址: 留空（首启按客户机本机地址生成，页面可改）")
+
+snap = gb.get("snapshot_upload", {})
+if section_hits("snapshot_upload") != 1:
+    problems.append("snapshot_upload 段出现 %d 次（应为 1 次）" % section_hits("snapshot_upload"))
+snap_url = str(snap.get("base_url") or "")
+if snap_url:
+    if not snap_url.startswith("http://"):
+        # ⛔⛔ 自签 HTTPS 是设备回传失败的头号原因，且失败在握手层、零日志。
+        problems.append("snapshot_upload.base_url=%r 必须是明文 http:// ——"
+                        "设备不认自签证书，https 会静默传不回来" % snap_url)
+else:
+    print("   抓拍回传基址: 留空（首启按客户机本机地址生成，页面可改）")
+
 if problems:
-    sys.exit("❌ 扫码接入基址未正确写进 config.yml：" + "；".join(problems)
-             + "。\n   出了这个包，页面能出二维码，但设备扫码后换不到接入信息，"
-               "而失败现场在手机上、看不出是包的问题。")
-print("✅ 扫码接入基址: " + base_url)
+    sys.exit("❌ 设备接入地址未正确写进 config.yml：" + "；".join(problems))
 QR_BASE_CHECK_PY
 
 log "复制启停脚本"
@@ -817,7 +857,75 @@ OPENAPI_MASTER_KEY="$("$PY" -c 'import secrets;print(secrets.token_urlsafe(32))'
 if [ -z "$OPENAPI_MASTER_KEY" ]; then
   fail "生成 OpenAPI 主密钥失败（python3 不可用？）"
 fi
+# ---- config.env 的「端口区」----
+#
+# ⭐ 2026-10-20（老板要求"所有端口都能改，尤其 ZLM 那些"）：把**全部 16 个端口**
+#   连同默认值直接写进 config.env，客户解包后打开这个文件就能改 ——
+#   不必先 start 一次，也不必去翻 PORTS.md 找键名。
+#
+# ⛔ 值一律**现读 ctl.sh**（见 ctl_port_default）：只要这里复制一份字面量，
+#   就会在某次改默认值后与运行期悄悄分家 —— 客户按文件里的值改完，
+#   实际跑的还是另一套端口，而页面上完全看不出来。
+# ⛔ 出包时仍可用同名环境变量临时覆盖（如 UVP_ZLM_HTTP_PORT=52004）。
+pkg_port_or_die() {
+  local env_key="$1" ctl_var="$2" val
+  val="$(printenv "$env_key" 2>/dev/null || true)"
+  if [ -z "$val" ]; then
+    val="$(ctl_port_default "$ctl_var")" || {
+      printf 'ERROR: 读不到 %s 的默认端口（ctl.sh 里找不到 %s="${%s:-<数字>}"？）\n' \
+        "$env_key" "$ctl_var" "$ctl_var" >&2
+      return 1
+    }
+  fi
+  printf '%s' "$val"
+}
+PORT_NGINX_HTTP="${UVP_NGINX_HTTP_PORT:-$NGINX_HTTP_PORT_DEFAULT}"
+PORT_HTTPS="${UVP_HTTPS_PORT:-$NGINX_HTTPS_PORT_DEFAULT}"
+PORT_BACKEND="$HTTP_PORT"
+PORT_REDIS="$REDIS_PORT"
+PORT_ZLM_HTTP="$(pkg_port_or_die UVP_ZLM_HTTP_PORT ZLM_HTTP_PORT)" || exit 1
+PORT_ZLM_SSL="$(pkg_port_or_die UVP_ZLM_SSL_PORT ZLM_SSL_PORT)" || exit 1
+PORT_ZLM_RTSP="$(pkg_port_or_die UVP_ZLM_RTSP_PORT ZLM_RTSP_PORT)" || exit 1
+PORT_ZLM_RTMP="$(pkg_port_or_die UVP_ZLM_RTMP_PORT ZLM_RTMP_PORT)" || exit 1
+PORT_ZLM_RTC="$(pkg_port_or_die UVP_ZLM_RTC_PORT ZLM_RTC_PORT)" || exit 1
+PORT_ZLM_SIGNALING="$(pkg_port_or_die UVP_ZLM_SIGNALING_PORT ZLM_SIGNALING_PORT)" || exit 1
+PORT_ZLM_SIGNALING_SSL="$(pkg_port_or_die UVP_ZLM_SIGNALING_SSL_PORT ZLM_SIGNALING_SSL_PORT)" || exit 1
+PORT_ZLM_SRT="$(pkg_port_or_die UVP_ZLM_SRT_PORT ZLM_SRT_PORT)" || exit 1
+PORT_ZLM_ONVIF="$(pkg_port_or_die UVP_ZLM_ONVIF_PORT ZLM_ONVIF_PORT)" || exit 1
+PORT_ZLM_ICE="$(pkg_port_or_die UVP_ZLM_ICE_PORT ZLM_ICE_PORT)" || exit 1
+PORT_ZLM_RTP_PROXY="$(pkg_port_or_die UVP_ZLM_RTP_PROXY_PORT ZLM_RTP_PROXY_PORT)" || exit 1
+PORT_ZLM_RTP_RANGE="$(pkg_port_or_die UVP_ZLM_RTP_RANGE ZLM_RTP_RANGE)" || exit 1
+
 {
+  printf '# [uvp-ports] ============================================================\n'
+  printf '# [uvp-ports] 端口（**全部可改**：改下面的值 → ./uvp-gb28181-ctl.sh restart）\n'
+  printf '# [uvp-ports]\n'
+  printf '# [uvp-ports] · 不用手写 UVP_USER_SET_ 标记：程序会对比上次落盘值，\n'
+  printf '# [uvp-ports]   发现你改过就自动记住，并在文件顶部补上标记行。\n'
+  printf '# [uvp-ports] · UVP_ZLM_RTP_RANGE 与 UVP_ZLM_RTP_PROXY_PORT 必须同一个起点；\n'
+  printf '# [uvp-ports]   只改其中一个，程序会按你改的那个自动拉齐另一个。\n'
+  printf '# [uvp-ports] · SIP 端口**不在本文件**（登录后引导页录入、存数据库），\n'
+  printf '# [uvp-ports]   默认值 = RTP 段尾 + 1；改了它，存量设备必须逐台改成同一端口。\n'
+  printf '# [uvp-ports] · 1024 以下是特权端口，本包以普通用户运行，绑不上。\n'
+  printf '# [uvp-ports] ============================================================\n'
+  printf '# [uvp-ports] ---- 管理页 / 后端 / Redis ----\n'
+  printf 'UVP_NGINX_HTTP_PORT=%s\n' "$PORT_NGINX_HTTP"
+  printf 'UVP_HTTPS_PORT=%s\n' "$PORT_HTTPS"
+  printf 'UVP_HTTP_PORT=%s\n' "$PORT_BACKEND"
+  printf 'UVP_REDIS_PORT=%s\n' "$PORT_REDIS"
+  printf '# [uvp-ports] ---- 流媒体（ZLMediaKit）----\n'
+  printf 'UVP_ZLM_HTTP_PORT=%s\n' "$PORT_ZLM_HTTP"
+  printf 'UVP_ZLM_SSL_PORT=%s\n' "$PORT_ZLM_SSL"
+  printf 'UVP_ZLM_RTSP_PORT=%s\n' "$PORT_ZLM_RTSP"
+  printf 'UVP_ZLM_RTMP_PORT=%s\n' "$PORT_ZLM_RTMP"
+  printf 'UVP_ZLM_RTC_PORT=%s\n' "$PORT_ZLM_RTC"
+  printf 'UVP_ZLM_RTP_PROXY_PORT=%s\n' "$PORT_ZLM_RTP_PROXY"
+  printf 'UVP_ZLM_RTP_RANGE=%s\n' "$PORT_ZLM_RTP_RANGE"
+  printf 'UVP_ZLM_SIGNALING_PORT=%s\n' "$PORT_ZLM_SIGNALING"
+  printf 'UVP_ZLM_SIGNALING_SSL_PORT=%s\n' "$PORT_ZLM_SIGNALING_SSL"
+  printf 'UVP_ZLM_SRT_PORT=%s\n' "$PORT_ZLM_SRT"
+  printf 'UVP_ZLM_ONVIF_PORT=%s\n' "$PORT_ZLM_ONVIF"
+  printf 'UVP_ZLM_ICE_PORT=%s\n' "$PORT_ZLM_ICE"
   printf '\n'
   printf '# ---- SIP 报文诊断加密密钥（打包时生成，每份包不同）----\n'
   printf '# 报文里的密码字段用它加密后落库。缺失或无效则**整条报文不落库**\n'

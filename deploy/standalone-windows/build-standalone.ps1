@@ -50,7 +50,8 @@ param(
     [string]$ToolchainDir = '',
     # Python 解释器（供 make-config.py 生成 config.yml 用）
     [string]$PythonExe = 'python',
-    # 扫码接入基址里「设备可达的地址」；留空则由 make-config.py 探测本机局域网 IP
+    # 扫码接入基址里「设备可达的地址」；⭐ 留空=出包留空，由客户机首启按本机地址生成
+    #   （出包机的 IP 写进客户配置 = 一个永远连不上的地址，2026-10-20 现场就是这坑）
     [string]$QrProvisionHost = '',
     # 跳过后端编译（产物新鲜度断言仍会执行）
     [switch]$SkipBuild,
@@ -558,7 +559,7 @@ if (-not [string]::IsNullOrWhiteSpace($env:UVP_UPGRADE_TRUSTED_KEYS)) {
     $mkArgs += @('--upgrade-trusted-keys', $env:UVP_UPGRADE_TRUSTED_KEYS)
 }
 Invoke-Native -FilePath $PythonExe -What '生成 config.yml（make-config.py）' -Arguments $mkArgs
-Ok 'config.yml 已生成（SQLite + 本机 Redis + ZLM 身份 + 扫码基址）'
+Ok 'config.yml 已生成（SQLite + 本机 Redis + ZLM 身份 + 设备接入地址留空待首启生成）'
 
 # ---- config\config.env：两个只走环境变量的密钥（每份包一份随机）----
 #
@@ -572,15 +573,71 @@ $openApiKey  = New-RandomBase64Url -ByteCount 32
 if (-not $sipTraceKey) { Fail '生成 SIP 报文诊断密钥失败' }
 if (-not $openApiKey)  { Fail '生成 OpenAPI 主密钥失败' }
 
+# ---- config.env 的「端口区」----
+#
+# ⭐ 2026-10-20（老板要求"所有端口都能改，尤其 ZLM 那些"）：把**全部 16 个端口**
+#   连同默认值直接写进 config.env，客户解包后打开就能改。
+# ⛔ 值一律从 uvp-gb28181-ctl.ps1 的 $PortDefault 现读，**不在这里抄字面量** ——
+#   抄一份就一定会分家：客户按文件里的值改完，实际跑的是另一套端口，页面上看不出来。
+$ctlText = Get-Content -LiteralPath (Join-Path $WinDir 'uvp-gb28181-ctl.ps1') -Raw -Encoding UTF8
+function Get-CtlPortDefault {
+    param([string]$Name)
+    $pattern = '(?m)^\s{4}' + [regex]::Escape($Name) + '\s+=\s+(\d+)\s'
+    $m = [regex]::Match($ctlText, $pattern)
+    if (-not $m.Success) {
+        Fail "读不到 $Name 的默认端口（ctl.ps1 的 `$PortDefault 表里没有？）"
+    }
+    return $m.Groups[1].Value
+}
+$rtpRangeMatch = [regex]::Match($ctlText, "(?m)^\`$ZlmRtpRange\s*=\s*'([0-9]+-[0-9]+)'")
+if (-not $rtpRangeMatch.Success) { Fail '读不到 RTP 端口段默认值（ctl.ps1 的 $ZlmRtpRange 没定义？）' }
+$pkgRtpRange = $rtpRangeMatch.Groups[1].Value
+
+$portLines = @(
+    '# [uvp-ports] ============================================================',
+    '# [uvp-ports] 端口（**全部可改**：改下面的值 → 停服后重新 start.cmd）',
+    '# [uvp-ports]',
+    '# [uvp-ports] · 不用手写 UVP_USER_SET_ 标记：程序会对比上次落盘值，',
+    '# [uvp-ports]   发现你改过就自动记住，并在文件顶部补上标记行。',
+    '# [uvp-ports] · UVP_ZLM_RTP_RANGE 与 UVP_ZLM_RTP_PROXY_PORT 必须同一个起点；',
+    '# [uvp-ports]   只改其中一个，程序会按你改的那个自动拉齐另一个。',
+    '# [uvp-ports] · SIP 端口**不在本文件**（登录后引导页录入、存数据库），',
+    '# [uvp-ports]   默认值 = RTP 段尾 + 1；改了它，存量设备必须逐台改成同一端口。',
+    '# [uvp-ports] · 1024 以下是特权端口，本包以普通用户运行，绑不上。',
+    '# [uvp-ports] · Windows 的动态端口范围（默认 49152-65535，可能被改）里禁止放端口，',
+    '# [uvp-ports]   用 netsh int ipv4 show excludedportrange protocol=tcp 可查。',
+    '# [uvp-ports] ============================================================',
+    '# [uvp-ports] ---- 管理页 / 后端 / Redis ----',
+    'UVP_NGINX_HTTP_PORT=' + (Get-CtlPortDefault 'NGINX_HTTP'),
+    'UVP_HTTPS_PORT=' + (Get-CtlPortDefault 'HTTPS'),
+    'UVP_HTTP_PORT=' + (Get-CtlPortDefault 'HTTP'),
+    'UVP_REDIS_PORT=' + (Get-CtlPortDefault 'REDIS'),
+    '# [uvp-ports] ---- 流媒体（ZLMediaKit）----',
+    'UVP_ZLM_HTTP_PORT=' + (Get-CtlPortDefault 'ZLM_HTTP'),
+    'UVP_ZLM_SSL_PORT=' + (Get-CtlPortDefault 'ZLM_SSL'),
+    'UVP_ZLM_RTSP_PORT=' + (Get-CtlPortDefault 'ZLM_RTSP'),
+    'UVP_ZLM_RTMP_PORT=' + (Get-CtlPortDefault 'ZLM_RTMP'),
+    'UVP_ZLM_RTC_PORT=' + (Get-CtlPortDefault 'ZLM_RTC'),
+    'UVP_ZLM_RTP_PROXY_PORT=' + (Get-CtlPortDefault 'ZLM_RTP_PROXY'),
+    'UVP_ZLM_RTP_RANGE=' + $pkgRtpRange,
+    'UVP_ZLM_SIGNALING_PORT=' + (Get-CtlPortDefault 'ZLM_SIGNALING'),
+    'UVP_ZLM_SIGNALING_SSL_PORT=' + (Get-CtlPortDefault 'ZLM_SIGNALING_SSL'),
+    'UVP_ZLM_SRT_PORT=' + (Get-CtlPortDefault 'ZLM_SRT'),
+    'UVP_ZLM_ONVIF_PORT=' + (Get-CtlPortDefault 'ZLM_ONVIF'),
+    'UVP_ZLM_ICE_PORT=' + (Get-CtlPortDefault 'ZLM_ICE'),
+    ''
+)
+
 $envBody = @(
     '# ============================================================',
     '# UVP-GB28181 环境变量（本文件由出包脚本生成）',
     '#',
     '# 后端进程启动时由 uvp-gb28181-ctl.ps1 读进环境变量再传给子进程。',
-    '# ⛔ 端口那 4 个键由 ctl 托管（会自动按 UVP_USER_SET_ 标记判断是不是用户改的），',
+    '# ⛔ 端口键（16 个）由 ctl 托管（标记 / 与 .port-baseline 比对判断是不是用户改的），',
     '#   其余键（含你自己加的行）一定会被原样保留 —— 放心往下加。',
     '# ============================================================',
-    '',
+    ''
+) + $portLines + @(
     '# ---- SIP 报文诊断加密密钥（打包时生成，每份包不同）----',
     '# 报文里的密码字段用它加密后落库。缺失或无效则**整条报文不落库**',
     '# （安全优先，但功能不可用，且 health 只报 invalid key、不提示怎么修）。',
@@ -589,13 +646,13 @@ $envBody = @(
     '',
     '# ---- OpenAPI 主密钥（打包时生成，每份包不同）----',
     '# 格式必须是 **32 字节的无填充 base64url**（后端用 Strict 解码，',
-    '# 标准 base64 的 + / = 会被直接拒 ⇒ 表现为 OpenAPI 客户端页 503）。',
+    '# 标准 base64 的 + / = 会直接被拒 ⇒ 表现为 OpenAPI 客户端页 503）。',
     '# ⚠️ 换主密钥后**已签发的客户端凭据全部失效**，需重新下发。',
     "UVP_OPENAPI_MASTER_KEY=$openApiKey",
     ''
 ) -join "`r`n"
 Write-Utf8NoBom -Path (Join-Path $Pkg 'config\config.env') -Text $envBody
-Ok 'config.env 已写入（SIP 报文诊断密钥 / OpenAPI 主密钥）'
+Ok 'config.env 已写入（16 个端口 + SIP 报文诊断密钥 + OpenAPI 主密钥）'
 
 # ---- 顶层脚本与说明 ----
 foreach ($f in @('uvp-gb28181-ctl.ps1', 'start.cmd', 'stop.cmd', 'status.cmd', 'reset-password.cmd')) {

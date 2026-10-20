@@ -144,6 +144,27 @@ _firewall_hint() {
   return 0
 }
 
+# port_range_bounds 输出「需要放行端口的最小值 最大值」。
+#
+# ⛔⛔ 为什么不能像以前那样「段首取两个 nginx 口的较小值、段尾取 RTP 段尾」：
+#   那是**基于默认规划段连续**的假设。客户把 nginx/后端改到 52000 段、ZLM 留在
+#   51000 段（或反过来）时，算出来就是 `52000-51064` 这种**倒挂区间**，
+#   提示和 `--dport 52000:51064` 全是错的，客户照着放行 ⇒ 媒体端口一个都没开。
+#   ⇒ 改成遍历全部对外端口的真实值取 min/max。端口不再连续时，范围里会带上
+#   中间没用到的端口（多放行几个不影响安全边界，总比漏掉媒体端口强）。
+port_range_bounds() {
+  local min=65535 max=0 p
+  for p in "$NGINX_HTTP_PORT" "$NGINX_HTTPS_PORT" "$HTTP_PORT" "$SIP_PORT" \
+           "$ZLM_HTTP_PORT" "$ZLM_SSL_PORT" "$ZLM_RTSP_PORT" "$ZLM_RTMP_PORT" \
+           "$ZLM_RTC_PORT" "$ZLM_SIGNALING_PORT" "$ZLM_SIGNALING_SSL_PORT" \
+           "$ZLM_SRT_PORT" "$ZLM_ONVIF_PORT" "$ZLM_ICE_PORT" \
+           "${ZLM_RTP_RANGE%-*}" "${ZLM_RTP_RANGE#*-}"; do
+    if [ "$p" -lt "$min" ]; then min="$p"; fi
+    if [ "$p" -gt "$max" ]; then max="$p"; fi
+  done
+  printf '%s %s' "$min" "$max"
+}
+
 # print_port_plan 打印**按用途分类**的端口规划 + 防火墙放行提示。
 #
 # ⛔ 之前端口信息散在三处（预检一行、ZLM ini 同步一坨"我改了哪 12 个键"、
@@ -151,26 +172,15 @@ _firewall_hint() {
 #   "现在开了哪些口、要不要在防火墙上放行"。⇒ 这里给一次**只读快照**，
 #   以"是否需要对局域网开放"分类，最后附放行命令。
 print_port_plan() {
-  local to="${ZLM_RTP_RANGE#*-}" fw="" fw_to=""
-  # 段起点取两个 nginx 端口的**较小值**，不写死、也不假设"HTTPS 一定是第一个"。
-  # ⛔ 2026-10-19 端口互换后就栽在这：原来直接拿 $NGINX_HTTPS_PORT 当起点，
-  #   于是提示变成「连续段 51001-51064」—— 默认入口 51000 反倒被排除在"规划段"之外，
-  #   客户照着放行就会漏掉自己正在用的那个端口。互换了顺序也照样对。
-  local fw_from="$NGINX_HTTP_PORT"
-  if [ "$NGINX_HTTPS_PORT" -lt "$fw_from" ]; then
-    fw_from="$NGINX_HTTPS_PORT"
-  fi
+  local fw="" fw_from fw_to bounds
+  bounds="$(port_range_bounds)"
+  fw_from="${bounds% *}"
+  fw_to="${bounds#* }"
   # 国标信令端口由**引导页**录入（存 gb_sip_config 表），本脚本无从得知；
-  # 这里按规划段末尾的预留位（51064）给出提示，放行命令也把它带上。
-  local sip_hint=51064
+  # 这里按规划段末尾的默认位（SIP_PORT = RTP 段尾 + 1）给提示，放行命令也带上。
+  local sip_hint="$SIP_PORT"
 
-  # ⛔ 段尾取 max(RTP 段尾, SIP 预留位)：SIP 默认 51064 正好在 RTP 段之后一个，
-  #   只放到 RTP 段尾会把 SIP 漏掉 —— 而 SIP 恰恰是**设备接入**能不能通的
-  #   关键。放行给**一整段**：规划段本来就是连续无空洞的，一条命令比逐条好记。
-  fw_to="$to"
-  if [ "$fw_to" -lt "$sip_hint" ]; then fw_to="$sip_hint"; fi
-
-  printf '%s[uvp-gb28181]%s 端口规划（连续段 %s-%s）\n' "$C_TAG" "$C_RST" "$fw_from" "$fw_to"
+  printf '%s[uvp-gb28181]%s 端口规划（放行范围 %s-%s）\n' "$C_TAG" "$C_RST" "$fw_from" "$fw_to"
   ok "需要对局域网开放"
   if [ "$NGINX_HTTPS_ENABLED" = "1" ]; then
     det "  · 管理页面   ${NGINX_HTTPS_PORT}/tcp（HTTPS） · ${NGINX_HTTP_PORT}/tcp（HTTP 自动跳转）"
@@ -286,8 +296,17 @@ UPDATER_UNIT_NAME="uvp-gb28181-updater.service"
 # 优先级：环境变量 > 包内 config.env > 默认值。
 # 首次运行把最终生效的端口写进 config.env，之后 start/stop/status 都以它为准 ——
 # 这样"改端口"只发生一次，不会出现"改了A 处忘了 B 处"。
-
+#
+# ⭐ 2026-10-20：**全部 16 个端口**（nginx/后端/Redis 4 个 + ZLM 12 个）都能在
+#   config.env 里改，规则统一 —— 直接改值即可，**不必**再手写 UVP_USER_SET_ 标记。
+#   程序靠下面的 .port-baseline 判断"这个值是不是用户改的"：
+#     · 基线里记着上次写进去的值；文件里的值 ≠ 基线 ⇒ 认定用户手改 ⇒ 采纳并补标记；
+#     · 老包没有基线文件 ⇒ 一律按本包默认值走（与"升级后跟随新端口规划"一致）。
+#   标记仍然保留作用：它一旦写上就永久生效（基线文件丢了也不会退回默认）。
 ENV_FILE="$ROOT/config/config.env"
+# 上次落盘的端口值（由 uvp-setup ports-sync 写）。⛔ 放在 config/ 而不是 data/：
+#   它描述的是"配置",与 config.env 同生命周期；备份 config/ 时一起带走正好。
+PORT_BASELINE_FILE="$ROOT/config/.port-baseline"
 
 # ------------------------------------------------ 旧布局迁移（升级兼容）----
 #
@@ -778,25 +797,49 @@ read_env_file() {
   sed -n "s/^$1=//p" "$ENV_FILE" 2>/dev/null | tail -1
 }
 
-# read_port_env 读**端口类**配置：只认带 UVP_USER_SET_ 标记的键。
+# port_baseline_get 读「上次落盘的值」；没有基线文件就返回空（= 无基线）。
+# ⛔ 基线只由 uvp-setup ports-sync 写，运维不该手改它。
+port_baseline_get() {
+  [ -f "$PORT_BASELINE_FILE" ] || return 0
+  sed -n "s/^$1=//p" "$PORT_BASELINE_FILE" 2>/dev/null | tail -1
+}
+
+# port_is_user_set 判断某个端口键是不是「用户显式设置过」的。判据任一成立即可：
+#   ① `UVP_USER_SET_<KEY>=1` 标记（历史上手写过，或程序自动补过）；
+#   ② 文件里的值 **≠** 上次落盘基线 ⇒ 说明两次启动之间有人改过它。
 #
-# ⛔⛔ 为什么端口要单独一套读法（这一轮踩了一整天才搞清）：
-#   普通键（如 ZLM 各段）config.env 里有就该用；但端口不行 ——
+# ⛔⛔ 为什么加 ②（2026-10-20，老板要"所有端口都能改，尤其 ZLM 那些"）：
+#   老实现只认 ① ⇒ 客户改一个端口要写**两行**（值 + 标记），漏写标记就静默失效，
+#   而且下次启动会被 ports-sync 用默认值**覆盖掉**（连痕迹都不留）。
+#   要求现场记住这个规则等于把坑留给客户 ⇒ 改成程序自己记基线、自动补标记。
+#
+# ⛔ ② 不会破坏"升级后跟随新端口规划"：老包根本没有基线文件，② 恒不成立，
+#   与既有语义逐字一致。升级上来的第一次启动仍按本包默认值走。
+port_is_user_set() {
+  local key="$1" val marker base
+  [ -f "$ENV_FILE" ] || return 1
+  val="$(sed -n "s/^$key=//p" "$ENV_FILE" 2>/dev/null | tail -1)"
+  [ -n "$val" ] || return 1
+  marker="$(sed -n "s/^UVP_USER_SET_$key=//p" "$ENV_FILE" 2>/dev/null | tail -1)"
+  if [ "$marker" = "1" ]; then
+    return 0
+  fi
+  base="$(port_baseline_get "$key")"
+  if [ -n "$base" ] && [ "$base" != "$val" ]; then
+    return 0
+  fi
+  return 1
+}
+
+# read_port_env 读端口类配置：**只有用户设置过的才采纳**（判据见 port_is_user_set）。
+#
+# ⛔⛔ 为什么端口不能像普通键那样"看到就用"（这一轮踩了一整天才搞清）：
 #   **老包写的 config.env 里全是旧默认值**（8280/6379/443/80）。
 #   若无条件读取，客户升级包后端口永远停在旧值上 ⇒ 包里代码是新的、
 #   配置是旧的，两者**静默共存**，而且没有任何提示。
-#
-#   而"这个值是用户设的还是默认值留下的"**无法从值本身判断**：
-#   我试过硬编码「上一版默认值」去比 —— 那玩意儿会随我改版本而漂移
-#   （改了默认值忘了改判据），而且调试残留值也会被误判成用户设置，
-#   两次都栽了。
-#   ⇒ 唯一可靠的做法：**写入时就把意图记下来**。老包没有标记，
-#   天然按新默认值处理，正好符合"跟着升级"的诉求。
 read_port_env() {
-  [ -f "$ENV_FILE" ] || return 0
-  if [ "$(sed -n "s/^UVP_USER_SET_$1=//p" "$ENV_FILE" 2>/dev/null | tail -1)" = "1" ]; then
-    sed -n "s/^$1=//p" "$ENV_FILE" 2>/dev/null | tail -1
-  fi
+  port_is_user_set "$1" || return 0
+  sed -n "s/^$1=//p" "$ENV_FILE" 2>/dev/null | tail -1
 }
 
 HTTP_PORT="${UVP_HTTP_PORT:-$(read_port_env UVP_HTTP_PORT)}"
@@ -855,44 +898,105 @@ ZLM_NATIVE_LOG_DIR="$LOGS/zlm"
 #   而真实原因是端口没写进配置文件。⚠️ 实测踩过这个（设了 18081 仍起不来）。
 #   ⇒ sync_zlm_ports_ini() 负责写进去。
 ZLM_INI="$ZLM_DIR/config.ini"
-ZLM_HTTP_PORT="${UVP_ZLM_HTTP_PORT:-$(read_env_file UVP_ZLM_HTTP_PORT)}"
+ZLM_HTTP_PORT="${UVP_ZLM_HTTP_PORT:-$(read_port_env UVP_ZLM_HTTP_PORT)}"
 # ⛔ 默认值一律选**高位端口**，不用 ZLM 自带的 80/443/554。
 #   1024 以下需要 CAP_NET_BIND_SERVICE，非 root 起不来（实测：
 #   「Listen on :: 554 failed: permission denied」）。
 #   绿色包的运行用户就是普通用户，所以默认值必须避开特权区。
 ZLM_HTTP_PORT="${ZLM_HTTP_PORT:-51004}"
-ZLM_SSL_PORT="${UVP_ZLM_SSL_PORT:-$(read_env_file UVP_ZLM_SSL_PORT)}"
+ZLM_SSL_PORT="${UVP_ZLM_SSL_PORT:-$(read_port_env UVP_ZLM_SSL_PORT)}"
 ZLM_SSL_PORT="${ZLM_SSL_PORT:-51007}"
-ZLM_RTSP_PORT="${UVP_ZLM_RTSP_PORT:-$(read_env_file UVP_ZLM_RTSP_PORT)}"
+ZLM_RTSP_PORT="${UVP_ZLM_RTSP_PORT:-$(read_port_env UVP_ZLM_RTSP_PORT)}"
 ZLM_RTSP_PORT="${ZLM_RTSP_PORT:-51005}"
 # 其余对外段也统一到规划段（PORTS.md）
-ZLM_RTMP_PORT="${UVP_ZLM_RTMP_PORT:-$(read_env_file UVP_ZLM_RTMP_PORT)}"
+ZLM_RTMP_PORT="${UVP_ZLM_RTMP_PORT:-$(read_port_env UVP_ZLM_RTMP_PORT)}"
 ZLM_RTMP_PORT="${ZLM_RTMP_PORT:-51006}"
-ZLM_RTC_PORT="${UVP_ZLM_RTC_PORT:-$(read_env_file UVP_ZLM_RTC_PORT)}"
+ZLM_RTC_PORT="${UVP_ZLM_RTC_PORT:-$(read_port_env UVP_ZLM_RTC_PORT)}"
 ZLM_RTC_PORT="${ZLM_RTC_PORT:-51008}"
-# ⛔ rtp_proxy 端口必须 = RTP 动态段的起点（同一个值，改一个必须改另一个）
-ZLM_RTP_PROXY_PORT="${UVP_ZLM_RTP_PROXY_PORT:-$(read_env_file UVP_ZLM_RTP_PROXY_PORT)}"
+# ⛔ rtp_proxy 端口必须 = RTP 动态段的起点（同一个值）。两者的一致性在下面
+#   RANGE 定义之后统一处理（客户最容易只改其中一个）。
+ZLM_RTP_PROXY_PORT="${UVP_ZLM_RTP_PROXY_PORT:-$(read_port_env UVP_ZLM_RTP_PROXY_PORT)}"
 ZLM_RTP_PROXY_PORT="${ZLM_RTP_PROXY_PORT:-51014}"
 # ⛔⛔ RTP 动态端口段必须改！ZLM 默认是 49152-65535，那是 Linux 的
 #   **临时端口范围**（客户端出站 connect 随机占用它）⇒ 两者抢端口，
 #   表现为「偶发 bind 失败 / 偶发推流失败」，重启就好、复现极难。
-# ⭐ 段长 = 默认 50 个（UDP+TCP 成对占用 ⇒ 50 路并发收流）；不够时改这个键放大，
-#   但**注意别越过 51063**（51064 是 SIP 预留位，见 PORTS.md）。
-ZLM_RTP_RANGE="${UVP_ZLM_RTP_RANGE:-$(read_env_file UVP_ZLM_RTP_RANGE)}"
+# ⭐ 段长 = 默认 50 个（UDP+TCP 成对占用 ⇒ 50 路并发收流）；不够时改这个键放大。
+# ⚠️ 段尾之后紧邻的是 SIP 的默认位（SIP_PORT_DEFAULT = 段尾 + 1），
+#   改段时**不要**让段尾越过 `UVP_SIP_PORT`（若你显式设过 SIP 端口）。
+ZLM_RTP_RANGE="${UVP_ZLM_RTP_RANGE:-$(read_port_env UVP_ZLM_RTP_RANGE)}"
 ZLM_RTP_RANGE="${ZLM_RTP_RANGE:-51014-51063}"
 # WebRTC 信令（键名不是 port，按"段名+port"匹配抓不到，实测漏掉导致 ZLM 起不来）
-ZLM_SIGNALING_PORT="${UVP_ZLM_SIGNALING_PORT:-$(read_env_file UVP_ZLM_SIGNALING_PORT)}"
+ZLM_SIGNALING_PORT="${UVP_ZLM_SIGNALING_PORT:-$(read_port_env UVP_ZLM_SIGNALING_PORT)}"
 ZLM_SIGNALING_PORT="${ZLM_SIGNALING_PORT:-51009}"
-ZLM_SIGNALING_SSL_PORT="${UVP_ZLM_SIGNALING_SSL_PORT:-$(read_env_file UVP_ZLM_SIGNALING_SSL_PORT)}"
+ZLM_SIGNALING_SSL_PORT="${UVP_ZLM_SIGNALING_SSL_PORT:-$(read_port_env UVP_ZLM_SIGNALING_SSL_PORT)}"
 ZLM_SIGNALING_SSL_PORT="${ZLM_SIGNALING_SSL_PORT:-51010}"
 # SRT / onvif：容器默认 9000/3702 在目标机上极易被占，一并挪进规划段
-ZLM_SRT_PORT="${UVP_ZLM_SRT_PORT:-$(read_env_file UVP_ZLM_SRT_PORT)}"
+ZLM_SRT_PORT="${UVP_ZLM_SRT_PORT:-$(read_port_env UVP_ZLM_SRT_PORT)}"
 ZLM_SRT_PORT="${ZLM_SRT_PORT:-51011}"
-ZLM_ONVIF_PORT="${UVP_ZLM_ONVIF_PORT:-$(read_env_file UVP_ZLM_ONVIF_PORT)}"
+ZLM_ONVIF_PORT="${UVP_ZLM_ONVIF_PORT:-$(read_port_env UVP_ZLM_ONVIF_PORT)}"
 ZLM_ONVIF_PORT="${ZLM_ONVIF_PORT:-51012}"
 # STUN/TURN（icePort / iceTcpPort）：容器默认 3478，UDP 上极易与其它服务冲突
-ZLM_ICE_PORT="${UVP_ZLM_ICE_PORT:-$(read_env_file UVP_ZLM_ICE_PORT)}"
+ZLM_ICE_PORT="${UVP_ZLM_ICE_PORT:-$(read_port_env UVP_ZLM_ICE_PORT)}"
 ZLM_ICE_PORT="${ZLM_ICE_PORT:-51013}"
+
+# resolve_rtp_pair 把 rtp_proxy 端口与 RTP 动态段对齐。
+#
+# ⛔⛔ 客户最容易踩的错法：改了 `UVP_ZLM_RTP_RANGE` 忘了改
+#   `UVP_ZLM_RTP_PROXY_PORT`（或反过来）。两者脱节**不会**让 ZLM 起不来，
+#   后果是"平台按段算容量、ZLM 按 proxy 端口收流"⇒ 推流偶发失败、查不出原因。
+#   ⇒ 规则按"谁被显式改过"决定，绝不猜：
+#     ① 两个都改过且不一致 ⇒ 直接失败（矛盾指令，替客户选哪个都是错的）
+#     ② 只改段            ⇒ proxy 跟随段起点
+#     ③ 只改 proxy        ⇒ 段以 proxy 为起点、**保持原段长**平移
+#     ④ 都没改            ⇒ 默认值本来就一致，零动作
+resolve_rtp_pair() {
+  local proxy_set=0 range_set=0 from to len
+  if port_is_user_set UVP_ZLM_RTP_PROXY_PORT; then proxy_set=1; fi
+  if port_is_user_set UVP_ZLM_RTP_RANGE; then range_set=1; fi
+
+  case "$ZLM_RTP_RANGE" in
+    *-*) ;;
+    *) fail "UVP_ZLM_RTP_RANGE 格式无效：${ZLM_RTP_RANGE}（应形如 51014-51063）" ;;
+  esac
+  from="${ZLM_RTP_RANGE%-*}"
+  to="${ZLM_RTP_RANGE#*-}"
+  case "${from}${to}" in
+    ''|*[!0-9]*) fail "UVP_ZLM_RTP_RANGE 必须是纯数字范围：${ZLM_RTP_RANGE}" ;;
+  esac
+  if [ "$from" -lt 1024 ] || [ "$to" -gt 65535 ] || [ "$from" -gt "$to" ]; then
+    fail "UVP_ZLM_RTP_RANGE 超出合法范围：${ZLM_RTP_RANGE}（要求 1024 ≤ 起点 ≤ 终点 ≤ 65535）
+      ⛔ 1024 以下是特权端口：本包以普通用户运行，绑不上（会报 permission denied）。"
+  fi
+  len=$(( to - from + 1 ))
+
+  if [ "$proxy_set" = "1" ] && [ "$range_set" = "1" ]; then
+    if [ "$ZLM_RTP_PROXY_PORT" != "$from" ]; then
+      fail "UVP_ZLM_RTP_PROXY_PORT=${ZLM_RTP_PROXY_PORT} 与 UVP_ZLM_RTP_RANGE=${ZLM_RTP_RANGE} 的起点冲突。
+      两者必须是同一个端口（proxy 端口就是段内第一个）。请把其中一个改掉，或删掉其中一行用默认值推导。"
+    fi
+  elif [ "$range_set" = "1" ]; then
+    ZLM_RTP_PROXY_PORT="$from"
+    log "rtp_proxy 端口跟随 RTP 段起点：${ZLM_RTP_PROXY_PORT}"
+  elif [ "$proxy_set" = "1" ]; then
+    local new_to=$(( ZLM_RTP_PROXY_PORT + len - 1 ))
+    if [ "$new_to" -gt 65535 ]; then
+      fail "UVP_ZLM_RTP_PROXY_PORT=${ZLM_RTP_PROXY_PORT} 配上原段长 ${len} 会越过 65535（段尾 ${new_to}）。请缩短段或降低起点。"
+    fi
+    ZLM_RTP_RANGE="${ZLM_RTP_PROXY_PORT}-${new_to}"
+    log "RTP 段跟随 rtp_proxy 端口平移：${ZLM_RTP_RANGE}"
+  fi
+}
+resolve_rtp_pair
+
+# SIP 的**默认位** = RTP 段尾 + 1（紧跟规划段，不占额外空洞）。
+# ⛔ 2026-10-20 起由段尾派生，不再写死 51064：客户把整段平移到 52000 段时，
+#   SIP 提示位自动变成 52064，防火墙放行命令才不会漏掉它。
+#   ⚠️ 这只是**默认值/提示值**：SIP 端口的真值在 gb_sip_config 表里，由引导页录入。
+if [ -z "${UVP_SIP_PORT:-}" ]; then
+  SIP_PORT_DEFAULT=$(( ${ZLM_RTP_RANGE#*-} + 1 ))
+  SIP_PORT="$SIP_PORT_DEFAULT"
+fi
+
 # ⛔⛔ TURN 一律**关掉**（`[rtc] enableTurn=0`，老板 2026-10-10 定）。
 #   不是"用不到"，而是**根本没接上**：平台的 ICE 下发只有 STUN 一条路 ——
 #   `app/gb28181/talk/ice.go` 的 BuildICEServers() 只构造 `"stun:" + endpoint`
@@ -1024,7 +1128,12 @@ check_ports_free() {
     log "端口预检：已跳过（本机没有 ss，见上面那条提示）"
     return 0
   fi
-  ok "端口预检通过（${NGINX_HTTPS_PORT}-${ZLM_RTP_RANGE#*-} 无冲突）"
+  # ⛔ 区间必须按**实际生效的 min/max**算（见 port_range_bounds）：
+  #   以前写 `${NGINX_HTTPS_PORT}-${ZLM_RTP_RANGE尾}`，客户只把 nginx 改高之后
+  #   就成了「52001-51063」这种倒挂区间，报出来的范围毫无意义。
+  local _bounds _min _max
+  _bounds="$(port_range_bounds)"; _min="${_bounds% *}"; _max="${_bounds#* }"
+  ok "端口预检通过（${_min}-${_max} 无冲突）"
 }
 
 # has_ss 探测本机有没有 ss（由 iproute2 提供）。
@@ -2131,6 +2240,23 @@ ensure_database() {
 }
 
 
+# _warn_legacy_zlm_port 在升级后首次启动时，告知"旧版生效值 ≠ 本包默认值"。
+#
+# ⛔ 只**提示**、不自动采纳：采纳旧值就等于把旧端口规划钉死（老实例升级后
+#   永远跟不上新规划）。但也不能一声不响地把客户改过的端口改回去 ——
+#   所以把"要保留就贴回这一行"原样打出来。
+# ⛔ 判据用 read_env_file（无条件读）而不是 read_port_env：
+#   这里要知道的正是"文件里写了什么"，与它算不算用户设置无关。
+_warn_legacy_zlm_port() {
+  local key="$1" effective="$2" current=""
+  current="$(read_env_file "$key")"
+  if [ -z "$current" ]; then return 0; fi
+  if [ "$current" = "$effective" ]; then return 0; fi
+  log "⚠️  ${key}=${current} 是旧版的生效值，本版按端口规划改用 ${effective}"
+  det "     要保留 ${current}：在 config/config.env 里写 ${key}=${current}，再 start 一次"
+}
+
+
 sync_ports_into_config() {
   # 把生效端口写回 config.env（持久化）、config.yml（后端读）、config.ini（ZLM 真源）。
   #
@@ -2149,18 +2275,45 @@ sync_ports_into_config() {
     REDIS_PORT="${yml_redis:-$REDIS_PORT}"
   fi
 
+  # ---- 升级兼容：老版里手工改过的 ZLM 端口 ----
+  # ⛔ 旧版对 ZLM 端口是「看到值就用」（不看标记），本版改成与主端口同一套判据
+  #   （标记 / 与基线不同）。而老实例**没有基线文件** ⇒ 首启会按本包默认值走，
+  #   客户在旧版里手工改过的媒体端口就"悄悄变回去了"。
+  #   ⇒ 不静默：只在基线不存在时逐个比一次，不同就明确告知怎么改回来。
+  if [ ! -f "$PORT_BASELINE_FILE" ]; then
+    _warn_legacy_zlm_port UVP_ZLM_HTTP_PORT     "$ZLM_HTTP_PORT"
+    _warn_legacy_zlm_port UVP_ZLM_SSL_PORT      "$ZLM_SSL_PORT"
+    _warn_legacy_zlm_port UVP_ZLM_RTSP_PORT     "$ZLM_RTSP_PORT"
+    _warn_legacy_zlm_port UVP_ZLM_RTMP_PORT     "$ZLM_RTMP_PORT"
+    _warn_legacy_zlm_port UVP_ZLM_RTC_PORT      "$ZLM_RTC_PORT"
+    _warn_legacy_zlm_port UVP_ZLM_RTP_PROXY_PORT "$ZLM_RTP_PROXY_PORT"
+    _warn_legacy_zlm_port UVP_ZLM_RTP_RANGE     "$ZLM_RTP_RANGE"
+    _warn_legacy_zlm_port UVP_ZLM_SIGNALING_PORT "$ZLM_SIGNALING_PORT"
+    _warn_legacy_zlm_port UVP_ZLM_SIGNALING_SSL_PORT "$ZLM_SIGNALING_SSL_PORT"
+    _warn_legacy_zlm_port UVP_ZLM_SRT_PORT      "$ZLM_SRT_PORT"
+    _warn_legacy_zlm_port UVP_ZLM_ONVIF_PORT    "$ZLM_ONVIF_PORT"
+    _warn_legacy_zlm_port UVP_ZLM_ICE_PORT      "$ZLM_ICE_PORT"
+  fi
+
   # ⛔ 只有「用户显式设过的」端口才写 UVP_USER_SET_ 标记：不带标记的老包值一律按
   #   新默认值处理，这正好与"升级后跟着新端口规划走"的诉求一致。
-  #   判据 = 环境变量显式传入，或文件里已经有标记（用户手工改过）。
+  #   判据 = 环境变量显式传入，或 port_is_user_set 认定用户改过（标记 / ≠ 基线）。
+  # ⭐ 2026-10-20：候选键**不再只有 4 个主端口**，ZLM 的 12 个键一并纳入 ——
+  #   否则客户改过的媒体端口在换包时会被新默认值顶掉，而他改主端口却能保住。
   local user_set="" port_key
-  for port_key in UVP_HTTP_PORT UVP_REDIS_PORT UVP_HTTPS_PORT UVP_NGINX_HTTP_PORT; do
-    if [ -n "${!port_key:-}" ] || [ "$(read_env_file "UVP_USER_SET_$port_key")" = "1" ]; then
+  for port_key in UVP_HTTP_PORT UVP_REDIS_PORT UVP_HTTPS_PORT UVP_NGINX_HTTP_PORT \
+                  UVP_ZLM_HTTP_PORT UVP_ZLM_SSL_PORT UVP_ZLM_RTSP_PORT UVP_ZLM_RTMP_PORT \
+                  UVP_ZLM_RTC_PORT UVP_ZLM_RTP_PROXY_PORT UVP_ZLM_RTP_RANGE \
+                  UVP_ZLM_SIGNALING_PORT UVP_ZLM_SIGNALING_SSL_PORT \
+                  UVP_ZLM_SRT_PORT UVP_ZLM_ONVIF_PORT UVP_ZLM_ICE_PORT; do
+    if [ -n "${!port_key:-}" ] || port_is_user_set "$port_key"; then
       user_set="${user_set:+$user_set,}$port_key"
     fi
   done
 
   local -a args=(ports-sync
     --env "$ENV_FILE" --yml "$CONF"
+    --baseline "$PORT_BASELINE_FILE"
     --http "$HTTP_PORT" --redis "$REDIS_PORT"
     --https "$NGINX_HTTPS_PORT" --nginx-http "$NGINX_HTTP_PORT"
     --zlm-http "$ZLM_HTTP_PORT" --zlm-ssl "$ZLM_SSL_PORT"
@@ -2175,6 +2328,62 @@ sync_ports_into_config() {
   local rc=0
   "$SETUP_BIN" "${args[@]}" || rc=$?
   [ "$rc" -eq 0 ] || fail "端口同步失败（退出码 ${rc}）—— 三处配置必须同源，不能只改一半"
+}
+
+
+# ============================================ 设备接入地址首启兜底 ====
+#
+# 「设备接入地址」有两项（都在 页面 → 国标服务配置 → 国标相关）：
+#   ① 扫码配网地址 qr_provision.base_url —— 二维码里交给设备的地址
+#   ② 抓拍回传地址 snapshot_upload.base_url —— 2022 抓拍时下发给设备的上传地址
+#
+# ⛔⛔ 为什么必须在**客户机上首启**生成，而不是打包时写死：
+#   打包机上探到的 IP 是**出包机**的地址。写进包里发出去，客户机上那个地址
+#   永远指向一台不存在的主机 —— 2026-10-20 客户现场就是
+#   `qr_provision.base_url: http://192.168.10.220:51002` 的残留，
+#   扫码配网必然失败，而现场看起来「配置都填好了」。
+#
+# ⛔⛔ 只填空值（config-set --if-empty）：现场把地址改成公网地址后，
+#   每次重启都不能被内网 IP 覆盖回去。真被覆盖的症状极难查：
+#   抓拍「突然又不行了」、设备连的是旧地址、平台日志零报错。
+#
+# ⛔ 端口各取各的源，不能统一：
+#   · 扫码地址 → 后端 HTTP 端口（设备直连后端拿 token/上传）
+#   · 抓拍回传 → nginx **明文**口（设备不认自签证书，必须明文；且过 nginx
+#     才有访问日志可查）。没有 nginx（源码模式）才退回后端端口。
+ensure_device_access_addresses() {
+  [ -f "$CONF" ] || return 0
+
+  local ip="" plain_port="$NGINX_HTTP_PORT" qr_url snapshot_url out rc
+  ip="$(detect_lan_ip)" || ip=""
+  if [ -z "$ip" ]; then
+    det "! 未识别到本机对外地址，跳过设备接入地址兜底"
+    det "  可在页面「国标服务配置 → 国标相关」里手工填写"
+    return 0
+  fi
+  [ -x "$NGINX_BIN" ] || plain_port="$HTTP_PORT"
+  qr_url="http://${ip}:${HTTP_PORT}"
+  snapshot_url="http://${ip}:${plain_port}"
+
+  rc=0
+  out="$("$SETUP_BIN" config-set --yml "$CONF" --section qr_provision --key base_url \
+        --value "$qr_url" --if-empty 2>&1)" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    det "扫码配网地址  ${qr_url}"
+  else
+    det "! 扫码配网地址兜底失败（${out}）"
+    det "  可在页面「国标服务配置 → 国标相关」里手工填写"
+  fi
+
+  rc=0
+  out="$("$SETUP_BIN" config-set --yml "$CONF" --section snapshot_upload --key base_url \
+        --value "$snapshot_url" --if-empty 2>&1)" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    det "抓拍回传地址  ${snapshot_url}"
+  else
+    det "! 抓拍回传地址兜底失败（${out}）"
+    det "  可在页面「国标服务配置 → 国标相关」里手工填写"
+  fi
 }
 
 
@@ -2269,6 +2478,9 @@ case "${1:-start}" in
     # ⛔ 端口必须先同步进 config.yml 再起服务：Redis 读 --port 参数、
     #   后端读 config.yml，两处不同源就是「Redis 起来了但后端连不上」。
     sync_ports_into_config
+    # ⛔ 两个设备接入地址必须在端口同步之后生成：它们要用**最终**端口拼 URL，
+    #   先算再用旧端口就是"地址能打开但不是这台机器在听"的经典静默失效。
+    ensure_device_access_addresses
     # ⛔⛔ ZLM secret 必须对齐，且必须在**后端启动之前**：
     #   不对齐时平台调 ZLM 全被拒（-100 Please login first），
     #   后端启动会「成功」但录像缓存/点播/录像查询/hook 全部装配失败，

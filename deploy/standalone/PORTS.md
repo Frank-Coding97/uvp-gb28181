@@ -14,8 +14,11 @@
 #        ⇒ 设备永远注册不上，而平台侧看不出任何错。
 #     ② 最初选的 15000 段被**深信服终端软件**占用（SangforPromoteService 监听
 #        127.0.0.1:15000，政企内网机常见）⇒ 整段再上移到 15500。
-#   ⛔ 两个平台的端口是**两份独立字面量**（各自在 build-standalone{.sh,.ps1} +
-#     uvp-gb28181-ctl.{sh,ps1} 里），改一边**不等于**改另一边。
+#   ⛔ **默认值**仍是两份（Linux 在 uvp-gb28181-ctl.sh、Windows 在 uvp-gb28181-ctl.ps1），
+#     改一边默认值不等于改另一边。
+#   ⭐ 但**改端口的方式两边完全一致**：都在各自包的 `config/config.env` 里改那 16 个键
+#     （2026-10-20 起 ZLM 的 12 个也支持，见文末「改端口的办法」）。
+#     出包时会从各自的 ctl 现读默认值写进 config.env，不会出现"文件里一套、跑的是另一套"。
 #
 # ==============================================================
 #
@@ -195,30 +198,66 @@
 # 💡 最小集 = ① + ② 两条就够（不用 SIP 注册时，把两条的末位截到 51063 即是原范围）。
 #
 # ==============================================================
-# 改端口的办法
+# 改端口的办法（2026-10-20 起：**全部 16 个端口都能改**）
 # ==============================================================
 #
-# 改 `config/config.env` 里的对应键（改动后 `./uvp-gb28181-ctl.sh start` 生效）：
+# 位置就一个：`config/config.env`。解压后打开它，**最上面就是「端口区」** ——
+# 出包时已把 16 个键连同当前默认值写进去了（`# [uvp-ports]` 开头那一段）。
 #
-#   UVP_NGINX_HTTP_PORT=51500       nginx 明文（**默认 51000**，默认入口）
-#   UVP_HTTPS_PORT=51501            nginx HTTPS（**默认 51001**，默认关闭）
-#   UVP_HTTP_PORT=51502             后端
-#   UVP_REDIS_PORT=51503            Redis
-#   UVP_ZLM_HTTP_PORT=51504         ZLM 各协议（键名见上表端口右侧说明）
-#   UVP_ZLM_RTP_RANGE=51514-51563   ZLM RTP 动态段（默认 50 个）
+# 改法两步：
+#   1) 改值；
+#   2) `./uvp-gb28181-ctl.sh restart`。
+#
+# ⭐ **不用**再手写 `UVP_USER_SET_<键>=1` 标记：程序每次启动都会把生效值记到
+#   `config/.port-baseline`，下次启动发现「文件里的值 ≠ 上次写进去的值」
+#   就认定是你改的，自动采纳并补上标记。
+#   （老包留下的标记仍然有效，不会被清掉；这只影响"要不要跟着新包默认值走"。）
+#
+# 键名与默认值：
+#
+#   UVP_NGINX_HTTP_PORT=51000        管理页明文入口（默认入口）
+#   UVP_HTTPS_PORT=51001             管理页 HTTPS（默认关闭，页面里开启后才监听）
+#   UVP_HTTP_PORT=51002              后端 API（扫码接入地址也用它）
+#   UVP_REDIS_PORT=51003             Redis（仅监听回环）
+#   UVP_ZLM_HTTP_PORT=51004          ZLM HTTP API
+#   UVP_ZLM_RTSP_PORT=51005          ZLM RTSP
+#   UVP_ZLM_RTMP_PORT=51006          ZLM RTMP
+#   UVP_ZLM_SSL_PORT=51007           ZLM HTTPS
+#   UVP_ZLM_RTC_PORT=51008           ZLM WebRTC 媒体（UDP `port` 与 TCP `tcpPort` 同号）
+#   UVP_ZLM_SIGNALING_PORT=51009     WebRTC 信令 WS
+#   UVP_ZLM_SIGNALING_SSL_PORT=51010 WebRTC 信令 WSS
+#   UVP_ZLM_SRT_PORT=51011           SRT
+#   UVP_ZLM_ONVIF_PORT=51012         ONVIF
+#   UVP_ZLM_ICE_PORT=51013           STUN/TURN
+#   UVP_ZLM_RTP_PROXY_PORT=51014     收流起点（必须 = RTP 段起点）
+#   UVP_ZLM_RTP_RANGE=51014-51063    RTP 动态段（UDP+TCP 成对占用）
+#
+# ⛔ 三条硬约束（程序会校验，不满足直接拒绝启动并说明原因）：
+#   ① RTP 段起点必须 = `UVP_ZLM_RTP_PROXY_PORT`。只改一个时，程序按
+#      「你改的那个」自动拉齐另一个；两个都改且互相矛盾 ⇒ 报错，不猜。
+#   ② 端口必须 ≥ 1024（本包以普通用户运行，特权端口绑不上）。
+#   ③ 起点 ≤ 终点 ≤ 65535。
 #
 # ⛔ 上面两个 nginx 端口**必须不同**：相同会让两个 listen 抢同一端口，nginx 起不来。
-#   改了 `UVP_HTTPS_PORT` 还要注意：data/https/settings.json 里落盘的端口优先 ——
+#   改了 `UVP_HTTPS_PORT` 还要注意：`data/https/settings.json` 里落盘的端口**优先** ——
 #   若你把它设成与明文端口相同，启动时会自动迁到本包默认的 51001（打一行日志）。
 #
-# ⛔ **SIP 例外：它不读 config.env**（见上「SIP 端口怎么定」）——
-#   改它在**引导页**里改（存 gb_sip_config 表）；改了要重启后端生效。
+# ⛔ **SIP 例外：它不读 config.env**（见下节「SIP 端口怎么定」）——
+#   改它在**引导页**里改（存 gb_sip_config 表）；改了要重启后端生效，
+#   而且存量设备必须逐台改成同一端口。
 #
-# ⛔ 只改 config.env 的值还不够：ZLM 的端口最终写进 `vendor/zlm/config.ini`，
-#   由启动脚本按同名环境变量同步 —— 键名必须对应，否则改不动。
-# ⛔ 改完先跑 `./uvp-gb28181-ctl.sh start`，它会**先做端口预检**再启动；
-#   端口冲突时会明确报出「哪个端口被谁占了」，按提示处理即可。
-# ⛔ 若把整段平移（如 51500 起），记得**保持连续**，并同步更新本文件。
+# ⭐ 其他组件不用你操心：ZLM 的端口由启动脚本同步写进 `vendor/zlm/config.ini`，
+#   后端的 `config.yml`（httpserver/redis/zlm.httpport/zlm.rtpport/media.hookport）
+#   也一并改 —— 这三处永远同源，不存在"只改了一半"。
+#
+# ⛔ 改完先跑 `./uvp-gb28181-ctl.sh start`：它会**先做端口预检**（逐个查占用）
+#   再启动。端口冲突时会明确报出「哪个端口、被谁占了」。
+#
+# ⭐ 收尾会打印「端口规划（放行范围 A-B）」和防火墙放行命令 —— 范围按**实际生效
+#   端口**的 min/max 算，端口被改成不连续时会把中间空洞一起包进去（多开几个而已，
+#   总比漏掉媒体端口强）。整段平移（如全部 +1000 到 52000 段）照上表逐个改即可，
+#   保持连续时一条防火墙规则就够了。
+
 
 # ==============================================================
 # SIP 端口怎么定（它和上面所有端口都不一样，单独说清）

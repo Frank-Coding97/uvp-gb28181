@@ -30,6 +30,35 @@ var managedEnvKeys = []string{
 	"UVP_ZLM_RTC_PORT", "UVP_ZLM_RTP_PROXY_PORT", "UVP_ZLM_RTP_RANGE",
 	"UVP_ZLM_SIGNALING_PORT", "UVP_ZLM_SIGNALING_SSL_PORT", "UVP_ZLM_SRT_PORT",
 	"UVP_ZLM_ONVIF_PORT", "UVP_ZLM_ICE_PORT",
+	// ⭐ 2026-10-20：ZLM 端口也支持「用户显式设置」标记。
+	//   之前只有 4 个主端口有标记，ZLM 的 12 个键是"看到值就用" —— 两套语义并存，
+	//   用户改一个 ZLM 端口在升级后会被新包默认值顶掉，而他改主端口却能保住。
+	//   现在两套合并成一套：任何端口键只要带标记（或与上次落盘值不同，见 ctl 侧
+	//   .port-baseline 判定）就是用户设置，升级后一律保留。
+	"UVP_USER_SET_UVP_ZLM_HTTP_PORT", "UVP_USER_SET_UVP_ZLM_SSL_PORT",
+	"UVP_USER_SET_UVP_ZLM_RTSP_PORT", "UVP_USER_SET_UVP_ZLM_RTMP_PORT",
+	"UVP_USER_SET_UVP_ZLM_RTC_PORT", "UVP_USER_SET_UVP_ZLM_RTP_PROXY_PORT",
+	"UVP_USER_SET_UVP_ZLM_RTP_RANGE", "UVP_USER_SET_UVP_ZLM_SIGNALING_PORT",
+	"UVP_USER_SET_UVP_ZLM_SIGNALING_SSL_PORT", "UVP_USER_SET_UVP_ZLM_SRT_PORT",
+	"UVP_USER_SET_UVP_ZLM_ONVIF_PORT", "UVP_USER_SET_UVP_ZLM_ICE_PORT",
+}
+
+// portHeaderPrefix 是 config.env 顶部「端口区」注释的前缀。
+//
+// ⛔ 幂等全靠它：这一块是程序自己写的，重写时必须先把自己上次写的那几行剔掉，
+// 否则每启动一次就多一份副本（注释行不属于"托管键"，会被当用户内容保留）。
+const portHeaderPrefix = "# [uvp-ports]"
+
+// markerKeys 是「允许出现 UVP_USER_SET_ 标记」的全部键，顺序与 writeEnvFile 的输出一致。
+//
+// ⛔ 必须与 ctl.sh 里 read_port_env/port_is_user_set 的候选键表**逐字对应**：
+// 少一个键，那一路的"用户改过"就在升级时丢掉（静默回到新默认值）。
+var markerKeys = []string{
+	"UVP_HTTP_PORT", "UVP_REDIS_PORT", "UVP_HTTPS_PORT", "UVP_NGINX_HTTP_PORT",
+	"UVP_ZLM_HTTP_PORT", "UVP_ZLM_SSL_PORT", "UVP_ZLM_RTSP_PORT", "UVP_ZLM_RTMP_PORT",
+	"UVP_ZLM_RTC_PORT", "UVP_ZLM_RTP_PROXY_PORT", "UVP_ZLM_RTP_RANGE",
+	"UVP_ZLM_SIGNALING_PORT", "UVP_ZLM_SIGNALING_SSL_PORT", "UVP_ZLM_SRT_PORT",
+	"UVP_ZLM_ONVIF_PORT", "UVP_ZLM_ICE_PORT",
 }
 
 type portSet struct {
@@ -97,6 +126,7 @@ func runPortsSync(args []string) error {
 	zRTP := fs.Int("zlm-rtp-proxy", 0, "ZLM RTP 端口段起点")
 	zRTPRange := fs.String("zlm-rtp-range", "", "ZLM RTP 端口段（如 51014-51063）")
 	zFFmpeg := fs.String("zlm-ffmpeg", "", "ZLM [ffmpeg] bin 的可执行文件路径（留空=不改；Windows 包传 ./ffmpeg.exe）")
+	baselinePath := fs.String("baseline", "", "上次落盘值记录文件（留空=不写）；ctl 用它判断用户是否手改过端口")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -131,6 +161,52 @@ func runPortsSync(args []string) error {
 			return err
 		}
 	}
+	// ⛔ 基线必须**最后**写：前面任何一步失败都不能留下"我已经写过这些端口"的记录，
+	//   否则下次启动会把这次没真正生效的值当成用户设置，永久钉死。
+	if *baselinePath != "" {
+		if err := writeBaselineFile(*baselinePath, ports); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// writeBaselineFile 记下「本次实际落盘的全部端口值」，供 ctl 下次判断用户是否手改过。
+//
+// ⛔⛔ 为什么需要它（这是"所有端口都能改"的关键一环）：
+//
+//	UVP_USER_SET_ 标记是唯一可靠的"这是用户意愿"证据，但它要求客户**手写两行**
+//	（一个值 + 一个标记）。改一个端口就要记两条，漏一条就静默失效、还会被下次
+//	启动覆盖回去。要求现场运维记住这个，等于把坑留给客户。
+//
+//	⇒ 反过来做：程序把自己上次写进去的值记在 config/.port-baseline 里。
+//	下次启动时「文件里的值 ≠ 基线里的值」即说明有人手改过 ⇒ 采纳并自动补标记
+//	（补完即使基线文件被删也不会退回默认值）。
+//
+//	老包没有这个文件 ⇒ 首启一律按新默认值走 ⇒ 与既有"升级后跟着新端口规划"
+//	的语义**完全一致**，不会让存量实例停在旧端口上。
+func writeBaselineFile(path string, ports portSet) error {
+	resolved, err := resolvePath(path)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(resolved), 0o755); err != nil {
+		return fmt.Errorf("创建基线目录失败: %w", err)
+	}
+	lines := []string{
+		"# 由 uvp-setup ports-sync 自动维护：记录上次落盘的端口值。",
+		"# ⛔ 不要手改本文件 —— 手工改端口请改 config.env，本文件只是用来判断「谁改过」。",
+	}
+	lines = append(lines, zlmEnvLines(ports.zlm)...)
+	// 主端口放最后无所谓，但顺序与 config.env 保持一致，肉眼对账最快。
+	lines = append(lines, fmt.Sprintf("UVP_HTTP_PORT=%d", ports.http))
+	lines = append(lines, fmt.Sprintf("UVP_REDIS_PORT=%d", ports.redis))
+	lines = append(lines, fmt.Sprintf("UVP_HTTPS_PORT=%d", ports.https))
+	lines = append(lines, fmt.Sprintf("UVP_NGINX_HTTP_PORT=%d", ports.nginxHTTP))
+	body := strings.Join(lines, "\n") + "\n"
+	if err := os.WriteFile(resolved, []byte(body), 0o644); err != nil {
+		return fmt.Errorf("写入端口基线失败: %w", err)
+	}
 	return nil
 }
 
@@ -154,6 +230,12 @@ func writeEnvFile(path string, ports portSet, markers map[string]bool) error {
 	if raw, err := os.ReadFile(resolved); err == nil {
 		eol = detectEOL(string(raw))
 		for _, line := range splitLines(string(raw), eol) {
+			// ⛔ 自己写的标题块必须跳过，否则**每次启动都会多一份**：
+			//   它以 `#` 开头 ⇒ 不属于"托管键行" ⇒ 会被当作用户内容保留，
+			//   再叠加新写的一份，几百次启动后文件就没法看了。
+			if strings.HasPrefix(line, portHeaderPrefix) {
+				continue
+			}
 			managed := false
 			for _, key := range managedEnvKeys {
 				if strings.HasPrefix(line, key+"=") {
@@ -170,7 +252,21 @@ func writeEnvFile(path string, ports portSet, markers map[string]bool) error {
 	//   保留空行就等于"每启动一次多一行"，几百次之后没人愿意再看它。
 	preserved = trimBlankEdges(preserved)
 
-	var out []string
+	out := []string{
+		portHeaderPrefix + " ============================================================",
+		portHeaderPrefix + " 端口（全部可改：改值 → ./uvp-gb28181-ctl.sh restart 生效）",
+		portHeaderPrefix + " ⛔ 不用手写 UVP_USER_SET_ 标记：程序会对比上次落盘值，",
+		portHeaderPrefix + "    发现你改过就自动记住（并在下次启动补上标记）。",
+		// ⛔ 这两行必须与打包时写进 config.env 的说明**同样存在**：
+		//   本函数每次启动都会重写整个说明区，少写一句就等于「客户重启一次，
+		//   那条最容易踩的规则就消失了」。而 RTP 段与 proxy 只改一个是最常见的改法。
+		portHeaderPrefix + " ⛔ UVP_ZLM_RTP_RANGE 与 UVP_ZLM_RTP_PROXY_PORT 必须同一起点；",
+		portHeaderPrefix + "    只改其中一个，程序会按你改的那个自动拉齐另一个。",
+		portHeaderPrefix + " ⛔ SIP 端口不在本文件（引导页 → 存数据库），默认 = RTP 段尾 + 1。",
+		portHeaderPrefix + " ⛔ 1024 以下是特权端口，本包以普通用户运行，绑不上。",
+		portHeaderPrefix + " ============================================================",
+	}
+	out = append(out, portHeaderPrefix+" ---- 管理页 / 后端 / Redis ----")
 	for _, key := range []string{"UVP_HTTP_PORT", "UVP_REDIS_PORT", "UVP_HTTPS_PORT", "UVP_NGINX_HTTP_PORT"} {
 		out = append(out, fmt.Sprintf("%s=%d", key, ports.managed()[key]))
 	}
@@ -181,7 +277,16 @@ func writeEnvFile(path string, ports portSet, markers map[string]bool) error {
 			out = append(out, "UVP_USER_SET_"+key+"=1")
 		}
 	}
+	out = append(out, portHeaderPrefix+" ---- 流媒体（ZLMediaKit）----")
 	out = append(out, zlmEnvLines(ports.zlm)...)
+	// ⭐ ZLM 段的标记紧跟在值之后（与主端口同一形态）：
+	//   用户改过一个媒体端口，升级后必须保住 —— 否则"我明明改过 SRT 端口"
+	//   会在下一次换包时静默回到默认值，而现场只会看到"推流又不行了"。
+	for _, key := range markerKeys[4:] {
+		if markers[key] {
+			out = append(out, "UVP_USER_SET_"+key+"=1")
+		}
+	}
 	if len(preserved) > 0 {
 		out = append(out, "")
 		out = append(out, preserved...)

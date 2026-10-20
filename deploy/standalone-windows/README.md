@@ -102,8 +102,9 @@ New-NetFirewallRule -DisplayName 'UVP-UDP' -Direction Inbound -Action Allow -Pro
 | 流媒体 RTP 段 | 15514-15563 | 51014-51063 |
 | SIP 信令 | 15564 | 51064 |
 
-**跨平台迁移（Linux → Windows 或反向）时**，把 `config\config.env` 里的 4 个端口
-改成目标平台那一列，再 `stop` → `start` 即可；SIP 端口在**引导页**里改（不走 config.env）。
+**跨平台迁移（Linux → Windows 或反向）时**，把 `config\config.env` 端口区里的
+**16 个端口**都改成目标平台那一列（两列一一对应），再 `stop` → `start` 即可；
+SIP 端口在**引导页**里改（不走 config.env）。
 
 > 如果你想确认当前机器上哪些端口段被系统占着，管理员 CMD 执行：
 > `netsh int ipv4 show excludedportrange protocol=udp`（`tcp` 同理）。
@@ -111,19 +112,47 @@ New-NetFirewallRule -DisplayName 'UVP-UDP' -Direction Inbound -Action Allow -Pro
 
 ---
 
-## 四、改端口（可选）
+## 四、改端口（可选，**全部 16 个都能改**）
 
-只有 4 个端口允许自定义，其余端口由它们派生。编辑 `config\config.env`：
+打开 `config\config.env`，**最上面就是「端口区」**（`# [uvp-ports]` 开头那一段）——
+出包时已把 16 个端口连同当前默认值写好，直接改数字即可：
 
 ```ini
 UVP_NGINX_HTTP_PORT=15500
 UVP_HTTPS_PORT=15501
 UVP_HTTP_PORT=15502
 UVP_REDIS_PORT=15503
+UVP_ZLM_HTTP_PORT=15504
+UVP_ZLM_SSL_PORT=15507
+UVP_ZLM_RTSP_PORT=15505
+UVP_ZLM_RTMP_PORT=15506
+UVP_ZLM_RTC_PORT=15508
+UVP_ZLM_RTP_PROXY_PORT=15514
+UVP_ZLM_RTP_RANGE=15514-15563
+UVP_ZLM_SIGNALING_PORT=15509
+UVP_ZLM_SIGNALING_SSL_PORT=15510
+UVP_ZLM_SRT_PORT=15511
+UVP_ZLM_ONVIF_PORT=15512
+UVP_ZLM_ICE_PORT=15513
 ```
 
-> **必须**同时加一行 `UVP_USER_SET_UVP_HTTPS_PORT=1` 之类的标记，否则会被当成
-> "老包里的旧默认值"在下次启动时改回去。改完执行 `stop.cmd` → `start.cmd`。
+改完执行 `stop.cmd` → `start.cmd`，就这些。
+
+> ⭐ **不用**再手写 `UVP_USER_SET_…=1` 标记。程序每次启动把生效值记在
+> `config\.port-baseline`，下次发现文件里的值跟它不一样，就认定是你改的，
+> 自动采纳并补上标记。老包留下的标记仍然有效。
+>
+> ⛔ `UVP_ZLM_RTP_RANGE` 与 `UVP_ZLM_RTP_PROXY_PORT` 必须同一个起点：
+> 只改一个时程序会按你改的那个自动拉齐另一个；两个都改且互相矛盾 ⇒ **拒绝启动**并说明原因。
+>
+> ⛔ **不要**把端口放进 Windows 的保留/排除段（默认 49152-65535，可能被改）：
+> 那里 bind 会直接返回"拒绝访问"。查法见第三节末尾的 `netsh` 命令。
+>
+> ⛔ **SIP 端口不在这个文件里**：登录后在引导页里设置（存数据库），
+> 默认值 = RTP 段尾 + 1。改了它，存量设备必须逐台改成同一端口。
+>
+> ⛔ 改了端口后，`start` 会重新打印「访问地址」和防火墙命令 —— 按新打印的来，
+> `New-NetFirewallRule` 建过的旧规则请一并删除。
 
 `config.env` 里**其他内容请勿删除** —— 里面有 SIP 报文诊断密钥和 OpenAPI 主密钥，
 缺了对应功能会静默不可用（页面能打开，但相关菜单永远是空的）。

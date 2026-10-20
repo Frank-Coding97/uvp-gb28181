@@ -7,7 +7,8 @@
 //   - Linux 版的自签证书原来用 openssl CLI 生成；Windows 自带没有 openssl。
 //
 // ⇒ 2026-10-19 起两个平台**都**只调这个二进制：Linux 侧的 python/openssl 依赖
-//   已全部删除（证书改为随包内置），目标机不再需要任何解释器。
+//
+//	已全部删除（证书改为随包内置），目标机不再需要任何解释器。
 //
 // 子命令：
 //
@@ -54,6 +55,8 @@ func main() {
 		err = runHTTPSRepairPort(os.Args[2:])
 	case "config-get":
 		err = runConfigGet(os.Args[2:])
+	case "config-set":
+		err = runConfigSet(os.Args[2:])
 	case "reset-admin":
 		err = runResetAdmin(os.Args[2:])
 	case "-h", "--help", "help":
@@ -85,6 +88,8 @@ func usage() {
 		"  uvp-setup https-repair-port --root <包根> --conflict <旧端口> --fallback <新端口>",
 		"      # 端口重排后修存量 settings.json：只在落盘端口 == conflict 时改成 fallback",
 		"  uvp-setup config-get --yml <config.yml> --section S --key K   # 读段落内标量（可嵌套）",
+		"  uvp-setup config-set --yml <config.yml> --section S --key K --value V [--if-empty]",
+		"      # 改段落内一个标量（逐字保留其余内容）；--if-empty = 只在当前为空时才写（首启兜底）",
 		"  uvp-setup https-render --root <包根>   # 应用页面保存的 HTTPS 配置",
 		"  uvp-setup reset-admin [--root <包根>] [--db <uvp.db>] [--config <config.yml>] [--username admin]",
 		"      [--password <明文>] [--no-force-change] [--no-unlock]",
