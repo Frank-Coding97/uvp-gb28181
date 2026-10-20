@@ -1299,4 +1299,65 @@ describe("service upgrade page", () => {
     expect(vm.taskHint({ phase: "awaiting_confirmation", policy_version: 3 })).toContain("维护窗口");
     wrapper.unmount();
   });
+
+  // 事件流水手动与自动共用一条管道（手动导入也写 downloaded / import_succeeded），
+  // 旧实现把面板叫「自动升级事件」并直出 import_succeeded 英文 key，语义误导。
+  it("升级事件区分手动与自动来源，并为离线导入使用正确文案", async () => {
+    const manual = { ...status() };
+    manual.events = [
+      { event: "import_succeeded", task_id: "manual-task", build_id: "b1", at: "2026-10-20T06:00:00Z" },
+      { event: "downloaded", task_id: "manual-task", build_id: "b1", at: "2026-10-20T06:01:00Z" },
+      { event: "succeeded", task_id: "manual-task", build_id: "b1", at: "2026-10-20T06:02:00Z" },
+      { event: "downloaded", task_id: "auto-task", policy_version: 7, build_id: "b2", at: "2026-10-20T07:00:00Z" },
+      { event: "blocked", task_id: "auto-task", policy_version: 7, reason: "维护窗口未到", at: "2026-10-20T07:01:00Z" },
+      { event: "recovery_required", task_id: "manual-task", build_id: "b1", at: "2026-10-20T07:02:00Z" }
+    ] as any;
+    api.getStatus.mockResolvedValue({ code: 0, data: manual });
+    const wrapper = mountPage();
+    await flushPromises();
+    const text = wrapper.text();
+    expect(text).toContain("升级事件");
+    expect(text).toContain("含手动与自动升级");
+    expect(text).not.toContain("自动升级事件");
+    // 英文事件名不能直接暴露给用户
+    ["import_succeeded", "downloaded", "recovery_required"].forEach(key => expect(text).not.toContain(key));
+    expect(text).toContain("导入校验通过");
+    expect(text).toContain("离线包就绪"); // 手动导入：不是"下载"
+    expect(text).toContain("下载完成"); // 自动下载
+    expect(text).toContain("已阻断");
+    expect(text).toContain("需要恢复处理");
+    // 来源标记按 policy_version 判
+    const scopes = wrapper.findAll(".event-scope").map(node => node.text());
+    expect(scopes).toEqual(["手动", "手动", "手动", "自动", "自动", "手动"]);
+    wrapper.unmount();
+  });
+
+  it("升级事件标签与配色覆盖全部后端事件名", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    const vm = wrapper.vm as any;
+    const cases: Array<[string, string]> = [
+      ["blocked", "已阻断"],
+      ["succeeded", "升级成功"],
+      ["failed", "升级失败"],
+      ["rolled_back", "已恢复旧版本"],
+      ["import_succeeded", "导入校验通过"],
+      ["import_failed", "导入失败"],
+      ["recovery_required", "需要恢复处理"],
+      ["cleanup_failed", "清理失败"],
+      ["auto_approved_by_policy", "自动批准"],
+      ["auto_started", "自动开始升级"]
+    ];
+    cases.forEach(([event, label]) => expect(vm.eventLabel({ event })).toBe(label));
+    expect(vm.eventLabel({ event: "downloaded", policy_version: 3 })).toBe("下载完成");
+    expect(vm.eventLabel({ event: "downloaded" })).toBe("离线包就绪");
+    expect(vm.eventLabel({ event: "brand_new_event" })).toBe("未知事件（brand_new_event）");
+    expect(vm.eventColor({ event: "succeeded" })).toBe("green");
+    ["failed", "import_failed", "cleanup_failed", "recovery_required"].forEach(event =>
+      expect(vm.eventColor({ event })).toBe("red")
+    );
+    expect(vm.eventColor({ event: "blocked" })).toBe("orange");
+    expect(vm.eventColor({ event: "downloaded" })).toBe("blue");
+    wrapper.unmount();
+  });
 });

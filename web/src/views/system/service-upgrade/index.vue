@@ -265,13 +265,12 @@
         </a-card>
         <details class="upgrade-events">
           <summary>
-            自动升级事件 <span>{{ status?.events?.length || 0 }} 条</span>
+            升级事件 <span>含手动与自动升级 · 共 {{ status?.events?.length || 0 }} 条</span>
           </summary>
-          <p v-if="!status?.events?.length" class="upgrade-caption">暂无自动升级事件</p>
+          <p v-if="!status?.events?.length" class="upgrade-caption">暂无升级事件</p>
           <div v-for="(event, index) in status?.events || []" :key="index" class="event-row">
-            <a-tag :color="event.event === 'blocked' ? 'orange' : event.event === 'succeeded' ? 'green' : 'blue'">{{
-              eventLabel(event.event)
-            }}</a-tag
+            <a-tag :color="eventColor(event)">{{ eventLabel(event) }}</a-tag
+            ><span class="event-scope">{{ event.policy_version ? "自动" : "手动" }}</span
             ><span>{{ event.reason || event.build_id || event.release_id || "" }}</span
             ><time>{{ formatTime(event.at) }}</time>
           </div>
@@ -475,6 +474,7 @@ import {
   getServiceUpgradePolicy,
   getServiceUpgradeMigrationPlan,
   rollbackServiceUpgradeTask,
+  type UpgradeEvent,
   type UpgradeImportArtifact,
   type UpgradeMigrationPlan,
   type UpgradeImportJob,
@@ -550,16 +550,31 @@ const formatTime = (value?: string) => {
         hourCycle: "h23"
       }).format(date);
 };
-const eventLabel = (value: string) =>
-  (
-    ({
-      blocked: "已阻断",
-      succeeded: "升级成功",
-      downloaded: "下载完成",
-      failed: "升级失败",
-      rolled_back: "已恢复旧版本"
-    }) as Record<string, string>
-  )[value] || value;
+// 事件流水同时记录手动升级与自动升级（同一个任务管道），文案必须两种都能读通。
+const eventLabels: Record<string, string> = {
+  blocked: "已阻断",
+  succeeded: "升级成功",
+  failed: "升级失败",
+  rolled_back: "已恢复旧版本",
+  downloaded: "下载完成",
+  import_succeeded: "导入校验通过",
+  import_failed: "导入失败",
+  recovery_required: "需要恢复处理",
+  cleanup_failed: "清理失败",
+  auto_approved_by_policy: "自动批准",
+  auto_started: "自动开始升级"
+};
+const eventLabel = (event: UpgradeEvent) => {
+  // 离线导入与自动下载共用同一条准备管道，都写 downloaded；
+  // 手动升级是本地选包，语义应为「包已就绪」而不是「下载完成」。
+  if (event.event === "downloaded" && !event.policy_version) return "离线包就绪";
+  return eventLabels[event.event] || `未知事件（${event.event}）`;
+};
+const eventColor = (event: UpgradeEvent) => {
+  if (event.event === "succeeded") return "green";
+  if (["failed", "import_failed", "cleanup_failed", "recovery_required"].includes(event.event)) return "red";
+  return event.event === "blocked" ? "orange" : "blue";
+};
 const migrationBlocked = computed(() => !migrationPlan.value?.can_apply || Boolean(migrationError.value));
 const migrationBlockLabel = computed(() =>
   migrationPlan.value?.unknown?.length
@@ -1625,6 +1640,15 @@ onUnmounted(() => {
   span {
     min-width: 0;
     overflow-wrap: anywhere;
+  }
+  .event-scope {
+    flex: none;
+    padding: 0 6px;
+    font-size: 12px;
+    line-height: 20px;
+    color: var(--color-text-3);
+    border: 1px solid var(--color-border-2);
+    border-radius: 6px;
   }
   time {
     margin-left: auto;
