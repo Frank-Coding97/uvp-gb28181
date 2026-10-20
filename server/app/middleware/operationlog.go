@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
 	"strings"
 	"time"
 	"uvplatform.com/uvp-gb28181/app/global/app"
@@ -105,6 +106,15 @@ type responseWriter struct {
 	gin.ResponseWriter
 	body    *bytes.Buffer
 	context *gin.Context
+}
+
+// Unwrap exposes the wrapped writer to http.ResponseController. Without it the
+// middleware chain looks like a writer that cannot set connection deadlines,
+// so every later SetReadDeadline/SetWriteDeadline fails as ErrNotSupported:
+// long upgrade uploads were then aborted by the ordinary
+// httpserver.read_timeout instead of the extended upload deadline.
+func (w *responseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }
 
 func (w *responseWriter) Write(b []byte) (int, error) {

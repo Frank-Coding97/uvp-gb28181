@@ -4,8 +4,10 @@ import (
 	"context"
 	"net/http"
 	"time"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 // TimeoutMiddleware 超时中间件
@@ -53,6 +55,13 @@ func isRealtimeRequestPath(path string) bool {
 
 func setRequestIODeadline(writer http.ResponseWriter, deadline time.Time) {
 	controller := http.NewResponseController(writer)
-	_ = controller.SetReadDeadline(deadline)
-	_ = controller.SetWriteDeadline(deadline)
+	// ⛔ 不能静默吞错：中间件链上任何一层包装如果没转发 Unwrap，这里就是
+	// ErrNotSupported，读超时仍停留在 httpserver.read_timeout(30s)，慢速上传
+	// 会被掐断成一句看不出原因的 400。宁可留下一条告警。
+	if err := controller.SetReadDeadline(deadline); err != nil && app.ZapLog != nil {
+		app.ZapLog.Warn("升级包上传读超时延长失败", zap.String("event", "http.upgrade_upload_read_deadline_failed"), zap.Error(err))
+	}
+	if err := controller.SetWriteDeadline(deadline); err != nil && app.ZapLog != nil {
+		app.ZapLog.Warn("升级包上传写超时延长失败", zap.String("event", "http.upgrade_upload_write_deadline_failed"), zap.Error(err))
+	}
 }
