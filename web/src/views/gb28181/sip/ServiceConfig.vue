@@ -11,7 +11,8 @@ import {
   type FixedAddressPlaybackConfig,
   type PlayAuthConfig,
   type CascadeSettingsConfig,
-  type PlaybackSettingsConfig
+  type PlaybackSettingsConfig,
+  type DeviceAccessConfig
 } from "@/api/gb28181";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import SNumberField from "@/components/s-number-field/index.vue";
@@ -118,6 +119,10 @@ const savedIgnoreChannelOfflineStatusNotify = ref(false);
 const savedSIPLogEnabled = ref(false);
 const savedCloudRecordingRetentionDays = ref(7);
 const savedRecordCacheTailToleranceSec = ref(2);
+// 设备接入地址（扫码配网 / 抓拍回传）：必须是**设备能访问到**的地址，
+// 不是浏览器打开平台的地址。留空=未配置，是合法状态（后端有回退/拒绝策略）。
+const savedQRProvisionBaseURL = ref("");
+const savedSnapshotUploadBaseURL = ref("");
 const savedCascadeSettings = reactive(createCascadeSettingsDraft());
 const cascadeChanged = computed(() => JSON.stringify(draft.cascade) !== JSON.stringify(savedCascadeSettings));
 const cascadeErrors = computed(() => validateCascadeSettings(draft.cascade));
@@ -185,6 +190,22 @@ const cloudRecordingRetentionChanged = computed(
 const recordCacheTailToleranceChanged = computed(
   () => draft.recordCacheTailToleranceSec !== savedRecordCacheTailToleranceSec.value
 );
+
+// 设备接入地址：只做「明显的格式错」这一层拦截，真正的闸门在后端（复用
+// EffectiveBaseURL 的同一套规则）。前端多拦只会出现「页面过了后端拒」的两套口径。
+function isDeviceAccessURLInputValid(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  if (/\s/.test(trimmed)) return false;
+  return /^https?:\/\/[^/?#]+(?:[/?#]\S*)?$/i.test(trimmed);
+}
+const qrProvisionBaseURLValid = computed(() => isDeviceAccessURLInputValid(draft.qrProvisionBaseUrl));
+const snapshotUploadBaseURLValid = computed(() => isDeviceAccessURLInputValid(draft.snapshotUploadBaseUrl));
+const deviceAccessChanged = computed(
+  () =>
+    draft.qrProvisionBaseUrl.trim() !== savedQRProvisionBaseURL.value ||
+    draft.snapshotUploadBaseUrl.trim() !== savedSnapshotUploadBaseURL.value
+);
 const cloudRecordingRetentionValid = computed(
   () =>
     Number.isInteger(draft.cloudRecordingRetentionDays) &&
@@ -230,6 +251,7 @@ const hasChanges = computed(
     sipLogChanged.value ||
     cloudRecordingRetentionChanged.value ||
     recordCacheTailToleranceChanged.value ||
+    deviceAccessChanged.value ||
     cascadeChanged.value
 );
 const configSaving = computed(() => aggregateSaving.value);
@@ -249,6 +271,17 @@ function applyPlaybackSettings(settings: PlaybackSettingsConfig) {
   draft.playback.onDemandLive = settings.onDemandLive;
   draft.playback.cloudRecordingEnabled = settings.cloudRecordingEnabled;
   Object.assign(savedPlaybackSettings, settings);
+}
+
+// 回填并同步 saved 快照：老后端（未升级）返回里没有 deviceAccess，一律按"未配置"处理，
+// 不能因为字段缺失就把这两项当成脏数据（否则页面一进来就显示"有未保存修改"）。
+function applyDeviceAccessConfig(config?: DeviceAccessConfig) {
+  const qr = config?.qrProvisionBaseUrl ?? "";
+  const snapshot = config?.snapshotUploadBaseUrl ?? "";
+  draft.qrProvisionBaseUrl = qr;
+  draft.snapshotUploadBaseUrl = snapshot;
+  savedQRProvisionBaseURL.value = qr;
+  savedSnapshotUploadBaseURL.value = snapshot;
 }
 
 function applyCascadeSettings(settings?: CascadeSettingsConfig) {
@@ -313,6 +346,8 @@ function resetDraft() {
   draft.saveMobilePositionHistory = savedPositionHistoryEnabled.value;
   draft.positionHistoryRetentionDays = savedPositionHistoryRetentionDays.value;
   draft.recordCacheTailToleranceSec = savedRecordCacheTailToleranceSec.value;
+  draft.qrProvisionBaseUrl = savedQRProvisionBaseURL.value;
+  draft.snapshotUploadBaseUrl = savedSnapshotUploadBaseURL.value;
   draft.sdpExtension = savedSDPExtensionEnabled.value;
   draft.ptzSpeed = savedPTZDefaultSpeed.value;
   draft.defaultChannelStreamTransport = savedDefaultChannelStreamTransport.value;
@@ -368,6 +403,10 @@ async function saveConfig() {
   if (!hasChanges.value) {
     return;
   }
+  if (!qrProvisionBaseURLValid.value || !snapshotUploadBaseURLValid.value) {
+    Message.warning("设备接入地址需要以 http:// 或 https:// 开头，且不能包含空格");
+    return;
+  }
   aggregateSaving.value = true;
   try {
     const response = await updateServiceConfig({
@@ -404,6 +443,10 @@ async function saveConfig() {
         enabled: draft.sipLogEnabled,
         applied: sipLogApplied.value
       },
+      deviceAccess: {
+        qrProvisionBaseUrl: draft.qrProvisionBaseUrl.trim(),
+        snapshotUploadBaseUrl: draft.snapshotUploadBaseUrl.trim()
+      },
       cascade: { ...draft.cascade }
     });
     if (response.code !== 0) throw new Error(response.message || "保存配置失败");
@@ -430,6 +473,7 @@ async function saveConfig() {
     applyPlayAuthConfig(v.playAuth);
     draft.sipLogEnabled = v.sipLog.enabled;
     sipLogApplied.value = v.sipLog.applied ?? true;
+    applyDeviceAccessConfig(v.deviceAccess);
     savedPositionHistoryEnabled.value = v.positionHistory.enabled;
     savedPositionHistoryRetentionDays.value = v.positionHistory.retentionDays ?? 7;
     savedCloudRecordingRetentionDays.value = v.cloudRecordingRetention.retentionDays ?? 7;
@@ -518,6 +562,7 @@ async function loadServiceConfig() {
     savedIgnoreChannelOfflineStatusNotify.value = v.ignoreChannelOfflineStatusNotify.enabled;
     draft.sipLogEnabled = v.sipLog.enabled;
     sipLogApplied.value = v.sipLog.applied ?? true;
+    applyDeviceAccessConfig(v.deviceAccess);
     savedSIPLogEnabled.value = v.sipLog.enabled;
     applyPlaybackSettings(v.playbackSettings);
     applyFixedAddressPlaybackConfig(v.fixedAddressPlayback);
@@ -928,6 +973,39 @@ onMounted(async () => {
                   </a-checkbox-group>
                 </a-form-item>
               </a-col>
+              <a-col :span="24">
+                <div class="service-config-subtitle">设备接入地址</div>
+              </a-col>
+              <a-col :span="isMobile ? 24 : 12">
+                <a-form-item
+                  field="qrProvisionBaseUrl"
+                  label="扫码配网地址"
+                  tooltip="二维码里交给设备的平台地址，必须是设备能访问到的地址（内网填本机 IP，公网部署填公网地址）。留空表示未配置，出码会被拒绝并提示先配置此项。"
+                >
+                  <a-input
+                    v-model="draft.qrProvisionBaseUrl"
+                    placeholder="http://192.168.1.10:51010"
+                    allow-clear
+                    :error="!qrProvisionBaseURLValid"
+                    :disabled="!configReady"
+                  />
+                </a-form-item>
+              </a-col>
+              <a-col :span="isMobile ? 24 : 12">
+                <a-form-item
+                  field="snapshotUploadBaseUrl"
+                  label="抓拍回传地址"
+                  tooltip="2022 抓拍时下发给设备的上传地址。设备不认自签证书，HTTPS 自签部署请改用明文口（如 http://IP:51001）。留空表示未配置，将按操作员访问平台时的地址自动推导，仅设备与平台直连时可靠。"
+                >
+                  <a-input
+                    v-model="draft.snapshotUploadBaseUrl"
+                    placeholder="http://192.168.1.10:51001"
+                    allow-clear
+                    :error="!snapshotUploadBaseURLValid"
+                    :disabled="!configReady"
+                  />
+                </a-form-item>
+              </a-col>
             </a-row>
           </a-form>
         </a-card>
@@ -1120,6 +1198,14 @@ onMounted(async () => {
 <style lang="scss" scoped>
 .service-config-page {
   overflow-y: auto;
+}
+
+// 「设备接入地址」小节标题：只作视觉分组，不承担任何逻辑判据。
+.service-config-subtitle {
+  margin: 4px 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--uvp-text-2, #4e5969);
 }
 
 // 从 SIP 日志页跳来时的定位高亮（老板 2026-10-08）。

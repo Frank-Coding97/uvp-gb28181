@@ -16,7 +16,12 @@ describe("static service config draft", () => {
     expect(draft.defaultChannelAudioEnabled).toBe(true);
     expect(draft.cloudRecordingRetentionDays).toBe(7);
 
-    expect(staticServiceConfigLabels).toHaveLength(16);
+    expect(staticServiceConfigLabels).toHaveLength(18);
+    expect(staticServiceConfigLabels).toContain("扫码配网地址");
+    expect(staticServiceConfigLabels).toContain("抓拍回传地址");
+    // 两个设备接入地址默认留空 = 未配置（后端各有回退/拒绝策略），不是拿浏览器地址兜底。
+    expect(draft.qrProvisionBaseUrl).toBe("");
+    expect(draft.snapshotUploadBaseUrl).toBe("");
     expect(staticServiceConfigLabels).toContain("云端录像默认保留天数（天）");
     expect(staticServiceConfigLabels).toContain("新通道默认流传输模式");
     expect(staticServiceConfigLabels).toContain("全局订阅项目");

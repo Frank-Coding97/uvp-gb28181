@@ -345,6 +345,7 @@ fi
   --zlm-api-port "$ZLM_HTTP_PORT" \
   --hook-port "$BACKEND_PORT" \
   --qr-provision-host "$QR_HOST" \
+  --snapshot-upload-base-url "http://${QR_HOST}:${HTTP_PORT}" \
   --upgrade-trusted-keys "${UVP_UPGRADE_TRUSTED_KEYS:-}" || fail "config.yml 生成失败"
 chown_biz "${BUSINESS_UID}:${BUSINESS_GID}" "$ROOT/config/config.yml"
 chmod 0640 "$ROOT/config/config.yml"

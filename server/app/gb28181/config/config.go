@@ -45,6 +45,12 @@ const (
 	SIPTraceRetentionDaysConfigKey            = "gb28181.trace.retention_days"
 	RecordCacheTailToleranceSecConfigKey      = "gb28181.record_cache.tail_tolerance_sec"
 
+	// 设备接入地址：两个都必须"设备能访问到"，不是浏览器打开平台的地址。
+	// ⛔ 键名只在这两个常量里出现，读取（QRProvisionConfigFrom/SnapshotUploadConfigFrom）
+	// 与写入（服务配置聚合接口）都走它，免得两处键名写岔后静默失效。
+	QRProvisionBaseURLConfigKey    = "gb28181.qr_provision.base_url"
+	SnapshotUploadBaseURLConfigKey = "gb28181.snapshot_upload.base_url"
+
 	DefaultRecordQueryTimezone           = "Asia/Shanghai"
 	DefaultRecordQueryTimeoutSec         = 15
 	DefaultRecordQueryMaxRangeHours      = 24
@@ -579,7 +585,7 @@ func QRProvisionConfigFrom(c valueSource) QRProvisionConfig {
 		return QRProvisionConfig{}
 	}
 	return QRProvisionConfig{
-		BaseURL:    c.GetString("gb28181.qr_provision.base_url"),
+		BaseURL:    c.GetString(QRProvisionBaseURLConfigKey),
 		Host:       c.GetString("gb28181.qr_provision.host"),
 		Port:       c.GetInt("gb28181.qr_provision.port"),
 		RequireTLS: c.GetBool("gb28181.qr_provision.require_tls"),
@@ -714,7 +720,7 @@ func SnapshotUploadConfigFrom(c valueSource) SnapshotUploadConfig {
 		return SnapshotUploadConfig{}
 	}
 	return SnapshotUploadConfig{
-		BaseURL: c.GetString("gb28181.snapshot_upload.base_url"),
+		BaseURL: c.GetString(SnapshotUploadBaseURLConfigKey),
 	}
 }
 

@@ -205,6 +205,145 @@ func TestServiceConfigController_AggregateRollsBackWhenPlayAuthTTLApplyFails(t *
 	require.Equal(t, 120, config.values[gbconfig.PlayAuthTTLSecondsConfigKey])
 }
 
+// Device access 的两个基址是"设备能访问到"的地址，页面可配（2026-10-20 现场定案）。
+// 这组用例锁住三件事：①读写往返；②老前端整包 PUT（不带/带 null）不能把地址清空；
+// ③显式提交空串才算清空，且非法值当场拒绝不落盘。
+func TestServiceConfigController_DeviceAccessRoundTrip(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{
+		gbconfig.QRProvisionBaseURLConfigKey:    "http://10.0.0.68:51010",
+		gbconfig.SnapshotUploadBaseURLConfigKey: "http://10.0.0.68:51001",
+	}}
+	app.ConfigYml = config
+	router := newServiceConfigRouter(NewServiceConfigController())
+
+	get := httptest.NewRecorder()
+	router.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/service-config", nil))
+	require.Equal(t, http.StatusOK, get.Code, get.Body.String())
+	var loaded struct {
+		Data ServiceConfig `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(get.Body.Bytes(), &loaded))
+	require.Equal(t, "http://10.0.0.68:51010", loaded.Data.DeviceAccess.QRProvisionBaseURL)
+	require.Equal(t, "http://10.0.0.68:51001", loaded.Data.DeviceAccess.SnapshotUploadBaseURL)
+
+	loaded.Data.DeviceAccess.QRProvisionBaseURL = "  https://vms.example.com:51000/  "
+	loaded.Data.DeviceAccess.SnapshotUploadBaseURL = "http://112.25.55.6:51001"
+	put := httptest.NewRecorder()
+	router.ServeHTTP(put, httptest.NewRequest(http.MethodPut, "/service-config", jsonBody(t, loaded.Data)))
+	require.Equal(t, http.StatusOK, put.Code, put.Body.String())
+	// 入库形态与运行时读到的一致（去尾斜杠、scheme 小写），不是原始输入。
+	require.Equal(t, "https://vms.example.com:51000", config.values[gbconfig.QRProvisionBaseURLConfigKey])
+	require.Equal(t, "http://112.25.55.6:51001", config.values[gbconfig.SnapshotUploadBaseURLConfigKey])
+}
+
+func TestServiceConfigController_LegacyRequestPreservesDeviceAccess(t *testing.T) {
+	cases := []struct {
+		name    string
+		mutate  func(map[string]interface{})
+		qr      string
+		snapsho string
+	}{
+		{name: "整包不带 deviceAccess", mutate: func(payload map[string]interface{}) { delete(payload, "deviceAccess") }, qr: "http://10.0.0.68:51010", snapsho: "http://10.0.0.68:51001"},
+		{name: "deviceAccess 为 null", mutate: func(payload map[string]interface{}) { payload["deviceAccess"] = nil }, qr: "http://10.0.0.68:51010", snapsho: "http://10.0.0.68:51001"},
+		{
+			name: "只带一个字段",
+			mutate: func(payload map[string]interface{}) {
+				payload["deviceAccess"] = map[string]interface{}{"snapshotUploadBaseUrl": "http://112.25.55.6:51001"}
+			},
+			qr:      "http://10.0.0.68:51010",
+			snapsho: "http://112.25.55.6:51001",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			previous := app.ConfigYml
+			t.Cleanup(func() { app.ConfigYml = previous })
+			config := &serviceConfigTestYAML{values: map[string]interface{}{
+				gbconfig.QRProvisionBaseURLConfigKey:    "http://10.0.0.68:51010",
+				gbconfig.SnapshotUploadBaseURLConfigKey: "http://10.0.0.68:51001",
+			}}
+			app.ConfigYml = config
+			controller := NewServiceConfigController()
+			payload, err := json.Marshal(controller.currentServiceConfig())
+			require.NoError(t, err)
+			var legacy map[string]interface{}
+			require.NoError(t, json.Unmarshal(payload, &legacy))
+			tc.mutate(legacy)
+
+			recorder := httptest.NewRecorder()
+			newServiceConfigRouter(controller).ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/service-config", jsonBody(t, legacy)))
+			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+			require.Equal(t, tc.qr, config.values[gbconfig.QRProvisionBaseURLConfigKey])
+			require.Equal(t, tc.snapsho, config.values[gbconfig.SnapshotUploadBaseURLConfigKey])
+		})
+	}
+}
+
+func TestServiceConfigController_DeviceAccessExplicitEmptyClears(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{
+		gbconfig.QRProvisionBaseURLConfigKey:    "http://10.0.0.68:51010",
+		gbconfig.SnapshotUploadBaseURLConfigKey: "http://10.0.0.68:51001",
+	}}
+	app.ConfigYml = config
+	controller := NewServiceConfigController()
+	payload, err := json.Marshal(controller.currentServiceConfig())
+	require.NoError(t, err)
+	var body map[string]interface{}
+	require.NoError(t, json.Unmarshal(payload, &body))
+	body["deviceAccess"] = map[string]interface{}{"qrProvisionBaseUrl": "", "snapshotUploadBaseUrl": ""}
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(controller).ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/service-config", jsonBody(t, body)))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Empty(t, config.values[gbconfig.QRProvisionBaseURLConfigKey])
+	require.Empty(t, config.values[gbconfig.SnapshotUploadBaseURLConfigKey])
+}
+
+func TestServiceConfigController_RejectsUnreachableDeviceAccess(t *testing.T) {
+	cases := []struct {
+		name string
+		body map[string]interface{}
+		msg  string
+	}{
+		{name: "抓拍地址是回环", body: map[string]interface{}{"snapshotUploadBaseUrl": "http://127.0.0.1:51001"}, msg: "回环"},
+		{name: "抓拍地址是 localhost", body: map[string]interface{}{"snapshotUploadBaseUrl": "http://localhost:51001"}, msg: "localhost"},
+		{name: "扫码地址不是 URL", body: map[string]interface{}{"qrProvisionBaseUrl": "10.0.0.68:51010"}, msg: "扫码配网地址"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			previous := app.ConfigYml
+			t.Cleanup(func() { app.ConfigYml = previous })
+			config := &serviceConfigTestYAML{values: map[string]interface{}{
+				gbconfig.QRProvisionBaseURLConfigKey:    "http://10.0.0.68:51010",
+				gbconfig.SnapshotUploadBaseURLConfigKey: "http://10.0.0.68:51001",
+			}}
+			app.ConfigYml = config
+			controller := NewServiceConfigController()
+			payload, err := json.Marshal(controller.currentServiceConfig())
+			require.NoError(t, err)
+			var body map[string]interface{}
+			require.NoError(t, json.Unmarshal(payload, &body))
+			access, _ := body["deviceAccess"].(map[string]interface{})
+			require.NotNil(t, access)
+			for key, value := range tc.body {
+				access[key] = value
+			}
+
+			recorder := httptest.NewRecorder()
+			newServiceConfigRouter(controller).ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/service-config", jsonBody(t, body)))
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			require.Contains(t, recorder.Body.String(), tc.msg)
+			require.Zero(t, config.saveNum)
+			require.Equal(t, "http://10.0.0.68:51010", config.values[gbconfig.QRProvisionBaseURLConfigKey])
+			require.Equal(t, "http://10.0.0.68:51001", config.values[gbconfig.SnapshotUploadBaseURLConfigKey])
+		})
+	}
+}
+
 func jsonBody(t *testing.T, value interface{}) *bytes.Reader {
 	t.Helper()
 	payload, err := json.Marshal(value)
