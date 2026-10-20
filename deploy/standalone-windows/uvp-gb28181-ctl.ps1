@@ -80,7 +80,7 @@ $NginxPidFile   = Join-Path $RunDir 'nginx.pid'
 # ⛔ IND 必须等于标签宽度「[uvp-gb28181] 」= 14 格，三个平台（Linux/Windows/uvp-setup）共用这个宽度。
 $script:IND = '              '
 $script:UseColor = (-not [Console]::IsOutputRedirected) -and (-not $env:NO_COLOR)
-$C = @{ rst = ''; tag = ''; ok = ''; warn = ''; err = ''; dim = '' }
+$C = @{ rst = ''; tag = ''; ok = ''; warn = ''; err = ''; dim = ''; hl = '' }
 if ($script:UseColor) {
     $C.rst  = [char]27 + '[0m'
     $C.tag  = [char]27 + '[36m'
@@ -88,6 +88,7 @@ if ($script:UseColor) {
     $C.warn = [char]27 + '[33m'
     $C.err  = [char]27 + '[31m'
     $C.dim  = [char]27 + '[90m'
+    $C.hl   = [char]27 + '[1;32m'   # 收尾的访问地址：加粗亮绿（整个安装过程只此一处）
 }
 
 function Write-UvpLog  { param([string]$Message) Write-Host ("{0}[uvp-gb28181]{1} {2}" -f $C.tag, $C.rst, $Message) }
@@ -630,16 +631,30 @@ function Write-PortPlan {
 
 function Write-StartSummary {
     param([hashtable]$Ports, [string]$LanIP)
-    Write-Host ''
     $scheme = 'https'; $entryPort = $Ports.HTTPS
     if (-not $script:HttpsEnabled) { $scheme = 'http'; $entryPort = $Ports.NGINX_HTTP }
-    Write-UvpDet ("访问地址：{0}://{1}:{2}" -f $scheme, $LanIP, $entryPort)
+    # ⛔⛔ 这是整段安装输出**最后**一块，用户装完第一眼就找这个地址 ⇒ 用不封口的
+    #   横线框圈出来、地址行加粗（$C.hl）。不能只靠颜色：输出重定向成日志时
+    #   $script:UseColor 为假，那时只剩框线与空行，也得能看出"到这里就装完了"。
+    #   不画右边线：中文双宽，PowerShell 也算不出列宽，封口框换字体必歪。
+    $rule = '-' * 64
+    Write-Host ''
+    Write-UvpLog '启动完成'
+    Write-Host ''
+    Write-Host ("{0}{1}{2}" -f $C.tag, $rule, $C.rst)
+    Write-Host ("{0}{1}访问地址  {2}://{3}:{4}{5}" -f $C.hl, $script:IND, $scheme, $LanIP, $entryPort, $C.rst)
+    if ($LanIP -ne '127.0.0.1') {
+        Write-UvpDet ("本机访问  {0}://127.0.0.1:{1}" -f $scheme, $entryPort)
+    } else {
+        Write-UvpDet '提示      未识别到对外网卡，其它电脑请改用本机 IP 访问'
+    }
     $demo = Get-DemoCredential
     if ($demo.Password) {
-        Write-UvpDet ("首次登录：{0} / {1}（登录后请立即修改密码）" -f $demo.User, $demo.Password)
+        Write-UvpDet ("登录账号  {0} / {1}（登录后请立即修改）" -f $demo.User, $demo.Password)
     } else {
-        Write-UvpDet '首次登录：admin（口令见 config\config.yml 的 server.demoaccount.defaultpassword，登录后请立即修改密码）'
+        Write-UvpDet '登录账号  admin（口令见 config\config.yml 的 server.demoaccount.defaultpassword，登录后请立即修改）'
     }
+    Write-Host ("{0}{1}{2}" -f $C.tag, $rule, $C.rst)
 }
 
 # ---------------------------------------------------------------- 阶段 1 ---- ----
@@ -1084,9 +1099,10 @@ function Invoke-Start {
     Start-Redis -Ports $config.Ports
     Start-Backend -Ports $config.Ports
 
-    Write-StartSummary -Ports $config.Ports -LanIP (Get-LanIP)
+    # 收尾：先给**端口规划**（技术明细，客户要拿去开防火墙），
+    # 最后才是「启动完成 + 访问地址」—— 让地址停在屏幕最后、不被一堆端口号冲掉。
     Write-PortPlan -Ports $config.Ports
-    Write-Host ("{0}[uvp-gb28181]{1} 启动完成。" -f $C.ok, $C.rst)
+    Write-StartSummary -Ports $config.Ports -LanIP (Get-LanIP)
     Write-Host ''
 }
 

@@ -69,3 +69,53 @@ test('三个平台的标签字面量完全一致（不许某一边还留着旧�
     assert.doesNotMatch(src, /\[uvp\](?!-)/, `${name} 里还留着旧的 [uvp] 标签`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// 契约：启动收尾的**版式与顺序**。
+//
+// 顺序：端口规划（技术明细，要拿去开防火墙）在前，启动完成 + 访问地址在最后。
+//   理由：装完之后用户唯一想抄走的就是那个 URL，它必须停在屏幕最后一行，
+//   而不是被十几行端口明细冲到上面去。
+// 版式：访问地址单独用一个不封口的横线框圈起来并加粗 —— 且**颜色必须可关**，
+//   输出重定向成日志时只剩框线与空行，照样能看出"到这里就装完了"。
+// ---------------------------------------------------------------------------
+
+test('Linux：端口规划必须排在启动完成之前（地址留在屏幕最后）', () => {
+  const branch = ctlSh.slice(ctlSh.indexOf('case "${1:-start}" in'));
+  assert.ok(branch.length > 0, 'ctl.sh 里找不到 case "${1:-start}" in');
+  const planAt = branch.indexOf('print_port_plan');
+  const doneAt = branch.indexOf('print_start_summary');
+  assert.ok(planAt > 0, 'start 分支没调用 print_port_plan');
+  assert.ok(doneAt > 0, 'start 分支没调用 print_start_summary');
+  assert.ok(planAt < doneAt, '启动收尾顺序反了：应当先打端口规划，再打「启动完成 + 访问地址」');
+});
+
+test('Windows：端口规划同样排在启动完成之前', () => {
+  const branch = ctlPs1.slice(ctlPs1.indexOf('function Invoke-Start {'));
+  const planAt = branch.indexOf('Write-PortPlan -Ports');
+  const doneAt = branch.indexOf('Write-StartSummary -Ports');
+  assert.ok(planAt > 0, 'Invoke-Start 没调用 Write-PortPlan');
+  assert.ok(doneAt > 0, 'Invoke-Start 没调用 Write-StartSummary');
+  assert.ok(planAt < doneAt, 'Windows 启动收尾顺序与 Linux 不一致');
+});
+
+test('访问地址用独立高亮色，且无彩色终端时该色必须清零', () => {
+  // 有 tty 才给加粗亮绿；否则空串 —— 否则日志里会混进 \033[1;32m 噪声。
+  assert.match(ctlSh, /C_HL=\$'\\033\[1;32m'/, 'ctl.sh 里没有定义高亮色 C_HL（应以加粗亮绿为准）');
+  assert.match(ctlSh, /else\s*\n\s*C_TAG='';[^\n]*C_HL='';?[^\n]*C_RST=''/, 'ctl.sh 的 else 分支没有清空 C_HL —— 重定向到文件时会漏转义序列');
+  assert.match(ctlPs1, /\$C\.hl\s*=\s*\[char\]27 \+ '\[1;32m'/, 'ctl.ps1 里 $C.hl 不是加粗亮绿');
+  assert.match(ctlPs1, /\$C\s*=\s*@\{[^}]*hl\s*=\s*''/, 'ctl.ps1 的 $C 没给 hl 默认空串');
+});
+
+test('收尾块用不封口的横线框圈住地址行（无彩色时也能一眼认出）', () => {
+  const body = ctlSh.match(/^print_start_summary\(\) \{[\s\S]*?^\}/m)?.[0];
+  assert.ok(body, 'ctl.sh 里找不到 print_start_summary');
+  assert.match(body, /rule="--+"/, 'print_start_summary 没有横线 rule');
+  const ruleLen = body.match(/rule="(-+)"/)[1].length;
+  assert.ok(ruleLen >= 48, `横线只有 ${ruleLen} 格，圈不住下面的地址行`);
+  // ⛔ 只许用光秃秃的短横线：中文双宽 + 无 wcwidth ⇒ 任何"左右封口"的框都会歪。
+  assert.doesNotMatch(body, /[│┃|]\s*$/m, '收尾框画了右边线，中文环境下必然错位');
+  assert.match(body, /访问地址/, '收尾块里没有"访问地址"字样');
+  assert.match(body, /登录账号/, '收尾块里没有登录账号');
+});
+

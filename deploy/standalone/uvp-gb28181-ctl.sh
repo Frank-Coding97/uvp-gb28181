@@ -36,9 +36,10 @@ if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
   C_TAG=$'\033[36m'   # [uvp-gb28181] 标签：青色
   C_OK=$'\033[32m'    # 成功标记：绿色
   C_ERR=$'\033[31m'   # 错误标记：红色
+  C_HL=$'\033[1;32m'  # 收尾的访问地址：加粗亮绿（整个安装过程只此一处这么打）
   C_RST=$'\033[0m'
 else
-  C_TAG=''; C_OK=''; C_ERR=''; C_RST=''
+  C_TAG=''; C_OK=''; C_ERR=''; C_HL=''; C_RST=''
 fi
 
 log()  { printf '%s[uvp-gb28181]%s %s\n' "$C_TAG" "$C_RST" "$*"; }
@@ -194,8 +195,15 @@ print_port_plan() {
 }
 
 # print_start_summary 打印启动收尾：访问地址（优先给局域网地址）+ 登录信息。
+#
+# ⛔⛔ 这是整段安装输出**最后**一块，用户装完第一眼就找这个地址 ⇒ 用一个
+#   不封口的横线框把它单独圈出来、地址行加粗（C_HL）。不能只靠颜色区分：
+#   输出重定向成日志文件时（systemd journal、客户贴给我们看）颜色会被关掉，
+#   那时只剩框线与空行 —— 也得一眼能看出"看到这里就装完了"。
+#   框不画右边线：中文是双宽字符，bash 没有 wcwidth，封口框换字体必歪
+#   （与 print_banner 同一个理由）。
 print_start_summary() {
-  local lan lan_url local_url
+  local lan lan_url local_url rule
   local scheme="https"
   [ -x "$NGINX_BIN" ] && [ "$NGINX_HTTPS_ENABLED" = "1" ] || scheme="http"
   local plain_port="$NGINX_HTTP_PORT"
@@ -207,7 +215,12 @@ print_start_summary() {
     local_url="http://127.0.0.1:${plain_port}"
   fi
 
-  printf '%s[uvp-gb28181]%s 启动完成\n' "$C_TAG" "$C_RST"
+  # 64 格：最长一行是 IND(14) + "访问地址  " + URL（局域网地址约 30 格），留余量。
+  rule="----------------------------------------------------------------"
+
+  # 前面留空行：紧接在「端口规划」之后，空一行才看得出这是收尾而不是又一项端口。
+  printf '\n%s[uvp-gb28181]%s 启动完成\n\n' "$C_TAG" "$C_RST"
+  printf '%s%s%s\n' "$C_TAG" "$rule" "$C_RST"
 
   lan="$(detect_lan_ip)"
   if [ -n "$lan" ]; then
@@ -216,20 +229,22 @@ print_start_summary() {
     else
       lan_url="http://${lan}:${plain_port}"
     fi
-    ok "管理页面  ${lan_url}"
-    det "  · 本机访问  ${local_url}"
+    printf '%s%s访问地址  %s%s\n' "$C_HL" "$IND" "$lan_url" "$C_RST"
+    printf '%s本机访问  %s\n' "$IND" "$local_url"
   else
-    ok "管理页面  ${local_url}"
-    det "  · 未识别到对外网卡地址，其它电脑请用本机 IP 访问"
+    printf '%s%s访问地址  %s%s\n' "$C_HL" "$IND" "$local_url" "$C_RST"
+    printf '%s提示      未识别到对外网卡，其它电脑请改用本机 IP 访问\n' "$IND"
   fi
   local demo_pw=""
   demo_pw="$(read_conf_scalar demoaccount defaultpassword 2>/dev/null || true)"
   if [ -n "$demo_pw" ]; then
-    det "  · 登录账号  admin / ${demo_pw}（登录后请立即修改）"
+    printf '%s登录账号  admin / %s（登录后请立即修改）\n' "$IND" "$demo_pw"
   else
     # ⛔ 读不到就**不编**一个口令出来：只说"见交付说明"（包的 README 里写着）。
-    det "  · 登录账号  admin（密码见 README/交付说明，登录后请立即修改）"
+    printf '%s登录账号  admin（密码见 README/交付说明，登录后请立即修改）\n' "$IND"
   fi
+
+  printf '%s%s%s\n' "$C_TAG" "$rule" "$C_RST"
   return 0
 }
 
@@ -2020,9 +2035,10 @@ case "${1:-start}" in
     start_redis          # ⛔ 顺序不能反：后端启动时要连缓存
     start_backend
 
-    # 收尾：访问地址（含对外网卡地址）+ 分类端口规划 + 防火墙放行提示。
-    print_start_summary
+    # 收尾：先给**端口规划**（技术明细，客户要拿去开防火墙），
+    # 最后才是「启动完成 + 访问地址」—— 让地址停在屏幕最后、不被一堆端口号冲掉。
     print_port_plan
+    print_start_summary
     ;;
   restart-zlm)
     stop_zlm
