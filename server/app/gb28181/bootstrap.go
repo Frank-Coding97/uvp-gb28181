@@ -746,6 +746,22 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+// currentSIPPort 读平台**当前生效**的 SIP 端口，供防火墙代理对齐 nft 规则。
+//
+// 读不到（首次启动、引导页还没填）就返回 0 =「平台还不知道」：
+// 代理会保持它自己的 `--sip-port`，等下一轮握手再对齐。
+func currentSIPPort() uint16 {
+	db := app.DB()
+	if db == nil {
+		return 0
+	}
+	row, err := gbsetup.NewSIPConfigRepository(db).Get(context.Background())
+	if err != nil || row == nil || row.Port <= 0 || row.Port > 65535 {
+		return 0
+	}
+	return uint16(row.Port)
+}
+
 func setupSecurityRuntime() *gbsecurity.Runtime {
 	clock := gbsecurity.RealClock()
 	socketPath := os.Getenv("UVP_GB28181_FIREWALL_SOCKET")
@@ -753,6 +769,17 @@ func setupSecurityRuntime() *gbsecurity.Runtime {
 		socketPath = "/run/uvp/firewall-agent.sock"
 	}
 	agent := gbsecurity.NewFirewallAgentClient(socketPath, 2*time.Second)
+	// ⛔⛔ 两层包装都必须有：
+	//   ① SetSIPPort —— 绿色包的 SIP 端口是引导页写进 gb_sip_config 的（晚于启动），
+	//      代理必须按平台当前端口重建 nft 规则，否则 dport 匹配不到真实报文，
+	//      界面显示"内核封禁已生效"而内核一条没拦。
+	//   ② SocketPresenceClient —— 没有代理的部署（绿色包非 root 启动、代理崩溃）
+	//      不能把"切保护模式"变成 400 英文 dial 错误：按 unsupported 降级，
+	//      应用层准入继续丢弃报文，前端显示"主机防火墙 降级"。
+	if unixAgent, ok := agent.(*gbsecurity.UnixFirewallClient); ok {
+		unixAgent.SetSIPPort(currentSIPPort())
+		agent = gbsecurity.NewSocketPresenceClient(unixAgent, socketPath)
+	}
 	secret := []byte(os.Getenv("UVP_GB28181_NONCE_SECRET"))
 	if app.DB() != nil {
 		store := gbsecurity.NewGormStore(app.DB())

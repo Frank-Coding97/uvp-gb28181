@@ -270,6 +270,11 @@ else
       "$GO_BIN" build -ldflags="-s -w" -o bin/uvp-updater ./cmd/uvp-updater
     CGO_ENABLED=0 GOOS="$PKG_OS" GOARCH="$PKG_ARCH" GOFLAGS=-mod=mod \
       "$GO_BIN" build -ldflags="-s -w" -o bin/uvp-setup ./cmd/uvp-setup
+    # 主机防火墙代理：安全页「内核级封禁」的执行者（nftables，需 root 运行）。
+    # ⛔ 必须随包出：绿色包原来不带它，导致「国标接入安全」切保护模式直接报
+    #   `dial unix .../firewall-agent.sock: no such file or directory`。
+    CGO_ENABLED=0 GOOS="$PKG_OS" GOARCH="$PKG_ARCH" GOFLAGS=-mod=mod \
+      "$GO_BIN" build -ldflags="-s -w" -o bin/uvp-firewall-agent ./cmd/uvp-firewall-agent
   ) || fail "后端构建失败（见上）。⚠️ 不要用旧的 bin/uvp-server 顶替——那就是本周反复踩的坑。"
   log "  后端二进制: $(du -h bin/uvp-server 2>/dev/null | cut -f1 || echo '?')"
   log "  升级助手二进制: $(du -h bin/uvp-updater 2>/dev/null | cut -f1 || echo '?')"
@@ -328,6 +333,7 @@ fi
 [ -x "$SERVER_DIR/bin/uvp-server" ] || fail "缺少后端二进制：$SERVER_DIR/bin/uvp-server"
 [ -x "$SERVER_DIR/bin/uvp-setup" ] || fail "缺少安装辅助程序：$SERVER_DIR/bin/uvp-setup"
 [ -x "$SERVER_DIR/bin/uvp-updater" ] || fail "缺少升级助手二进制：$SERVER_DIR/bin/uvp-updater"
+[ -x "$SERVER_DIR/bin/uvp-firewall-agent" ] || fail "缺少主机防火墙代理：$SERVER_DIR/bin/uvp-firewall-agent"
 [ -x "$DEPLOY_DIR/bin/redis-server" ] || fail "缺少 redis-server：$DEPLOY_DIR/bin/redis-server（先跑 deploy/standalone/build-redis.sh）"
 [ -x "$DEPLOY_DIR/bin/redis-cli" ]    || fail "缺少 redis-cli：$DEPLOY_DIR/bin/redis-cli（先跑 deploy/standalone/build-redis.sh）"
 [ -f "$SQLITE_DIR/baseline.sql" ]     || fail "缺少 SQLite 基线：$SQLITE_DIR/baseline.sql（先跑 generate.py）"
@@ -335,6 +341,9 @@ fi
 # ZLM（平台靠它推流/取流/录像，缺了整套功能跑不起来）
 [ -x "$ZLM_DIR/MediaServer" ] || fail "缺少 ZLM：$ZLM_DIR/MediaServer（先跑 deploy/standalone/fetch-zlm.sh）"
 [ -f "$ZLM_DIR/config.ini" ]   || fail "缺少 ZLM 配置：$ZLM_DIR/config.ini"
+# ffmpeg（ZLM 通道抓拍的执行器）——2026-10-20 客户现场实锤后强制内置：
+# 包里不带它、config.ini 指着 /usr/bin/ffmpeg 时，目标机没装 ⇒ 抓拍静默不可用。
+[ -x "$DEPLOY_DIR/bin/ffmpeg" ] || fail "缺少内置 ffmpeg：$DEPLOY_DIR/bin/ffmpeg（先跑 deploy/standalone/build-ffmpeg.sh）"
 # ⛔ 必须校验依赖闭包完整：MediaServer 缺库时报的是
 #   `error while loading shared libraries: libavfilter.so.9`，
 #   而那是**启动瞬间**的事 —— 装完的客户机上表现为「服务起了但推流全失败」。
@@ -379,8 +388,10 @@ arch_of() { file "$1" | grep -oE "$ELF_ARCH_RE" | head -1; }
 [ -n "$(arch_of "$SERVER_DIR/bin/uvp-server")" ] || fail "后端二进制不是 $PKG_ARCH"
 [ -n "$(arch_of "$SERVER_DIR/bin/uvp-setup")" ] || fail "安装辅助程序不是 $PKG_ARCH"
 [ -n "$(arch_of "$SERVER_DIR/bin/uvp-updater")" ] || fail "升级助手二进制不是 $PKG_ARCH"
+[ -n "$(arch_of "$SERVER_DIR/bin/uvp-firewall-agent")" ] || fail "主机防火墙代理不是 $PKG_ARCH"
 [ -n "$(arch_of "$DEPLOY_DIR/bin/redis-server")" ] || fail "redis-server 不是 $PKG_ARCH"
 [ -n "$(arch_of "$ZLM_DIR/MediaServer")" ]|| fail "MediaServer 不是 $PKG_ARCH"
+[ -n "$(arch_of "$DEPLOY_DIR/bin/ffmpeg")" ]|| fail "内置 ffmpeg 不是 $PKG_ARCH"
 # nginx 也必须一起查：它是最容易"忘了换"的那个（ZLM/redis 有明显的 lib 目录提示，
 # nginx 只是 bin/nginx 里一个文件，装到目标机才会以 `Exec format error` 暴露）。
 [ -n "$(arch_of "$NGINX_DIR/sbin/nginx")" ]|| fail "nginx 不是 $PKG_ARCH"
@@ -409,7 +420,9 @@ mkdir -p "$PKG"/vendor/{redis,nginx,zlm}
 log "复制后端二进制"
 cp "$SERVER_DIR/bin/uvp-server" "$PKG/bin/uvp-server"
 cp "$SERVER_DIR/bin/uvp-setup" "$PKG/bin/uvp-setup"
-chmod 0755 "$PKG/bin/uvp-setup"
+# 主机防火墙代理：特权进程，只由 ctl.sh（root）/ systemd 启动，不随后端进程树走。
+cp "$SERVER_DIR/bin/uvp-firewall-agent" "$PKG/bin/uvp-firewall-agent"
+chmod 0755 "$PKG/bin/uvp-setup" "$PKG/bin/uvp-firewall-agent"
 cp "$SERVER_DIR/bin/uvp-updater" "$PKG/updater/uvp-updater"
 chmod 0755 "$PKG/bin/uvp-server" "$PKG/updater/uvp-updater"
 
@@ -464,6 +477,7 @@ assert_fresh() {
 assert_fresh "$SERVER_DIR/bin/uvp-server" "后端二进制"
 assert_fresh "$SERVER_DIR/bin/uvp-setup" "安装辅助程序"
 assert_fresh "$SERVER_DIR/bin/uvp-updater" "升级助手二进制"
+assert_fresh "$SERVER_DIR/bin/uvp-firewall-agent" "主机防火墙代理"
 if [ -f "$WEB_DIR/dist/index.html" ]; then
   assert_fresh "$WEB_DIR/dist/index.html" "前端产物"
 else
@@ -486,6 +500,18 @@ cp "$ZLM_DIR/config.ini" "$PKG/vendor/zlm/config.ini"
 [ -f "$ZLM_DIR/default.pem" ] && cp "$ZLM_DIR/default.pem" "$PKG/vendor/zlm/default.pem"
 [ -f "$ZLM_DIR/zlm-buildinfo.txt" ] && cp "$ZLM_DIR/zlm-buildinfo.txt" "$PKG/vendor/zlm/"
 chmod 0755 "$PKG/vendor/zlm/MediaServer"
+
+# ---- ffmpeg 随包内置（2026-10-20 起，老板拍板：不再让用户手动安装）----
+# ⛔⛔ 客户现场实锤（openEuler 22.03）：包里不带 ffmpeg、config.ini 指着
+#   /usr/bin/ffmpeg 时，ZLM 的 getSnap 每次都 fork/exec 失败（execv -2）、
+#   返回 1024x512 占位 PNG，平台侧只报「未返回 JPEG」——通道抓拍从部署
+#   当天起静默不可用，零告警。
+# ⛔ 放 vendor/zlm/bin/ 而不是 vendor/zlm/ 根下：根下已有 ZLM 的 ffmpeg
+#   日志目录（[ffmpeg] log=./ffmpeg/ffmpeg.log），同名文件与目录无法共存。
+log "内置 ffmpeg（ZLM 通道抓拍依赖）"
+mkdir -p "$PKG/vendor/zlm/bin"
+cp "$DEPLOY_DIR/bin/ffmpeg" "$PKG/vendor/zlm/bin/ffmpeg"
+chmod 0755 "$PKG/vendor/zlm/bin/ffmpeg"
 
 # ---- ZLM 的身份也固定（源头侧）----
 # ⛔⛔ 必须改**包内这份** config.ini，而不是靠启动时对齐：
@@ -515,7 +541,7 @@ for i, line in enumerate(lines):
     if not m:
         continue
     indent, key, eq, old, cr = m.groups()
-    # 只认 [api] 的 secret 与 [general] 的 mediaServerId，
+    # 只认三处：[api] 的 secret、[general] 的 mediaServerId、[ffmpeg] 的 bin，
     # 别处出现的同名键不能动（这份 ini 有 11 个段）。
     if section == "api" and key == "secret" and old.strip() != secret:
         changed.append("[api] secret: " + old.strip() + " -> (固定值)")
@@ -523,6 +549,12 @@ for i, line in enumerate(lines):
     elif section == "general" and key.lower() == "mediaserverid" and old.strip() != msid:
         changed.append("[general] mediaServerId: " + old.strip() + " -> " + msid)
         lines[i] = indent + "mediaServerId=" + msid + cr
+    # 2026-10-20 起 ffmpeg 随包内置：bin 必须指向包内 vendor/zlm/bin/ffmpeg。
+    # 相对路径 ./bin/ffmpeg 由 ZLM 按 exeDir（= vendor/zlm）解析，
+    # ctl.sh 启动时也会 cd 到同一目录，两种解析口径落到同一个文件。
+    elif section == "ffmpeg" and key == "bin" and old.strip() != "./bin/ffmpeg":
+        changed.append("[ffmpeg] bin: " + old.strip() + " -> ./bin/ffmpeg（包内内置）")
+        lines[i] = indent + key + eq + "./bin/ffmpeg" + cr
 
 open(path, "w", encoding="utf-8", newline="").write("\n".join(lines))
 print("   ZLM config.ini: " + ("; ".join(changed) if changed else "已是固定值，无需改动"))
@@ -825,11 +857,13 @@ bash "$DEPLOY_DIR/check-portable-elf.sh" \
   --provided-dir "$PKG/vendor/zlm/lib" \
   "$PKG/bin/uvp-server" \
   "$PKG/bin/uvp-setup" \
+  "$PKG/bin/uvp-firewall-agent" \
   "$PKG/updater/uvp-updater" \
   "$PKG/vendor/nginx/sbin/nginx" \
   "$PKG/vendor/redis/redis-server" \
   "$PKG/vendor/redis/redis-cli" \
   "$PKG/vendor/zlm/MediaServer" \
+  "$PKG/vendor/zlm/bin/ffmpeg" \
   "$PKG"/vendor/zlm/lib/*.so* \
   || fail "包内二进制对目标系统库的要求过高（拷到国产 OS 上必然起不来，逐条见上）。"
 

@@ -209,6 +209,7 @@ test('出包流程必须审计全部关键二进制（nginx / redis×2 / ZLM / �
     'vendor/redis/redis-server',
     'vendor/redis/redis-cli',
     'vendor/zlm/MediaServer',
+    'vendor/zlm/bin/ffmpeg',
     'vendor/zlm/lib/*.so*',
   ]) {
     assert.ok(s.includes(needle), `出包门禁没有覆盖 ${needle}`);
@@ -237,6 +238,22 @@ test('redis 构建脚本必须 BUILD_TLS=no（从根上去掉 OpenSSL 依赖）'
   assert.match(s, /^\s*make\b[^\n]*BUILD_TLS=no/m,
     'redis 的 make 调用必须带 BUILD_TLS=no，否则又回到动态链 OpenSSL 的老坑');
   assert.match(s, /check-portable-elf\.sh/, '构建脚本没有自检可移植性');
+});
+
+test('ffmpeg 构建脚本必须静态化 + 关自动探测（内置进包不许缺库）', () => {
+  // 2026-10-20 客户现场实锤：包里不带 ffmpeg ⇒ ZLM getSnap 全部
+  // execv 失败返回占位图，通道抓拍静默不可用。此后 ffmpeg 随包内置，
+  // 构建脚本必须保证产物在国产 OS / 老 glibc 上拿起来就能跑。
+  const s = codeOnly(readFileSync(join(DEPLOY_DIR, 'build-ffmpeg.sh'), 'utf8'));
+  assert.match(s, /UVP_INSIDE_BUILDER/, '缺少"必须进底座容器"的守卫');
+  // ⛔ --disable-autodetect 是静态化的关键：不关它，configure 会把容器里
+  //   的动态 .so（zlib/libxcb/vaapi…）链进"静态"产物，拷到目标机照样缺库。
+  assert.match(s, /--disable-autodetect/,
+    '必须关掉 configure 自动探测，否则会把容器里的动态库链进去');
+  assert.match(s, /statically linked/,
+    '静态产物必须用 file 断言 statically linked（假静态当场暴露）');
+  assert.match(s, /ffmpeg -version/,
+    '装配前必须真跑一次 -version（链接残缺当场暴露，比 file 更硬）');
 });
 
 test('构建底座 Dockerfile 自证 glibc 必须是 2.17', () => {

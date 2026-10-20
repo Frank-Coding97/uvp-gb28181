@@ -8,6 +8,7 @@ import (
 	"net"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"uvplatform.com/uvp-gb28181/app/gb28181/security"
@@ -40,7 +41,11 @@ type NftConfig struct {
 
 type NftBackend struct {
 	runner CommandRunner
-	cfg    NftConfig
+	// cfg 在构造后**只读**（Port 除外：它单独用原子变量存，见 port）。
+	// ⛔ 别改成"直接写 b.cfg.Port"：Add/Remove/List 与 SetSIPPort 是并发调用的，
+	//   整结构体赋值会与那些只读字段构成数据竞争。
+	cfg  NftConfig
+	port atomic.Uint32
 }
 
 func NewNftBackend(ctx context.Context, runner CommandRunner, cfg NftConfig) (*NftBackend, error) {
@@ -51,11 +56,15 @@ func NewNftBackend(ctx context.Context, runner CommandRunner, cfg NftConfig) (*N
 		return nil, err
 	}
 	b := &NftBackend{runner: runner, cfg: cfg}
+	b.port.Store(uint32(cfg.Port))
 	if err := b.ensure(ctx); err != nil {
 		return nil, err
 	}
 	return b, nil
 }
+
+// Port 返回当前规则表匹配的 SIP 端口。
+func (b *NftBackend) Port() uint16 { return uint16(b.port.Load()) }
 
 func DetectNftConfig(ctx context.Context, runner CommandRunner, port uint16, allowlist []net.IPNet) (NftConfig, error) {
 	if runner == nil {
@@ -88,6 +97,30 @@ func (b *NftBackend) ensure(ctx context.Context) error {
 	_, err = b.runner.Run(ctx, "nft", []string{"-f", "-"}, []byte(script))
 	if err != nil {
 		return fmt.Errorf("create uvp_sip_guard table: %w", err)
+	}
+	return nil
+}
+
+// SetSIPPort 用新端口重建规则表（平台下发的端口变了才会被调用）。
+//
+// ⛔ 重建 = delete table + add table ⇒ 集合里的封禁 IP 会被一起清空，
+//
+//	调用方（Agent.SetSIPPort）负责随后把已跟踪规则补回去。
+//
+// ⛔ 失败要回滚端口值，否则后续 ban 会往"没建成的新表"里写，静默落空。
+func (b *NftBackend) SetSIPPort(ctx context.Context, port uint16) error {
+	if port == 0 || port == b.Port() {
+		return nil
+	}
+	next := b.cfg
+	next.Port = port
+	if err := validateNftConfig(next); err != nil {
+		return err
+	}
+	previous := b.port.Swap(uint32(port))
+	if err := b.ensure(ctx); err != nil {
+		b.port.Store(previous)
+		return err
 	}
 	return nil
 }
@@ -202,8 +235,8 @@ func (b *NftBackend) tableScript() string {
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "add table inet uvp_sip_guard\nadd set inet uvp_sip_guard %s { type %s; flags timeout; }\n", blocked, family)
 	fmt.Fprintf(&builder, "add chain inet uvp_sip_guard guard_prerouting { type filter hook prerouting priority raw; policy accept; }\n")
-	fmt.Fprintf(&builder, "add rule inet uvp_sip_guard guard_prerouting iifname %q %s daddr %s %s saddr @%s udp dport %d counter drop\n", b.cfg.Interface, protocol, destination, protocol, blocked, b.cfg.Port)
-	fmt.Fprintf(&builder, "add rule inet uvp_sip_guard guard_prerouting iifname %q %s daddr %s %s saddr @%s tcp dport %d counter drop\n", b.cfg.Interface, protocol, destination, protocol, blocked, b.cfg.Port)
+	fmt.Fprintf(&builder, "add rule inet uvp_sip_guard guard_prerouting iifname %q %s daddr %s %s saddr @%s udp dport %d counter drop\n", b.cfg.Interface, protocol, destination, protocol, blocked, b.Port())
+	fmt.Fprintf(&builder, "add rule inet uvp_sip_guard guard_prerouting iifname %q %s daddr %s %s saddr @%s tcp dport %d counter drop\n", b.cfg.Interface, protocol, destination, protocol, blocked, b.Port())
 	return builder.String()
 }
 

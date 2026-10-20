@@ -178,6 +178,43 @@ test('内置私钥在仓库里也是 0600（拷贝到客户机之前的最后一
 });
 
 // ---------------------------------------------------------------------------
+// ffmpeg 内置契约（2026-10-20 客户现场实锤后立的）：
+//   客户机没装 ffmpeg ⇒ ZLM getSnap 每次都 execv 失败、返回 1024x512 占位 PNG，
+//   平台只报「未返回 JPEG」——通道抓拍从装机起静默不可用、零告警。
+//   与"客户机不该预装 python/openssl"是同一类契约：**ffmpeg 也是预装件，必须随包**。
+// ---------------------------------------------------------------------------
+test('两端构建脚本都把 ffmpeg 打进 vendor/zlm（缺资产必须 fail）', () => {
+  const shBuild = readFileSync(join(LINUX_DIR, 'build-standalone.sh'), 'utf8');
+  assert.match(shBuild, /缺少内置 ffmpeg/,
+    'Linux 出包脚本缺资产时必须直接 fail —— 否则又出一个"装完抓拍不可用"的包');
+  assert.match(shBuild, /"\$PKG\/vendor\/zlm\/bin\/ffmpeg"/,
+    'Linux 包必须把 ffmpeg 装到 vendor/zlm/bin/ffmpeg');
+  // ini 重写进同一个 python 块；相对路径 ./bin/ffmpeg 由 ZLM 按 exeDir 解析。
+  assert.match(shBuild, /section == "ffmpeg" and key == "bin"/,
+    '出包时必须把 config.ini 的 [ffmpeg] bin 重写到包内路径');
+  assert.match(shBuild, /"\.\/bin\/ffmpeg"/, '[ffmpeg] bin 的目标值必须是 ./bin/ffmpeg');
+
+  const psBuild = readFileSync(join(WIN_DIR, 'build-standalone.ps1'), 'utf8');
+  assert.match(psBuild, /zlm\\ffmpeg\.exe/,
+    'Windows 出包脚本里找不到 ffmpeg.exe 的断言/拷贝（应随包打到 vendor\\zlm\\ffmpeg.exe）');
+});
+
+test('两端 ctl 启动时必须自检 ZLM 配置的 ffmpeg（把静默失效点破成启动警告）', () => {
+  const sh = readFileSync(join(LINUX_DIR, 'uvp-gb28181-ctl.sh'), 'utf8');
+  assert.match(sh, /zlm_ffmpeg_check\(\)/, 'Linux ctl 里找不到 zlm_ffmpeg_check 函数');
+  assert.match(sh, /ZLM ffmpeg 自检通过/,
+    '自检通过的文案要保持这个固定句式（排障时好 grep）');
+  // 函数必须在 start_zlm 的成功路径上被调用（定义了不调=白写）。
+  const startZlm = sh.slice(sh.indexOf('start_zlm() {'), sh.indexOf('stop_zlm() {'));
+  assert.ok(/zlm_ffmpeg_check/.test(startZlm), 'start_zlm 的成功路径必须调用 zlm_ffmpeg_check');
+
+  const ps = readFileSync(join(WIN_DIR, 'uvp-gb28181-ctl.ps1'), 'utf8');
+  const startZlmFn = ps.slice(ps.indexOf('function Start-Zlm'), ps.indexOf('function Start-Nginx'));
+  assert.match(startZlmFn, /ffmpeg 自检通过/,
+    'Windows Start-Zlm 的成功路径必须做 ffmpeg 自检');
+});
+
+// ---------------------------------------------------------------------------
 // 行为用例：把 ensure_self_signed_cert 从脚本里抠出来真跑一遍。
 //
 // 为什么光有静态断言不够：「优先级写反了」和「兜底时静默返回 0」这两种错法都能通过

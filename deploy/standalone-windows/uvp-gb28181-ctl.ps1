@@ -1047,6 +1047,30 @@ function Start-Zlm {
               "              处理：把 config\config.env 的端口段挪出保留区（见包内 README 第四节），再 stop → start。")
     }
     Write-UvpOk "流媒体服务已启动（ZLM HTTP $($Ports.ZLM_HTTP)）"
+    # ffmpeg 自检（2026-10-20 起，与 Linux 线同一天加）：缺它的现场症状极具
+    # 迷惑性——ZLM getSnap 每次都 execv 失败、返回占位 PNG，平台只报
+    # 「未返回 JPEG」，通道抓拍从装机起静默不可用。启动时就点破，不阻断。
+    $zlmIni = Join-Path $ZlmDir 'config.ini'
+    $bin = $null
+    if (Test-Path -LiteralPath $zlmIni) {
+        $inFfmpeg = $false
+        foreach ($line in Get-Content -LiteralPath $zlmIni) {
+            if ($line -match '^\[') { $inFfmpeg = ($line -match '^\[ffmpeg\]'); continue }
+            if ($inFfmpeg -and $line -match '^\s*bin\s*=\s*(.+?)\s*$') { $bin = $Matches[1]; break }
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($bin)) {
+        Write-UvpLog "⚠️  config.ini 里没有 [ffmpeg] bin —— 通道抓拍不可用（ZLM getSnap 无执行器）"
+        return
+    }
+    $path = if ($bin -match '^([A-Za-z]:)?[\\/]') { $bin } else { Join-Path $ZlmDir ($bin -replace '^\.[/\\]', '') }
+    if (-not (Test-Path -LiteralPath $path)) {
+        Write-UvpLog "⚠️  ZLM 配置的 ffmpeg 不存在：$bin → $path"
+        Write-UvpLog "    后果：通道抓拍（设备截图）会失败，ZLM 返回占位图、平台报「未返回 JPEG」。"
+        Write-UvpLog "    修复：把 ffmpeg.exe 放到 $path（新版包已随包内置，升级即自带）。"
+    } else {
+        Write-UvpLog "ZLM ffmpeg 自检通过：$path"
+    }
 }
 
 function Start-Nginx {

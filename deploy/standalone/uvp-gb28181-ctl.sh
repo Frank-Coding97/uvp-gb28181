@@ -691,6 +691,11 @@ stop_updater() {
 #      本脚本无从知道现场最终选了哪个端口；保存时若端口被占，引导页会报 bind 失败。
 HTTP_PORT_DEFAULT=51002
 REDIS_PORT_DEFAULT=51003
+# SIP 端口的**兜底值**：真源是引导页写进 gb_sip_config 的那条记录（本脚本读不到库），
+# 这里只给「防火墙代理首次建 nft 规则表」用一个初值，平台启动后会在几秒内
+# 把真实端口下发下去（见 server/app/gb28181/security/firewall_client.go 的 sipPort）。
+# 51064 是 PORTS.md 里 SIP 的预留位，也是前端构建期注入的默认值。
+SIP_PORT_DEFAULT=51064
 
 read_env_file() {
   # 读 config.env 的 KEY=VALUE；忽略注释与空行；取最后一条（后写的覆盖先写的）
@@ -737,6 +742,27 @@ SETUP_BIN="$BIN/uvp-setup"
 UPDATER_BIN="$ROOT/updater/uvp-updater"
 REDIS_BIN="$VENDOR/redis/redis-server"
 REDIS_CLI="$VENDOR/redis/redis-cli"
+
+# ---- 主机防火墙代理（特权进程：nftables / CAP_NET_ADMIN）----
+#
+# ⛔⛔ 它解决的是「国标接入安全」页面的**内核级封禁**这一层：平台判断出攻击源后，
+#   由它把 IP 写进 nft 集合，在 raw/prerouting 上直接丢弃。没有它，保护模式只剩
+#   **应用层拦截**（SIP 报文进到 Go 进程再丢），页面会显示"主机防火墙 降级"。
+#
+# ⛔ 三条硬约束：
+#   1. **必须 root**：nft 需要 CAP_NET_ADMIN。非 root 启动时本脚本只提示、不失败
+#      （应用层拦截照常生效，平台不该因为少一层防护就起不来）。
+#   2. **socket 放包内 run/，不用 /run/uvp**：绿色包不要求先建 /run/uvp；且 socket
+#      必须与后端**同用户同组**才能连（代理会 chmod 0660）。
+#   3. 端口初值只是兜底：真端口由平台运行期下发（见 SIP_PORT_DEFAULT 注释）。
+FIREWALL_AGENT_BIN="$BIN/uvp-firewall-agent"
+FIREWALL_AGENT_SOCKET="$RUN/firewall-agent.sock"
+FIREWALL_AGENT_PID_FILE="$RUN/firewall-agent.pid"
+FIREWALL_AGENT_LOG="$LOGS/firewall-agent.log"
+SIP_PORT="${UVP_SIP_PORT:-$SIP_PORT_DEFAULT}"
+# 永不封禁的来源网段：回环 + 三段私网。与 deploy/test/uvp-firewall-agent.default 同源，
+# ⛔ 别把客户现场的公网出口/共享 NAT 网关写进黑名单 —— 一封就是整机房掉线。
+FIREWALL_AGENT_ALLOWLIST="${UVP_FIREWALL_ALLOWLIST:-127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}"
 
 # ---- ZLM（二开版，平台靠它推流/取流/录像）----
 ZLM_DIR="$VENDOR/zlm"
@@ -1151,6 +1177,112 @@ stop_by_pidfile() {
   fi
 }
 
+# ------------------------------------------------------ 主机防火墙代理 ----
+#
+# 就绪判据 = **socket 文件存在**（`-S`），不探端口、不看 pid：
+#   代理是 socket 服务，socket 建好了就说明 nft 表也建成了（它先建表再 listen）。
+
+firewall_agent_healthy() { [ -S "$FIREWALL_AGENT_SOCKET" ]; }
+
+# 单元名与 uvp-gb28181-service-install.sh 里的 FIREWALL_UNIT_NAME 必须逐字一致。
+FIREWALL_AGENT_UNIT_NAME="uvp-gb28181-firewall-agent.service"
+
+firewall_agent_systemd_managed() {
+  command -v systemctl >/dev/null 2>&1 || return 1
+  systemctl is-active --quiet "$FIREWALL_AGENT_UNIT_NAME" 2>/dev/null
+}
+
+start_firewall_agent() {
+  if [ ! -x "$FIREWALL_AGENT_BIN" ]; then
+    # 包不完整/旧包：不阻断启动。但必须说出来，否则现场只会看到页面"主机防火墙 降级"，
+    # 完全不知道是包里没这个东西。
+    det "未随包提供主机防火墙代理（${FIREWALL_AGENT_BIN}），内核级封禁不可用"
+    return 0
+  fi
+  if firewall_agent_healthy; then
+    ok "主机防火墙代理已在运行（socket ${FIREWALL_AGENT_SOCKET}）"
+    return 0
+  fi
+
+  # ⛔ 非 root 只提示、不失败、也不偷偷 sudo：
+  #   exec 模式下 sudo 要密码会直接失败（`a terminal is required`），
+  #   而且交互式弹密码会把 `start | tail` 这类用法挂死。
+  if [ "$(id -u)" -ne 0 ]; then
+    det "主机防火墙代理未启动：需要 root（nftables）—— 保护模式仅在应用层生效"
+    det "  要内核级封禁：sudo ./uvp-gb28181-ctl.sh start，或 sudo ./uvp-gb28181-service-install.sh 注册服务"
+    return 0
+  fi
+
+  # ⛔ 不重置 nft 表：代理自己按 DetectNftConfig 对齐（删表重建在它内部做）。
+  # ⛔ 日志独立一份：它和 backend.log 混在一起时，排障会互相干扰。
+  "$FIREWALL_AGENT_BIN" \
+    --socket "$FIREWALL_AGENT_SOCKET" \
+    --sip-port "$SIP_PORT" \
+    --allowlist "$FIREWALL_AGENT_ALLOWLIST" \
+    >"$FIREWALL_AGENT_LOG" 2>&1 </dev/null &
+  echo $! > "$FIREWALL_AGENT_PID_FILE"
+
+  for _ in $(seq 1 50); do
+    if firewall_agent_healthy; then
+      ok "主机防火墙代理启动成功（socket ${FIREWALL_AGENT_SOCKET}，SIP ${SIP_PORT}）"
+      return 0
+    fi
+    if [ -f "$FIREWALL_AGENT_PID_FILE" ]; then
+      local pid; pid="$(cat "$FIREWALL_AGENT_PID_FILE")"
+      if ! kill -0 "$pid" 2>/dev/null; then
+        rm -f "$FIREWALL_AGENT_PID_FILE"
+        break
+      fi
+    fi
+    sleep 0.2
+  done
+
+  # ⛔ 代理起不来**绝不能 fail 整套启动**：平台核心功能不依赖它，只是少一层内核封禁。
+  #   但必须把原因摆在屏幕上（通常是目标机没装 nftables，或 nft 版本不认 inet 表）。
+  log "⚠️  主机防火墙代理未能启动，最后 10 行日志："
+  tail -10 "$FIREWALL_AGENT_LOG" >&2 || true
+  det "常见原因：目标机没装 nftables（nft 命令缺失）或当前内核不支持 inet 表"
+  det "影响：保护/严格模式只在应用层生效，页面显示「主机防火墙 降级」"
+  return 0
+}
+
+stop_firewall_agent() {
+  # ⛔ 由 systemd 托管时**不许动**：那是 root 单元（uvp-gb28181-firewall-agent.service），
+  #   本脚本通常以普通用户跑，kill 不掉它；更糟的是下面 `rm -f socket` 会把**正在
+  #   运行**的代理的 socket 摘掉（探测只看文件存在）⇒ 后端误判"代理没了"，
+  #   而进程还活着、规则还在，状态与事实完全对不上。
+  if firewall_agent_systemd_managed; then
+    log "主机防火墙代理由 systemd 托管（${FIREWALL_AGENT_UNIT_NAME}），stop 不处理它"
+    return 0
+  fi
+  stop_by_pidfile "$FIREWALL_AGENT_PID_FILE" "$FIREWALL_AGENT_BIN" "主机防火墙代理"
+  # ⛔ 杀不掉就别摘 socket：代理是 root 起的、本脚本是普通用户时 kill 会失败，
+  #   此时删掉 socket 只会让进程变成"还在跑但没人连得上"，状态与事实彻底脱节。
+  if proc_alive_by_exe "$FIREWALL_AGENT_BIN"; then
+    log "⚠️ 主机防火墙代理仍在运行（多半是 root 启动的）—— 请用 sudo $0 stop 停止"
+    return 0
+  fi
+  # 残留 socket 会让后端误判"代理在跑"（探测只看文件存在），必须清掉。
+  rm -f "$FIREWALL_AGENT_SOCKET"
+}
+
+# serve_firewall_agent 以前台方式跑代理，供 systemd 的 root 单元调用。
+#
+# ⛔⛔ 为什么单元不直接 ExecStart=<绝对路径>/bin/uvp-firewall-agent：
+#   绿色包升级后程序在 releases/<task_id>/bin（`current` 软链指向它），首发版本的
+#   ROOT/bin 会被换掉、旧 release 目录还可能被清 ⇒ 写死的绝对路径迟早指向不存在的文件，
+#   而 systemd 的表现只是「启动失败」，看不出是升级导致的。
+#   走本子命令 = 与升级助手（serve-updater）同一套路：路径由 ctl 在**每次启动时**解析。
+# ⛔ 必须 exec：Type=simple 跟踪的进程要是代理本身，隔一层 shell 会误判"已退出"。
+serve_firewall_agent() {
+  [ -x "$FIREWALL_AGENT_BIN" ] || fail "找不到主机防火墙代理：${FIREWALL_AGENT_BIN}"
+  ensure_dirs
+  exec "$FIREWALL_AGENT_BIN" \
+    --socket "$FIREWALL_AGENT_SOCKET" \
+    --sip-port "$SIP_PORT" \
+    --allowlist "$FIREWALL_AGENT_ALLOWLIST"
+}
+
 # ---------------------------------------------------------------- Redis ----
 
 redis_healthy() {
@@ -1251,6 +1383,11 @@ start_backend() {
   export UVP_UPDATER_SOCKET="$UPDATER_SOCKET"
   export UVP_UPDATER_STATE="$UPDATER_STATE"
   export UVP_UPDATER_GATE_PATH="$UPDATER_GATE_PATH"
+  # ⛔ 必须把**包内**的 socket 路径告诉后端：它默认找 /run/uvp/firewall-agent.sock
+  #   （那是 systemd/compose 交付的约定），绿色包把代理放在 run/ 下。
+  #   漏了这一行 ⇒ 后端连不上代理 ⇒ 页面永远显示「主机防火墙 降级」，
+  #   而 ctl 这边明明显示代理启动成功。
+  export UVP_GB28181_FIREWALL_SOCKET="$FIREWALL_AGENT_SOCKET"
 
   # ⛔ 绝不能关掉子 shell 的 stdio：`uvp-gb28181-ctl.sh start | tail` 这类用法会永远挂住
   #   （孤儿子 shell 攥着管道的写端），看起来像「启动卡死」。实测挂过 10 分钟以上。
@@ -1298,6 +1435,7 @@ migrate_backend() {
   export UVP_VERSION_PATH="$ACTIVE_ROOT/version.json"
   export UVP_UPDATER_STATE="$UPDATER_STATE"
   export UVP_UPDATER_GATE_PATH="$UPDATER_GATE_PATH"
+  export UVP_GB28181_FIREWALL_SOCKET="$FIREWALL_AGENT_SOCKET"
   log "执行应用迁移"
   "$SERVER_BIN" -migrate-up
 }
@@ -1758,9 +1896,43 @@ zlm_healthy() {
   proc_alive_by_exe "$ZLM_BIN"
 }
 
+# ---- ZLM 通道抓拍的 ffmpeg 自检（2026-10-20 客户现场实锤加的）----
+# 缺 ffmpeg 的现场症状极具迷惑性：ZLM 的 getSnap 每次 fork/exec 都失败
+# （vendor/zlm/ffmpeg/ 下留一堆 642 字节的 `execv process failed:-2` 日志），
+# 返回 1024x512 占位 PNG，平台侧只报「ZLM getSnap 未返回 JPEG」——
+# 从部署当天起通道抓拍静默不可用，没人想到是少了个二进制。
+# 这里启动时就把它点破（不阻断启动：老包升级 / 用户自己删了还能进页面）。
+zlm_ffmpeg_check() {
+  # [ffmpeg] bin 的值可能是绝对路径（老包：/usr/bin/ffmpeg）或相对路径
+  # （新包：./bin/ffmpeg，按 ZLM 的 exeDir=vendor/zlm 解析）。
+  local bin path
+  bin="$(tr -d '\r' < "$ZLM_INI" | awk '
+    /^\[/ { sec=$0; next }
+    sec=="[ffmpeg]" && /^[[:space:]]*bin[[:space:]]*=/ {
+      sub(/^[^=]*=/, ""); gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print; exit
+    }')"
+  if [ -z "$bin" ]; then
+    log "⚠️  ${ZLM_INI} 里没有 [ffmpeg] bin —— 通道抓拍不可用（ZLM getSnap 无执行器）"
+    return 0
+  fi
+  case "$bin" in
+    /*) path="$bin" ;;
+    *)  path="$ZLM_DIR/${bin#./}" ;;
+  esac
+  if [ ! -x "$path" ]; then
+    log "⚠️  ZLM 配置的 ffmpeg 不存在或不可执行：$bin → $path"
+    log "    后果：通道抓拍（设备截图）会失败，ZLM 返回占位图、平台报「未返回 JPEG」。"
+    log "    修复：把一个 ffmpeg 放到 $path（新版绿色包已随包内置，升级即自带）。"
+  else
+    log "ZLM ffmpeg 自检通过：$path"
+  fi
+  return 0
+}
+
 start_zlm() {
   if zlm_healthy; then
     log "ZLM 已在运行（HTTP 端口 ${ZLM_HTTP_PORT}）"
+    zlm_ffmpeg_check
     return 0
   fi
   if [ ! -x "$ZLM_BIN" ]; then
@@ -1793,6 +1965,7 @@ start_zlm() {
   for _ in $(seq 1 100); do
     if zlm_healthy; then
       ok "ZLM 启动成功（HTTP ${ZLM_HTTP_PORT} / RTSP ${ZLM_RTSP_PORT}）"
+      zlm_ffmpeg_check
       return 0
     fi
     if [ -f "$ZLM_PID_FILE" ]; then
@@ -2027,6 +2200,9 @@ case "${1:-start}" in
     log "阶段 3/3 · 启动服务"
     # 升级助手独立于业务进程，必须先启动；业务 stop 时不停止它。
     start_updater
+    # ⛔ 防火墙代理要在**后端之前**起：后端起不来就会去连 socket 判能力，
+    #   代理先就绪才能一上线就是「内核级封禁可用」。
+    start_firewall_agent
     # ⛔ ZLM 要在**后端之前**起来：后端启动后会立即注册 hook、
     #   校验 ZLM 连通性，ZLM 没起就报连接失败。
     start_zlm
@@ -2053,11 +2229,18 @@ case "${1:-start}" in
   serve-updater)
     serve_updater
     ;;
+  # 供 systemd 的 root 单元（uvp-gb28181-firewall-agent.service）调用：
+  # 以前台方式跑主机防火墙代理，路径/端口由本脚本按当前版本解析。
+  serve-firewall-agent)
+    serve_firewall_agent
+    ;;
   stop)
     stop_nginx
     stop_backend
     stop_zlm
     stop_redis
+    # ⛔ 代理最后停：后端先退，才不会出现"代理没了、后端还在按已生效的规则封人"。
+    stop_firewall_agent
     # 升级助手独立运行，业务 stop/restart 不得杀掉它（契约见 stop_updater 上方）。
     # ⛔ 但它必须**被说出来**：不说的话现场只看到四行"没在跑"，以为整套停了。
     #   restart 走 `stop --quiet`，避免这行提示夹在重启流程里当噪音。
@@ -2075,6 +2258,7 @@ case "${1:-start}" in
     stop_backend
     stop_zlm
     stop_redis
+    stop_firewall_agent
     stop_updater
     log "已停止（含升级助手）"
     ;;
@@ -2097,12 +2281,20 @@ case "${1:-start}" in
     if [ -x "$UPDATER_BIN" ]; then
       log "升级助手: $(updater_status_line)"
     fi
+    # 主机防火墙代理同理：它是安全页「内核级封禁」的真身，不显示就没人知道它没跑。
+    if [ -x "$FIREWALL_AGENT_BIN" ]; then
+      if firewall_agent_healthy; then
+        log "防火墙代理: 运行中（socket ${FIREWALL_AGENT_SOCKET}）"
+      else
+        log "防火墙代理: 未运行（保护模式只在应用层生效）"
+      fi
+    fi
     ;;
   reset-password)
     reset_admin_password "${2:-}"
     ;;
   *)
-    echo "用法: $0 {start|stop|stop-all|restart|status|migrate|start-updater|stop-updater|serve-updater|reset-password [账号名]}" >&2
+    echo "用法: $0 {start|stop|stop-all|restart|status|migrate|start-updater|stop-updater|serve-updater|serve-firewall-agent|reset-password [账号名]}" >&2
     echo "  stop          ：停止业务服务（Redis / ZLM / 后端 / nginx），升级助手继续待命" >&2
     echo "  stop-all      ：上面全停，再停升级助手（确实要整机下线时用）" >&2
     echo "  stop-updater  ：只停升级助手（升级进行中请勿执行）" >&2

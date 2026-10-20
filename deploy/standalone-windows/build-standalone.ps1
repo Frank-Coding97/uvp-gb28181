@@ -16,10 +16,12 @@
       <OutDir>\uvp-gb28181-windows-amd64-<版本>.zip
       <OutDir>\uvp-gb28181-windows-amd64-<版本>.zip.sha256
 
-  -VendorDir 里必须有三样（Linux 版对应 deploy/standalone/bin/{redis,nginx,zlm}，
+  -VendorDir 里必须有四样（Linux 版对应 deploy/standalone/bin/{redis,nginx,zlm,ffmpeg}，
   Windows 版不入库，按平台单独准备）：
       redis\redis-server.exe  redis\redis-cli.exe  redis\*.dll   （Cygwin 版 redis）
       zlm\MediaServer.exe     zlm\config.ini       zlm\www\      zlm\default.pem
+      zlm\ffmpeg.exe          （ZLM 通道抓拍的执行器；取 gyan.dev 或 BtbN 的
+                               win64 构建里的 ffmpeg.exe，2026-10-20 起随包内置）
       nginx\nginx.exe         nginx\conf\  nginx\html\ ...       （nginx for Windows 发行包）
 
   ⛔⛔ 包内契约与 Linux 版**逐条对齐**（deploy/standalone/uvp-gb28181-ctl.sh 顶部注释）：
@@ -266,6 +268,7 @@ foreach ($item in @(
         @{ P = (Join-Path $VendorRedis 'redis-cli.exe');    N = "-VendorDir\redis\redis-cli.exe" },
         @{ P = (Join-Path $VendorZlm 'MediaServer.exe');    N = "-VendorDir\zlm\MediaServer.exe" },
         @{ P = (Join-Path $VendorZlm 'config.ini');         N = "-VendorDir\zlm\config.ini" },
+        @{ P = (Join-Path $VendorZlm 'ffmpeg.exe');         N = "-VendorDir\zlm\ffmpeg.exe（2026-10-20 起随包内置：取 gyan.dev/BtbN win64 构建的 ffmpeg.exe）" },
         @{ P = (Join-Path $VendorNginx 'nginx.exe');        N = "-VendorDir\nginx\nginx.exe" }
     )) {
     if (-not (Test-Path -LiteralPath $item.P)) { $missing += $item.N }
@@ -409,6 +412,10 @@ Det 'vendor\redis\（redis-server / redis-cli / cygwin 运行库）'
 # ---- vendor\zlm：二开 ZLM。Windows 版是**静态链接**，没有 Linux 那份 lib\ ----
 Copy-Item -Path (Join-Path $VendorZlm 'MediaServer.exe') -Destination (Join-Path $Pkg 'vendor\zlm\') -Force
 Copy-Item -LiteralPath (Join-Path $VendorZlm 'config.ini') -Destination (Join-Path $Pkg 'vendor\zlm\config.ini') -Force
+# ffmpeg.exe 随包内置（2026-10-20 起，与 Linux 线同一天拍板）：portsync 已把
+# config.ini 的 [ffmpeg] bin 改成 ./ffmpeg.exe（相对 ZLM 的 exeDir=vendor\zlm），
+# 这里把执行器真的放进包，不再让客户手动丢文件。
+Copy-Item -LiteralPath (Join-Path $VendorZlm 'ffmpeg.exe') -Destination (Join-Path $Pkg 'vendor\zlm\ffmpeg.exe') -Force
 if (Test-Path -LiteralPath (Join-Path $VendorZlm 'default.pem')) {
     Copy-Item -LiteralPath (Join-Path $VendorZlm 'default.pem') -Destination (Join-Path $Pkg 'vendor\zlm\default.pem') -Force
 }

@@ -62,6 +62,27 @@ http://<本机IP>:51000
 ```
 
 服务名是 `uvp-gb28181`，之后用 `systemctl status uvp-gb28181` 查看。
+注册服务时会**同时**装一个 `uvp-gb28181-firewall-agent`（root，nftables）—— 见下面「主机防火墙代理」。
+
+### 主机防火墙代理（国标接入安全 · 内核级封禁）
+
+**国标接入安全**页面的「保护 / 严格」模式有两层防护：应用层准入（后端进程内直接丢弃报文）
+和**内核级封禁**（把攻击源 IP 写进 nftables，在 raw/prerouting 上丢包）。第二层由
+`bin/uvp-firewall-agent` 执行，它需要 **root 权限**：
+
+| 启动方式 | 内核级封禁 | 说明 |
+|---|---|---|
+| `sudo ./uvp-gb28181-ctl.sh start` | ✅ | 代理以 root 启动，socket 在 `run/firewall-agent.sock` |
+| `./uvp-gb28181-ctl.sh start`（普通用户） | ❌ 仅应用层 | 页面显示「主机防火墙 降级」 |
+| `sudo ./uvp-gb28181-service-install.sh` | ✅ | 代理由 systemd 以 root 单独托管（推荐） |
+
+> 普通用户启动不是错误：平台功能不受影响，只是少一层内核封禁。
+> 内核封禁还需要目标机装了 **nftables**（`nft` 命令）；缺了代理会在 `logs/firewall-agent.log` 里报错，
+> 页面同样显示「降级」，不会影响平台启动。
+> ⚠️ 用 `sudo ./uvp-gb28181-ctl.sh start` 启动时，`data/`、`logs/`、`run/` 会变成 root 属主；
+> 之后如果要改回普通用户或注册 systemd 服务，先 `sudo chown -R <用户>:<组> data logs run`。
+> 想长期以内核封禁方式运行，**首选注册服务**（代理由 systemd 托管，业务仍按原用户跑）。
+> 状态口径：`./uvp-gb28181-ctl.sh status` 会多打一行「防火墙代理」。
 
 ---
 

@@ -1,6 +1,7 @@
 package firewall
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net"
@@ -18,6 +19,13 @@ type Backend interface {
 	Add(sourceIP string, expiresAt time.Time) error
 	Remove(sourceIP string) error
 	List() ([]string, error)
+}
+
+// SIPPortReconfigurable 由真正写内核规则的 Backend 实现（NftBackend）：
+// 平台下发的 SIP 端口变了就得重建规则表，否则 nft 的 dport 永远匹配不到报文。
+// MemoryBackend 不实现它 ⇒ 单测与无内核环境下的行为不变。
+type SIPPortReconfigurable interface {
+	SetSIPPort(ctx context.Context, port uint16) error
 }
 
 type MemoryBackend struct {
@@ -55,6 +63,10 @@ type Agent struct {
 	mu        sync.Mutex
 	rules     map[string]security.BanDecision
 	lastError string
+	// sipMu/sipPort 保护「当前生效的 SIP 端口」。端口由平台随请求下发，
+	// 变化时重建规则表（重建会清空内核集合 ⇒ 之后必须把已跟踪规则补回去）。
+	sipMu   sync.Mutex
+	sipPort uint16
 }
 
 func New(backend Backend, clock security.Clock, allowlist []net.IPNet) *Agent {
@@ -185,6 +197,45 @@ func sameReconcileDecision(applied, desired security.BanDecision) bool {
 
 func (a *Agent) setError(err error) { a.mu.Lock(); a.lastError = err.Error(); a.mu.Unlock() }
 
+// SetSIPPort 把内核规则表的匹配端口对齐到平台当前值，并补齐重建后丢失的规则。
+//
+// ⛔ 幂等：端口没变直接返回（每次请求都会带端口，不能每次都重建表）。
+// ⛔ 重建后必须 reapply：`nft delete table` 会连集合里的封禁 IP 一起清掉，
+//
+//	不补就是「表重建的那一刻所有内核封禁静默失效」。
+func (a *Agent) SetSIPPort(ctx context.Context, port uint16) error {
+	if port == 0 {
+		return nil
+	}
+	a.sipMu.Lock()
+	defer a.sipMu.Unlock()
+	if a.sipPort == port {
+		return nil
+	}
+	reconfigurable, ok := a.backend.(SIPPortReconfigurable)
+	if !ok {
+		// 内存后端（单测 / 无内核环境）没有端口概念，只记下值即可。
+		a.sipPort = port
+		return nil
+	}
+	if err := reconfigurable.SetSIPPort(ctx, port); err != nil {
+		a.setError(err)
+		return err
+	}
+	a.sipPort = port
+	a.mu.Lock()
+	desired := make([]security.BanDecision, 0, len(a.rules))
+	for _, decision := range a.rules {
+		desired = append(desired, decision)
+	}
+	a.mu.Unlock()
+	if len(desired) == 0 {
+		return nil
+	}
+	// 复用整表下发：重建后的表是空的，Reconcile 会把 desired 全部重新加进去。
+	return a.Reconcile(desired)
+}
+
 var _ security.FirewallAgentCapabilityProvider = (*Agent)(nil)
 
 type request struct {
@@ -192,6 +243,8 @@ type request struct {
 	Decision  security.BanDecision   `json:"decision"`
 	SourceIP  string                 `json:"sourceIp"`
 	Decisions []security.BanDecision `json:"decisions,omitempty"`
+	// SIPPort 是平台当前生效的 SIP 端口；0=平台未知（旧客户端），保持现状。
+	SIPPort uint16 `json:"sipPort,omitempty"`
 }
 type response struct {
 	OK     bool                 `json:"ok"`
@@ -250,16 +303,24 @@ func (a *Agent) handleConn(conn net.Conn) {
 		return
 	}
 	var err error
-	switch req.Action {
-	case "ban":
-		err = a.Ban(req.Decision)
-	case "unban":
-		err = a.Unban(req.SourceIP)
-	case "status":
-	case "reconcile":
-		err = a.Reconcile(req.Decisions)
-	default:
-		err = errors.New("unsupported action")
+	// 端口对齐必须在动作**之前**：ban/unban 落到表里的前提是表按正确端口建的。
+	if req.SIPPort != 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		err = a.SetSIPPort(ctx, req.SIPPort)
+		cancel()
+	}
+	if err == nil {
+		switch req.Action {
+		case "ban":
+			err = a.Ban(req.Decision)
+		case "unban":
+			err = a.Unban(req.SourceIP)
+		case "status":
+		case "reconcile":
+			err = a.Reconcile(req.Decisions)
+		default:
+			err = errors.New("unsupported action")
+		}
 	}
 	resp := response{OK: err == nil, Status: a.Status()}
 	if err != nil {

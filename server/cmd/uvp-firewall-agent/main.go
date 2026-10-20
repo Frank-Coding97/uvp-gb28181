@@ -29,11 +29,17 @@ func main() {
 		backend, err = firewall.NewNftBackend(ctx, nil, config)
 		if err == nil {
 			defer cancel()
+			agent := firewall.New(backend, nil, allowlist)
+			// 用启动参数建立端口基线：否则平台第一次下发（哪怕值相同）都会触发一次
+			// 删表重建 —— 那一下会把内核里已有的封禁集合清空再补回，毫无必要。
+			if err := agent.SetSIPPort(context.Background(), uint16(*port)); err != nil {
+				os.Exit(1)
+			}
 			stop := make(chan struct{})
 			signals := make(chan os.Signal, 1)
 			signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 			go func() { <-signals; close(stop) }()
-			if err := firewall.New(backend, nil, allowlist).ServeUnix(*socket, stop); err != nil {
+			if err := agent.ServeUnix(*socket, stop); err != nil {
 				os.Exit(1)
 			}
 			return

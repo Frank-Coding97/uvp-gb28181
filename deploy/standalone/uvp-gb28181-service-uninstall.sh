@@ -17,6 +17,9 @@ UNIT_NAME="uvp-gb28181.service"
 UNIT_PATH="/etc/systemd/system/${UNIT_NAME}"
 UPDATER_UNIT_NAME="uvp-gb28181-updater.service"
 UPDATER_UNIT_PATH="/etc/systemd/system/${UPDATER_UNIT_NAME}"
+# 主机防火墙代理是**独立的 root 单元**（业务服务以普通用户跑，没 nftables 权限）。
+FIREWALL_UNIT_NAME="uvp-gb28181-firewall-agent.service"
+FIREWALL_UNIT_PATH="/etc/systemd/system/${FIREWALL_UNIT_NAME}"
 
 log()  { printf '[uvp-service] %s\n' "$*"; }
 fail() { printf '[uvp-service][ERROR] %s\n' "$*" >&2; exit 1; }
@@ -34,7 +37,7 @@ fi
 command -v systemctl >/dev/null 2>&1 \
   || fail "本机没有 systemctl —— 这里没有可卸载的服务注册"
 
-if [ ! -f "$UNIT_PATH" ]; then
+if [ ! -f "$UNIT_PATH" ] && [ ! -f "$FIREWALL_UNIT_PATH" ]; then
   # ⛔ 幂等：没装过也要正常退出 0（下次仍是「没装过」）。顺手清掉可能的 failed 残留记录。
   systemctl reset-failed "$UNIT_NAME" >/dev/null 2>&1 || true
   log "未发现服务单元 ${UNIT_PATH} —— 本包没有注册过服务，无需卸载"
@@ -47,12 +50,24 @@ log "停止服务并取消开机自启…"
 # ⛔ 失败不当致命错误：服务可能本来就处于 failed/dead，仍要继续把注册摘干净。
 systemctl disable --now "$UNIT_NAME" 2>&1 | sed 's/^/    /' || true
 systemctl disable --now "$UPDATER_UNIT_NAME" 2>&1 | sed 's/^/    /' || true
+# ⛔ 防火墙代理必须先停：它会把 nft 表（inet uvp_sip_guard）留在内核里，
+#   只摘 unit 不停服务的话，删掉安装目录后内核规则仍然生效，来源 IP 一直被丢包，
+#   而平台上已经没有任何地方能解释这件事。
+systemctl disable --now "$FIREWALL_UNIT_NAME" 2>&1 | sed 's/^/    /' || true
 
 rm -f "$UNIT_PATH"
 rm -f "$UPDATER_UNIT_PATH"
+rm -f "$FIREWALL_UNIT_PATH"
+
+# 顺带清掉内核里的规则表：代理进程退出了，nft 表**不会**跟着消失。
+# ⛔ 只删我们自己那张表（inet uvp_sip_guard），绝不碰其他规则集。
+if command -v nft >/dev/null 2>&1; then
+  nft delete table inet uvp_sip_guard >/dev/null 2>&1 || true
+fi
 systemctl daemon-reload
 systemctl reset-failed "$UNIT_NAME" >/dev/null 2>&1 || true
 systemctl reset-failed "$UPDATER_UNIT_NAME" >/dev/null 2>&1 || true
+systemctl reset-failed "$FIREWALL_UNIT_NAME" >/dev/null 2>&1 || true
 log "已移除服务单元 ${UNIT_PATH}"
 
 # ------------------------------------------------------------ 残留进程检查 ----
