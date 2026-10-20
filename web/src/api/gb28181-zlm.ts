@@ -23,9 +23,16 @@ export interface ZLMNode {
   name: string;
   host: string;
   hookIp?: string;
-  receiveHost: string;
   sdpIp: string;
   playbackHost: string;
+  /**
+   * 下面三个是「节点留空时实际生效的地址」，由后端按与下发相同的兜底链算好。
+   * ⛔ 只用于 placeholder/说明文案，**绝不能回填进表单**：回填保存会把
+   * 「跟随平台默认」变成「写死在这个节点上」，之后改引导页对这节点不再生效。
+   */
+  effectiveHookIp?: string;
+  effectiveSdpIp?: string;
+  effectivePlaybackHost?: string;
   apiPort: number;
   mediaServerUUID: string;
   weight: number;
@@ -51,7 +58,6 @@ export interface CreateZLMNodeReq {
   name?: string;
   host: string;
   hookIp?: string;
-  receiveHost?: string;
   sdpIp?: string;
   playbackHost?: string;
   apiPort: number;
@@ -91,7 +97,6 @@ export interface UpdateZLMNodeReq {
   name?: string;
   host?: string;
   hookIp?: string;
-  receiveHost?: string;
   sdpIp?: string;
   playbackHost?: string;
   apiPort?: number;

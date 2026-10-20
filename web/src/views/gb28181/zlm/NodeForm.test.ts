@@ -2,14 +2,21 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { buildNodeRequest, clearNodeSecret, createNodeFormState, parseRTPPortRange, validateNodeForm } from "./nodeFormState";
+import {
+  buildNodeRequest,
+  clearNodeSecret,
+  createNodeFormState,
+  inheritedPlaceholder,
+  NODE_NAME_MAX_LENGTH,
+  parseRTPPortRange,
+  validateNodeForm
+} from "./nodeFormState";
 
 const existingNode = {
   id: 7,
   revision: 3,
   name: "zlm-a",
   host: "10.0.0.7",
-  receiveHost: "10.0.0.8",
   sdpIp: "192.0.2.21",
   playbackHost: "media.example.com",
   hookIp: "192.0.2.20",
@@ -64,7 +71,7 @@ describe("ZLM node form state", () => {
     });
   });
 
-  it("creates a node from only host, API port and secret without sending a name", () => {
+  it("creates a node from only host, API port and secret without sending an empty alias", () => {
     const form = createNodeFormState();
     Object.assign(form, { host: "10.0.0.7", apiPort: "18080", apiSecret: "secret" });
     expect(validateNodeForm(form, false)).toEqual({});
@@ -73,7 +80,33 @@ describe("ZLM node form state", () => {
       apiPort: 18080,
       apiSecret: "secret"
     });
+    // 留空 = 交给后端用 `host:port` 兜底，**不能**把空串写进库覆盖兜底值。
     expect(buildNodeRequest(form, false)).not.toHaveProperty("name");
+  });
+
+  it("sends the optional alias on create so new nodes are not stuck with host:port", () => {
+    const form = createNodeFormState();
+    Object.assign(form, { name: "  北京一楼弱电间  ", host: "10.0.0.7", apiPort: "18080", apiSecret: "secret" });
+    expect(validateNodeForm(form, false)).toEqual({});
+    expect(buildNodeRequest(form, false)).toMatchObject({ name: "北京一楼弱电间" });
+
+    // 别名不参与唯一性：两台节点重名也照常提交（纯展示字段）。
+    const duplicate = { ...form, name: "北京一楼弱电间", host: "10.0.0.8" };
+    expect(buildNodeRequest(duplicate, false)).toMatchObject({ name: "北京一楼弱电间" });
+  });
+
+  it("caps the alias at the column width by characters, not bytes", () => {
+    const form = createNodeFormState();
+    Object.assign(form, { host: "10.0.0.7", apiPort: "18080", apiSecret: "secret" });
+
+    // 64 个汉字 = 192 字节，仍应放行（DB 是 varchar(64) 按字符算）。
+    form.name = "电".repeat(NODE_NAME_MAX_LENGTH);
+    expect(validateNodeForm(form, false)).toEqual({});
+
+    form.name = "电".repeat(NODE_NAME_MAX_LENGTH + 1);
+    expect(validateNodeForm(form, false)).toMatchObject({ name: expect.stringContaining("最长") });
+    // 超长时仍然提交原值，由后端同一套判据兜底，前端不做静默截断。
+    expect(buildNodeRequest(form, false)).toMatchObject({ name: "电".repeat(NODE_NAME_MAX_LENGTH + 1) });
   });
 
   it("submits edited host and API port while omitting an unchanged secret", () => {
@@ -140,7 +173,11 @@ describe("ZLM node form state", () => {
     expect(source).toContain("probeZLMNode");
     expect(source).toContain("连接并读取");
     expect(source).toContain("确认添加");
-    expect(source).toMatch(/<a-form-item\s+v-if="editing"\s+label="节点名"/);
+    // 别名在新建向导里也可填（可选）：不填由后端兜底成 host:port，
+    // 因此这里**不能**要求它必填，也不能再退回「只在编辑态出现」。
+    expect(source).toContain("editing ? '节点名' : '节点别名（可选）'");
+    expect(source).toContain("留空则显示为「IP:端口」");
+    expect(source).not.toContain('<a-descriptions-item label="节点名称">');
     expect(source).toContain("editing ? '管理地址（API Host）' : 'IP 地址'");
     expect(source).not.toContain('<a-descriptions-item label="节点名称">');
   });
@@ -170,6 +207,13 @@ describe("ZLM node form state", () => {
 });
 
 describe("receive port mode", () => {
+  it("only offers the mode switch when editing an existing node", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/NodeForm.vue"), "utf8");
+    // 新建时模式恒为多端口（后端 buildCreateCandidate 的默认），开关只留给编辑态：
+    // 否则用户能在新建向导里选成单端口，却既看不到、也没法核对 ZLM 的单端口监听是否启用。
+    expect(source).toMatch(/<a-form-item v-if="editing" label="收流端口模式">/);
+    expect(source).not.toMatch(/<a-form-item label="收流端口模式">/);
+  });
   it("never guesses a fixed listener port from a node registration", () => {
     expect(createNodeFormState().rtpProxyPort).toBe("");
     expect(createNodeFormState({ ...existingNode, rtpProxyPort: 10000 }).rtpProxyPort).toBe("");
@@ -229,5 +273,25 @@ describe("RTP port range parsing", () => {
     for (const value of unusable) {
       expect(parseRTPPortRange(value as string | undefined), `${String(value)} 不应被当成可用范围`).toBeNull();
     }
+  });
+});
+
+// 2026-10-20 现场反馈：引导步骤里配过的媒体地址，在节点编辑弹窗里「不回显」。
+// 真因是这三项属于节点级覆盖，留空 = 跟随平台默认，所以空白是正常的；
+// 但界面必须把「实际生效的是哪个地址」摆出来，否则看着像丢数据。
+describe("inherited media address placeholder", () => {
+  it("shows the effective address while the node-level value is empty", () => {
+    expect(inheritedPlaceholder("", "192.168.10.220", "设备可访问的 IP 或域名")).toBe("留空则使用：192.168.10.220");
+  });
+
+  it("keeps the plain hint once the operator types an override", () => {
+    expect(inheritedPlaceholder("198.51.100.21", "192.168.10.220", "设备可访问的 IP 或域名")).toBe("设备可访问的 IP 或域名");
+  });
+
+  it("falls back to the plain hint when there is no platform default either", () => {
+    expect(inheritedPlaceholder("", "", "具体 IPv4 或 IPv6")).toBe("具体 IPv4 或 IPv6");
+    expect(inheritedPlaceholder("", undefined, "具体 IPv4 或 IPv6")).toBe("具体 IPv4 或 IPv6");
+    // 只有空白字符等同于没填。
+    expect(inheritedPlaceholder("   ", "   ", "具体 IP 地址或域名")).toBe("具体 IP 地址或域名");
   });
 });

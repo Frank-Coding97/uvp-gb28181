@@ -27,7 +27,6 @@ const node = {
   revision: 1,
   name: "zlm-a",
   host: "10.0.0.7",
-  receiveHost: "",
   sdpIp: "",
   playbackHost: "",
   apiPort: 18080,

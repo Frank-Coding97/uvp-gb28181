@@ -5,7 +5,6 @@ export interface NodeFormState {
   name: string;
   host: string;
   hookIp: string;
-  receiveHost: string;
   sdpIp: string;
   playbackHost: string;
   apiPort: string;
@@ -24,7 +23,6 @@ export function createNodeFormState(node?: ZLMNode | null): NodeFormState {
     name: node?.name ?? "",
     host: node?.host ?? "",
     hookIp: node?.hookIp ?? "",
-    receiveHost: node?.receiveHost ?? "",
     sdpIp: node?.sdpIp ?? "",
     playbackHost: node?.playbackHost ?? "",
     apiPort: node ? String(node.apiPort) : "",
@@ -36,6 +34,29 @@ export function createNodeFormState(node?: ZLMNode | null): NodeFormState {
     rtpPortEnd: String(node?.rtpPortEnd ?? 35000)
   };
 }
+
+/**
+ * 生成「留空则用哪个地址」的 placeholder。
+ *
+ * 网络地址这三项是**节点级覆盖**：节点留空 ≠ 没配置，而是跟随平台默认
+ * （引导页配的那套）。可输入框只会显示节点自己的值，所以引导页填过、这里却是
+ * 一片空白 —— 看起来就像「配了没保存 / 没回显」(2026-10-20 现场反馈)。
+ *
+ * ⛔ 只作 placeholder，绝不回填进 `form`：回填后一保存，「跟随平台默认」就变成
+ * 「写死在这个节点上」，之后再改引导页对这台节点不再生效。
+ */
+export function inheritedPlaceholder(current: string, effective: string | undefined, fallback: string): string {
+  const value = (effective ?? "").trim();
+  if (current.trim() || !value) return fallback;
+  return `留空则使用：${value}`;
+}
+
+/**
+ * 节点名/别名长度上限，与后端 `meta_node.name` 的 varchar(64) 对齐。
+ * ⛔ 按**字符数**算（`[...str].length` 是 code point，与 Go 的 `utf8.RuneCountInString` 同口径），
+ * 别用 `str.length` 之外再套字节数 —— 那会让正常中文别名被误拒。
+ */
+export const NODE_NAME_MAX_LENGTH = 64;
 
 function integerError(value: string, label: string, min: number, max: number) {
   const trimmed = value.trim();
@@ -69,6 +90,7 @@ export function parseRTPPortRange(value?: string): { start: number; end: number 
 export function validateNodeForm(form: NodeFormState, editing: boolean): NodeFormErrors {
   const errors: NodeFormErrors = {};
   if (editing && !form.name.trim()) errors.name = "请输入节点名";
+  else if ([...form.name.trim()].length > NODE_NAME_MAX_LENGTH) errors.name = `节点名最长 ${NODE_NAME_MAX_LENGTH} 个字符`;
   if (!form.host.trim()) errors.host = "请输入后端可访问的管理地址";
   if (!editing && !form.apiSecret.trim()) errors.apiSecret = "新建节点必须填写 API Secret";
 
@@ -105,7 +127,6 @@ export function buildNodeRequest(form: NodeFormState, editing: boolean): CreateZ
   const request: CreateZLMNodeReq = {
     host: form.host.trim(),
     hookIp: form.hookIp.trim(),
-    receiveHost: form.receiveHost.trim(),
     sdpIp: form.sdpIp.trim(),
     playbackHost: form.playbackHost.trim(),
     apiPort: Number(form.apiPort),
@@ -116,7 +137,11 @@ export function buildNodeRequest(form: NodeFormState, editing: boolean): CreateZ
       ? { rtpProxyPort: Number(form.rtpProxyPort) }
       : { rtpPortStart: Number(form.rtpPortStart), rtpPortEnd: Number(form.rtpPortEnd) })
   };
-  if (editing) request.name = form.name.trim();
+  // 节点名（对外显示为「节点别名」）。**新建也允许填**：留空时后端会用
+  // `host:port` 兜底（`service.buildCreateCandidate`），所以这里只在非空时带上，
+  // 目的是让「不填」继续走同一条兜底路径，而不是把空串写进库。
+  const name = form.name.trim();
+  if (name) request.name = name;
   if (editing && !request.apiSecret) {
     const update: UpdateZLMNodeReq = { ...request };
     delete update.apiSecret;

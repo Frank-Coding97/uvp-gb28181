@@ -88,6 +88,33 @@ describe("node fixed listener readback", () => {
 });
 
 /**
+ * 收流端口模式只在编辑态出现：新建时固定多端口（后端 `buildCreateCandidate` 的默认），
+ * 界面不给人选 —— 新建阶段还核不到 ZLM 的单端口监听，选了单端口只会把节点建成一个收不到流的配置。
+ */
+describe("receive port mode is edit-only", () => {
+  it("hides the mode switch while adding a node but still shows the multi-port range", async () => {
+    const wrapper = track(
+      shallowMount(NodeForm, {
+        props: { visible: true, node: null },
+        global: { renderStubDefaultSlot: true, stubs: createStubs }
+      })
+    );
+    await flushPromises();
+
+    expect(wrapper.html()).not.toContain('aria-label="收流端口模式"');
+    expect(wrapper.find('input[aria-label="RTP 起始端口"]').exists()).toBe(true);
+    expect(wrapper.find('input[aria-label="RTP 单端口"]').exists()).toBe(false);
+  });
+
+  it("keeps the mode switch when editing a node", async () => {
+    const wrapper = mountEdit({ code: 0, data: { groups: [{ items: [] }] } });
+    await flushPromises();
+
+    expect(wrapper.html()).toContain('aria-label="收流端口模式"');
+  });
+});
+
+/**
  * 多端口收流范围与单端口同规则：**只读**，值来自 ZLM 实测。
  * 真源在 ZLM 的 `[rtp_proxy] port_range`，平台这边只是镜像，而且平台从不下发这个键 ——
  * 所以这个框本来就不该让人改，要改去「服务配置」。
@@ -207,5 +234,48 @@ describe("node multi-port range mirror", () => {
 
     // ⛔ 不能写 0：那会让用户卡在一个自己根本改不了的校验错误上。
     expect(wrapper.text()).toContain("30000 - 35000");
+  });
+});
+
+/**
+ * 引导页配的媒体地址是「平台默认」，节点级留空是完全正常的状态。
+ * 但输入框必须把这个「实际生效值」显示出来，否则用户看到三个空框，
+ * 会以为引导步骤里配的地址没保存/没回显（2026-10-20 现场反馈）。
+ */
+describe("inherited media address hint", () => {
+  const effectiveNode = {
+    ...multiNode,
+    hookIp: "",
+    sdpIp: "",
+    playbackHost: "",
+    effectiveHookIp: "192.168.10.220",
+    effectiveSdpIp: "192.168.10.220",
+    effectivePlaybackHost: "192.168.10.220"
+  };
+
+  it("surfaces the effective address while the node-level field is empty", async () => {
+    const wrapper = track(
+      shallowMount(NodeForm, {
+        props: { visible: true, node: effectiveNode as any },
+        global: { renderStubDefaultSlot: true, stubs: createStubs }
+      })
+    );
+    await flushPromises();
+
+    // 三项都留空 ⇒ 三处提示，各自指向实际生效的地址。
+    expect(wrapper.html().match(/留空则使用：192\.168\.10\.220/g)?.length).toBe(3);
+  });
+
+  it("keeps the plain hint once the node has its own override", async () => {
+    const wrapper = track(
+      shallowMount(NodeForm, {
+        props: { visible: true, node: { ...effectiveNode, sdpIp: "198.51.100.21" } as any },
+        global: { renderStubDefaultSlot: true, stubs: createStubs }
+      })
+    );
+    await flushPromises();
+
+    // sdpIp 有覆盖值 ⇒ 只剩 hook / playback 两条提示。
+    expect(wrapper.html().match(/留空则使用：192\.168\.10\.220/g)?.length).toBe(2);
   });
 });

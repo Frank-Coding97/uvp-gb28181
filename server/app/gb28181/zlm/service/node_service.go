@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -111,40 +112,51 @@ type MediaTuning struct {
 
 // NodeDTO 对外暴露的节点视图(剥掉 secret)
 type NodeDTO struct {
-	ID                  int64             `json:"id"`
-	Revision            uint64            `json:"revision"`
-	Name                string            `json:"name"`
-	Host                string            `json:"host"`
-	ReceiveHost         string            `json:"receiveHost"`
-	SDPIP               string            `json:"sdpIp"`
-	PlaybackHost        string            `json:"playbackHost"`
-	HookIP              string            `json:"hookIp"`
-	APIPort             int               `json:"apiPort"`
-	MediaServerUUID     string            `json:"mediaServerUUID"`
-	Weight              int               `json:"weight"`
-	Tags                map[string]string `json:"tags,omitempty"`
-	State               node.State        `json:"state"`
-	Enabled             bool              `json:"enabled"`
-	Health              node.State        `json:"health"`
-	RecoveryRequired    bool              `json:"recoveryRequired"`
-	RecoveryReason      string            `json:"recoveryReason,omitempty"`
-	RecoveryFingerprint string            `json:"recoveryFingerprint,omitempty"`
-	RTPReceiveMode      string            `json:"rtpReceiveMode"`
-	RTPProxyPort        int               `json:"rtpProxyPort"`
-	RTPPortStart        int               `json:"rtpPortStart"`
-	RTPPortEnd          int               `json:"rtpPortEnd"`
-	Stats               node.Stats        `json:"stats"`
-	NearCapacity        bool              `json:"nearCapacity"` // T3.4: port_usage>=80% 或 cpu>=80%,UI 黄色高亮
-	AutoOnDemandReady   bool              `json:"autoOnDemandReady"`
-	CreatedAt           time.Time         `json:"createdAt"`
-	UpdatedAt           time.Time         `json:"updatedAt"`
+	ID           int64  `json:"id"`
+	Revision     uint64 `json:"revision"`
+	Name         string `json:"name"`
+	Host         string `json:"host"`
+	SDPIP        string `json:"sdpIp"`
+	PlaybackHost string `json:"playbackHost"`
+	HookIP       string `json:"hookIp"`
+	// 以下三个是「节点留空时实际生效的地址」，只读回显用。
+	//
+	// ⛔ 为什么必须单独给：节点级留空 = 跟随平台默认（引导页配的那套），所以
+	// 编辑弹窗里这三个输入框本来就该是空的。但只给空串，用户看到的就是
+	// 「我明明在引导步骤里配过，怎么这里没回显」—— 看起来像丢数据。
+	// 前端只拿它们当 placeholder/说明文案，**绝不回填进表单**：一旦回填保存，
+	// 「跟随平台默认」就变成「写死在这个节点上」，以后改引导页对这节点不再生效。
+	//
+	// 取值走与下发完全相同的兜底链（EffectiveSDPIP / EffectivePlaybackHost），
+	// ⛔ 别在别处另写一份规则，否则界面说的和实际下发会漂。
+	EffectiveHookIP       string            `json:"effectiveHookIp"`
+	EffectiveSDPIP        string            `json:"effectiveSdpIp"`
+	EffectivePlaybackHost string            `json:"effectivePlaybackHost"`
+	APIPort               int               `json:"apiPort"`
+	MediaServerUUID       string            `json:"mediaServerUUID"`
+	Weight                int               `json:"weight"`
+	Tags                  map[string]string `json:"tags,omitempty"`
+	State                 node.State        `json:"state"`
+	Enabled               bool              `json:"enabled"`
+	Health                node.State        `json:"health"`
+	RecoveryRequired      bool              `json:"recoveryRequired"`
+	RecoveryReason        string            `json:"recoveryReason,omitempty"`
+	RecoveryFingerprint   string            `json:"recoveryFingerprint,omitempty"`
+	RTPReceiveMode        string            `json:"rtpReceiveMode"`
+	RTPProxyPort          int               `json:"rtpProxyPort"`
+	RTPPortStart          int               `json:"rtpPortStart"`
+	RTPPortEnd            int               `json:"rtpPortEnd"`
+	Stats                 node.Stats        `json:"stats"`
+	NearCapacity          bool              `json:"nearCapacity"` // T3.4: port_usage>=80% 或 cpu>=80%,UI 黄色高亮
+	AutoOnDemandReady     bool              `json:"autoOnDemandReady"`
+	CreatedAt             time.Time         `json:"createdAt"`
+	UpdatedAt             time.Time         `json:"updatedAt"`
 }
 
 // CreateNodeReq 新建节点入参
 type CreateNodeReq struct {
 	Name           string            `json:"name"`
 	Host           string            `json:"host" binding:"required"`
-	ReceiveHost    string            `json:"receiveHost"`
 	SDPIP          string            `json:"sdpIp"`
 	PlaybackHost   string            `json:"playbackHost"`
 	HookIP         string            `json:"hookIp"`
@@ -193,7 +205,6 @@ type NodeProbeResult struct {
 type UpdateNodeReq struct {
 	Name           *string           `json:"name,omitempty"`
 	Host           *string           `json:"host,omitempty"`
-	ReceiveHost    *string           `json:"receiveHost,omitempty"`
 	SDPIP          *string           `json:"sdpIp,omitempty"`
 	PlaybackHost   *string           `json:"playbackHost,omitempty"`
 	HookIP         *string           `json:"hookIp,omitempty"`
@@ -265,35 +276,65 @@ func (s *NodeService) toDTO(n *node.Node) *NodeDTO {
 	if n == nil {
 		return nil
 	}
-	return &NodeDTO{
-		ID:                  n.ID,
-		Revision:            n.Revision,
-		Name:                n.Name,
-		Host:                n.Host,
-		ReceiveHost:         n.ReceiveHost,
-		SDPIP:               n.SDPIP,
-		PlaybackHost:        n.PlaybackHost,
-		HookIP:              n.HookIP,
-		APIPort:             n.APIPort,
-		MediaServerUUID:     n.MediaServerUUID,
-		Weight:              n.Weight,
-		Tags:                cloneTags(n.Tags),
-		State:               n.State,
-		Enabled:             n.IsEnabled(),
-		Health:              n.State,
-		RecoveryRequired:    n.RecoveryRequired,
-		RecoveryReason:      publicNodeRecoveryReason(n),
-		RecoveryFingerprint: publicNodeRecoveryFingerprint(n),
-		RTPReceiveMode:      n.EffectiveRTPReceiveMode(),
-		RTPProxyPort:        n.RTPProxyPort,
-		RTPPortStart:        n.RTPPortStart,
-		RTPPortEnd:          n.RTPPortEnd,
-		Stats:               n.Stats,
-		NearCapacity:        n.IsNearCapacity(),
-		AutoOnDemandReady:   s.registry.IsAutoOnDemandReady(n.ID),
-		CreatedAt:           n.CreatedAt,
-		UpdatedAt:           n.UpdatedAt,
+	// 「实际生效值」要经得起任何取数路径：registry 注入的平台默认只在
+	// List/Get 路径上存在，Create 刚返回的对象还没有 —— 缺了就在这里用 tuning 补，
+	// 兜底链本身仍然只走 Node.EffectiveSDPIP / EffectivePlaybackHost（不另写一份规则）。
+	effective := *n
+	s.tuningMu.RLock()
+	if strings.TrimSpace(effective.PlatformSDPIP) == "" {
+		effective.PlatformSDPIP = s.tuning.SDPIP
 	}
+	if strings.TrimSpace(effective.PlatformPlaybackHost) == "" {
+		effective.PlatformPlaybackHost = s.tuning.StreamIP
+	}
+	hookIP := strings.TrimSpace(n.HookIP)
+	if hookIP == "" {
+		hookIP = strings.TrimSpace(s.tuning.HookIP)
+	}
+	s.tuningMu.RUnlock()
+	return &NodeDTO{
+		ID:                    n.ID,
+		Revision:              n.Revision,
+		Name:                  n.Name,
+		Host:                  n.Host,
+		SDPIP:                 n.SDPIP,
+		PlaybackHost:          n.PlaybackHost,
+		HookIP:                n.HookIP,
+		EffectiveHookIP:       hookIP,
+		EffectiveSDPIP:        effective.EffectiveSDPIP(),
+		EffectivePlaybackHost: effective.EffectivePlaybackHost(),
+		APIPort:               n.APIPort,
+		MediaServerUUID:       n.MediaServerUUID,
+		Weight:                n.Weight,
+		Tags:                  cloneTags(n.Tags),
+		State:                 n.State,
+		Enabled:               n.IsEnabled(),
+		Health:                n.State,
+		RecoveryRequired:      n.RecoveryRequired,
+		RecoveryReason:        publicNodeRecoveryReason(n),
+		RecoveryFingerprint:   publicNodeRecoveryFingerprint(n),
+		RTPReceiveMode:        n.EffectiveRTPReceiveMode(),
+		RTPProxyPort:          n.RTPProxyPort,
+		RTPPortStart:          n.RTPPortStart,
+		RTPPortEnd:            n.RTPPortEnd,
+		Stats:                 n.Stats,
+		NearCapacity:          n.IsNearCapacity(),
+		AutoOnDemandReady:     s.registry.IsAutoOnDemandReady(n.ID),
+		CreatedAt:             n.CreatedAt,
+		UpdatedAt:             n.UpdatedAt,
+	}
+}
+
+// effectiveHookIP 返回该节点实际会被下发的 Hook 回调主机：节点覆盖优先，
+// 留空则用平台默认（引导页配的那个）。与 adapter.ApplyConfigForNode 里
+// 「firstNonEmpty(node.HookIP, tuning.HookIP)」是同一套口径。
+func (s *NodeService) effectiveHookIP(n *node.Node) string {
+	if host := strings.TrimSpace(n.HookIP); host != "" {
+		return host
+	}
+	s.tuningMu.RLock()
+	defer s.tuningMu.RUnlock()
+	return strings.TrimSpace(s.tuning.HookIP)
 }
 
 func cloneTags(tags map[string]string) map[string]string {
@@ -459,6 +500,20 @@ func (s *NodeService) Get(_ context.Context, id int64) (*NodeDTO, error) {
 // 失败回滚:probe 或 Apply 失败,DB 不应残留节点行。
 // validateNodeFields 服务端统一校验节点字段:API 调用可绕过前端约束;
 // 无效端口范围会让 PortUsage 返回 0,使节点绕过容量剔除进入调度
+// maxNodeNameLen 与 `meta_node.name` 的 varchar(64) 对齐。
+//
+// ⛔ 按**字符数**算，不是字节数：MySQL 的 varchar(64) 在 utf8mb4 下是 64 个字符，
+// 用 len() 判字节会让 22 个汉字就被拒（22×3=66 字节），中文别名直接填不进去。
+const maxNodeNameLen = 64
+
+// validateNodeName 只拒绝超长，允许留空（留空由调用方兜底成 host:port）。
+func validateNodeName(name string) error {
+	if count := utf8.RuneCountInString(name); count > maxNodeNameLen {
+		return fmt.Errorf("节点名最长 %d 个字符: 当前 %d", maxNodeNameLen, count)
+	}
+	return nil
+}
+
 func validateNodeFields(host string, apiPort, weight, rtpStart, rtpEnd int, apiSecret string) error {
 	if strings.TrimSpace(host) == "" || strings.ContainsAny(host, " \t") || strings.Contains(host, "://") {
 		return fmt.Errorf("host 非法: %q", host)
@@ -542,11 +597,15 @@ func buildCreateCandidate(req CreateNodeReq) (*node.Node, error) {
 	if name == "" {
 		name = net.JoinHostPort(strings.TrimSpace(req.Host), strconv.Itoa(req.APIPort))
 	}
+	// 兜底出来的 host:port 也要过长度校验：`name` 列是 varchar(64)，
+	// 超长会直接变成 500（MySQL strict / PG 都拒），而前端只会看到"保存失败"。
+	if err := validateNodeName(name); err != nil {
+		return nil, err
+	}
 
 	return &node.Node{
 		Name:            name,
 		Host:            req.Host,
-		ReceiveHost:     req.ReceiveHost,
 		SDPIP:           req.SDPIP,
 		PlaybackHost:    req.PlaybackHost,
 		HookIP:          strings.TrimSpace(req.HookIP),
@@ -640,16 +699,13 @@ func (s *NodeService) Update(ctx context.Context, id int64, req UpdateNodeReq) (
 	old := cloneNode(cur)
 	candidate := cloneNode(cur)
 	if req.Name != nil {
-		candidate.Name = *req.Name
+		candidate.Name = strings.TrimSpace(*req.Name)
 	}
 	if req.Host != nil {
 		candidate.Host = *req.Host
 	}
 	if req.SDPIP != nil {
 		candidate.SDPIP = *req.SDPIP
-	}
-	if req.ReceiveHost != nil {
-		candidate.ReceiveHost = *req.ReceiveHost
 	}
 	if req.PlaybackHost != nil {
 		candidate.PlaybackHost = *req.PlaybackHost
@@ -688,6 +744,9 @@ func (s *NodeService) Update(ctx context.Context, id int64, req UpdateNodeReq) (
 		candidate.RTPPortEnd = *req.RTPPortEnd
 	}
 	// 合并后整体校验,防 API 绕过前端约束写入倒置端口范围/异常权重
+	if err := validateNodeName(candidate.Name); err != nil {
+		return nil, err
+	}
 	if err := validateNodeFields(candidate.Host, candidate.APIPort, candidate.Weight, candidate.RTPPortStart, candidate.RTPPortEnd, candidate.APISecret); err != nil {
 		return nil, err
 	}

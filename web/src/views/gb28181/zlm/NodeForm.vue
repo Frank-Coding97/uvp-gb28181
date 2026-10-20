@@ -15,6 +15,8 @@ import {
   buildNodeRequest,
   clearNodeSecret,
   createNodeFormState,
+  inheritedPlaceholder,
+  NODE_NAME_MAX_LENGTH,
   parseRTPPortRange,
   validateNodeForm,
   type NodeFormErrors,
@@ -202,20 +204,22 @@ async function handleSubmit() {
       <div v-if="!editing" class="form-section-title">必填参数</div>
       <div class="node-form-grid">
         <a-form-item
-          v-if="editing"
-          label="节点名"
-          required
+          :label="editing ? '节点名' : '节点别名（可选）'"
+          :required="editing"
           :validate-status="errors.name ? 'error' : undefined"
           :help="errors.name"
         >
           <a-input
             v-model="form.name"
             allow-clear
-            :max-length="80"
+            :max-length="NODE_NAME_MAX_LENGTH"
             show-word-limit
-            placeholder="例如 zlm-bj-1"
+            :placeholder="editing ? '例如 zlm-bj-1' : '例如 北京一楼弱电间'"
             @blur="validateField('name')"
           />
+          <div v-if="!editing" class="form-tip">
+            只用于平台内展示和搜索，不会写进 ZLM；留空则显示为「IP:端口」。添加后仍可在「编辑」里修改。
+          </div>
         </a-form-item>
 
         <a-form-item
@@ -265,9 +269,18 @@ async function handleSubmit() {
       </div>
 
       <div v-if="editing" class="node-form-grid">
-        <a-form-item label="设备收流地址">
-          <a-input v-model="form.receiveHost" allow-clear :max-length="255" placeholder="写入 SDP 的地址，留空跟随管理地址" />
-          <div class="form-tip">设备向此地址发送 RTP；公网部署时填写设备可达地址。</div>
+        <a-form-item label="设备推流地址" :validate-status="errors.sdpIp ? 'error' : undefined" :help="errors.sdpIp">
+          <a-input
+            v-model="form.sdpIp"
+            allow-clear
+            :max-length="253"
+            :placeholder="inheritedPlaceholder(form.sdpIp, props.node?.effectiveSdpIp, '设备可访问的 IP 或域名')"
+            @blur="validateField('sdpIp')"
+          />
+          <div class="form-tip">
+            设备把视频流推送到这个地址（写进 SDP 的 c= 行）。设备和平台不在同一网段、或平台在 NAT/公网后面时才需要填；
+            留空使用平台默认地址，不能填 127.0.0.1。
+          </div>
         </a-form-item>
 
         <a-form-item label="调度权重" :validate-status="errors.weight ? 'error' : undefined" :help="errors.weight">
@@ -282,7 +295,7 @@ async function handleSubmit() {
           <div class="form-tip">0 表示不参与加权调度；不会在输入时静默修正数值。</div>
         </a-form-item>
       </div>
-      <a-form-item label="收流端口模式">
+      <a-form-item v-if="editing" label="收流端口模式">
         <a-space>
           <span :class="{ 'form-tip': form.rtpReceiveMode !== 'single' }">单端口</span>
           <a-switch v-model="form.rtpReceiveMode" checked-value="multi" unchecked-value="single" aria-label="收流端口模式" />
@@ -317,53 +330,47 @@ async function handleSubmit() {
             <a-input v-model="form.rtpPortEnd" readonly aria-label="RTP 结束端口" @blur="validateField('rtpPortEnd')" />
           </a-space>
           <div class="form-tip">
-            从 ZLM 实时读取，只读显示。修改收流范围请前往节点“服务配置”的 rtp_proxy.port_range（需重启节点生效）；
-            平台会在节点启动探测与服务配置保存时自动对齐这里的登记值。
+            <template v-if="editing">
+              从 ZLM 实时读取，只读显示。修改收流范围请前往节点“服务配置”的 rtp_proxy.port_range（需重启节点生效）；
+              平台会在节点启动探测与服务配置保存时自动对齐这里的登记值。
+            </template>
+            <template v-else>
+              新建节点固定按多端口收流登记：点「连接并读取」后这里会换成 ZLM 的实测范围，只读。
+              添加完成后可在「编辑」里改成单端口。
+            </template>
           </div>
         </a-form-item>
       </template>
 
-      <div class="form-section-title">媒体网络地址覆盖</div>
+      <div class="form-section-title">网络地址（通常不用改）</div>
       <div class="node-form-grid">
-        <a-form-item label="Hook IP 覆盖" :validate-status="errors.hookIp ? 'error' : undefined" :help="errors.hookIp">
+        <a-form-item label="平台回调地址" :validate-status="errors.hookIp ? 'error' : undefined" :help="errors.hookIp">
           <a-input
             v-model="form.hookIp"
             allow-clear
             :max-length="45"
-            placeholder="具体 IPv4 或 IPv6"
+            :placeholder="inheritedPlaceholder(form.hookIp, props.node?.effectiveHookIp, '具体 IPv4 或 IPv6')"
             @blur="validateField('hookIp')"
           />
-          <div class="form-tip">留空使用平台默认 Hook IP；平台默认未配置时沿用原地址策略。</div>
+          <div class="form-tip">
+            ZLM 把事件回调给平台时连接的地址，也就是平台自己的地址（只要这台 ZLM
+            能访问到即可）；和平台装在同一台机器上时一般不用改，留空则使用平台默认（见输入框提示）。
+          </div>
         </a-form-item>
 
-        <a-form-item label="SDP IP 覆盖" :validate-status="errors.sdpIp ? 'error' : undefined" :help="errors.sdpIp">
+        <a-form-item label="播放地址" :validate-status="errors.playbackHost ? 'error' : undefined" :help="errors.playbackHost">
           <a-input
-            v-model="form.sdpIp"
+            v-model="form.playbackHost"
             allow-clear
             :max-length="253"
-            placeholder="设备可访问的 IP 或域名"
-            @blur="validateField('sdpIp')"
+            :placeholder="inheritedPlaceholder(form.playbackHost, props.node?.effectivePlaybackHost, '具体 IP 地址或域名')"
+            @blur="validateField('playbackHost')"
           />
           <div class="form-tip">
-            该节点下发 SDP 时通告的地址（设备据此回推 RTP 流）；留空使用平台默认 SDP IP，不能填 127.0.0.1。
+            浏览器或客户端看视频时连接的地址；局域网内直连一般不用改，经过 NAT 时才需填公网地址，留空则使用平台默认。
           </div>
         </a-form-item>
       </div>
-
-      <a-form-item
-        label="Stream IP 覆盖"
-        :validate-status="errors.playbackHost ? 'error' : undefined"
-        :help="errors.playbackHost"
-      >
-        <a-input
-          v-model="form.playbackHost"
-          allow-clear
-          :max-length="253"
-          placeholder="具体 IP 地址或域名"
-          @blur="validateField('playbackHost')"
-        />
-        <div class="form-tip">留空使用平台默认 Stream IP；平台默认未配置时沿用原播放地址策略。</div>
-      </a-form-item>
     </a-form>
 
     <section v-else class="probe-preview" aria-label="ZL 信息确认">
@@ -376,6 +383,9 @@ async function handleSubmit() {
       </div>
 
       <a-descriptions class="probe-details" :column="2" bordered size="medium">
+        <a-descriptions-item label="节点别名"
+          ><span class="probe-value">{{ form.name.trim() || `${form.host}:${form.apiPort}` }}</span></a-descriptions-item
+        >
         <a-descriptions-item label="IP 地址"
           ><span class="probe-value">{{ form.host }}</span></a-descriptions-item
         >
@@ -477,7 +487,7 @@ async function handleSubmit() {
 
 /* 双列表单：把「一行一个」的长表单折成两列，压掉弹窗的滚动高度。
    约定（与 ProxyForm.vue 同款）：成对的字段包进 .node-form-grid；
-   需要独占整行的（收流端口模式、RTP 端口范围、分组标题）留在栅格外即可。
+   需要独占整行的（收流端口模式（仅编辑态）、RTP 端口范围、分组标题）留在栅格外即可。
    ⛔ 不要改成「给 a-form 本身加 grid + 逐个标 grid-column」—— 那样新增字段会静默落进别人那一行。 */
 .node-form-grid {
   display: grid;
@@ -485,6 +495,10 @@ async function handleSubmit() {
   column-gap: var(--zlm-space-4);
   align-items: start;
 }
+
+/* 状态卡与明细表之间要留出可见空隙（曾因引用了未定义的间距档位，
+   整条 gap 声明被丢弃 ⇒ 两张卡贴成一体、看着像同一块）。
+   ⛔ 这里只能引用已定义的档位，改档位前先确认 zlm-tokens.css / uvp-ui-language.scss 里有定义。 */
 .probe-preview {
   display: grid;
   gap: var(--zlm-space-5);
