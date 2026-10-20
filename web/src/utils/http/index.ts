@@ -11,8 +11,8 @@ import { throttledModalConfirm } from "@/utils/app";
 
 // 相关配置请参考：www.axios-js.com/zh-cn/docs/#axios-request-config-1
 const defaultConfig: AxiosRequestConfig = {
-  // 请求超时时间
-  timeout: 30000,
+  // 请求超时时间（2026-10-20 交付包口径：默认 15 秒）
+  timeout: 15000,
   headers: {
     Accept: "application/json, text/plain, */*",
     "Content-Type": "application/json",

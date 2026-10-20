@@ -21,6 +21,7 @@ func TestAlarmProcessor_DeduplicatesNotifyAndMessage(t *testing.T) {
 	device := &gbmodels.GbDevice{DeviceID: "D"}
 	require.NoError(t, db.Create(device).Error)
 	p := NewAlarmProcessor(db, func() time.Time { return time.Date(2026, 7, 19, 16, 40, 0, 0, time.Local) })
+	p.saveEnabled = func() bool { return true } // 出厂默认已改为不落库，落库用例需显式开启
 	body := []byte(`<Notify><CmdType>Alarm</CmdType><SN>7</SN><DeviceID>UNKNOWN</DeviceID><AlarmTime>2026-07-19T16:39:00</AlarmTime><AlarmPriority>2</AlarmPriority><AlarmDescription>loss</AlarmDescription></Notify>`)
 	notification := Notification{CallID: "call", CSeq: "9", Body: body}
 	require.NoError(t, p.Process(context.Background(), device, notification))
@@ -42,6 +43,7 @@ func TestAlarmProcessor_RawSummaryIsUTF8ForGB2312Body(t *testing.T) {
 	device := &gbmodels.GbDevice{DeviceID: "D"}
 	require.NoError(t, db.Create(device).Error)
 	p := NewAlarmProcessor(db, func() time.Time { return time.Date(2026, 7, 23, 15, 35, 55, 0, time.Local) })
+	p.saveEnabled = func() bool { return true } // 出厂默认已改为不落库，落库用例需显式开启
 
 	// GB2312 字节: 视频动检
 	gb := []byte{0xCA, 0xD3, 0xC6, 0xB5, 0xB6, 0xAF, 0xBC, 0xEC}
@@ -64,6 +66,7 @@ func TestAlarmProcessor_PersistsNestedTypeAndLeavesMissingTypeNull(t *testing.T)
 	device := &gbmodels.GbDevice{DeviceID: "37010301021320000111"}
 	require.NoError(t, db.Create(device).Error)
 	p := NewAlarmProcessor(db, func() time.Time { return time.Date(2026, 8, 4, 17, 53, 0, 0, time.Local) })
+	p.saveEnabled = func() bool { return true } // 出厂默认已改为不落库，落库用例需显式开启
 
 	withType := []byte(`<Notify><CmdType>Alarm</CmdType><SN>1260</SN><DeviceID>37010301021320000111</DeviceID><AlarmPriority>4</AlarmPriority><AlarmMethod>5</AlarmMethod><AlarmTime>2026-08-04T17:52:23</AlarmTime><Info><AlarmType>2</AlarmType></Info></Notify>`)
 	require.NoError(t, p.Process(context.Background(), device, Notification{CallID: "nested", CSeq: "1", Body: withType}))

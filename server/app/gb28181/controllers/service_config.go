@@ -160,7 +160,7 @@ func (sc *ServiceConfigController) GetServiceConfig(c *gin.Context) {
 }
 
 func (sc *ServiceConfigController) currentServiceConfig() ServiceConfig {
-	position := PositionHistoryConfig{Enabled: true, RetentionDays: defaultPositionHistoryRetentionDays}
+	position := PositionHistoryConfig{Enabled: false, RetentionDays: defaultPositionHistoryRetentionDays}
 	if app.ConfigYml != nil {
 		if app.ConfigYml.Get(positionHistoryConfigKey) != nil {
 			position.Enabled = app.ConfigYml.GetBool(positionHistoryConfigKey)

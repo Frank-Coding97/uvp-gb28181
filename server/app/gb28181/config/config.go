@@ -58,7 +58,7 @@ const (
 	DefaultChannelStreamTransport        = "TCP-Passive"
 	DefaultPlaybackProtocol              = "ws-flv"
 	DefaultChannelAudioEnabledValue      = true
-	DefaultPlayRequestTimeoutMs          = 10000
+	DefaultPlayRequestTimeoutMs          = 15000
 	MinPlayRequestTimeoutMs              = 1000
 	MaxPlayRequestTimeoutMs              = 300000
 	DefaultChannelOnDemandLive           = true
@@ -332,11 +332,14 @@ func ensurePlayAuthActiveKey(c mutableValueSource, reader io.Reader) error {
 	return nil
 }
 
+// FixedAddressPlaybackSettingsFrom reads the current values on every call.
+// Missing configuration defaults to fixed-address playback enabled
+// (2026-10-20 交付包口径: 固定点播地址默认开启).
 func FixedAddressPlaybackSettingsFrom(c valueSource) FixedAddressPlaybackSettings {
 	if c == nil {
-		return FixedAddressPlaybackSettings{}
+		return FixedAddressPlaybackSettings{FixedAddressEnabled: true}
 	}
-	settings := FixedAddressPlaybackSettings{}
+	settings := FixedAddressPlaybackSettings{FixedAddressEnabled: true}
 	if c.Get(FixedAddressEnabledConfigKey) != nil {
 		settings.FixedAddressEnabled = c.GetBool(FixedAddressEnabledConfigKey)
 	}
@@ -464,10 +467,10 @@ func OnlineOnHeartbeat() bool {
 }
 
 // SaveAlarmMessagesFrom returns whether received alarm notifications should be
-// persisted. Missing configuration defaults to true to preserve the historical
-// behavior.
+// persisted. Missing configuration defaults to false (2026-10-20 交付包口径:
+// 报警消息默认不落库，仅接收和解析).
 func SaveAlarmMessagesFrom(c valueSource) bool {
-	return c == nil || c.Get(SaveAlarmMessagesConfigKey) == nil || c.GetBool(SaveAlarmMessagesConfigKey)
+	return c != nil && c.Get(SaveAlarmMessagesConfigKey) != nil && c.GetBool(SaveAlarmMessagesConfigKey)
 }
 
 // SaveAlarmMessages reads the live setting for the next alarm notification.

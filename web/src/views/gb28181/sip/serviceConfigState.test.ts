@@ -45,13 +45,13 @@ describe("static service config draft", () => {
     expect(playbackServiceConfigLabels).not.toContain("推流是否录制");
     expect(playbackServiceConfigLabels).not.toContain("推流鉴权");
     expect(cascadeServiceConfigLabels).toEqual(["User-Agent", "平台名称", "厂商", "型号", "行政区划", "安装地址"]);
-    expect(draft.playback.fixedAddressEnabled).toBe(false);
+    expect(draft.playback.fixedAddressEnabled).toBe(true);
     expect(draft.playback.autoOnDemandEnabled).toBe(false);
     expect(draft.playback.authEnabled).toBe(false);
     expect(draft.playback.authBindClientIP).toBe(false);
     expect(draft.playback.authTTLSeconds).toBe(120);
     expect(draft.playback).not.toHaveProperty("autoInvite");
-    expect(draft.playback.playTimeoutMs).toBe(10000);
+    expect(draft.playback.playTimeoutMs).toBe(15000);
     expect(draft.playback.onDemandLive).toBe(true);
     expect(draft.playback.cloudRecordingEnabled).toBe(false);
     expect(playbackServiceConfigLabels).toContain("按需直播");

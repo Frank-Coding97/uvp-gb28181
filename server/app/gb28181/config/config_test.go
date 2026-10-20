@@ -140,9 +140,9 @@ func TestOnlineOnHeartbeatFromDefaultsToEnabled(t *testing.T) {
 	require.True(t, OnlineOnHeartbeatFrom(source))
 }
 
-func TestSaveAlarmMessagesFromDefaultsToEnabled(t *testing.T) {
+func TestSaveAlarmMessagesFromDefaultsToDisabled(t *testing.T) {
 	source := fakeSource{}
-	require.True(t, SaveAlarmMessagesFrom(source))
+	require.False(t, SaveAlarmMessagesFrom(source))
 
 	source.values = map[string]interface{}{SaveAlarmMessagesConfigKey: false}
 	source.bools = map[string]bool{SaveAlarmMessagesConfigKey: false}
@@ -241,7 +241,7 @@ func TestPlaybackSettingsFromDefaultsAndReadsExplicitFalse(t *testing.T) {
 	require.Equal(t, DefaultPlayRequestTimeoutMs, settings.PlayTimeoutMs)
 	require.True(t, settings.OnDemandLive)
 	require.False(t, settings.CloudRecordingEnabled)
-	require.Equal(t, 10*time.Second, settings.PlayTimeout())
+	require.Equal(t, 15*time.Second, settings.PlayTimeout())
 
 	source.values = map[string]interface{}{
 		PlayRequestTimeoutMsConfigKey:         1500,
@@ -334,7 +334,7 @@ func TestValidateRecordCacheTailToleranceSec(t *testing.T) {
 
 func TestFixedAddressPlaybackSettingsDefaultsAndValidStates(t *testing.T) {
 	source := fakeSource{}
-	require.Equal(t, FixedAddressPlaybackSettings{}, FixedAddressPlaybackSettingsFrom(source))
+	require.Equal(t, FixedAddressPlaybackSettings{FixedAddressEnabled: true}, FixedAddressPlaybackSettingsFrom(source))
 
 	for _, settings := range []FixedAddressPlaybackSettings{
 		{},

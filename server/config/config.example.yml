@@ -298,9 +298,9 @@ gb28181:
     default_channel_on_demand_live: true            # 新通道默认点播按需拉流
     default_channel_cloud_recording_enabled: false  # 新通道默认云端录像
   alarm:
-    save_messages: true # 是否将设备报警通知写入报警记录；关闭后仍接收和解析通知
+    save_messages: false # 是否将设备报警通知写入报警记录；关闭后仍接收和解析通知。交付包默认关闭
   position_history:
-    enabled: true             # 是否保存位置历史轨迹；关闭后仍更新最新位置
+    enabled: false            # 是否保存位置历史轨迹；关闭后仍更新最新位置。交付包默认关闭
     retention_days: 7         # 历史轨迹保留天数，范围 1-365
   sdp:
     extension_enabled: false  # 部分设备需要的扩展 SDP 媒体编码兼容模式，一般无需开启
@@ -364,8 +364,8 @@ gb28181:
     # 点播会话兜底对账 goroutine 的扫描周期(秒)；0=禁用 reconciler（开发/调试场景）。
     # ⚠️ 不配即为 0：代码用 GetInt 直取，没有兜底值,所以这里显式写出 300，别整行删掉
     reconcile_interval_sec: 300
-    request_timeout_ms: 10000     # 点播请求超时(毫秒)；有效范围 1000-300000，越界回落 10000
-    fixed_address_enabled: false  # 固定播放地址；开启后同一通道的点播地址保持稳定
+    request_timeout_ms: 15000     # 点播请求超时(毫秒)；有效范围 1000-300000，越界回落 15000
+    fixed_address_enabled: true   # 固定播放地址；开启后同一通道的点播地址保持稳定。交付包默认开启
     auto_on_demand_enabled: false # 自动按需推流；依赖上项=true，否则校验直接报错
     auth:
       enabled: false              # 播放地址鉴权，默认关闭以兼容现网

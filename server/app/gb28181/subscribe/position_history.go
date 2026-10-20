@@ -15,10 +15,11 @@ const (
 	maxPositionHistoryRetentionDays     = 365
 )
 
-// PositionHistoryEnabled defaults to true so existing deployments begin retaining positions after upgrade.
+// PositionHistoryEnabled defaults to false (2026-10-20 交付包口径:
+// 移动位置历史轨迹默认不保存，仅更新最新位置).
 func PositionHistoryEnabled() bool {
 	if app.ConfigYml == nil || app.ConfigYml.Get("gb28181.position_history.enabled") == nil {
-		return true
+		return false
 	}
 	return app.ConfigYml.GetBool("gb28181.position_history.enabled")
 }

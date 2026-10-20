@@ -134,3 +134,54 @@ test('首屏标题与系统名称一致（不留下旧产品名）', () => {
   const title = read(INDEX_HTML).match(/<title>([^<]*)<\/title>/)?.[1]?.trim();
   assert.equal(title, 'UVP统一视频接入平台');
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 国标服务配置出厂默认（老板 2026-10-20 交付包口径），同样分散多处：
+//   config.example.yml（出包模板）/ gb28181/config/config.go（缺键兜底）/
+//   serviceConfigState.ts（前端表单兜底）/ utils/http/index.ts（axios 全局超时）。
+// 任意一处单方面改动都会造成「模板是 A、删掉配置行又变 B」的静默漂移。
+// ─────────────────────────────────────────────────────────────────────────────
+const GB_CONFIG = 'server/app/gb28181/config/config.go';
+const SERVICE_CONFIG_STATE = 'web/src/views/gb28181/sip/serviceConfigState.ts';
+const HTTP_INDEX = 'web/src/utils/http/index.ts';
+
+test('国标服务配置出厂默认：报警/位置轨迹不存、固定点播地址开启', () => {
+  const gb28181 = sectionBody(yml, 'gb28181');
+  const alarm = sectionBody(gb28181, 'alarm');
+  const position = sectionBody(gb28181, 'position_history');
+  const play = sectionBody(gb28181, 'play');
+
+  assert.equal(scalarIn(alarm, 'gb28181.alarm', 'save_messages'), 'false', 'alarm.save_messages 默认应为 false');
+  assert.equal(scalarIn(position, 'gb28181.position_history', 'enabled'), 'false', 'position_history.enabled 默认应为 false');
+  assert.equal(scalarIn(play, 'gb28181.play', 'fixed_address_enabled'), 'true', 'play.fixed_address_enabled 默认应为 true');
+});
+
+test('国标服务配置出厂默认：点播超时 15000ms，yml 与 Go 兜底一致', () => {
+  const play = sectionBody(sectionBody(yml, 'gb28181'), 'play');
+  const ymlTimeout = scalarIn(play, 'gb28181.play', 'request_timeout_ms');
+  assert.equal(ymlTimeout, '15000', 'play.request_timeout_ms 默认应为 15000');
+
+  // ⛔ 两边必须同步：config.yml 里没有该键时走 Go 的兜底常量。
+  const go = read(GB_CONFIG);
+  const goTimeout = go.match(/DefaultPlayRequestTimeoutMs\s*=\s*(\d+)/)?.[1];
+  assert.ok(goTimeout, 'config.go 里的 DefaultPlayRequestTimeoutMs 常量不见了（被改名？）');
+  assert.equal(ymlTimeout, goTimeout, `点播超时：yml=${ymlTimeout} 而 Go=${goTimeout}`);
+});
+
+test('前端表单兜底默认与 yml 出厂默认一致', () => {
+  const draft = read(SERVICE_CONFIG_STATE);
+  const pin = (pattern, what) => {
+    assert.match(draft, pattern, `${SERVICE_CONFIG_STATE} 里 ${what} 与出厂默认不一致`);
+  };
+  pin(/saveMobilePositionHistory:\s*false/, 'saveMobilePositionHistory 应为 false');
+  pin(/saveAlarmMessages:\s*false/, 'saveAlarmMessages 应为 false');
+  pin(/fixedAddressEnabled:\s*true/, 'fixedAddressEnabled 应为 true');
+  pin(/playTimeoutMs:\s*15000/, 'playTimeoutMs 应为 15000');
+});
+
+test('axios 全局请求超时默认 15 秒', () => {
+  const http = read(HTTP_INDEX);
+  const timeout = http.match(/timeout:\s*(\d+)/)?.[1];
+  assert.ok(timeout, `${HTTP_INDEX} 里找不到全局 timeout`);
+  assert.equal(timeout, '15000', '前端接口请求超时默认应为 15000ms');
+});
