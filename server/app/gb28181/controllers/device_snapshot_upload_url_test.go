@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -60,4 +61,68 @@ func TestSnapshotUploadURLRejectsDeviceUnreachableHost(t *testing.T) {
 			require.Equal(t, test.wantURL, got)
 		})
 	}
+}
+
+// ⛔⛔ 2026-10-20 客户现场实锤：公网 NAT + nginx HTTPS（自签、非 443 端口）部署下，
+// 「请求 Host 派生」的下发地址丢了端口、指向 443 死地址——设备拍了图传不回来，
+// nginx 里 0 条回传请求、图像库 0 行、平台侧零报错。此后上传基址有了**显式配置**
+// （gb28181.snapshot_upload.base_url）：配置了就一票优先（连浏览器 Host 是回环
+// 也不看），配置非法当场拒发并说清是配置问题，未配置才回退 Host 派生。
+//
+// 以下三条用例钉住这三个分支；provider 是包级变量，save/restore 注入
+// （qr.go 的 SetBaseURLProvider 同款手法，避免测试依赖全局 app.ConfigYml）。
+
+func snapshotUploadURLWithProvider(t *testing.T, fn func() (string, error), host string) (string, error) {
+	t.Helper()
+	prev := snapshotUploadBaseURLProvider
+	snapshotUploadBaseURLProvider = fn
+	t.Cleanup(func() { snapshotUploadBaseURLProvider = prev })
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+	ctx.Request.Host = host
+	return snapshotUploadURL(ctx, "tok")
+}
+
+func TestSnapshotUploadURLPrefersConfiguredBase(t *testing.T) {
+	// 配置说了算：即使浏览器 Host 是回环（往常会被门禁拒发）也照样用配置值。
+	got, err := snapshotUploadURLWithProvider(t,
+		func() (string, error) { return "https://124.236.76.233:51000", nil },
+		"localhost:5177")
+	require.NoError(t, err)
+	require.Equal(t,
+		"https://124.236.76.233:51000/api/gb28181/device-snapshots/uploads/tok/", got)
+}
+
+func TestSnapshotUploadURLKeepsConfiguredPathPrefix(t *testing.T) {
+	// 反代带路径前缀：基址路径必须保留（EffectiveBaseURL 已裁尾斜杠）。
+	got, err := snapshotUploadURLWithProvider(t,
+		func() (string, error) { return "https://uv.example.com/uvp", nil },
+		"192.168.10.120:5177")
+	require.NoError(t, err)
+	require.Equal(t,
+		"https://uv.example.com/uvp/api/gb28181/device-snapshots/uploads/tok/", got)
+}
+
+func TestSnapshotUploadURLRejectsInvalidConfiguredBase(t *testing.T) {
+	// 配置非法：当场拒发，文案指向配置项，而不是沉成"设备没上传"让人猜。
+	_, err := snapshotUploadURLWithProvider(t,
+		func() (string, error) { return "", errors.New("抓拍上传基址无效") },
+		"192.168.10.120:5177")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "抓拍上传基址")
+}
+
+func TestSnapshotUploadURLFallsBackWhenUnconfigured(t *testing.T) {
+	// 未配置（("", nil)）：保持既有行为——请求 Host 派生 + 回环门禁。
+	got, err := snapshotUploadURLWithProvider(t,
+		func() (string, error) { return "", nil },
+		"192.168.10.120:5177")
+	require.NoError(t, err)
+	require.Equal(t,
+		"http://192.168.10.120:5177/api/gb28181/device-snapshots/uploads/tok/", got)
+
+	_, err = snapshotUploadURLWithProvider(t,
+		func() (string, error) { return "", nil },
+		"localhost:5177")
+	require.Error(t, err, "未配置时回环 Host 仍必须拒发")
 }

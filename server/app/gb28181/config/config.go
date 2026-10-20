@@ -67,15 +67,15 @@ const (
 	MinSIPTraceRetentionDays             = 1
 	MaxSIPTraceRetentionDays             = 365
 
-	MaxRecordQueryTimeoutSec = 300
-	MaxRecordQueryRangeHours = 168
-	MaxRecordQueryActive     = 1024
-	MaxRecordsPerQuery       = 100000
-	MaxResultTTLSec          = 86400
-	MaxMediaWaitSec          = 120
-	MaxPlaybackIdleSec       = 3600
-	MaxPlaybackSessionSec    = 86400
-	MaxSIPCommandTimeoutSec  = 300
+	MaxRecordQueryTimeoutSec           = 300
+	MaxRecordQueryRangeHours           = 168
+	MaxRecordQueryActive               = 1024
+	MaxRecordsPerQuery                 = 100000
+	MaxResultTTLSec                    = 86400
+	MaxMediaWaitSec                    = 120
+	MaxPlaybackIdleSec                 = 3600
+	MaxPlaybackSessionSec              = 86400
+	MaxSIPCommandTimeoutSec            = 300
 	DefaultRecordCacheTailToleranceSec = 2
 	MinRecordCacheTailToleranceSec     = 0
 	MaxRecordCacheTailToleranceSec     = 30
@@ -607,6 +607,8 @@ type Config struct {
 	RecordQuery RecordQueryConfig
 	Playback    PlaybackConfig
 	QRProvision QRProvisionConfig
+	// ⛔ 用与 CurrentSnapshotUploadBaseURL 同一个读取函数,免得两处键名写岔
+	SnapshotUpload SnapshotUploadConfig
 }
 
 // QRProvisionConfig controls the address handed to devices by the access QR code.
@@ -656,6 +658,72 @@ func (c QRProvisionConfig) EffectiveBaseURL() (string, error) {
 	parsed.Path = strings.TrimRight(parsed.Path, "/")
 	parsed.RawPath = strings.TrimRight(parsed.RawPath, "/")
 	return parsed.String(), nil
+}
+
+// SnapshotUploadConfig controls the upload address handed to devices by the
+// 2022 snapshot capture command (SnapShotConfig.UploadURL, GB/T 28181-2022 §9.14).
+//
+// ⛔⛔ 与 QRProvisionConfig 同一条铁律：这个地址**必须是设备能访问到的**，
+// 不能从「操作员浏览器打开平台的地址」猜。2026-10-20 客户现场实锤（公网 NAT +
+// nginx HTTPS 自签）：请求 Host 派生出的上传地址**丢了端口**（nginx $host 不带
+// 端口）、指向 443 死地址，设备把图拍好后传不回来，平台侧零报错、会话永远
+// waiting —— 又一次「设备没上传」式静默失效。公网/NAT 部署必须显式配置本项。
+type SnapshotUploadConfig struct {
+	// BaseURL 设备可达的平台入口基址（如 https://124.236.76.233:51000
+	// 或 http://10.0.0.68:51002）。留空 = 未配置，回退请求 Host 派生。
+	BaseURL string
+}
+
+// EffectiveBaseURL 返回校验过的基址。
+// ("", nil) 表示未配置（调用方自行回退）；配置非法返回错误，绝不猜。
+func (c SnapshotUploadConfig) EffectiveBaseURL() (string, error) {
+	raw := strings.TrimSpace(c.BaseURL)
+	if raw == "" {
+		return "", nil
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed == nil || !parsed.IsAbs() || parsed.Host == "" || parsed.Opaque != "" {
+		return "", errors.New("抓拍上传基址无效")
+	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", errors.New("抓拍上传基址仅支持 HTTP 或 HTTPS")
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
+		return "", errors.New("抓拍上传基址不得包含用户信息、查询参数或片段")
+	}
+	// ⭐ 回环/localhost/通配对**设备**不可达：配置了等于发一个注定失败的上传
+	//   地址（静默失效），当场报错优于猜。域名一律放行（解析到哪平台判不了）。
+	if h := parsed.Hostname(); h != "" {
+		lower := strings.ToLower(h)
+		if lower == "localhost" || strings.HasSuffix(lower, ".localhost") {
+			return "", errors.New("抓拍上传基址不能是 localhost（设备访问不到）")
+		}
+		if ip := net.ParseIP(h); ip != nil && (ip.IsLoopback() || ip.IsUnspecified()) {
+			return "", errors.New("抓拍上传基址不能是回环或通配地址（设备访问不到）")
+		}
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	parsed.RawPath = strings.TrimRight(parsed.RawPath, "/")
+	return parsed.String(), nil
+}
+
+// SnapshotUploadConfigFrom 从配置源读抓拍上传基址配置.
+func SnapshotUploadConfigFrom(c valueSource) SnapshotUploadConfig {
+	if c == nil {
+		return SnapshotUploadConfig{}
+	}
+	return SnapshotUploadConfig{
+		BaseURL: c.GetString("gb28181.snapshot_upload.base_url"),
+	}
+}
+
+// CurrentSnapshotUploadBaseURL 读当前生效的抓拍上传基址.
+//
+// ("", nil) = 未配置（调用方回退请求 Host 派生，仅设备与平台同网/直连时可靠）；
+// 非空 = 校验过的设备可达基址；err = 配置了但非法，当场拒发而不是发死地址。
+func CurrentSnapshotUploadBaseURL() (string, error) {
+	return SnapshotUploadConfigFrom(app.ConfigYml).EffectiveBaseURL()
 }
 
 // RecordQueryConfig controls device-local RecordInfo queries.
@@ -956,6 +1024,8 @@ func loadFrom(c valueSource) (Config, error) {
 		},
 		// ⛔ 用与 CurrentQRProvisionBaseURL 同一个读取函数,免得两处键名写岔
 		QRProvision: QRProvisionConfigFrom(c),
+		// ⛔ 用与 CurrentSnapshotUploadBaseURL 同一个读取函数,免得两处键名写岔
+		SnapshotUpload: SnapshotUploadConfigFrom(c),
 	}
 	if err := validateRecordRuntimeConfig(&cfg, c.GetInt("httpserver.handler_timeout")); err != nil {
 		return cfg, err

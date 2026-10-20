@@ -18,6 +18,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"uvplatform.com/uvp-gb28181/app/gb28181/devicecapture"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
 	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
@@ -760,7 +761,22 @@ func validSnapshotSource(source string) bool {
 	}
 }
 
+// snapshotUploadBaseURLProvider 解析「管理员配置的设备可达上传基址」。
+// 包级变量是为测试注入（save/restore，qr.go 的 SetBaseURLProvider 同款手法）。
+var snapshotUploadBaseURLProvider = gbconfig.CurrentSnapshotUploadBaseURL
+
 func snapshotUploadURL(c *gin.Context, token string) (string, error) {
+	// ① 管理员显式配置的设备可达基址优先（gb28181.snapshot_upload.base_url）。
+	//    ⛔ 公网/NAT 部署里「浏览器打开平台的地址」与「设备可达的地址」不是同一个：
+	//    2026-10-20 现场实锤——nginx HTTPS 段的 $host 不带端口，派生出的上传地址
+	//    指向 443 死地址，设备拍了图传不回来、平台零报错。这类部署必须配置本项。
+	if base, err := snapshotUploadBaseURLProvider(); err != nil {
+		return "", fmt.Errorf("抓拍上传基址配置无效：%w", err)
+	} else if base != "" {
+		return base + "/api/gb28181/device-snapshots/uploads/" + token + "/", nil
+	}
+	// ② 未配置 → 回退「请求 Host 派生」。只对「设备与平台同网/直连」可靠；
+	//    回环/通配仍由下方门禁当场拒发。
 	scheme := strings.TrimSpace(strings.Split(c.GetHeader("X-Forwarded-Proto"), ",")[0])
 	if scheme == "" {
 		scheme = "http"
