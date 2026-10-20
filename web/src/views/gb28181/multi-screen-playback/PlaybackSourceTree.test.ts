@@ -367,6 +367,12 @@ describe("PlaybackSourceTree", () => {
     expect(source).toMatch(/\.favorite-dialog-backdrop\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*0;/s);
   });
 
+  it("keeps indented tree rows inside the scroll container", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/multi-screen-playback/PlaybackSourceTree.vue"), "utf8");
+
+    expect(source).toMatch(/\.tree-row\s*\{[^}]*box-sizing:\s*border-box;/s);
+  });
+
   it("emits a quick-play action for a favorite group", async () => {
     favoritesApi.listChannelFavoriteGroups.mockResolvedValue({
       code: 0,

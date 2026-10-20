@@ -1311,6 +1311,7 @@ defineExpose({ openFavoriteDialogForChannels });
   scrollbar-gutter: stable;
 }
 .tree-row {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   width: 100%;
