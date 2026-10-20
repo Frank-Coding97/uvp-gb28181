@@ -8,6 +8,7 @@ import { disableZLMNode, enableZLMNode, listZLMNodes, type ZLMNode } from "@/api
 import type { MediaNodeCatalogNode, MediaScope } from "@/store/modules/media-workbench";
 import { useZLMContextStore } from "@/store/modules/zlm-context";
 import { hasPermission } from "@/hooks/usePermission";
+import { writeTextToClipboard } from "@/utils/app";
 import NodeForm from "../../NodeForm.vue";
 import ZLMNodeActionDialog from "../../ZLMNodeActionDialog.vue";
 import LifecycleDot from "../../components/LifecycleDot.vue";
@@ -237,6 +238,20 @@ function actionDone() {
   refreshRows();
 }
 
+/**
+ * 复制 mediaid（= `meta_node.media_server_uuid`，也就是下发到 ZLM `general.mediaServerId` 的值）。
+ *
+ * 台账上摆这串 UUID 的唯一用途就是「拿现场 / 日志里的 id 反查是哪台节点」，
+ * 所以必须能一键复制 —— 36 位手选太重。复制失败只提示，不改表格状态。
+ */
+async function copyMediaId(mediaId?: string) {
+  const value = (mediaId ?? "").trim();
+  if (!value) return;
+  const ok = await writeTextToClipboard(value);
+  if (ok) Message.success("mediaid 已复制");
+  else Message.error("复制失败，请手动选择后复制");
+}
+
 function isZeroTime(value?: string) {
   return !value || value.startsWith("0001-01-01");
 }
@@ -261,7 +276,13 @@ function relativeTime(value?: string) {
 
     <s-layout-search class="node-search-panel">
       <template #fields>
-        <a-input v-model="search" allow-clear placeholder="节点名称 / Host" style="width: 260px" @press-enter="queryRows" />
+        <a-input
+          v-model="search"
+          allow-clear
+          placeholder="节点名称 / Host / mediaid"
+          style="width: 300px"
+          @press-enter="queryRows"
+        />
         <a-select
           v-model="filterEnabled"
           allow-clear
@@ -319,11 +340,23 @@ function relativeTime(value?: string) {
     <section v-else class="node-table-wrap">
       <a-table :data="filteredNodes" :loading="loading" row-key="id" :pagination="false" class="node-table uvp-data-table">
         <template #columns>
-          <a-table-column title="节点" :width="230"
+          <a-table-column title="节点" :width="300"
             ><template #cell="{ record }"
               ><div class="cell-node">
                 <span class="cell-node-name">{{ record.name }}</span
-                ><span class="cell-node-host">{{ record.host }}:{{ record.apiPort }}</span>
+                ><span class="cell-node-host">{{ record.host }}:{{ record.apiPort }}</span
+                ><span
+                  v-if="record.mediaServerUUID"
+                  class="cell-node-mediaid"
+                  role="button"
+                  tabindex="0"
+                  :title="`mediaid：${record.mediaServerUUID}（点击复制）`"
+                  :aria-label="`复制 mediaid ${record.mediaServerUUID}`"
+                  @click.stop="copyMediaId(record.mediaServerUUID)"
+                  @keydown.enter.prevent="copyMediaId(record.mediaServerUUID)"
+                  @keydown.space.prevent="copyMediaId(record.mediaServerUUID)"
+                  ><span class="cell-node-mediaid-label">ID</span>{{ record.mediaServerUUID }}</span
+                >
               </div></template
             ></a-table-column
           >
@@ -523,6 +556,36 @@ function relativeTime(value?: string) {
   font-family: var(--zlm-font-mono);
   font-size: var(--zlm-fs-caption);
   color: var(--zlm-text-3);
+}
+
+/* mediaid（= ZLM 的 general.mediaServerId）。等宽 + 弱化，用「ID」小标签跟地址行区分开；
+   点击即复制，因为台账摆它的用途就是拿现场的一串 UUID 反查节点。 */
+.cell-node-mediaid {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--zlm-font-mono);
+  font-size: 11px;
+  color: var(--zlm-text-3);
+  white-space: nowrap;
+  cursor: copy;
+}
+.cell-node-mediaid:hover,
+.cell-node-mediaid:focus-visible {
+  color: var(--uvp-brand);
+}
+.cell-node-mediaid-label {
+  flex: none;
+  padding: 0 3px;
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--zlm-text-4);
+  border: 1px solid var(--zlm-border);
+  border-radius: 4px;
 }
 .node-row-actions .uvp-table-action {
   flex: none;

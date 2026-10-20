@@ -88,4 +88,14 @@ describe("NodeListPanel", () => {
     expect(source).toContain('placeholder="管理状态"');
     expect(source).toContain('placeholder="在线状态"');
   });
+
+  it("puts the mediaid on the ledger row and copies it on click", () => {
+    // 台账要能拿现场日志里的 UUID 反查节点，所以 mediaid 必须可见且能一键复制。
+    expect(source).toContain("record.mediaServerUUID");
+    expect(source).toContain("copyMediaId");
+    expect(source).toContain("writeTextToClipboard");
+    expect(source).toContain("节点名称 / Host / mediaid");
+    // 空值时不要渲染一个可点的空行。
+    expect(source).toContain('v-if="record.mediaServerUUID"');
+  });
 });

@@ -7,6 +7,8 @@ export interface NodeListRecord {
   name: string;
   host: string;
   state: ZLMNodeState;
+  /** 节点身份 UUID（= 下发到 ZLM 的 general.mediaServerId）。台账要能按它反查现场。 */
+  mediaServerUUID?: string;
   enabled?: boolean;
   health?: ZLMNodeState;
   recoveryRequired?: boolean;
@@ -48,9 +50,21 @@ export function nodeHealthReason(
 export function filterNodeRecords<T extends NodeListRecord>(nodes: readonly T[], filter: NodeListFilter = {}) {
   const keyword = filter.keyword?.trim().toLowerCase() ?? "";
   return nodes.filter(node => {
-    if (keyword && !node.name.toLowerCase().includes(keyword) && !node.host.toLowerCase().includes(keyword)) return false;
+    if (keyword && !matchesNodeKeyword(node, keyword)) return false;
     if (filter.state && nodeOnlineState(node) !== filter.state) return false;
     if (filter.enabled !== undefined && (node.enabled !== false) !== filter.enabled) return false;
     return !filter.health || nodeHealth(node) === filter.health;
   });
+}
+
+/**
+ * 关键词匹配：别名 / Host / mediaid。
+ *
+ * mediaid 也参与匹配，是因为台账把它摆在明面上就是为了「拿现场日志里的一串 UUID 反查是哪个节点」——
+ * 只能看不能搜，等于还得人眼比对。
+ */
+function matchesNodeKeyword(node: NodeListRecord, keyword: string) {
+  if (node.name.toLowerCase().includes(keyword)) return true;
+  if (node.host.toLowerCase().includes(keyword)) return true;
+  return (node.mediaServerUUID ?? "").toLowerCase().includes(keyword);
 }
