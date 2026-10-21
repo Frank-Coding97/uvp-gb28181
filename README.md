@@ -12,6 +12,20 @@
   面向 GB/T 28181 视频接入场景的统一管理平台，让设备接入、媒体调度和问题排查都有迹可循。
 </p>
 
+<p align="center">
+  <a href="https://github.com/Frank-Coding97/uvp-gb28181/releases"><img src="https://img.shields.io/github/v/release/Frank-Coding97/uvp-gb28181?label=release&color=2563EB" alt="release"></a>
+  <img src="https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white" alt="Go">
+  <img src="https://img.shields.io/badge/Vue-3.5-42B883?logo=vuedotjs&logoColor=white" alt="Vue">
+  <img src="https://img.shields.io/badge/GB%2FT%2028181-2016%20%2F%202022-1F6FEB" alt="GB/T 28181">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/DB-MySQL%20%2F%20PostgreSQL%20%2F%20SQLServer-4479A1" alt="Database">
+  <img src="https://img.shields.io/badge/Redis-7.4-DC382D?logo=redis&logoColor=white" alt="Redis">
+  <img src="https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white" alt="Docker">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-3DA639?logo=opensourceinitiative&logoColor=white" alt="License MIT"></a>
+</p>
+
 UVP 是 **Unified Video Platform** 的缩写，中文全称为 **统一视频接入平台**。UVP-GB28181 是一套面向安防视频联网场景的统一视频接入与管理平台。项目采用 Go、Vue 3 和 TypeScript 构建，并集成 ZLMediaKit 提供媒体处理能力，目标是让国标设备接入更容易部署、更便于运维，也更容易定位问题。
 
 - 当前版本：`1.1.12`（见根目录 `VERSION`）
