@@ -1,10 +1,38 @@
-# UVP-GB28181
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="web/src/assets/logo/uvp-wordmark-light.svg">
+    <img src="web/src/assets/logo/uvp-full.svg" alt="UVP 统一视频接入平台" width="340">
+  </picture>
+</p>
 
-> **Unified Video Platform · 统一视频接入平台**
->
-> 面向 GB/T 28181 视频接入场景的统一管理平台，让设备接入、媒体调度和问题排查都有迹可循。
+<h1 align="center">UVP-GB28181</h1>
+
+<p align="center">
+  <b>Unified Video Platform · 统一视频接入平台</b><br/>
+  面向 GB/T 28181 视频接入场景的统一管理平台，让设备接入、媒体调度和问题排查都有迹可循。
+</p>
 
 UVP 是 **Unified Video Platform** 的缩写，中文全称为 **统一视频接入平台**。UVP-GB28181 是一套面向安防视频联网场景的统一视频接入与管理平台。项目采用 Go、Vue 3 和 TypeScript 构建，并集成 ZLMediaKit 提供媒体处理能力，目标是让国标设备接入更容易部署、更便于运维，也更容易定位问题。
+
+- 当前版本：`1.1.12`（见根目录 `VERSION`）
+- 许可证：MIT
+- 代码托管：[GitHub](https://github.com/Frank-Coding97/uvp-gb28181) · [Gitee](https://gitee.com/Frank-Coding/uvp-gb28181)
+
+## 目录
+
+- [项目亮点](#项目亮点)
+- [功能一览](#功能一览)
+- [技术架构](#技术架构)
+- [快速开始](#快速开始)
+- [目录结构](#目录结构)
+- [配置说明](#配置说明)
+- [开发与质量](#开发与质量)
+- [文档索引](#文档索引)
+- [常见问题](#常见问题)
+- [版本与发布](#版本与发布)
+- [项目背景](#项目背景)
+- [致谢](#致谢)
+- [许可证](#许可证)
 
 ## 项目亮点
 
@@ -18,6 +46,26 @@ UVP 是 **Unified Video Platform** 的缩写，中文全称为 **统一视频接
 - **兼顾协议演进**：以 GB/T 28181-2016 兼容为基础，持续完善 GB/T 28181-2022 的版本识别、信令字段和设备能力适配；具体能力以设备支持情况和项目当前版本为准。
 - **配套模拟器便于联调**：提供配套的国标设备模拟器，用于没有真实设备时的注册、目录、点播和协议问题复现。
 - **部署路径清晰**：后端编译为 Go 程序，前端独立构建，数据库、缓存和媒体节点按职责拆分，适合开发联调、单机部署和按需扩展。
+
+## 功能一览
+
+> 下表按业务域归类，均为当前版本已实现并在页面上可用的能力；协议细节层面的兼容程度仍以具体设备的实现为准。
+
+| 业务域 | 能力 |
+| --- | --- |
+| 设备接入 | 国标注册与鉴权、心跳保活、注册有效期协商、设备上下线状态、设备接入地址生成、设备导入与批量维护 |
+| 目录与资源 | 目录查询与订阅、通道树、自定义业务分组、收藏、设备授权共享、部门级数据隔离 |
+| 实时视频 | 单画面/多画面点播、主辅码流切换、WebRTC / HTTP-FLV / HLS 播放协议切换、播放会话管理 |
+| 录像业务 | 设备录像检索、按时间回放、多屏同步回放、云端录像、录像计划、设备录像缓存到服务器、回放与下载日志 |
+| 云台与控制 | 云台方向/变倍/聚焦控制、预置位、巡航、看守位、雨刷与辅助开关、目标跟踪框 |
+| 告警与位置 | 告警接收与查询、移动位置上报、订阅与通知 |
+| 语音对讲 | 设备语音对讲与语音广播 |
+| 平台级联 | 上级平台级联配置、目录共享与推送、级联点播与录像回放、级联状态查看 |
+| 媒体节点 | 多 ZLMediaKit 节点接入与配置、节点探活与重启、调度策略（轮询/加权/最小负载）、ZLM Hook 凭证管理 |
+| 运维排障 | SIP 报文与会话追踪、实时业务日志、流媒体探针与诊断、节点健康检查、系统任务与操作日志 |
+| 图像与固件 | 抓图与图像库、批量下载、固件仓库与升级任务 |
+| 平台管理 | 用户/角色/菜单/部门/字典/API 权限、登录安全（验证码、失败锁定）、安全事件、OpenAPI 客户端与凭证 |
+| 系统能力 | 多数据库支持（MySQL / PostgreSQL / SQL Server / SQLite）、Redis 或内存缓存、服务在线升级、HTTPS 与端口可配置 |
 
 ## 技术架构
 
@@ -71,6 +119,150 @@ flowchart TB
 ```
 
 这种分层方式既方便开发者调试协议，也方便运维人员在真实网络环境下区分设备、信令、媒体节点、网络和浏览器播放端的问题。
+
+## 快速开始
+
+平台提供三条使用路径。现场交付优先选绿色安装包或容器版，二次开发选源码运行。
+
+### 系统要求
+
+| 场景 | 要求 |
+| --- | --- |
+| Linux 绿色包 | x86_64 或 aarch64，glibc 2.28 及以上（银河麒麟 V10 SP2 / 统信 UOS / openEuler 等国产系统可用）；无需预装数据库、Redis、nginx、ZLM、ffmpeg |
+| Windows 绿色包 | Windows x64；同样免安装依赖，但解压目录不能含中文与空格 |
+| 容器版 | Docker 20.10+ / Compose v2，且使用 **host 网络模式** |
+| 源码运行 | Go 1.25+（见 `server/go.mod`）、Node.js ≥ 18.12、pnpm ≥ 8.7；MySQL / PostgreSQL / SQL Server 任选其一；Redis 可选（单实例可用内存缓存） |
+
+### 方式一：绿色安装包（推荐现场交付）
+
+解压即用，数据库（SQLite）、缓存（Redis）、流媒体（ZLMediaKit）、Web 服务器（nginx）、ffmpeg 与自签证书全部随包自带。
+
+```bash
+tar -xzf uvp-gb28181-*.tar.gz
+cd uvp-gb28181-*
+./uvp-gb28181-ctl.sh start     # 首次启动自动建库，约 1 分钟
+```
+
+启动完成后访问 `http://<本机IP>:51000`，初始账号 `admin` / `123456`，登录后强制修改密码。`start` 是幂等的，重复执行只补齐未启动的组件。
+
+- Linux 版端口落在 **51000–51064**，可用 `config/config.env` 整段平移
+- Windows 版端口落在 **15500–15564**（避开系统动态端口段与深信服等终端软件占用）
+- 详细说明：[`deploy/standalone/README.md`](deploy/standalone/README.md)、[`deploy/standalone-windows/README.md`](deploy/standalone-windows/README.md)、[`deploy/standalone/PORTS.md`](deploy/standalone/PORTS.md)
+
+### 方式二：Docker Compose
+
+```bash
+tar -xzf uvp-gb28181-docker-linux-amd64-<版本>.tar.gz
+cd uvp-gb28181-docker-linux-amd64-<版本>
+sudo ./install.sh                          # 离线：docker load 本地镜像
+sudo ./install.sh --online --registry <你的镜像仓库>/uvp --version 1.1.12
+sudo ./install.sh --port-base 53000        # 端口段冲突时整段平移
+```
+
+> 容器必须使用 `network_mode: host`。走 bridge 时平台会把容器内网地址（172.x）写进 SDP 发给摄像机，设备按它推流连不进来，表现为「信令全成功、就是没画面」。端口预检、目录结构与启动流程的说明见 [`deploy/compose/install.sh`](deploy/compose/install.sh) 与 [`deploy/compose/compose.yml`](deploy/compose/compose.yml)。
+
+### 方式三：源码运行
+
+后端：
+
+```bash
+cd server
+# 1) 建库：MySQL 用 resource/database/uvp-gb28181.sql
+#           PostgreSQL 用 postgresql_converted.sql
+#           SQL Server 用 sqlserver_converted.sql
+# 2) 按实际环境修改 config/config.yml（数据库、缓存、SIP、媒体地址）
+go run .          # 开发端口 8280
+```
+
+前端：
+
+```bash
+cd web
+pnpm install
+pnpm dev          # http://localhost:5177，/api 与 /public 代理到 127.0.0.1:8280
+pnpm build:prod   # 生产构建，产物交给 nginx 托管
+```
+
+> 后端**不服务 SPA**，只提供 API、ZLM Hook、扫码页等接口。开发时用 vite（5177）访问页面，生产环境由 nginx 同时托管前端静态文件并反向代理后端。代理目标可用 `VITE_APP_BASE_URL` 覆盖。
+
+## 目录结构
+
+```text
+.
+├── server/                    # Go 后端（模块名 uvplatform.com/uvp-gb28181）
+│   ├── app/gb28181/           # 业务主体：sip / play / playback / recordcache / cascade / zlm / ptz …
+│   ├── app/controllers/       # 管理端与 OpenAPI 控制器
+│   ├── app/models/            # GORM 模型
+│   ├── app/routes/            # 路由注册与权限绑定
+│   ├── config/                # config.example.yml（全量注释）+ config.yml
+│   ├── resource/database/     # 三库基线 SQL、SQLite 基线与增量迁移
+│   └── gen/templates/         # 代码生成器模板
+├── web/                       # Vue 3 + TypeScript 前端
+│   └── src/views/gb28181/     # 设备、点播、回放、级联、节点、图像库、日志等业务页面
+├── deploy/
+│   ├── standalone/            # Linux 绿色包（构建、端口规划、ctl 脚本）
+│   ├── standalone-windows/    # Windows 绿色包
+│   └── compose/               # 容器版 compose 模板与安装脚本
+├── api/openapi-v1.yaml        # 对外开放接口（OpenAPI 3）
+├── docs/                      # 设计规格、计划、任务记录与升版说明
+├── scripts/                   # 质量门禁、发版、权限与数据库辅助脚本
+└── VERSION                    # 版本号唯一来源
+```
+
+## 配置说明
+
+主配置为 `server/config/config.yml`，完整字段与注释见 `server/config/config.example.yml`。最常调整的几组：
+
+| 配置段 | 作用 |
+| --- | --- |
+| `server.cachetype` | `memory`（单实例）或 `redis`（多实例必须） |
+| `server.appdebug` | 调试开关，影响 gin 模式与 swagger / pprof / viewCache 调试路由，出厂默认关闭 |
+| `system.*` | 系统名称、Logo、版权与备案号，登录页与页脚展示 |
+| `safe.*` / `captcha.*` | 登录失败锁定策略、密码强度、验证码开关 |
+| `httpserver.*` | 监听端口与跨域；改端口需同步媒体 Hook 端口 |
+| `gormv2.usedbtype` | `mysql` / `postgresql` / `sqlserver` |
+
+## 开发与质量
+
+```bash
+scripts/quality-gate.sh          # 快速档：gofmt / go vet / golangci-lint / ESLint / Vitest / Prettier / Stylelint
+scripts/quality-gate.sh --full   # 完整档：追加 vue-tsc 类型检查与全量 go test
+```
+
+- 前端单测 `cd web && pnpm test:unit`，后端单测 `cd server && go test ./...`（涉及真实 Redis 的用例建议 `-p 1` 串行执行）
+- 提交前由 husky 钩子守住格式与提交信息规范
+- 前端页面与表单的样式、输入体验约定见 `CLAUDE.md`，新增页面请复用既有的 `uvp-*` 全局类，不要另起一套
+
+## 文档索引
+
+| 文档 | 内容 |
+| --- | --- |
+| [`docs/specs/`](docs/specs) | 功能设计规格（级联、NAT 回放、日志留存、OpenAPI 能力、服务升级等） |
+| [`docs/plans/`](docs/plans) | 对应的实施方案 |
+| [`docs/tasks/`](docs/tasks) | 任务记录与验收数据 |
+| [`docs/releases/`](docs/releases) | 升版说明，发版脚本按版本号取用 |
+| [`api/openapi-v1.yaml`](api/openapi-v1.yaml) | 开放接口定义 |
+| [`deploy/standalone/PORTS.md`](deploy/standalone/PORTS.md) | 端口规划与归属 |
+| [`CLAUDE.md`](CLAUDE.md) | 前端 UI 与开发约定 |
+
+## 常见问题
+
+**设备注册不上线。** 确认设备侧配置的 SIP 服务器地址与端口可达、域与鉴权账号与平台一致；平台在首次启动时会生成设备接入地址，跨 NAT 部署建议直接使用该地址，而不是手填内网 IP。
+
+**信令成功但没有画面。** 按「设备 ↔ 媒体节点」这一段查：SDP 中下发的媒体地址必须是设备能访问到的地址（容器部署走 bridge 时这里会变成容器内网地址）；同时确认 RTP 端口段未被防火墙拦截、ZLM 已收到流并注册成功。平台的探针与 SIP 会话追踪可以直接看到卡在哪一层。
+
+**端口冲突或需要改端口。** 绿色包改 `config/config.env` 里的端口项（16 个端口均可改，包括 ZLM 的 12 个）；容器版用 `install.sh --port-base` 整段平移。不要只改单个端口，混合端口段会让防火墙规则变复杂。
+
+**换数据库类型。** 修改 `config/config.yml` 的 `gormv2.usedbtype`，并用对应的基线 SQL 建库；三者基线分别位于 `server/resource/database/`。
+
+**前端改了没生效。** 生产环境替换前端产物前先清空 nginx 站点目录再铺新文件，直接覆盖会残留旧哈希文件，页面仍加载旧代码。
+
+## 版本与发布
+
+- 版本号唯一来源为根目录 `VERSION`，前后端版本需与其一致
+- 每个版本的升版说明写在 `docs/releases/v<版本号>.md`，发布脚本会原样写入 GitHub / Gitee Release 与官网升级日志
+- 发布流程由 `scripts/publish-release.mjs` 与 `scripts/publish-upgrade-release.mjs` 驱动，产物与校验信息输出到 `release-output/`
+- 仓库同时维护 GitHub 与 Gitee 两个远程，发版需两边同步
 
 ## 项目背景
 
@@ -128,6 +320,10 @@ UVP-GB28181 采用宽松的 MIT License。无论个人还是企业，都可以�
 
 UVP-GB28181 的诞生离不开行业内优秀项目和前辈们长期积累的成果。在此特别感谢以下项目及其开发者、维护者和社区贡献者。
 
+### [GinFast](https://github.com/tiger1103/gfast) / [ginfast-ui](https://github.com/qxkjsoft/ginfast-ui)
+
+UVP-GB28181 的后台骨架与前端工程底座基于 GinFast（Gfast 团队 / 奇讯科技）搭建。用户、角色、菜单、部门、字典、API 权限等基础模块，JWT 认证、Casbin 授权、代码生成器、日志中间件、Swagger 文档以及 Vue 3 + Vite + Arco Design 的前端工程结构，都来自这个项目。正是有了这套成熟的后台基础设施，这个平台才能把主要精力放在国标协议、媒体调度和运维可观测性上，而不是从零重写一遍管理后台。
+
 ### [ZLMediaKit](https://github.com/ZLMediaKit/ZLMediaKit)
 
 感谢 ZLMediaKit 提供稳定、完整的流媒体服务能力。UVP-GB28181 以 ZLMediaKit 作为核心媒体能力底座，围绕它完成流媒体接入、分发、录制、协议转换、WebRTC 播放、Hook 回调以及媒体节点管理。ZLMediaKit 出色的性能、丰富的协议支持和持续演进的社区，为本项目节省了大量媒体层的重复建设工作。
@@ -141,3 +337,9 @@ UVP-GB28181 的诞生离不开行业内优秀项目和前辈们长期积累的�
 感谢 EasyDarwin 团队提供 EasyPlayer.js。它为浏览器端的视频直播与录像回放提供了多协议、多编码格式和多种解码路径的支持，降低了 H.264、H.265 等视频在不同浏览器环境中的播放适配成本，为 UVP-GB28181 的 Web 播放体验提供了重要支撑。
 
 以上项目的名称、商标和版权归各自权利人所有。使用相关项目时，请遵守其各自的许可证和使用条款。
+
+## 许可证
+
+UVP-GB28181 基于 [MIT License](LICENSE) 开源。个人和企业均可在遵守许可证要求的前提下使用、修改、分发或用于商业项目，请在使用时保留原始版权与许可声明。
+
+第三方组件（ZLMediaKit、EasyPlayer.js 等）遵循各自许可证，详见对应项目仓库。
