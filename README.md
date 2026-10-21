@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="web/src/assets/logo/uvp-wordmark-light.svg">
-    <img src="web/src/assets/logo/uvp-full.svg" alt="UVP 统一视频接入平台" width="340">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Frank-Coding97/uvp-gb28181/develop/web/src/assets/logo/uvp-wordmark-light.svg">
+    <img src="https://raw.githubusercontent.com/Frank-Coding97/uvp-gb28181/develop/web/src/assets/logo/uvp-full.svg" alt="UVP 统一视频接入平台" width="340">
   </picture>
 </p>
 
