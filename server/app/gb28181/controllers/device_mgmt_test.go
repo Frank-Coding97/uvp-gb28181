@@ -71,6 +71,9 @@ func newDeviceMgmtRouter(t *testing.T, middlewares ...gin.HandlerFunc) (*gin.Eng
 		&gbmodels.GbChannel{},
 		&gbmodels.GbDevice{},
 		&gbmodels.GbMobilePositionLatest{},
+		// 轨迹查询读的是历史表，中心点配置存 sys_param —— 两者都要建，否则新接口的测试全是 "no such table"。
+		&gbmodels.GbMobilePositionHistory{},
+		&basemodels.SysParam{},
 		&gbmodels.GbDeviceSubscription{},
 		&gbmodels.GbAlarmEvent{},
 		&gbmodels.GbDeviceStatusEvent{},
@@ -118,6 +121,9 @@ func newDeviceMgmtRouter(t *testing.T, middlewares ...gin.HandlerFunc) (*gin.Eng
 		gr.GET("/map/markers", mc.Markers)
 		gr.GET("/map/clusters", mc.Clusters)
 		gr.GET("/map/no-coord-count", mc.NoCoordCount)
+		gr.GET("/map/trajectory", mc.Trajectory)
+		gr.GET("/map/center", mc.GetCenter)
+		gr.PUT("/map/center", mc.SetCenter)
 	}
 	return r, db
 }

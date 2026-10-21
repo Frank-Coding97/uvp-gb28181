@@ -396,6 +396,11 @@ export interface TimelineSlot {
 export interface MapMarker {
   id: number;
   channelId: string;
+  /**
+   * 所属设备国标编码。点播入参是 (设备编码, 通道编码) 两元组，
+   * 地图卡片上的「播放视频」直接用这一对，不必再回查详情。
+   */
+  deviceId: string;
   name: string;
   latitude: number;
   longitude: number;
@@ -415,6 +420,7 @@ export interface MapMarker {
 export interface MapClusterSingle {
   id: number;
   channelId: string;
+  deviceId: string;
   name: string;
   status: number;
 }
@@ -624,6 +630,62 @@ export const listMapClusters = (params: MapQuery & { zoom: number }) =>
     baseUrlApi("gb28181/device-mgmt/map/clusters"),
     { params }
   );
+
+/** 轨迹点。`speed`/`direction`/`altitude` 只有设备报了才有，缺省表示"该次上报没带"。 */
+export interface MapTrajectoryPoint {
+  eventTime: string;
+  longitude: number;
+  latitude: number;
+  speed?: number;
+  direction?: number;
+  altitude?: number;
+}
+
+export interface MapTrajectoryQuery {
+  channelId: number;
+  /** RFC3339 或 `YYYY-MM-DD HH:mm:ss`；不传则后端默认最近 1 小时。 */
+  startTime?: string;
+  endTime?: string;
+  maxPoints?: number;
+}
+
+export interface MapTrajectoryResult {
+  channelId: string;
+  deviceId: string;
+  name: string;
+  list: MapTrajectoryPoint[];
+  total: number;
+  /** 命中点数超过 maxPoints 时为 true，表示返回的是一条**抽稀后**的路线（首尾必留）。 */
+  truncated: boolean;
+  /**
+   * 服务端「位置历史记录」总开关。
+   * ⛔ 空轨迹有两种完全不同的原因：开关关着（去哪开）与设备本来不上报（固定摄像机）。
+   *    前端必须靠这个字段区分，不能一律提示"暂无轨迹"。
+   */
+  historyEnabled: boolean;
+  startTime: string;
+  endTime: string;
+}
+
+export const listMapTrajectory = (params: MapTrajectoryQuery) =>
+  http.request<BaseResult<MapTrajectoryResult>>("get", baseUrlApi("gb28181/device-mgmt/map/trajectory"), {
+    params
+  });
+
+/** 地图默认视野。`zoom` 是小数（MapLibre 原样），不要取整。 */
+export interface MapCenter {
+  longitude: number;
+  latitude: number;
+  zoom: number;
+}
+
+export const getMapCenter = () =>
+  http.request<BaseResult<{ center: MapCenter | null }>>("get", baseUrlApi("gb28181/device-mgmt/map/center"));
+
+export const saveMapCenter = (center: MapCenter) =>
+  http.request<BaseResult<{ center: MapCenter }>>("put", baseUrlApi("gb28181/device-mgmt/map/center"), {
+    data: center
+  });
 
 export interface BatchDeleteResult {
   succeeded: number[];

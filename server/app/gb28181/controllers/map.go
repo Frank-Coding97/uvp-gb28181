@@ -1,6 +1,9 @@
 package controllers
 
 import (
+	"encoding/json"
+	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -11,7 +14,9 @@ import (
 	"uvplatform.com/uvp-gb28181/app/controllers"
 	gbdirectory "uvplatform.com/uvp-gb28181/app/gb28181/directory"
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/subscribe"
 	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/models"
 	"uvplatform.com/uvp-gb28181/app/utils/datascope"
 )
 
@@ -90,8 +95,11 @@ func applyMapDirectoryFilter(c *gin.Context, db *gorm.DB, q *gorm.DB) (*gorm.DB,
 }
 
 type markerVO struct {
-	ID        uint    `json:"id"`
-	ChannelID string  `json:"channelId"`
+	ID        uint   `json:"id"`
+	ChannelID string `json:"channelId"`
+	// DeviceID 是所属设备国标编码。地图卡片上的「播放视频」要拿它去点播，
+	// 而点播入参是 (设备编码, 通道编码) 两元组 —— 只回通道 id 前端还得再查一次详情。
+	DeviceID  string  `json:"deviceId"`
 	Name      string  `json:"name"`
 	Latitude  float64 `json:"latitude"`
 	Longitude float64 `json:"longitude"`
@@ -117,8 +125,10 @@ type markerVO struct {
 type clusterSingle struct {
 	ID        uint   `json:"id"`
 	ChannelID string `json:"channelId"`
-	Name      string `json:"name"`
-	Status    int8   `json:"status"`
+	// DeviceID 与 markerVO 同义：卡片上的播放入口需要设备编码，两条来源必须是同一份形状。
+	DeviceID string `json:"deviceId"`
+	Name     string `json:"name"`
+	Status   int8   `json:"status"`
 }
 
 // latestPositionByChannel 取各通道最新的**移动位置**记录，只用于标注"位置是否新鲜"。
@@ -196,6 +206,7 @@ func (mc *MapController) Markers(c *gin.Context) {
 		marker := markerVO{
 			ID:             ch.ID,
 			ChannelID:      ch.ChannelID,
+			DeviceID:       ch.DeviceID,
 			Name:           ch.Name,
 			Latitude:       ch.Latitude,
 			Longitude:      ch.Longitude,
@@ -315,7 +326,7 @@ func (mc *MapController) Clusters(c *gin.Context) {
 		// 落单时带上身份;同一格子进来第二个通道就不再落单,把身份摘掉。
 		if cl.Count == 1 {
 			cl.Single = &clusterSingle{
-				ID: ch.ID, ChannelID: ch.ChannelID, Name: ch.Name, Status: ch.Status,
+				ID: ch.ID, ChannelID: ch.ChannelID, DeviceID: ch.DeviceID, Name: ch.Name, Status: ch.Status,
 			}
 		} else {
 			cl.Single = nil
@@ -352,4 +363,318 @@ func (mc *MapController) NoCoordCount(c *gin.Context) {
 		return
 	}
 	mc.Success(c, gin.H{"count": count})
+}
+
+// ── 轨迹 ───────────────────────────────────────────────────────────────
+
+// 轨迹窗口的三条硬边界。
+//
+// ⛔ 上限 24h 不是为了省事：`gb_mobile_position_history` 保留期默认 7 天，
+// 而一次 7 天的查询在 5 秒级上报频率下是百万行量级 —— 会直接把接口拖到超时。
+// 前端的时间选择器也按这个上限做禁用，两边共用同一份口径。
+const (
+	// 默认给 24 小时而不是 1 小时：执法仪的值班周期就是"一整天"，
+	// 默认 1 小时会让早上打开的人看到一条几乎空的轨迹，误以为功能坏了
+	// （2026-09-21 设计评审已定：Q2 轨迹默认 24 小时）。
+	trajectoryDefaultWindow = 24 * time.Hour
+	trajectoryMaxWindow     = 24 * time.Hour
+	trajectoryDefaultPoints = 2000
+	trajectoryMaxPoints     = 5000
+	// trajectoryMaxScanRows 是单次查询从库里取出的硬上限。
+	//
+	// ⛔ 不能像早期实现那样 `Limit(maxPoints+1)` 再抽稀：那样取到的是
+	// **时间窗内最早的那 N+1 条**，抽稀只能在这 N+1 条里做 ⇒ 路线永远只画到开头一段，
+	// 终点假落在中途（比"点少一些"更误导）。必须先全量取回、再等间隔抽稀。
+	// 5 万行 ≈ 5MB 内存，24h 窗口在 5 秒级上报频率下是 1.7 万行，留了充足余量。
+	trajectoryMaxScanRows = 50000
+)
+
+type trajectoryPoint struct {
+	EventTime time.Time `json:"eventTime"`
+	Longitude float64   `json:"longitude"`
+	Latitude  float64   `json:"latitude"`
+	Speed     *float64  `json:"speed,omitempty"`
+	Direction *float64  `json:"direction,omitempty"`
+	Altitude  *float64  `json:"altitude,omitempty"`
+}
+
+// Trajectory 返回一个通道在时间窗内的移动位置轨迹点(按时间升序)。
+// 只有会发 MobilePosition 的移动设备(执法仪/车载/单兵)才有数据;固定枪机不上报,
+// 所以"空轨迹"是**正常业务结果**,不是错误 —— 接口照常 200,由前端结合
+// historyEnabled 区分「没开记录」与「这台设备本来就不上报」。
+func (mc *MapController) Trajectory(c *gin.Context) {
+	db := mc.db()
+	if db == nil {
+		mc.FailAndAbort(c, "DB 未就绪", nil)
+		return
+	}
+	channelID, err := strconv.ParseUint(strings.TrimSpace(c.Query("channelId")), 10, 64)
+	if err != nil || channelID == 0 {
+		mc.Fail(c, "channelId 非法", nil, 400)
+		return
+	}
+
+	// ⛔ 先做可见性校验再查历史：历史表没有 owner_dept_id，若跳过这一步，
+	//    任何登录用户拿别人的 channel id 就能拉到别人的行驶轨迹(位置即隐私)。
+	var ch gbmodels.GbChannel
+	res := db.WithContext(c.Request.Context()).
+		Scopes(datascope.VisibilityScope(c, "gb_channel.owner_dept_id", "gb_channel.device_id")).
+		Where("gb_channel.id = ?", channelID).Limit(1).Find(&ch)
+	if res.Error != nil {
+		mc.FailAndAbort(c, "查询通道失败", res.Error)
+		return
+	}
+	// ⛔ 用 RowsAffected 判存在，不用 First + ErrRecordNotFound(回调会把 not-found 掩成零值)。
+	if res.RowsAffected == 0 {
+		mc.Fail(c, "通道不存在或无权访问", nil, 404)
+		return
+	}
+
+	end := time.Now()
+	start := end.Add(-trajectoryDefaultWindow)
+	if raw := strings.TrimSpace(c.Query("startTime")); raw != "" {
+		parsed, err := parseMapTime(raw)
+		if err != nil {
+			mc.Fail(c, "startTime 格式非法", err, 400)
+			return
+		}
+		start = parsed
+	}
+	if raw := strings.TrimSpace(c.Query("endTime")); raw != "" {
+		parsed, err := parseMapTime(raw)
+		if err != nil {
+			mc.Fail(c, "endTime 格式非法", err, 400)
+			return
+		}
+		end = parsed
+	}
+	if !end.After(start) {
+		mc.Fail(c, "结束时间需晚于开始时间", nil, 400)
+		return
+	}
+	if end.Sub(start) > trajectoryMaxWindow {
+		mc.Fail(c, "轨迹查询时间跨度不能超过 24 小时", nil, 400)
+		return
+	}
+
+	maxPoints := trajectoryDefaultPoints
+	if raw := strings.TrimSpace(c.Query("maxPoints")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			maxPoints = n
+		}
+	}
+	if maxPoints < 100 {
+		maxPoints = 100
+	}
+	if maxPoints > trajectoryMaxPoints {
+		maxPoints = trajectoryMaxPoints
+	}
+
+	// 全量取回再抽稀（理由见 trajectoryMaxScanRows）。
+	// Limit 仍保留一个硬上限，防止极端情况下把库和内存同时拖死。
+	var rows []gbmodels.GbMobilePositionHistory
+	err = db.WithContext(c.Request.Context()).
+		Where("channel_id = ?", ch.ID).
+		Where("event_time BETWEEN ? AND ?", start, end).
+		Order("event_time ASC").
+		Limit(trajectoryMaxScanRows).
+		Find(&rows).Error
+	if err != nil {
+		mc.FailAndAbort(c, "查询轨迹失败", err)
+		return
+	}
+	truncated := len(rows) > maxPoints || len(rows) >= trajectoryMaxScanRows
+	if len(rows) > maxPoints {
+		rows = thinTrajectoryRows(rows, maxPoints)
+	}
+
+	list := make([]trajectoryPoint, 0, len(rows))
+	for _, row := range rows {
+		list = append(list, trajectoryPoint{
+			EventTime: row.EventTime,
+			Longitude: row.Longitude,
+			Latitude:  row.Latitude,
+			Speed:     row.Speed,
+			Direction: row.Direction,
+			Altitude:  row.Altitude,
+		})
+	}
+	mc.Success(c, gin.H{
+		"channelId": ch.ChannelID,
+		"deviceId":  ch.DeviceID,
+		"name":      ch.Name,
+		"list":      list,
+		"total":     len(list),
+		"truncated": truncated,
+		// historyEnabled 是服务端"位置历史记录"总开关(服务配置里可关，交付包默认关)。
+		// 前端必须用它区分两种空结果：开关关着 = 去哪开；开着还空 = 这台设备没上报。
+		"historyEnabled": subscribe.PositionHistoryEnabled(),
+		"startTime":      start,
+		"endTime":        end,
+	})
+}
+
+// thinTrajectoryRows 按时间顺序等间隔抽稀，首尾必留。
+//
+// 抽稀而不是"只取前 N 条"：轨迹是空间曲线，截断前半段会让用户看到
+// 一条只走了一半的路线，而且终点会假落在中途 —— 比"点少一些"更误导。
+func thinTrajectoryRows(rows []gbmodels.GbMobilePositionHistory, limit int) []gbmodels.GbMobilePositionHistory {
+	if limit <= 0 || len(rows) <= limit || limit == 1 {
+		return rows
+	}
+	out := make([]gbmodels.GbMobilePositionHistory, 0, limit)
+	step := float64(len(rows)-1) / float64(limit-1)
+	last := -1
+	for i := 0; i < limit; i++ {
+		idx := int(math.Round(float64(i) * step))
+		if idx >= len(rows) {
+			idx = len(rows) - 1
+		}
+		if idx == last {
+			continue
+		}
+		out = append(out, rows[idx])
+		last = idx
+	}
+	// 浮点累计误差可能让最后一个下标没落到末尾，这里强制对齐，
+	// 否则路线会停在"倒数第二个采样点"，看起来像设备在终点前消失了。
+	out[0] = rows[0]
+	out[len(out)-1] = rows[len(rows)-1]
+	return out
+}
+
+// parseMapTime 接受 RFC3339 与"空格分隔的本地时间"两种写法。
+//
+// 与 subscribe.parsePositionTime 保持同一组合法格式：前端时间选择器给的是本地
+// `YYYY-MM-DD HH:mm:ss`，而接口文档举例用 RFC3339，两种都收才不会出现
+// "文档里的能查、界面里的报 400"。
+func parseMapTime(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05", "2006-01-02 15:04:05"} {
+		if t, err := time.ParseInLocation(layout, value, time.Local); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("时间格式非法: %q", value)
+}
+
+// ── 默认中心点 ─────────────────────────────────────────────────────────
+
+// mapCenterParamCode 是"地图默认视野"在 sys_param 里的键。
+//
+// 不自建表：中心点是**一份 JSON 配置**，不是业务实体（没有生命周期、没有列表、
+// 不需要按部门多份）。sys_param 就是为这类"单键值"准备的表。
+//
+// 语义是**全平台一份**：平台常见用法是值班室大屏固定在辖区中心，换个人登录
+// 看到的还是同一个视野；按用户各存一份反而会让"进来先看哪"变成随机。
+const mapCenterParamCode = "gb28181.map.center"
+
+const (
+	// 与前端 mapMinZoom / mapMaxZoom 同一对边界：两边不一致会出现
+	// "存进去 3 级、打开却是 5 级"的静默改写。
+	mapCenterMinZoom = 5.0
+	mapCenterMaxZoom = 22.0
+)
+
+// mapCenterPayload 是默认视野三元组。
+//
+// ⛔ zoom 用 float64 而不是 int：MapLibre 的 zoom 本身就是小数，
+// 存整数会让用户设的 11.5 级在保存后悄悄变成 12 —— 地图会"自己动了一下"。
+type mapCenterPayload struct {
+	Longitude float64 `json:"longitude"`
+	Latitude  float64 `json:"latitude"`
+	Zoom      float64 `json:"zoom"`
+}
+
+func validateMapCenter(p mapCenterPayload) error {
+	if p.Longitude < -180 || p.Longitude > 180 {
+		return fmt.Errorf("经度应在 -180 ~ 180 之间")
+	}
+	if p.Latitude < -90 || p.Latitude > 90 {
+		return fmt.Errorf("纬度应在 -90 ~ 90 之间")
+	}
+	// 0/0 在本仓全链路表示"无坐标"（与通道坐标同一口径），不能当成一个真实中心点存下来。
+	if p.Longitude == 0 && p.Latitude == 0 {
+		return fmt.Errorf("经纬度不能同时为 0")
+	}
+	if p.Zoom < mapCenterMinZoom || p.Zoom > mapCenterMaxZoom {
+		return fmt.Errorf("缩放级别应在 %.0f ~ %.0f 之间", mapCenterMinZoom, mapCenterMaxZoom)
+	}
+	return nil
+}
+
+// GetCenter 读取默认中心点。未设置返回 center: null(前端回退内置默认视野)。
+func (mc *MapController) GetCenter(c *gin.Context) {
+	db := mc.db()
+	if db == nil {
+		mc.FailAndAbort(c, "DB 未就绪", nil)
+		return
+	}
+	// ⛔ Find + RowsAffected 判存在，不用 First + ErrRecordNotFound。
+	var param models.SysParam
+	res := db.WithContext(c.Request.Context()).Where("code = ?", mapCenterParamCode).Limit(1).Find(&param)
+	if res.Error != nil {
+		mc.FailAndAbort(c, "读取地图中心点失败", res.Error)
+		return
+	}
+	if res.RowsAffected == 0 || param.Value == nil {
+		mc.Success(c, gin.H{"center": nil})
+		return
+	}
+	var center mapCenterPayload
+	// 脏值(手改库/半截写入)一律当"未设置"：地图必须能打开，
+	// 不能因为一条配置解析失败就让整个视图报错。
+	if err := json.Unmarshal([]byte(*param.Value), &center); err != nil || validateMapCenter(center) != nil {
+		mc.Success(c, gin.H{"center": nil})
+		return
+	}
+	mc.Success(c, gin.H{"center": center})
+}
+
+// SetCenter 保存默认中心点(有则更新、无则插入)。
+func (mc *MapController) SetCenter(c *gin.Context) {
+	db := mc.db()
+	if db == nil {
+		mc.FailAndAbort(c, "DB 未就绪", nil)
+		return
+	}
+	var body mapCenterPayload
+	if err := c.ShouldBindJSON(&body); err != nil {
+		mc.Fail(c, "请求参数格式错误", err, 400)
+		return
+	}
+	if err := validateMapCenter(body); err != nil {
+		mc.Fail(c, err.Error(), nil, 400)
+		return
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		mc.FailAndAbort(c, "序列化中心点失败", err)
+		return
+	}
+
+	var param models.SysParam
+	res := db.WithContext(c.Request.Context()).Where("code = ?", mapCenterParamCode).Limit(1).Find(&param)
+	if res.Error != nil {
+		mc.FailAndAbort(c, "读取地图中心点失败", res.Error)
+		return
+	}
+	if res.RowsAffected == 0 {
+		name := "地图默认中心点"
+		code := mapCenterParamCode
+		value := string(raw)
+		status := int8(1)
+		description := "设备地图进入时默认定位的中心点与缩放级别(JSON)"
+		row := models.SysParam{Name: &name, Code: &code, Value: &value, Status: &status, Description: &description}
+		if err := db.WithContext(c.Request.Context()).Create(&row).Error; err != nil {
+			mc.FailAndAbort(c, "保存地图中心点失败", err)
+			return
+		}
+	} else {
+		if err := db.WithContext(c.Request.Context()).Model(&param).Update("value", string(raw)).Error; err != nil {
+			mc.FailAndAbort(c, "保存地图中心点失败", err)
+			return
+		}
+	}
+	mc.Success(c, gin.H{"center": body})
 }

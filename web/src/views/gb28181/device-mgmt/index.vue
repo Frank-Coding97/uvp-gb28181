@@ -32,7 +32,7 @@ import {
   Camera,
   Bell
 } from "@lucide/vue";
-import { stopPlay } from "@/api/gb28181";
+import { startPlay, stopPlay, type PlayResult } from "@/api/gb28181";
 import { listZLMNodes, type ZLMNode } from "@/api/gb28181-zlm";
 import {
   batchDeleteChannels,
@@ -50,6 +50,9 @@ import {
   listDeviceStatusEvents,
   listMapClusters,
   listMapMarkers,
+  listMapTrajectory,
+  getMapCenter,
+  saveMapCenter,
   listDeviceSubscriptions,
   refreshDeviceCatalog,
   updateCloudRecording,
@@ -99,6 +102,18 @@ import { cloudRecordingStateMeta, mergeCloudRecordingState } from "./cloudRecord
 import { catalogShapeFromAttributes, catalogShapeText } from "./channelAttributeText";
 import { useChannelAttributeEntries } from "./useChannelAttributeDict";
 import { coordPatchAfterSave, positionSourceText, resolveChannelCoordPayload } from "./channelPositionForm";
+import { buildMapCenter, formatMapCenter, normalizeMapCenter, type MapCenter } from "./mapView";
+import {
+  describeEmptyTrajectory,
+  interpolateAlongTrajectory,
+  trajectoryDistanceMeters,
+  trajectoryEndpoints,
+  trajectoryLineFeature,
+  type TrackPoint
+} from "./mapTrajectory";
+import MapTrajectoryControls from "./MapTrajectoryControls.vue";
+import ChannelLocationPicker from "./ChannelLocationPicker.vue";
+import PlayWindow from "../components/PlayWindow.vue";
 import {
   createDirectoryState,
   directoryQuery,
@@ -275,6 +290,43 @@ const mapFirstRender = ref(false);
 const mapError = ref("");
 const mapCursorLongitude = ref(116.3974);
 const mapCursorLatitude = ref(39.9093);
+
+// ── 地图业务闭环：卡片 / 视频 / 轨迹 / 默认中心 / 踩点 ──────────────────
+//
+// 这块状态刻意都放在本文件而不是子组件：地图实例、marker、popup 三者必须共享
+// 同一个"当前选中的通道"，拆开就会互相抢生命周期（典型表现：关卡片后轨迹还在画）。
+
+/** 当前打开的地图卡片气泡。⛔ 不是 ref：它是 MapLibre 的实例对象，不需要响应式代理。 */
+let mapPopup: maplibregl.Popup | null = null;
+
+const videoVisible = ref(false);
+const videoLoading = ref(false);
+const videoTarget = ref<{ deviceId: string; channelId: string; name: string } | null>(null);
+const videoPlaying = ref<PlayResult | null>(null);
+
+const trajectoryVisible = ref(false);
+const trajectoryLoading = ref(false);
+const trajectoryTarget = ref<{
+  id: number;
+  channelId: string;
+  deviceId: string;
+  name: string;
+  hasCoordinate: boolean;
+} | null>(null);
+const trajectoryPoints = ref<TrackPoint[]>([]);
+const trajectoryEmptyText = ref("");
+const trajectoryTruncated = ref(false);
+const trajectoryDistance = ref(0);
+const trajectoryProgress = ref(0);
+const trajectoryPlaying = ref(false);
+const trajectorySpeed = ref(1);
+const trajectoryCurrentTime = ref("");
+
+const mapCenterSaving = ref(false);
+
+const locationPickerVisible = ref(false);
+const locationPickerTarget = ref<{ id: number; name: string; longitude: number; latitude: number } | null>(null);
+
 const canViewDevices = computed(() => hasPermission("gb28181:device:view"));
 const canStartPlayback = computed(() => hasPermission("gb28181:play:start"));
 const canQueryDeviceRecords = computed(() => hasPermission("gb28181:device-record:query"));
@@ -504,6 +556,10 @@ watch(viewMode, async mode => {
     assetKind.value = "channel";
     await nextTick(ensureMap);
   } else {
+    // ⛔ 切走时要连轨迹面板一起关：地图实例被销毁后轨迹图层已经没了，
+    //    留着面板会变成"显示着一条轨迹，但图上什么都没有"。
+    closeTrajectory();
+    closeMarkerCard();
     destroyMap();
   }
   void refreshMainData();
@@ -988,7 +1044,10 @@ function currentMapStyleUrl() {
 }
 
 function resetMapView() {
-  mapInstance?.flyTo({ center: [116.3974, 39.9093], zoom: 10, essential: true });
+  // 「复位」= 回到平台默认视野。没配默认视野时才回内置的北京视野。
+  void applyDefaultMapCenter().then(applied => {
+    if (!applied) mapInstance?.flyTo({ center: [116.3974, 39.9093], zoom: 10, essential: true });
+  });
 }
 
 function switchMapBaseStyle(value: "light" | "dark") {
@@ -1030,6 +1089,9 @@ function destroyMap() {
   if (mapInstance && mapMouseMoveHandler) mapInstance.off("mousemove", mapMouseMoveHandler);
   mapMoveHandler = null;
   mapMouseMoveHandler = null;
+  closeMarkerCard();
+  stopTrajectoryPlayback();
+  trajectoryPlayMarker = null;
   removeMapMarkers();
   mapInstance?.remove();
   mapInstance = null;
@@ -1086,7 +1148,7 @@ function createClusterElement(cluster: MapCluster) {
  * 而聚合接口里"落单的那一个通道"只给身份和状态。让标记点渲染只依赖这个最小集合，
  * 两条来源才能复用同一段代码，不必为聚合再造一个形状。
  */
-type MarkerPoint = Pick<MapMarker, "id" | "channelId" | "name" | "status">;
+type MarkerPoint = Pick<MapMarker, "id" | "channelId" | "deviceId" | "name" | "status">;
 
 function createMarkerElement(marker: MarkerPoint) {
   const element = document.createElement("button");
@@ -1095,13 +1157,100 @@ function createMarkerElement(marker: MarkerPoint) {
   element.title = `${displayName(marker)} · ${marker.channelId}`;
   element.setAttribute("aria-label", element.title);
   element.innerHTML = '<span class="map-channel-pip"></span>';
-  element.addEventListener("click", () => openChannel(marker));
+  // 点标记点不再直接开详情抽屉：先弹一张业务卡片，播视频/看轨迹/改位置都在卡片上。
+  // ⛔ 不要改成"直接播放" —— 同一台执法仪既有实时画面又有轨迹，"点一下到底干什么"
+  //    必须由用户在卡片上选，否则想查轨迹的人会先被拉起一路实时流。
+  element.addEventListener("click", () => openMarkerCard(marker));
   return element;
+}
+
+/** 卡片上展示的完整信息。聚合里落单的点只带身份，来源/新鲜度要从 markers 列表补。 */
+function markerCardDetail(marker: MarkerPoint): MapMarker | null {
+  return markers.value.find(item => item.id === marker.id) || null;
+}
+
+function closeMarkerCard() {
+  mapPopup?.remove();
+  mapPopup = null;
+}
+
+/**
+ * 打开通道卡片气泡。
+ *
+ * 用 MapLibre Popup 而不是自绘浮层：气泡会跟着地图自动平移，不需要在 moveend 里
+ * 手算屏幕坐标；关掉地图（destroyMap）时也会随地图一起销毁。
+ */
+function openMarkerCard(marker: MarkerPoint) {
+  if (!mapInstance) return;
+  const detail = markerCardDetail(marker);
+  const longitude = detail?.longitude;
+  const latitude = detail?.latitude;
+  if (longitude === undefined || latitude === undefined) return;
+
+  closeMarkerCard();
+
+  const card = document.createElement("div");
+  card.className = "map-channel-card";
+
+  const head = document.createElement("div");
+  head.className = "map-channel-card__head";
+  const dot = document.createElement("span");
+  dot.className = `map-channel-card__dot${marker.status === 1 ? " online" : ""}`;
+  const title = document.createElement("span");
+  title.className = "map-channel-card__name";
+  title.textContent = displayName(marker);
+  head.append(dot, title);
+
+  const meta = document.createElement("div");
+  meta.className = "map-channel-card__meta";
+  const metaParts = [
+    marker.status === 1 ? "在线" : "离线",
+    marker.channelId,
+    detail?.positionSource ? `坐标来源：${positionSourceText(detail)}` : ""
+  ].filter(Boolean);
+  meta.textContent = metaParts.join(" · ");
+
+  const actions = document.createElement("div");
+  actions.className = "map-channel-card__actions";
+
+  const actionConfigs: Array<{ key: string; label: string; disabled?: boolean; title?: string }> = [
+    { key: "play", label: "播放视频", disabled: !canStartPlayback.value, title: canStartPlayback.value ? "" : "无播放权限" },
+    { key: "trajectory", label: "查看轨迹" },
+    { key: "location", label: "设置位置", disabled: !canEditChannel.value, title: canEditChannel.value ? "" : "无通道编辑权限" },
+    { key: "detail", label: "通道详情" }
+  ];
+  actionConfigs.forEach(config => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `map-channel-card__action map-channel-card__action--${config.key}`;
+    button.textContent = config.label;
+    button.disabled = !!config.disabled;
+    if (config.title) button.title = config.title;
+    button.addEventListener("click", () => {
+      if (config.key === "play") void playFromMap(marker);
+      if (config.key === "trajectory") openTrajectory(marker, detail);
+      if (config.key === "location") openLocationPickerForMarker(marker, detail);
+      if (config.key === "detail") {
+        closeMarkerCard();
+        void openChannel(marker);
+      }
+    });
+    actions.append(button);
+  });
+
+  card.append(head, meta, actions);
+  mapPopup = new maplibregl.Popup({ closeButton: true, offset: 16, maxWidth: "280px" })
+    .setLngLat([longitude, latitude])
+    .setDOMContent(card)
+    .addTo(mapInstance);
 }
 
 function renderMapOverlays() {
   if (!mapInstance || !mapReady.value) return;
   removeMapMarkers();
+  // 底图 setStyle 会把 source/layer 全部清掉（轨迹折线也在其中），
+  // 这里按需补画。⛔ 不能放在函数末尾：下面 zoom 低于阈值时是提前 return 的。
+  restoreTrajectoryOverlay();
   // 两种呈现**互斥**：低于阈值用聚合气泡，达到阈值换成单个通道标记点。
   // ⛔ 不要让它们同时画 —— 历史上聚合气泡是无条件渲染、标记点按 zoom 渲染，
   //    于是 zoom≥阈值 时同一批通道会同时出现"气泡 N"和 N 个标记点，重叠在同一位置。
@@ -1139,6 +1288,433 @@ function renderMapOverlays() {
         .addTo(mapInstance!)
     );
   });
+}
+
+// ── 从地图卡片起播 ─────────────────────────────────────────────────────
+
+/**
+ * 卡片「播放视频」：起一路实时流，弹窗内嵌播放器。
+ *
+ * ⛔ 关闭弹窗必须 stopPlay：实时流在 ZLM 侧是有生命的，只关 UI 会让流一直挂着，
+ *    按需直播关了的情况下尤其明显（设备侧收流不停、媒体节点 CPU 白烧）。
+ */
+async function playFromMap(marker: MarkerPoint) {
+  if (!canStartPlayback.value) {
+    Message.warning("没有播放权限");
+    return;
+  }
+  if (!marker.deviceId) {
+    Message.error("缺少设备编码，无法点播");
+    return;
+  }
+  closeMarkerCard();
+  await stopVideoStream();
+  videoTarget.value = { deviceId: marker.deviceId, channelId: marker.channelId, name: displayName(marker) };
+  videoVisible.value = true;
+  videoLoading.value = true;
+  try {
+    const res = await startPlay(marker.deviceId, marker.channelId);
+    if (res.code !== 0) {
+      Message.error(res.message || "点播失败");
+      videoVisible.value = false;
+      videoTarget.value = null;
+      return;
+    }
+    videoPlaying.value = res.data;
+  } catch (error: any) {
+    Message.error(error?.message || "点播失败");
+    videoVisible.value = false;
+    videoTarget.value = null;
+  } finally {
+    videoLoading.value = false;
+  }
+}
+
+/** 停掉当前弹窗里的流（不负责关 UI）。 */
+async function stopVideoStream() {
+  const streamId = videoPlaying.value?.streamId;
+  videoPlaying.value = null;
+  if (!streamId) return;
+  try {
+    await stopPlay(streamId);
+  } catch (error) {
+    // 停流失败不打断用户：流可能已被 ZLM 按需回收，这里只是兜底。
+    console.warn("停流失败", error);
+  }
+}
+
+async function closeVideoDialog() {
+  videoVisible.value = false;
+  videoTarget.value = null;
+  await stopVideoStream();
+}
+
+function onMapVideoError(message: string) {
+  Message.warning(`播放器：${message}`);
+}
+
+// ── 轨迹 ───────────────────────────────────────────────────────────────
+
+const TRAJECTORY_SOURCE_ID = "uvp-trajectory";
+const TRAJECTORY_LINE_LAYER_ID = "uvp-trajectory-line";
+const TRAJECTORY_ENDS_SOURCE_ID = "uvp-trajectory-ends";
+const TRAJECTORY_ENDS_LAYER_ID = "uvp-trajectory-ends";
+/**
+ * 1× 速度下整条轨迹走完的时长。倍速只缩这个值，不改变插值口径。
+ *
+ * 取 40s 而不是 20s：倍速档位是 1×/4×/16×（评审定稿），16× 时 40s 只剩 2.5s，
+ * 刚好是"一眼扫完整条路线"的可读下限；若基准取 20s，16× 只有 1.25s，什么也看不清。
+ */
+const TRAJECTORY_PLAY_MS = 40000;
+
+let trajectoryPlayMarker: MapLibreMarker | null = null;
+let trajectoryRaf: number | null = null;
+let trajectoryPlayStartedAt = 0;
+let trajectoryPlayFromProgress = 0;
+
+function formatClock(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function openTrajectory(marker: MarkerPoint, detail: MapMarker | null) {
+  closeMarkerCard();
+  trajectoryTarget.value = {
+    id: marker.id,
+    channelId: marker.channelId,
+    deviceId: marker.deviceId,
+    name: displayName(marker),
+    hasCoordinate: !!(detail?.longitude || detail?.latitude)
+  };
+  trajectoryVisible.value = true;
+  trajectoryPoints.value = [];
+  trajectoryEmptyText.value = "";
+  trajectoryTruncated.value = false;
+  trajectoryDistance.value = 0;
+  trajectoryProgress.value = 0;
+  trajectoryCurrentTime.value = "";
+  stopTrajectoryPlayback();
+  clearTrajectoryOverlay();
+  // 默认窗口与子组件初始值一致：最近 24 小时（后端 trajectoryDefaultWindow 同口径）。
+  void loadTrajectory();
+}
+
+async function loadTrajectory(range?: { startTime: string; endTime: string }) {
+  const target = trajectoryTarget.value;
+  if (!target) return;
+  trajectoryLoading.value = true;
+  stopTrajectoryPlayback();
+  try {
+    const res = await listMapTrajectory({
+      channelId: target.id,
+      startTime: range?.startTime,
+      endTime: range?.endTime
+    });
+    if (res.code !== 0) {
+      Message.error(res.message || "轨迹查询失败");
+      return;
+    }
+    const data = res.data;
+    trajectoryPoints.value = data.list || [];
+    trajectoryTruncated.value = !!data.truncated;
+    trajectoryDistance.value = trajectoryDistanceMeters(trajectoryPoints.value);
+    trajectoryProgress.value = 0;
+    trajectoryCurrentTime.value = "";
+    trajectoryEmptyText.value = trajectoryPoints.value.length
+      ? ""
+      : describeEmptyTrajectory({
+          historyEnabled: data.historyEnabled,
+          hasCoordinate: target.hasCoordinate
+        });
+    clearTrajectoryOverlay();
+    drawTrajectoryOverlay();
+    fitTrajectoryBounds();
+  } catch (error: any) {
+    Message.error(error?.message || "轨迹查询失败");
+  } finally {
+    trajectoryLoading.value = false;
+  }
+}
+
+function closeTrajectory() {
+  trajectoryVisible.value = false;
+  trajectoryTarget.value = null;
+  stopTrajectoryPlayback();
+  clearTrajectoryOverlay();
+}
+
+function clearTrajectoryOverlay() {
+  if (!mapInstance) return;
+  trajectoryPlayMarker?.remove();
+  trajectoryPlayMarker = null;
+  // 图层必须先于 source 删除（MapLibre 不允许删还有图层引用的 source）。
+  if (mapInstance.getLayer(TRAJECTORY_ENDS_LAYER_ID)) mapInstance.removeLayer(TRAJECTORY_ENDS_LAYER_ID);
+  if (mapInstance.getLayer(TRAJECTORY_LINE_LAYER_ID)) mapInstance.removeLayer(TRAJECTORY_LINE_LAYER_ID);
+  if (mapInstance.getSource(TRAJECTORY_ENDS_SOURCE_ID)) mapInstance.removeSource(TRAJECTORY_ENDS_SOURCE_ID);
+  if (mapInstance.getSource(TRAJECTORY_SOURCE_ID)) mapInstance.removeSource(TRAJECTORY_SOURCE_ID);
+}
+
+/** 画折线 + 起止点。⛔ 起止点用数据驱动的 circle 层，不要用两个 DOM marker。 */
+function drawTrajectoryOverlay() {
+  if (!mapInstance || !mapReady.value) return;
+  const points = trajectoryPoints.value;
+  const feature = trajectoryLineFeature(points);
+  const ends = trajectoryEndpoints(points);
+  if (!feature || !ends) return;
+  if (mapInstance.getSource(TRAJECTORY_SOURCE_ID)) return;
+
+  mapInstance.addSource(TRAJECTORY_SOURCE_ID, { type: "geojson", data: feature as any });
+  mapInstance.addLayer({
+    id: TRAJECTORY_LINE_LAYER_ID,
+    type: "line",
+    source: TRAJECTORY_SOURCE_ID,
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": "#2563eb", "line-width": 4, "line-opacity": 0.85 }
+  });
+
+  const endFeatures = {
+    type: "FeatureCollection" as const,
+    features: [
+      {
+        type: "Feature" as const,
+        properties: { kind: "start" },
+        geometry: { type: "Point" as const, coordinates: [ends.start.longitude, ends.start.latitude] }
+      },
+      {
+        type: "Feature" as const,
+        properties: { kind: "end" },
+        geometry: { type: "Point" as const, coordinates: [ends.end.longitude, ends.end.latitude] }
+      }
+    ]
+  };
+  mapInstance.addSource(TRAJECTORY_ENDS_SOURCE_ID, { type: "geojson", data: endFeatures as any });
+  mapInstance.addLayer({
+    id: TRAJECTORY_ENDS_LAYER_ID,
+    type: "circle",
+    source: TRAJECTORY_ENDS_SOURCE_ID,
+    paint: {
+      // 起点绿、终点红（⛔ 与国内股票涨跌配色无关，这里是"出发/到达"的通用语义）。
+      "circle-color": ["match", ["get", "kind"], "start", "#16a34a", "#dc2626"] as any,
+      "circle-radius": 7,
+      "circle-stroke-color": "#ffffff",
+      "circle-stroke-width": 2
+    }
+  });
+}
+
+/**
+ * 底图样式切换后重建轨迹图层。
+ *
+ * setStyle 会把所有 source/layer 清掉（包括轨迹），但 DOM marker 还在 ——
+ * 不重建的表现是"线上没了、回放点还在飘"。
+ */
+function restoreTrajectoryOverlay() {
+  if (!trajectoryPoints.value.length) return;
+  if (mapInstance?.getSource(TRAJECTORY_SOURCE_ID)) return;
+  drawTrajectoryOverlay();
+}
+
+function fitTrajectoryBounds() {
+  if (!mapInstance || trajectoryPoints.value.length === 0) return;
+  const bounds = new LngLatBounds();
+  trajectoryPoints.value.forEach(point => bounds.extend([point.longitude, point.latitude]));
+  mapInstance.fitBounds(bounds, {
+    padding: { top: 90, bottom: 140, left: 80, right: 80 },
+    maxZoom: trajectoryPoints.value.length === 1 ? mapSinglePointFitZoom : mapMaxZoom,
+    duration: 600
+  });
+}
+
+function applyTrajectoryProgress(progress: number) {
+  const position = interpolateAlongTrajectory(trajectoryPoints.value, progress);
+  trajectoryProgress.value = progress;
+  if (!position || !mapInstance) return;
+  trajectoryCurrentTime.value = formatClock(position.eventTime);
+  if (!trajectoryPlayMarker) {
+    trajectoryPlayMarker = new MapLibreMarker({ color: "#f59e0b" })
+      .setLngLat([position.longitude, position.latitude])
+      .addTo(mapInstance);
+    return;
+  }
+  trajectoryPlayMarker.setLngLat([position.longitude, position.latitude]);
+}
+
+function stopTrajectoryPlayback() {
+  trajectoryPlaying.value = false;
+  if (trajectoryRaf !== null) {
+    cancelAnimationFrame(trajectoryRaf);
+    trajectoryRaf = null;
+  }
+}
+
+function toggleTrajectoryPlayback() {
+  if (trajectoryPlaying.value) {
+    stopTrajectoryPlayback();
+    return;
+  }
+  if (trajectoryPoints.value.length < 2) return;
+  trajectoryPlaying.value = true;
+  // 播完后再点播放 = 从头再放一遍，而不是"停在终点不动"。
+  trajectoryPlayFromProgress = trajectoryProgress.value >= 1 ? 0 : trajectoryProgress.value;
+  trajectoryPlayStartedAt = performance.now();
+  trajectoryRaf = requestAnimationFrame(stepTrajectoryPlayback);
+}
+
+function stepTrajectoryPlayback() {
+  if (!trajectoryPlaying.value) return;
+  const from = trajectoryPlayFromProgress;
+  const speed = trajectorySpeed.value > 0 ? trajectorySpeed.value : 1;
+  const remainingMs = Math.max(1, (1 - from) * (TRAJECTORY_PLAY_MS / speed));
+  const elapsed = performance.now() - trajectoryPlayStartedAt;
+  const progress = from + (elapsed / remainingMs) * (1 - from);
+  if (progress >= 1) {
+    applyTrajectoryProgress(1);
+    stopTrajectoryPlayback();
+    return;
+  }
+  applyTrajectoryProgress(progress);
+  trajectoryRaf = requestAnimationFrame(stepTrajectoryPlayback);
+}
+
+function onTrajectoryProgressInput(progress: number) {
+  stopTrajectoryPlayback();
+  applyTrajectoryProgress(progress);
+}
+
+function onTrajectorySpeedChange(speed: number) {
+  trajectorySpeed.value = speed;
+  // 变速时把"已播到哪"钉住，否则会在下一帧按新速度重算总时长，进度突然跳一段。
+  if (trajectoryPlaying.value) {
+    trajectoryPlayFromProgress = trajectoryProgress.value;
+    trajectoryPlayStartedAt = performance.now();
+  }
+}
+
+// ── 默认中心点 ─────────────────────────────────────────────────────────
+
+/**
+ * 应用平台保存的默认视野。
+ *
+ * ⛔ 成功后必须把 mapAutoFitPending 置 false：首次进入时 loadMapData 默认会
+ *    fitBounds 到数据包围盒，那个动作会把用户设的中心点直接覆盖掉 ——
+ *    表现就是"设了中心点，进来还是全图"。
+ * ⛔ 也不做"只应用一次"的锁：切走菜单再进地图应当回到中心点，
+ *    否则用户在别的页面绕一圈回来，视野停在上次随便拖到的地方。
+ */
+async function applyDefaultMapCenter(): Promise<boolean> {
+  if (!mapInstance) return false;
+  try {
+    const res = await getMapCenter();
+    const center: MapCenter | null = res.code === 0 ? normalizeMapCenter(res.data?.center) : null;
+    if (!center) return false;
+    // ⛔ 先清掉"待适应数据视野"，再移动相机：jumpTo 会触发 moveend，
+    //    而 moveend 里的 loadMapData 若看见 mapAutoFitPending=true 就会 fitBounds，
+    //    把中心点当场顶掉（表现是"设了中心点，进来还是全图"）。
+    mapAutoFitPending = false;
+    mapInstance.jumpTo({ center: [center.longitude, center.latitude], zoom: center.zoom });
+    mapZoom.value = Math.round(center.zoom);
+    return true;
+  } catch (error) {
+    // 读不到就用内置默认视野，不打扰用户。
+    console.warn("读取地图默认中心失败", error);
+    return false;
+  }
+}
+
+/** 把当前地图中心保存为平台默认视野。 */
+async function saveCurrentMapCenter() {
+  if (!mapInstance) {
+    Message.warning("地图尚未加载完成");
+    return;
+  }
+  if (!canEditDevice.value) {
+    Message.warning("没有修改平台默认视野的权限");
+    return;
+  }
+  const center = buildMapCenter({
+    longitude: mapInstance.getCenter().lng,
+    latitude: mapInstance.getCenter().lat,
+    zoom: mapInstance.getZoom()
+  });
+  mapCenterSaving.value = true;
+  try {
+    const res = await saveMapCenter(center);
+    if (res.code !== 0) {
+      Message.error(res.message || "保存默认中心失败");
+      return;
+    }
+    Message.success(`已设为默认中心：${formatMapCenter(center)}`);
+  } catch (error: any) {
+    Message.error(error?.message || "保存默认中心失败");
+  } finally {
+    mapCenterSaving.value = false;
+  }
+}
+
+// ── 通道位置踩点 ───────────────────────────────────────────────────────
+
+function openLocationPickerForMarker(marker: MarkerPoint, detail: MapMarker | null) {
+  if (!canEditChannel.value) {
+    Message.warning("没有通道编辑权限");
+    return;
+  }
+  closeMarkerCard();
+  locationPickerTarget.value = {
+    id: marker.id,
+    name: displayName(marker),
+    longitude: detail?.longitude || 0,
+    latitude: detail?.latitude || 0
+  };
+  locationPickerVisible.value = true;
+}
+
+/** 从通道编辑弹窗打开踩点：把当前输入框里的值带过去，避免"两边不一致"。 */
+function openLocationPickerFromEdit() {
+  if (!editingChannelId.value) return;
+  locationPickerTarget.value = {
+    id: editingChannelId.value,
+    name: editChannelForm.value.alias || editChannelForm.value.name || "通道",
+    longitude: Number(editChannelLongitude.value) || 0,
+    latitude: Number(editChannelLatitude.value) || 0
+  };
+  locationPickerVisible.value = true;
+}
+
+/**
+ * 踩点结果回填。
+ *
+ * ⛔ 从通道编辑弹窗进来时只回填、不保存：用户在弹窗里可能还要改别名等其它字段，
+ *    直接落库会让"我还没点保存怎么就生效了"。
+ * ⛔ 从地图卡片进来时没有其它待改字段，直接落库更符合预期（点完就生效）。
+ */
+async function handleLocationConfirm(payload: { longitude: number; latitude: number }) {
+  const target = locationPickerTarget.value;
+  locationPickerVisible.value = false;
+  if (!target) return;
+
+  if (editChannelVisible.value && editingChannelId.value === target.id) {
+    editChannelLongitude.value = payload.longitude === 0 ? "0" : String(payload.longitude);
+    editChannelLatitude.value = payload.latitude === 0 ? "0" : String(payload.latitude);
+    Message.success("已填入坐标，点「保存」后生效");
+    return;
+  }
+
+  try {
+    const res = await updateChannel(target.id, { longitude: payload.longitude, latitude: payload.latitude });
+    if (res.code !== 0) {
+      Message.error(res.message || "保存位置失败");
+      return;
+    }
+    const cleared = payload.longitude === 0 && payload.latitude === 0;
+    Message.success(cleared ? "已清除该通道坐标" : "位置已保存");
+    // 地图数据重新拉一遍，而不是本地改一个点：清除坐标后该点必须从地图上消失，
+    // 本地 patch 很容易漏掉"从有到无"这一支。
+    await loadMapData();
+  } catch (error: any) {
+    Message.error(error?.message || "保存位置失败");
+  }
 }
 
 function fitMapToData() {
@@ -1190,7 +1766,12 @@ function attachMapLifecycle() {
   mapInstance.once("load", () => {
     mapReady.value = true;
     requestAnimationFrame(() => mapInstance?.resize());
-    loadMapData();
+    // 先定位到平台默认中心，再决定要不要"适应数据视野"。
+    // ⛔ 顺序不能反：loadMapData 里首次会 fitBounds 到数据包围盒，
+    //    那一步会把刚设好的中心点直接覆盖掉。
+    void applyDefaultMapCenter().then(applied => {
+      if (!applied) loadMapData();
+    });
     // 底图瓦片长期未就绪时兜底，避免一直停在 loading。
     mapFirstRenderTimer = window.setTimeout(() => {
       mapFirstRenderTimer = null;
@@ -2378,6 +2959,9 @@ onUnmounted(() => {
   stopAutoRefresh();
   if (ringAnimFrame !== null) cancelAnimationFrame(ringAnimFrame);
   destroyMap();
+  // ⛔ 离开页面必须把地图卡片拉起来的实时流停掉：ZLM 侧那条流不会因为
+  //    前端路由跳走而自己消失，不停就是"人走了、设备还在往服务器推流"。
+  void stopVideoStream();
 });
 </script>
 
@@ -3402,6 +3986,17 @@ onUnmounted(() => {
             <button class="btn-ghost" type="button" @click="loadMapData">刷新</button>
             <button class="btn-ghost" type="button" @click="resetMapView">复位</button>
             <button class="btn-primary map-fit-btn" type="button" @click="fitMapToData">适应视野</button>
+            <!-- 把当前视野存成平台默认中心：执法仪场景每次进来都先看到辖区那一片。 -->
+            <button
+              v-if="canEditDevice"
+              class="btn-ghost map-center-btn"
+              type="button"
+              :disabled="mapCenterSaving"
+              title="把当前地图中心与缩放保存为平台默认视野"
+              @click="saveCurrentMapCenter"
+            >
+              {{ mapCenterSaving ? "保存中" : "设为默认中心" }}
+            </button>
             <label class="map-basemap-select">
               <span>底图</span>
               <select
@@ -3417,11 +4012,62 @@ onUnmounted(() => {
             <span>{{ mapCursorLongitude.toFixed(5) }}, {{ mapCursorLatitude.toFixed(5) }}</span>
             <strong>Z{{ mapZoom }}</strong>
           </div>
+          <MapTrajectoryControls
+            :visible="trajectoryVisible"
+            :channel-name="trajectoryTarget?.name || ''"
+            :loading="trajectoryLoading"
+            :points="trajectoryPoints"
+            :distance-meters="trajectoryDistance"
+            :truncated="trajectoryTruncated"
+            :empty-text="trajectoryEmptyText"
+            :playing="trajectoryPlaying"
+            :progress="trajectoryProgress"
+            :speed="trajectorySpeed"
+            :current-time="trajectoryCurrentTime"
+            :can-play="canStartPlayback"
+            @close="closeTrajectory"
+            @search="loadTrajectory"
+            @toggle="toggleTrajectoryPlayback"
+            @update:progress="onTrajectoryProgressInput"
+            @update:speed="onTrajectorySpeedChange"
+          />
           <div v-if="mapError" class="map-state map-state-error"><Info :size="16" /> {{ mapError }}</div>
           <div v-else-if="!mapReady || !mapFirstRender" class="map-state"><Loader2 :size="16" class="spin" /> 正在加载地图</div>
         </div>
       </main>
     </div>
+
+    <a-modal
+      :visible="videoVisible"
+      :title="`实时视频 · ${videoTarget?.name || ''}`"
+      :footer="false"
+      :width="960"
+      unmount-on-close
+      modal-class="map-video-modal"
+      @cancel="closeVideoDialog"
+    >
+      <div class="map-video-body">
+        <div v-if="videoLoading" class="map-video-state">
+          <Loader2 :size="18" class="spin" />
+          正在点播，请稍候…
+        </div>
+        <PlayWindow v-else :url="videoPlaying?.httpFlvUrl || ''" :has-audio="false" @error="onMapVideoError" />
+      </div>
+      <div class="map-video-meta">
+        <span>通道 {{ videoTarget?.channelId }}</span>
+        <span v-if="videoPlaying">流 {{ videoPlaying.streamId }}</span>
+      </div>
+    </a-modal>
+
+    <!-- 通道位置踩点：固定枪机不会上报经纬度，这是给它们补坐标的唯一顺手入口。 -->
+    <ChannelLocationPicker
+      v-model:visible="locationPickerVisible"
+      :channel-name="locationPickerTarget?.name || ''"
+      :style-url="currentMapStyleUrl()"
+      :initial-longitude="locationPickerTarget?.longitude || 0"
+      :initial-latitude="locationPickerTarget?.latitude || 0"
+      @confirm="handleLocationConfirm"
+    />
 
     <a-drawer
       v-model:visible="drawerVisible"
@@ -4104,10 +4750,14 @@ onUnmounted(() => {
           <div class="coord-inputs">
             <a-input v-model="editChannelLongitude" placeholder="经度，如 116.99505" allow-clear />
             <a-input v-model="editChannelLatitude" placeholder="纬度，如 36.66237" allow-clear />
+            <a-button size="small" @click="openLocationPickerFromEdit">
+              <template #icon><MapIcon :size="14" /></template>
+              地图选点
+            </a-button>
           </div>
           <template #extra>
             <span class="form-hint">
-              留空表示本次不修改坐标；两者都填 0 可清除。当前来源：{{
+              留空表示本次不修改坐标；两者都填 0 可清除。「地图选点」可直接在地图上点击确定位置。当前来源：{{
                 positionSourceText({ positionSource: editChannelPositionSource }) || "无坐标"
               }}
             </span>
@@ -5881,6 +6531,128 @@ onUnmounted(() => {
  * 默认 button：白底黑字的方块（历史上地图上那个 "1" 就是它）。
  * ⚠️ 别把这两条搬回裸选择器，`index.runtime.test.ts` 有一条守卫盯着。
  */
+
+/* ── 地图通道卡片（Popup 内容）────────────────────────────────────────
+ * ⛔ 这些元素由 document.createElement 生成、塞进 MapLibre 的 popup，
+ *    不在本组件的模板树里 ⇒ 必须用 :deep 才吃得到样式。
+ */
+:deep(.maplibregl-popup-content) {
+  padding: 0;
+  overflow: hidden;
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgb(15 23 42 / 18%);
+}
+
+:deep(.map-channel-card) {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 220px;
+  padding: 12px;
+  background: #ffffff;
+}
+
+:deep(.map-channel-card__head) {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+:deep(.map-channel-card__dot) {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  background: #a9aeb8;
+  border-radius: 50%;
+}
+
+:deep(.map-channel-card__dot.online) {
+  background: #00b42a;
+  box-shadow: 0 0 0 3px rgb(0 180 42 / 16%);
+}
+
+:deep(.map-channel-card__name) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1d2129;
+  white-space: nowrap;
+}
+
+:deep(.map-channel-card__meta) {
+  font-size: 11px;
+  line-height: 1.5;
+  color: #86909c;
+  word-break: break-all;
+}
+
+:deep(.map-channel-card__actions) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 2px;
+}
+
+:deep(.map-channel-card__action) {
+  height: 28px;
+  font-size: 12px;
+  color: #1d2129;
+  cursor: pointer;
+  background: #f8fbff;
+  border: 1px solid #dce6f2;
+  border-radius: 6px;
+  transition: background-color 0.15s ease;
+}
+
+:deep(.map-channel-card__action:hover:not(:disabled)) {
+  background: #eaf2ff;
+  border-color: #b7d3ff;
+}
+
+:deep(.map-channel-card__action:disabled) {
+  color: #c9cdd4;
+  cursor: not-allowed;
+  background: #f7f8fa;
+}
+
+:deep(.map-channel-card__action--play) {
+  color: #ffffff;
+  background: var(--uvp-solid-bg, #2563eb);
+  border-color: var(--uvp-solid-bg, #2563eb);
+}
+
+:deep(.map-channel-card__action--play:hover:not(:disabled)) {
+  background: var(--uvp-solid-hover-bg, #1d4ed8);
+  border-color: var(--uvp-solid-hover-bg, #1d4ed8);
+}
+
+:deep(.map-channel-card__action--play:disabled) {
+  color: #ffffff;
+  background: #c9cdd4;
+  border-color: #c9cdd4;
+}
+
+/* 深色底图下的卡片 */
+:deep(.map-dark .map-channel-card) {
+  background: #1f2733;
+}
+
+:deep(.map-dark .map-channel-card__name) {
+  color: #e5e6eb;
+}
+
+:deep(.map-dark .map-channel-card__action) {
+  color: #e5e6eb;
+  background: #2a3442;
+  border-color: #3a4657;
+}
+
+:deep(.map-dark .map-channel-card__action:hover:not(:disabled)) {
+  background: #33404f;
+}
+
 :deep(.map-cluster-marker),
 :deep(.map-channel-marker) {
   box-sizing: border-box;
@@ -5895,32 +6667,113 @@ onUnmounted(() => {
     box-shadow 140ms ease;
 }
 
-/* 聚合气泡：圆形 + 白描边 + 柔和投影；尺寸/字号由数量分级（JS 给 --cluster-size）。
- * 底色按在线率在"品牌色 → 品牌青"之间混色，一眼看出这簇里在线占比。
+/* 聚合气泡：玻璃球 —— 很低的底色 alpha + 轻微背景虚化 + 亮边 + 顶部高光。
+ * 尺寸/字号由数量分级（JS 给 --cluster-size）；色相仍按在线率在"蓝 ←→ 青"之间混。
+ *
  * ⚠️ 只写一个百分比：`color-mix` 里两个百分比会被归一化，
- *    原来写成 `cyan 60%, brand 60%` 等价于各 50%，在线率差异被压平了。 */
+ *    原来写成 `cyan 60%, brand 60%` 等价于各 50%，在线率差异被压平了。
+ * ⛔⛔ **"透"的判据不是 alpha 有多低，而是底图细节还看不看得见。**
+ *     第一版把 alpha 压到 48%、虚化开到 8px，配上 32% 的顶部白高光 ——
+ *     底下的路网被糊成一片纯色，人眼得不到任何"后面有东西"的线索，
+ *     看着就是一颗实心塑料球（老板 2026-10-21 当场否掉）。
+ *     ⇒ **虚化半径必须 ≤3px、底色 alpha 必须 ≤25%，高光只留在最顶上一小片。**
+ * ⛔ 透明感只能压**底色**的 alpha，文字必须保持不透明 ——
+ *    直接加 `opacity` / `filter: blur()` 会把数字一起糊掉（那是"发灰"不是"玻璃"）。
+ * ⛔ `backdrop-filter` 只对**元素背后**生效；聚合点是网格聚合出来的，
+ *    一屏通常十几个，虚化开销可以接受。若哪天改成"每路一个气泡"，必须去掉它。
+ *
+ * 明暗两套走**相反**的观感，这不是疏漏：
+ *   浅色底图 = 白玻璃 + 深色数字（亮底上只有"发白"才透得出底图，白字上去就没了）；
+ *   深色底图 = 染色玻璃 + 白字（亮玻璃压在夜底上会变成一片灰白贴纸，见下方暗色块）。 */
 :deep(.map-cluster-marker) {
+  /* ⛔ 这个兜底不能省：color-mix 里的百分比一旦非法（变量没拿到 / 写成 67 而不是 67%），
+   *    整条 `background` 声明会作废 ⇒ 气泡只剩 backdrop-filter 的虚化，变成一颗看不见字的空玻璃球。 */
+  --cluster-rate: 0%;
+  --cluster-tint-offline: rgb(37 99 235 / 52%);
+  --cluster-tint-online: rgb(13 148 136 / 48%);
+  --cluster-glass-top: rgb(255 255 255 / 30%);
+  --cluster-glass-bottom: rgb(255 255 255 / 12%);
+
   width: var(--cluster-size, 40px);
   height: var(--cluster-size, 40px);
   font-size: var(--cluster-font-size, 13px);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1;
-  color: #ffffff;
-  text-shadow: 0 1px 2px rgb(0 0 0 / 35%);
-  background: color-mix(in srgb, var(--uvp-brand-cyan) var(--cluster-rate), var(--uvp-brand));
-  border: 2px solid rgb(255 255 255 / 92%);
+
+  /* 数字颜色同样随在线率走（深蓝 ←→ 深青），在浅玻璃上对比度都在 5:1 以上。 */
+  color: color-mix(in srgb, #0f766e var(--cluster-rate), #1e40af);
+  background:
+    radial-gradient(120% 120% at 50% 6%, rgb(255 255 255 / 72%) 0%, rgb(255 255 255 / 10%) 54%, rgb(255 255 255 / 0%) 78%),
+    linear-gradient(180deg, var(--cluster-glass-top) 0%, var(--cluster-glass-bottom) 100%),
+    color-mix(in srgb, var(--cluster-tint-online) var(--cluster-rate), var(--cluster-tint-offline));
+  border: 1.5px solid rgb(255 255 255 / 85%);
   border-radius: 50%;
   box-shadow:
-    0 1px 3px rgb(0 0 0 / 28%),
-    0 4px 14px rgb(0 0 0 / 22%);
+    0 0 0 1px rgb(30 64 175 / 20%),
+    0 6px 16px rgb(15 23 42 / 20%),
+    inset 0 1px 2px rgb(255 255 255 / 90%),
+    inset 0 -8px 14px rgb(37 99 235 / 10%);
+  backdrop-filter: blur(3px) saturate(150%);
+  backdrop-filter: blur(3px) saturate(150%);
+}
+
+/* 暗色底图：去掉那两层"白玻璃"，只留染色 + 冷光晕，数字转白。
+ * ⚠️ 选择器必须写全 `.map-view.map-dark`：markers 是 MapLibre 插进 `.map-container` 的，
+ *    `.map-dark` 挂在 `.map-view` 自己身上，写成后代选择器一条都匹配不到。 */
+.map-view.map-dark :deep(.map-cluster-marker) {
+  --cluster-tint-offline: rgb(96 165 250 / 30%);
+  --cluster-tint-online: rgb(45 212 191 / 26%);
+
+  color: #ffffff;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 65%);
+  background:
+    radial-gradient(120% 120% at 50% 6%, rgb(255 255 255 / 30%) 0%, rgb(255 255 255 / 0%) 56%),
+    color-mix(in srgb, var(--cluster-tint-online) var(--cluster-rate), var(--cluster-tint-offline));
+  border-color: rgb(255 255 255 / 55%);
+  box-shadow:
+    0 0 0 1px rgb(147 197 253 / 20%),
+    0 0 22px rgb(59 130 246 / 28%),
+    0 8px 20px rgb(2 8 20 / 40%),
+    inset 0 1px 2px rgb(255 255 255 / 34%),
+    inset 0 -9px 15px rgb(4 14 30 / 34%);
+}
+
+/* 不支持背景虚化时（老内核 / 关闭合成）退回高不透明度：宁可少点玻璃味，也不能让数字压在花底图上。 */
+@supports not ((backdrop-filter: blur(2px)) or (-webkit-backdrop-filter: blur(2px))) {
+  :deep(.map-cluster-marker) {
+    --cluster-tint-offline: rgb(37 99 235 / 58%);
+    --cluster-tint-online: rgb(13 148 136 / 56%);
+    --cluster-glass-top: rgb(255 255 255 / 92%);
+    --cluster-glass-bottom: rgb(255 255 255 / 84%);
+  }
+
+  .map-view.map-dark :deep(.map-cluster-marker) {
+    --cluster-tint-offline: rgb(37 99 235 / 62%);
+    --cluster-tint-online: rgb(13 148 136 / 62%);
+  }
 }
 
 :deep(.map-cluster-marker:hover) {
+  border-color: rgb(255 255 255 / 96%);
   box-shadow:
-    0 2px 6px rgb(0 0 0 / 32%),
-    0 8px 22px rgb(0 0 0 / 28%);
+    0 0 0 1px rgb(37 99 235 / 26%),
+    0 3px 9px rgb(15 23 42 / 20%),
+    0 12px 26px rgb(15 23 42 / 20%),
+    inset 0 1px 1px rgb(255 255 255 / 98%),
+    inset 0 -8px 14px rgb(37 99 235 / 12%);
   transform: scale(1.08);
+}
+
+/* 暗色 hover 保留冷光晕（上面那条 hover 会把光晕整条覆盖掉）。 */
+.map-view.map-dark :deep(.map-cluster-marker:hover) {
+  border-color: rgb(255 255 255 / 66%);
+  box-shadow:
+    0 0 0 1px rgb(147 197 253 / 26%),
+    0 0 26px rgb(59 130 246 / 40%),
+    0 10px 26px rgb(2 8 20 / 52%),
+    inset 0 1px 1px rgb(255 255 255 / 52%),
+    inset 0 -10px 16px rgb(4 14 30 / 28%);
 }
 
 :deep(.map-cluster-marker:focus-visible),
@@ -6846,7 +7699,9 @@ onUnmounted(() => {
 /* 通道坐标三路来源的标注（目录 / 实时 / 人工），列表与详情卡共用 */
 .coord-inputs {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+
+  /* 经度 / 纬度 / 「地图选点」按钮一行放下：按钮单独一行会让"选完点还得往下找保存"更远。 */
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
   gap: 8px;
 }
 .coord-cell {
@@ -6912,5 +7767,40 @@ onUnmounted(() => {
   .cmdk .kbd {
     display: none;
   }
+}
+
+/* 地图卡片里起的实时视频。定高是为了让播放器拿到稳定的容器尺寸 ——
+   高度自适应会让 EasyPlayer 的首帧计算跳一次，画面先糊后清。 */
+.map-video-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 520px;
+  overflow: hidden;
+  background: #0b0f14;
+  border-radius: 8px;
+}
+
+.map-video-state {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+  color: #c9cdd4;
+}
+
+.map-video-meta {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #86909c;
+}
+
+/* 「设为默认中心」在工具栏里与其它 ghost 按钮同高，禁用时要看得出不可点。 */
+.map-center-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 </style>

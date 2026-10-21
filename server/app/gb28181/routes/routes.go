@@ -1031,6 +1031,13 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.GET("/map/markers", mapController.Markers)
 			dmgmt.GET("/map/clusters", mapController.Clusters)
 			dmgmt.GET("/map/no-coord-count", mapController.NoCoordCount)
+			// 轨迹:只有会发 MobilePosition 的移动设备(执法仪/车载)有数据,固定枪机恒空。
+			// 与 markers 同一条数据权限闸门(控制器内按 gb_channel 的归属做可见性校验)。
+			dmgmt.GET("/map/trajectory", mapController.Trajectory)
+			// 默认中心点:读=所有人(地图视图初始化要用)、写=管理员。
+			// 同路径按方法分档，与 target-track / video-params 的做法一致。
+			dmgmt.GET("/map/center", mapController.GetCenter)
+			dmgmt.PUT("/map/center", mapController.SetCenter)
 		}
 	}
 }
