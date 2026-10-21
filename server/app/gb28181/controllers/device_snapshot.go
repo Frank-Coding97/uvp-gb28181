@@ -240,9 +240,21 @@ func (dc *DeviceMgmtController) recordDeviceSnapshot(c *gin.Context, registry *d
 		sessionID := session.ID
 		row.SessionID = &sessionID
 	}
+	// ⛔ 归属查不到时**不能**靠 `First` 的 error 判：本仓全局注册了 `MaskNotDataError`
+	// （`app/utils/gormhelper/hook.go`），record-not-found 被抹成 `err == nil` + 零值结构体 ⇒
+	// `if err == nil { row.DeviceID = device.ID }` 会把"没查到"当成"查到了"写 0，全程不报错。
+	// 这里显式判主键（自增恒 > 0），查不到就保持 0 并留一条日志 —— 图像库那边会显示"-"，
+	// 有了这条日志至少能对上"哪台设备的图没挂上归属"。
 	var device gbmodels.GbDevice
-	if err := dc.db().WithContext(c.Request.Context()).Select("id").
-		Where("device_id = ?", session.DeviceCode).First(&device).Error; err == nil {
+	lookup := dc.db().WithContext(c.Request.Context()).Select("id").
+		Where("device_id = ?", session.DeviceCode).Limit(1).Find(&device)
+	if lookup.Error != nil {
+		return 0, lookup.Error
+	}
+	if device.ID == 0 {
+		zap.S().Warnw("抓拍图登记时找不到所属设备，该图的设备归属留空",
+			zap.String("channel_code", session.ChannelCode), zap.String("device_code", session.DeviceCode))
+	} else {
 		row.DeviceID = device.ID
 	}
 
@@ -463,14 +475,49 @@ type snapshotLibraryVO struct {
 	CreatedAt   time.Time `json:"createdAt"`
 }
 
+// snapshotChannelJoin 把每张抓拍图绑到**唯一一条**通道行上。
+//
+// ⛔ 必须是子查询而不是直连：`gb_channel` 里同一个 20 位 `channel_id` 可能有两行
+// （2026-07 老板报过"卡片重复 + 勾一张选中两张"），直连 JOIN 是一对多 ⇒ 一张图渲染两次。
+//
+// ⛔⛔ 2026-10-21 老板报「所属设备显示未知设备 + 设备ID通道ID 显示成数据库ID」后的加固 ——
+// 原来的写法**只按编码匹配且要求未软删**，现场"删掉设备又重加""重新注册换了编码"之后，
+// 历史图就一条都关联不上，整张卡片只剩一行编码。现在的匹配顺序是：
+//
+//	1. `c.id = s.channel_id` —— 抓拍当时记下的平台主键，最权威（编码后来改了也不影响）；
+//	2. `MIN(c.id) WHERE c.channel_id = s.channel_code` —— 兼容抓拍时没记下主键的存量行。
+//	3. **不再要求 `deleted_at IS NULL`** —— 通道有软删/重建两行时取主键最小的那行（与 2026-07
+//	   定的口径一致：宁可主键偏小也不要行数翻倍），但没有活跃行时**软删行也算**：
+//	   历史抓拍图是取证材料，通道被删了不等于这张图没有主通道。
+//
+// ⛔ 刻意不写 `ORDER BY ... LIMIT 1`：SQLite（单机版用的就是它）不允许子查询的 ORDER BY
+// 引用外层列，报 `no such column: s.channel_id`，而 MySQL 能跑 —— 只在一个库上验过就当通过，
+// 上线到另一种库才会炸。用 COALESCE + MIN 达到同样的偏好，两边都能跑。
+const snapshotChannelJoin = `LEFT JOIN gb_channel AS ch ON ch.id = COALESCE(
+	(SELECT c.id FROM gb_channel AS c WHERE s.channel_id <> 0 AND c.id = s.channel_id),
+	(SELECT MIN(c2.id) FROM gb_channel AS c2 WHERE c2.channel_id = s.channel_code)
+)`
+
+// snapshotDeviceJoin 同上，绑设备行。
+//
+// ⛔ 编码走 `ch.device_id`（`gb_channel.device_id` 存的就是设备的 20 位编码），
+// 主键走本表抓拍时记下的 `s.device_id` —— 两条路都要有：设备被删后重建会换主键，
+// 而通道被改挂到别的设备时编码也会变，任一匹配上就能显示名字。
+const snapshotDeviceJoin = `LEFT JOIN gb_device AS d ON d.id = COALESCE(
+	(SELECT g.id FROM gb_device AS g WHERE s.device_id <> 0 AND g.id = s.device_id),
+	(SELECT MIN(g2.id) FROM gb_device AS g2 WHERE ch.device_id <> '' AND g2.device_id = ch.device_id)
+)`
+
 // snapshotLibrarySelect 与 [snapshotLibraryRow] 逐列对应。
 //
 // ⛔ 显式列名，不用 `s.*`：`s.*` 展开出的 `s.device_id`（平台主键）与旁边的
-// `ch.device_id AS device_code`（20 位国标编码）会同时出现，靠 GORM 的命名策略猜映射
+// `device_code`（20 位国标编码）会同时出现，靠 GORM 的命名策略猜映射
 // 很容易把两者接反 —— 而前端拿反了就是"用编码当主键去关联"。
 const snapshotLibrarySelect = "s.id, s.device_id, s.channel_id, s.channel_code, s.session_id, s.file_name, " +
 	"s.size, s.md5, s.captured_at, s.source, s.created_at, " +
-	"ch.name AS channel_name, ch.device_id AS device_code, d.name AS device_name, " +
+	"ch.name AS channel_name, " +
+	// 设备编码：通道行上有就用它（通道挂在哪台设备下是权威），否则用设备行自己的编码。
+	"COALESCE(NULLIF(ch.device_id, ''), d.device_id) AS device_code, d.name AS device_name, " +
 	// ⛔ 两个 alias 都要显式取，别指望 GORM 按名字猜：`ch.alias` 与 `d.alias`
 	// 同名，不起 AS 就撞成同一列，而扫描行只有一个字段能接住两个值 ——
 	// 表现是"设备别名显示成通道别名"或干脆空着，且不报错。
@@ -622,25 +669,10 @@ func (dc *DeviceMgmtController) ListSnapshots(c *gin.Context) {
 		Table("gb_channel_snapshot AS s").
 		Select(snapshotLibrarySelect).
 		// ⛔ LEFT JOIN 而不是 INNER JOIN：通道/设备被删之后，**历史图仍是原始凭证**，
-		// 不该跟着消失。可见性由下面的 Scope 决定（它作用在 `ch.*` 上，匹配不到通道的行
-		// 天然不可见），而不是由 JOIN 类型决定。
-		//
-		// ⛔⛔ 通道必须走**子查询取唯一行**，不能直接 JOIN（老板 2026-10-07 报
-		// 「设备ID通道ID 的值不对」+「勾第一张第二张也跟着勾」+「看着像重复数据」）。
-		// 实测根因：**同一个 20 位 `channel_id` 在 `gb_channel` 里有两行**
-		// （库行 3539 与 3732 指向同一设备），直连 JOIN 变成一对多 ⇒
-		//   1) 同一张图被**渲染两次**（页面出现两张一模一样的卡片）；
-		//   2) 两行前端 `:key="item.id"` 相同 ⇒ Vue 复用同一 DOM ⇒ **勾一张选中两张**；
-		//   3) 展示的通道主键变成 JOIN 命中的那一行（3732），与图里存的 3539 不一致。
-		// ⛔ 归并判据用 `MIN(id)`：**只取一行**，宁可主键偏小也不要行数翻倍
-		//（行数翻倍会同时毁掉展示与交互，而主键只用于报障定位）。
-		// ⚠️ 同一个编码对应两个**不同**通道行，说明写入侧曾经重复建行，
-		// 根治要在通道创建处加唯一约束，不是这里能兜住的。
-		Joins(`LEFT JOIN gb_channel AS ch ON ch.id = (
-			SELECT MIN(c2.id) FROM gb_channel AS c2
-			WHERE c2.channel_id = s.channel_code AND c2.deleted_at IS NULL
-		)`).
-		Joins("LEFT JOIN gb_device AS d ON d.device_id = ch.device_id AND d.deleted_at IS NULL").
+		// 不该跟着消失。可见性由下面的 Scope 决定（它作用在 `ch.*` 上），而不是由 JOIN 类型决定。
+		// ⛔ 两条 JOIN 的匹配顺序与软删策略见 [snapshotChannelJoin] / [snapshotDeviceJoin]。
+		Joins(snapshotChannelJoin).
+		Joins(snapshotDeviceJoin).
 		Where("s.deleted_at IS NULL").
 		// ⛔ 用**带别名**的可见性 Scope：本表自己也有 `device_id` 列（平台主键），
 		// 不带前缀在联表里是歧义列（见 controllers/deptscope.go 的注释）。
@@ -725,7 +757,17 @@ func (dc *DeviceMgmtController) ListSnapshots(c *gin.Context) {
 	}
 
 	list := make([]snapshotLibraryVO, 0, len(rows))
+	// ⛔ 归属彻底查不到时留一条日志：2026-10-21「所属设备显示未知设备」就是**静默**发生的
+	// —— 页面只写"未知设备"，后端一个字都没有，事后只能靠猜是 JOIN 写错了还是库里真没这行。
+	// 日志里带上抓拍时记下的两个平台主键与编码：有主键没行 ⇒ 行被物理删了；主键为 0 ⇒ 收图时就没关联上。
+	// ⚠️ 只汇总打一条（一页最多 200 行，逐行打会把日志刷满）。
+	unattributed := make([]string, 0, 4)
 	for _, row := range rows {
+		if strings.TrimSpace(row.ChannelName) == "" && strings.TrimSpace(row.DeviceCode) == "" && len(unattributed) < 4 {
+			unattributed = append(unattributed, fmt.Sprintf(
+				"{snapshot=%d channel_code=%s channel_id=%d device_id=%d}",
+				row.ID, row.ChannelCode, row.ChannelID, row.DeviceID))
+		}
 		view := snapshotLibraryVO{
 			ID: row.ID, DeviceID: row.DeviceID, ChannelID: row.ChannelID,
 			ChannelCode: row.ChannelCode, ChannelName: row.ChannelName, ChannelAlias: row.ChannelAlias,
@@ -738,6 +780,10 @@ func (dc *DeviceMgmtController) ListSnapshots(c *gin.Context) {
 			view.SessionID = *row.SessionID
 		}
 		list = append(list, view)
+	}
+	if len(unattributed) > 0 {
+		zap.S().Warnw("图像库有抓拍行关联不到通道/设备（页面会显示「未知设备」）",
+			zap.Int("page", page), zap.Strings("samples", unattributed))
 	}
 	dc.Success(c, gin.H{"list": list, "total": total, "page": page, "pageSize": pageSize})
 }

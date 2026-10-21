@@ -164,16 +164,20 @@
                      ⛔ 但图片区保留 `contain`：通道卡片的快照是**引流图**（cover 无所谓），
                      抓拍图是**取证材料**，裁掉画面上下缘就看不出现场拍全没有。 -->
                 <div class="library-card-info">
+                  <!-- ⛔ 这里显示 **20 位国标编码**，不是库主键（老板 2026-10-21 纠正：
+                       "设备 ID 显示成了数据库的 ID，这样不对"）。现场对设备说话用的是编码 ——
+                       贴纸、SIP 报文、上级平台目录里都是它；主键只有查库时才有意义。
+                       主键仍留在详情抽屉（报障时定位具体库行）。 -->
                   <div>
-                    <span>设备 ID</span>
-                    <a-tooltip :content="String(item.deviceId)" position="top">
-                      <strong class="mono text-ellipsis">{{ item.deviceId }}</strong>
+                    <span>设备编码</span>
+                    <a-tooltip :content="deviceCodeLabel(item)" position="top">
+                      <strong class="mono text-ellipsis">{{ deviceCodeLabel(item) }}</strong>
                     </a-tooltip>
                   </div>
-                  <div>
-                    <span>通道 ID</span>
-                    <a-tooltip :content="String(item.channelId)" position="top">
-                      <strong class="mono text-ellipsis">{{ item.channelId }}</strong>
+                  <div v-if="showChannelCode(item)">
+                    <span>通道编码</span>
+                    <a-tooltip :content="channelCodeLabel(item)" position="top">
+                      <strong class="mono text-ellipsis">{{ channelCodeLabel(item) }}</strong>
                     </a-tooltip>
                   </div>
                   <div>
@@ -316,14 +320,15 @@
               <a-tag size="small">{{ snapshotSourceLabel(detail.source) }}</a-tag>
             </span>
           </div>
-          <!-- ⛔ 平台主键：报障/对账时对方要的是"哪一条记录"，
-               光有 20 位编码没法直接定位库行。 -->
+          <!-- ⛔ 平台主键：报障/对账时对方要的是"哪一条记录"，光有 20 位编码没法直接定位库行。
+               ⛔ 标签**必须**带"库"字：卡片上那两行叫「设备编码 / 通道编码」，这里叫
+               「设备 ID」会让人以为同一个东西有两个值（老板 2026-10-21 就把库主键当成了编码）。 -->
           <div class="library-detail-row">
-            <span class="library-detail-label">设备 ID</span>
+            <span class="library-detail-label">设备库 ID</span>
             <span class="library-detail-value library-detail-mono">{{ detail.deviceId }}</span>
           </div>
           <div class="library-detail-row">
-            <span class="library-detail-label">通道 ID</span>
+            <span class="library-detail-label">通道库 ID</span>
             <span class="library-detail-value library-detail-mono">{{ detail.channelId }}</span>
           </div>
           <!-- ⛔ 上报名只在与别名**确实不同**时列出：两者相同时列出来只会让人
@@ -416,13 +421,16 @@ import {
   formatSnapshotSize,
   mayViewSnapshotLibrary,
   normalizeSnapshotQuery,
+  snapshotChannelCode,
   snapshotChannelLabel,
   snapshotChannelReportedName,
   snapshotContentImageUrl,
+  snapshotDeviceCode,
   snapshotDeviceLabel,
   snapshotDownloadName,
   snapshotFiltersFromRoute,
   snapshotQueryFromFilters,
+  snapshotShowsChannelCode,
   snapshotShowsReportedName,
   snapshotSourceLabel,
   SNAPSHOT_LIBRARY_PAGE_SIZE,
@@ -542,7 +550,20 @@ function detailTitle(item: SnapshotLibraryItem) {
   return snapshotChannelLabel(item);
 }
 
-/** 卡片刻意露出**平台主键** deviceId/channelId：报障时对方要的是"哪一条记录"。 */
+/** 卡片上的两行编码：显示**20 位国标编码**，不是库主键（老板 2026-10-21 纠正）。 */
+function channelCodeLabel(item: SnapshotLibraryItem) {
+  return snapshotChannelCode(item);
+}
+
+function deviceCodeLabel(item: SnapshotLibraryItem) {
+  return snapshotDeviceCode(item);
+}
+
+/** ⛔ 标题已经是编码时不再单列「通道编码」，否则同一张卡片里同一个 20 位数出现两次。 */
+function showChannelCode(item: SnapshotLibraryItem) {
+  return snapshotShowsChannelCode(item);
+}
+
 function channelLabel(item: SnapshotLibraryItem) {
   return snapshotChannelLabel(item);
 }

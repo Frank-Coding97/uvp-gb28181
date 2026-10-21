@@ -401,6 +401,16 @@ func channelPrimaryKey(t *testing.T, db *gorm.DB, channelCode string) uint {
 	return channel.ID
 }
 
+// devicePrimaryKey 取设备的**平台主键**（gb_device.id）。
+// 与 [channelPrimaryKey] 同理：图像库表里 `device_id` 存的是主键，不是 20 位编码。
+func devicePrimaryKey(t *testing.T, db *gorm.DB, deviceCode string) uint {
+	t.Helper()
+	var device gbmodels.GbDevice
+	require.NoError(t, db.Where("device_id = ?", deviceCode).First(&device).Error)
+	require.NotZero(t, device.ID)
+	return device.ID
+}
+
 // deleteSnapshotLibrary 打批量删除请求。
 func deleteSnapshotLibrary(t *testing.T, router *gin.Engine, body string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -749,6 +759,57 @@ func TestListSnapshotsDoesNotFanOutWhenOneCodeHasTwoChannelRows(t *testing.T) {
 	require.Len(t, list, 1)
 	// 通道主键必须与库里存的一致（不能被 JOIN 命中的另一行顶掉）。
 	require.Equal(t, float64(id), list[0]["id"], "列表行的 id 必须等于图的主键")
+}
+
+// TestListSnapshotsKeepsAttributionWhenChannelOrDeviceWasRecreated 是 2026-10-21 老板报
+// 「所属设备显示未知设备、设备ID通道ID 是数据库 ID」那一轮的后端回归。
+//
+// ⛔ 现场最常见的两种情况都会让老 JOIN（只按编码匹配 + 要求 `deleted_at IS NULL`）**一条都匹配不上**：
+//  1. 通道编码后来变了（重新注册 / 下级平台重新导入）；
+//  2. 通道或设备被删掉（软删）后重建 —— 老行 `deleted_at` 有值，新行主键又变了。
+//
+// 两者都会让历史抓拍图整张卡片只剩编码，而**图本身是取证材料，不能因为设备被删就失去归属**。
+// 判据只能看响应：通道名/设备名/设备编码必须还在。
+func TestListSnapshotsKeepsAttributionWhenChannelOrDeviceWasRecreated(t *testing.T) {
+	t.Run("通道编码后来被改掉", func(t *testing.T) {
+		router, db := snapshotLibraryFixture(t)
+		const deviceCode, channelCode = "37010301021320004011", "37010301021320004012"
+		seedSnapshotChannel(t, db, deviceCode, channelCode, 10)
+		pk := channelPrimaryKey(t, db, channelCode)
+		base := time.Date(2026, 10, 20, 20, 54, 33, 0, time.UTC)
+		seedSnapshotImage(t, db, channelCode, "renamed.jpg", base, gbmodels.SnapshotSourceDevice,
+			func(row *gbmodels.GbChannelSnapshot) { row.ChannelID = pk; row.DeviceID = devicePrimaryKey(t, db, deviceCode) })
+		// 编码换了（抓拍行里记的还是旧编码）—— 只能靠抓拍时记下的平台主键兜住。
+		require.NoError(t, db.Model(&gbmodels.GbChannel{}).Where("id = ?", pk).
+			Update("channel_id", "37010301021320004099").Error)
+
+		list, total := decodeSnapshotLibraryList(t, getSnapshotLibraryList(t, router, ""))
+		require.Equal(t, float64(1), total)
+		require.Equal(t, "通道-"+channelCode, list[0]["channelName"], "编码变了也要关联上（按平台主键）")
+		require.Equal(t, deviceCode, list[0]["deviceCode"])
+		require.Equal(t, "设备-"+deviceCode, list[0]["deviceName"])
+	})
+
+	t.Run("通道与设备被软删后重建", func(t *testing.T) {
+		router, db := snapshotLibraryFixture(t)
+		const deviceCode, channelCode = "37010301021320004111", "37010301021320004112"
+		seedSnapshotChannel(t, db, deviceCode, channelCode, 10)
+		pk := channelPrimaryKey(t, db, channelCode)
+		base := time.Date(2026, 10, 20, 20, 54, 34, 0, time.UTC)
+		seedSnapshotImage(t, db, channelCode, "deleted.jpg", base, gbmodels.SnapshotSourceDevice,
+			func(row *gbmodels.GbChannelSnapshot) { row.ChannelID = pk; row.DeviceID = devicePrimaryKey(t, db, deviceCode) })
+		// 删设备（软删）+ 删通道（`gb_channel.deleted_at` 是普通时间列，用 Update 置位）。
+		// ⛔ 现场就是这么操作的：设备管理里删掉、重新注册，历史图还在库里。
+		require.NoError(t, db.Model(&gbmodels.GbChannel{}).Where("id = ?", pk).
+			Update("deleted_at", time.Now()).Error)
+		require.NoError(t, db.Where("device_id = ?", deviceCode).Delete(&gbmodels.GbDevice{}).Error)
+
+		list, total := decodeSnapshotLibraryList(t, getSnapshotLibraryList(t, router, ""))
+		require.Equal(t, float64(1), total, "历史图不因设备/通道被删而消失")
+		require.Equal(t, "通道-"+channelCode, list[0]["channelName"], "软删的通道仍要给出名字")
+		require.Equal(t, deviceCode, list[0]["deviceCode"], "设备编码必须还在（页面要显示的是编码，不是主键）")
+		require.Equal(t, "设备-"+deviceCode, list[0]["deviceName"])
+	})
 }
 
 // TestDeleteSnapshotsRemovesRowAndFile 覆盖批量删除的主路径。

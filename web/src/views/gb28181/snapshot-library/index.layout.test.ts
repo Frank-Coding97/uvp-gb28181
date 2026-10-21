@@ -180,12 +180,20 @@ describe("image library download and batch actions", () => {
     expect(stateSource).not.toContain("quickRangeBounds");
   });
 
-  it("shows the platform primary keys so a report can name one exact row", () => {
-    // ⛔ 光有 20 位编码没法直接定位库行；报障时对方要的是"哪一条记录"。
-    expect(pageSource).toContain("设备 ID");
-    expect(pageSource).toContain("通道 ID");
-    expect(pageSource).toContain("item.deviceId");
-    expect(pageSource).toContain("item.channelId");
+  it("shows the 20-digit GB codes on the card instead of the database primary keys", () => {
+    // ⛔ 老板 2026-10-21 纠正：卡片上的「设备 ID / 通道 ID」显示成了库主键（33 / 36），
+    // 一处都对不上现场 —— 贴纸、SIP 报文、上级平台目录里用的都是 20 位国标编码。
+    expect(pageSource).toContain("<span>设备编码</span>");
+    expect(pageSource).toContain("<span>通道编码</span>");
+    expect(pageSource).toContain("snapshotDeviceCode(item)");
+    expect(pageSource).toContain("snapshotChannelCode(item)");
+    // ⛔ 反证：卡片信息区不能再插值主键。主键只在详情抽屉里留着（报障时定位具体库行），
+    // 所以只能断言"模板里没有这个插值"，不能断言"页面里没有 deviceId 这个词"。
+    expect(pageSource).not.toContain("{{ item.deviceId }}");
+    expect(pageSource).not.toContain("{{ item.channelId }}");
+    // 纯逻辑层必须**绝不**回落到主键：拿不到编码就给 "-"。
+    expect(stateSource).toContain("firstNonBlank(item.deviceCode");
+    expect(stateSource).toContain("firstNonBlank(item.channelCode");
   });
 
   it("puts the human-given alias on the card, the reported name only as backup", () => {

@@ -8,13 +8,16 @@ import {
   mayViewSnapshotLibrary,
   normalizeSnapshotQuery,
   resolveSnapshotSource,
+  snapshotChannelCode,
   snapshotChannelLabel,
   snapshotChannelReportedName,
   snapshotContentImageUrl,
+  snapshotDeviceCode,
   snapshotDeviceLabel,
   snapshotDownloadName,
   snapshotFiltersFromRoute,
   snapshotQueryFromFilters,
+  snapshotShowsChannelCode,
   snapshotShowsReportedName,
   snapshotSourceLabel,
   SNAPSHOT_LIBRARY_PERMISSION
@@ -296,5 +299,30 @@ describe("card labels put the human-given name first", () => {
   it("still names the source when the reported name is blank", () => {
     expect(snapshotChannelReportedName({ channelName: "", channelCode: "3701...12" })).toBe("3701...12");
     expect(snapshotChannelReportedName({})).toBe("");
+  });
+});
+
+describe("card shows the 20-digit GB code, never the database primary key", () => {
+  // ⛔ 老板 2026-10-21 纠正：卡片上原来显示 `deviceId: 33` / `channelId: 36`（库主键），
+  // 一处都对不上现场 —— 设备贴纸、SIP 报文、上级平台目录里用的都是 20 位国标编码。
+  it("renders the codes", () => {
+    expect(snapshotDeviceCode({ deviceCode: "34020000001100000010" })).toBe("34020000001100000010");
+    expect(snapshotChannelCode({ channelCode: "34020000001320000010" })).toBe("34020000001320000010");
+  });
+
+  it("trims the code and never falls back to a primary key", () => {
+    expect(snapshotDeviceCode({ deviceCode: "  34020000001100000010  " })).toBe("34020000001100000010");
+    // ⛔ 拿不到编码就给 "-"：退回主键会把"关联不上"伪装成"这台设备就叫 33"。
+    expect(snapshotDeviceCode({})).toBe("-");
+    expect(snapshotChannelCode({})).toBe("-");
+  });
+
+  it("skips the code row when the title is already that code", () => {
+    // ⛔ 通道既没别名也没上报名时，标题回退成编码 —— 再单列一行就是同一个 20 位数出现两次。
+    expect(snapshotShowsChannelCode({ channelCode: "3701...12" })).toBe(false);
+    expect(snapshotShowsChannelCode({ channelAlias: "东门枪机", channelCode: "3701...12" })).toBe(true);
+    expect(snapshotShowsChannelCode({ channelName: "IPC-HFW2431S", channelCode: "3701...12" })).toBe(true);
+    // 连编码都没有（标题会显示"未知通道"）⇒ 不列一行占位。
+    expect(snapshotShowsChannelCode({})).toBe(false);
   });
 });

@@ -249,6 +249,40 @@ export function snapshotDeviceLabel(item: {
 }
 
 /**
+ * 卡片上展示的**设备编码**（20 位国标编码）。
+ *
+ * ⛔ 这里绝不能回落到 `deviceId`（平台主键）：老板 2026-10-21 明确纠正过 ——
+ * "设备 ID 显示成了数据库的 ID，这样不对"。现场对设备说话用的是国标编码
+ * （贴纸、SIP 报文、上级平台目录里都是它），而库主键只有开发看数据库时才有意义。
+ * ⛔ 查不到编码时给 "-"，不要退回主键：那会把"关联不上"伪装成"这台设备就叫 33"。
+ */
+export function snapshotDeviceCode(item: { deviceCode?: string | null }): string {
+  return firstNonBlank(item.deviceCode, "-");
+}
+
+/** 卡片上展示的**通道编码**（20 位国标编码），口径同 [snapshotDeviceCode]。 */
+export function snapshotChannelCode(item: { channelCode?: string | null }): string {
+  return firstNonBlank(item.channelCode, "-");
+}
+
+/**
+ * 卡片上是否还要**单独列一行**「通道编码」。
+ *
+ * ⛔ 标题本身就是"别名 → 上报名 → 编码"的回退链：通道没有别名/上报名时标题**已经是编码**，
+ * 再列一行就是同一个 20 位数在一张卡片里出现两次（老板 2026-10-21 那张截图就是这种观感）。
+ * 编码本身不丢 —— 标题里还在，tooltip 也是全量。
+ */
+export function snapshotShowsChannelCode(item: {
+  channelAlias?: string | null;
+  channelName?: string | null;
+  channelCode?: string | null;
+}): boolean {
+  const code = (item.channelCode ?? "").trim();
+  if (!code) return false;
+  return code !== snapshotChannelLabel(item);
+}
+
+/**
  * 上报名是否值得**并排**显示在别名旁边。
  *
  * ⛔ 判据必须是"有没有**别名**"，而不是"别名和上报名是否不同名"：

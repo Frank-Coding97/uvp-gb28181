@@ -210,9 +210,10 @@ describe("snapshot library page", () => {
     wrapper.unmount();
   });
 
-  it("labels the card with the alias and surfaces both platform ids", async () => {
+  it("labels the card with the alias and shows the 20-digit GB codes", async () => {
     // ⛔ 现场人员认的是别名（"东门枪机"），而 channelName 是设备上报的厂家串。
-    // 光有 20 位编码没法定位库行，报障时对方要的是"哪一条记录"。
+    // ⛔ 两行 ID 显示的是**20 位国标编码**，不是库主键（老板 2026-10-21 纠正）：
+    // 主键 7/9 对现场毫无意义，编码才是设备贴纸、SIP 报文、上级目录里用的那个。
     gbApi.listSnapshotLibrary.mockResolvedValue(listResult([row(21, "东门枪机")], 1));
     const wrapper = mountPage();
     await flushPromises();
@@ -221,9 +222,13 @@ describe("snapshot library page", () => {
     expect(card.text()).toContain("东门枪机");
     // 上报名与别名不同 ⇒ 并排显示，让人知道这台是设备自报的那个名字。
     expect(card.text()).toContain("IPC-HFW2431S");
-    expect(card.text()).toContain("设备 ID");
-    expect(card.text()).toContain("通道 ID");
-    expect(card.text()).toContain("2");
+    expect(card.text()).toContain("设备编码");
+    expect(card.text()).toContain("通道编码");
+    expect(card.text()).toContain("37010301021320000311");
+    expect(card.text()).toContain("37010301021320000312");
+    // ⛔ 反证：不能回落到库主键（界面上出现 7 / 9 就是回退了）。
+    expect(card.text()).not.toContain("设备 ID");
+    expect(card.text()).not.toContain("通道 ID");
     wrapper.unmount();
   });
 
