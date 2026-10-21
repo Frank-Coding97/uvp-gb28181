@@ -47,6 +47,7 @@ UVP 是 **Unified Video Platform** 的缩写，中文全称为 **统一视频接
 - [项目背景](#项目背景)
 - [致谢](#致谢)
 - [许可证](#许可证)
+- [联系我](#联系我)
 
 ## 项目亮点
 
@@ -357,3 +358,29 @@ UVP-GB28181 的后台骨架与前端工程底座基于 GinFast（Gfast 团队 / 
 UVP-GB28181 基于 [MIT License](LICENSE) 开源。个人和企业均可在遵守许可证要求的前提下使用、修改、分发或用于商业项目，请在使用时保留原始版权与许可声明。
 
 第三方组件（ZLMediaKit、EasyPlayer.js 等）遵循各自许可证，详见对应项目仓库。
+
+## 联系我
+
+遇到 Bug、想要新功能、做平台兼容性反馈，欢迎提 [Issue](https://github.com/Frank-Coding97/uvp-gb28181/issues) 或加微信交流。如果你的团队有国标平台二次开发、设备与协议适配、私有化部署或疑难问题排查的需求，也可以直接找我。
+
+<p align="center">
+  <img src="https://gitee.com/Frank-Coding/uvp-gb28181/raw/develop/docs/contact/wechat-card.jpg" alt="微信名片" width="280">
+</p>
+
+---
+
+<details>
+<summary>☕ 请我喝杯咖啡（点击展开）</summary>
+
+如果 UVP-GB28181 帮你节省了时间，或者在现场解决过一个让人头疼的老问题，欢迎请我喝杯咖啡。
+
+<table>
+<tr>
+<td align="center" width="50%"><b>微信</b><br/><img src="https://gitee.com/Frank-Coding/uvp-gb28181/raw/develop/docs/contact/wechat-pay.jpg" alt="微信收款码" width="280"/></td>
+<td align="center" width="50%"><b>支付宝</b><br/><img src="https://gitee.com/Frank-Coding/uvp-gb28181/raw/develop/docs/contact/alipay-pay.jpg" alt="支付宝收款码" width="280"/></td>
+</tr>
+</table>
+
+打赏完全自愿，不影响任何功能、许可证或技术支持。也欢迎用不花钱的方式支持：点个 Star、提一个 Issue、把这套平台推荐给身边做国标接入的同行，同样很有帮助。
+
+</details>
