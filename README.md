@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://gitee.com/Frank-Coding/uvp-gb28181/raw/develop/web/src/assets/logo/uvp-wordmark-light.svg">
-    <img referrerpolicy="no-referrer" src="https://gitee.com/Frank-Coding/uvp-gb28181/raw/develop/web/src/assets/logo/uvp-full.svg" alt="UVP 统一视频接入平台" width="340">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Frank-Coding97/uvp-gb28181/develop/web/src/assets/logo/uvp-wordmark-light.svg">
+    <img referrerpolicy="no-referrer" src="https://raw.githubusercontent.com/Frank-Coding97/uvp-gb28181/develop/web/src/assets/logo/uvp-full.svg" alt="UVP 统一视频接入平台" width="340">
   </picture>
 </p>
 
@@ -384,7 +384,7 @@ UVP-GB28181 基于 [MIT License](LICENSE) 开源。个人和企业均可在遵�
 遇到 Bug、想要新功能、做平台兼容性反馈，欢迎提 [Issue](https://github.com/Frank-Coding97/uvp-gb28181/issues) 或加微信交流。如果你的团队有国标平台二次开发、设备与协议适配、私有化部署或疑难问题排查的需求，也可以直接找我。
 
 <p align="center">
-  <img referrerpolicy="no-referrer" src="https://gitee.com/Frank-Coding/uvp-gb28181/raw/develop/docs/contact/wechat-card.jpg" alt="微信名片" width="280">
+  <img referrerpolicy="no-referrer" src="https://raw.githubusercontent.com/Frank-Coding97/uvp-gb28181/develop/docs/contact/wechat-card.jpg" alt="微信名片" width="280">
 </p>
 
 ## 请作者喝杯咖啡
@@ -393,8 +393,8 @@ UVP-GB28181 基于 [MIT License](LICENSE) 开源。个人和企业均可在遵�
 
 <table>
 <tr>
-<td align="center" width="50%"><b>微信</b><br/><img referrerpolicy="no-referrer" src="https://gitee.com/Frank-Coding/uvp-gb28181/raw/develop/docs/contact/wechat-pay.jpg" alt="微信收款码" width="280"/></td>
-<td align="center" width="50%"><b>支付宝</b><br/><img referrerpolicy="no-referrer" src="https://gitee.com/Frank-Coding/uvp-gb28181/raw/develop/docs/contact/alipay-pay.jpg" alt="支付宝收款码" width="280"/></td>
+<td align="center" width="50%"><b>微信</b><br/><img referrerpolicy="no-referrer" src="https://raw.githubusercontent.com/Frank-Coding97/uvp-gb28181/develop/docs/contact/wechat-pay.jpg" alt="微信收款码" width="280"/></td>
+<td align="center" width="50%"><b>支付宝</b><br/><img referrerpolicy="no-referrer" src="https://raw.githubusercontent.com/Frank-Coding97/uvp-gb28181/develop/docs/contact/alipay-pay.jpg" alt="支付宝收款码" width="280"/></td>
 </tr>
 </table>
 
