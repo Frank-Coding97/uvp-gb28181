@@ -36,6 +36,7 @@ UVP 是 **Unified Video Platform** 的缩写，中文全称为 **统一视频接
 
 - [项目亮点](#项目亮点)
 - [功能一览](#功能一览)
+- [界面预览](#界面预览)
 - [技术架构](#技术架构)
 - [快速开始](#快速开始)
 - [目录结构](#目录结构)
@@ -83,6 +84,37 @@ UVP 是 **Unified Video Platform** 的缩写，中文全称为 **统一视频接
 | 图像与固件 | 抓图与图像库、批量下载、固件仓库与升级任务 |
 | 平台管理 | 用户/角色/菜单/部门/字典/API 权限、登录安全（验证码、失败锁定）、安全事件、OpenAPI 客户端与凭证 |
 | 系统能力 | 多数据库支持（MySQL / PostgreSQL / SQL Server / SQLite）、Redis 或内存缓存、服务在线升级、HTTPS 与端口可配置 |
+
+## 界面预览
+
+> 以下截图取自开发环境，设备名称与编码均为测试数据。点击图片可查看原图。
+
+<table>
+<tr>
+<td width="50%" align="center">
+<img src="docs/screenshots/device-list.jpg" alt="设备列表：国标目录树与设备卡片" width="100%">
+<b>设备列表</b><br>
+<sub>左侧国标目录树（行政区划 / 部门目录 / 业务分组），右侧设备卡片直显在线状态、厂商型号、通道数与最近心跳</sub>
+</td>
+<td width="50%" align="center">
+<img src="docs/screenshots/cloud-recording.jpg" alt="云端录像：录像文件与存储状态对账" width="100%">
+<b>云端录像</b><br>
+<sub>按设备 / 通道 / 时间检索录像文件，展示时长、文件大小、存储节点与可用性，支持对账与详情回溯</sub>
+</td>
+</tr>
+<tr>
+<td width="50%" align="center">
+<img src="docs/screenshots/device-permission.jpg" alt="设备权限工作台：设备归属与共享授权" width="100%">
+<b>设备权限工作台</b><br>
+<sub>把“设备归属哪个部门、还能给谁用”做成一条可视化流程：选范围 → 勾设备 → 选操作 → 确认提交</sub>
+</td>
+<td width="50%" align="center">
+<img src="docs/screenshots/sip-access.jpg" alt="SIP 接入信息：设备侧接入参数与扫码录入" width="100%">
+<b>SIP 接入信息</b><br>
+<sub>把设备侧要填的服务地址、端口、平台 ID、域和密码集中呈现，支持扫码录入与配套模拟器下载</sub>
+</td>
+</tr>
+</table>
 
 ## 技术架构
 
