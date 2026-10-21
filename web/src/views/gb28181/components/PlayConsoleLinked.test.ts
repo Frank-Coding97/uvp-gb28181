@@ -859,6 +859,7 @@ describe("PlayConsoleLinked 双区联动", () => {
   });
 
   it("上报当前播放会话的客户端事实且失败不影响播放", async () => {
+    const measure = vi.spyOn(performance, "measure");
     api.startPlay.mockResolvedValueOnce({
       code: 0,
       message: "",
@@ -885,6 +886,8 @@ describe("PlayConsoleLinked 双区联动", () => {
     });
     await flushPromises();
 
+    expect(measure).toHaveBeenCalledWith("uvp-play-api", expect.any(Object));
+    expect(measure).toHaveBeenCalledWith("uvp-play-visible", expect.any(Object));
     expect(api.reportPlaybackClientEvent).toHaveBeenCalledWith("life-1", "feedback-1", {
       event: "first_frame",
       clientElapsedMs: 321
@@ -6918,5 +6921,39 @@ describe("PlayConsoleLinked 目标跟踪（GB/T 28181-2022 A.2.3.1.14）", () =>
     // 反向对照：云台侧的拉框变焦此时也在（它由 canControlDevice 挡），说明整块门禁一致。
     expect(wrapper.find("[data-testid='ptz-drag-zoom']").exists()).toBe(false);
     wrapper.unmount();
+  });
+});
+
+/**
+ * 加载/空/错误三态的居中：`.placeholder` 必须**脱离** `.video-canvas` 的网格流。
+ *
+ * ⛔ 曾经的形态是纯网格项 —— `phase === 'requesting'` 时 PlayWindow 与占位块是同级网格项，
+ *    两个 auto 行把画面劈成上下两半，转圈和文案被压到画面中线以下
+ *    （老板 2026-10-21：「播放的时候，这个 loading 出现的位置有些靠下了」）。
+ *    jsdom 不排版、量不出像素 ⇒ 只能把"它是否脱离文档流 + 锚点/居中是否还在"钉成契约。
+ */
+describe("PlayConsoleLinked 播放占位层居中", () => {
+  const pageSource = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
+  // ⛔ 先剥注释再断言：本仓注释里会写"别改回纯 grid 项"，反向断言不能把说明一起命中。
+  const css = pageSource.replace(/\/\*[\s\S]*?\*\//g, "");
+  /** 取形如 `\n.selector {` 的声明块（必须顶格，否则 `.console-body.is-minimized .video-canvas` 会被误命中）。 */
+  const cssBlock = (selector: string) => {
+    const start = css.indexOf(`\n${selector} {`);
+    if (start < 0) return "";
+    return css.slice(start + 1, css.indexOf("}", start) + 1);
+  };
+
+  it("keeps the placeholder out of the canvas grid flow", () => {
+    const placeholder = cssBlock(".placeholder");
+    expect(placeholder).toContain("position: absolute;");
+    expect(placeholder).toContain("inset: 0;");
+    // 绝对定位后仍要靠这两条居中：删掉任意一条都会让转圈贴到左上角。
+    expect(placeholder).toContain("place-items: center;");
+    expect(placeholder).toContain("align-content: center;");
+  });
+
+  it("keeps the canvas as the positioning anchor", () => {
+    // 占位层的包含块就是 `.video-canvas`；它一旦不再是定位元素，占位层会飞到弹窗外面。
+    expect(cssBlock(".video-canvas")).toContain("position: relative;");
   });
 });

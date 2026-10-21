@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "path";
 import { resolve } from "path";
 import { include } from "./build/optimize";
+import { easyPlayerAssets } from "./build/easyplayer-assets";
 import { createVitePlugins } from "./build/vite-plugin";
 import postcssPresetEnv from "postcss-preset-env";
 
@@ -52,7 +53,7 @@ export default defineConfig(({ mode }) => {
         "/public": { target: apiProxyTarget, changeOrigin: true }
       }
     },
-    plugins: [...createVitePlugins()],
+    plugins: [...createVitePlugins(), easyPlayerAssets()],
     resolve: {
       alias: {
         "@assets": path.join(__dirname, "src/assets"),

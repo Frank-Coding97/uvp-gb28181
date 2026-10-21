@@ -75,8 +75,8 @@ http {
     gzip_comp_level   5;
     gzip_vary         on;
     gzip_types        text/plain text/css application/json application/javascript
-                      application/xml text/xml image/svg+xml font/woff font/woff2;
-    # ⛔ 不 gzip 二进制（vorbis/flv/mp4 已在压缩，再压是纯浪费 CPU）
+                      application/xml text/xml image/svg+xml font/woff font/woff2 application/wasm;
+    # ⛔ WASM 可压缩；不 gzip 已压缩媒体（vorbis/flv/mp4）
     gzip_proxied      any;
 
     # ---------------- 上游：后端 ----------------
@@ -113,6 +113,23 @@ http {
         # ---------------- 前端 ----------------
         # ⛔ 带 hash 的静态资源（/static/js/xxx.<hash>.js）可以长期缓存：
         #   文件名变了浏览器就会重新拉，这是构建工具的契约。
+        # 内容摘要覆盖整组主脚本、worker 和 WASM；只有版本目录允许长期缓存。
+        location ~ "^/easyplayer/[0-9a-f]{16}/" {
+            expires 30d;
+            add_header Cache-Control "public, immutable";
+            try_files $uri =404;
+        }
+
+        # 旧页面仍可用固定路径；发布后必须校验，防止混用旧解码器。
+        location /easyplayer/ {
+            add_header Cache-Control "no-cache";
+            try_files $uri =404;
+        }
+
+        location = /index.html {
+            add_header Cache-Control "no-cache";
+        }
+
         location /static/ {
             expires 30d;
             add_header Cache-Control "public, immutable";

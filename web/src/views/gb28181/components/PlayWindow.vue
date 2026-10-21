@@ -2,6 +2,8 @@
 import { computed, ref, watch, onBeforeUnmount, shallowRef, nextTick } from "vue";
 import { useUserStoreHook } from "@/store/modules/user";
 import { PlayerSmoothness, type SmoothnessSnapshot } from "./playerSmoothness";
+import { observePlayerFirstFrame } from "./playerFirstFrame";
+import { preparePlayerDecoder } from "./playerDecoderResources";
 
 interface Props {
   /** 流地址(http-flv / ws-flv / hls 等),传空字符串关闭播放器 */
@@ -69,12 +71,12 @@ const canScreenshot = computed(() => {
  */
 const videoSize = ref<VideoSize | null>(null);
 let sizeTimer: number | undefined;
-let playbackSession = 0;
+let stopFirstFrame: (() => void) | undefined;
 let playbackStartedAt = 0;
 let firstFrameReported = false;
 let playerErrorReported = false;
 
-/** 轮询间隔。取 1s：分辨率是低频变化量，但首帧后要尽快拿到。 */
+/** 分辨率变化保持低频轮询；首帧由独立的呈现检测处理。 */
 const VIDEO_SIZE_POLL_MS = 1000;
 
 /**
@@ -85,7 +87,6 @@ const VIDEO_SIZE_POLL_MS = 1000;
  *    事件订阅写法看起来完全合理，实际只在第一帧收到一次 —— 所以这里自己按时读。
  */
 function readVideoSize() {
-  const session = playbackSession;
   let raw: { width?: unknown; height?: unknown } | null = null;
   try {
     raw = player.value?.getVideoInfo?.() ?? null;
@@ -97,17 +98,32 @@ function readVideoSize() {
   const next: VideoSize | null =
     Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0 ? { width, height } : null;
   const prev = videoSize.value;
-  if (next && !firstFrameReported && session === playbackSession) {
-    firstFrameReported = true;
-    firstFrameReady.value = true;
-    emit("firstFrame", {
-      event: "first_frame",
-      clientElapsedMs: Math.max(0, Math.round(performance.now() - playbackStartedAt))
-    });
-  }
   if (next?.width === prev?.width && next?.height === prev?.height) return;
   videoSize.value = next;
   emit("videosize", next);
+}
+
+function startFirstFrameDetection(instance: any, url: string, token: number) {
+  stopFirstFrame?.();
+  stopFirstFrame = observePlayerFirstFrame(instance, url, evidence => {
+    if (token !== playToken || firstFrameReported || playerErrorReported) return;
+    firstFrameReported = true;
+    firstFrameReady.value = true;
+    readVideoSize();
+    const elapsed = Math.max(0, Math.round(performance.now() - playbackStartedAt));
+    // User Timing stays local and contains no media URL or authorization token.
+    try {
+      performance.clearMeasures("uvp-player-first-frame");
+      performance.measure("uvp-player-first-frame", {
+        start: playbackStartedAt,
+        end: performance.now(),
+        detail: { evidence, family: demuxFamily(url, props.zlmWebrtc) }
+      });
+    } catch {
+      /* Older browsers may not support User Timing options. */
+    }
+    emit("firstFrame", { event: "first_frame", clientElapsedMs: elapsed });
+  });
 }
 
 function startSizePolling() {
@@ -134,6 +150,8 @@ function stopSizePolling() {
  *    —— 只 `await nextTick()`（微任务）差一个量级，钉不住。
  */
 async function destroy(): Promise<void> {
+  stopFirstFrame?.();
+  stopFirstFrame = undefined;
   stopSizePolling();
   videoSize.value = null;
   smoothness.value?.dispose();
@@ -151,6 +169,7 @@ async function destroy(): Promise<void> {
 function reportPlayerError(code: "player_error" | "player_timeout") {
   if (playerErrorReported || !props.url) return;
   playerErrorReported = true;
+  stopFirstFrame?.();
   emit("playerError", {
     event: "player_error",
     code,
@@ -174,17 +193,23 @@ async function play(u: string, token: number) {
   if (player.value) {
     if (!u) return;
     try {
-      await player.value.play(u);
+      const instance = player.value;
+      const pending = instance.play(u);
+      startFirstFrameDetection(instance, u, token);
+      await pending;
       if (token !== playToken) return;
       applyAudioState(player.value);
       startSizePolling();
     } catch (e) {
+      if (token !== playToken) return;
+      stopFirstFrame?.();
       errorMsg.value = `切换播放地址失败: ${(e as Error).message || e}`;
       emit("error", errorMsg.value);
     }
     return;
   }
 
+  const decoderPath = await preparePlayerDecoder();
   await nextTick();
   // 期间又发生了新的切换(含跨协议重建):这次构造作废,让位给更新的那次,
   // 否则两个 await 之间插进来的切换会让旧实例回写到 player 上。
@@ -194,6 +219,7 @@ async function play(u: string, token: number) {
   try {
     const p = new EasyPlayerPro(containerRef.value, {
       isLive: true,
+      ...(decoderPath ? { decoderPath } : {}),
       bufferTime: 0.2,
       // 国标 IPC 默认 PCMA(G.711),EasyPlayer wasm 路径支持解码 G711
       // 通道关音频时库自己会摘掉音频按钮(内部 `operateBtns.audio = false`)
@@ -247,11 +273,15 @@ async function play(u: string, token: number) {
     }
 
     if (!u) return;
-    await p.play(u);
+    const pending = p.play(u);
+    startFirstFrameDetection(p, u, token);
+    await pending;
     if (token !== playToken) return;
     applyAudioState(p);
     startSizePolling();
   } catch (e) {
+    if (token !== playToken) return;
+    stopFirstFrame?.();
     errorMsg.value = `初始化失败: ${(e as Error).message || e}`;
     emit("error", errorMsg.value);
   }
@@ -325,7 +355,10 @@ async function switchTo(u: string, force = false): Promise<void> {
 watch(
   [() => props.url, () => props.zlmWebrtc, () => props.prepare],
   ([u]) => {
-    playbackSession += 1;
+    stopFirstFrame?.();
+    stopFirstFrame = undefined;
+    stopSizePolling();
+    videoSize.value = null;
     playbackStartedAt = performance.now();
     firstFrameReported = false;
     firstFrameReady.value = false;

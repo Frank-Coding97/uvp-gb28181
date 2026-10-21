@@ -563,4 +563,40 @@ describe("PlayWindow playback embedding", () => {
 
     wrapper.unmount();
   });
+  it("detects a browser frame while play() is still pending and records the evidence locally", async () => {
+    vi.useFakeTimers();
+    const video = document.createElement("video");
+    let frame: VideoFrameRequestCallback;
+    video.requestVideoFrameCallback = vi.fn(callback => {
+      frame = callback;
+      return 1;
+    });
+    video.cancelVideoFrameCallback = vi.fn();
+    class FakeEasyPlayer {
+      player = { _opt: { url: "ws://zlm/live.flv" }, video: { $videoElement: video } };
+      on = vi.fn();
+      play = vi.fn(() => new Promise<void>(() => {}));
+      destroy = vi.fn();
+      getVideoInfo = vi.fn(() => ({ width: 1920, height: 1080 }));
+    }
+    (globalThis as { EasyPlayerPro?: unknown }).EasyPlayerPro = FakeEasyPlayer;
+    const measure = vi.spyOn(performance, "measure");
+    const wrapper = mount(PlayWindow, { props: { url: "ws://zlm/live.flv" } });
+    await flushPromises();
+    expect(wrapper.emitted("firstFrame")).toBeUndefined();
+    frame!(performance.now(), { presentedFrames: 1 } as VideoFrameCallbackMetadata);
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-testid="player-loading"]').exists()).toBe(false);
+    expect(wrapper.emitted("firstFrame")).toHaveLength(1);
+    expect(measure).toHaveBeenCalledWith(
+      "uvp-player-first-frame",
+      expect.objectContaining({
+        detail: { evidence: "video-frame-callback", family: "flv" }
+      })
+    );
+    wrapper.unmount();
+    frame!(performance.now(), { presentedFrames: 2 } as VideoFrameCallbackMetadata);
+    expect(measure.mock.calls.filter(([name]) => name === "uvp-player-first-frame")).toHaveLength(1);
+    vi.useRealTimers();
+  });
 });

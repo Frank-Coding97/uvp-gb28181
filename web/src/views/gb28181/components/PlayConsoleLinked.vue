@@ -270,6 +270,8 @@ const phase = ref<SessionPhase>("idle");
 const errorMessage = ref("");
 const startedAt = ref<number | null>(null);
 const now = ref(Date.now());
+const clientFrameArrived = ref(false);
+let sessionRequestedAt = 0;
 const playResult = ref<PlayResult | null>(null);
 let timer: number | null = null;
 let monitorTimer: number | null = null;
@@ -282,10 +284,24 @@ const clientFeedbackSessionKey = computed(() => {
   return result?.lifecycleId && result.clientFeedbackToken ? `${result.lifecycleId}:${result.clientFeedbackToken}` : "";
 });
 
+function recordStartupTiming(name: string, start: number) {
+  try {
+    performance.clearMeasures(name);
+    performance.measure(name, { start, end: performance.now(), detail: { protocol: protocol.value } });
+  } catch {
+    /* Keep playback usable in browsers without User Timing options. */
+  }
+}
+
 function reportClientPlaybackFact(fact: PlaybackClientFact) {
   const result = playResult.value;
   const sessionKey = clientFeedbackSessionKey.value;
-  if (!result?.lifecycleId || !result.clientFeedbackToken || !sessionKey) return;
+  if (!result) return;
+  if (fact.event === "first_frame" && !clientFrameArrived.value) {
+    clientFrameArrived.value = true;
+    recordStartupTiming("uvp-play-visible", sessionRequestedAt);
+  }
+  if (!result.lifecycleId || !result.clientFeedbackToken || !sessionKey) return;
   const lifecycleId = result.lifecycleId;
   const token = result.clientFeedbackToken;
   void reportPlaybackClientEvent(lifecycleId, token, fact).catch(() => undefined);
@@ -668,7 +684,7 @@ const title = computed(
 
 const phaseHint = computed(() => {
   if (phase.value === "requesting") return "正在向设备发送 INVITE,等待 RTP 媒体建立";
-  if (phase.value === "playing") return "媒体链路正常,画面已实时呈现";
+  if (phase.value === "playing") return clientFrameArrived.value ? "视频正在播放" : "媒体已就绪，正在加载画面";
   if (phase.value === "paused") return "已暂停,可随时恢复";
   if (phase.value === "error") return errorMessage.value || "无法建立播放链路";
   if (phase.value === "stopping") return "正在释放会话资源";
@@ -2224,6 +2240,7 @@ async function startSession() {
   const previousStreamId = playResult.value?.streamId;
   const token = ++sessionToken;
   resetSessionState();
+  sessionRequestedAt = performance.now();
   await stopTalk();
   if (hasPermission("gb28181:play:stop") && previousStreamId) await stopPlay(previousStreamId).catch(() => undefined);
   if (token !== sessionToken || !props.visible || props.channel?.id !== channel.id) return;
@@ -2233,6 +2250,7 @@ async function startSession() {
   now.value = Date.now();
   beginTimer();
   try {
+    const apiStartedAt = performance.now();
     const response = await startPlay(channel.deviceId, channel.channelId);
     if (token !== sessionToken || !props.visible) {
       if (hasPermission("gb28181:play:stop") && token > localCleanupThroughToken && response.data?.streamId) {
@@ -2240,6 +2258,7 @@ async function startSession() {
       }
       return;
     }
+    recordStartupTiming("uvp-play-api", apiStartedAt);
     if (response.code !== 0 || !response.data) throw new Error(response.message || "点播失败");
     playResult.value = response.data;
     streamInfo.value.streamId = response.data.streamId;
@@ -2260,6 +2279,7 @@ async function startSession() {
 }
 
 function resetSessionState() {
+  clientFrameArrived.value = false;
   clearMonitor();
   clearTimer();
   playResult.value = null;
@@ -6044,7 +6064,14 @@ provide(PLAY_CONSOLE_CONTEXT, {
   letter-spacing: 0.04em;
 }
 
+/* 加载/空/错误三态**脱离网格流**铺满画面再居中。
+   ⛔ 别改回纯 grid 项：`requesting` 态下 PlayWindow 与占位块是 `.video-canvas` 的同级网格项，
+      两个 auto 行把画面劈成上下两半 ⇒ 转圈和文案被推到画面中线以下（老板：「loading 位置有些靠下」）。
+      绝对定位后占位块只认画布本身，谁在旁边都不影响它的居中。 */
 .placeholder {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
   display: grid;
   gap: 10px;
   place-items: center;
