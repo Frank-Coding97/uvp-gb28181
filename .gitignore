@@ -88,3 +88,13 @@ test-long-text.json
 # 装的是 nginx/openssl/pcre2/zlib/redis 的官方 tar 包，合计 ~25MB ——
 # 它们只是网络不稳时的离线兜底，不该进仓库（每次出包都能重新下）。
 .uvp-src/
+
+# 过程文档：AI 产出的规格/方案/任务记录/审查稿，只在本地参考，不入库。
+# ⚠️ docs/releases/（发版脚本按版本号取用）与 docs/contact/（README 配图）**不在此列**，
+#    它们是对外交付物，必须入库。
+docs/specs/
+docs/plans/
+docs/tasks/
+docs/audits/
+docs/device-channel-tree/
+docs/camera-first-frame-*.md

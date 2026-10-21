@@ -221,7 +221,7 @@ pnpm build:prod   # 生产构建，产物交给 nginx 托管
 │   ├── standalone-windows/    # Windows 绿色包
 │   └── compose/               # 容器版 compose 模板与安装脚本
 ├── api/openapi-v1.yaml        # 对外开放接口（OpenAPI 3）
-├── docs/                      # 设计规格、计划、任务记录与升版说明
+├── docs/                      # 升版说明、运维手册与 README 配图
 ├── scripts/                   # 质量门禁、发版、权限与数据库辅助脚本
 └── VERSION                    # 版本号唯一来源
 ```
@@ -254,12 +254,12 @@ scripts/quality-gate.sh --full   # 完整档：追加 vue-tsc 类型检查与全
 
 | 文档 | 内容 |
 | --- | --- |
-| [`docs/specs/`](docs/specs) | 功能设计规格（级联、NAT 回放、日志留存、OpenAPI 能力、服务升级等） |
-| [`docs/plans/`](docs/plans) | 对应的实施方案 |
-| [`docs/tasks/`](docs/tasks) | 任务记录与验收数据 |
-| [`docs/releases/`](docs/releases) | 升版说明，发版脚本按版本号取用 |
+| [`docs/releases/`](docs/releases) | 各版本升版说明，发版脚本按版本号取用 |
+| [`docs/admin-self-hosted-upgrade.md`](docs/admin-self-hosted-upgrade.md) | 自建升级站点与在线升级接入（面向运维管理员） |
 | [`api/openapi-v1.yaml`](api/openapi-v1.yaml) | 开放接口定义 |
 | [`deploy/standalone/PORTS.md`](deploy/standalone/PORTS.md) | 端口规划与归属 |
+| [`deploy/standalone/README.md`](deploy/standalone/README.md) | Linux 绿色包部署与运维 |
+| [`deploy/standalone-windows/README.md`](deploy/standalone-windows/README.md) | Windows 绿色包部署与运维 |
 | [`CLAUDE.md`](CLAUDE.md) | 前端 UI 与开发约定 |
 
 ## 常见问题

@@ -166,7 +166,7 @@ build_one redis    redis    redis.Dockerfile
 # ---- 镜像身份摘要 ----
 # ⛔ 记录的是**本机镜像的 config id**，不是 Registry 的 RepoDigest：
 #   docker save/load 不保留 RepoDigest，离线升级只能拿 config id 比对身份
-#   （与 docs/plans/service-upgrade.md U11-2 的判定契约一致）。
+#   （与服务升级方案 U11-2 的判定契约一致）。
 IMAGE_IDENTITY="$OUT_DIR/image-identity.json"
 log "采集镜像身份 → $IMAGE_IDENTITY"
 UVP_ARCH="$ARCH" node -e '
