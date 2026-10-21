@@ -22,6 +22,9 @@
 #                            ⛔ 出 aarch64 包时设 linux/arm64，并把底座换成
 #                               uvp/linux-builder:glibc217-arm64
 #   UVP_FFMPEG_VERSION       默认 7.1.1（LTS）
+#   UVP_FFMPEG_MINIMAL       默认 1：只编 ZLM 抓拍/转推用到的组件（约 1/4 体积）。
+#                            =0 退回完整档，体积 21MB+，**别拿去出交付包**
+#                            （Gitee 发行版单附件上限 100MB，完整档会把包顶过线）。
 #   UVP_FORCE_BUILDER        =1 时无视本机 glibc 强制进容器编
 #   UVP_FFMPEG_DYNAMIC       =1 时编动态链（仍 glibc≤2.17；容器里没有
 #                            glibc-static 时脚本也会自动走这条路）
@@ -199,6 +202,31 @@ if [ "$LINK_MODE" = "static" ]; then
   CONFIGURE_FLAGS+=(--disable-shared --enable-static)
 fi
 
+# ------------------------------------------------------------ 精简白名单 ----
+# ⛔⛔ 为什么要有精简档（2026-10-21，1.1.12 发布被 Gitee 挡下来才做）：
+#   Gitee 发行版**单个附件上限 100MiB（104857600 字节）**，而 1.1.12 三个包全越线
+#   （110.4 / 109.0 / 104.8MB）。体积不是代码涨的，是 `9e23be98` 起把**完整版 ffmpeg**
+#   塞进包里——Windows 那个 ffmpeg.exe 单个就 105MB，Linux 版 20.9/32.8MB。
+#   精简后：amd64 20.9→6.5MB、arm64 32.8→5.5MB，功能经真 RTSP 抓拍验证不变。
+#
+# ⭐ 白名单内容与「为什么是这些组件」全部写在 ffmpeg-minimal-flags.conf 里，
+#   Windows 交叉编译（deploy/standalone-windows/build-ffmpeg-win.sh）读的是**同一份**，
+#   ⛔ 不要在脚本里再维护第二份清单。
+#   UVP_FFMPEG_MINIMAL=0 可退回完整档（排障用，别拿去出包）。
+MINIMAL_FLAGS="$SCRIPT_DIR/ffmpeg-minimal-flags.conf"
+if [ "${UVP_FFMPEG_MINIMAL:-1}" = "1" ]; then
+  [ -f "$MINIMAL_FLAGS" ] || fail "找不到精简白名单 $MINIMAL_FLAGS"
+  log "精简档：只保留 ZLM 抓拍/转推用到的组件（UVP_FFMPEG_MINIMAL=0 可退回完整档）"
+  while IFS= read -r line; do
+    line="${line%%#*}"                     # 去行尾注释
+    line="$(printf '%s' "$line" | tr -d '[:space:]')"
+    [ -n "$line" ] || continue
+    CONFIGURE_FLAGS+=("$line")
+  done < "$MINIMAL_FLAGS"
+else
+  log "完整档（UVP_FFMPEG_MINIMAL=0）：体积会到 21MB+，别用这个出交付包"
+fi
+
 log "configure（${LINK_MODE}）"
 ./configure "${CONFIGURE_FLAGS[@]}" > "$SRC_ROOT/configure.log" 2>&1 || {
   tail -30 "$SRC_ROOT/configure.log" >&2
@@ -222,15 +250,21 @@ chmod 0755 "$DEST/ffmpeg"
 # 终检：真跑一次 -version（比 file 更硬——链接残缺当场暴露），并记录形态。
 OUT="$(./ffmpeg -version 2>&1 | head -1)" || fail "ffmpeg -version 都跑不起来，产物不可用"
 log "产物自检：$OUT"
-if [ "$LINK_MODE" = "static" ]; then
-  file "$DEST/ffmpeg" | grep -q 'statically linked' \
-    || fail "按静态配置编出来的二进制不是 statically linked（查 $SRC_ROOT/make.log）"
+if [ "$LINK_MODE" = "static" ] && file "$DEST/ffmpeg" | grep -q 'statically linked'; then
+  log "形态：静态链接"
 else
-  # 动态链兜底时必须过可移植性门禁（无 OpenSSL、GLIBC ≤ 上限）。
+  # ⚠️ 两种情况都会走到这里，**都不能算失败**：
+  #   ① 明确选了 dynamic（容器没有 glibc-static）；
+  #   ② 选了 static（有 libc.a）但 ffmpeg 的 configure 并不会替我们传 `-static`，
+  #      编出来仍是动态 —— aarch64 的 openeuler 底座就是这样（2026-10-21 实测）。
+  #      包内 nginx / redis 也是动态＋glibc≤2.28，目标机自带 libc 即可，形态一致。
+  # ⇒ 判据统一落到「可移植性门禁」：无动态 OpenSSL + GLIBC 不超过上限。
+  [ "$LINK_MODE" = "static" ] && log "静态未成立（configure 不带 -static），改按动态形态过可移植性门禁"
   bash "$SCRIPT_DIR/check-portable-elf.sh" \
     --glibc-max "$GLIBC_MAX" \
     "$DEST/ffmpeg" \
-    || fail "动态链 ffmpeg 没过可移植性门禁（不能随包分发）"
+    || fail "ffmpeg 没过可移植性门禁（不能随包分发）"
+  LINK_MODE="dynamic"
 fi
 
 cat > "$DEST/ffmpeg-buildinfo.txt" <<EOF
