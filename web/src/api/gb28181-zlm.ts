@@ -273,6 +273,8 @@ export interface UpdateConfigResp {
   unknown: string[];
   actual?: Record<string, string>;
   mismatched?: string[];
+  /** 保存后还需要人做的事（目前只有改 WebRTC 端口后的防火墙放行清单）。 */
+  hints?: string[];
 }
 
 export interface TestConnectionResult {

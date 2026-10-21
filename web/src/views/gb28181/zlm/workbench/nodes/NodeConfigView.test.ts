@@ -26,6 +26,14 @@ describe("NodeConfigView", () => {
     expect(source).not.toMatch(/restartZLMNode[\s\S]{0,500}Message\.success/);
   });
 
+  it("lets the save-result area trigger the same single restart flow", () => {
+    // 保存结果里的「重启媒体节点」不能自带一套受理/轮询：它必须复用本页这台状态机，
+    // 否则会出现两套 operationId、两套恢复状态，且面板那套拿不到重启权限。
+    expect(source).toContain('@restart-requested="requestRestart"');
+    expect(source).toContain(':can-restart="canRestart"');
+    expect(source).toContain(':restart-busy="restartPolling"');
+  });
+
   it("fills the workspace without creating an outer scrollbar", () => {
     expect(hasRuleBlock(source, ".node-config-view", "display: flex", "height: 100%", "min-height: 0", "overflow: hidden")).toBe(
       true

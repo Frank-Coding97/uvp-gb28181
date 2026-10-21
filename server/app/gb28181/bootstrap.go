@@ -534,6 +534,11 @@ func startControlPlane(cfg gbconfig.Config, authority *processauthority.Authorit
 
 		cfgSvc := gbzlmsvc.NewConfigService(zlmRegistry, adapter)
 		cfgSvc.SetLogger(app.ZapLog)
+		// 页面改的 WebRTC 端口要写回部署端口规划，否则 ctl.sh 下次启动会按旧值
+		// 重写 config.ini（端口的真源在 config.env，不在 ZLM）。文件不存在时
+		// PersistWebRTCPorts 返回 ErrPortPlanUnavailable ⇒ 接口 fail-closed 拒绝，
+		// 不会出现"页面改了、重启又变回去"的假成功。
+		cfgSvc.SetPortPlan(gbzlmsvc.NewPortPlan(filepath.Join(app.BasePath, "config", "config.env")))
 		gbroutes.SetZLMNodeController(gbcontrollers.NewZLMNodeController(nodeSvc))
 		gbroutes.SetZLMConfigController(gbcontrollers.NewZLMConfigController(cfgSvc))
 		setupZLMManagementCore(nodeSvc, restartCoordinator)

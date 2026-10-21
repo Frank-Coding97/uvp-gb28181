@@ -127,9 +127,44 @@ var configCatalog = []ConfigGroup{
 		},
 	},
 	{
+		// WebRTC 独立成组:它和 general.* 的「运行时策略」不是同一类东西 ——
+		// 前者是浏览器播放/对讲那条链路的**对外可达性**(地址 + 端口),后者是
+		// ZLM 的内部调度参数。而且 rtc.externIP 是跨网段部署唯一必须人工填的
+		// 开关:它同时充当 STUN 下发门禁(talk/ice.go 只在它非空时才给浏览器发
+		// iceServers),混在 general.* 里既难找、又容易被当成「没人看的默认值」。
+		//
+		// 两个地址项都留空是合法状态(都表示"用本机地址"),但只有 externIP
+		// 能热改:interfaces 是 ICE 绑定网卡,改了必须重启才重新 bind。
+		//
+		// 四个端口项可改(restart_required),但它们必须**成对同号**:
+		//   port ↔ tcpPort(UDP/TCP 各占一个协议栈)
+		//   icePort ↔ iceTcpPort
+		// 只改一半就是 2026-10-12 那个事故的复刻(tcpPort 留在 8000 被占 ⇒ ZLM 启动
+		// 即退出)。补齐由 pairWebRTCPorts 做,不指望人记得。
+		//
+		// ⛔ 改了必须持久化到部署端口规划(config/config.env):ctl.sh 每次启动按那里
+		// 重写 ini,不写回去 = 下次启动被改回,而且用户以为改成功了。
+		//
+		// port_range 仍然只读:它是 TURN 中继端口池,而 TURN 被强制关闭
+		// (ctl.sh 每次启动写 enableTurn=0),现在填了不生效;它的默认值又落在
+		// Linux 临时端口区,乱改更容易撞端口。
+		Name: "WebRTC",
+		Items: []ConfigItem{
+			{Key: "rtc.externIP", Default: "", HotReloadable: true, Comment: "WebRTC 对外地址；公网/NAT 部署填写客户端可达的公网 IP，多个地址用逗号分隔；留空使用本机地址。保存后新建会话生效，已有会话需重新连接"},
+			{Key: "rtc.interfaces", Default: "", Mode: ConfigModeRestartRequired, RestartRequired: true, Comment: "ICE 绑定的网卡地址；多网卡或弹性公网 IP（机器本身 bind 不到公网 IP）时填本机内网 IP，多个用逗号分隔；留空自动选择。保存后需重启媒体节点生效"},
+			// 端口项的 Default 留空是刻意的:实际端口由部署端口规划决定(绿色包 510xx,
+			// 与上游出厂 8000/3478 并不相同),这里填一个"默认端口"会在 ZLM 没返回
+			// 该键时把假数字当成事实显示出来 —— 宁可显示空。
+			{Key: "rtc.port", Default: "", Mode: ConfigModeRestartRequired, RestartRequired: true, Comment: "WebRTC 媒体端口(UDP)；与 tcpPort 同号，保存后写回部署端口规划，重启媒体节点生效。还需防火墙放行"},
+			{Key: "rtc.tcpPort", Default: "", Mode: ConfigModeRestartRequired, RestartRequired: true, Comment: "WebRTC over TCP 回退端口；必须与 port 同号（UDP/TCP 各占一个协议栈），保存时会自动对齐"},
+			{Key: "rtc.icePort", Default: "", Mode: ConfigModeRestartRequired, RestartRequired: true, Comment: "内置 STUN 监听端口(UDP)；与 iceTcpPort 同号，保存后写回部署端口规划，重启媒体节点生效。跨网段用 WebRTC 时防火墙需放行"},
+			{Key: "rtc.iceTcpPort", Default: "", Mode: ConfigModeRestartRequired, RestartRequired: true, Comment: "内置 STUN/TURN 的 TCP 监听端口；必须与 icePort 同号，保存时会自动对齐"},
+			{Key: "rtc.port_range", Default: "", Mode: ConfigModeReadOnly, Comment: "TURN 中继端口池(UDP)；TURN 已由部署脚本强制关闭，此键当前不生效，故只读"},
+		},
+	},
+	{
 		Name: "运行时策略",
 		Items: []ConfigItem{
-			{Key: "rtc.externIP", Default: "", HotReloadable: true, Comment: "WebRTC 对外地址；公网/NAT 部署填写公网 IP，多个地址用逗号分隔；留空使用本机地址。保存后新建会话生效，已有会话需重新连接"},
 			{Key: "general.streamNoneReaderDelayMS", Default: "20000", HotReloadable: true, Comment: "无人观看自动断流延迟(毫秒)"},
 			{Key: "general.mediaServerId", Default: "", HotReloadable: true, Comment: "节点 UUID,业务侧生成"},
 			{Key: "general.maxStreamWaitMS", Default: "15000", HotReloadable: true, Comment: "流就绪最大等待(毫秒)"},
@@ -226,6 +261,10 @@ type UpdateConfigResp struct {
 	Applied         []string `json:"applied"`         // 已生效(热改成功)
 	RequiresRestart []string `json:"requiresRestart"` // 需要重启 ZLM 才生效
 	Unknown         []string `json:"unknown"`         // 未在 catalog 中的 key(原样下发)
+	// Hints 是保存后**还需要人做的事**（目前只有改端口后的防火墙放行）。
+	// 单独一列而不是塞进 RequiresRestart：后者是"配置项状态"，这里是"操作清单"，
+	// 混在一起前端只能靠猜文案。
+	Hints []string `json:"hints,omitempty"`
 }
 
 // ConfigReadbackError contains only redacted actual values. It is returned
@@ -307,11 +346,20 @@ type ConfigService struct {
 	registry *node.Registry
 	client   ZLMConfigClient
 	logger   *zap.Logger
+	// portPlan 是「页面改端口」的持久化出口（部署端口规划 config.env）。
+	// nil 表示当前部署没有这个文件（容器编排由外部注入端口）⇒ 端口改动必须
+	// fail-closed 拒绝，见 Update 里的 ErrPortPlanUnavailable。
+	portPlan *PortPlan
 }
 
 // NewConfigService 构造
 func NewConfigService(reg *node.Registry, cli ZLMConfigClient) *ConfigService {
 	return &ConfigService{registry: reg, client: cli, logger: zap.NewNop()}
+}
+
+// SetPortPlan 装配端口规划写回器（nil 安全：不装配 = 不支持页面改端口）。
+func (s *ConfigService) SetPortPlan(plan *PortPlan) {
+	s.portPlan = plan
 }
 
 // SetLogger 装配日志(nil 安全)。未装配时静默,便于测试直接构造。
@@ -418,6 +466,30 @@ func (s *ConfigService) Update(ctx context.Context, nodeID int64, req UpdateConf
 			}
 		}
 	}
+	// WebRTC 端口成对同号：只改 UDP 不改 TCP 就是 2026-10-12 那个事故
+	// （tcpPort 留在 8000 被占 ⇒ ZLM 启动即退出）。补齐发生在这里而不是前端，
+	// 因为接口可以被直接调用。
+	rtcPort, icePort, err := pairWebRTCPorts(hotParams)
+	if err != nil {
+		return nil, err
+	}
+	needsPortPlan := rtcPort > 0 || icePort > 0
+	if needsPortPlan && s.portPlan == nil {
+		// 先拒后发：没有持久化出口时下发等于假改（ZLM 接受了，下次启动被改回）。
+		return nil, fmt.Errorf("%w: 当前部署不支持在页面修改 WebRTC 端口，请直接改部署端口规划", ErrPortPlanUnavailable)
+	}
+	if needsPortPlan {
+		// 撞车必须在下发之前发现：端口规划是重启时生效的那份，撞了不会在保存时炸，
+		// 而是下次启动 ZLM 直接退出（`address already in use`），用户却以为保存成功。
+		conflict, checkErr := s.portPlan.FindConflict(rtcPort, icePort)
+		if checkErr != nil {
+			return nil, checkErr
+		}
+		if conflict != nil {
+			return nil, fmt.Errorf("%w: 端口 %d 已被部署端口规划里的 %s=%s 占用，请换一个端口",
+				ErrInvalidConfigValue, conflict.Port, conflict.Key, conflict.Value)
+		}
+	}
 	if len(hotParams) > 0 {
 		target := snapshotConfigTarget(n)
 		if err := s.client.SetServerConfig(ctx, n, hotParams); err != nil {
@@ -463,8 +535,83 @@ func (s *ConfigService) Update(ctx context.Context, nodeID int64, req UpdateConf
 		}
 		sort.Strings(resp.Applied)
 		sort.Strings(resp.RequiresRestart)
+		if needsPortPlan {
+			// 回读成功之后才落盘：先证明 ZLM 接受，再让它成为下次启动的规划。
+			if persistErr := s.portPlan.PersistWebRTCPorts(rtcPort, icePort); persistErr != nil {
+				// ZLM 已改、规划没落盘 ⇒ 重启会退回旧端口。报出来而不是当成功，
+				// 否则用户会在下次重启后遇到「端口自己变回去了」且毫无线索。
+				return nil, fmt.Errorf("%w: %v", ErrPortPlanPersistFailed, persistErr)
+			}
+			resp.Hints = append(resp.Hints, webrtcPortHints(rtcPort, icePort)...)
+		}
 	}
 	return resp, nil
+}
+
+// pairWebRTCPorts 让成对端口一起变，返回需要写回部署端口规划的 (媒体端口, STUN 端口)。
+//
+// 传 0 表示该项没改。前端也会做同样的对齐，但接口可以被直接调用（curl / 其他
+// 客户端），所以约束必须在服务端成立。
+func pairWebRTCPorts(changes map[string]string) (rtcPort, icePort int, err error) {
+	pairs := [][2]string{
+		{"rtc.port", "rtc.tcpPort"},       // 同一个媒体端口，UDP 与 TCP 各占一个协议栈
+		{"rtc.icePort", "rtc.iceTcpPort"}, // STUN/TURN 的 UDP 与 TCP
+	}
+	for _, pair := range pairs {
+		left, leftOK := changes[pair[0]]
+		right, rightOK := changes[pair[1]]
+		switch {
+		case leftOK && rightOK && left != right:
+			return 0, 0, fmt.Errorf("%w: %s 与 %s 必须同号（UDP/TCP 各占一个协议栈，不同号会让其中一路监听留在旧端口）",
+				ErrInvalidConfigValue, pair[0], pair[1])
+		case leftOK && !rightOK:
+			changes[pair[1]] = left
+		case !leftOK && rightOK:
+			changes[pair[0]] = right
+		}
+	}
+	parse := func(key string) (int, error) {
+		value, ok := changes[key]
+		if !ok {
+			return 0, nil
+		}
+		port, convErr := strconv.Atoi(strings.TrimSpace(value))
+		if convErr != nil {
+			return 0, fmt.Errorf("%w: %s 必须是整数端口", ErrInvalidConfigValue, key)
+		}
+		return port, nil
+	}
+	if rtcPort, err = parse("rtc.port"); err != nil {
+		return 0, 0, err
+	}
+	if icePort, err = parse("rtc.icePort"); err != nil {
+		return 0, 0, err
+	}
+	if rtcPort > 0 && icePort > 0 && rtcPort == icePort {
+		// 两个都是 UDP 监听，同 IP 同端口必然抢不到 bind。
+		// （只有一侧被改时由 FindConflict 拿端口规划里的另一侧值判，见 PortPlan.FindConflict）
+		return 0, 0, fmt.Errorf("%w: 媒体端口与 STUN 端口不能同号（%d）", ErrInvalidConfigValue, rtcPort)
+	}
+	return rtcPort, icePort, nil
+}
+
+// webrtcPortHints 给出改端口后**还需要人做**的事。
+//
+// 端口改了防火墙没放行 = 浏览器能拿到信令但拿不到画面，症状与"节点没起来"极像，
+// 所以这条提示必须具体到端口号和协议，而不是一句"请检查防火墙"。
+func webrtcPortHints(rtcPort, icePort int) []string {
+	hints := make([]string, 0, 2)
+	if rtcPort > 0 {
+		hints = append(hints, fmt.Sprintf(
+			"WebRTC 媒体端口已改为 %d（UDP/TCP 同号）：重启媒体节点后生效，并请放行 %d/udp 与 %d/tcp，否则浏览器拿不到画面。",
+			rtcPort, rtcPort, rtcPort))
+	}
+	if icePort > 0 {
+		hints = append(hints, fmt.Sprintf(
+			"STUN 端口已改为 %d：重启媒体节点后生效，跨网段/公网播放请放行 %d/udp 与 %d/tcp。",
+			icePort, icePort, icePort))
+	}
+	return hints
 }
 
 // reconcileRTPPortRange 把 ZLM 回读到的收流范围写回节点登记值(镜像对齐真源)。
@@ -581,7 +728,10 @@ func validateNetworkPortConfig(key, value string) error {
 		return nil
 	}
 	allowDisabled := key == "rtp_proxy.port" || key == "http.sslport" || key == "rtmp.port" || key == "rtmp.sslport" || key == "rtsp.port" || key == "rtsp.sslport" || key == "shell.port"
-	isPort := key == "http.port" || allowDisabled
+	// WebRTC 四个端口没有"0 = 禁用"的语义：ZLM 会把 0 当成随机端口 bind，
+	// 客户端拿到的候选地址不可预测 —— 只能当非法值拒掉。
+	isRTCMediaPort := key == "rtc.port" || key == "rtc.tcpPort" || key == "rtc.icePort" || key == "rtc.iceTcpPort"
+	isPort := key == "http.port" || allowDisabled || isRTCMediaPort
 	if !isPort {
 		return nil
 	}

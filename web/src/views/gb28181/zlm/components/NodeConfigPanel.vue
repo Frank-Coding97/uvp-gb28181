@@ -18,18 +18,35 @@ import {
   isConfigEditable,
   isHookRoutingChange,
   isNetworkPortChange,
+  isWebRTCPortChange,
   orderConfigGroups,
   updateResultRows,
   type ConfigUpdateResultRow
 } from "../nodeConfigState";
 import { zlmErrorPresentation } from "./zlmFormatters";
 
-const props = withDefaults(defineProps<{ nodeId: number; editable?: boolean }>(), { editable: true });
+const props = withDefaults(
+  defineProps<{
+    nodeId: number;
+    editable?: boolean;
+    /**
+     * 当前账号能否重启节点；重启权限是 gb28181:zlm:restart，与配置修改权限是两回事。
+     * 刻意不给默认值：undefined 表示"宿主没接重启入口"（旧页面），
+     * false 才是"接了但没权限" —— 两种情况该说的话不一样。
+     */
+    canRestart?: boolean;
+    /** 重启流程进行中（已受理但还没确认恢复）。由外层持有重启状态，面板只借它做禁用。 */
+    restartBusy?: boolean;
+  }>(),
+  { editable: true, restartBusy: false }
+);
 const { dict } = storeToRefs(useSystemStore());
 const emit = defineEmits<{
   dirtyChange: [dirty: boolean];
   pollingSkipped: [];
   saved: [result: UpdateConfigResp];
+  /** 请求外层发起重启（确认弹窗、受理、轮询恢复都由外层负责，面板不重复一套）。 */
+  restartRequested: [];
 }>();
 
 const groups = ref<ConfigGroup[]>([]);
@@ -40,9 +57,24 @@ const dirty = ref<Record<string, string>>({});
 const searchKey = ref("");
 const activeGroup = ref("");
 const saveResults = ref<ConfigUpdateResultRow[]>([]);
+// 保存后还需要人做的事（改端口 ⇒ 防火墙放行）。常驻在回读区上方，而不是一次性
+// 弹窗：放行端口是离开页面之后才做的动作，弹窗一关就再也找不到了。
+const saveHints = ref<string[]>([]);
+// 上次保存里「已写入但重启才生效」的 key。单独存一份、不跟着 saveResults 走：
+// saveResults 会被下一次轮询 refresh 清空，而「要重启才生效」这件事在重启发生前
+// 一直成立 —— 10 秒后按钮自己消失比没有按钮更糟。
+const pendingRestartKeys = ref<string[]>([]);
 const loadError = ref("");
 
 const dirtyCount = computed(() => Object.keys(dirty.value).length);
+// 重启入口的禁用理由：能点但点了没反应是最差的状态，所以把"为什么现在不能重启"
+// 直接写在按钮旁边，而不是让外层安静地 return 掉。
+const restartBlockedReason = computed(() => {
+  if (!pendingRestartKeys.value.length) return "";
+  if (props.restartBusy) return "重启已受理，正在等待节点离线、心跳恢复和配置收敛";
+  if (dirtyCount.value > 0) return `还有 ${dirtyCount.value} 项改动未保存，先保存或放弃草稿再重启`;
+  return "";
+});
 const allItems = computed(() => groups.value.flatMap(group => group.items));
 const filteredGroups = computed<ConfigGroup[]>(() => {
   const query = searchKey.value.trim().toLowerCase();
@@ -77,6 +109,10 @@ async function refresh(options: { force?: boolean } = {}) {
     groups.value = orderConfigGroups(response.data?.groups ?? []);
     dirty.value = {};
     saveResults.value = [];
+    // force 只会由「进页面 / 换节点 / 重启已恢复」触发，这三种情况下上一次保存的
+    // 重启待办都已经失效：换节点是别人的账，重启恢复后新值已经读回来了。
+    // 15 秒轮询走的是非 force 路径，不会把待办冲掉。
+    if (options.force) pendingRestartKeys.value = [];
     if (!groups.value.some(group => group.name === activeGroup.value)) activeGroup.value = groups.value[0]?.name ?? "";
     return true;
   } catch (error) {
@@ -111,6 +147,9 @@ function resetItem(key: string) {
 function discardDrafts() {
   dirty.value = {};
   saveResults.value = [];
+  // 放弃草稿等于「我现在什么都不想改」，重启待办也跟着收掉；否则会出现
+  // 「没有未保存改动、也没有回读记录，却还挂着一个重启按钮」的悬空状态。
+  pendingRestartKeys.value = [];
   Message.info("未保存草稿已放弃");
 }
 
@@ -157,6 +196,23 @@ async function handleSave() {
       });
       if (!confirmed) return;
     }
+    if (Object.keys(changes).some(isWebRTCPortChange)) {
+      const confirmed = await new Promise<boolean>(resolve => {
+        Modal.warning({
+          title: "修改 WebRTC 端口",
+          content:
+            "UDP 与 TCP 会自动对齐同号（rtc.port ↔ rtc.tcpPort、rtc.icePort ↔ rtc.iceTcpPort）。" +
+            "新值会写回部署端口规划，重启后仍然生效；保存后需重启媒体节点才会真正换端口。" +
+            "请确认防火墙已按新端口放行，否则浏览器能连上节点却拿不到画面。是否继续保存？",
+          hideCancel: false,
+          okText: "继续保存",
+          cancelText: "取消",
+          onOk: () => resolve(true),
+          onCancel: () => resolve(false)
+        });
+      });
+      if (!confirmed) return;
+    }
     if (Object.keys(changes).some(isHookRoutingChange)) {
       const confirmed = await new Promise<boolean>(resolve => {
         Modal.warning({
@@ -176,6 +232,10 @@ async function handleSave() {
     const result = response.data;
     const rows = updateResultRows(allItems.value, changes, result);
     saveResults.value = rows;
+    saveHints.value = result.hints ?? [];
+    // 只认后端返回的 requiresRestart，不从行里的 tone 反推 —— tone 还混着回读不一致，
+    // 而"回读不一致"该做的是重查，不是重启。
+    pendingRestartKeys.value = result.requiresRestart ?? [];
     applyConfirmedValues(rows);
     emit("saved", result);
     if (rows.some(row => row.tone === "danger")) Message.warning("配置命令已返回，但存在回读不一致或未确认项");
@@ -244,6 +304,10 @@ defineExpose({ refresh, discardDrafts });
     <a-alert v-if="loadError" type="error" class="config-alert">{{ loadError }}</a-alert>
     <a-alert v-else-if="!editable" type="info" class="config-alert">当前账号可查看配置，但没有配置修改权限。</a-alert>
 
+    <!-- 保存后仍需人做的事（改端口 ⇒ 防火墙放行）。常驻而不是弹窗：放行动作是
+         离开页面之后才做的，弹窗关了就没有第二次机会看到具体端口号。 -->
+    <a-alert v-for="hint in saveHints" :key="hint" type="warning" class="config-alert">{{ hint }}</a-alert>
+
     <div v-if="saveResults.length" class="readback-panel">
       <header><strong>最近一次保存与回读</strong><span>命令返回不等于实际生效；以下四列分别保留事实。</span></header>
       <a-table :data="saveResults" :pagination="false" size="small" row-key="key">
@@ -259,6 +323,31 @@ defineExpose({ refresh, discardDrafts });
           <a-table-column title="实际值" data-index="actualValue" />
         </template>
       </a-table>
+    </div>
+
+    <!-- 「保存完才发现还得去别处点重启」是这条链路上最容易漏的一步：保存结果里
+         直接给出重启入口，并把「为什么现在点不了」写在旁边。 -->
+    <div v-if="pendingRestartKeys.length" class="restart-cta">
+      <div class="restart-cta__text">
+        <strong>{{ pendingRestartKeys.length }} 项配置已保存，需重启媒体节点后生效</strong>
+        <code class="restart-cta__keys">{{ pendingRestartKeys.join("  ") }}</code>
+        <span v-if="restartBlockedReason" class="restart-cta__blocked">{{ restartBlockedReason }}</span>
+        <span v-else-if="canRestart === false" class="restart-cta__blocked"
+          >当前账号没有重启媒体的权限，请让有重启权限的账号执行；重启后这些项才会生效。</span
+        >
+        <span v-else-if="canRestart !== true" class="restart-cta__tip"
+          >请到节点管理页对该节点执行重启，重启完成后这些项才会生效。</span
+        >
+        <span v-else class="restart-cta__tip">重启会中断该节点上全部媒体会话，页面会持续等到离线、心跳恢复和配置收敛。</span>
+      </div>
+      <a-button
+        v-if="canRestart"
+        status="danger"
+        :loading="restartBusy"
+        :disabled="!!restartBlockedReason"
+        @click="emit('restartRequested')"
+        >重启媒体节点</a-button
+      >
     </div>
 
     <a-spin :loading="loading && groups.length === 0" class="config-spin">
@@ -420,6 +509,44 @@ defineExpose({ refresh, discardDrafts });
 }
 .result-danger {
   color: var(--zlm-danger-600);
+}
+.restart-cta {
+  display: flex;
+  flex: none;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: var(--zlm-fill-1);
+  border: 1px solid var(--zlm-warn-500);
+  border-radius: var(--zlm-radius-lg);
+}
+.restart-cta__text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.restart-cta__text strong {
+  font-size: var(--zlm-fs-body);
+  color: var(--zlm-text-1);
+}
+.restart-cta__keys {
+  font-family: var(--zlm-font-mono);
+  font-size: 11px;
+  color: var(--zlm-text-3);
+  word-break: break-all;
+}
+.restart-cta__tip,
+.restart-cta__blocked {
+  font-size: var(--zlm-fs-caption);
+  line-height: 1.5;
+}
+.restart-cta__tip {
+  color: var(--zlm-text-3);
+}
+.restart-cta__blocked {
+  color: var(--zlm-warn-600);
 }
 .config-spin {
   display: flex;

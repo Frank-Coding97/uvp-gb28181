@@ -9,6 +9,7 @@ import {
   isConfigEditable,
   isHookRoutingChange,
   isNetworkPortChange,
+  isWebRTCPortChange,
   orderConfigGroups,
   updateResultRows
 } from "../nodeConfigState";
@@ -98,6 +99,23 @@ describe("NodeConfigPanel", () => {
     expect(source).toContain("修改网络端口配置");
     expect(source).toContain("节点登记的 API 端口");
     expect(source).toContain("节点登记的 RTP 收流范围");
+  });
+  it("confirms WebRTC port changes with the persistence and firewall consequences", () => {
+    // 四个端口才算「WebRTC 端口」；地址类不算（改了不用重启，也不涉及防火墙）。
+    expect(isWebRTCPortChange("rtc.port")).toBe(true);
+    expect(isWebRTCPortChange("rtc.tcpPort")).toBe(true);
+    expect(isWebRTCPortChange("rtc.icePort")).toBe(true);
+    expect(isWebRTCPortChange("rtc.iceTcpPort")).toBe(true);
+    expect(isWebRTCPortChange("rtc.externIP")).toBe(false);
+    expect(isWebRTCPortChange("rtc.port_range")).toBe(false);
+    // 与「网络端口」分开：那一批的后果是平台与节点失联，这一批只是浏览器拿不到画面。
+    expect(isNetworkPortChange("rtc.port")).toBe(false);
+    expect(source).toContain("修改 WebRTC 端口");
+    expect(source).toContain("会自动对齐同号");
+    expect(source).toContain("写回部署端口规划");
+    expect(source).toContain("防火墙");
+    // hints 必须常驻展示，不能只弹一次窗
+    expect(source).toContain('v-for="hint in saveHints"');
   });
   it("confirms hook routing changes while allowing URL and switch edits", () => {
     const items = [item("hook.enable", "hot_reload", "1"), item("hook.on_play", "hot_reload")];
@@ -195,6 +213,31 @@ describe("NodeConfigPanel", () => {
     expect(source).not.toContain("dirty.value = {};\n            // 默认选中第一个分组");
   });
 
+  it("offers the restart entry right where the restart-required result is reported", () => {
+    // 语义：保存返回的 requiresRestart 才是「要重启」的真源。行里的 tone 不能反推，
+    // 它同时承载「回读不一致」—— 那种情况该做的是重查，不是重启。
+    const port = item("rtc.port", "restart_required", "51008");
+    expect(
+      updateResultRows([port], { "rtc.port": "51070" }, { applied: [], requiresRestart: ["rtc.port"], unknown: [] })[0]?.tone
+    ).toBe("warning");
+    expect(source).toContain("pendingRestartKeys.value = result.requiresRestart ?? []");
+    expect(source).toContain("@click=\"emit('restartRequested')\"");
+    // 待办不能挂在 saveResults 上：15 秒轮询会清空回读表，按钮会自己消失。
+    expect(source).toContain("if (options.force) pendingRestartKeys.value = []");
+    const restartCta = source.indexOf("restart-cta");
+    const configBody = source.indexOf('class="config-spin"');
+    expect(restartCta).toBeGreaterThan(0);
+    expect(restartCta).toBeLessThan(configBody);
+    // 点不动时必须说明原因，不能"点了没反应"
+    expect(source).toContain("项改动未保存，先保存或放弃草稿再重启");
+    expect(source).toContain("重启已受理，正在等待节点离线、心跳恢复和配置收敛");
+    expect(source).toContain(':disabled="!!restartBlockedReason"');
+    // 面板自己没有重启权限状态：canRestart / restartBusy 都由外层（NodeConfigView）传入，
+    // 面板只负责根据它们决定按钮可不可点。
+    expect(source).toContain("canRestart?: boolean");
+    expect(source).toContain("restartBusy?: boolean");
+  });
+
   it("orders categories by common GB28181 operations", () => {
     const group = (name: string): ConfigGroup => ({ name, items: [] });
     expect(
@@ -203,12 +246,13 @@ describe("NodeConfigPanel", () => {
         group("Hook 回调"),
         group("协议开关"),
         group("运行时策略"),
+        group("WebRTC"),
         group("GB28181 国标"),
         group("录制与截图"),
         group("性能调优"),
         group("安全")
       ]).map(item => item.name)
-    ).toEqual(["GB28181 国标", "运行时策略", "协议开关", "录制与截图", "Hook 回调", "性能调优", "网络端口", "安全"]);
+    ).toEqual(["GB28181 国标", "运行时策略", "WebRTC", "协议开关", "录制与截图", "Hook 回调", "性能调优", "网络端口", "安全"]);
   });
 
   it("keeps vertical scrolling inside the configuration table", () => {

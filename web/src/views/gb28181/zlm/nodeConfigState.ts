@@ -3,6 +3,7 @@ import type { ConfigGroup, ConfigItem, ConfigMode, UpdateConfigResp } from "@/ap
 export const CONFIG_GROUP_ORDER = [
   "GB28181 国标",
   "运行时策略",
+  "WebRTC",
   "协议开关",
   "录制与截图",
   "Hook 回调",
@@ -81,6 +82,17 @@ export function isNetworkPortChange(key: string) {
     key === "rtp_proxy.port_range" ||
     key === "shell.port"
   );
+}
+
+/**
+ * WebRTC 端口（媒体端口 UDP/TCP + STUN 端口 UDP/TCP）。
+ *
+ * 与 isNetworkPortChange 分开是因为后果不同：上面那批改错会让**平台与节点失联**，
+ * 这四个改错只是**浏览器拿不到画面**；而且它们的值会被写回部署端口规划
+ * （否则重启就被改回去），提示文案必须说清这一点。
+ */
+export function isWebRTCPortChange(key: string) {
+  return key === "rtc.port" || key === "rtc.tcpPort" || key === "rtc.icePort" || key === "rtc.iceTcpPort";
 }
 
 export function configDictionaryOptions(
