@@ -87,16 +87,37 @@ UVP 是 **Unified Video Platform** 的缩写，中文全称为 **统一视频接
 
 ## 界面预览
 
-> 以下截图取自开发环境，设备名称与编码均为测试数据。点击图片可查看原图。
+> 截图取自我们的开发环境与现场部署环境；图中设备编码为设备出厂默认值，IP 地址与口令已做脱敏。点击图片可查看原图。
+
+### 暗色主题
 
 <table>
 <tr>
 <td width="50%" align="center">
-<img src="docs/screenshots/device-list.jpg" alt="设备列表：国标目录树与设备卡片" width="100%">
+<img src="docs/screenshots/dashboard-dark.jpg" alt="仪表盘（暗色）：平台当日运行态势" width="100%">
+<b>仪表盘</b><br>
+<sub>实时 SIP RPM、今日事务量、点播成功率、设备与通道在线率、协议事务分布，一屏看清平台当天在干什么</sub>
+</td>
+<td width="50%" align="center">
+<img src="docs/screenshots/device-map-dark.jpg" alt="设备地图（暗色）：MapLibre 暗色底图与国标目录树" width="100%">
+<b>设备地图</b><br>
+<sub>MapLibre 暗色底图，与国标目录树联动筛选；设备上报经纬度后按视野聚合打点，可查看单个终端的移动轨迹</sub>
+</td>
+</tr>
+<tr>
+<td colspan="2" align="center">
+<img src="docs/screenshots/device-list-dark.jpg" alt="设备列表（暗色）：国标目录树与设备卡片" width="100%">
 <b>设备列表</b><br>
 <sub>左侧国标目录树（行政区划 / 部门目录 / 业务分组），右侧设备卡片直显在线状态、厂商型号、通道数与最近心跳</sub>
 </td>
-<td width="50%" align="center">
+</tr>
+</table>
+
+### 亮色主题
+
+<table>
+<tr>
+<td colspan="2" align="center">
 <img src="docs/screenshots/cloud-recording.jpg" alt="云端录像：录像文件与存储状态对账" width="100%">
 <b>云端录像</b><br>
 <sub>按设备 / 通道 / 时间检索录像文件，展示时长、文件大小、存储节点与可用性，支持对账与详情回溯</sub>
