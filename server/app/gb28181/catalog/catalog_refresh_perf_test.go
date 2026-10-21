@@ -13,7 +13,7 @@ import (
 )
 
 func TestPipelineRefreshSkipsUnchangedCatalogNodeWrites(t *testing.T) {
-	body, err := os.ReadFile("../../../../docs/device-channel-tree/business-audit/standard-scenario.xml")
+	body, err := os.ReadFile("testdata/standard-scenario.xml")
 	require.NoError(t, err)
 	response, err := manscdp.ParseCatalogResponse(body)
 	require.NoError(t, err)

@@ -15,7 +15,7 @@ import (
 // The hand-written Appendix J fixture is independent of either simulator.
 // Reverse delivery is a robustness case, not an Appendix M sending requirement.
 func TestAppendixJIndependentFixture(t *testing.T) {
-	body, err := os.ReadFile("../../../../docs/device-channel-tree/business-audit/standard-scenario.xml")
+	body, err := os.ReadFile("testdata/standard-scenario.xml")
 	require.NoError(t, err)
 	response, err := manscdp.ParseCatalogResponse(body)
 	require.NoError(t, err)
