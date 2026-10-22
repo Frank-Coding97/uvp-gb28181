@@ -98,3 +98,9 @@ docs/tasks/
 docs/audits/
 docs/device-channel-tree/
 docs/camera-first-frame-*.md
+
+# 用户操作手册与软著申请材料：正文、142 张插图、导出的 docx/PDF 合计约 90MB，
+# 一次性推进两个公开远程就永久留在历史里。老板 2026-10-22 决定：**整个留在本地不入库**。
+# ⚠️ 下次真要把手册发出去，走 Gitee 发行版附件（与交付包同一条路），别提交进 git。
+docs/manual/
+docs/software-copyright/
