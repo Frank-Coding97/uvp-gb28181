@@ -307,4 +307,14 @@ onMounted(async () => {
   box-shadow: 0 6px 18px rgb(24 144 255 / 14%);
   transform: translateY(-1px);
 }
+
+// 320~360 窄屏：验证码图等比缩到 118×42（仍保持 142:46 的宽高比）。
+// 不缩的话固定 142px 会把输入框压到 ~110px，「请输入验证码」被截成「请输入验证…」。
+@media (width <= 360px) {
+  .verifyCodeImg {
+    flex: 0 0 118px;
+    width: 118px;
+    height: 42px;
+  }
+}
 </style>

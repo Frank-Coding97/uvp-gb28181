@@ -157,11 +157,11 @@
 
     <!-- Page footer -->
     <footer class="page-foot">
-      <span>{{ displayCopyright }}</span>
-      <span class="sep">·</span>
-      <span>Powered by GB/T 28181-2022</span>
-      <span v-if="displayRecordNo" class="sep">·</span>
-      <span v-if="displayRecordNo">{{ displayRecordNo }}</span>
+      <span class="foot-copyright">{{ displayCopyright }}</span>
+      <span class="sep foot-sep">·</span>
+      <span class="foot-powered">Powered by GB/T 28181-2022</span>
+      <span v-if="displayRecordNo" class="sep foot-sep">·</span>
+      <span v-if="displayRecordNo" class="foot-record">{{ displayRecordNo }}</span>
     </footer>
   </div>
 </template>
@@ -220,14 +220,26 @@ $primary-light: #69c0ff;
   position: relative;
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
-  overflow: hidden;
+
+  // ⛔ 登录页必须自己当滚动容器。
+  // 全局 src/style/index.scss 把 html / body / #app 都设成 overflow:hidden
+  // （工作台各页自己内部滚动，依赖这条不让整页被撑开），所以文档级永远滚不动。
+  // 登录页在窄屏（手机竖屏、横屏）内容比视口高 200~300px，原来只有一个
+  // min-height:100vh + overflow:hidden ⇒ 超出的部分被直接裁掉，登录按钮在视口外
+  // 且滚不到（实测 375x667 时按钮 top≈768，滚动后 scrollTop 恒为 0）。
+  // 因此这里用「固定视口高度 + 自身纵向滚动」：高度给死，内容溢出才能在页内滚。
+  height: 100vh; // 老浏览器兜底
+  height: 100dvh; // 移动端动态视口（地址栏伸缩时不至于把按钮顶到屏幕外）
+  overflow: hidden auto;
+  overscroll-behavior-y: contain; // 滚到底不把「下一条手势」传给外层
+  -webkit-overflow-scrolling: touch;
   font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif;
   color: var(--login-text);
   background: radial-gradient(ellipse at 50% 50%, rgb(24 144 255 / 6%), transparent 65%), var(--login-bg);
 
+  // 装饰层改用 fixed：absolute 会随内容一起滚走，滚到下半屏时网格背景整块消失。
   &::after {
-    position: absolute;
+    position: fixed;
     inset: 0;
     z-index: 0;
     pointer-events: none;
@@ -247,7 +259,7 @@ $primary-light: #69c0ff;
 
 /* Topology */
 .topology-bg {
-  position: absolute;
+  position: fixed; // 同 ::after：不能跟着 .login-page 的滚动走，否则滚过首屏后背景被切掉
   inset: 0;
   z-index: 0;
   width: 100%;
@@ -553,30 +565,78 @@ $primary-light: #69c0ff;
   }
 }
 
-/* Responsive */
+/* Responsive —— 手机竖屏：从"营销落地页"收成"登录卡"，一屏就能看到登录按钮 */
 @media (width <= 880px) {
+  /* 版本条在手机上只剩一条空白（文字早被隐藏），整条让位给内容 */
   .page-meta {
-    height: 56px;
-    padding: 0 24px;
-
-    .version-text {
-      display: none;
-    }
+    display: none;
   }
+
+  .stage {
+    padding: 16px 14px 18px;
+  }
+
   .float-card {
     grid-template-columns: 1fr;
     width: 420px;
     min-height: 0;
+    border-radius: 16px;
   }
+
+  /* 品牌区收成标题条：logo + 一行平台名 + GB28181 标号，
+     长介绍与功能点整块收掉（手机上它们只把登录按钮挤到屏幕外） */
   .brand-side {
-    padding: 64px 28px 32px;
+    padding: 20px 22px 18px;
 
     .brand-features,
-    .brand-foot {
+    .brand-foot,
+    .brand-lede {
       display: none;
     }
   }
+
+  .brand-heading {
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  .brand-mark {
+    width: 30px;
+    height: 30px;
+  }
+
+  .brand-eyebrow {
+    font-size: 10px;
+  }
+
+  .brand-title {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    align-items: baseline;
+    margin-bottom: 0;
+    font-size: 19px;
+    line-height: 1.35;
+
+    span {
+      display: inline;
+      white-space: nowrap;
+    }
+
+    /* 第二段降级成标号，不再和主标题抢视线 */
+    span + span {
+      font-size: 12px;
+      font-weight: 600;
+      color: rgb(255 255 255 / 58%);
+      letter-spacing: 0.6px;
+    }
+  }
+
   .theme-toggle {
+    top: 14px;
+    right: 14px;
+    width: 34px;
+    height: 34px;
     color: #ffffff;
     background: rgb(255 255 255 / 8%);
     border-color: rgb(255 255 255 / 22%);
@@ -586,14 +646,61 @@ $primary-light: #69c0ff;
       border-color: rgb(255 255 255 / 40%);
     }
   }
+
   .form-side {
-    padding: 32px 28px;
+    padding: 22px 22px 24px;
+
+    :deep(.login_form_box) {
+      margin-top: 16px;
+    }
+  }
+
+  .form-head {
+    margin-bottom: 4px;
+
+    h1 {
+      margin-bottom: 4px;
+      font-size: 19px;
+    }
+
+    p {
+      font-size: 12px;
+    }
+  }
+
+  /* 页脚：手机上挤成一行只会断得乱七八糟（"· Powered / by …"），
+     改成版权、备案号各占一行的竖排，版本信息在品牌区已有 GB28181，不再重复 */
+  .page-foot {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    align-items: center;
+    padding: 10px 16px 14px;
+    font-size: 11px;
+    line-height: 1.5;
+
+    .foot-powered,
+    .foot-sep {
+      display: none;
+    }
   }
 }
 
 @media (width <= 360px) {
+  .stage {
+    padding: 12px 12px 8px;
+  }
+
+  .brand-side {
+    padding: 18px 18px 16px;
+  }
+
   .brand-title {
-    font-size: 24px;
+    font-size: 17px;
+  }
+
+  .form-side {
+    padding: 20px 18px 22px;
   }
 }
 </style>
