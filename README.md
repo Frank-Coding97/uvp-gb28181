@@ -1,8 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Frank-Coding97/uvp-gb28181/develop/web/src/assets/logo/uvp-wordmark-light.svg">
-    <img referrerpolicy="no-referrer" src="https://raw.githubusercontent.com/Frank-Coding97/uvp-gb28181/develop/web/src/assets/logo/uvp-full.svg" alt="UVP 统一视频接入平台" width="340">
-  </picture>
+  <img src="web/src/assets/logo/uvp-full.svg" alt="UVP 统一视频接入平台" width="340">
 </p>
 
 <h1 align="center">UVP-GB28181</h1>
@@ -51,7 +48,6 @@ UVP 是 **Unified Video Platform** 的缩写，中文全称为 **统一视频接
 - [许可证](#许可证)
 - [法律声明与免责](#法律声明与免责)
 - [联系我](#联系我)
-- [请作者喝杯咖啡](#请作者喝杯咖啡)
 
 ## 项目亮点
 
@@ -383,7 +379,7 @@ UVP-GB28181 采用宽松的 MIT License。无论个人还是企业，都可以�
 
 开源这个项目，也是希望借此认识更多从事视频监控、国标接入、流媒体和相关业务的同行。我愿意把这些年在设备接入、复杂网络、协议兼容和平台运维中积累的经验，逐步整理成可以复用的行业解决方案，与大家共同交流和完善。一个人的经历终究有限，只有让更多真实设备、真实场景和不同观点参与进来，平台才能持续解决更有价值的问题。
 
-坦率地说，做这个项目也有一点自己的“私心”：我希望通过 UVP-GB28181，让更多人看到我在视频接入领域的专业能力和长期积累。如果你的团队有 GB/T 28181 平台二次开发、设备与协议适配、视频系统集成、私有化部署、疑难问题排查或其他软件开发需求，也欢迎与我交流合作。我希望能够用自己的专业经验，为项目提供真正可落地、可维护的技术服务。
+坦率地说，做这个项目也有一点自己的“私心”：我希望通过 UVP-GB28181，让更多人看到我在视频接入领域的专业能力和长期积累。项目相关的技术讨论、方案探讨和问题反馈，都欢迎在 [Issue](https://github.com/Frank-Coding97/uvp-gb28181/issues) 区一起交流，这样讨论的过程也能被后来的人检索到。
 
 当然，合作并不是交流的前提。即使彼此之间没有任何商业关系，我也很愿意结识来自五湖四海的行业朋友，交流业务场景、技术方案、踩坑经历和新的想法。开源带来的价值不应只有代码，也应该包括人与人之间真实、长期的连接。
 
@@ -421,11 +417,11 @@ UVP-GB28181 基于 [MIT License](LICENSE) 开源。个人和企业均可在遵�
 
 ## 法律声明与免责
 
-> 本项目是**技术工具**，不是监控授权，也不是合规背书。任何人使用本项目从事违法违规活动，均与作者无关，相关法律责任由使用者自行承担。
+> 本项目是**技术工具**，不是使用授权，也不是合规背书。任何人使用本项目从事违法违规活动，均与作者无关，相关法律责任由使用者自行承担。
 
-**1. 合法使用是使用者的义务。** 使用本项目必须遵守所在国家或地区的法律法规，包括但不限于《网络安全法》《数据安全法》《个人信息保护法》《治安管理处罚法》以及视频监控、数据留存、跨境的行业监管要求。涉及公共区域监控、员工监控、未成年人或他人隐私的场景，应自行完成合规评估、备案与告知义务。
+**1. 合法使用是使用者的义务。** 使用本项目必须遵守所在国家或地区的法律法规，包括但不限于网络与数据安全、个人信息保护方面的相关规定，以及视频数据留存、跨境传输的行业监管要求。在涉及公共场所、办公场所或他人权益的场景中部署，应自行完成合规评估、备案与告知义务。
 
-**2. 禁止用于侵犯他人权益的行为。** 严禁将本项目用于非法侵入他人网络或设备、未经授权接入或查看他人摄像头、偷拍偷录、窥探隐私、非法跟踪定位，以及任何形式的敲诈、骚扰或数据倒卖。作者不参与、不支持、也不为上述行为提供任何协助。
+**2. 禁止用于侵犯他人权益的行为。** 严禁将本项目用于任何未经授权的设备接入、数据获取或隐私侵害行为。作者不参与、不支持、也不为上述行为提供任何协助。
 
 **3. 按“现状”提供，不提供担保。** 本项目以 MIT 许可证按“现状”（AS IS）提供，不附带任何明示或默示的担保，包括但不限于适销性、特定用途适用性和不侵权的担保。因使用或无法使用本项目导致的设备损坏、数据丢失、业务中断、录像缺失或任何间接损失，作者不承担责任。
 
@@ -439,21 +435,6 @@ UVP-GB28181 基于 [MIT License](LICENSE) 开源。个人和企业均可在遵�
 
 ## 联系我
 
-遇到 Bug、想要新功能、做平台兼容性反馈，欢迎提 [Issue](https://github.com/Frank-Coding97/uvp-gb28181/issues) 或加微信交流。如果你的团队有国标平台二次开发、设备与协议适配、私有化部署或疑难问题排查的需求，也可以直接找我。
+遇到 Bug、想要新功能、做平台兼容性反馈，欢迎提 [Issue](https://github.com/Frank-Coding97/uvp-gb28181/issues)。项目相关的技术问题会在 Issue 区一起讨论，也方便后来的人检索到同类问题的处理过程。
 
-<p align="center">
-  <img referrerpolicy="no-referrer" src="https://raw.githubusercontent.com/Frank-Coding97/uvp-gb28181/develop/docs/contact/wechat-card.jpg" alt="微信名片" width="280">
-</p>
-
-## 请作者喝杯咖啡
-
-如果 UVP-GB28181 帮你节省了时间，或者在现场解决过一个让人头疼的老问题，欢迎请作者喝杯咖啡。
-
-<table>
-<tr>
-<td align="center" width="50%"><b>微信</b><br/><img referrerpolicy="no-referrer" src="https://raw.githubusercontent.com/Frank-Coding97/uvp-gb28181/develop/docs/contact/wechat-pay.jpg" alt="微信收款码" width="280"/></td>
-<td align="center" width="50%"><b>支付宝</b><br/><img referrerpolicy="no-referrer" src="https://raw.githubusercontent.com/Frank-Coding97/uvp-gb28181/develop/docs/contact/alipay-pay.jpg" alt="支付宝收款码" width="280"/></td>
-</tr>
-</table>
-
-打赏完全自愿，不影响任何功能、许可证或技术支持。也欢迎用不花钱的方式支持：点个 Star、提一个 Issue、把这套平台推荐给身边做国标接入的同行，同样很有帮助。
+如果这个项目对你有帮助，欢迎点个 Star、提一个 Issue，或者把它推荐给身边做国标接入的同行，这些支持同样很有帮助。
