@@ -27,6 +27,7 @@ import {
 import {
   createDefaultRecordQueryForm,
   mapRecordQueryError,
+  readableHttpError,
   recordQueryRequestTypes,
   recordQueryTypeText,
   serializeRecordQueryForm,
@@ -226,7 +227,7 @@ async function loadOptions() {
     await runQuery();
   } catch (error) {
     queryState.value = "error";
-    queryMessage.value = (error as Error)?.message || "无法加载通道录像查询配置";
+    queryMessage.value = readableHttpError(error, "无法加载通道录像查询配置");
   }
 }
 
@@ -343,8 +344,7 @@ function createIdempotencyKey(record: RecordQueryItem) {
 }
 
 function playbackErrorMessage(error: unknown) {
-  const value = error as { message?: string; response?: { data?: { message?: string } } };
-  return value?.response?.data?.message || value?.message || "设备录像回放失败";
+  return readableHttpError(error, "设备录像回放失败");
 }
 
 function sessionTime(session: PlaybackSession) {

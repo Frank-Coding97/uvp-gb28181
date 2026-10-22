@@ -9,6 +9,7 @@ import {
   paginateRecordQueryItems,
   recordQueryOptionsPath,
   recordQueryPath,
+  readableHttpError,
   recordQueryTypeText,
   serializeRecordQueryForm,
   sortRecordQueryItems,
@@ -143,5 +144,26 @@ describe("record query result helpers", () => {
     expect(recordQueryTypeText("time")).toBe("定时录像");
     expect(recordQueryTypeText("vendor-x")).toBe("未知类型");
     expect(recordQueryTypeText(null)).toBe("未知类型");
+  });
+});
+
+describe("readableHttpError", () => {
+  it("axios 英文技术串一律换成中文，并按状态码给出可行动的原因", () => {
+    // 关键回归：这串英文以前会原样出现在「录像段」区域里。
+    expect(mapRecordQueryError({ message: "Request failed with status code 404", response: { status: 404 } }).message).toBe(
+      "通道不存在或无权访问"
+    );
+    expect(readableHttpError({ message: "Network Error" }, "兜底")).toContain("网络连接异常");
+    expect(readableHttpError({ response: { status: 503 } }, "兜底")).toBe("服务暂不可用，请稍后重试");
+    expect(readableHttpError({ code: "ECONNABORTED", message: "timeout of 15000ms exceeded" }, "兜底")).toContain("请求超时");
+  });
+
+  it("后端中文文案优先，专属错误码说明次之", () => {
+    expect(
+      mapRecordQueryError({ response: { data: { message: "设备未响应", data: { errorCode: "record_query_timeout" } } } }).message
+    ).toBe("设备未响应");
+    expect(mapRecordQueryError({ response: { data: { data: { errorCode: "record_query_device_offline" } } } }).message).toBe(
+      "设备当前离线，无法查询录像"
+    );
   });
 });
