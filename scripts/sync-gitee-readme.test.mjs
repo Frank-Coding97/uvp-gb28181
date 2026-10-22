@@ -86,6 +86,23 @@ test('GitHub 版 README 仍然保留赞助与联系入口（两份定位不同�
   );
 });
 
+test('Gitee 版的 Issue 与发行版入口都指向 Gitee，不把读者送去 GitHub', () => {
+  // 这两类链接是"点了就要操作"的入口：Gitee 的读者点「提 Issue」如果落到
+  // github.com 的登录页，等于白点一次还把用户送出了站。
+  // ⛔ 只断言这两类；致谢里的第三方仓库地址（GinFast / ZLMediaKit / EasyPlayer.js）
+  //    和顶部的「代码托管」双地址声明是信息性链接，必须保留。
+  assert.equal(
+    GITEE_README.includes('https://github.com/Frank-Coding97/uvp-gb28181/issues'),
+    false,
+    'README_zh.md 的 Issue 链接仍指向 GitHub',
+  );
+  assert.equal(
+    GITEE_README.includes('https://github.com/Frank-Coding97/uvp-gb28181/releases'),
+    false,
+    'README_zh.md 的发行版链接仍指向 GitHub',
+  );
+});
+
 test('Gitee 版 README 已存在且非空', () => {
   assert.ok(GITEE_README.length > 10000, 'README_zh.md 内容异常（长度不足），检查生成脚本');
 });

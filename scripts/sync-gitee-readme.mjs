@@ -100,6 +100,20 @@ const RULES = [
 
 如果这个项目对你有帮助，欢迎点个 Star、提一个 Issue，或者把它推荐给身边做国标接入的同行，这些支持同样很有帮助。`,
   },
+  {
+    label: '发行版徽章：href 指向 Gitee 的发行版页（徽章图仍由 shields.io 提供版本号）',
+    find: '<a href="https://github.com/Frank-Coding97/uvp-gb28181/releases">',
+    replace: '<a href="https://gitee.com/Frank-Coding/uvp-gb28181/releases">',
+  },
+  {
+    // 正文里有 3 处「提 Issue」都用同一个地址，必须全量替换：
+    // Gitee 的读者点了不该被送去 GitHub 的登录页。
+    // mode: 'all' 表示允许命中多次；不带 mode 的规则仍要求"命中且仅命中一次"。
+    label: '本项目 Issue 链接：GitHub → Gitee（全量）',
+    mode: 'all',
+    find: 'https://github.com/Frank-Coding97/uvp-gb28181/issues',
+    replace: 'https://gitee.com/Frank-Coding/uvp-gb28181/issues',
+  },
 ]
 
 function applyRules(content) {
@@ -108,6 +122,17 @@ function applyRules(content) {
 
   for (const rule of RULES) {
     const hits = out.split(rule.find).length - 1
+
+    // 全量替换：允许命中多次，但一次都没命中同样是规则失效，不能放过。
+    if (rule.mode === 'all') {
+      if (hits === 0) {
+        failures.push(`规则「${rule.label}」命中 0 次（全量规则至少应命中一次）`)
+        continue
+      }
+      out = out.split(rule.find).join(rule.replace)
+      continue
+    }
+
     if (hits !== 1) {
       failures.push(`规则「${rule.label}」命中 ${hits} 次（应为 1 次）`)
       continue

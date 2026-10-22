@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Frank-Coding97/uvp-gb28181/releases"><img src="https://img.shields.io/github/v/release/Frank-Coding97/uvp-gb28181?label=release&color=2563EB" alt="release"></a>
+  <a href="https://gitee.com/Frank-Coding/uvp-gb28181/releases"><img src="https://img.shields.io/github/v/release/Frank-Coding97/uvp-gb28181?label=release&color=2563EB" alt="release"></a>
   <img src="https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white" alt="Go">
   <img src="https://img.shields.io/badge/Vue-3.5-42B883?logo=vuedotjs&logoColor=white" alt="Vue">
   <img src="https://img.shields.io/badge/GB%2FT%2028181-2016%20%2F%202022-1F6FEB" alt="GB/T 28181">
@@ -382,7 +382,7 @@ UVP-GB28181 采用宽松的 MIT License。无论个人还是企业，都可以�
 
 开源这个项目，也是希望借此认识更多从事视频监控、国标接入、流媒体和相关业务的同行。我愿意把这些年在设备接入、复杂网络、协议兼容和平台运维中积累的经验，逐步整理成可以复用的行业解决方案，与大家共同交流和完善。一个人的经历终究有限，只有让更多真实设备、真实场景和不同观点参与进来，平台才能持续解决更有价值的问题。
 
-坦率地说，做这个项目也有一点自己的“私心”：我希望通过 UVP-GB28181，让更多人看到我在视频接入领域的专业能力和长期积累。项目相关的技术讨论、方案探讨和问题反馈，都欢迎在 [Issue](https://github.com/Frank-Coding97/uvp-gb28181/issues) 区一起交流，这样讨论的过程也能被后来的人检索到。
+坦率地说，做这个项目也有一点自己的“私心”：我希望通过 UVP-GB28181，让更多人看到我在视频接入领域的专业能力和长期积累。项目相关的技术讨论、方案探讨和问题反馈，都欢迎在 [Issue](https://gitee.com/Frank-Coding/uvp-gb28181/issues) 区一起交流，这样讨论的过程也能被后来的人检索到。
 
 当然，合作并不是交流的前提。即使彼此之间没有任何商业关系，我也很愿意结识来自五湖四海的行业朋友，交流业务场景、技术方案、踩坑经历和新的想法。开源带来的价值不应只有代码，也应该包括人与人之间真实、长期的连接。
 
@@ -432,12 +432,12 @@ UVP-GB28181 基于 [MIT License](LICENSE) 开源。个人和企业均可在遵�
 
 **5. 第三方组件遵循各自条款。** 本项目集成的 ZLMediaKit、EasyPlayer.js、GinFast 等组件，其许可证与使用限制以各自项目为准，使用前请自行确认。
 
-**6. 发现问题请联系。** 若你认为本项目存在侵犯权益的内容或能力，或发现本项目被用于不当用途，欢迎通过 [Issue](https://github.com/Frank-Coding97/uvp-gb28181/issues) 或下方联系方式告知，作者会及时评估并处理。
+**6. 发现问题请联系。** 若你认为本项目存在侵犯权益的内容或能力，或发现本项目被用于不当用途，欢迎通过 [Issue](https://gitee.com/Frank-Coding/uvp-gb28181/issues) 或下方联系方式告知，作者会及时评估并处理。
 
 继续使用本项目，即表示你已阅读并同意上述声明。
 
 ## 联系我
 
-遇到 Bug、想要新功能、做平台兼容性反馈，欢迎提 [Issue](https://github.com/Frank-Coding97/uvp-gb28181/issues)。项目相关的技术问题会在 Issue 区一起讨论，也方便后来的人检索到同类问题的处理过程。
+遇到 Bug、想要新功能、做平台兼容性反馈，欢迎提 [Issue](https://gitee.com/Frank-Coding/uvp-gb28181/issues)。项目相关的技术问题会在 Issue 区一起讨论，也方便后来的人检索到同类问题的处理过程。
 
 如果这个项目对你有帮助，欢迎点个 Star、提一个 Issue，或者把它推荐给身边做国标接入的同行，这些支持同样很有帮助。
