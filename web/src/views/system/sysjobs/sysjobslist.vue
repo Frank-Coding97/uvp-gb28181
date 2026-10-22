@@ -1,141 +1,133 @@
 <template>
   <div class="snow-page sysjobs-page">
     <div class="snow-inner uvp-page-shell-flat">
-      <a-card :loading="loading" :bordered="false">
-        <s-layout-search>
-          <template #fields>
-            <a-input
-              v-model="searchForm.id"
-              placeholder="请输入任务ID"
-              style="width: 176px"
-              allow-clear
-              @press-enter="handleSearch"
-            />
-            <a-input-search
-              v-model="searchForm.name"
-              placeholder="请输入任务名称搜索"
-              style="width: 176px"
-              @search="handleSearch"
-              allow-clear
-            />
-            <a-select v-model="searchForm.executorName" placeholder="请选择执行器名称" style="width: 176px" allow-clear>
-              <a-option v-for="executor in executorList" :key="executor" :value="executor">{{ executor }}</a-option>
-            </a-select>
-            <a-select v-model="searchForm.executionPolicy" placeholder="请选择执行策略" style="width: 136px" allow-clear>
-              <a-option v-for="option in executePolicyOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </a-option>
-            </a-select>
-            <a-select v-model="searchForm.status" placeholder="请选择任务状态" style="width: 136px" allow-clear>
-              <a-option v-for="option in jobStatusOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </a-option>
-            </a-select>
-          </template>
-          <template #actions>
-            <a-button type="primary" @click="handleSearch">
-              <template #icon><icon-search /></template>
-              <span>查询</span>
-            </a-button>
-            <a-button @click="handleReset">
-              <template #icon><icon-refresh /></template>
-              <span>重置</span>
-            </a-button>
-          </template>
-          <template #extra>
-            <a-button type="primary" @click="handleCreate" v-hasPerm="['system:sysjobs:add']">
-              <template #icon>
-                <icon-plus />
-              </template>
-              <span>新增数据</span>
-            </a-button>
-          </template>
-        </s-layout-search>
+      <s-layout-search>
+        <template #fields>
+          <a-input
+            v-model="searchForm.id"
+            placeholder="请输入任务ID"
+            style="width: 176px"
+            allow-clear
+            @press-enter="handleSearch"
+          />
+          <a-input-search
+            v-model="searchForm.name"
+            placeholder="请输入任务名称搜索"
+            style="width: 176px"
+            @search="handleSearch"
+            allow-clear
+          />
+          <a-select v-model="searchForm.executorName" placeholder="请选择执行器名称" style="width: 176px" allow-clear>
+            <a-option v-for="executor in executorList" :key="executor" :value="executor">{{ executor }}</a-option>
+          </a-select>
+          <a-select v-model="searchForm.executionPolicy" placeholder="请选择执行策略" style="width: 136px" allow-clear>
+            <a-option v-for="option in executePolicyOptions" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </a-option>
+          </a-select>
+          <a-select v-model="searchForm.status" placeholder="请选择任务状态" style="width: 136px" allow-clear>
+            <a-option v-for="option in jobStatusOptions" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </a-option>
+          </a-select>
+        </template>
+        <template #actions>
+          <a-button type="primary" @click="handleSearch">
+            <template #icon><icon-search /></template>
+            <span>查询</span>
+          </a-button>
+          <a-button @click="handleReset">
+            <template #icon><icon-refresh /></template>
+            <span>重置</span>
+          </a-button>
+        </template>
+        <template #extra>
+          <a-button type="primary" @click="handleCreate" v-hasPerm="['system:sysjobs:add']">
+            <template #icon>
+              <icon-plus />
+            </template>
+            <span>新增数据</span>
+          </a-button>
+        </template>
+      </s-layout-search>
 
-        <a-table
-          class="uvp-data-table"
-          :data="dataList"
-          :loading="loading"
-          :pagination="paginationConfig"
-          :bordered="false"
-          :scroll="{ x: '120%' }"
-          @page-change="handlePageChange"
-          @page-size-change="handlePageSizeChange"
-        >
-          <template #columns>
-            <a-table-column title="任务分组名称" data-index="group" :width="150" ellipsis tooltip />
-            <a-table-column title="任务名称" data-index="name" :width="150" ellipsis tooltip />
-            <a-table-column title="执行器名称" data-index="executorName" :width="150" ellipsis tooltip />
-            <a-table-column title="执行策略" data-index="executionPolicy" :width="150" ellipsis tooltip>
-              <template #cell="{ record }">
-                {{ formatExecutionPolicy(record["executionPolicy"]) }}
-              </template>
-            </a-table-column>
-            <a-table-column title="任务状态" data-index="status" :width="150" ellipsis tooltip>
-              <template #cell="{ record }">
-                <a-switch
-                  v-model="record.status"
-                  :checked-value="1"
-                  :unchecked-value="0"
-                  :loading="statusLoading[record.id]"
-                  @change="(value: number | boolean) => handleStatusChange(record, value)"
-                  :checked-text="'启用'"
-                  :unchecked-text="'禁用'"
-                />
-              </template>
-            </a-table-column>
-            <a-table-column title="Cron表达式" data-index="cronExpression" :width="150" ellipsis tooltip />
-            <a-table-column title="阻塞策略" data-index="blockingPolicy" :width="150" ellipsis tooltip>
-              <template #cell="{ record }">
-                {{ formatBlockingPolicy(record["blockingPolicy"]) }}
-              </template>
-            </a-table-column>
-            <a-table-column title="创建时间" data-index="createdAt" :width="150" ellipsis tooltip>
-              <template #cell="{ record }">
-                {{ record["createdAt"] ? formatTime(record["createdAt"]) : "" }}
-              </template>
-            </a-table-column>
-            <a-table-column
-              title="操作"
-              :width="224"
-              align="center"
-              cell-class="sysjobs-ops-cell"
-              :fixed="isMobile ? '' : 'right'"
-            >
-              <template #cell="{ record }">
-                <div class="uvp-table-actions">
-                  <a-link
-                    class="uvp-table-action uvp-table-action--execute"
-                    @click="handleExecuteNow(record)"
-                    v-hasPerm="['system:sysjobs:executeNow']"
-                  >
-                    <template #icon><icon-play-arrow /></template>
-                    <span>执行</span>
+      <a-table
+        class="uvp-data-table"
+        :data="dataList"
+        :loading="loading"
+        :pagination="paginationConfig"
+        :bordered="false"
+        :scroll="{ x: '120%' }"
+        @page-change="handlePageChange"
+        @page-size-change="handlePageSizeChange"
+      >
+        <template #columns>
+          <a-table-column title="任务分组名称" data-index="group" :width="150" ellipsis tooltip />
+          <a-table-column title="任务名称" data-index="name" :width="150" ellipsis tooltip />
+          <a-table-column title="执行器名称" data-index="executorName" :width="150" ellipsis tooltip />
+          <a-table-column title="执行策略" data-index="executionPolicy" :width="150" ellipsis tooltip>
+            <template #cell="{ record }">
+              {{ formatExecutionPolicy(record["executionPolicy"]) }}
+            </template>
+          </a-table-column>
+          <a-table-column title="任务状态" data-index="status" :width="150" ellipsis tooltip>
+            <template #cell="{ record }">
+              <a-switch
+                v-model="record.status"
+                :checked-value="1"
+                :unchecked-value="0"
+                :loading="statusLoading[record.id]"
+                @change="(value: number | boolean) => handleStatusChange(record, value)"
+                :checked-text="'启用'"
+                :unchecked-text="'禁用'"
+              />
+            </template>
+          </a-table-column>
+          <a-table-column title="Cron表达式" data-index="cronExpression" :width="150" ellipsis tooltip />
+          <a-table-column title="阻塞策略" data-index="blockingPolicy" :width="150" ellipsis tooltip>
+            <template #cell="{ record }">
+              {{ formatBlockingPolicy(record["blockingPolicy"]) }}
+            </template>
+          </a-table-column>
+          <a-table-column title="创建时间" data-index="createdAt" :width="150" ellipsis tooltip>
+            <template #cell="{ record }">
+              {{ record["createdAt"] ? formatTime(record["createdAt"]) : "" }}
+            </template>
+          </a-table-column>
+          <a-table-column title="操作" :width="224" align="center" cell-class="sysjobs-ops-cell" :fixed="isMobile ? '' : 'right'">
+            <template #cell="{ record }">
+              <div class="uvp-table-actions">
+                <a-link
+                  class="uvp-table-action uvp-table-action--execute"
+                  @click="handleExecuteNow(record)"
+                  v-hasPerm="['system:sysjobs:executeNow']"
+                >
+                  <template #icon><icon-play-arrow /></template>
+                  <span>执行</span>
+                </a-link>
+                <a-link class="uvp-table-action uvp-table-action--logs" @click="handleViewLogs(record)">
+                  <template #icon><icon-file /></template>
+                  <span>日志</span>
+                </a-link>
+                <a-link
+                  class="uvp-table-action uvp-table-action--edit"
+                  @click="handleEdit(record)"
+                  v-hasPerm="['system:sysjobs:edit']"
+                >
+                  <template #icon><icon-edit /></template>
+                  <span>编辑</span>
+                </a-link>
+                <a-popconfirm content="确定要删除这条数据吗？" @ok="handleDelete(record.id)">
+                  <a-link class="uvp-table-action uvp-table-action--delete" v-hasPerm="['system:sysjobs:delete']">
+                    <template #icon><icon-delete /></template>
+                    <span>删除</span>
                   </a-link>
-                  <a-link class="uvp-table-action uvp-table-action--logs" @click="handleViewLogs(record)">
-                    <template #icon><icon-file /></template>
-                    <span>日志</span>
-                  </a-link>
-                  <a-link
-                    class="uvp-table-action uvp-table-action--edit"
-                    @click="handleEdit(record)"
-                    v-hasPerm="['system:sysjobs:edit']"
-                  >
-                    <template #icon><icon-edit /></template>
-                    <span>编辑</span>
-                  </a-link>
-                  <a-popconfirm content="确定要删除这条数据吗？" @ok="handleDelete(record.id)">
-                    <a-link class="uvp-table-action uvp-table-action--delete" v-hasPerm="['system:sysjobs:delete']">
-                      <template #icon><icon-delete /></template>
-                      <span>删除</span>
-                    </a-link>
-                  </a-popconfirm>
-                </div>
-              </template>
-            </a-table-column>
-          </template>
-        </a-table>
-      </a-card>
+                </a-popconfirm>
+              </div>
+            </template>
+          </a-table-column>
+        </template>
+      </a-table>
 
       <!-- 编辑/创建弹窗 -->
       <a-modal

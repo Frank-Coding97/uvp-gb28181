@@ -1,90 +1,89 @@
 <template>
   <div class="snow-page sysjobresults-page">
     <div class="snow-inner uvp-page-shell-flat">
-      <a-card :loading="loading" :bordered="false">
-        <s-layout-search>
-          <template #fields>
-            <a-input
-              v-model="searchForm.jobId"
-              placeholder="请输入任务ID"
-              style="width: 176px"
-              allow-clear
-              @press-enter="handleSearch"
-            />
-            <a-select v-model="searchForm.status" placeholder="请选择执行状态" style="width: 136px" allow-clear>
-              <a-option value="SUCCESS">SUCCESS</a-option>
-              <a-option value="FAILED">FAILED</a-option>
-              <a-option value="PANIC">PANIC</a-option>
-            </a-select>
-            <a-range-picker
-              v-model="searchForm.startTimeRange"
-              show-time
-              format="YYYY-MM-DD HH:mm:ss"
-              style="width: 360px"
-              :placeholder="['开始时间', '结束时间']"
-            />
-          </template>
-          <template #actions>
-            <a-button type="primary" @click="handleSearch">
-              <template #icon><icon-search /></template>
-              <span>查询</span>
-            </a-button>
-            <a-button @click="handleReset">
-              <template #icon><icon-refresh /></template>
-              <span>重置</span>
-            </a-button>
-          </template>
-        </s-layout-search>
+      <s-layout-search>
+        <template #fields>
+          <a-input
+            v-model="searchForm.jobId"
+            placeholder="请输入任务ID"
+            style="width: 176px"
+            allow-clear
+            @press-enter="handleSearch"
+          />
+          <a-select v-model="searchForm.status" placeholder="请选择执行状态" style="width: 136px" allow-clear>
+            <a-option value="SUCCESS">SUCCESS</a-option>
+            <a-option value="FAILED">FAILED</a-option>
+            <a-option value="PANIC">PANIC</a-option>
+          </a-select>
+          <a-range-picker
+            v-model="searchForm.startTimeRange"
+            show-time
+            format="YYYY-MM-DD HH:mm:ss"
+            style="width: 360px"
+            :placeholder="['开始时间', '结束时间']"
+          />
+        </template>
+        <template #actions>
+          <a-button type="primary" @click="handleSearch">
+            <template #icon><icon-search /></template>
+            <span>查询</span>
+          </a-button>
+          <a-button @click="handleReset">
+            <template #icon><icon-refresh /></template>
+            <span>重置</span>
+          </a-button>
+        </template>
+      </s-layout-search>
 
-        <a-table
-          class="uvp-data-table"
-          :data="dataList"
-          :loading="loading"
-          :pagination="paginationConfig"
-          :bordered="false"
-          :scroll="{ x: '120%' }"
-          @page-change="handlePageChange"
-          @page-size-change="handlePageSizeChange"
-        >
-          <template #columns>
-            <a-table-column title="任务ID" data-index="jobId" :width="110" ellipsis tooltip />
-            <a-table-column title="执行状态" data-index="status" :width="150" ellipsis tooltip />
-            <a-table-column title="错误信息" data-index="error" :width="150" ellipsis tooltip />
-            <a-table-column title="执行摘要" data-index="summary" :width="260" ellipsis tooltip>
-              <template #cell="{ record }">
-                {{ record.summary?.trim() || "—" }}
-              </template>
-            </a-table-column>
-            <a-table-column title="开始时间" data-index="startTime" :width="150" ellipsis tooltip>
-              <template #cell="{ record }">
-                {{ record["startTime"] ? formatTime(record["startTime"]) : "" }}
-              </template>
-            </a-table-column>
-            <a-table-column title="结束时间" data-index="endTime" :width="150" ellipsis tooltip>
-              <template #cell="{ record }">
-                {{ record["endTime"] ? formatTime(record["endTime"]) : "" }}
-              </template>
-            </a-table-column>
-            <a-table-column title="执行时长(秒)" data-index="duration" :width="150" ellipsis tooltip>
-              <template #cell="{ record }">
-                {{ record["duration"] ? (record["duration"] / 1000000000).toFixed(4) : "" }}
-              </template>
-            </a-table-column>
-            <a-table-column title="重试次数" data-index="retryCount" :width="150" ellipsis tooltip />
-            <a-table-column title="操作" :width="96" :fixed="isMobile ? '' : 'right'">
-              <template #cell="{ record }">
-                <div class="uvp-table-actions">
-                  <a-popconfirm content="确定要删除这条数据吗？" @ok="handleDelete(record.id)">
-                    <a-link class="uvp-table-action uvp-table-action--delete" v-hasPerm="['system:sysjobresults:delete']">
-                      删除
-                    </a-link>
-                  </a-popconfirm>
-                </div>
-              </template>
-            </a-table-column>
-          </template>
-        </a-table>
-      </a-card>
+      <a-table
+        class="uvp-data-table"
+        :data="dataList"
+        :loading="loading"
+        :pagination="paginationConfig"
+        :bordered="false"
+        :scroll="{ x: '120%' }"
+        @page-change="handlePageChange"
+        @page-size-change="handlePageSizeChange"
+      >
+        <template #columns>
+          <a-table-column title="任务ID" data-index="jobId" :width="110" ellipsis tooltip />
+          <a-table-column title="执行状态" data-index="status" :width="150" ellipsis tooltip />
+          <a-table-column title="错误信息" data-index="error" :width="150" ellipsis tooltip />
+          <a-table-column title="执行摘要" data-index="summary" :width="260" ellipsis tooltip>
+            <template #cell="{ record }">
+              {{ record.summary?.trim() || "—" }}
+            </template>
+          </a-table-column>
+          <a-table-column title="开始时间" data-index="startTime" :width="150" ellipsis tooltip>
+            <template #cell="{ record }">
+              {{ record["startTime"] ? formatTime(record["startTime"]) : "" }}
+            </template>
+          </a-table-column>
+          <a-table-column title="结束时间" data-index="endTime" :width="150" ellipsis tooltip>
+            <template #cell="{ record }">
+              {{ record["endTime"] ? formatTime(record["endTime"]) : "" }}
+            </template>
+          </a-table-column>
+          <a-table-column title="执行时长(秒)" data-index="duration" :width="150" ellipsis tooltip>
+            <template #cell="{ record }">
+              {{ record["duration"] ? (record["duration"] / 1000000000).toFixed(4) : "" }}
+            </template>
+          </a-table-column>
+          <a-table-column title="重试次数" data-index="retryCount" :width="150" ellipsis tooltip />
+          <a-table-column title="操作" :width="96" :fixed="isMobile ? '' : 'right'">
+            <template #cell="{ record }">
+              <div class="uvp-table-actions">
+                <a-popconfirm content="确定要删除这条数据吗？" @ok="handleDelete(record.id)">
+                  <a-link class="uvp-table-action uvp-table-action--delete" v-hasPerm="['system:sysjobresults:delete']">
+                    <template #icon><icon-delete /></template>
+                    <span>删除</span>
+                  </a-link>
+                </a-popconfirm>
+              </div>
+            </template>
+          </a-table-column>
+        </template>
+      </a-table>
     </div>
   </div>
 </template>
