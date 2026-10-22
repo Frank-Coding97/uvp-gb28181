@@ -437,6 +437,8 @@ UVP-GB28181 基于 [MIT License](LICENSE) 开源。个人和企业均可在遵�
 
 ## 联系我
 
-遇到 Bug、想要新功能、做平台兼容性反馈，欢迎提 [Issue](https://github.com/Frank-Coding97/uvp-gb28181/issues)。项目相关的技术问题会在 Issue 区一起讨论，也方便后来的人检索到同类问题的处理过程。
+遇到 Bug、想要新功能、做平台兼容性反馈，欢迎提 [Issue](https://github.com/Frank-Coding97/uvp-gb28181/issues)（Gitee 侧也有 [Issues](https://gitee.com/Frank-Coding/uvp-gb28181/issues)）。项目相关的技术问题会在 Issue 区一起讨论，也方便后来的人检索到同类问题的处理过程。
 
-如果这个项目对你有帮助，欢迎点个 Star、提一个 Issue，或者把它推荐给身边做国标接入的同行，这些支持同样很有帮助。
+如果你的团队有国标平台二次开发、设备与协议适配、私有化部署或疑难问题排查方面的需求，也欢迎通过 Issue 或 [SUPPORT.md](SUPPORT.md) 里的方式联系我，我会按实际场景给出可落地的方案。
+
+如果这个项目对你有帮助，欢迎点个 Star、提一个 Issue，或者把它推荐给身边做国标接入的同行；想请我喝杯咖啡的话，入口也在 [SUPPORT.md](SUPPORT.md)。
