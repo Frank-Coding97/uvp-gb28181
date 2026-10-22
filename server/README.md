@@ -1,25 +1,13 @@
 # UVP GB28181 后端
 
-开源、免费、轻量级 Gin 前后分离快速开发基础框架，基于主流技术，集成了 JWT 认证、权限控制、数据库操作等功能，用于快速搭建 GB28181 视频平台的后台管理系统。权限按部门(owner_dept_id)做数据隔离，非多租户模型。
+UVP 国标视频接入管理平台的后端服务，提供 GB/T 28181 设备接入、SIP 信令处理、媒体调度、录像与回放、语音对讲、级联和运维可观测性等能力，同时承载平台自身的用户、角色、菜单、部门、字典与 API 权限管理。权限按部门（`owner_dept_id`）做数据隔离，非多租户模型。
 
-本项目由[Gfast](https://github.com/tiger1103/gfast)团队（[奇讯科技](https://www.qjit.cn)）开发，如果您愿意为GinFast贡献代码或提供建议以及商业合作，请加微信：qixun007(备注：ginfast)
-
-项目为前后端分离，前端地址：
-
-github地址：[https://github.com/qxkjsoft/ginfast-ui](https://github.com/qxkjsoft/ginfast-ui)
+前端工程见同级目录 `web/`，完整项目说明见[仓库根 README](../README.md)。
 
 ## 使用文档
 
-[文档](docs/README.md)
-
-[安装使用视频](https://www.bilibili.com/video/BV14gsgzXEGM/)
-
-[ginfast宝塔部署教程](https://www.bilibili.com/video/BV1Wi6MBwEYL/)
-## 演示地址
-
-[http://gin.g-fast.cn/system](http://gin.g-fast.cn/system)
-
-账号：demo  密码：123456
+- 用户操作手册：[`docs/manual/`](../docs/manual/)
+- 接口文档：服务启动后访问 `/swagger/index.html`
 
 ## 功能特性
 
@@ -166,8 +154,8 @@ uvp-gb28181/
 
 1. 克隆项目
 ```bash
-git clone https://github.com/qxkjsoft/ginfast.git
-cd ginfast
+git clone git@github.com:Frank-Coding97/uvp-gb28181.git
+cd uvp-gb28181/server
 ```
 
 2. 安装依赖
@@ -209,8 +197,8 @@ go run main.go
 
 #### Linux/Mac 系统:
 ```bash
-# 进入项目根目录
-cd gin-fast
+# 进入后端目录
+cd server
 
 # 运行脚本生成文档
 ./scripts/swagger.sh
@@ -218,8 +206,8 @@ cd gin-fast
 
 #### Windows 系统:
 ```cmd
-# 进入项目根目录
-cd gin-fast
+# 进入后端目录
+cd server
 
 # 运行脚本生成文档
 scripts\swagger.bat
@@ -402,7 +390,7 @@ GET /api/codegen/preview?genId=<gen_id>
 | 字段 | 说明 | 示例 |
 |------|------|------|
 | dbType | 数据库类型 | mysql、postgresql、sqlserver |
-| database | 数据库名 | gin-fast |
+| database | 数据库名 | uvp-gb28181 |
 | name | 表名 | sys_user |
 | moduleName | 模块名 | user |
 | fileName | 文件名 | user |
@@ -598,7 +586,7 @@ DELETE /api/pluginsmanager/uninstall?folderName=example
   "email": "author@example.com",
   "url": "https://github.com/example",
   "dependencies": {
-    "ginfast": ">=1.0.0"
+    "uvp-gb28181": ">=1.0.0"
   },
   "exportDirs": [
     "plugins/example/controllers",
@@ -671,7 +659,7 @@ DELETE /api/pluginsmanager/uninstall?folderName=example
 在config.yml中配置前端项目路径：
 ```yaml
 gen:
-  dir: "../ginfast-ui"  # 前端项目根目录相对路径
+  dir: "../web"  # 前端项目根目录相对路径
 ```
 
 ## 插件开发规范
@@ -991,7 +979,7 @@ package executors
 import (
     "context"
     "log"
-    "gin-fast/app/utils/schedulerhelper"
+    "uvplatform.com/uvp-gb28181/app/utils/schedulerhelper"
 )
 
 // MyExecutor 自定义执行器
@@ -1098,8 +1086,8 @@ func (e *ExampleExecutor) Name() string {
 package scheduler
 
 import (
-    "gin-fast/app/global/app"
-    "gin-fast/plugins/example/scheduler/executors"
+    "uvplatform.com/uvp-gb28181/app/global/app"
+    "uvplatform.com/uvp-gb28181/plugins/example/scheduler/executors"
 )
 
 func init() {
@@ -1210,41 +1198,27 @@ UI 切换算法**热生效**,通过 `scheduler.Manager.Switch`,无需重启服�
 
 ### 编译项目
 ```bash
-go build -o gin-fast .
+go build -o uvp-gb28181 .
 ```
 
 ### 运行项目
 ```bash
-./gin-fast
+./uvp-gb28181
 ```
 
 ### Docker 部署
 
 1. 构建 Docker 镜像
 ```bash
-docker build -t gin-fast .
+docker build -t uvp-gb28181 .
 ```
 
 2. 运行容器
 ```bash
-docker run -p 8080:8080 gin-fast
+docker run -p 8080:8080 uvp-gb28181
 ```
 
-## 免责声明：
-> 1、GIN-FAST仅限自己学习使用，一切商业行为与GIN-FAST无关。
+## 许可证
 
-> 2、用户不得利用GIN-FAST从事非法行为，用户应当合法合规的使用，发现用户在使用产品时有任何的非法行为，GIN-FAST有权配合有关机关进行调查或向政府部门举报，GIN-FAST不承担用户因非法行为造成的任何法律责任，一切法律责任由用户自行承担，如因用户使用造成第三方损害的，用户应当依法予以赔偿。
-
-> 3、所有与使用GIN-FAST相关的资源直接风险均由用户承担。
-
-## 交流群
-
-### 微信群
-```
-如果二维码过期，请添加微信 qixun007 邀请您进群(备注：ginfast)
-```
-![微信群](docs/mdFile/wx3.png)
-
-### QQ群
-
-QQ群：967593545
+本项目基于 [MIT License](LICENSE) 开源。第三方组件的版权与许可声明见
+[THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md)。

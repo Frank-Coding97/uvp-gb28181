@@ -147,8 +147,8 @@ func TestOpenAPIAdminBrowserFixture(t *testing.T) {
 				return
 			}
 			for name, value := range map[string]map[string]any{
-				"gin-fast-access-token":  {"accessToken": pair.AccessToken, "accessTokenExpires": time.Now().Add(time.Hour).Unix()},
-				"gin-fast-refresh-token": {"refreshToken": pair.RefreshToken, "refreshTokenExpires": time.Now().Add(time.Hour).Unix()},
+				"uvp-gb28181-access-token":  {"accessToken": pair.AccessToken, "accessTokenExpires": time.Now().Add(time.Hour).Unix()},
+				"uvp-gb28181-refresh-token": {"refreshToken": pair.RefreshToken, "refreshTokenExpires": time.Now().Add(time.Hour).Unix()},
 			} {
 				encoded, _ := json.Marshal(value)
 				http.SetCookie(w, &http.Cookie{Name: name, Value: url.QueryEscape(string(encoded)), Path: "/", SameSite: http.SameSiteStrictMode})
