@@ -87,6 +87,10 @@ func newDeviceMgmtRouter(t *testing.T, middlewares ...gin.HandlerFunc) (*gin.Eng
 		&cascademodel.GbCascadePlatform{},
 		&cascademodel.GbCascadeDeviceProjection{},
 		&cascademodel.GbCascadeChannelProjection{},
+		// 删设备/删通道时 RetireDeletedSources 会顺手清掉业务绑定
+		// （cascade/repository/projection_retire.go），表缺了就退化成
+		// "no such table: gb_cascade_business_binding" ⇒ 整个删除接口 400。
+		&cascademodel.GbCascadeBusinessBinding{},
 		&cascademodel.GbCascadeMediaSession{}))
 
 	dmgmt := gbcontrollers.NewDeviceMgmtController()
