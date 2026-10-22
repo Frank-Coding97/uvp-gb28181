@@ -73,9 +73,12 @@ function mountPanel(props: Record<string, unknown> = {}, attrs: Record<string, u
           props: ["modelValue", "disabled"],
           template: "<input :value='modelValue' :disabled='disabled' @input='$emit(`update:modelValue`, $event.target.value)' />"
         },
+        // `<script setup>` 里的 upgradeMode 不在组件实例的类型上（Vue 也不保证
+        // 生产构建里还能从 vm 摸到内部 ref），所以切模式一律走真实交互：
+        // 点这个桩就会 emit update:modelValue=manual，等价于用户点「手填 URL」。
         "a-radio-group": {
           props: ["modelValue"],
-          template: "<div @click='$emit(`update:modelValue`, \"manual\")'><slot /></div>"
+          template: "<div data-testid='firmware-mode-switch' @click='$emit(`update:modelValue`, \"manual\")'><slot /></div>"
         },
         "a-radio": {
           props: ["value"],
@@ -120,7 +123,7 @@ describe("DeviceFirmwareUpgradePanel", () => {
     await flushPromises();
 
     // 切换到手填 URL 模式
-    wrapper.vm.upgradeMode = "manual";
+    await wrapper.get("[data-testid='firmware-mode-switch']").trigger("click");
     await wrapper.vm.$nextTick();
 
     const inputs = wrapper.findAll("input");
@@ -140,7 +143,7 @@ describe("DeviceFirmwareUpgradePanel", () => {
     await flushPromises();
 
     // 切换到手填 URL 模式
-    wrapper.vm.upgradeMode = "manual";
+    await wrapper.get("[data-testid='firmware-mode-switch']").trigger("click");
     await wrapper.vm.$nextTick();
 
     const inputs = wrapper.findAll("input");
@@ -250,7 +253,7 @@ describe("DeviceFirmwareUpgradePanel", () => {
     await flushPromises();
 
     // 切换到手填 URL 模式
-    wrapper.vm.upgradeMode = "manual";
+    await wrapper.get("[data-testid='firmware-mode-switch']").trigger("click");
     await wrapper.vm.$nextTick();
 
     const inputs = wrapper.findAll("input");
@@ -280,7 +283,7 @@ describe("DeviceFirmwareUpgradePanel", () => {
     await flushPromises();
 
     // 切换到手填 URL 模式
-    wrapper.vm.upgradeMode = "manual";
+    await wrapper.get("[data-testid='firmware-mode-switch']").trigger("click");
     await wrapper.vm.$nextTick();
 
     const inputs = wrapper.findAll("input");
@@ -296,7 +299,7 @@ describe("DeviceFirmwareUpgradePanel", () => {
     expect(wrapper.find("[data-testid='firmware-upgrade-tracking']").exists()).toBe(false);
 
     // 点击"准备新升级"后重新切换到手填 URL 模式以验证表单重置
-    wrapper.vm.upgradeMode = "manual";
+    await wrapper.get("[data-testid='firmware-mode-switch']").trigger("click");
     await wrapper.vm.$nextTick();
 
     expect((wrapper.findAll("input")[1].element as HTMLInputElement).value).toBe("海康");
@@ -325,7 +328,7 @@ describe("DeviceFirmwareUpgradePanel", () => {
     await flushPromises();
 
     // 切换到手填 URL 模式
-    wrapper.vm.upgradeMode = "manual";
+    await wrapper.get("[data-testid='firmware-mode-switch']").trigger("click");
     await wrapper.vm.$nextTick();
 
     const inputs = wrapper.findAll("input");

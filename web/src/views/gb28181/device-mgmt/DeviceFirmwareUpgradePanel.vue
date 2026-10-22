@@ -74,6 +74,22 @@ const active = computed(() =>
   Boolean(activeOperation.value && isActiveStatus(activeOperation.value.status) && !pollTimedOut.value)
 );
 const busy = computed(() => submitPending.value || active.value || uncertainSubmission.value);
+// 已经收官、可以让用户开下一次升级的状态。
+//
+// 为什么必须由用户点一下、而不是终态自动回到表单：
+// 设备升级是不可逆操作，自动把表单弹回「准备」会让刚收到"已完成"的人
+// 手指还停在原按钮位置（连点两次 = 对同一台设备发了两条升级）。
+//
+// 两个例外不放出这个入口：
+//   · unknown —— 后端都没确认结果，允许再发等于赌它没生效；
+//   · pollTimedOut —— 只是轮询超时，任务可能还在跑，得先去记录页看清楚。
+const canPrepareNext = computed(() => {
+  const operation = activeOperation.value;
+  if (!operation) return false;
+  if (submitPending.value || uncertainSubmission.value || pollTimedOut.value) return false;
+  const key = statusKey(operation.status);
+  return key === "succeeded" || key === "failed" || key === "rejected";
+});
 const phase = computed<UpgradePhase>(() => {
   if (submitPending.value || activeOperation.value || uncertainSubmission.value) return "tracking";
   return confirmVisible.value && pendingPayload.value ? "confirm" : "prepare";
@@ -370,6 +386,13 @@ function resetForDevice(device: DeviceVO | null) {
   submittedPayload.value = null;
   loadError.value = "";
   lastFirmwareEventOperationId.value = "";
+}
+
+// 终态后回到「准备」表单。复用 resetForDevice 而不是另写一套清空逻辑：
+// 厂商要回到设备档案里的值（不是空），模式要回到固件仓库 —— 这些口径
+// 与切换设备时一致，两份实现迟早会漂。
+function prepareNextUpgrade() {
+  resetForDevice(currentDevice.value);
 }
 
 function clearFieldErrors() {
@@ -805,6 +828,9 @@ onBeforeUnmount(() => {
         </dl>
       </details>
       <div class="upgrade-tracking-actions">
+        <a-button v-if="canPrepareNext" data-testid="firmware-upgrade-new" type="primary" @click="prepareNextUpgrade">
+          准备新升级
+        </a-button>
         <a-button
           v-if="taskOperation && statusKey(taskOperation.status) === 'succeeded'"
           data-testid="firmware-upgrade-view-records"
