@@ -90,15 +90,17 @@ UVP 是 **Unified Video Platform** 的缩写，中文全称为 **统一视频接
 
 <table>
 <tr>
-<td width="50%" align="center">
+<td colspan="2" align="center">
 <img src="docs/screenshots/dashboard-dark.jpg" alt="仪表盘（暗色）：平台当日运行态势" width="100%">
 <b>仪表盘</b><br>
 <sub>实时 SIP RPM、今日事务量、点播成功率、设备与通道在线率、协议事务分布，一屏看清平台当天在干什么</sub>
 </td>
-<td width="50%" align="center">
-<img src="docs/screenshots/device-map-dark.jpg" alt="设备地图（暗色）：MapLibre 暗色底图与国标目录树" width="100%">
-<b>设备地图</b><br>
-<sub>MapLibre 暗色底图，与国标目录树联动筛选；设备上报经纬度后按视野聚合打点，可查看单个终端的移动轨迹</sub>
+</tr>
+<tr>
+<td colspan="2" align="center">
+<img src="docs/screenshots/device-tree-dark.jpg" alt="设备目录（暗色）：国标目录树与通道在线状态" width="34%">
+<b>设备目录</b><br>
+<sub>国标目录树按行政区划 / 部门目录 / 业务分组三级组织，每个节点直显子级通道数与在线数，右侧逐条列出通道编码与在线状态</sub>
 </td>
 </tr>
 <tr>
