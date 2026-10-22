@@ -34,6 +34,13 @@ import javax.crypto.spec.SecretKeySpec;
  * It intentionally does not call the server auth package. Run
  * {@code java OpenAPISignExample.java --self-test} from either the repository
  * root or its server directory to consume the public golden fixture.
+ * The canonical string is the eleven lines documented in
+ * {@code x-uvp-signature-contract.canonical.lines}: version, access key,
+ * timestamp, nonce, method, path, canonical query, content type, body hash,
+ * idempotency key, audience. Leaving out the idempotency line (the common
+ * mistake) still produces a signature, but the server rejects every request
+ * with 401 because the canonical bytes differ.
+ *
  * Keep SK only in the server-side secret store. If a GET result is unknown,
  * retry with a new timestamp, nonce, and signature; do not automatically
  * retry a POST whose result is unknown. Never put AK/SK or a signature into a
@@ -68,10 +75,17 @@ public final class OpenAPISignExample {
         private final String accessKey;
         private final String timestamp;
         private final String nonce;
+        private final String idempotencyKey;
         private final String audience;
 
         public Request(String method, String path, String rawQuery, String contentType,
                 byte[] body, String accessKey, String timestamp, String nonce, String audience) {
+            this(method, path, rawQuery, contentType, body, accessKey, timestamp, nonce, "", audience);
+        }
+
+        public Request(String method, String path, String rawQuery, String contentType,
+                byte[] body, String accessKey, String timestamp, String nonce, String idempotencyKey,
+                String audience) {
             this.method = method;
             this.path = path;
             this.rawQuery = rawQuery;
@@ -80,6 +94,7 @@ public final class OpenAPISignExample {
             this.accessKey = accessKey;
             this.timestamp = timestamp;
             this.nonce = nonce;
+            this.idempotencyKey = idempotencyKey == null ? "" : idempotencyKey;
             this.audience = audience;
         }
 
@@ -103,6 +118,7 @@ public final class OpenAPISignExample {
         require(validTimestamp(input.timestamp));
         require(validNonce(input.nonce));
         require(validLineField(input.audience));
+        require(validIdempotencyKey(input.idempotencyKey));
         require(validPath(input.path));
         require(input.body.length <= MAX_BODY_BYTES);
         String query = canonicalQuery(input.rawQuery);
@@ -119,7 +135,7 @@ public final class OpenAPISignExample {
         }
         String bodyHash = hex(sha256(input.body));
         return joinLines("UVP-HMAC-SHA256/1", input.accessKey, input.timestamp, input.nonce,
-                method, input.path, query, contentType, bodyHash, input.audience);
+                method, input.path, query, contentType, bodyHash, input.idempotencyKey, input.audience);
     }
 
     /** Signs one request with the decoded 32-byte base64url-no-padding SK. */
@@ -213,6 +229,30 @@ public final class OpenAPISignExample {
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);
             if (c == '\r' || c == '\n' || c == 0 || c == 0x7f) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * The idempotency key is empty for requests that do not carry one. When
+     * present it must be 1-128 printable ASCII characters with no spaces; the
+     * server rejects the request otherwise.
+     */
+    private static boolean validIdempotencyKey(String value) {
+        if (value == null) {
+            return false;
+        }
+        if (value.isEmpty()) {
+            return true;
+        }
+        if (value.length() > 128) {
+            return false;
+        }
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c < 0x21 || c > 0x7e) {
                 return false;
             }
         }
@@ -802,7 +842,36 @@ public final class OpenAPISignExample {
         require(canonical(reordered).equals(canonical(base)));
         Request emptyValue = new Request(base.method, base.path, "empty=&a=1", base.contentType, base.body,
                 base.accessKey, base.timestamp, base.nonce, base.audience);
-        require(canonical(emptyValue).endsWith("\na=1&empty=\n\n" + stringField(first, "bodySHA256") + "\n" + audience));
+        require(canonical(emptyValue).endsWith("\na=1&empty=\n\n" + stringField(first, "bodySHA256") + "\n\n" + audience));
+
+        // The idempotency key occupies its own canonical line. Dropping that
+        // line is the failure mode that makes every signed request a 401, so
+        // assert both its position and that it changes the signature.
+        String[] baseLines = canonical(base).split("\n", -1);
+        require(baseLines.length == 11);
+        require("".equals(baseLines[9]));
+        Request withKey = new Request(base.method, base.path, base.rawQuery, base.contentType, base.body,
+                base.accessKey, base.timestamp, base.nonce, "idem-0001", base.audience);
+        String[] keyedLines = canonical(withKey).split("\n", -1);
+        require(keyedLines.length == 11);
+        require("idem-0001".equals(keyedLines[9]));
+        require(!sign(withKey, secretKey).equals(sign(base, secretKey)));
+        final Request tooLong = new Request(base.method, base.path, base.rawQuery, base.contentType, base.body,
+                base.accessKey, base.timestamp, base.nonce, repeat('a', 129), base.audience);
+        expectFailure(new Action() {
+            @Override
+            public void run() {
+                sign(tooLong, secretKey);
+            }
+        });
+        final Request spaced = new Request(base.method, base.path, base.rawQuery, base.contentType, base.body,
+                base.accessKey, base.timestamp, base.nonce, "idem 0001", base.audience);
+        expectFailure(new Action() {
+            @Override
+            public void run() {
+                sign(spaced, secretKey);
+            }
+        });
         HeaderValues valid = new HeaderValues();
         valid.signVersion = new String[] {"1"};
         valid.accessKey = new String[] {accessKey};
@@ -862,8 +931,11 @@ public final class OpenAPISignExample {
 
     private static Request request(String accessKey, String timestamp, String nonce, String audience,
             Map<String, Object> vector) {
+        Object rawIdempotencyKey = vector.get("idempotencyKey");
+        String idempotencyKey = rawIdempotencyKey instanceof String ? (String) rawIdempotencyKey : "";
         return new Request(stringField(vector, "method"), stringField(vector, "path"), stringField(vector, "rawQuery"),
-                stringField(vector, "contentType"), utf8(stringField(vector, "body")), accessKey, timestamp, nonce, audience);
+                stringField(vector, "contentType"), utf8(stringField(vector, "body")), accessKey, timestamp, nonce,
+                idempotencyKey, audience);
     }
 
     @SuppressWarnings("unchecked")
@@ -910,6 +982,12 @@ public final class OpenAPISignExample {
         if (!condition) {
             throw invalid();
         }
+    }
+
+    private static String repeat(char value, int count) {
+        char[] result = new char[count];
+        Arrays.fill(result, value);
+        return new String(result);
     }
 
     private static IllegalArgumentException invalid() {

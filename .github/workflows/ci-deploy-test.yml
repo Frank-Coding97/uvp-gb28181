@@ -45,6 +45,20 @@ jobs:
       - name: Install golangci-lint
         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.0
 
+      # OpenAPI 契约护栏：规范 / 签名夹具 / Java 参考实现三方一致性。
+      # 这三样任何一处漂移，第三方接入会拿到「算得出签名但一律 401」或
+      # 「生成出来的 SDK 编译不过」——现象离根因极远，必须在这里拦住。
+      - name: Set up Java for signing example
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: OpenAPI contract guard
+        run: |
+          python3 -m pip install --quiet --disable-pip-version-check pyyaml
+          python3 scripts/openapi-spec-guard.py --require-java
+
       - name: Lint changed backend code
         working-directory: server
         env:

@@ -131,6 +131,15 @@ run_check "go vet（后端）" "$ROOT/server" '"$GO_BIN" vet ./...'
 # ⛔ 本注释刻意不写出完整旧域名 —— 那是护栏的判据本身，写出来会把自己判违规。
 run_check "域名残留（uvplatform.com）" "$ROOT" './scripts/domain-guard.sh'
 
+# OpenAPI 契约：yaml 是第三方接入的唯一契约，三处静默失效都会让接入方一无所获地 401：
+#   ① YAML 1.1 把裸写的 `on` 当布尔 ⇒ 代码生成器产出 `private TrueEnum true;` 编译不过
+#     （Go 的 yaml.v3 是 YAML 1.2，所以服务端契约测试看不见，只有生成器侧会炸）；
+#   ② 声明 3.0.3 却用 3.1 的 `const` ⇒ 校验器报错、生成器静默丢语义；
+#   ③ 签名示例少拼一行 canonical（共 11 行，第 10 行是 Idempotency-Key）⇒ 签名算得出但全 401。
+# 护栏用夹具反算 HMAC + 静态核对 Java 示例的实参个数；有 JDK 时再真跑一次自测。
+run_check "OpenAPI 契约（规范 / 签名夹具 / Java 示例）" "$ROOT" \
+  "$PY_BIN scripts/openapi-spec-guard.py"
+
 # 路由 ↔ sys_api 对账：新增路由忘了登记权限 ⇒ 用户一点就 403，
 # 而 casbin 只匹配 URL 路径、完全不查 sys_api，所以这类缺口对所有基于
 # sys_api 正查的检查都是隐形的（2026-10-08 已因此漏过两批）。
