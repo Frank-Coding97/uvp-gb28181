@@ -654,6 +654,20 @@ log "复制后端资源（SQLite 建库脚本 + 静态资源）"
 cp -a "$SERVER_DIR/resource/database/sqlitebaseline" "$PKG/resource/baseline"
 [ -d "$SERVER_DIR/resource/public" ] && cp -a "$SERVER_DIR/resource/public/." "$PKG/resource/public/" || true
 
+# ⛔⛔ 包内不再保留 EasyPlayer 的**明文副本**：vite 插件（web/build/easyplayer-assets.ts）
+#   会把同一份资源再按内容哈希放一份到 easyplayer/<16hex>/，且把 index.html 的 <script>
+#   改写成哈希路径。明文那 4 个文件（pro.js / pro.wasm / decode.js / lib.js，共 6.3MB）
+#   在包里是**逐字节重复**。2026-10-22 因它们把 Windows 包顶到 106.0MB、越过 Gitee
+#   单附件 100MiB（104857600 字节）上限而剔除。
+#   ⛔ 只删 easyplayer/ 下 maxdepth 1 的明文副本，哈希目录必须留着；
+#   ⛔ 改写没生效时**一个字都不删**（宁可包大，也不能让播放器 404）。
+if grep -qE 'src="/easyplayer/[0-9a-f]{16}/EasyPlayer-pro\.js"' "$PKG/resource/public/index.html" 2>/dev/null; then
+  find "$PKG/resource/public/easyplayer" -maxdepth 1 -type f -delete 2>/dev/null || true
+  log "  已剔除 EasyPlayer 明文副本（index.html 走哈希路径，实测省 6.3MB）"
+else
+  log "  注意：index.html 未指向 EasyPlayer 哈希目录，保留明文副本（包会更大，播放不受影响）"
+fi
+
 # ---- 内置自签证书（安装时不再现场生成）----
 # ⛔⛔ 为什么要随包带：客户机（CentOS 7 等）不保证有 openssl，而"安装时生成"
 #   等于在交付链路上多加一个会失败、且失败了只写在日志里的步骤。

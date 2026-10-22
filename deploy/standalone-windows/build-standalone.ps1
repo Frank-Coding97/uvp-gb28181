@@ -489,6 +489,26 @@ $srvPublic = Join-Path $ServerDir 'resource\public'
 if (Test-Path -LiteralPath $srvPublic) {
     Copy-Tree -Source $srvPublic -Destination $publicDir
 }
+
+# 包内不再保留 EasyPlayer 的明文副本：vite 插件（web\build\easyplayer-assets.ts）会把同一份
+# 资源再按内容哈希放一份到 easyplayer\<16hex>\，并把 index.html 的 <script> 改写成哈希路径。
+# 明文那 4 个文件（pro.js / pro.wasm / decode.js / lib.js，共 6.3MB）在包里是逐字节重复。
+# 2026-10-22 因它们把本包顶到 106.0MB、越过 Gitee 单附件 100MiB（104857600 字节）上限而剔除。
+# 只删 easyplayer\ 下第一层的明文副本，哈希目录必须留着；改写没生效时一个字都不删。
+$indexHtml = Join-Path $publicDir 'index.html'
+$hashRef = $false
+if (Test-Path -LiteralPath $indexHtml) {
+    $hashRef = (Select-String -LiteralPath $indexHtml -Pattern 'src="/easyplayer/[0-9a-f]{16}/EasyPlayer-pro\.js"' -Quiet -ErrorAction SilentlyContinue)
+}
+if ($hashRef) {
+    $plainAssets = @(Get-ChildItem -LiteralPath (Join-Path $publicDir 'easyplayer') -File -ErrorAction SilentlyContinue)
+    if ($plainAssets.Count -gt 0) {
+        $plainAssets | Remove-Item -Force -ErrorAction SilentlyContinue
+        Ok "已剔除 EasyPlayer 明文副本（$($plainAssets.Count) 个，index.html 走哈希路径）"
+    }
+} else {
+    Warn 'index.html 未指向 EasyPlayer 哈希目录，保留明文副本（包会更大，播放不受影响）'
+}
 # ⛔⛔ 不能直接用 server\resource\public\uploads：那个目录被 gitignore，是**运行时产物**，
 #   从 git 拉代码的构建机上它是空的 ⇒ 头像进不了包，而 nginx 的 SPA 回落会把
 #   index.html 返回给图片请求 ⇒ HTTP 200 而内容是 HTML，浏览器静默显示不出图。
