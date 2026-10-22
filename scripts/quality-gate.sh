@@ -80,8 +80,20 @@ if [ -z "$PY_BIN" ] || [ ! -x "$PY_BIN" ]; then
   exit 2
 fi
 
+# Node：README 双平台同步校验要用它（web/ 的检查走 node_modules/.bin，不依赖这里）。
+# ⚠️ 与 go 同理，不能假定它在 PATH 里；找不到就 skip 而不是"当成通过"。
+NODE_BIN="$(command -v node 2>/dev/null || true)"
+for cand in \
+  "$HOME/.workbuddy/binaries/node/versions/22.22.2-6/bin/node" \
+  "$HOME/.nvm/versions/node/v24.13.0/bin/node"
+do
+  if [ -z "$NODE_BIN" ] && [ -x "$cand" ]; then
+    NODE_BIN="$cand"; break
+  fi
+done
+
 WEB_BIN="$ROOT/web/node_modules/.bin"
-export GO_BIN GOFMT_BIN GO_PATH_PREFIX GOLANGCI_BIN WEB_BIN ROOT PY_BIN
+export GO_BIN GOFMT_BIN GO_PATH_PREFIX GOLANGCI_BIN WEB_BIN ROOT PY_BIN NODE_BIN
 
 echo "仓库根  : $ROOT"
 echo "Go      : $GO_BIN"
@@ -130,6 +142,18 @@ run_check "go vet（后端）" "$ROOT/server" '"$GO_BIN" vet ./...'
 # 与前端扫码页里，靠人眼盯不完整。口径与 scripts/domain-guard.sh 一致。
 # ⛔ 本注释刻意不写出完整旧域名 —— 那是护栏的判据本身，写出来会把自己判违规。
 run_check "域名残留（uvplatform.com）" "$ROOT" './scripts/domain-guard.sh'
+
+# GitHub / Gitee 两份 README 的同步：README_zh.md 是 README.md 的**派生产物**
+# （Gitee 优先渲染文件名带 _zh 的 README，GitHub 只渲染 README.md）。
+# ⛔ 改了 README.md 忘了重新生成，表现是**静默**的：两边长期展示不一致，
+#    而且 Gitee 版可能残留会被平台自动审核拦下的内容（整篇被隐藏，别人只能看到
+#    「内容可能含有违规信息」一行字，作者自己登录却完全正常）。
+if [ -n "$NODE_BIN" ] && [ -x "$NODE_BIN" ]; then
+  run_check "README 双平台同步（GitHub ↔ Gitee）" "$ROOT" \
+    '"$NODE_BIN" scripts/sync-gitee-readme.mjs --check && "$NODE_BIN" --test scripts/sync-gitee-readme.test.mjs'
+else
+  skip_check "README 双平台同步（GitHub ↔ Gitee）" "未找到 node，请安装 Node.js 或把它的 bin 目录加进 PATH"
+fi
 
 # 路由 ↔ sys_api 对账：新增路由忘了登记权限 ⇒ 用户一点就 403，
 # 而 casbin 只匹配 URL 路径、完全不查 sys_api，所以这类缺口对所有基于
