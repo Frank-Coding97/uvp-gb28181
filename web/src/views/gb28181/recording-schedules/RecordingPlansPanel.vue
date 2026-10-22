@@ -121,7 +121,7 @@
                 </template>
               </a-table-column>
               <a-table-column title="最近更新" :width="172" data-index="updatedAt" />
-              <a-table-column title="操作" :width="230" align="center" fixed="right">
+              <a-table-column title="操作" :width="280" align="center" fixed="right">
                 <template #cell="{ record }">
                   <div class="uvp-table-actions schedule-actions">
                     <a-link class="uvp-table-action uvp-table-action--detail" @click="openDetail(record)"
@@ -462,8 +462,23 @@ const planFilters = reactive({ keyword: "", status: "" });
 const statusFilters = reactive({ keyword: recordingContextKeyword.value, online: "", state: "" });
 const planPageState = reactive({ current: 1, pageSize: 10 });
 const executionPageState = reactive({ current: 1, pageSize: 10 });
-const planTableScroll = { x: "100%", minWidth: 1200 };
-const executionTableScroll = { x: "100%", minWidth: 1072 };
+/* ⛔⛔ `y` 不能省：只给 `x` 时 Arco 不拆「表头 / 表体」两个滚动容器，整张表退化成
+   一个 `overflow-y: hidden` 的内容块 —— 表头不冻结、行数超出时最后几行直接被裁掉
+   （2026-10-22 实机：10 行数据只显示 9 行半，且没有任何纵向滚动条）。
+   基准写法同 `system/login-log`：空表不设 `y`（避免空白撑满一屏），有行才设。
+   ⛔ `minWidth` 必须等于各列 `width` 之和（计划表 226+132+220+126+110+172+280=1266，
+   执行表 218+200+104+104+144+150+152+86=1158）：小于列宽和时 Arco 会把列**等比压缩**
+   到容器宽度，操作列被压窄 ⇒ 内容溢出 ⇒ 底部常年挂一条只能拖十几像素的横向滚动条。 */
+const planTableScroll = computed(() => ({
+  x: "100%",
+  minWidth: 1266,
+  ...(plans.value.length ? { y: "100%" } : {})
+}));
+const executionTableScroll = computed(() => ({
+  x: "100%",
+  minWidth: 1158,
+  ...(executionChannels.value.length ? { y: "100%" } : {})
+}));
 const evidenceVisible = ref(false);
 const evidenceLoading = ref(false);
 const evidenceTitle = ref("通道诊断与时间线");

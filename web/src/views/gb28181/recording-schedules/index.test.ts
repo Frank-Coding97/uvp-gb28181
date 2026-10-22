@@ -108,9 +108,35 @@ describe("recording schedule prototype", () => {
   });
 
   it("keeps the plan action column compact and marks delete as destructive", () => {
-    expect(source).toContain('<a-table-column title="操作" :width="230"');
+    // ⚠️ 这里原本写的是 230。实测 4 个动作链接（查看/编辑/分配通道/删除）最小需要 266px：
+    // 列宽 230 时 Arco 把 td 压到 252，内容溢出 14px ⇒ 底部常年挂一条只能拖十几像素的
+    // 横向滚动条，且横向滚动会顶得冻结列与内容错位。280 = 266 + 余量（同 cloud-recordings）。
+    expect(source).toContain('<a-table-column title="操作" :width="280"');
     expect(source).toContain('class="uvp-table-action uvp-table-action--delete"');
     expect(source).not.toContain("uvp-table-action--danger");
+  });
+
+  it("splits header and body so the header stays frozen, and never compresses columns", () => {
+    // ⛔⛔ 只给 `scroll.x` 不给 `y` 时 Arco 不拆「表头 / 表体」两个滚动容器：表头不冻结，
+    // 行数超出时最后几行被 `overflow: hidden` 直接裁掉（2026-10-22 实机：10 行只看到 9 行半，
+    // 且没有纵向滚动条）。基准写法同 `system/login-log`：有行才给 `y: "100%"`。
+    const scrollBlock = (name: string) =>
+      source.match(new RegExp(`const ${name} = computed\\(\\(\\) => \\(\\{([\\s\\S]*?)\\}\\)\\);`))?.[1] ?? "";
+    const planScroll = scrollBlock("planTableScroll");
+    const executionScroll = scrollBlock("executionTableScroll");
+    expect(planScroll).toContain('y: "100%"');
+    expect(executionScroll).toContain('y: "100%"');
+    expect(source).toContain('...(plans.value.length ? { y: "100%" } : {})');
+    expect(source).toContain('...(executionChannels.value.length ? { y: "100%" } : {})');
+
+    // ⛔ `minWidth` 小于列宽和时，Arco 会把各列**等比压缩**到容器宽度（不是横向滚动），
+    // 操作列被压窄 ⇒ 内容溢出 ⇒ 底部出现一条伪滚动条。两者必须严格相等。
+    // ⚠️ 必须排除 `<a-table-column`（它同样以 `<a-table` 开头），否则切出来的是列片段。
+    const [planTable, executionTable] = source.split(/<a-table(?!-)/).slice(1);
+    const widthSum = (block: string) =>
+      [...block.matchAll(/:width="(\d+)"/g)].reduce((total, match) => total + Number(match[1]), 0);
+    expect(planScroll).toContain(`minWidth: ${widthSum(planTable)}`);
+    expect(executionScroll).toContain(`minWidth: ${widthSum(executionTable)}`);
   });
 
   it("keeps plan expectation and actual recording state visually distinct", () => {
