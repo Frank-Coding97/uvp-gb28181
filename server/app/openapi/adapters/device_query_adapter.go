@@ -13,13 +13,19 @@ import (
 const (
 	DeviceAlarmsScope                = "device:alarms"
 	DeviceStatusEventsScope          = "device:status-events"
+	DeviceMaintenanceListScope       = "device:maintenance:list"
 	ChannelPreciseStatusScope        = "channel:precise-status"
+	ChannelMountsReadScope           = "channel:mounts:read"
+	ChannelTimelineReadScope         = "channel:timeline:read"
 	ChannelHomePositionReadScope     = "ptz:home-position:read"
 	ChannelCruiseTracksReadScope     = "ptz:cruise:read"
 	ChannelTargetTrackReadScope      = "channel:target-track:read"
 	DeviceAlarmsAdapterKey           = "devicequery.device.alarms.v1"
 	DeviceStatusEventsAdapterKey     = "devicequery.device.status-events.v1"
+	DeviceMaintenanceListAdapterKey  = "devicequery.device.maintenance-operations.v1"
 	ChannelPreciseStatusAdapterKey   = "devicequery.channel.precise-status.v1"
+	ChannelMountsReadAdapterKey      = "devicequery.channel.mounts.v1"
+	ChannelTimelineReadAdapterKey    = "devicequery.channel.timeline.v1"
 	ChannelHomePositionAdapterKey    = "devicequery.ptz.home-position.v1"
 	ChannelCruiseTracksAdapterKey    = "devicequery.ptz.cruise-tracks.v1"
 	ChannelTargetTrackReadAdapterKey = "devicequery.channel.target-track.v1"
@@ -28,7 +34,10 @@ const (
 type DeviceQueryReader interface {
 	ListDeviceAlarmsInScope(context.Context, resource.DepartmentScope, string, resource.DeviceListOptions) (devicequery.AlarmPage, error)
 	ListDeviceStatusEventsInScope(context.Context, resource.DepartmentScope, string, int, string) (devicequery.StatusEventPage, error)
+	ListDeviceMaintenanceOperationsInScope(context.Context, resource.DepartmentScope, string, resource.DeviceListOptions) (devicequery.MaintenanceOperationPage, error)
 	GetChannelPreciseStatusInScope(context.Context, resource.DepartmentScope, string, string) (devicequery.PreciseStatusSnapshot, error)
+	ListChannelMountsInScope(context.Context, resource.DepartmentScope, string, string) (devicequery.ChannelMountList, error)
+	GetChannelTimelineInScope(context.Context, resource.DepartmentScope, string, string) (devicequery.ChannelTimeline, error)
 	GetChannelHomePositionInScope(context.Context, resource.DepartmentScope, string, string) (devicequery.HomePositionSnapshot, error)
 	ListChannelCruiseTracksInScope(context.Context, resource.DepartmentScope, string, string) (devicequery.CruiseTrackSnapshot, error)
 	GetChannelTargetTrackInScope(context.Context, resource.DepartmentScope, string, string) (devicequery.TargetTrackSnapshot, error)
@@ -39,7 +48,10 @@ type deviceQueryOperation uint8
 const (
 	listDeviceAlarms deviceQueryOperation = iota + 1
 	listDeviceStatusEvents
+	listDeviceMaintenance
 	getChannelPreciseStatus
+	listChannelMounts
+	getChannelTimeline
 	getChannelHomePosition
 	listChannelCruiseTracks
 	getChannelTargetTrack
@@ -60,7 +72,10 @@ func NewDeviceQueryAdapters(reader DeviceQueryReader) []Adapter {
 	return []Adapter{
 		&deviceQueryAdapter{key: DeviceAlarmsAdapterKey, scope: DeviceAlarmsScope, operation: listDeviceAlarms, reader: reader},
 		&deviceQueryAdapter{key: DeviceStatusEventsAdapterKey, scope: DeviceStatusEventsScope, operation: listDeviceStatusEvents, reader: reader},
+		&deviceQueryAdapter{key: DeviceMaintenanceListAdapterKey, scope: DeviceMaintenanceListScope, operation: listDeviceMaintenance, reader: reader},
 		&deviceQueryAdapter{key: ChannelPreciseStatusAdapterKey, scope: ChannelPreciseStatusScope, operation: getChannelPreciseStatus, reader: reader},
+		&deviceQueryAdapter{key: ChannelMountsReadAdapterKey, scope: ChannelMountsReadScope, operation: listChannelMounts, reader: reader},
+		&deviceQueryAdapter{key: ChannelTimelineReadAdapterKey, scope: ChannelTimelineReadScope, operation: getChannelTimeline, reader: reader},
 		&deviceQueryAdapter{key: ChannelHomePositionAdapterKey, scope: ChannelHomePositionReadScope, operation: getChannelHomePosition, reader: reader},
 		&deviceQueryAdapter{key: ChannelCruiseTracksAdapterKey, scope: ChannelCruiseTracksReadScope, operation: listChannelCruiseTracks, reader: reader},
 		&deviceQueryAdapter{key: ChannelTargetTrackReadAdapterKey, scope: ChannelTargetTrackReadScope, operation: getChannelTargetTrack, reader: reader},
@@ -119,9 +134,9 @@ func (adapter *deviceQueryAdapter) Execute(ctx context.Context, invocation catal
 func sameDeviceQueryParams(operation deviceQueryOperation, params map[string]string, request Request) bool {
 	expected := map[string]string{"deviceId": request.DeviceID}
 	switch operation {
-	case getChannelPreciseStatus, getChannelHomePosition, listChannelCruiseTracks, getChannelTargetTrack:
+	case getChannelPreciseStatus, listChannelMounts, getChannelTimeline, getChannelHomePosition, listChannelCruiseTracks, getChannelTargetTrack:
 		expected["channelId"] = request.ChannelID
-	case listDeviceAlarms, listDeviceStatusEvents:
+	case listDeviceAlarms, listDeviceStatusEvents, listDeviceMaintenance:
 	default:
 		return false
 	}
@@ -173,6 +188,21 @@ func (adapter *deviceQueryAdapter) Dispatch(ctx context.Context, request Request
 			return nil, ErrInvalidRequest
 		}
 		data, err = adapter.reader.ListDeviceStatusEventsInScope(ctx, request.ResourceScope, request.DeviceID, request.List.PageSize, request.Cursor)
+	case listDeviceMaintenance:
+		if request.ChannelID != "" || request.Cursor != "" {
+			return nil, ErrInvalidRequest
+		}
+		data, err = adapter.reader.ListDeviceMaintenanceOperationsInScope(ctx, request.ResourceScope, request.DeviceID, resource.DeviceListOptions{
+			Page: request.List.Page, PageSize: request.List.PageSize,
+		})
+	case listChannelMounts:
+		if err = validateChannelReadRequest(request); err == nil {
+			data, err = adapter.reader.ListChannelMountsInScope(ctx, request.ResourceScope, request.DeviceID, request.ChannelID)
+		}
+	case getChannelTimeline:
+		if err = validateChannelReadRequest(request); err == nil {
+			data, err = adapter.reader.GetChannelTimelineInScope(ctx, request.ResourceScope, request.DeviceID, request.ChannelID)
+		}
 	case getChannelPreciseStatus:
 		if err = validateChannelReadRequest(request); err == nil {
 			data, err = adapter.reader.GetChannelPreciseStatusInScope(ctx, request.ResourceScope, request.DeviceID, request.ChannelID)

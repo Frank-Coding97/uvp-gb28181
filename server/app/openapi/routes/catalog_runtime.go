@@ -15,6 +15,7 @@ import (
 	catalogruntime "uvplatform.com/uvp-gb28181/app/openapi/catalog/runtime"
 	"uvplatform.com/uvp-gb28181/app/openapi/catalog/store"
 	"uvplatform.com/uvp-gb28181/app/openapi/contracts"
+	"uvplatform.com/uvp-gb28181/app/openapi/devicecatalog"
 	"uvplatform.com/uvp-gb28181/app/openapi/devicequery"
 	openapimodels "uvplatform.com/uvp-gb28181/app/openapi/models"
 	"uvplatform.com/uvp-gb28181/app/openapi/resource"
@@ -156,6 +157,7 @@ func newCatalogRuntime(db *gorm.DB, bindings ...map[string]catalogruntime.Adapte
 	reader := resource.New(db)
 	registrations := adapters.NewDeviceChannelAdapterRegistrations(reader)
 	registrations = append(registrations, adapters.NewDeviceQueryAdapterRegistrations(devicequery.New(db))...)
+	registrations = append(registrations, devicecatalog.NewAdapterRegistrations(devicecatalog.NewDispatcher(db))...)
 	bound := make(map[string]catalogruntime.Adapter)
 	for _, group := range bindings {
 		for key, adapter := range group {

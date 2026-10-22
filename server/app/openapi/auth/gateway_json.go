@@ -120,13 +120,17 @@ func validateCatalogObject(operation contracts.Operation, body []byte) error {
 
 func (g *Gateway) dispatchCatalog(ctx context.Context, q gatewayRequest, clientID int64, metadata metadataInput) (any, error) {
 	if g.catalog == nil || g.catalog.Active() == nil {
-		if q.scope == PlayLiveScope && g.playReady() {
-			return g.play.Start(ctx, PlayRequest{ClientID: clientID, OwnerDeptID: metadata.owner, DataScope: metadata.dataScope, DeviceID: metadata.deviceID, ChannelID: metadata.channelID, ClientIP: q.source})
+		if (q.scope == PlayLiveScope || q.scope == PlayLiveStopScope) && g.playReady() {
+			request := PlayRequest{ClientID: clientID, OwnerDeptID: metadata.owner, DataScope: metadata.dataScope, DeviceID: metadata.deviceID, ChannelID: metadata.channelID, ClientIP: q.source}
+			if q.scope == PlayLiveStopScope {
+				return g.play.Stop(ctx, request)
+			}
+			return g.play.Start(ctx, request)
 		}
 		return nil, adapters.ErrUnavailable
 	}
 	var value any
-	if q.scope == PlayLiveScope {
+	if q.scope == PlayLiveScope || q.scope == PlayLiveStopScope {
 		value = PlayRequest{ClientID: clientID, OwnerDeptID: metadata.owner, DataScope: metadata.dataScope, DeviceID: metadata.deviceID, ChannelID: metadata.channelID, ClientIP: q.source}
 	} else {
 		value = adapters.Request{ClientID: clientID, IdempotencyKey: q.idempotencyKey, ResourceScope: resource.DepartmentScope{OwnerDeptID: metadata.owner, DataScope: metadata.dataScope}, DeviceID: metadata.deviceID, ChannelID: metadata.channelID, Cursor: metadata.cursor, Query: metadata.query, List: adapters.ListOptions{Page: metadata.page, PageSize: metadata.size, Keyword: metadata.keyword, Status: metadata.status}}

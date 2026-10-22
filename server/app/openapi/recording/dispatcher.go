@@ -29,6 +29,7 @@ import (
 
 const (
 	ScopeRecordQuery         = "device:record-query"
+	ScopeRecordQueryOptions  = "device:record-query:options"
 	ScopePlaybackCreate      = "device:playback-create"
 	ScopePlaybackRead        = "device:playback-read"
 	ScopePlaybackAction      = "device:playback-action"
@@ -37,6 +38,7 @@ const (
 	ScopeDownloadRead        = "device:download-read"
 	ScopeDownloadCancel      = "device:download-cancel"
 	RecordQueryAdapterKey    = "device.record-query.v1"
+	RecordQueryOptionsKey    = "device.record-query-options.v1"
 	PlaybackCreateAdapterKey = "device.playback-create.v1"
 	PlaybackReadAdapterKey   = "device.playback-read.v1"
 	PlaybackActionAdapterKey = "device.playback-action.v1"
@@ -254,6 +256,8 @@ func (d *Dispatcher) Handle(ctx context.Context, scope string, request Request) 
 	switch scope {
 	case ScopeRecordQuery:
 		return d.search(ctx, request)
+	case ScopeRecordQueryOptions:
+		return d.recordQueryOptions(ctx, request)
 	case ScopePlaybackCreate:
 		return d.createPlayback(ctx, request)
 	case ScopePlaybackRead:
@@ -271,6 +275,54 @@ func (d *Dispatcher) Handle(ctx context.Context, scope string, request Request) 
 	default:
 		return nil, adapters.ErrUnavailable
 	}
+}
+
+// RecordQueryOptions describes how a caller must shape a device record search:
+// which clock and timezone the device answers in, how wide a window it accepts,
+// and which record types it can report. It is read-only and never opens a SIP
+// session, so it works for offline channels too (Online reports that state).
+type RecordQueryOptions struct {
+	Device         RecordQueryOptionDevice  `json:"device"`
+	Channel        RecordQueryOptionChannel `json:"channel"`
+	Timezone       string                   `json:"timezone"`
+	ServerNow      string                   `json:"serverNow"`
+	MaxRangeHours  int                      `json:"maxRangeHours"`
+	SupportedTypes []string                 `json:"supportedTypes"`
+}
+
+type RecordQueryOptionDevice struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Online bool   `json:"online"`
+}
+
+type RecordQueryOptionChannel struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// recordQueryOptions resolves the caller's scope and reports the accepted
+// search window. Deliberately no device-offline rejection: knowing the window
+// before going online is what lets a caller time its retry.
+func (d *Dispatcher) recordQueryOptions(ctx context.Context, request Request) (RecordQueryOptions, error) {
+	if d.targets == nil || d.config.Location == nil || d.config.MaxRangeHours <= 0 {
+		return RecordQueryOptions{}, adapters.ErrUnavailable
+	}
+	if len(request.Body) != 0 || len(request.Query) != 0 {
+		return RecordQueryOptions{}, adapters.ErrInvalidRequest
+	}
+	target, err := d.resolveTarget(ctx, request)
+	if err != nil {
+		return RecordQueryOptions{}, err
+	}
+	return RecordQueryOptions{
+		Device:         RecordQueryOptionDevice{ID: target.DeviceCode, Name: target.DeviceName, Online: target.DeviceOnline && target.ChannelOnline},
+		Channel:        RecordQueryOptionChannel{ID: target.ChannelCode, Name: target.ChannelName},
+		Timezone:       d.config.Location.String(),
+		ServerNow:      d.config.Now().In(d.config.Location).Format(time.RFC3339),
+		MaxRangeHours:  d.config.MaxRangeHours,
+		SupportedTypes: []string{"all", "manual", "alarm"},
+	}, nil
 }
 
 func (d *Dispatcher) search(ctx context.Context, request Request) (RecordPage, error) {
@@ -968,6 +1020,7 @@ func (a *operationAdapter) Execute(ctx context.Context, invocation catalogruntim
 func NewAdapterRegistrations(dispatcher *Dispatcher) []catalogruntime.AdapterRegistration {
 	definitions := []struct{ key, scope, method string }{
 		{RecordQueryAdapterKey, ScopeRecordQuery, http.MethodPost},
+		{RecordQueryOptionsKey, ScopeRecordQueryOptions, http.MethodGet},
 		{PlaybackCreateAdapterKey, ScopePlaybackCreate, http.MethodPost},
 		{PlaybackReadAdapterKey, ScopePlaybackRead, http.MethodGet},
 		{PlaybackActionAdapterKey, ScopePlaybackAction, http.MethodPost},

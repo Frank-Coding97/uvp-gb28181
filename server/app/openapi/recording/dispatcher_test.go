@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 	gbplayback "uvplatform.com/uvp-gb28181/app/gb28181/playback"
@@ -334,7 +335,7 @@ func TestRecordingAdapterRegistrationsMapInvocationIntoTypedDispatcher(t *testin
 		return testTarget(), nil
 	}), query, &snapshotStub{}, &playbackStub{})
 	registrations := NewAdapterRegistrations(dispatcher)
-	require.Len(t, registrations, 8)
+	require.Len(t, registrations, 9)
 	registry := catalogruntime.NewAdapterRegistry()
 	for _, registration := range registrations {
 		require.NoError(t, registry.Register(registration))
@@ -547,4 +548,59 @@ func TestRecordingTargetReadinessAndProtocolVersionFailClosed(t *testing.T) {
 		})
 	}
 	require.Zero(t, query.calls)
+}
+
+// The options endpoint exists so a caller can prepare a search before the
+// channel comes back online: it must answer for an offline target and must
+// never open a SIP query.
+func TestRecordQueryOptionsAnswerForOfflineChannelWithoutQueryingDevice(t *testing.T) {
+	resolver := targetResolverFunc(func(_ context.Context, scope resource.DepartmentScope, deviceID, channelID string) (Target, error) {
+		require.Equal(t, testDeviceCode, deviceID)
+		require.Equal(t, testChannelCode, channelID)
+		target := testTarget()
+		target.DeviceName, target.ChannelName = "front-device", "front-channel"
+		target.DeviceOnline, target.ChannelOnline = false, false
+		return target, nil
+	})
+	query := &queryStub{}
+	dispatcher := testDispatcher(resolver, query, &snapshotStub{}, &playbackStub{})
+	scope := resource.DepartmentScope{OwnerDeptID: 10, DataScope: resource.DataScopeDepartment}
+
+	data, err := dispatcher.Handle(context.Background(), ScopeRecordQueryOptions, Request{
+		ClientID: 31, ResourceScope: scope, DeviceID: testDeviceCode, ChannelID: testChannelCode,
+	})
+	require.NoError(t, err)
+	options, ok := data.(RecordQueryOptions)
+	require.True(t, ok)
+	assert.Equal(t, testDeviceCode, options.Device.ID)
+	assert.Equal(t, "front-device", options.Device.Name)
+	assert.False(t, options.Device.Online, "offline is reported, not rejected")
+	assert.Equal(t, testChannelCode, options.Channel.ID)
+	assert.Equal(t, "CST", options.Timezone)
+	assert.Equal(t, 24, options.MaxRangeHours)
+	assert.Equal(t, []string{"all", "manual", "alarm"}, options.SupportedTypes)
+	assert.NotEmpty(t, options.ServerNow)
+	_, err = time.Parse(time.RFC3339, options.ServerNow)
+	require.NoError(t, err, "serverNow must stay RFC3339 so a caller can echo the window")
+	require.Zero(t, query.calls, "reading options must never reach the device")
+
+	_, err = dispatcher.Handle(context.Background(), ScopeRecordQueryOptions, Request{
+		ClientID: 31, ResourceScope: scope, DeviceID: testDeviceCode, ChannelID: testChannelCode,
+		Body: []byte(`{}`),
+	})
+	require.ErrorIs(t, err, adapters.ErrInvalidRequest)
+
+	_, err = dispatcher.Handle(context.Background(), ScopeRecordQueryOptions, Request{
+		ClientID: 31, ResourceScope: scope, DeviceID: testDeviceCode, ChannelID: testChannelCode,
+		Query: map[string]string{"pageSize": "10"},
+	})
+	require.ErrorIs(t, err, adapters.ErrInvalidRequest)
+
+	missing := targetResolverFunc(func(context.Context, resource.DepartmentScope, string, string) (Target, error) {
+		return Target{}, adapters.ErrNotFound
+	})
+	_, err = testDispatcher(missing, query, &snapshotStub{}, &playbackStub{}).Handle(context.Background(), ScopeRecordQueryOptions, Request{
+		ClientID: 31, ResourceScope: scope, DeviceID: testDeviceCode, ChannelID: testChannelCode,
+	})
+	require.ErrorIs(t, err, adapters.ErrNotFound)
 }

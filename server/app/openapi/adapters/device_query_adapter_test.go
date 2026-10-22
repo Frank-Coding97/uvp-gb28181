@@ -27,6 +27,10 @@ type deviceQueryReaderStub struct {
 	home    func(context.Context, resource.DepartmentScope, string, string) (devicequery.HomePositionSnapshot, error)
 	cruise  func(context.Context, resource.DepartmentScope, string, string) (devicequery.CruiseTrackSnapshot, error)
 	target  func(context.Context, resource.DepartmentScope, string, string) (devicequery.TargetTrackSnapshot, error)
+
+	maintenance func(context.Context, resource.DepartmentScope, string, resource.DeviceListOptions) (devicequery.MaintenanceOperationPage, error)
+	mounts      func(context.Context, resource.DepartmentScope, string, string) (devicequery.ChannelMountList, error)
+	timeline    func(context.Context, resource.DepartmentScope, string, string) (devicequery.ChannelTimeline, error)
 }
 
 func (stub *deviceQueryReaderStub) ListDeviceAlarmsInScope(ctx context.Context, scope resource.DepartmentScope, deviceID string, options resource.DeviceListOptions) (devicequery.AlarmPage, error) {
@@ -65,10 +69,28 @@ func (stub *deviceQueryReaderStub) GetChannelTargetTrackInScope(ctx context.Cont
 	}
 	return stub.target(ctx, scope, deviceID, channelID)
 }
+func (stub *deviceQueryReaderStub) ListDeviceMaintenanceOperationsInScope(ctx context.Context, scope resource.DepartmentScope, deviceID string, options resource.DeviceListOptions) (devicequery.MaintenanceOperationPage, error) {
+	if stub.maintenance == nil {
+		return devicequery.MaintenanceOperationPage{}, errors.New("unexpected maintenance operation query")
+	}
+	return stub.maintenance(ctx, scope, deviceID, options)
+}
+func (stub *deviceQueryReaderStub) ListChannelMountsInScope(ctx context.Context, scope resource.DepartmentScope, deviceID, channelID string) (devicequery.ChannelMountList, error) {
+	if stub.mounts == nil {
+		return devicequery.ChannelMountList{}, errors.New("unexpected channel mount query")
+	}
+	return stub.mounts(ctx, scope, deviceID, channelID)
+}
+func (stub *deviceQueryReaderStub) GetChannelTimelineInScope(ctx context.Context, scope resource.DepartmentScope, deviceID, channelID string) (devicequery.ChannelTimeline, error) {
+	if stub.timeline == nil {
+		return devicequery.ChannelTimeline{}, errors.New("unexpected channel timeline query")
+	}
+	return stub.timeline(ctx, scope, deviceID, channelID)
+}
 
 func TestNewDeviceQueryAdaptersExposeFixedV1Keys(t *testing.T) {
 	registrations := NewDeviceQueryAdapterRegistrations(&deviceQueryReaderStub{})
-	require.Len(t, registrations, 6)
+	require.Len(t, registrations, 9)
 	keys := make([]string, 0, len(registrations))
 	for _, registration := range registrations {
 		keys = append(keys, registration.Key)
@@ -78,6 +100,7 @@ func TestNewDeviceQueryAdaptersExposeFixedV1Keys(t *testing.T) {
 	assert.ElementsMatch(t, []string{
 		DeviceAlarmsAdapterKey, DeviceStatusEventsAdapterKey, ChannelPreciseStatusAdapterKey,
 		ChannelHomePositionAdapterKey, ChannelCruiseTracksAdapterKey, ChannelTargetTrackReadAdapterKey,
+		DeviceMaintenanceListAdapterKey, ChannelMountsReadAdapterKey, ChannelTimelineReadAdapterKey,
 	}, keys)
 }
 

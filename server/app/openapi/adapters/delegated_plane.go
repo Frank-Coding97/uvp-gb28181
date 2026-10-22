@@ -37,6 +37,7 @@ const (
 	PTZPresetDeleteAdapterKey  = "delegated.ptz.preset-delete.v1"
 	PTZOperationReadAdapterKey = "delegated.ptz.operation-read.v1"
 	PlayLiveAdapterKey         = "delegated.play.live.v1"
+	PlayLiveStopAdapterKey     = "delegated.play.live-stop.v1"
 )
 
 // DelegatedPlaneContractVersion is separate from ResourceAdapterContractVersion
@@ -89,6 +90,7 @@ func (adapter *delegatedPlaneAdapter) Execute(_ context.Context, invocation cata
 func NewDelegatedPlaneRegistrations(bindings ...map[string]catalogruntime.Adapter) []catalogruntime.AdapterRegistration {
 	adapters := []*delegatedPlaneAdapter{
 		{key: PlayLiveAdapterKey, plane: DelegatedPlayPlane},
+		{key: PlayLiveStopAdapterKey, plane: DelegatedPlayPlane},
 		{key: PTZPresetListAdapterKey, plane: DelegatedPTZPlane},
 		{key: PTZPresetSaveAdapterKey, plane: DelegatedPTZPlane},
 		{key: PTZPresetCallAdapterKey, plane: DelegatedPTZPlane},

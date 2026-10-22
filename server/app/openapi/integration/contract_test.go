@@ -311,26 +311,44 @@ func TestOpenAPIContract(t *testing.T) {
 	checkInstalledBoundary(t, doc)
 }
 
-func TestDeviceCaptureIsNotPublishedWhileRuntimeDependenciesAreIncomplete(t *testing.T) {
+// 抓图从"待接线"变为已发布：适配器（adapters.NewDeviceSessionCaptureAdapterRegistrations）、
+// 幂等落库（sys_openapi_device_capture_session）、上传基址与 SIP 收图注册表都在
+// bootstrap 里装配，三条 scope 因此进入能力目录。
+//
+// ⛔ 另一半断言仍然是负向的，且必须保留：早期草稿用过一套不同的 scope 名与路径
+// （`/snapshots/{sessionId}/images/{fileName}`，没有 `-sessions` 与 `/content`）。
+// 它们从未接线；若哪天重新出现在契约里，说明有人另起了一套抓图面而不是复用
+// device_sessions，那会让同一批图片拥有两套归属与幂等语义。
+func TestDeviceCaptureIsPublishedOnlyThroughTheWiredCaptureSessionSurface(t *testing.T) {
 	doc := loadOpenAPIContract(t)
 	for _, scope := range []string{
 		"channel:snapshot:create",
 		"channel:snapshot:read",
 		"channel:snapshot:image:read",
 	} {
+		found := false
 		for _, operation := range contracts.Operations() {
-			require.NotEqual(t, scope, operation.Scope, "capture scopes stay unpublished until the runtime is wired")
+			if operation.Scope == scope {
+				found = true
+			}
 		}
-		for _, published := range client.SupportedScopes() {
-			require.NotEqual(t, scope, published, "capture scopes must not enter the capability registry")
-		}
+		require.Truef(t, found, "capture scope %s must be published by the wired runtime", scope)
+		require.Contains(t, client.SupportedScopes(), scope)
 	}
+	for _, path := range []string{
+		"/openapi/v1/devices/{deviceId}/channels/{channelId}/snapshot-sessions",
+		"/openapi/v1/devices/{deviceId}/channels/{channelId}/snapshot-sessions/{sessionId}",
+		"/openapi/v1/devices/{deviceId}/channels/{channelId}/snapshot-sessions/{sessionId}/images/{fileName}/content",
+	} {
+		require.Contains(t, doc.Paths, path)
+	}
+	// 草稿期名称不得复活。
 	for _, path := range []string{
 		"/openapi/v1/devices/{deviceId}/channels/{channelId}/snapshots",
 		"/openapi/v1/devices/{deviceId}/channels/{channelId}/snapshots/{sessionId}",
 		"/openapi/v1/devices/{deviceId}/channels/{channelId}/snapshots/{sessionId}/images/{fileName}",
 	} {
-		require.NotContains(t, doc.Paths, path, "unwired capture endpoints must not be documented as available")
+		require.NotContains(t, doc.Paths, path, "draft capture paths must never come back")
 	}
 }
 
@@ -397,7 +415,17 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 		require.Equal(t, 1, *schema.MinLength)
 		require.Equal(t, 128, *schema.MaxLength)
 	}
-	requestBodyRequired := (route.method == "post" && route.scope != "play:live") || route.method == "put" || route.scope == "ptz:preset:delete"
+	// A POST normally carries a JSON body. The documented exceptions are the
+	// operations declared with `x-uvp-body: empty`: live playback takes no
+	// input, and a catalog refresh is addressed entirely by its path parameter.
+	//
+	// A DELETE is bodyless by default. Image-library deletion is the documented
+	// exception: it removes a caller-selected set, and the selection must be
+	// explicit in the body instead of hiding in a query string that proxies and
+	// access logs would record.
+	bodylessPOST := route.scope == "play:live" || route.scope == "device:catalog:refresh"
+	requestBodyRequired := (route.method == "post" && !bodylessPOST) || route.method == "put" ||
+		route.scope == "ptz:preset:delete" || route.scope == "channel:snapshot:library:delete"
 	if requestBodyRequired {
 		require.Equal(t, "application/json", operation.ContentType)
 		require.NotNil(t, operation.RequestBody)
@@ -553,7 +581,13 @@ func conflictScope(scope string) bool {
 		"device:alarm:guard:set", "device:alarm:guard:reset", "device:alarm:reset",
 		"device:maintenance:reboot", "channel:storage-card:format", "device:firmware-upgrade:execute",
 		"device:playback-create", "device:playback-action", "device:playback-stop", "device:download-create", "device:download-cancel",
-		"device:config:refresh", "device:config:apply", "channel:video-params:refresh", "channel:video-params:apply":
+		"device:config:refresh", "device:config:apply", "channel:video-params:refresh", "channel:video-params:apply",
+		// A catalog refresh is refused while the device is offline: the same
+		// "known device state blocks this command" conflict class as reboot.
+		// A capture request is refused when the same idempotency key carries
+		// different parameters: the same "known earlier state blocks this
+		// request" conflict class as the other idempotent commands.
+		"device:catalog:refresh", "channel:snapshot:create":
 		return true
 	default:
 		return ptzControlScope(scope)
@@ -713,6 +747,7 @@ func checkInstalledBoundary(t *testing.T, doc openAPIContract) {
 		path = strings.ReplaceAll(path, "{subscriptionId}", "550e8400-e29b-41d4-a716-446655440000")
 		path = strings.ReplaceAll(path, "{sessionId}", "550e8400-e29b-41d4-a716-446655440000")
 		path = strings.ReplaceAll(path, "{fileName}", "snapshot.jpg")
+		path = strings.ReplaceAll(path, "{snapshotId}", "42")
 		request := httptest.NewRequest(strings.ToUpper(route.method), path, nil)
 		response := httptest.NewRecorder()
 		root.ServeHTTP(response, request)

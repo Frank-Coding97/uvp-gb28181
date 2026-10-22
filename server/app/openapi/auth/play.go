@@ -8,7 +8,10 @@ import (
 	"uvplatform.com/uvp-gb28181/app/openapi/resource"
 )
 
-const PlayLiveScope = "play:live"
+const (
+	PlayLiveScope     = "play:live"
+	PlayLiveStopScope = "play:live:stop"
+)
 
 var (
 	ErrPlayUnavailable   = errors.New("OpenAPI play dispatcher unavailable")
@@ -30,6 +33,10 @@ type PlayRequest struct {
 type PlayDispatcher interface {
 	Ready() bool
 	Start(context.Context, PlayRequest) (any, error)
+	// Stop releases the live stream this client opened for the channel. It must
+	// fail closed for a channel the client never started, because the platform
+	// stop primitive itself carries no ownership check.
+	Stop(context.Context, PlayRequest) (any, error)
 }
 
 // PlayViewerMaintainer is optional so existing dispatchers and test doubles do
@@ -39,7 +46,10 @@ type PlayViewerMaintainer interface {
 }
 
 func playPattern(scope string) string {
-	if scope == PlayLiveScope {
+	switch scope {
+	case PlayLiveScope:
+		return "/openapi/v1/devices/:deviceId/channels/:channelId/live"
+	case PlayLiveStopScope:
 		return "/openapi/v1/devices/:deviceId/channels/:channelId/live"
 	}
 	return ""

@@ -12,6 +12,14 @@ import (
 // Every database round trip consumes a share of the startup deadline, even
 // when the server executes a query quickly. Scale remote latency down here
 // so an N+1 catalog seed fails without a minute-long test.
+//
+// The budget is derived from the surface size plus a fixed slack instead of
+// being a constant: the seeded row count grows with every published
+// capability (two writes per scope), so a fixed deadline silently turns into
+// "fails when the machine is busy" — measured at ~1.0s idle with 84 scopes,
+// which is nowhere near the 2s constant once the rest of the suite competes
+// for CPU. Deriving it keeps the actual guard intact: a seed that writes more
+// than roughly twice the expected rows still blows the deadline.
 func TestCoreCatalogSeedFitsRemoteRoundTripBudget(t *testing.T) {
 	db := newPublishTestDB(t)
 	queries := 0
@@ -24,7 +32,9 @@ func TestCoreCatalogSeedFitsRemoteRoundTripBudget(t *testing.T) {
 	}
 	require.NoError(t, db.Callback().Query().Before("gorm:query").Register("test:remote_query_delay", func(tx *gorm.DB) { queries++; delay(tx) }))
 	require.NoError(t, db.Callback().Create().Before("gorm:create").Register("test:remote_create_delay", delay))
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	expectedWrites := 2*len(CoreCatalogScopes()) + len(coreGroups)
+	budget := time.Duration(expectedWrites)*5*time.Millisecond + 2*time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 	result, err := EnsureCoreCatalog(ctx, db, SystemActorID)
 	require.NoError(t, err, "catalog seeding must fit startup budget with remote database latency")

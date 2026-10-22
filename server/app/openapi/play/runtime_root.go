@@ -49,6 +49,14 @@ func (r *RuntimeRoot) Start(ctx context.Context, request auth.PlayRequest) (any,
 	return dispatcher.Start(ctx, request)
 }
 
+func (r *RuntimeRoot) Stop(ctx context.Context, request auth.PlayRequest) (any, error) {
+	dispatcher := r.current()
+	if dispatcher == nil || !safeReady(dispatcher) {
+		return nil, auth.ErrPlayUnavailable
+	}
+	return dispatcher.Stop(ctx, request)
+}
+
 func (r *RuntimeRoot) ReconcileViewers(ctx context.Context) error {
 	dispatcher := r.current()
 	if dispatcher == nil {

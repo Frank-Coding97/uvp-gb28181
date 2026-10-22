@@ -503,6 +503,47 @@ paths:
           content: *errorContent
         '429': *rateLimitedResponse
         '503': *serviceUnavailableResponse
+    delete:
+      operationId: stopLivePlayback
+      summary: Stop the live stream this client opened for one channel
+      description: >-
+        Ends the live media stream this client started for the channel and
+        retires its viewer reservation. The platform serves one shared live
+        stream per channel, so stopping it also interrupts every other viewer of
+        that channel — they must start playback again to recover. A channel this
+        client never started answers 404 instead of stopping another client's
+        stream; the ledger, not the stream identifier, is the ownership evidence.
+      x-uvp-scope: play:live:stop
+      x-uvp-risk: media
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2016 9.2", "GB/T 28181-2022 9.2"]
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+      responses:
+        '200':
+          description: Live stream stop result
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveStopPlaybackResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
   /openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets:
     get:
       operationId: listPTZPresets
@@ -782,6 +823,41 @@ paths:
           description: Client-owned device event subscription
           headers: *noStoreHeader
           content: {application/json: {schema: {$ref: '#/components/schemas/DeviceSubscriptionResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+    get:
+      operationId: deviceSubscriptionList
+      summary: List the client-owned subscriptions of one device
+      description: >-
+        Returns every logical subscription this client created for the device,
+        including cancelled and expired rows, so a caller can reconcile its own
+        state without remembering identifiers it no longer tracks.
+      x-uvp-scope: device:subscription:list
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 9.11"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+      responses:
+        '200':
+          description: Client-owned device event subscriptions
+          headers: *noStoreHeader
+          content: {application/json: {schema: {$ref: '#/components/schemas/DeviceSubscriptionListResponse'}}}
         '400': *invalidRequestResponse
         '401': *authenticationFailedResponse
         '403': *capabilityDeniedResponse
@@ -1913,7 +1989,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: {"type":"object","required":["confirmed"],"additionalProperties":false,"properties":{"confirmed":{"const":true}}}
+            schema: {"type":"object","required":["confirmed"],"additionalProperties":false,"properties":{"confirmed":{"type":"boolean","enum":[true]}}}
       responses:
         '200':
           description: "设备重启结果"
@@ -1962,7 +2038,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: {"type":"object","required":["confirmed","cardIndex"],"additionalProperties":false,"properties":{"confirmed":{"const":true},"cardIndex":{"type":"integer","minimum":0}}}
+            schema: {"type":"object","required":["confirmed","cardIndex"],"additionalProperties":false,"properties":{"confirmed":{"type":"boolean","enum":[true]},"cardIndex":{"type":"integer","minimum":0}}}
       responses:
         '200':
           description: "存储卡格式化结果"
@@ -1982,6 +2058,47 @@ paths:
           description: Idempotency key conflicts with an earlier command or request
           headers: *noStoreHeader
           content: *errorContent
+  /openapi/v1/devices/{deviceId}/maintenance/operations:
+    get:
+      operationId: deviceMaintenanceOperationList
+      summary: "设备维护操作记录"
+      description: >-
+        分页列出该设备的重启与存储卡格式化记录，包含平台已发送但设备未确认、
+        以及因进程中断而状态未知的历史行。仅返回平台维护审计收录的动作，
+        不支持的动作不会由此接口扩大可见范围。
+      x-uvp-scope: device:maintenance:operation:list
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["平台操作状态；设备确认字段依协议语义返回"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: "设备维护操作记录"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAPIDeviceMaintenanceOperationListResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
   /openapi/v1/devices/{deviceId}/maintenance/operations/{operationId}:
     get:
       operationId: deviceMaintenanceOperationRead
@@ -2012,6 +2129,89 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OpenAPIDeviceMaintenanceOperationReadResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/catalog/refresh:
+    post:
+      operationId: refreshDeviceCatalog
+      summary: "手动刷新设备目录"
+      description: >-
+        向在线设备下发 Catalog 查询，使其重新上报通道树；返回异步操作号用于查询进度。
+        同一设备已有进行中的刷新时不会重复下发，deduplicated 为 true 并复用原操作号。
+        设备离线或来源地址缺失时拒绝下发。
+      x-uvp-scope: device:catalog:refresh
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2016 9.4", "GB/T 28181-2022 9.4"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      x-uvp-body: empty
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+      responses:
+        '200':
+          description: "目录刷新已受理"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceCatalogRefreshResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '409':
+          description: 设备离线，无法下发目录查询
+          headers: *noStoreHeader
+          content: *errorContent
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/catalog/refresh/{operationId}:
+    get:
+      operationId: getDeviceCatalogRefreshProgress
+      summary: "读取目录刷新进度"
+      description: >-
+        按设备和操作号读取异步 Catalog 交换的进度。操作号必须由该设备产生，
+        否则按未找到处理；完成状态在平台保留有限时间，过期后同样返回未找到。
+      x-uvp-scope: device:catalog:refresh:read
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2016 9.4", "GB/T 28181-2022 9.4"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/OperationId'
+      responses:
+        '200':
+          description: "目录刷新进度"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceCatalogRefreshProgressResponse'
         '400': *invalidRequestResponse
         '401': *authenticationFailedResponse
         '403': *capabilityDeniedResponse
@@ -2385,7 +2585,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: {"type":"object","required":["confirmed","firmwareId"],"additionalProperties":false,"properties":{"confirmed":{"const":true},"firmwareId":{"type":"string","minLength":1,"maxLength":64,"pattern":"^[A-Za-z0-9_-]+$"}}}
+            schema: {"type":"object","required":["confirmed","firmwareId"],"additionalProperties":false,"properties":{"confirmed":{"type":"boolean","enum":[true]},"firmwareId":{"type":"string","minLength":1,"maxLength":64,"pattern":"^[A-Za-z0-9_-]+$"}}}
       responses:
         '200':
           description: "设备固件升级操作已受理或复用"
@@ -2405,6 +2605,41 @@ paths:
           description: Firmware compatibility, device state, or idempotency conflict
           headers: *noStoreHeader
           content: *errorContent
+    get:
+      operationId: deviceFirmwareUpgradeList
+      summary: "设备固件升级历史"
+      description: "按设备和客户端归属列出最近的固件升级尝试，按时间倒序；SIP 2xx 只表示命令已发送，不代表升级成功。"
+      x-uvp-scope: device:firmware-upgrade:list
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 9.13, 附录 A.2.3.1.12、A.2.5.9"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+      responses:
+        '200':
+          description: "该客户端在此设备上的固件升级历史"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAPIFirmwareUpgradeHistoryResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
   /openapi/v1/devices/{deviceId}/firmware-upgrades/{operationId}:
     get:
       operationId: deviceFirmwareUpgradeRead
@@ -2435,6 +2670,124 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OpenAPIDeviceFirmwareUpgradeResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/mounts:
+    get:
+      operationId: channelMountList
+      summary: "通道目录挂载位置"
+      description: >-
+        列出该通道被挂载到的全部目录节点，并标明主挂载位置。目录节点与挂载关系均在
+        客户端部门范围内校验，范围外的挂载不会出现在结果中。
+      x-uvp-scope: channel:mounts:read
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["平台目录与多视图挂载关系"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+      responses:
+        '200':
+          description: "通道目录挂载位置"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAPIChannelMountListResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/timeline:
+    get:
+      operationId: channelTimeline
+      summary: "通道 24 小时在线时序"
+      description: >-
+        返回通道最近 24 小时以固定时长切分的可用性网格。当前平台尚未保存真实历史，
+        网格由通道当前状态填充并以 simplified=true 标明：连续同值的网格不代表
+        该时段内持续在线，调用方不得据此计算可用率。
+      x-uvp-scope: channel:timeline:read
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["平台通道在线状态快照"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+      responses:
+        '200':
+          description: "通道 24 小时在线时序"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAPIChannelTimelineResponse'
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/recordings/options:
+    get:
+      operationId: deviceRecordQueryOptions
+      summary: "读取录像检索参数"
+      description: >-
+        返回该通道录像检索可接受的时间窗口、时区、平台当前时间与可检索的记录类型。
+        通道离线时仍返回参数（online 字段标明状态），便于调用方先准备请求再择机重试。
+      x-uvp-scope: device:record-query:options
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2016 9.7", "GB/T 28181-2022 9.7"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+      responses:
+        '200':
+          description: "录像检索参数"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenAPIDeviceRecordQueryOptionsResponse'
         '400': *invalidRequestResponse
         '401': *authenticationFailedResponse
         '403': *capabilityDeniedResponse
@@ -2733,7 +3086,7 @@ paths:
           headers: *noStoreHeader
           content:
             application/json:
-              schema: {type: object, required: [code, message, requestId, data], properties: {code: {type: string, enum: [OK]}, message: {type: string, enum: [success]}, requestId: {type: string}, data: {type: object, required: [sessionId, status, mode, protocolVersion], properties: {sessionId: {type: string}, status: {type: string}, mode: {const: download}, protocolVersion: {type: string}}}}}
+              schema: {type: object, required: [code, message, requestId, data], properties: {code: {type: string, enum: [OK]}, message: {type: string, enum: [success]}, requestId: {type: string}, data: {type: object, required: [sessionId, status, mode, protocolVersion], properties: {sessionId: {type: string}, status: {type: string}, mode: {type: string, enum: [download]}, protocolVersion: {type: string}}}}}
         '400': *invalidRequestResponse
         '401': *authenticationFailedResponse
         '403': *capabilityDeniedResponse
@@ -2778,7 +3131,7 @@ paths:
           headers: *noStoreHeader
           content:
             application/json:
-              schema: {type: object, required: [code, message, requestId, data], properties: {code: {type: string, enum: [OK]}, message: {type: string, enum: [success]}, requestId: {type: string}, data: {type: object, required: [sessionId, status, mode, protocolVersion], properties: {sessionId: {type: string}, status: {type: string}, mode: {const: download}, protocolVersion: {type: string}}}}}
+              schema: {type: object, required: [code, message, requestId, data], properties: {code: {type: string, enum: [OK]}, message: {type: string, enum: [success]}, requestId: {type: string}, data: {type: object, required: [sessionId, status, mode, protocolVersion], properties: {sessionId: {type: string}, status: {type: string}, mode: {type: string, enum: [download]}, protocolVersion: {type: string}}}}}
         '400': *invalidRequestResponse
         '401': *authenticationFailedResponse
         '403': *capabilityDeniedResponse
@@ -2819,7 +3172,7 @@ paths:
           headers: *noStoreHeader
           content:
             application/json:
-              schema: {type: object, required: [code, message, requestId, data], properties: {code: {type: string, enum: [OK]}, message: {type: string, enum: [success]}, requestId: {type: string}, data: {type: object, required: [sessionId, status], properties: {sessionId: {type: string}, status: {const: stopped}}}}}
+              schema: {type: object, required: [code, message, requestId, data], properties: {code: {type: string, enum: [OK]}, message: {type: string, enum: [success]}, requestId: {type: string}, data: {type: object, required: [sessionId, status], properties: {sessionId: {type: string}, status: {type: string, enum: [stopped]}}}}}
         '400': *invalidRequestResponse
         '401': *authenticationFailedResponse
         '403': *capabilityDeniedResponse
@@ -2829,6 +3182,273 @@ paths:
           description: Idempotency key conflicts with an earlier command or request
           headers: *noStoreHeader
           content: *errorContent
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/snapshot-sessions:
+    post:
+      operationId: createChannelSnapshotSession
+      summary: "设备抓图"
+      description: >-
+        向 GB/T 28181-2022 设备下发抓拍配置并创建抓图会话。图像由设备经 SIP 异步回传，
+        平台只保证会话已受理与命令下发状态，因此必须按 sessionId 轮询结果。
+        同一 Idempotency-Key 重放返回同一会话；相同 key 携带不同参数按冲突处理。
+        2016 版设备不支持该命令，直接返回 CAPABILITY_NOT_SUPPORTED。
+      x-uvp-scope: channel:snapshot:create
+      x-uvp-risk: control
+      x-uvp-idempotency-mode: required
+      x-uvp-protocol-versions: ["2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 附录 A.2.3.2.12（SnapShotConfig）", "GB/T 28181-2022 附录 A.2.5.7（图像抓拍传输完成通知）"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      x-uvp-content-type: application/json
+      x-uvp-idempotency-header: Idempotency-Key
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [snapNum, interval], additionalProperties: false, properties: {snapNum: {type: integer, minimum: 1, maximum: 10}, interval: {type: integer, minimum: 1, maximum: 3600}}}
+      responses:
+        '200':
+          description: "抓图会话已受理"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema: {type: object, required: [code, message, requestId, data], properties: {code: {type: string, enum: [OK]}, message: {type: string, enum: [success]}, requestId: {type: string}, data: {$ref: '#/components/schemas/OpenAPISnapshotSession'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '409':
+          description: Idempotency key conflicts with an earlier capture request
+          headers: *noStoreHeader
+          content: *errorContent
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/snapshot-sessions/{sessionId}:
+    get:
+      operationId: getChannelSnapshotSession
+      summary: "读取抓图会话"
+      description: >-
+        读取本客户端创建的抓图会话及已回传图像清单。平台进程重启后内存会话丢失时，
+        状态报 unknown 而不是根据已落盘文件反推 completed。会话与设备、通道同时校验归属。
+      x-uvp-scope: channel:snapshot:read
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 附录 A.2.3.2.12（SnapShotConfig）", "GB/T 28181-2022 附录 A.2.5.7（图像抓拍传输完成通知）"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: "抓图会话状态"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema: {type: object, required: [code, message, requestId, data], properties: {code: {type: string, enum: [OK]}, message: {type: string, enum: [success]}, requestId: {type: string}, data: {$ref: '#/components/schemas/OpenAPISnapshotSession'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/snapshot-sessions/{sessionId}/images/{fileName}/content:
+    get:
+      operationId: getChannelSnapshotImageContent
+      summary: "读取抓图图像内容"
+      description: >-
+        按会话与文件名读取本客户端抓图产生的图像字节。字节以 base64 放入 JSON 信封，
+        读取时校验落盘大小与 MD5 摘要；文件缺失按未找到处理，摘要不符按服务不可用处理。
+      x-uvp-scope: channel:snapshot:image:read
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 附录 A.2.5.7（图像抓拍传输完成通知）"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/SessionId'
+        - $ref: '#/components/parameters/FileName'
+      responses:
+        '200':
+          description: "图像内容（base64）"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema: {type: object, required: [code, message, requestId, data], properties: {code: {type: string, enum: [OK]}, message: {type: string, enum: [success]}, requestId: {type: string}, data: {$ref: '#/components/schemas/OpenAPISnapshotImageContent'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/snapshot-library:
+    get:
+      operationId: listChannelSnapshotLibrary
+      summary: "通道抓拍图列表"
+      description: >-
+        分页列出该通道图像库中的抓拍图。图像库汇集设备回传（A.2.5.7）、媒体节点截帧
+        与浏览器截图三类产出，本接口只返回元数据与取图地址，不内联图片字节。
+        列表按拍摄时刻倒序；from/to 打在拍摄时刻而非平台接收时刻（设备补传时两者可能相差数小时）。
+        设备离线不影响本接口。
+      x-uvp-scope: channel:snapshot:library:read
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 附录 A.2.5.7（图像抓拍传输完成通知）", "平台图像库：设备抓拍、媒体节点截帧与浏览器截图汇总"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Source'
+      responses:
+        '200':
+          description: "该通道的图像库分页"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema: {type: object, required: [code, message, requestId, data], properties: {code: {type: string, enum: [OK]}, message: {type: string, enum: [success]}, requestId: {type: string}, data: {$ref: '#/components/schemas/OpenAPISnapshotLibraryResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+    delete:
+      operationId: deleteChannelSnapshotLibrary
+      summary: "批量删除抓拍图"
+      description: >-
+        彻底删除该通道图像库中的指定抓拍图：库行与磁盘文件一并删除且不可恢复，必须显式确认。
+        一次最多 100 个主键。只删除本通道且部门可见范围内的图；不在范围内的主键与已不存在的主键
+        统一计入 missing，调用方无法据此探测其他通道图片是否存在。
+        删除顺序为先删文件再删库行，因此 filesFailed 大于 0 表示库行已删但文件残留，需要运维清理。
+      x-uvp-scope: channel:snapshot:library:delete
+      x-uvp-risk: destructive
+      x-uvp-idempotency-mode: optional
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["平台图像库保留策略；删除语义由平台定义，非协议命令"]
+      x-uvp-requires-confirmation: true
+      x-uvp-enabled: true
+      x-uvp-content-type: application/json
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [ids, confirmed], additionalProperties: false, properties: {ids: {type: array, minItems: 1, maxItems: 100, items: {type: integer, minimum: 1}}, confirmed: {type: boolean, enum: [true]}}}
+      responses:
+        '200':
+          description: "删除结果"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema: {type: object, required: [code, message, requestId, data], properties: {code: {type: string, enum: [OK]}, message: {type: string, enum: [success]}, requestId: {type: string}, data: {$ref: '#/components/schemas/OpenAPISnapshotLibraryDeleteResponse'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
+        '429': *rateLimitedResponse
+        '503': *serviceUnavailableResponse
+  /openapi/v1/devices/{deviceId}/channels/{channelId}/snapshot-library/{snapshotId}/content:
+    get:
+      operationId: getChannelSnapshotLibraryImageContent
+      summary: "读取抓拍图内容"
+      description: >-
+        按图像库主键读取该通道一张抓拍图的字节。字节以 base64 放入 JSON 信封，读取时校验
+        落盘大小与 MD5 摘要；文件缺失或摘要不符按未找到处理，超过 8MiB 的异常库行同样按取不到处理。
+      x-uvp-scope: channel:snapshot:library:image:read
+      x-uvp-risk: read
+      x-uvp-idempotency-mode: none
+      x-uvp-protocol-versions: ["2016", "2022"]
+      x-uvp-standard-refs: ["GB/T 28181-2022 附录 A.2.5.7（图像抓拍传输完成通知）", "平台图像库：设备抓拍、媒体节点截帧与浏览器截图汇总"]
+      x-uvp-requires-confirmation: false
+      x-uvp-enabled: true
+      security:
+        - uvpHmac: []
+      parameters:
+        - $ref: '#/components/parameters/SignVersion'
+        - $ref: '#/components/parameters/AccessKey'
+        - $ref: '#/components/parameters/Timestamp'
+        - $ref: '#/components/parameters/Nonce'
+        - $ref: '#/components/parameters/Signature'
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/ChannelId'
+        - $ref: '#/components/parameters/SnapshotId'
+      responses:
+        '200':
+          description: "图像内容（base64）"
+          headers: *noStoreHeader
+          content:
+            application/json:
+              schema: {type: object, required: [code, message, requestId, data], properties: {code: {type: string, enum: [OK]}, message: {type: string, enum: [success]}, requestId: {type: string}, data: {$ref: '#/components/schemas/OpenAPISnapshotImageContent'}}}
+        '400': *invalidRequestResponse
+        '401': *authenticationFailedResponse
+        '403': *capabilityDeniedResponse
+        '404': *resourceNotFoundResponse
+        '405': *methodNotAllowedResponse
         '429': *rateLimitedResponse
         '503': *serviceUnavailableResponse
 
@@ -2902,6 +3522,22 @@ components:
         type: string
         minLength: 1
         maxLength: 64
+    SnapshotId:
+      name: snapshotId
+      in: path
+      required: true
+      description: Image-library primary key returned by the snapshot-library listing; it is a database identifier, not a GB/T 28181 code.
+      schema:
+        type: string
+        pattern: '^[1-9][0-9]{0,19}$'
+    FileName:
+      name: fileName
+      in: path
+      required: true
+      description: Image file name exactly as reported by the device, without any directory part.
+      schema:
+        type: string
+        pattern: '^[A-Za-z0-9._-]{1,64}$'
     TrackId:
       name: trackId
       in: path
@@ -2986,6 +3622,30 @@ components:
       schema:
         type: string
         enum: [online, offline, unknown]
+    From:
+      name: from
+      in: query
+      required: false
+      description: Inclusive lower bound on the capture time, RFC3339 with an explicit offset; an explicit empty value is rejected.
+      schema:
+        type: string
+        format: date-time
+    To:
+      name: to
+      in: query
+      required: false
+      description: Inclusive upper bound on the capture time, RFC3339 with an explicit offset; must not precede `from`; an explicit empty value is rejected.
+      schema:
+        type: string
+        format: date-time
+    Source:
+      name: source
+      in: query
+      required: false
+      description: Optional capture source filter; an explicit empty value is rejected.
+      schema:
+        type: string
+        enum: [device, zlm, browser]
   schemas:
     EmptyObject:
       type: object
@@ -3073,9 +3733,9 @@ components:
     PictureMaskWriteBlock:
       type: object
       additionalProperties: false
-      required: [on, regions]
+      required: ['on', regions]
       properties:
-        on: {type: integer, enum: [0, 1]}
+        'on': {type: integer, enum: [0, 1]}
         regions:
           type: array
           maxItems: 4
@@ -3269,6 +3929,22 @@ components:
         message: {type: string, enum: [success]}
         requestId: {type: string}
         data: {$ref: '#/components/schemas/DeviceSubscriptionView'}
+    DeviceSubscriptionListResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data:
+          type: object
+          additionalProperties: false
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: {$ref: '#/components/schemas/DeviceSubscriptionView'}
     DevicePosition:
       type: object
       additionalProperties: false
@@ -3419,6 +4095,135 @@ components:
         message: {type: string, enum: [success]}
         requestId: {type: string}
         data: {$ref: '#/components/schemas/OpenAPIDeviceMaintenanceOperationReadResult'}
+    OpenAPIMaintenanceOperation:
+      type: object
+      additionalProperties: false
+      required: [operationId, action, status, sipStatus, errorMessage, deviceError, targetCode, requestedAt, sentAt, completedAt]
+      properties:
+        operationId: {type: string, minLength: 1, maxLength: 64}
+        action: {type: string, enum: [teleboot, format_sd]}
+        status: {type: string, enum: [queued, sent, accepted, rejected, timeout, cancelled, unknown]}
+        sipStatus: {type: integer}
+        errorMessage: {type: string}
+        deviceError: {type: string}
+        targetCode: {type: string}
+        requestedAt: {type: string, format: date-time}
+        sentAt: {type: string, format: date-time, nullable: true}
+        completedAt: {type: string, format: date-time, nullable: true}
+    OpenAPIDeviceMaintenanceOperationListResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data:
+          type: object
+          additionalProperties: false
+          required: [items, page, pageSize, total]
+          properties:
+            items:
+              type: array
+              items: {$ref: '#/components/schemas/OpenAPIMaintenanceOperation'}
+            page: {type: integer, minimum: 1}
+            pageSize: {type: integer, minimum: 1, maximum: 100}
+            total: {type: integer, minimum: 0}
+    OpenAPIChannelMount:
+      type: object
+      additionalProperties: false
+      required: [id, parentNodeId, parentName, parentPath, displayName, isPrimary, mountSource]
+      properties:
+        id: {type: integer, minimum: 1}
+        parentNodeId: {type: integer, minimum: 1}
+        parentName: {type: string}
+        parentPath: {type: string}
+        displayName: {type: string}
+        isPrimary: {type: boolean}
+        mountSource: {type: string}
+    OpenAPIChannelMountListResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data:
+          type: object
+          additionalProperties: false
+          required: [channelId, items]
+          properties:
+            channelId: {type: string}
+            items:
+              type: array
+              items: {$ref: '#/components/schemas/OpenAPIChannelMount'}
+    OpenAPIChannelTimelineSlot:
+      type: object
+      additionalProperties: false
+      required: [start, end, status]
+      properties:
+        start: {type: string, format: date-time}
+        end: {type: string, format: date-time}
+        status: {type: string, enum: [online, offline]}
+    OpenAPIChannelTimelineResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data:
+          type: object
+          additionalProperties: false
+          required: [channelId, range, slotMinutes, simplified, slots]
+          properties:
+            channelId: {type: string}
+            range: {type: string, enum: [24h]}
+            slotMinutes: {type: integer, minimum: 1}
+            simplified: {type: boolean}
+            slots:
+              type: array
+              items: {$ref: '#/components/schemas/OpenAPIChannelTimelineSlot'}
+    DeviceCatalogRefreshResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data:
+          type: object
+          additionalProperties: false
+          required: [deviceId, operationId, deduplicated]
+          properties:
+            deviceId: {type: string}
+            operationId: {type: string}
+            deduplicated: {type: boolean}
+    DeviceCatalogRefreshProgressResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data:
+          type: object
+          additionalProperties: false
+          required: [deviceId, operationId, status, receivedCount, errorMessage, startedAt, updatedAt]
+          properties:
+            deviceId: {type: string}
+            operationId: {type: string}
+            status: {type: string, enum: [waiting, receiving, persisting, completed, failed, timeout]}
+            receivedCount: {type: integer, minimum: 0}
+            totalCount: {type: integer, minimum: 0, nullable: true}
+            errorMessage: {type: string}
+            startedAt: {type: string, format: date-time}
+            updatedAt: {type: string, format: date-time}
+            completedAt: {type: string, format: date-time, nullable: true}
     OpenAPIDeviceFirmwareUpgradeResult:
       type: object
       additionalProperties: false
@@ -3449,6 +4254,23 @@ components:
         message: {type: string, enum: [success]}
         requestId: {type: string}
         data: {$ref: '#/components/schemas/OpenAPIDeviceFirmwareUpgradeResult'}
+    OpenAPIFirmwareUpgradeHistoryResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data:
+          type: object
+          additionalProperties: false
+          required: [items, totalRecords]
+          properties:
+            items:
+              type: array
+              items: {$ref: '#/components/schemas/OpenAPIDeviceFirmwareUpgradeResult'}
+            totalRecords: {type: integer, minimum: 0}
     OpenAPIDeviceRecordQueryResult:
       {"type":"object","required":["items","totalRecords","pageSize","protocolVersion","status","incomplete"],"additionalProperties":true}
     OpenAPIDeviceRecordQueryResponse:
@@ -3460,6 +4282,40 @@ components:
         message: {type: string, enum: [success]}
         requestId: {type: string}
         data: {$ref: '#/components/schemas/OpenAPIDeviceRecordQueryResult'}
+    OpenAPIDeviceRecordQueryOptionsResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data:
+          type: object
+          additionalProperties: false
+          required: [device, channel, timezone, serverNow, maxRangeHours, supportedTypes]
+          properties:
+            device:
+              type: object
+              additionalProperties: false
+              required: [id, name, online]
+              properties:
+                id: {type: string}
+                name: {type: string}
+                online: {type: boolean}
+            channel:
+              type: object
+              additionalProperties: false
+              required: [id, name]
+              properties:
+                id: {type: string}
+                name: {type: string}
+            timezone: {type: string}
+            serverNow: {type: string, format: date-time}
+            maxRangeHours: {type: integer, minimum: 1}
+            supportedTypes:
+              type: array
+              items: {type: string, enum: [all, manual, alarm]}
     OpenAPIDevicePlaybackCreateResult:
       {"type":"object","required":["sessionId","status","mode","protocolVersion"],"additionalProperties":true}
     OpenAPIDevicePlaybackCreateResponse:
@@ -3504,6 +4360,78 @@ components:
         message: {type: string, enum: [success]}
         requestId: {type: string}
         data: {$ref: '#/components/schemas/OpenAPIDevicePlaybackStopResult'}
+    OpenAPISnapshotSession:
+      type: object
+      additionalProperties: false
+      required: [sessionId, deviceId, channelId, state, commandStatus, snapNum, interval, receivedCount, notifiedCount, images, createdAt, updatedAt]
+      properties:
+        sessionId: {type: string, minLength: 1, maxLength: 64}
+        deviceId: {type: string, pattern: '^[0-9]{20}$'}
+        channelId: {type: string, pattern: '^[0-9]{20}$'}
+        state: {type: string, enum: [creating, waiting, completed, failed, unknown]}
+        commandStatus: {type: string}
+        snapNum: {type: integer, minimum: 1, maximum: 10}
+        interval: {type: integer, minimum: 1, maximum: 3600}
+        receivedCount: {type: integer, minimum: 0}
+        notifiedCount: {type: integer, minimum: 0}
+        images:
+          type: array
+          items: {$ref: '#/components/schemas/OpenAPISnapshotImage'}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    OpenAPISnapshotImage:
+      type: object
+      additionalProperties: false
+      required: [fileName, size, md5, capturedAt, contentUrl]
+      properties:
+        fileName: {type: string}
+        size: {type: integer, minimum: 0}
+        md5: {type: string}
+        capturedAt: {type: string, format: date-time}
+        contentUrl: {type: string}
+    OpenAPISnapshotImageContent:
+      type: object
+      additionalProperties: false
+      required: [fileName, contentType, size, md5, contentBase64]
+      properties:
+        fileName: {type: string}
+        contentType: {type: string}
+        size: {type: integer, minimum: 0}
+        md5: {type: string}
+        contentBase64: {type: string}
+    OpenAPISnapshotLibraryItem:
+      type: object
+      additionalProperties: false
+      required: [snapshotId, fileName, size, md5, source, capturedAt, receivedAt, contentUrl]
+      properties:
+        snapshotId: {type: integer, minimum: 1}
+        sessionId: {type: string, description: Only present for images produced by a capture session.}
+        fileName: {type: string}
+        size: {type: integer, minimum: 0}
+        md5: {type: string}
+        source: {type: string, enum: [device, zlm, browser]}
+        capturedAt: {type: string, format: date-time, description: 'Capture time parsed from the device file name; not the platform receive time.'}
+        receivedAt: {type: string, format: date-time}
+        contentUrl: {type: string, description: Path of the content endpoint for this image.}
+    OpenAPISnapshotLibraryResponse:
+      type: object
+      additionalProperties: false
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/OpenAPISnapshotLibraryItem'}
+        page: {type: integer, minimum: 1}
+        pageSize: {type: integer, minimum: 1}
+        total: {type: integer, minimum: 0}
+    OpenAPISnapshotLibraryDeleteResponse:
+      type: object
+      additionalProperties: false
+      required: [deleted, filesFailed, missing]
+      properties:
+        deleted: {type: integer, minimum: 0}
+        filesFailed: {type: integer, minimum: 0, description: Rows removed while the file could not be deleted; orphans need manual cleanup.}
+        missing: {type: integer, minimum: 0, description: Ids that were absent or outside this channel and department scope; the two cases are deliberately indistinguishable.}
     ErrorResponse:
       type: object
       additionalProperties: false
@@ -3719,6 +4647,21 @@ components:
             status: {type: string}
             reused: {type: boolean}
             urls: {type: object, additionalProperties: true}
+    LiveStopPlaybackResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, data]
+      properties:
+        code: {type: string, enum: [OK]}
+        message: {type: string, enum: [success]}
+        requestId: {type: string}
+        data:
+          type: object
+          additionalProperties: false
+          required: [released]
+          properties:
+            released: {type: boolean}
+            streamId: {type: string}
     DeviceAlarm:
       type: object
       additionalProperties: false

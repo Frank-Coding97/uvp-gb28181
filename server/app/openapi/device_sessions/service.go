@@ -400,34 +400,12 @@ func (s *Service) captureView(ctx context.Context, record CaptureSessionRecord) 
 }
 
 func (s *Service) resolveTarget(ctx context.Context, scope resource.DepartmentScope, deviceID, channelID string) (runtimeptz.Target, gbmodels.GbChannel, error) {
-	departmentIDs, err := resource.ResolveDepartmentIDs(ctx, s.db, scope)
+	device, channel, err := s.resolveChannelScope(ctx, scope, deviceID, channelID)
 	if err != nil {
-		if errors.Is(err, resource.ErrResourceNotFound) || errors.Is(err, resource.ErrInvalidDepartmentScope) {
-			return runtimeptz.Target{}, gbmodels.GbChannel{}, ErrNotFound
-		}
-		return runtimeptz.Target{}, gbmodels.GbChannel{}, ErrUnavailable
+		return runtimeptz.Target{}, gbmodels.GbChannel{}, err
 	}
-	var device gbmodels.GbDevice
-	result := s.db.WithContext(ctx).Where("device_id = ? AND owner_dept_id IN ? AND deleted_at IS NULL", deviceID, departmentIDs).
-		Where("NOT EXISTS (SELECT 1 FROM gb_device d2 WHERE d2.device_id = gb_device.device_id AND d2.deleted_at IS NULL AND d2.id <> gb_device.id)").
-		Limit(1).Find(&device)
-	if result.Error != nil {
-		return runtimeptz.Target{}, gbmodels.GbChannel{}, ErrUnavailable
-	}
-	if result.RowsAffected != 1 {
-		return runtimeptz.Target{}, gbmodels.GbChannel{}, ErrNotFound
-	}
-	var channel gbmodels.GbChannel
-	result = s.db.WithContext(ctx).Where("device_id = ? AND channel_id = ? AND owner_dept_id = ? AND owner_dept_id IN ? AND deleted_at IS NULL",
-		deviceID, channelID, device.OwnerDeptID, departmentIDs).
-		Where("NOT EXISTS (SELECT 1 FROM gb_channel c2 WHERE c2.device_id = gb_channel.device_id AND c2.channel_id = gb_channel.channel_id AND c2.deleted_at IS NULL AND c2.id <> gb_channel.id)").
-		Limit(1).Find(&channel)
-	if result.Error != nil {
-		return runtimeptz.Target{}, gbmodels.GbChannel{}, ErrUnavailable
-	}
-	if result.RowsAffected != 1 {
-		return runtimeptz.Target{}, gbmodels.GbChannel{}, ErrNotFound
-	}
+	// ⛔ 在线门禁只属于"要下发命令"的能力（抓图）。图像库的读与删走
+	// `resolveChannelScope`，离线设备照样能翻历史图 —— 图已经在盘上了。
 	if device.Status != gbmodels.DeviceStatusOnline || channel.Status != gbmodels.ChannelStatusOnline {
 		return runtimeptz.Target{}, gbmodels.GbChannel{}, ErrDeviceOffline
 	}
@@ -441,6 +419,43 @@ func (s *Service) resolveTarget(ctx context.Context, scope resource.DepartmentSc
 		IP: device.IP, Port: device.Port, Transport: device.Transport,
 		DeviceOnline: true, ChannelOnline: true, Profile: profile,
 	}, channel, nil
+}
+
+// resolveChannelScope 解析"这个客户端能不能碰这一行通道"，**不含在线判断**。
+//
+// ⛔ 两个"唯一性"子查询是刻意的：同一 20 位 device_id / channel_id 在库里可能有
+// 多行（设备/通道被删后重加，2026-07 老板报过"卡片重复 + 勾一张选中两张"）。
+// 遇到重行时报 404 而不是随便取一行 —— 取错行会让"能操作哪个通道"变得不确定。
+func (s *Service) resolveChannelScope(ctx context.Context, scope resource.DepartmentScope, deviceID, channelID string) (gbmodels.GbDevice, gbmodels.GbChannel, error) {
+	departmentIDs, err := resource.ResolveDepartmentIDs(ctx, s.db, scope)
+	if err != nil {
+		if errors.Is(err, resource.ErrResourceNotFound) || errors.Is(err, resource.ErrInvalidDepartmentScope) {
+			return gbmodels.GbDevice{}, gbmodels.GbChannel{}, ErrNotFound
+		}
+		return gbmodels.GbDevice{}, gbmodels.GbChannel{}, ErrUnavailable
+	}
+	var device gbmodels.GbDevice
+	result := s.db.WithContext(ctx).Where("device_id = ? AND owner_dept_id IN ? AND deleted_at IS NULL", deviceID, departmentIDs).
+		Where("NOT EXISTS (SELECT 1 FROM gb_device d2 WHERE d2.device_id = gb_device.device_id AND d2.deleted_at IS NULL AND d2.id <> gb_device.id)").
+		Limit(1).Find(&device)
+	if result.Error != nil {
+		return gbmodels.GbDevice{}, gbmodels.GbChannel{}, ErrUnavailable
+	}
+	if result.RowsAffected != 1 {
+		return gbmodels.GbDevice{}, gbmodels.GbChannel{}, ErrNotFound
+	}
+	var channel gbmodels.GbChannel
+	result = s.db.WithContext(ctx).Where("device_id = ? AND channel_id = ? AND owner_dept_id = ? AND owner_dept_id IN ? AND deleted_at IS NULL",
+		deviceID, channelID, device.OwnerDeptID, departmentIDs).
+		Where("NOT EXISTS (SELECT 1 FROM gb_channel c2 WHERE c2.device_id = gb_channel.device_id AND c2.channel_id = gb_channel.channel_id AND c2.deleted_at IS NULL AND c2.id <> gb_channel.id)").
+		Limit(1).Find(&channel)
+	if result.Error != nil {
+		return gbmodels.GbDevice{}, gbmodels.GbChannel{}, ErrUnavailable
+	}
+	if result.RowsAffected != 1 {
+		return gbmodels.GbDevice{}, gbmodels.GbChannel{}, ErrNotFound
+	}
+	return device, channel, nil
 }
 
 func validGBID(value string) bool {

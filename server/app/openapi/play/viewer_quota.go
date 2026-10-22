@@ -337,6 +337,76 @@ func (q *ViewerQuota) ReconcileViewers(ctx context.Context, runtime ViewerRuntim
 	return closed, nil
 }
 
+// ActiveLiveGrant returns the newest grant this client still holds for one
+// channel. It is the only admissible ownership evidence for a stop request:
+// the platform stop primitive accepts any stream id and performs no client
+// check, so without this ledger an external caller could end another client's
+// stream by guessing its identifier.
+func (q *ViewerQuota) ActiveLiveGrant(ctx context.Context, clientID int64, deviceID, channelID string) (models.PlayGrant, bool, error) {
+	if q == nil || q.db == nil || ctx == nil || clientID <= 0 || !validGBID(deviceID) || !validGBID(channelID) {
+		return models.PlayGrant{}, false, ErrQuotaDenied
+	}
+	var grants []models.PlayGrant
+	result := q.db.WithContext(ctx).
+		Where("client_id = ? AND device_id = ? AND channel_id = ? AND state IN ?", clientID, deviceID, channelID,
+			[]models.GrantState{models.GrantStatePending, models.GrantStateIssued, models.GrantStateBound}).
+		Order("created_at DESC, grant_id DESC").Limit(1).Find(&grants)
+	if result.Error != nil {
+		return models.PlayGrant{}, false, ErrQuotaFailed
+	}
+	if len(grants) != 1 || grants[0].ClientID != clientID {
+		return models.PlayGrant{}, false, nil
+	}
+	return grants[0], true, nil
+}
+
+// Release retires a grant because the client itself asked for the stream to
+// end. Unlike CloseViewer it needs no media-server report: the request is the
+// observation, so waiting for an absence callback would leak quota until the
+// grace period expired.
+func (q *ViewerQuota) Release(ctx context.Context, clientID int64, grantID string) error {
+	if q == nil || q.db == nil || q.now == nil || ctx == nil || clientID <= 0 || !validUUID(grantID) {
+		return ErrQuotaDenied
+	}
+	now, err := q.currentTime()
+	if err != nil {
+		return err
+	}
+	err = q.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if _, err := lockClient(tx, clientID); err != nil {
+			return err
+		}
+		grant, err := lockGrant(tx, grantID)
+		if err != nil || grant.ClientID != clientID {
+			return ErrQuotaDenied
+		}
+		switch grant.State {
+		case models.GrantStateRevoked, models.GrantStateExpired, models.GrantStateFailed:
+			return nil
+		case models.GrantStatePending, models.GrantStateIssued, models.GrantStateBound:
+		default:
+			return ErrQuotaDenied
+		}
+		updated := tx.Model(&models.PlayGrant{}).
+			Where("grant_id = ? AND client_id = ? AND state = ?", grantID, clientID, grant.State).
+			Updates(map[string]any{"state": models.GrantStateRevoked, "reason": "client_stop", "updated_at": now})
+		if updated.Error != nil || updated.RowsAffected != 1 {
+			return ErrQuotaFailed
+		}
+		viewer, exists, err := lockViewerByGrant(tx, grantID)
+		if err != nil || !exists || viewer.State == models.ViewerStateClosed {
+			return err
+		}
+		closed := tx.Model(&models.Viewer{}).Where("id = ? AND state = ?", viewer.ID, viewer.State).
+			Updates(map[string]any{"state": models.ViewerStateClosed, "updated_at": now})
+		if closed.Error != nil || closed.RowsAffected != 1 {
+			return ErrQuotaFailed
+		}
+		return nil
+	})
+	return normalizeQuotaError(err)
+}
+
 func (q *ViewerQuota) currentTime() (time.Time, error) {
 	now := q.now().UTC().Truncate(time.Microsecond)
 	if now.IsZero() {

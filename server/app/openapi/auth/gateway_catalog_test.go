@@ -232,6 +232,10 @@ func (spy *liveCatalogFallbackSpy) Start(context.Context, PlayRequest) (any, err
 	spy.calls.Add(1)
 	return nil, ErrPlayUnavailable
 }
+func (spy *liveCatalogFallbackSpy) Stop(context.Context, PlayRequest) (any, error) {
+	spy.calls.Add(1)
+	return nil, ErrPlayUnavailable
+}
 
 func TestLivePlaybackUsesPublishedAdapterInsteadOfFallback(t *testing.T) {
 	gate, db, secret := gatewayFixture(t)

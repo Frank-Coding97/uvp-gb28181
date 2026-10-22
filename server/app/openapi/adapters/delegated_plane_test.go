@@ -10,11 +10,12 @@ import (
 
 func TestDelegatedPlaneRegistrationsCoverTheWholeDelegatedSurface(t *testing.T) {
 	registrations := NewDelegatedPlaneRegistrations()
-	require.Len(t, registrations, 15)
+	require.Len(t, registrations, 16)
 
 	registry := catalogruntime.NewAdapterRegistry()
 	expected := map[string]string{
 		PlayLiveAdapterKey:             DelegatedPlayPlane,
+		PlayLiveStopAdapterKey:         DelegatedPlayPlane,
 		PTZPresetListAdapterKey:        DelegatedPTZPlane,
 		PTZPresetSaveAdapterKey:        DelegatedPTZPlane,
 		PTZPresetCallAdapterKey:        DelegatedPTZPlane,

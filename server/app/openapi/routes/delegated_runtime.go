@@ -40,6 +40,13 @@ func delegatedRuntimeBindings(ptz auth.PTZDispatcher, playback ...auth.PlayDispa
 			}
 			return dispatcher.Start(ctx, request)
 		})
+		bindings[adapters.PlayLiveStopAdapterKey] = delegatedRuntimeAdapter(func(ctx context.Context, invocation catalogruntime.Invocation) (any, error) {
+			request, ok := invocation.Value.(auth.PlayRequest)
+			if !ok || invocation.Scope != auth.PlayLiveStopScope || !dispatcher.Ready() {
+				return nil, auth.ErrPlayUnavailable
+			}
+			return dispatcher.Stop(ctx, request)
+		})
 	}
 	return bindings
 }

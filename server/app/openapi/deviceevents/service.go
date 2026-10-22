@@ -25,6 +25,10 @@ const (
 	maxPageSize     = 100
 	minExpires      = 60
 	maxExpires      = 7 * 24 * 60 * 60
+	// maxSubscriptionRows bounds the per-device subscription list. The platform
+	// stores at most one row per (client, device, kind) and the event kind
+	// enumeration is fixed, so this is a defensive ceiling rather than a page.
+	maxSubscriptionRows = 16
 )
 
 type EventKind string
@@ -249,6 +253,34 @@ func (s *Service) GetSubscription(ctx context.Context, request Request) (Configu
 		return ConfiguredSubscription{}, err
 	}
 	return s.subscriptionView(ctx, subscription, device.DeviceID), nil
+}
+
+// SubscriptionList is bounded by the fixed event kinds the platform supports,
+// so a device can never carry more rows than the enumeration allows. The list
+// deliberately includes cancelled and expired rows: a caller reconciling its
+// own state needs to see that a subscription exists and is no longer active.
+type SubscriptionList struct {
+	Items []ConfiguredSubscription `json:"items"`
+}
+
+func (s *Service) ListSubscriptions(ctx context.Context, request Request) (SubscriptionList, error) {
+	device, err := s.resolveDevice(ctx, request)
+	if err != nil {
+		return SubscriptionList{}, err
+	}
+	var rows []OpenAPIDeviceSubscription
+	result := s.db.WithContext(ctx).
+		Where("client_id = ? AND device_id = ?", request.OpenAPIClientID, device.ID).
+		Order("created_at ASC, id ASC").Limit(maxSubscriptionRows).
+		Find(&rows)
+	if result.Error != nil {
+		return SubscriptionList{}, ErrUnavailable
+	}
+	items := make([]ConfiguredSubscription, 0, len(rows))
+	for index := range rows {
+		items = append(items, s.subscriptionView(ctx, &rows[index], device.DeviceID))
+	}
+	return SubscriptionList{Items: items}, nil
 }
 
 func (s *Service) RenewSubscription(ctx context.Context, request Request) (ConfiguredSubscription, error) {

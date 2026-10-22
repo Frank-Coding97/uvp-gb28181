@@ -17,6 +17,7 @@ import (
 const (
 	SubscriptionCreateScope  = "device:subscription:create"
 	SubscriptionReadScope    = "device:subscription:read"
+	SubscriptionListScope    = "device:subscription:list"
 	SubscriptionRenewScope   = "device:subscription:renew"
 	SubscriptionCancelScope  = "device:subscription:cancel"
 	DeviceEventsReadScope    = "device:events:read"
@@ -25,6 +26,7 @@ const (
 
 	SubscriptionCreateAdapterKey = "device.events.subscription.create.v1"
 	SubscriptionReadAdapterKey   = "device.events.subscription.read.v1"
+	SubscriptionListAdapterKey   = "device.events.subscription.list.v1"
 	SubscriptionRenewAdapterKey  = "device.events.subscription.renew.v1"
 	SubscriptionCancelAdapterKey = "device.events.subscription.cancel.v1"
 	DeviceEventsReadAdapterKey   = "device.events.read.v1"
@@ -37,6 +39,7 @@ type operation uint8
 const (
 	createSubscription operation = iota + 1
 	readSubscription
+	listSubscriptions
 	renewSubscription
 	cancelSubscription
 	pollEvents
@@ -57,6 +60,8 @@ func (dispatcher *Dispatcher) Dispatch(ctx context.Context, scope string, reques
 		return dispatcher.service.CreateSubscription(ctx, request)
 	case SubscriptionReadScope:
 		return dispatcher.service.GetSubscription(ctx, request)
+	case SubscriptionListScope:
+		return dispatcher.service.ListSubscriptions(ctx, request)
 	case SubscriptionRenewScope:
 		return dispatcher.service.RenewSubscription(ctx, request)
 	case SubscriptionCancelScope:
@@ -89,6 +94,7 @@ func NewAdapterRegistrations(dispatcher *Dispatcher) []catalogruntime.AdapterReg
 	}{
 		{SubscriptionCreateAdapterKey, SubscriptionCreateScope, http.MethodPost, createSubscription},
 		{SubscriptionReadAdapterKey, SubscriptionReadScope, http.MethodGet, readSubscription},
+		{SubscriptionListAdapterKey, SubscriptionListScope, http.MethodGet, listSubscriptions},
 		{SubscriptionRenewAdapterKey, SubscriptionRenewScope, http.MethodPost, renewSubscription},
 		{SubscriptionCancelAdapterKey, SubscriptionCancelScope, http.MethodDelete, cancelSubscription},
 		{DeviceEventsReadAdapterKey, DeviceEventsReadScope, http.MethodGet, pollEvents},
@@ -144,6 +150,8 @@ func buildRequest(action operation, invocation catalogruntime.Invocation) (Reque
 	switch action {
 	case createSubscription:
 		bodyAllowed = true
+	case listSubscriptions:
+		// Collection read: no body, no query, no sub-resource identifier.
 	case readSubscription, renewSubscription, cancelSubscription, pollEvents:
 		request.SubscriptionID = invocation.Params["subscriptionId"]
 		params["subscriptionId"] = request.SubscriptionID

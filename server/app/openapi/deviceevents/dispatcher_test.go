@@ -279,7 +279,7 @@ func TestPositionReadReturnsOnlyPersistedFieldsWithinClientDepartment(t *testing
 func TestDeviceEventAdaptersUseSeparateScopesAndValidateInvocation(t *testing.T) {
 	dispatcher := NewDispatcher(nil)
 	registrations := NewAdapterRegistrations(dispatcher)
-	require.Len(t, registrations, 7)
+	require.Len(t, registrations, 8)
 	byKey := make(map[string]runtime.Adapter)
 	for _, registration := range registrations {
 		assert.Equal(t, "v1", registration.ContractVersion)

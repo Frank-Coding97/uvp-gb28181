@@ -19,6 +19,9 @@ func (*runtimeRootDispatcher) Ready() bool { return true }
 func (*runtimeRootDispatcher) Start(context.Context, auth.PlayRequest) (any, error) {
 	return nil, nil
 }
+func (*runtimeRootDispatcher) Stop(context.Context, auth.PlayRequest) (any, error) {
+	return nil, nil
+}
 func (d *runtimeRootDispatcher) ReconcileViewers(context.Context) error {
 	d.called++
 	return d.reconcileErr

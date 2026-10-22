@@ -32,6 +32,7 @@ import (
 	"uvplatform.com/uvp-gb28181/app/gb28181/upgrade"
 	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/openapi/devicecatalog"
 )
 
 var deviceController = gbcontrollers.NewDeviceController()
@@ -447,9 +448,12 @@ func applySourceLeaseCheckers() {
 }
 
 // SetDeviceMgmtCatalogTrigger 由 bootstrap 在 SIP UAC 就绪后注入
-// handler.CatalogTrigger 满足 controllers.CatalogTrigger 接口(duck typing)
+// handler.CatalogTrigger 满足 controllers.CatalogTrigger 接口(duck typing)。
+// OpenAPI 的手动目录刷新复用同一个 SIP 触发器：进程只有一套 UAC，
+// 再建一条独立通道只会制造两份真值。
 func SetDeviceMgmtCatalogTrigger(t gbhandler.CatalogTrigger) {
 	deviceMgmtController.SetCatalogTrigger(t)
+	devicecatalog.SetTrigger(t)
 }
 
 func SetDeviceMgmtSubscriptionManager(manager gbcontrollers.SubscriptionManager) {

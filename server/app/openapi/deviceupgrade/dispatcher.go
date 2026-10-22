@@ -28,10 +28,16 @@ import (
 )
 
 const (
-	UpgradeScope       = "device:firmware-upgrade:execute"
-	ReadScope          = "device:firmware-upgrade:read"
-	UpgradeAdapterKey  = "device.maintenance.firmware-upgrade.v1"
-	ReadAdapterKey     = "device.maintenance.firmware-upgrade-read.v1"
+	UpgradeScope      = "device:firmware-upgrade:execute"
+	ReadScope         = "device:firmware-upgrade:read"
+	ListScope         = "device:firmware-upgrade:list"
+	UpgradeAdapterKey = "device.maintenance.firmware-upgrade.v1"
+	ReadAdapterKey    = "device.maintenance.firmware-upgrade-read.v1"
+	ListAdapterKey    = "device.maintenance.firmware-upgrade-list.v1"
+	// maxUpgradeHistory bounds one history page. Upgrade attempts are rare and
+	// the newest window is what an operator reconciles against; a longer view is
+	// a platform-report concern, not a machine-client one.
+	maxUpgradeHistory  = 50
 	AdapterVersion     = "v1"
 	maxOperationIDSize = 64
 )
@@ -63,6 +69,7 @@ type Dispatcher struct {
 	executor upgradeExecutor
 	create   catalogruntime.Adapter
 	read     catalogruntime.Adapter
+	list     catalogruntime.Adapter
 }
 
 // NewDispatcher creates code-owned, fixed-path adapters. A nil DB or executor
@@ -71,6 +78,7 @@ func NewDispatcher(db *gorm.DB, executor upgradeExecutor) *Dispatcher {
 	dispatcher := &Dispatcher{db: db, executor: executor}
 	dispatcher.create = operationAdapter{dispatcher: dispatcher, scope: UpgradeScope, create: true}
 	dispatcher.read = operationAdapter{dispatcher: dispatcher, scope: ReadScope}
+	dispatcher.list = operationAdapter{dispatcher: dispatcher, scope: ListScope, list: true}
 	return dispatcher
 }
 
@@ -83,6 +91,8 @@ func (dispatcher *Dispatcher) Adapter(key string) catalogruntime.Adapter {
 		return dispatcher.create
 	case ReadAdapterKey:
 		return dispatcher.read
+	case ListAdapterKey:
+		return dispatcher.list
 	default:
 		return nil
 	}
@@ -95,6 +105,7 @@ func (dispatcher *Dispatcher) Registrations() []catalogruntime.AdapterRegistrati
 	return []catalogruntime.AdapterRegistration{
 		{Key: UpgradeAdapterKey, ContractVersion: AdapterVersion, Adapter: dispatcher.create},
 		{Key: ReadAdapterKey, ContractVersion: AdapterVersion, Adapter: dispatcher.read},
+		{Key: ListAdapterKey, ContractVersion: AdapterVersion, Adapter: dispatcher.list},
 	}
 }
 
@@ -102,6 +113,7 @@ type operationAdapter struct {
 	dispatcher *Dispatcher
 	scope      string
 	create     bool
+	list       bool
 }
 
 func (adapter operationAdapter) Execute(ctx context.Context, invocation catalogruntime.Invocation) (any, error) {
@@ -125,6 +137,9 @@ func (adapter operationAdapter) Execute(ctx context.Context, invocation catalogr
 	}
 	if adapter.create {
 		return adapter.dispatcher.execute(ctx, invocation, request, device)
+	}
+	if adapter.list {
+		return adapter.dispatcher.listOperations(ctx, invocation, request, device)
 	}
 	return adapter.dispatcher.readOperation(ctx, invocation, request, device)
 }
@@ -183,6 +198,35 @@ func (dispatcher *Dispatcher) readOperation(ctx context.Context, invocation cata
 		return OperationView{}, ErrNotFound
 	}
 	return viewFromRow(operation), nil
+}
+
+// UpgradeOperationList is the newest-window history of upgrade attempts this
+// client submitted for one device. It is ordered newest first so a reconciler
+// sees the attempt it just launched without scanning.
+type UpgradeOperationList struct {
+	Items        []OperationView `json:"items"`
+	TotalRecords int             `json:"totalRecords"`
+}
+
+func (dispatcher *Dispatcher) listOperations(ctx context.Context, invocation catalogruntime.Invocation, request openapiadapters.Request, device resolvedDevice) (UpgradeOperationList, error) {
+	if strings.ToUpper(invocation.Method) != http.MethodGet || len(invocation.Body) != 0 || len(invocation.Query) != 0 {
+		return UpgradeOperationList{}, ErrInvalidRequest
+	}
+	var rows []gbmodels.GbDeviceFirmwareUpgrade
+	result := dispatcher.db.WithContext(ctx).
+		Where("device_id = ? AND device_code = ? AND actor_dept_id = ? AND idempotency_key LIKE ?",
+			device.Target.DeviceID, device.Target.DeviceCode, request.ResourceScope.OwnerDeptID,
+			upgradeClientIdempotencyPrefix(request.ClientID)+"%").
+		Order("created_at DESC, operation_id DESC").Limit(maxUpgradeHistory).
+		Find(&rows)
+	if result.Error != nil {
+		return UpgradeOperationList{}, ErrUnavailable
+	}
+	items := make([]OperationView, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, viewFromRow(row))
+	}
+	return UpgradeOperationList{Items: items, TotalRecords: len(items)}, nil
 }
 
 func (dispatcher *Dispatcher) resolveDevice(ctx context.Context, scope resource.DepartmentScope, deviceCode string) (resolvedDevice, error) {

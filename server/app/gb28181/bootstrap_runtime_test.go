@@ -111,7 +111,8 @@ func TestOpenAPIDeviceEventBindingsFollowSIPGenerationLifecycle(t *testing.T) {
 
 	registrations, err := newOpenAPIDeviceEventAdapterRegistrations(db, runtimeDeviceEventSubscriptionLifecycle{}, []byte(strings.Repeat("m", 32)))
 	require.NoError(t, err)
-	require.Len(t, registrations, 7)
+	// 八项：订阅 create/read/list/renew/cancel + 事件续读 + 位置最新 + 位置历史。
+	require.Len(t, registrations, 8)
 	require.NoError(t, BindOpenAPIOperationAdapters(registrations))
 	_, err = forwarder.Execute(context.Background(), catalogruntime.Invocation{
 		Scope: openapideviceevents.DevicePositionReadScope, Method: "POST",
@@ -138,7 +139,8 @@ func TestOpenAPIDeviceEventRegistrationsReadConfiguredStableMasterKey(t *testing
 	t.Setenv(openAPIMasterKeyEnv, base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("m", 32))))
 	registrations, err := openAPIDeviceEventAdapterRegistrations(db, runtimeDeviceEventSubscriptionLifecycle{})
 	require.NoError(t, err)
-	require.Len(t, registrations, 7)
+	// 与上一个用例同一个八项集合：多一个少一个都说明事件面与契约漂移。
+	require.Len(t, registrations, 8)
 }
 
 func TestOpenAPIDeviceEventRuntimeRequiresSubscriptionLifecycle(t *testing.T) {

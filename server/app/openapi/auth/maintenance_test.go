@@ -21,6 +21,9 @@ func (*maintenancePlayDispatcher) Ready() bool { return true }
 func (*maintenancePlayDispatcher) Start(context.Context, PlayRequest) (any, error) {
 	return nil, nil
 }
+func (*maintenancePlayDispatcher) Stop(context.Context, PlayRequest) (any, error) {
+	return nil, nil
+}
 func (d *maintenancePlayDispatcher) ReconcileViewers(context.Context) error {
 	d.called.Add(1)
 	return d.err

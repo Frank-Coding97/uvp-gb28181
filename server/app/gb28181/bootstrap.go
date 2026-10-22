@@ -57,6 +57,7 @@ import (
 	"uvplatform.com/uvp-gb28181/app/global/app"
 	"uvplatform.com/uvp-gb28181/app/logcleanup"
 	openapiadapters "uvplatform.com/uvp-gb28181/app/openapi/adapters"
+	openapidevicesessions "uvplatform.com/uvp-gb28181/app/openapi/device_sessions"
 	openapideviceconfig "uvplatform.com/uvp-gb28181/app/openapi/deviceconfig"
 	openapideviceupgrade "uvplatform.com/uvp-gb28181/app/openapi/deviceupgrade"
 	openapiplay "uvplatform.com/uvp-gb28181/app/openapi/play"
@@ -1148,6 +1149,34 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 	openAPIAdapterRegistrations = append(openAPIAdapterRegistrations, openapirecording.NewAdapterRegistrations(openAPIRecordings)...)
 	openAPIVoice := openapivoice.NewDispatcher(openapivoice.NewGormTargetResolver(deviceDB), talkSvc)
 	openAPIAdapterRegistrations = append(openAPIAdapterRegistrations, openapivoice.NewAdapterRegistrations(openAPIVoice)...)
+	// 图像库（读列表、取图、批量删图）只依赖**库行 + 磁盘目录**：设备离线、
+	// 上传基址没配都照样要能翻历史图，所以它先于抓图单独注册。
+	if deviceCaptureRegistry == nil {
+		app.ZapLog.Info("OpenAPI 设备抓图与图像库能力未绑定(缺少 SIP 抓图注册表)",
+			zap.String("event", "openapi.device_snapshot.unavailable"))
+	} else {
+		openAPILibrary := openapidevicesessions.NewService(openapidevicesessions.Config{
+			DB: deviceDB, Captures: deviceCaptureRegistry,
+		})
+		openAPIAdapterRegistrations = append(openAPIAdapterRegistrations,
+			openapiadapters.NewDeviceSessionLibraryAdapterRegistrations(openAPILibrary)...)
+		// 抓图额外还需要管理员配置的对外上传基址(设备把图 POST 回平台)与命令服务。
+		// 任一缺失时注册了也只能失败, 因此"声明式跳过 + 明确日志",
+		// 而不是让调用方在执行期才发现 503。
+		if uploadBase, uploadErr := gbconfig.CurrentSnapshotUploadBaseURL(); uploadErr != nil {
+			app.ZapLog.Info("OpenAPI 设备抓图能力未绑定(抓拍上传基址不可用)",
+				zap.String("event", "openapi.device_snapshot.unavailable"), zap.Error(uploadErr))
+		} else if uploadURL, uploadErr := openapidevicesessions.NewUploadURLBuilder(uploadBase); uploadErr != nil {
+			app.ZapLog.Info("OpenAPI 设备抓图能力未绑定(抓拍上传基址不合法)",
+				zap.String("event", "openapi.device_snapshot.unavailable"), zap.Error(uploadErr))
+		} else {
+			openAPICaptures := openapidevicesessions.NewService(openapidevicesessions.Config{
+				DB: deviceDB, Captures: deviceCaptureRegistry, Commands: newPTZService, UploadURL: uploadURL,
+			})
+			openAPIAdapterRegistrations = append(openAPIAdapterRegistrations,
+				openapiadapters.NewDeviceSessionCaptureAdapterRegistrations(openAPICaptures)...)
+		}
+	}
 	if eventRegistrations, err := openAPIDeviceEventAdapterRegistrations(deviceDB, subscriptionService); err != nil {
 		app.ZapLog.Info("OpenAPI 设备事件能力未绑定(需要稳定的 UVP_OPENAPI_MASTER_KEY 和 SIP subscription service)",
 			zap.String("event", "openapi.device_events.unavailable"))
