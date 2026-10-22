@@ -142,7 +142,7 @@ UVP-GB28181 采用“信令控制面、业务管理面、媒体数据面分层�
 
 ```mermaid
 flowchart TB
-    D[国标设备<br/>IPC / NVR / 执法记录仪] -->|SIP REGISTER / MESSAGE / INVITE| S[Go SIP 接入层]
+    D[国标设备<br/>IPC / NVR / 移动终端] -->|SIP REGISTER / MESSAGE / INVITE| S[Go SIP 接入层]
     D -->|RTP / PS 媒体流| Z[ZLMediaKit 媒体节点]
 
     S --> B[Go 业务服务层<br/>设备 / 通道 / 播放 / 回放 / 级联 / 告警]
