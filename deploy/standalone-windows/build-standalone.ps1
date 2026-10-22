@@ -422,6 +422,14 @@ if (Test-Path -LiteralPath (Join-Path $VendorZlm 'default.pem')) {
 }
 if (Test-Path -LiteralPath (Join-Path $VendorZlm 'www')) {
     Copy-Tree -Source (Join-Path $VendorZlm 'www') -Destination (Join-Path $Pkg 'vendor\zlm\www')
+    # 不打包 swagger 的 sourcemap（www 下 5 份 .map 共 5.9MB，纯调试元数据）。
+    # 2026-10-22：Linux amd64 包被它们顶到 101.6MiB，越过 Gitee 单附件 100MiB（104857600 字节）
+    # 上限 => 只删 .map，swagger 页面本体（js/css/openapi.json）照常保留。
+    $mapFiles = @(Get-ChildItem -LiteralPath (Join-Path $Pkg 'vendor\zlm\www') -Recurse -File -Filter '*.map' -ErrorAction SilentlyContinue)
+    if ($mapFiles.Count -gt 0) {
+        $mapFiles | Remove-Item -Force -ErrorAction SilentlyContinue
+        Ok "已剔除 swagger sourcemap（$($mapFiles.Count) 个）"
+    }
 }
 Det 'vendor\zlm\（MediaServer.exe / config.ini / www）'
 

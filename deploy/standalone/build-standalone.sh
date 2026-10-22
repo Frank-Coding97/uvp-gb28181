@@ -524,6 +524,11 @@ cp "$ZLM_DIR/config.ini" "$PKG/vendor/zlm/config.ini"
 [ -f "$ZLM_DIR/zlm-buildinfo.txt" ] && cp "$ZLM_DIR/zlm-buildinfo.txt" "$PKG/vendor/zlm/"
 chmod 0755 "$PKG/vendor/zlm/MediaServer"
 
+# ⛔ 不打包 swagger 的 sourcemap（www 下 5 份 .map 共 5.9MB，纯调试元数据）。
+#   2026-10-22 起 amd64 包被它们顶到 101.6MiB，越过 Gitee 单附件 100MiB（104857600 字节）上限
+#   ⇒ 只删 .map，swagger 页面本体（js/css/openapi.json）照常保留。
+find "$PKG/vendor/zlm/www" -type f -name '*.map' -delete 2>/dev/null || true
+
 # ---- ffmpeg 随包内置（2026-10-20 起，老板拍板：不再让用户手动安装）----
 # ⛔⛔ 客户现场实锤（openEuler 22.03）：包里不带 ffmpeg、config.ini 指着
 #   /usr/bin/ffmpeg 时，ZLM 的 getSnap 每次都 fork/exec 失败（execv -2）、
