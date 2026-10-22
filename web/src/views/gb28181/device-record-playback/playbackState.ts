@@ -52,3 +52,20 @@ export function reducePlaybackState(state: PlaybackState, event: PlaybackEvent):
   if (event.type === "stopping") return { ...state, status: "stopping" };
   return { ...state, status: "stopped", sessionId: null, currentTime: null, error: null };
 }
+
+/**
+ * 解析回放路由里的通道参数。
+ *
+ * ⛔ 必须按字符串处理：20 位国标编码（`34020000001320000037`）超出
+ * `Number.MAX_SAFE_INTEGER`，直接 `Number()` 会把末几位悄悄抹成 0，页面随后
+ * 提示「通道不存在」——用户明明输的是对的编码，却极难自查。
+ *
+ * 返回值 0 表示「参数不可用」，调用方必须给出明确提示；**不要**回落成某个默认
+ * 通道 id，那会把用户带到另一个通道的录像上。
+ */
+export function parsePlaybackChannelId(value: unknown): number {
+  const raw = String(value ?? "").trim();
+  if (!/^\d+$/.test(raw)) return 0;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 0;
+}

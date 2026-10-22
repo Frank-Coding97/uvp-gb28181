@@ -35,7 +35,7 @@ import {
   type RecordQueryForm,
   type RecordQueryUiState
 } from "../device-mgmt/recordQueryState";
-import { createPlaybackState, reducePlaybackState } from "./playbackState";
+import { createPlaybackState, parsePlaybackChannelId, reducePlaybackState } from "./playbackState";
 import {
   channelReleaseWatchBudget,
   isChannelBusy,
@@ -66,7 +66,8 @@ const route = useRoute();
 const router = useRouter();
 /** 设备在线状态文案（`device_status` 字典）。 */
 const deviceStatusLabel = useDeviceStatusLabel();
-const channelId = computed(() => Number(route.params.channelId || 31));
+// 路由参数解析见 parsePlaybackChannelId：0 表示参数不可用，由 loadOptions 给提示。
+const channelId = computed(() => parsePlaybackChannelId(route.params.channelId));
 const playbackChannelId = channelId.value;
 const options = ref<RecordQueryOptions | null>(null);
 const form = ref<RecordQueryForm | null>(null);
@@ -219,6 +220,11 @@ function saveLastRecordIdentity(record: RecordQueryItem) {
 
 async function loadOptions() {
   if (!canQuery.value) return;
+  if (!playbackChannelId) {
+    queryState.value = "error";
+    queryMessage.value = "通道参数无效，请从「设备列表 → 查看通道」进入回放，不要手工拼接地址";
+    return;
+  }
   try {
     const response = await getRecordQueryOptions(playbackChannelId);
     options.value = response.data;
