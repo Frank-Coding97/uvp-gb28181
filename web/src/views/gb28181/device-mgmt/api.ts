@@ -632,6 +632,51 @@ export const listMapClusters = (params: MapQuery & { zoom: number }) =>
   );
 
 /** 轨迹点。`speed`/`direction`/`altitude` 只有设备报了才有，缺省表示"该次上报没带"。 */
+/** 可定位通道树里的一个通道。只会出现在**有坐标**的通道上。 */
+export interface MapTreeChannel {
+  id: number;
+  channelId: string;
+  /** 所属设备国标编码：点位卡片上的「播放视频」要用 (设备编码, 通道编码)。 */
+  deviceId: string;
+  name: string;
+  /** 展示名与列表页同口径：alias 优先，前端 displayName 统一兜底。 */
+  alias: string;
+  status: number;
+  longitude: number;
+  latitude: number;
+  positionSource: string;
+}
+
+export interface MapTreeDevice {
+  deviceId: string;
+  name: string;
+  alias: string;
+  online: boolean;
+  channels: MapTreeChannel[];
+}
+
+export interface MapChannelTreeResult {
+  devices: MapTreeDevice[];
+  /** 实际返回的通道数（truncated 时就是上限值）。 */
+  total: number;
+  /** 命中数超过后端上限：⛔ 必须显式提示，静默截断等于"有台设备永远找不到"。 */
+  truncated: boolean;
+  /**
+   * 同一筛选范围内**没有坐标**的通道数。
+   * 与 devices 用同一次查询算出来，所以"树里 12 个 + 提示 3 个"永远对得上。
+   */
+  noCoordCount: number;
+}
+
+/**
+ * 地图视角左栏的通道树。
+ * ⛔ 后端**不吃视野框**：树是全局索引，不能跟着拖动地图变化。
+ */
+export const getMapChannelTree = (params: MapQuery = {}) =>
+  http.request<BaseResult<MapChannelTreeResult>>("get", baseUrlApi("gb28181/device-mgmt/map/channel-tree"), {
+    params
+  });
+
 export interface MapTrajectoryPoint {
   eventTime: string;
   longitude: number;

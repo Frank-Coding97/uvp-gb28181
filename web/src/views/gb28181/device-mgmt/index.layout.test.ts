@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { squash } from "@/test/source-assert";
+import { hasMarkup, hasRuleBlock, ruleBlocks, squash } from "@/test/source-assert";
 
 const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/device-mgmt/index.vue"), "utf8");
 
@@ -223,5 +223,84 @@ describe("device management toolbar layout", () => {
     const playback = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
     expect(playback).not.toContain("远程重启父设备");
     expect(playback).not.toContain("runAdvancedAction('teleboot')");
+  });
+});
+
+describe("map channel card actions", () => {
+  const ACTION_VARIANTS = ["play", "trajectory", "location", "detail"] as const;
+  const TINTED = ["trajectory", "location", "detail"] as const;
+
+  it("gives every card action its own color instead of four identical white buttons", () => {
+    const colors = new Set<string>();
+    for (const variant of ACTION_VARIANTS) {
+      expect(hasRuleBlock(source, `:deep(.map-channel-card__action--${variant})`, "color:", "background:")).toBe(true);
+      const block = ruleBlocks(source, `:deep(.map-channel-card__action--${variant})`).join(" ");
+      colors.add(/color:\s*([^;]+);/.exec(block)?.[1] ?? "");
+    }
+    expect(colors.size).toBe(ACTION_VARIANTS.length);
+
+    // 只有主行动「播放视频」允许用实心底色，另外三颗必须是同色低透明底（四块饱和色并排像调色板）
+    expect(hasRuleBlock(source, ":deep(.map-channel-card__action--play)", "background: var(--uvp-solid-bg")).toBe(true);
+    for (const variant of TINTED) {
+      expect(ruleBlocks(source, `:deep(.map-channel-card__action--${variant})`).join(" ")).toContain("rgb(");
+    }
+  });
+
+  it("greys out every no-permission action again, because the variant color beats the generic :disabled rule", () => {
+    // ⛔ 踩过：`.map-channel-card__action:disabled` 只改了文字色，而被 `--trajectory/--location/--detail`
+    //    这类按类写的配色覆盖 ⇒ 没权限的按钮还是彩色的，看着像能点。必须逐个显式补。
+    for (const variant of TINTED) {
+      expect(hasRuleBlock(source, `:deep(.map-channel-card__action--${variant}:disabled)`, "color: #c9cdd4")).toBe(true);
+      expect(hasRuleBlock(source, `:deep(.map-dark .map-channel-card__action--${variant}:disabled)`, "color: #5c6675")).toBe(
+        true
+      );
+    }
+  });
+
+  it("pulls the popup close button off the card corner so it stops covering the channel name", () => {
+    const closeButton = ruleBlocks(source, ":deep(.maplibregl-popup-close-button)").join(" ");
+    expect(closeButton).toContain("top:");
+    expect(closeButton).toContain("right:");
+    expect(closeButton).toContain("width:");
+    // 标题一侧留出让位空间，否则长通道名会钻到 × 底下
+    expect(hasRuleBlock(source, ":deep(.map-channel-card__head)", "padding-right:")).toBe(true);
+  });
+
+  it("replaces the UA focus ring with the project focus ring on the raw card buttons", () => {
+    // 这四颗是原生 <button>，不处理就是浏览器的 1px 默认焦点环（深色卡片上像没擦干净的描边）
+    expect(hasRuleBlock(source, ":deep(.map-channel-card__action:focus)", "outline: none")).toBe(true);
+    expect(hasRuleBlock(source, ":deep(.map-channel-card__action:focus-visible)", "outline: 2px solid var(--uvp-brand")).toBe(
+      true
+    );
+  });
+});
+
+describe("map live video card", () => {
+  it("keeps live video on the map instead of a half-screen modal", () => {
+    // ⛔ 别再退回 `a-modal` + 960px：那一屏正是"点了播放就看不见地图"，而看视频的人往往
+    //    还要在地图上找下一个点位。小窗形态（贴点位、随地图平移）才是这一屏该有的。
+    expect(source).not.toContain("map-video-modal");
+    expect(source).not.toContain('class="map-video-body"');
+    expect(source).toContain('class="map-video-card"');
+  });
+
+  it("teleports the card into the popup instead of stuffing DOM into MapLibre by hand", () => {
+    // MapLibre 只认 DOM 节点：直接把 PlayWindow 塞进 setDOMContent 会变成无主节点
+    // （props 不更新、也不会走 unmount ⇒ 播放器实例泄漏）。
+    expect(hasMarkup(source, '<Teleport v-if="videoPopupHost" :to="videoPopupHost">')).toBe(true);
+  });
+
+  it("keeps the disabled look on the two solid actions in dark mode too", () => {
+    // ⛔ `:deep(.map-dark .x--play)` 与 `:deep(.x--play:disabled)` 同优先级（都是 3 个类级
+    //    选择器），深色块写在后面 ⇒ 深色实心蓝会把浅色禁用灰盖掉，
+    //    表现是"离线/无权限时按钮还是亮蓝色、看着能点"。
+    for (const variant of ["play", "console"]) {
+      expect(hasRuleBlock(source, `:deep(.map-dark .map-channel-card__action--${variant}:disabled)`, "color: #5c6675")).toBe(
+        true
+      );
+    }
+    for (const variant of ["console", "stop"]) {
+      expect(hasRuleBlock(source, `:deep(.map-channel-card__action--${variant})`, "color:", "background:")).toBe(true);
+    }
   });
 });

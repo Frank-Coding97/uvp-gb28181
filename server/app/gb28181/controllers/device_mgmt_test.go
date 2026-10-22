@@ -121,6 +121,7 @@ func newDeviceMgmtRouter(t *testing.T, middlewares ...gin.HandlerFunc) (*gin.Eng
 		gr.GET("/map/markers", mc.Markers)
 		gr.GET("/map/clusters", mc.Clusters)
 		gr.GET("/map/no-coord-count", mc.NoCoordCount)
+		gr.GET("/map/channel-tree", mc.ChannelTree)
 		gr.GET("/map/trajectory", mc.Trajectory)
 		gr.GET("/map/center", mc.GetCenter)
 		gr.PUT("/map/center", mc.SetCenter)

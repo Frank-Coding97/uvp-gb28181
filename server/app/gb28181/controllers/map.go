@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -220,6 +221,162 @@ func (mc *MapController) Markers(c *gin.Context) {
 		out = append(out, marker)
 	}
 	mc.Success(c, gin.H{"list": out, "total": len(out)})
+}
+
+// ── 可定位通道树 ────────────────────────────────────────────────────────
+
+// mapChannelTreeLimit 是「可定位通道树」单次返回的通道上限。
+//
+// ⛔ 为什么是"一次取上限"而不是分页：这棵树是**点位目录** —— 点一下就要飞到那个点，
+//   分页会让"某台设备在第 3 页"变成无法表达的状态（树没有页码这个位置）。
+//   而这个规模本来就有限：地图一次也只画得下几百个点（markers 默认 500 / 上限 1000）。
+// ⛔ 超限必须回 `truncated=true` 让前端显式提示，**不能静默截断** —— 那等于
+//   "某台执法仪在地图上永远找不到"，且界面上看不出任何异常。
+const mapChannelTreeLimit = 1000
+
+type mapTreeChannel struct {
+	ID        uint   `json:"id"`
+	ChannelID string `json:"channelId"`
+	// DeviceID 与 markerVO 同义：点卡片上的「播放视频」要用 (设备编码, 通道编码) 两元组。
+	DeviceID string `json:"deviceId"`
+	Name     string `json:"name"`
+	// Alias 与列表页同口径：展示名优先 alias，前端 displayName 统一兜底。
+	Alias          string  `json:"alias"`
+	Status         int8    `json:"status"`
+	Longitude      float64 `json:"longitude"`
+	Latitude       float64 `json:"latitude"`
+	PositionSource string  `json:"positionSource"`
+}
+
+type mapTreeDevice struct {
+	DeviceID string           `json:"deviceId"`
+	Name     string           `json:"name"`
+	Alias    string           `json:"alias"`
+	Online   bool             `json:"online"`
+	Channels []mapTreeChannel `json:"channels"`
+}
+
+// ChannelTree 返回「有坐标的通道」按设备分组的两级树（地图视角的左侧面板）。
+//
+// ⛔ 必须来自库查询，不能拿 /map/markers 的结果反推：markers 是**按视野**过滤的，
+// 用它建树的话用户一拖地图，左侧就凭空出现/消失一批设备，树完全无法当索引用。
+// ⛔ 过滤口径与 markers **逐条一致**（同一个 applyMapFilters + applyMapDirectoryFilter），
+// 否则会出现本仓最忌讳的"地图上有点、左侧树里没有"两套口径。
+func (mc *MapController) ChannelTree(c *gin.Context) {
+	db := mc.db()
+	if db == nil {
+		mc.FailAndAbort(c, "DB 未就绪", nil)
+		return
+	}
+	// 视野框**不参与**：树是全局索引，跟当前位置无关。
+	base := db.WithContext(c.Request.Context()).Model(&gbmodels.GbChannel{}).
+		Scopes(datascope.VisibilityScope(c, "gb_channel.owner_dept_id", "gb_channel.device_id"))
+	base = applyMapFilters(c, db, base)
+	base, err := applyMapDirectoryFilter(c, db, base)
+	if err != nil {
+		mc.Fail(c, "目录筛选参数错误", err, 400)
+		return
+	}
+
+	var channels []gbmodels.GbChannel
+	if err := base.Session(&gorm.Session{}).
+		Where("gb_channel.latitude != 0 AND gb_channel.longitude != 0").
+		Order("gb_channel.device_id ASC, gb_channel.name ASC, gb_channel.id ASC").
+		Limit(mapChannelTreeLimit + 1).Find(&channels).Error; err != nil {
+		mc.FailAndAbort(c, "查询可定位通道失败", err)
+		return
+	}
+	truncated := len(channels) > mapChannelTreeLimit
+	if truncated {
+		channels = channels[:mapChannelTreeLimit]
+	}
+
+	// 未设置位置的通道数：与上面的树**共用同一个 base 查询**（只翻了个条件），
+	// 这样"树里 12 个 + 提示 3 个 = 范围内 15 个"永远对得上。
+	// ⛔ 不要在前端再调一次 /map/no-coord-count 拼起来 —— 两次查询之间数据会变。
+	var noCoordCount int64
+	if err := base.Session(&gorm.Session{}).
+		Where("gb_channel.latitude = 0 OR gb_channel.longitude = 0").
+		Count(&noCoordCount).Error; err != nil {
+		mc.FailAndAbort(c, "统计未定位通道失败", err)
+		return
+	}
+
+	type deviceInfo struct {
+		Name   string
+		Alias  string
+		Status int8
+	}
+	infos := map[string]deviceInfo{}
+	codes := make([]string, 0, 8)
+	seen := map[string]bool{}
+	for _, channel := range channels {
+		if !seen[channel.DeviceID] {
+			seen[channel.DeviceID] = true
+			codes = append(codes, channel.DeviceID)
+		}
+	}
+	if len(codes) > 0 {
+		var devices []gbmodels.GbDevice
+		if err := db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).
+			Select("device_id", "name", "alias", "status").
+			Where("device_id IN ?", codes).Find(&devices).Error; err != nil {
+			mc.FailAndAbort(c, "查询通道所属设备失败", err)
+			return
+		}
+		for _, device := range devices {
+			infos[device.DeviceID] = deviceInfo{Name: device.Name, Alias: device.Alias, Status: device.Status}
+		}
+	}
+
+	groups := make([]mapTreeDevice, 0, len(codes))
+	index := make(map[string]int, len(codes))
+	for _, channel := range channels {
+		position, ok := index[channel.DeviceID]
+		if !ok {
+			info := infos[channel.DeviceID]
+			groups = append(groups, mapTreeDevice{
+				DeviceID: channel.DeviceID,
+				Name:     info.Name,
+				Alias:    info.Alias,
+				Online:   info.Status == gbmodels.DeviceStatusOnline,
+			})
+			position = len(groups) - 1
+			index[channel.DeviceID] = position
+		}
+		groups[position].Channels = append(groups[position].Channels, mapTreeChannel{
+			ID:             channel.ID,
+			ChannelID:      channel.ChannelID,
+			DeviceID:       channel.DeviceID,
+			Name:           channel.Name,
+			Alias:          channel.Alias,
+			Status:         channel.Status,
+			Longitude:      channel.Longitude,
+			Latitude:       channel.Latitude,
+			PositionSource: channel.PositionSource,
+		})
+	}
+	// 按展示名排序：通道在库里是按 device_id（一串数字）排的，直接给用户看等于没排序。
+	sort.SliceStable(groups, func(i, j int) bool {
+		return mapTreeDeviceLabel(groups[i]) < mapTreeDeviceLabel(groups[j])
+	})
+
+	mc.Success(c, gin.H{
+		"devices":      groups,
+		"total":        len(channels),
+		"truncated":    truncated,
+		"noCoordCount": noCoordCount,
+	})
+}
+
+func mapTreeDeviceLabel(device mapTreeDevice) string {
+	if alias := strings.TrimSpace(device.Alias); alias != "" {
+		return alias
+	}
+	if name := strings.TrimSpace(device.Name); name != "" {
+		return name
+	}
+	return device.DeviceID
 }
 
 // Clusters 服务端 cluster(简化实现:zoom < 12 时按网格分组)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch, onUnmounted } from "vue";
+import { computed, createVNode, nextTick, onMounted, reactive, ref, render, shallowRef, watch, onUnmounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Message, Modal } from "@arco-design/web-vue";
 import maplibregl, { LngLatBounds, Marker as MapLibreMarker, type Map as MapLibreMap } from "maplibre-gl";
@@ -9,6 +9,7 @@ import {
   ArrowLeft,
   BarChart3,
   Copy,
+  Crosshair,
   Eye,
   Grid2X2,
   History,
@@ -29,6 +30,7 @@ import {
   Video,
   X,
   Plus,
+  Cctv,
   Camera,
   Bell
 } from "@lucide/vue";
@@ -74,6 +76,8 @@ import {
   type DirectoryNode,
   type MapCluster,
   type MapMarker,
+  type MapTreeChannel,
+  type MapTreeDevice,
   type OnlineStatus,
   type ProtocolOverride,
   type TimelineSlot
@@ -96,6 +100,7 @@ import SnapshotConfigPanel from "./SnapshotConfigPanel.vue";
 import { buildFactChannelOptions } from "./deviceFactChannel";
 import { createMaintenanceActivity, isRebootPending, isUpgradeUnresolved } from "./maintenanceActivity";
 import DirectoryPanel from "./components/DirectoryPanel.vue";
+import MapChannelTree, { type MapScopeSelection } from "./components/MapChannelTree.vue";
 import TrafficTrend from "./components/TrafficTrend.vue";
 import ViewerTable from "./components/ViewerTable.vue";
 import { cloudRecordingStateMeta, mergeCloudRecordingState } from "./cloudRecordingState";
@@ -120,6 +125,7 @@ import {
   findDirectoryNode,
   normalizeDirectoryView,
   selectDirectory,
+  switchDirectoryView,
   type DirectoryState
 } from "./directoryState";
 import { normalizeProtocolOverride, protocolOverrideAfterSave } from "./protocolOverrideState";
@@ -190,6 +196,31 @@ const selectedDirectory = computed(() =>
   navigationMode.value === "directory" ? selectedDirectories.value[directoryState.value.view] : null
 );
 const directoryPanelRef = ref<InstanceType<typeof DirectoryPanel> | null>(null);
+const mapChannelTreeRef = ref<InstanceType<typeof MapChannelTree> | null>(null);
+/** 从左侧通道树点过来、正在地图上高亮的那一路通道。 */
+const mapSelectedChannelId = ref<number | null>(null);
+/**
+ * 地图左栏「范围」下拉的值，形如 `department|<key>`。
+ *
+ * 刻意从 directoryState 派生而不是另存一份：范围一改，markers / clusters /
+ * 可定位通道树 三处必须同时收窄，多存一份状态就迟早漂成两套口径。
+ */
+const mapScopeValue = computed(() => {
+  const view = directoryState.value.view;
+  const node = selectedDirectories.value[view];
+  // 行政区划也算（它同样能筛地图）；下拉里没有对应项时由 mapScopeLabel 补一项。
+  return node ? `${view}|${node.key}` : "";
+});
+/**
+ * 范围的可读名。行政区划也能筛地图，但下拉里只放 部门/业务分组（行政区划层级深、条目多），
+ * 所以行政区划生效时靠这个标签在下拉里补一项，避免"下拉写着全部、地图却只显示一个区"。
+ */
+const mapScopeLabel = computed(() => {
+  const node = selectedDirectory.value;
+  if (!node) return "";
+  const viewLabel = { administrative: "行政区划", department: "部门", business: "业务分组" }[directoryState.value.view];
+  return `${viewLabel} / ${node.name}`;
+});
 const drawerVisible = ref(false);
 const subscriptionDialogVisible = ref(false);
 const subscriptionDevice = ref<DeviceVO | null>(null);
@@ -261,15 +292,12 @@ const mapZoom = ref(10);
 const mapMinZoom = 5;
 const mapMaxZoom = 22;
 const mapBaseStyle = ref<"light" | "dark">(darkMode.value ? "dark" : "light");
+// 底图**不再提供手动切换**（2026-10-22 决定暂时去掉）：两套 JSON 都是 OpenFreeMap 的矢量瓦片
+// （道路/建筑/注记），只差配色、没有卫星影像，留着下拉容易被当成"能切卫星"。
+// 现在底图只跟随系统主题：watch(darkMode) → reloadMapStyle()。
 const mapSearchQuery = ref("");
 // 单独画通道标记点的最小 zoom；低于它改用聚合气泡（两者互斥，见 renderMapOverlays）。
 const mapMarkerMinZoom = 14;
-// 点击聚合后**至少**要放大到的层级。必须严格高于 mapMarkerMinZoom。
-//
-// ⛔ 别按"当前 zoom + 2"算:从 zoom 10 出发只到 12，仍在气泡层 ——
-//    用户点一下跟没点一样(历史现象:"点了这个数字之后标记点就没了")。
-// 下限抬到标记点层，保证一次点击必定展开成通道标记点。
-const mapClusterExpandMinZoom = mapMarkerMinZoom + 1;
 // 单点（或所有点重合）时 fitBounds 会把缩放一路顶到 mapMaxZoom(22)，直接落到街景级。
 // 给个"街区级"上限，同时必须高于 mapMarkerMinZoom，否则 fit 完反而看不到标记点。
 const mapSinglePointFitZoom = 16;
@@ -299,9 +327,18 @@ const mapCursorLatitude = ref(39.9093);
 /** 当前打开的地图卡片气泡。⛔ 不是 ref：它是 MapLibre 的实例对象，不需要响应式代理。 */
 let mapPopup: maplibregl.Popup | null = null;
 
-const videoVisible = ref(false);
+/**
+ * 实时视频小窗的挂载点：MapLibre popup 里那个容器 div。
+ * ⛔ 必须是 `shallowRef`：这张卡片是 **Teleport 进 popup 的**，普通 `ref` 会把 DOM
+ *    节点包成响应式代理，MapLibre 拿代理节点做 appendChild/remove 时很容易出现
+ *    "父节点不认识这个子节点"的怪状态（弹窗关不掉、播放器实例泄漏）。
+ */
+const videoPopupHost = shallowRef<HTMLElement | null>(null);
+/** 当前视频小窗的 popup。⛔ 同 mapPopup：MapLibre 实例不进响应式。 */
+let mapVideoPopup: maplibregl.Popup | null = null;
 const videoLoading = ref(false);
-const videoTarget = ref<{ deviceId: string; channelId: string; name: string } | null>(null);
+/** `status` 一起存：小窗里要按在线状态决定给不给「播放控制台」。 */
+const videoTarget = ref<{ id: number; deviceId: string; channelId: string; name: string; status: number } | null>(null);
 const videoPlaying = ref<PlayResult | null>(null);
 
 const trajectoryVisible = ref(false);
@@ -323,6 +360,13 @@ const trajectorySpeed = ref(1);
 const trajectoryCurrentTime = ref("");
 
 const mapCenterSaving = ref(false);
+/**
+ * 「设为默认中心」是**两步**：先进入选点态（地图上点一下挑位置），确认后才落库。
+ * 早先是"点按钮＝把当前视野存下来"，语义和按钮名对不上 —— 用户以为是在地图上挑点，
+ * 结果存的是他恰好拖到的地方。缩放仍然沿用当前级别（默认视野本来就是"一块区域"）。
+ */
+const mapCenterPicking = ref(false);
+const mapCenterPick = ref<{ longitude: number; latitude: number } | null>(null);
 
 const locationPickerVisible = ref(false);
 const locationPickerTarget = ref<{ id: number; name: string; longitude: number; latitude: number } | null>(null);
@@ -427,6 +471,16 @@ let mapMouseMoveHandler: ((event: maplibregl.MapMouseEvent) => void) | null = nu
 let mapAutoFitPending = true;
 // 底图加载 12s 兜底定时器句柄(window.setTimeout 返回 number),销毁地图时必须清除,防跨实例污染
 let mapFirstRenderTimer: number | null = null;
+// 切换底图时"揭遮罩"的兜底定时器（见 reloadMapStyle），同样要在销毁时清掉
+let mapStyleSwitchTimer: number | null = null;
+/**
+ * 「选取默认中心」点地图取坐标的监听句柄。
+ * ⛔ 这个监听是**常驻**的（attachMapLifecycle 里挂一次），进出选点态只翻标志位，
+ *    不去 on/off 增删 —— 增删会和 destroyMap 的清理抢时序，出现"销毁后回调还在跑"。
+ */
+let mapClickHandler: ((event: maplibregl.MapMouseEvent) => void) | null = null;
+/** 选点针：跟着用户点到的位置走。退出选点态必须摘掉，否则下次进来会留着上一次的针。 */
+let mapCenterPickMarker: MapLibreMarker | null = null;
 // 地图数据请求代次:响应返回时与当前代次不一致则丢弃
 let mapDataSeq = 0;
 const mapMarkers = new Map<number, MapLibreMarker>();
@@ -574,18 +628,7 @@ watch(viewMode, mode => {
 });
 watch(darkMode, value => {
   mapBaseStyle.value = value ? "dark" : "light";
-  if (!mapInstance) return;
-  mapInstance.setStyle(currentMapStyleUrl());
-  mapReady.value = false;
-  mapFirstRender.value = false;
-  mapInstance.once("style.load", () => {
-    mapReady.value = true;
-    mapInstance?.resize();
-    renderMapOverlays();
-  });
-  mapInstance.once("idle", () => {
-    mapFirstRender.value = true;
-  });
+  reloadMapStyle();
 });
 watch(statusFilter, () => {
   if (restoringDeviceListSnapshot) return;
@@ -903,6 +946,66 @@ async function loadPtzTypeDict() {
   }
 }
 
+/**
+ * 地图左栏「范围」下拉：复用列表页同一份目录状态。
+ *
+ * ⛔ 不另起一套 mapScope 状态 —— markers/clusters/通道树 都从 directoryQuery 取范围，
+ *    多一份状态就一定会有"树里收窄了、地图没变"的时刻。
+ */
+function applyMapScope(payload: MapScopeSelection | null) {
+  if (!canViewDevices.value) return;
+  navigationMode.value = "directory";
+  ++directoryDeviceRequestVersion;
+  selectedDevice.value = null;
+  selectedDeviceSummary.value = null;
+  deviceIdFilter.value = "";
+  if (!payload) {
+    clearDirectorySelection();
+    return;
+  }
+  directoryState.value = selectDirectory(switchDirectoryView(directoryState.value, payload.view), payload.node.key);
+  selectedDirectories.value = { ...selectedDirectories.value, [payload.view]: payload.node };
+  changeChannelScope();
+}
+
+/**
+ * 左栏点通道 → 飞到那个点，并弹出点位卡片（播放 / 轨迹 / 改位置都在卡片上）。
+ *
+ * ⛔ 坐标必须由通道自带：markers 是**按视野**查的，视野外的通道在 markers 里根本不存在，
+ *    只靠 openMarkerCard 回查详情会直接 return ⇒ "点了没反应"。
+ * ⛔ 缩放只往上抬到单点档，不要无条件跳到 16 —— 用户已经在 18 级看清门牌时，点一下反而被拉远。
+ */
+function locateMapChannel(channel: MapTreeChannel) {
+  if (!mapInstance) return;
+  mapInstance.flyTo({
+    center: [channel.longitude, channel.latitude],
+    zoom: Math.max(mapInstance.getZoom(), mapSinglePointFitZoom),
+    essential: true
+  });
+  openMarkerCard(
+    {
+      id: channel.id,
+      channelId: channel.channelId,
+      deviceId: channel.deviceId,
+      name: channel.name,
+      status: channel.status
+    },
+    { longitude: channel.longitude, latitude: channel.latitude }
+  );
+}
+
+/** 左栏点设备：只有一个点位就直接飞过去，多个就框住它们（执法仪通常只有一路）。 */
+function focusMapDevice(device: MapTreeDevice) {
+  if (!mapInstance || !device.channels.length) return;
+  if (device.channels.length === 1) {
+    locateMapChannel(device.channels[0]);
+    return;
+  }
+  const bounds = new LngLatBounds();
+  device.channels.forEach(channel => bounds.extend([channel.longitude, channel.latitude]));
+  mapInstance.fitBounds(bounds, { padding: 80, maxZoom: mapSinglePointFitZoom, essential: true });
+}
+
 function onDirectorySelect(node: DirectoryNode) {
   if (!canViewDevices.value) return;
   navigationMode.value = "directory";
@@ -1050,17 +1153,44 @@ function resetMapView() {
   });
 }
 
-function switchMapBaseStyle(value: "light" | "dark") {
-  mapBaseStyle.value = value;
+/**
+ * 换底图 = `setStyle` + 把盖在地图上的「正在加载地图」遮罩收掉。
+ *
+ * 触发方只有一个：`watch(darkMode)`（底图跟系统主题走）。手动切换下拉已于 2026-10-22 去掉。
+ *
+ * ⛔⛔ 这里最容易漏的一步：`style.load` 只说明**样式表到位**，而遮罩的显示条件是
+ *   `!mapReady || !mapFirstRender`；`mapFirstRender` 原本只有 `idle` 事件才会置 true。
+ *   早先这一版只挂了 `style.load` ⇒ 换完底图 `mapFirstRender` 永远是 false，
+ *   整块地图被 `.map-state`（`inset:0` + 不透明底）盖住，看起来就是"切换不生效"。
+ * ⛔ 再加一个兜底定时器：底图瓦片服务慢或不可达时 `idle` 可能很久不来，不能让遮罩一直挂着。
+ * ⚠️ `renderMapOverlays()` 只在 `style.load` 时跑一次（重建标记点）；`idle` / 兜底只负责揭遮罩，
+ *    重复调用会把标记点再画一遍。
+ */
+function reloadMapStyle() {
   if (!mapInstance) return;
   mapInstance.setStyle(currentMapStyleUrl());
   mapReady.value = false;
   mapFirstRender.value = false;
-  mapInstance.once("style.load", () => {
+
+  let settled = false;
+  const revealMap = () => {
+    if (settled) return;
+    settled = true;
+    if (mapStyleSwitchTimer !== null) {
+      window.clearTimeout(mapStyleSwitchTimer);
+      mapStyleSwitchTimer = null;
+    }
     mapReady.value = true;
+    mapFirstRender.value = true;
     mapInstance?.resize();
+  };
+  mapInstance.once("style.load", () => {
+    revealMap();
     renderMapOverlays();
   });
+  mapInstance.once("idle", revealMap);
+  // 4s 足够本地样式表（≈120KB）走完一轮；等不到就直接揭遮罩，宁可短暂空白也不要一直挂着。
+  mapStyleSwitchTimer = window.setTimeout(revealMap, 4000);
 }
 
 function searchMapCameras() {
@@ -1071,7 +1201,11 @@ function searchMapCameras() {
 }
 
 function removeMapMarkers() {
-  mapMarkers.forEach(marker => marker.remove());
+  mapMarkers.forEach(marker => {
+    const icon = marker.getElement().querySelector(".map-channel-pip");
+    if (icon) render(null, icon);
+    marker.remove();
+  });
   mapMarkers.clear();
   mapClusters.forEach(marker => marker.remove());
   mapClusters.clear();
@@ -1083,15 +1217,26 @@ function destroyMap() {
     clearTimeout(mapFirstRenderTimer);
     mapFirstRenderTimer = null;
   }
+  if (mapStyleSwitchTimer !== null) {
+    clearTimeout(mapStyleSwitchTimer);
+    mapStyleSwitchTimer = null;
+  }
   // 使在途的地图数据请求响应失效,避免旧响应覆盖当前视图
   mapDataSeq += 1;
   if (mapInstance && mapMoveHandler) mapInstance.off("moveend", mapMoveHandler);
   if (mapInstance && mapMouseMoveHandler) mapInstance.off("mousemove", mapMouseMoveHandler);
+  if (mapInstance && mapClickHandler) mapInstance.off("click", mapClickHandler);
   mapMoveHandler = null;
   mapMouseMoveHandler = null;
+  mapClickHandler = null;
   closeMarkerCard();
+  // 视频小窗也挂在 popup 上，地图没了它就是孤儿：先停流再销毁地图，
+  // 否则 PlayWindow 被连 DOM 一起扔掉，播放器实例不会走 onBeforeUnmount 的释放逻辑。
+  void closeVideoCard();
   stopTrajectoryPlayback();
   trajectoryPlayMarker = null;
+  // 选点态跨实例不保留：reset 掉状态、摘掉针、恢复光标（否则重建后的地图还是十字准星）
+  stopMapCenterPicking();
   removeMapMarkers();
   mapInstance?.remove();
   mapInstance = null;
@@ -1100,27 +1245,21 @@ function destroyMap() {
   mapError.value = "";
 }
 
-/**
- * 点击聚合：把这一簇放大到"里面的通道都画成标记点"。
- *
- * 两步走，缺一不可：
- *   ① 先用簇的包围盒问相机"刚好框住它需要多大缩放" —— 只飞到质心的话，
- *      散在质心四周的点会跑出视野，看起来就是"点了然后点没了"；
- *   ② 再把结果抬到 `mapClusterExpandMinZoom` 以上 —— 只按"当前 zoom + 固定档位"算，
- *      从低层级出发会停在气泡层，用户点一下跟没点一样（历史现象：
- *      "点击这个数字之后标记点就没了"）。
- * ⚠️ 已知取舍：点散布过广时"框住它"的缩放低于标记点层，抬上去会让边缘的点出视野。
- *    这一档不引入蜘蛛网展开（spiderfy），够用为止。
- */
+/** 聚合点击只放大地图；同坐标聚合进入最大层级展示独立标记。 */
 function expandCluster(cluster: MapCluster) {
   if (!mapInstance) return;
+  closeMarkerCard();
   const bounds = new LngLatBounds([cluster.minLng, cluster.minLat], [cluster.maxLng, cluster.maxLat]);
-  const framed = mapInstance.cameraForBounds(bounds, { padding: 80 })?.zoom;
-  // 包围盒退化（所有点重合）时 cameraForBounds 会顶到 maxZoom，拿不到就按 maxZoom 算
-  const target = typeof framed === "number" && Number.isFinite(framed) ? framed : mapMaxZoom;
+  const framed = mapInstance.cameraForBounds(bounds, { padding: 80 });
+  const samePosition = cluster.minLat === cluster.maxLat && cluster.minLng === cluster.maxLng;
+  const targetZoom = framed?.zoom ?? mapMaxZoom;
+  // 分散的大范围聚合先框住成员；不能因相机已经框住而反复停在原层级。
+  const zoom = samePosition
+    ? mapMaxZoom
+    : Math.min(mapMaxZoom, targetZoom > mapInstance.getZoom() + 0.5 ? targetZoom : mapInstance.getZoom() + 2);
   mapInstance.flyTo({
-    center: [cluster.centerLng, cluster.centerLat],
-    zoom: Math.min(mapMaxZoom, Math.max(target, mapClusterExpandMinZoom)),
+    center: samePosition ? [cluster.centerLng, cluster.centerLat] : (framed?.center ?? [cluster.centerLng, cluster.centerLat]),
+    zoom,
     essential: true
   });
 }
@@ -1137,7 +1276,10 @@ function createClusterElement(cluster: MapCluster) {
   element.style.setProperty("--cluster-rate", `${Math.round(cluster.onlineRate * 100)}%`);
   element.title = `${cluster.count} 路通道 · 在线 ${cluster.onlineCount}`;
   element.setAttribute("aria-label", element.title);
-  element.addEventListener("click", () => expandCluster(cluster));
+  element.addEventListener("click", event => {
+    event.stopPropagation();
+    expandCluster(cluster);
+  });
   return element;
 }
 
@@ -1150,17 +1292,23 @@ function createClusterElement(cluster: MapCluster) {
  */
 type MarkerPoint = Pick<MapMarker, "id" | "channelId" | "deviceId" | "name" | "status">;
 
-function createMarkerElement(marker: MarkerPoint) {
+function createMarkerElement(marker: MarkerPoint, offset?: [number, number]) {
   const element = document.createElement("button");
   element.type = "button";
   element.className = `map-channel-marker${marker.status === 1 ? " online" : ""}`;
   element.title = `${displayName(marker)} · ${marker.channelId}`;
   element.setAttribute("aria-label", element.title);
-  element.innerHTML = '<span class="map-channel-pip"></span>';
+  const icon = document.createElement("span");
+  icon.className = "map-channel-pip";
+  render(createVNode(Cctv, { size: 15, strokeWidth: 2.1, "aria-hidden": "true" }), icon);
+  element.append(icon);
   // 点标记点不再直接开详情抽屉：先弹一张业务卡片，播视频/看轨迹/改位置都在卡片上。
   // ⛔ 不要改成"直接播放" —— 同一台执法仪既有实时画面又有轨迹，"点一下到底干什么"
   //    必须由用户在卡片上选，否则想查轨迹的人会先被拉起一路实时流。
-  element.addEventListener("click", () => openMarkerCard(marker));
+  element.addEventListener("click", event => {
+    event.stopPropagation();
+    openMarkerCard(marker, undefined, offset);
+  });
   return element;
 }
 
@@ -1172,6 +1320,7 @@ function markerCardDetail(marker: MarkerPoint): MapMarker | null {
 function closeMarkerCard() {
   mapPopup?.remove();
   mapPopup = null;
+  mapSelectedChannelId.value = null;
 }
 
 /**
@@ -1179,15 +1328,23 @@ function closeMarkerCard() {
  *
  * 用 MapLibre Popup 而不是自绘浮层：气泡会跟着地图自动平移，不需要在 moveend 里
  * 手算屏幕坐标；关掉地图（destroyMap）时也会随地图一起销毁。
+ *
+ * `position` 用于"从左侧通道树点过来"的通道：它的坐标可能不在当前视野的 markers 列表里
+ * （markers 按视野查询），回查不到就会直接 return ⇒ 表现为"点了没反应"。
  */
-function openMarkerCard(marker: MarkerPoint) {
+function openMarkerCard(marker: MarkerPoint, position?: { longitude: number; latitude: number }, offset?: [number, number]) {
   if (!mapInstance) return;
   const detail = markerCardDetail(marker);
-  const longitude = detail?.longitude;
-  const latitude = detail?.latitude;
+  const longitude = position?.longitude ?? detail?.longitude;
+  const latitude = position?.latitude ?? detail?.latitude;
   if (longitude === undefined || latitude === undefined) return;
 
   closeMarkerCard();
+  // 视频小窗与卡片是互斥的两块浮层：点另一个点位时它必须让位（并停掉那一路流），
+  // 否则两张 popup 会叠在同一片地图上，还白烧一路实时流。
+  void closeVideoCard();
+  // 高亮状态放在这里而不是 locateMapChannel：地图上直接点标记点同样要能在左栏亮起来。
+  mapSelectedChannelId.value = marker.id;
 
   const card = document.createElement("div");
   card.className = "map-channel-card";
@@ -1213,8 +1370,13 @@ function openMarkerCard(marker: MarkerPoint) {
   const actions = document.createElement("div");
   actions.className = "map-channel-card__actions";
 
+  // ⛔ 离线通道不给点「播放视频」：设备侧根本不推流，点了只会白等到点播超时再报错。
+  //    无权限与离线是两种原因，title 要分开说，否则用户会去要权限。
+  const playDisabled = !canStartPlayback.value || marker.status !== 1;
+  const playTitle = !canStartPlayback.value ? "无播放权限" : marker.status === 1 ? "" : "通道离线，无法播放";
+
   const actionConfigs: Array<{ key: string; label: string; disabled?: boolean; title?: string }> = [
-    { key: "play", label: "播放视频", disabled: !canStartPlayback.value, title: canStartPlayback.value ? "" : "无播放权限" },
+    { key: "play", label: "播放视频", disabled: playDisabled, title: playTitle },
     { key: "trajectory", label: "查看轨迹" },
     { key: "location", label: "设置位置", disabled: !canEditChannel.value, title: canEditChannel.value ? "" : "无通道编辑权限" },
     { key: "detail", label: "通道详情" }
@@ -1227,9 +1389,10 @@ function openMarkerCard(marker: MarkerPoint) {
     button.disabled = !!config.disabled;
     if (config.title) button.title = config.title;
     button.addEventListener("click", () => {
-      if (config.key === "play") void playFromMap(marker);
-      if (config.key === "trajectory") openTrajectory(marker, detail);
-      if (config.key === "location") openLocationPickerForMarker(marker, detail);
+      // 坐标直接从小窗的锚点传下去：卡片本身就贴在点位上，不必再回查 markers 列表。
+      if (config.key === "play") void playFromMap(marker, { longitude, latitude });
+      if (config.key === "trajectory") openTrajectory(marker, detail, position);
+      if (config.key === "location") openLocationPickerForMarker(marker, detail, position);
       if (config.key === "detail") {
         closeMarkerCard();
         void openChannel(marker);
@@ -1239,7 +1402,7 @@ function openMarkerCard(marker: MarkerPoint) {
   });
 
   card.append(head, meta, actions);
-  mapPopup = new maplibregl.Popup({ closeButton: true, offset: 16, maxWidth: "280px" })
+  mapPopup = new maplibregl.Popup({ closeButton: true, offset: offset ? [offset[0], offset[1] - 16] : 16, maxWidth: "280px" })
     .setLngLat([longitude, latitude])
     .setDOMContent(card)
     .addTo(mapInstance);
@@ -1251,7 +1414,8 @@ function renderMapOverlays() {
   // 底图 setStyle 会把 source/layer 全部清掉（轨迹折线也在其中），
   // 这里按需补画。⛔ 不能放在函数末尾：下面 zoom 低于阈值时是提前 return 的。
   restoreTrajectoryOverlay();
-  // 两种呈现**互斥**：低于阈值用聚合气泡，达到阈值换成单个通道标记点。
+  // 两种呈现**互斥**：低于阈值用服务端聚合，达到阈值后按屏幕距离画通道点或重叠组。
+  // 最大层级不再保留聚合，重叠通道只做屏幕偏移，真实坐标保持不变。
   // ⛔ 不要让它们同时画 —— 历史上聚合气泡是无条件渲染、标记点按 zoom 渲染，
   //    于是 zoom≥阈值 时同一批通道会同时出现"气泡 N"和 N 个标记点，重叠在同一位置。
   if (mapZoom.value < mapMarkerMinZoom) {
@@ -1280,12 +1444,54 @@ function renderMapOverlays() {
     });
     return;
   }
-  markers.value.forEach(marker => {
-    mapMarkers.set(
-      marker.id,
-      new MapLibreMarker({ element: createMarkerElement(marker), anchor: "center" })
-        .setLngLat([marker.longitude, marker.latitude])
-        .addTo(mapInstance!)
+  // 按屏幕距离合并会遮挡彼此的标记；数量仍是通道数，不按设备或坐标去重。
+  const groups: Array<{ x: number; y: number; members: MapMarker[] }> = [];
+  [...markers.value]
+    .sort((a, b) => a.id - b.id)
+    .forEach(marker => {
+      const point = mapInstance!.project([marker.longitude, marker.latitude]);
+      const group = groups.find(item => Math.hypot(item.x - point.x, item.y - point.y) < 36);
+      if (group) group.members.push(marker);
+      else groups.push({ x: point.x, y: point.y, members: [marker] });
+    });
+  groups.forEach(({ x, y, members }) => {
+    const marker = members[0];
+    if (members.length === 1 || mapZoom.value >= mapMaxZoom - 0.01) {
+      const radius = Math.max(36, (members.length * 40) / (2 * Math.PI));
+      members.forEach((channel, index) => {
+        const point = mapInstance!.project([channel.longitude, channel.latitude]);
+        const angle = (index * 2 * Math.PI) / members.length - Math.PI / 2;
+        const offset: [number, number] =
+          members.length === 1 ? [0, 0] : [x + radius * Math.cos(angle) - point.x, y + radius * Math.sin(angle) - point.y];
+        mapMarkers.set(
+          channel.id,
+          new MapLibreMarker({
+            element: createMarkerElement(channel, members.length > 1 ? offset : undefined),
+            anchor: "center",
+            offset
+          })
+            .setLngLat([channel.longitude, channel.latitude])
+            .addTo(mapInstance!)
+        );
+      });
+      return;
+    }
+    const onlineCount = members.filter(item => item.status === 1).length;
+    const element = createClusterElement({
+      centerLat: marker.latitude,
+      centerLng: marker.longitude,
+      minLat: Math.min(...members.map(item => item.latitude)),
+      maxLat: Math.max(...members.map(item => item.latitude)),
+      minLng: Math.min(...members.map(item => item.longitude)),
+      maxLng: Math.max(...members.map(item => item.longitude)),
+      count: members.length,
+      onlineCount,
+      onlineRate: onlineCount / members.length,
+      single: null
+    });
+    mapClusters.set(
+      String(marker.id),
+      new MapLibreMarker({ element, anchor: "center" }).setLngLat([marker.longitude, marker.latitude]).addTo(mapInstance!)
     );
   });
 }
@@ -1293,44 +1499,136 @@ function renderMapOverlays() {
 // ── 从地图卡片起播 ─────────────────────────────────────────────────────
 
 /**
- * 卡片「播放视频」：起一路实时流，弹窗内嵌播放器。
+ * 卡片「播放视频」：在**地图上**贴一块实时视频小窗。
  *
- * ⛔ 关闭弹窗必须 stopPlay：实时流在 ZLM 侧是有生命的，只关 UI 会让流一直挂着，
+ * ⛔ 不要退回 `a-modal`：960px 的模态盖掉半块地图，而点视频的人往往正是一边看画面
+ *    一边在地图上找下一个点位。小窗贴着通道点位、跟着地图平移，才是这一屏该有的形态。
+ * ⛔ 关闭小窗必须 stopPlay：实时流在 ZLM 侧是有生命的，只关 UI 会让流一直挂着，
  *    按需直播关了的情况下尤其明显（设备侧收流不停、媒体节点 CPU 白烧）。
+ * ⛔ 离线通道不给起流：设备侧根本不推流，点了只会白等到点播超时再报错。
  */
-async function playFromMap(marker: MarkerPoint) {
+async function playFromMap(marker: MarkerPoint, position?: { longitude: number; latitude: number }) {
   if (!canStartPlayback.value) {
     Message.warning("没有播放权限");
+    return;
+  }
+  if (marker.status !== 1) {
+    Message.warning("通道离线，无法播放");
     return;
   }
   if (!marker.deviceId) {
     Message.error("缺少设备编码，无法点播");
     return;
   }
+  const detail = markerCardDetail(marker);
+  const longitude = position?.longitude ?? detail?.longitude;
+  const latitude = position?.latitude ?? detail?.latitude;
+  if (longitude === undefined || latitude === undefined) {
+    Message.warning("该通道没有坐标，无法定位到地图上");
+    return;
+  }
+
   closeMarkerCard();
-  await stopVideoStream();
-  videoTarget.value = { deviceId: marker.deviceId, channelId: marker.channelId, name: displayName(marker) };
-  videoVisible.value = true;
+  openVideoCard(marker, { longitude, latitude });
   videoLoading.value = true;
   try {
     const res = await startPlay(marker.deviceId, marker.channelId);
     if (res.code !== 0) {
       Message.error(res.message || "点播失败");
-      videoVisible.value = false;
-      videoTarget.value = null;
+      void closeVideoCard();
       return;
     }
     videoPlaying.value = res.data;
   } catch (error: any) {
     Message.error(error?.message || "点播失败");
-    videoVisible.value = false;
-    videoTarget.value = null;
+    void closeVideoCard();
   } finally {
     videoLoading.value = false;
   }
 }
 
-/** 停掉当前弹窗里的流（不负责关 UI）。 */
+/**
+ * 把视频小窗挂到地图点位上（用 MapLibre Popup，随地图自动平移/销毁）。
+ *
+ * 卡片内容是**模板里 Teleport 进来的**：MapLibre 只认 DOM 节点，直接把 `PlayWindow`
+ * 这类 Vue 组件塞进 `setDOMContent` 会变成无主节点（拿不到 props 更新、不会走 unmount）。
+ */
+function openVideoCard(marker: MarkerPoint, position: { longitude: number; latitude: number }) {
+  if (!mapInstance) {
+    Message.warning("地图尚未加载完成");
+    return;
+  }
+  void closeVideoCard();
+  videoTarget.value = {
+    id: marker.id,
+    deviceId: marker.deviceId,
+    channelId: marker.channelId,
+    name: displayName(marker),
+    status: marker.status
+  };
+  const host = document.createElement("div");
+  host.className = "map-video-card-host";
+  videoPopupHost.value = host;
+  mapVideoPopup = new maplibregl.Popup({ closeButton: true, offset: 24, maxWidth: "304px" })
+    .setLngLat([position.longitude, position.latitude])
+    .setDOMContent(host)
+    .addTo(mapInstance);
+  mapVideoPopup.on("close", () => {
+    // 点 × 或地图自己把它关掉：此时 mapVideoPopup 还是它自己，交给 resetVideoCard 收尾。
+    // closeVideoCard 会先把 mapVideoPopup 置空再 remove，所以不会重复进来。
+    if (mapVideoPopup) void resetVideoCard();
+  });
+}
+
+/** 关掉视频小窗（含停流）。返回停流的 promise，给"要先停再开控制台"的调用方 await。 */
+function closeVideoCard(): Promise<void> {
+  const popup = mapVideoPopup;
+  mapVideoPopup = null;
+  popup?.remove();
+  return resetVideoCard();
+}
+
+/**
+ * 复位小窗状态并停流。
+ * ⛔ `stopVideoStream()` 在第一个 await 之前就把 `videoPlaying` 清空了，
+ *    所以这里 fire-and-forget 不会污染"下一个"小窗的流句柄。
+ */
+function resetVideoCard(): Promise<void> {
+  mapVideoPopup = null;
+  videoPopupHost.value = null;
+  videoLoading.value = false;
+  videoTarget.value = null;
+  return stopVideoStream();
+}
+
+/**
+ * 小窗上的「播放控制台」：交给全局播放控制台，小窗让位。
+ *
+ * ⛔ 必须先停小窗这一路流再开控制台：同一通道同时挂两路实时流，ZLM 侧会用同一个 SSRC
+ *    互相顶掉，表现是"刚打开控制台，小窗那路瞬间黑屏/花屏"，日志里两串 streamId 抢通道。
+ */
+async function openPlaybackConsoleFromMap() {
+  const target = videoTarget.value;
+  if (!target) return;
+  if (!canStartPlayback.value) {
+    Message.warning("没有播放权限");
+    return;
+  }
+  if (target.status !== 1) {
+    Message.warning("通道离线，无法播放");
+    return;
+  }
+  await closeVideoCard();
+  playbackConsole.open({
+    id: target.id,
+    channelId: target.channelId,
+    deviceId: target.deviceId,
+    name: target.name,
+    status: target.status
+  });
+}
+
+/** 停掉当前小窗里的流（不负责关 UI）。 */
 async function stopVideoStream() {
   const streamId = videoPlaying.value?.streamId;
   videoPlaying.value = null;
@@ -1341,12 +1639,6 @@ async function stopVideoStream() {
     // 停流失败不打断用户：流可能已被 ZLM 按需回收，这里只是兜底。
     console.warn("停流失败", error);
   }
-}
-
-async function closeVideoDialog() {
-  videoVisible.value = false;
-  videoTarget.value = null;
-  await stopVideoStream();
 }
 
 function onMapVideoError(message: string) {
@@ -1379,14 +1671,17 @@ function formatClock(iso: string): string {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
-function openTrajectory(marker: MarkerPoint, detail: MapMarker | null) {
+function openTrajectory(marker: MarkerPoint, detail: MapMarker | null, position?: { longitude: number; latitude: number }) {
   closeMarkerCard();
+  void closeVideoCard();
   trajectoryTarget.value = {
     id: marker.id,
     channelId: marker.channelId,
     deviceId: marker.deviceId,
     name: displayName(marker),
-    hasCoordinate: !!(detail?.longitude || detail?.latitude)
+    // 从左侧通道树点进来的通道可能不在当前视野的 markers 里（detail 为 null），
+    // 但它的坐标一定在 —— 不能因此提示"该通道没有坐标"。
+    hasCoordinate: position ? true : !!(detail?.longitude || detail?.latitude)
   };
   trajectoryVisible.value = true;
   trajectoryPoints.value = [];
@@ -1623,8 +1918,64 @@ async function applyDefaultMapCenter(): Promise<boolean> {
   }
 }
 
-/** 把当前地图中心保存为平台默认视野。 */
-async function saveCurrentMapCenter() {
+/**
+ * 选点态下"当前打算存哪个点"的展示文本。
+ * ⚠️ 不复用 `formatMapCenter`：那个带 `Z{zoom}`，而缩放是"跟着当前地图走"的，
+ *    选点过程中滚一下轮子数字就变，会让人以为选点被改掉了。
+ */
+const mapCenterPickText = computed(() => {
+  const pick = mapCenterPick.value;
+  return pick ? `${pick.longitude.toFixed(5)}, ${pick.latitude.toFixed(5)}` : "";
+});
+
+/**
+ * 把选点针摆到当前选中的坐标上（首次创建，之后只挪位置）。
+ *
+ * ⛔⛔ 水滴形状必须画在**内层元素**上，外层 `element` 只当定位壳子。
+ *   原因：MapLibre 靠 `.maplibregl-marker { position: absolute; top:0; left:0 }` 定位，
+ *   再往同一个元素上写 `transform: translate(x,y)` 挪位置。
+ *   一旦外层自己也写 `position`/`transform`（比如为了画旋转的水滴），就会把 MapLibre
+ *   那两条覆盖掉 —— 元素掉回普通文档流、被画布容器裁掉，**地图上什么都看不见**，
+ *   但提示条和坐标是正常的（2026-10-22 上线后老板截图就是"进了选点态却看不到点"）。
+ */
+function renderMapCenterPickMarker() {
+  if (!mapInstance || !mapCenterPick.value) return;
+  const lngLat: [number, number] = [mapCenterPick.value.longitude, mapCenterPick.value.latitude];
+  if (!mapCenterPickMarker) {
+    const element = document.createElement("div");
+    element.className = "map-center-pin";
+    element.setAttribute("aria-hidden", "true");
+    // 水滴用内联 SVG 画：CSS 拿 rotate + 单角不倒圆凑出来的"水滴"在 24px 下就是个圆疙瘩，
+    // 尖端还容易被抗锯齿吃掉。这里的 path **尖端精确落在 viewBox 底边 y=24**，
+    // 配合 anchor:"bottom" ⇒ 针尖 = 坐标点，不用再补偏移。
+    element.innerHTML =
+      '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false">' +
+      '<path class="map-center-pin__body" d="M12 1.5C8.05 1.5 4.85 4.7 4.85 8.65 4.85 14.1 12 24 12 24s7.15-9.9 7.15-15.35c0-3.95-3.2-7.15-7.15-7.15Z"/>' +
+      '<circle class="map-center-pin__dot" cx="12" cy="8.5" r="2.6"/>' +
+      "</svg>";
+    // ⛔⛔ **必须 `.setLngLat()` 在 `.addTo()` 之前**，而且这里不能拆成两句。
+    //   MapLibre 5.x 的 `addTo()` 会**立刻**跑一次 `Marker._update()`，`_update` 里第一件事就是
+    //   `smartWrap(this._lngLat, this._flatPos, ...)`。若此时 `_lngLat` 还是 undefined，就会抛
+    //   `TypeError: Cannot read properties of undefined (reading 'lng')`。
+    //   后果极具迷惑性：异常发生在 `element.style.transform = ...` **之前**，
+    //   于是标记永远停在 `top:0;left:0`（视觉上"卡在左上角"），
+    //   而且 `_flatPos` 也没初始化 ⇒ 之后每次 `setLngLat()` 重试都在同一行再抛一次
+    //   ⇒ 点地图"选不中"（其实 pick 值有更新，只是针永远不动）。
+    //   ⚠️ 官方示例全是 `.setLngLat([...]).addTo(map)` 这个顺序，别改回去。
+    //   （2026-10-22 老板实测报的是"标记点一直在左上角、没法从地图上选点"。）
+    mapCenterPickMarker = new MapLibreMarker({ element, anchor: "bottom" }).setLngLat(lngLat).addTo(mapInstance);
+    return;
+  }
+  mapCenterPickMarker.setLngLat(lngLat);
+}
+
+function removeMapCenterPickMarker() {
+  mapCenterPickMarker?.remove();
+  mapCenterPickMarker = null;
+}
+
+/** 进入"在地图上挑一个点"的选点态（第一步，不落库）。 */
+function startMapCenterPicking() {
   if (!mapInstance) {
     Message.warning("地图尚未加载完成");
     return;
@@ -1633,9 +1984,46 @@ async function saveCurrentMapCenter() {
     Message.warning("没有修改平台默认视野的权限");
     return;
   }
+  // 选点期间不能挂着通道卡片：那玩意儿会挡住地图，也容易让人以为点卡片就是选点。
+  closeMarkerCard();
+  mapCenterPicking.value = true;
+  // 默认选中当前中心：用户若只是"把现在这一块存下来"，直接点保存即可，不必先把地图挪一遍。
+  const current = mapInstance.getCenter();
+  mapCenterPick.value = { longitude: current.lng, latitude: current.lat };
+  renderMapCenterPickMarker();
+  setMapCursor("crosshair");
+}
+
+function stopMapCenterPicking() {
+  mapCenterPicking.value = false;
+  mapCenterPick.value = null;
+  removeMapCenterPickMarker();
+  setMapCursor("");
+}
+
+function setMapCursor(cursor: string) {
+  const canvas = mapInstance?.getCanvas();
+  if (canvas) canvas.style.cursor = cursor;
+}
+
+/**
+ * 选点态下点地图：记下坐标，把针挪过去，并让镜头平滑移到该点 ——
+ * 点完立刻就能看到"以后进来画面正中对的就是这里"。
+ * ⛔ 非选点态直接返回：这个监听常驻（不动态增删），靠标志位判定，避免增删与销毁竞态。
+ * ✅ 点通道标记/聚合气泡不会误触发：它们的 DOM 监听里都 `stopPropagation()` 了。
+ */
+function onMapClick(event: maplibregl.MapMouseEvent) {
+  if (!mapCenterPicking.value) return;
+  mapCenterPick.value = { longitude: event.lngLat.lng, latitude: event.lngLat.lat };
+  renderMapCenterPickMarker();
+  mapInstance?.easeTo({ center: [event.lngLat.lng, event.lngLat.lat], duration: 320 });
+}
+
+async function confirmMapCenterPick() {
+  if (!mapInstance || !mapCenterPick.value) return;
   const center = buildMapCenter({
-    longitude: mapInstance.getCenter().lng,
-    latitude: mapInstance.getCenter().lat,
+    longitude: mapCenterPick.value.longitude,
+    latitude: mapCenterPick.value.latitude,
     zoom: mapInstance.getZoom()
   });
   mapCenterSaving.value = true;
@@ -1645,6 +2033,7 @@ async function saveCurrentMapCenter() {
       Message.error(res.message || "保存默认中心失败");
       return;
     }
+    stopMapCenterPicking();
     Message.success(`已设为默认中心：${formatMapCenter(center)}`);
   } catch (error: any) {
     Message.error(error?.message || "保存默认中心失败");
@@ -1653,19 +2042,37 @@ async function saveCurrentMapCenter() {
   }
 }
 
+/** 选点态的键盘操作：Esc 取消、Enter 保存（都和用户肌肉记忆一致）。 */
+function handleMapCenterPickKeydown(event: KeyboardEvent) {
+  if (!mapCenterPicking.value) return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    stopMapCenterPicking();
+  } else if (event.key === "Enter") {
+    event.preventDefault();
+    void confirmMapCenterPick();
+  }
+}
+
 // ── 通道位置踩点 ───────────────────────────────────────────────────────
 
-function openLocationPickerForMarker(marker: MarkerPoint, detail: MapMarker | null) {
+function openLocationPickerForMarker(
+  marker: MarkerPoint,
+  detail: MapMarker | null,
+  position?: { longitude: number; latitude: number }
+) {
   if (!canEditChannel.value) {
     Message.warning("没有通道编辑权限");
     return;
   }
   closeMarkerCard();
+  void closeVideoCard();
   locationPickerTarget.value = {
     id: marker.id,
     name: displayName(marker),
-    longitude: detail?.longitude || 0,
-    latitude: detail?.latitude || 0
+    // 同 openTrajectory：视野外的通道拿不到 detail，坐标由调用方带进来
+    longitude: position?.longitude ?? detail?.longitude ?? 0,
+    latitude: position?.latitude ?? detail?.latitude ?? 0
   };
   locationPickerVisible.value = true;
 }
@@ -1712,6 +2119,8 @@ async function handleLocationConfirm(payload: { longitude: number; latitude: num
     // 地图数据重新拉一遍，而不是本地改一个点：清除坐标后该点必须从地图上消失，
     // 本地 patch 很容易漏掉"从有到无"这一支。
     await loadMapData();
+    // 左栏通道树的增删与"未设置位置"计数同样会变：补完位置这台设备就进树/出提示了。
+    void mapChannelTreeRef.value?.refresh();
   } catch (error: any) {
     Message.error(error?.message || "保存位置失败");
   }
@@ -1795,6 +2204,8 @@ function attachMapLifecycle() {
     mapCursorLatitude.value = event.lngLat.lat;
   };
   mapInstance.on("mousemove", mapMouseMoveHandler);
+  mapClickHandler = onMapClick;
+  mapInstance.on("click", mapClickHandler);
   mapInstance.on("error", () => {
     if (!mapReady.value) {
       mapError.value = "底图加载失败，请检查网络或配置 VITE_MAP_STYLE_URL";
@@ -2922,6 +3333,8 @@ async function refreshCurrent(background = false) {
 
 onMounted(async () => {
   window.addEventListener("keydown", focusKeyword);
+  // 选点态的 Enter/Esc：作用是"确认/放弃挑好的点"，和上面那个 `keydown` 不冲突（各管各的标志位）。
+  window.addEventListener("keydown", handleMapCenterPickKeydown);
   if (returnSnapshot?.selectedDeviceId && navigationMode.value === "device" && canViewDevices.value) {
     try {
       const restored = await getDevice(returnSnapshot.selectedDeviceId);
@@ -2955,6 +3368,7 @@ onUnmounted(() => {
   clearInterval(maintenancePoll);
   closeCatalogRefreshProgress();
   window.removeEventListener("keydown", focusKeyword);
+  window.removeEventListener("keydown", handleMapCenterPickKeydown);
   cancelKeywordSearch();
   stopAutoRefresh();
   if (ringAnimFrame !== null) cancelAnimationFrame(ringAnimFrame);
@@ -3086,8 +3500,22 @@ onUnmounted(() => {
       </s-layout-search>
 
       <aside class="catalog-pane">
+        <!-- 地图视角换「可定位通道树」：地图只认有坐标的通道，摆一棵设备目录树等于
+             让人一路点到"没有点位"的枪机上。列表/卡片视角仍用原目录树。 -->
+        <MapChannelTree
+          v-if="canViewDevices && viewMode === 'map'"
+          ref="mapChannelTreeRef"
+          v-model:keyword="keyword"
+          :scope-value="mapScopeValue"
+          :scope-label="mapScopeLabel"
+          :selected-channel-id="mapSelectedChannelId"
+          :status="statusFilter || ''"
+          @locate="locateMapChannel"
+          @focus="focusMapDevice"
+          @scope-change="applyMapScope"
+        />
         <DirectoryPanel
-          v-if="canViewDevices"
+          v-else-if="canViewDevices"
           ref="directoryPanelRef"
           :resource-filter="{ assetKind, q: keyword.trim(), status: statusFilter }"
           v-model="directoryState"
@@ -3841,6 +4269,7 @@ onUnmounted(() => {
                       <template v-if="canEditChannel">
                         <a-switch
                           :model-value="item.audioEnabled"
+                          :aria-label="`音频:${item.audioEnabled ? '开' : '关'}`"
                           size="small"
                           checked-text="开"
                           unchecked-text="关"
@@ -3856,6 +4285,7 @@ onUnmounted(() => {
                       <template v-if="canEditChannel">
                         <a-switch
                           :model-value="item.onDemandLive !== false"
+                          :aria-label="`按需直播:${item.onDemandLive !== false ? '开' : '关'}`"
                           size="small"
                           checked-text="开"
                           unchecked-text="关"
@@ -3892,6 +4322,7 @@ onUnmounted(() => {
                       <button
                         class="icon-btn small framed primary"
                         type="button"
+                        aria-label="点播"
                         :disabled="!canStartPlayback"
                         @click.stop="playChannel(item)"
                       >
@@ -3925,6 +4356,7 @@ onUnmounted(() => {
                       <button
                         class="icon-btn small framed stop"
                         type="button"
+                        aria-label="停止当前直播"
                         :disabled="stoppingChannels.has(item.id) || !canStopPlayback"
                         @click.stop="handleStopChannel(item)"
                       >
@@ -3935,6 +4367,7 @@ onUnmounted(() => {
                       ><button
                         class="icon-btn small framed warning"
                         type="button"
+                        aria-label="编辑通道"
                         :disabled="!canEditChannel"
                         @click.stop="openEditChannelModal(item)"
                       >
@@ -3944,6 +4377,7 @@ onUnmounted(() => {
                       ><button
                         class="icon-btn small framed danger"
                         type="button"
+                        aria-label="删除通道"
                         :disabled="deleting || !canDeleteChannel"
                         @click.stop="handleDeleteChannel(item)"
                       >
@@ -3969,44 +4403,56 @@ onUnmounted(() => {
           />
         </div>
 
-        <div v-else class="view-body map-view" :class="{ 'map-dark': darkMode }">
+        <div v-else class="view-body map-view" :class="{ 'map-dark': darkMode }" :data-basemap="mapBaseStyle">
           <div ref="mapContainer" class="map-container"></div>
           <div class="map-floating-actions">
-            <div class="map-search-box">
-              <Search :size="15" />
-              <input
-                v-model="mapSearchQuery"
-                type="search"
-                placeholder="搜索地点 / 道路 / 建筑 / 摄像头"
-                @keyup.enter="searchMapCameras"
-              />
-            </div>
+            <a-input
+              v-model="mapSearchQuery"
+              class="map-search-box"
+              allow-clear
+              placeholder="搜索地点 / 道路 / 建筑 / 摄像头"
+              @press-enter="searchMapCameras"
+            >
+              <template #prefix><Search :size="15" /></template>
+            </a-input>
             <span class="map-camera-count">摄像头：{{ total }}</span>
             <div class="map-toolbar-spacer"></div>
-            <button class="btn-ghost" type="button" @click="loadMapData">刷新</button>
-            <button class="btn-ghost" type="button" @click="resetMapView">复位</button>
-            <button class="btn-primary map-fit-btn" type="button" @click="fitMapToData">适应视野</button>
-            <!-- 把当前视野存成平台默认中心：执法仪场景每次进来都先看到辖区那一片。 -->
-            <button
+            <a-button class="map-action map-action--refresh" @click="loadMapData">刷新</a-button>
+            <a-button class="map-action map-action--reset" @click="resetMapView">复位</a-button>
+            <a-button class="map-action map-action--fit" type="primary" @click="fitMapToData">适应视野</a-button>
+            <!-- 平台默认中心（执法仪场景每次进来先看到辖区那一片）：点进去选地图上的点，再确认保存。 -->
+            <a-button
               v-if="canEditDevice"
-              class="btn-ghost map-center-btn"
-              type="button"
-              :disabled="mapCenterSaving"
-              title="把当前地图中心与缩放保存为平台默认视野"
-              @click="saveCurrentMapCenter"
+              class="map-action map-action--center"
+              :disabled="mapCenterSaving || mapCenterPicking"
+              title="在地图上点选一个位置，设为平台默认视野"
+              @click="startMapCenterPicking"
             >
-              {{ mapCenterSaving ? "保存中" : "设为默认中心" }}
-            </button>
-            <label class="map-basemap-select">
-              <span>底图</span>
-              <select
-                :value="mapBaseStyle"
-                @change="switchMapBaseStyle(($event.target as HTMLSelectElement).value as 'light' | 'dark')"
-              >
-                <option value="light">矢量</option>
-                <option value="dark">深色</option>
-              </select>
-            </label>
+              设为默认中心
+            </a-button>
+          </div>
+          <!-- 选点态提示条：告诉用户「刚才是进入了一个模式」，并把确认/取消放在眼前。
+               ⛔ 不能用 a-modal 之类的遮罩做这件事 —— 它会把地图挡住，而这里恰恰要求用户去点地图。 -->
+          <div v-if="mapCenterPicking" class="map-center-picker" role="group" aria-label="选择平台默认中心">
+            <span class="map-center-picker__hint">
+              <Crosshair :size="14" />
+              在地图上点击选择中心点
+            </span>
+            <code v-if="mapCenterPickText" class="map-center-picker__coord">{{ mapCenterPickText }}</code>
+            <span class="map-center-picker__keys">Enter 保存 · Esc 取消</span>
+            <a-button
+              class="map-center-picker__confirm"
+              type="primary"
+              size="mini"
+              :loading="mapCenterSaving"
+              :disabled="!mapCenterPick"
+              @click="confirmMapCenterPick"
+            >
+              保存为中心
+            </a-button>
+            <a-button class="map-center-picker__cancel" size="mini" :disabled="mapCenterSaving" @click="stopMapCenterPicking">
+              取消
+            </a-button>
           </div>
           <div class="map-position-readout" aria-live="polite">
             <span>{{ mapCursorLongitude.toFixed(5) }}, {{ mapCursorLatitude.toFixed(5) }}</span>
@@ -4037,27 +4483,45 @@ onUnmounted(() => {
       </main>
     </div>
 
-    <a-modal
-      :visible="videoVisible"
-      :title="`实时视频 · ${videoTarget?.name || ''}`"
-      :footer="false"
-      :width="960"
-      unmount-on-close
-      modal-class="map-video-modal"
-      @cancel="closeVideoDialog"
-    >
-      <div class="map-video-body">
-        <div v-if="videoLoading" class="map-video-state">
-          <Loader2 :size="18" class="spin" />
-          正在点播，请稍候…
+    <!-- 地图上的实时视频小窗。
+         形态刻意与「点通道图标弹出的功能卡片」一致（同一套头/说明/动作按钮），因为它们是
+         同一块地图上的同一族浮层；只是这块多了一块画面，并且多一个去控制台的入口。
+         ⛔ 内容必须 Teleport 进 popup：MapLibre 只认 DOM 节点，把 PlayWindow 直接塞进
+            setDOMContent 的结果是「组件成了无主节点」——props 不会更新、也不会走 unmount。 -->
+    <Teleport v-if="videoPopupHost" :to="videoPopupHost">
+      <div class="map-video-card">
+        <div class="map-video-card__head">
+          <span class="map-channel-card__dot" :class="{ online: videoTarget?.status === 1 }"></span>
+          <span class="map-channel-card__name">{{ videoTarget?.name || "" }}</span>
         </div>
-        <PlayWindow v-else :url="videoPlaying?.httpFlvUrl || ''" :has-audio="false" @error="onMapVideoError" />
+        <div class="map-video-card__stage">
+          <div v-if="videoLoading" class="map-video-card__state">
+            <Loader2 :size="16" class="spin" />
+            正在点播…
+          </div>
+          <PlayWindow v-else :url="videoPlaying?.httpFlvUrl || ''" :has-audio="false" @error="onMapVideoError" />
+        </div>
+        <div class="map-video-card__meta">
+          <span>{{ videoTarget?.status === 1 ? "在线" : "离线" }}</span>
+          <span>{{ videoTarget?.channelId }}</span>
+          <span v-if="videoPlaying">流 {{ videoPlaying.streamId }}</span>
+        </div>
+        <div class="map-video-card__actions">
+          <button
+            type="button"
+            class="map-channel-card__action map-channel-card__action--console"
+            :disabled="!canStartPlayback || videoTarget?.status !== 1"
+            :title="!canStartPlayback ? '无播放权限' : videoTarget?.status !== 1 ? '通道离线，无法播放' : ''"
+            @click="openPlaybackConsoleFromMap"
+          >
+            播放控制台
+          </button>
+          <button type="button" class="map-channel-card__action map-channel-card__action--stop" @click="closeVideoCard">
+            停止播放
+          </button>
+        </div>
       </div>
-      <div class="map-video-meta">
-        <span>通道 {{ videoTarget?.channelId }}</span>
-        <span v-if="videoPlaying">流 {{ videoPlaying.streamId }}</span>
-      </div>
-    </a-modal>
+    </Teleport>
 
     <!-- 通道位置踩点：固定枪机不会上报经纬度，这是给它们补坐标的唯一顺手入口。 -->
     <ChannelLocationPicker
@@ -6381,25 +6845,23 @@ onUnmounted(() => {
   box-shadow: 0 4px 16px rgb(15 23 42 / 12%);
   backdrop-filter: blur(8px);
 }
+
+/* 搜索框：换成 Arco input 后外观由这里接管 —— 工具栏是「白玻璃 / 暗玻璃」两套底，
+ * 不能吃 Arco 默认的灰底，否则在暗色地图上会白成一块。 */
 .map-search-box {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  width: 260px;
-  height: 32px;
+  width: 268px;
   padding: 0 10px;
-  color: #64748b;
+  color: #94a3b8;
   background: rgb(248 250 252 / 92%);
   border: 1px solid #dbe3ed;
   border-radius: 7px;
 }
-.map-search-box input {
-  width: 100%;
-  min-width: 0;
+.map-search-box :deep(.arco-input) {
+  font-size: 13px;
   color: #334155;
-  outline: 0;
-  background: transparent;
-  border: 0;
+}
+.map-search-box :deep(.arco-input::placeholder) {
+  color: #94a3b8;
 }
 .map-camera-count {
   padding: 7px 10px;
@@ -6413,31 +6875,224 @@ onUnmounted(() => {
 .map-toolbar-spacer {
   flex: 1;
 }
-.map-fit-btn {
+
+/* 工具条按钮：四个动作各给一个语义色，不再是一排相同的白底 ——
+ *   刷新 = 天蓝（只重取数据，不改视野）
+ *   复位 = 琥珀（会把视野拉回去，属于"改变现状"）
+ *   适应视野 = 实心主色（最高频动作，保持视觉焦点）
+ *   设为默认中心 = 绿（写配置，成功语义）
+ * ⛔ 浅底一律「同色文字 + 低透明同色底 + 同色描边」：四颗实心饱和色并排像调色板，
+ *    而且白字压琥珀/青绿对比度只有 2:1 上下。
+ * ⛔ 不要用 `--uvp-brand` 当底色：它是**文字色**（暗色下是浅蓝），白字压上去只有 2.5:1。 */
+.map-action.arco-btn {
   height: 32px;
   padding: 0 14px;
-  border: 0;
+  font-size: 13px;
+  border: 1px solid transparent;
   border-radius: 7px;
+  box-shadow: none;
 }
-.map-basemap-select {
+.map-action--refresh.arco-btn {
+  color: #0369a1;
+  background: rgb(2 132 199 / 12%);
+  border-color: rgb(2 132 199 / 34%);
+}
+.map-action--refresh.arco-btn:hover {
+  color: #075985;
+  background: rgb(2 132 199 / 20%);
+  border-color: rgb(2 132 199 / 48%);
+}
+.map-action--reset.arco-btn {
+  color: #b45309;
+  background: rgb(217 119 6 / 13%);
+  border-color: rgb(217 119 6 / 36%);
+}
+.map-action--reset.arco-btn:hover {
+  color: #92400e;
+  background: rgb(217 119 6 / 21%);
+  border-color: rgb(217 119 6 / 50%);
+}
+.map-action--center.arco-btn {
+  color: #047857;
+  background: rgb(5 150 105 / 12%);
+  border-color: rgb(5 150 105 / 34%);
+}
+.map-action--center.arco-btn:hover {
+  color: #065f46;
+  background: rgb(5 150 105 / 20%);
+  border-color: rgb(5 150 105 / 48%);
+}
+.map-action--fit.arco-btn {
+  font-weight: 600;
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
+  border-color: var(--uvp-solid-bg);
+}
+.map-action--fit.arco-btn:hover {
+  background: var(--uvp-solid-hover-bg);
+  border-color: var(--uvp-solid-hover-bg);
+}
+
+/* 上面几条按 class 定色，优先级高于 Arco 自己的 .arco-btn-disabled ⇒ 禁用态必须显式补。 */
+.map-action.arco-btn:disabled,
+.map-action.arco-btn.arco-btn-disabled {
+  color: var(--uvp-text-tertiary);
+  cursor: not-allowed;
+  background: color-mix(in srgb, var(--uvp-text-tertiary) 10%, transparent);
+  border-color: color-mix(in srgb, var(--uvp-text-tertiary) 26%, transparent);
+  opacity: 0.65;
+}
+
+/* ── 「选取默认中心」的选点条 + 选点针 ────────────────────────────────
+ * 选点是一个**临时模式**：按钮点下去之后界面必须明显变了个样子，否则用户以为自己
+ * 还在浏览，随手拖两下地图就退出了，回头根本不知道刚才进了什么模式。
+ * ⛔ 不能用弹窗/modal 做这条提示：它要挡在地图上，而这里恰恰要求用户去点地图。 */
+.map-center-picker {
+  position: absolute;
+  top: 68px; /* 落在 14px 顶部工具条（44px 高）下面一点 */
+  left: 50%;
+  z-index: 3;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 8px 7px 14px;
+  font-size: 12px;
+  color: #0f172a;
+  white-space: nowrap;
+  background: rgb(255 255 255 / 94%);
+  border: 1px solid rgb(5 150 105 / 45%);
+  border-radius: 999px;
+  box-shadow: 0 6px 20px rgb(15 23 42 / 18%);
+  backdrop-filter: blur(8px);
+  transform: translateX(-50%);
+}
+.map-center-picker__hint {
   display: inline-flex;
   gap: 6px;
   align-items: center;
-  height: 32px;
-  padding: 0 8px;
-  font-size: 12px;
-  color: #475569;
-  background: #f8fafc;
-  border: 1px solid #dbe3ed;
-  border-radius: 7px;
+  font-weight: 600;
+  color: #047857;
 }
-.map-basemap-select select {
+.map-center-picker__coord {
+  padding: 2px 8px;
+  font:
+    12px/1.2 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    monospace;
   color: #334155;
-  cursor: pointer;
-  outline: 0;
-  background: transparent;
-  border: 0;
+  background: rgb(241 245 249 / 92%);
+  border-radius: 6px;
 }
+.map-center-picker__keys {
+  color: #64748b;
+}
+.map-center-picker .arco-btn {
+  height: 26px;
+  padding: 0 12px;
+  font-size: 12px;
+  border-radius: 999px;
+}
+
+/* 主按钮压成实心深绿（不是 --uvp-brand）：和工具条那颗「设为默认中心」同色系，
+ * 白字对它 5.5:1 够读；用浅绿底会掉到 3.3:1。 */
+.map-center-picker__confirm.arco-btn-primary {
+  background: #047857;
+  border-color: #047857;
+}
+.map-center-picker__confirm.arco-btn-primary:hover {
+  background: #065f46;
+  border-color: #065f46;
+}
+
+/* 「取消」也显式定色，不吃 Arco 的 secondary 默认底：
+ * 这条浮层自带绿框白/深底，混进一颗纯白按钮会显得像别的组件掉进来了。 */
+.map-center-picker__cancel.arco-btn {
+  color: #475569;
+  background: rgb(241 245 249 / 92%);
+  border-color: rgb(148 163 184 / 45%);
+}
+.map-center-picker__cancel.arco-btn:hover {
+  color: #334155;
+  background: rgb(226 232 240 / 95%);
+  border-color: rgb(148 163 184 / 60%);
+}
+.map-view.map-dark .map-center-picker {
+  color: #e2e8f0;
+  background: linear-gradient(105deg, rgb(12 30 48 / 96%), rgb(18 28 53 / 94%));
+  border-color: rgb(52 211 153 / 55%);
+  box-shadow: 0 6px 22px rgb(0 0 0 / 45%);
+}
+.map-view.map-dark .map-center-picker__hint {
+  color: #6ee7b7;
+}
+.map-view.map-dark .map-center-picker__coord {
+  color: #cbd5e1;
+  background: rgb(148 163 184 / 18%);
+}
+.map-view.map-dark .map-center-picker__keys {
+  color: #94a3b8;
+}
+.map-view.map-dark .map-center-picker__cancel.arco-btn {
+  color: #cbd5e1;
+  background: rgb(148 163 184 / 16%);
+  border-color: rgb(148 163 184 / 34%);
+}
+.map-view.map-dark .map-center-picker__cancel.arco-btn:hover {
+  color: #e2e8f0;
+  background: rgb(148 163 184 / 26%);
+  border-color: rgb(148 163 184 / 48%);
+}
+
+/* ── 选点针（水滴形）────────────────────────────────────────────────
+ * ⛔ 元素是 document.createElement 造的、由 MapLibre 插进 .map-container，拿不到 data-v-*
+ *    ⇒ 必须走 :deep()，否则退化成白底方块。
+ *
+ * ⛔⛔ 外层 `.map-center-pin` **绝对不能写 position / transform**：
+ *    MapLibre 靠 `.maplibregl-marker{position:absolute;top:0;left:0}` + `transform: translate()` 摆标记，
+ *    而本组件的样式表在 maplibre 之后加载、同优先级 ⇒ 外层只要写一句 `position: relative`
+ *    就会把 `absolute` 顶掉，标记掉回普通文档流、被画布容器裁掉 ——
+ *    表现就是"提示条和坐标都出来了，地图上却没有点"（2026-10-22 线上就这么挂的）。
+ *    ⇒ 摆形状的活全部放进 SVG 里，外层只留 24×24 的盒子。
+ *
+ * 形状：内联 SVG 水滴，path 的尖端**精确落在 viewBox 底边 y=24**，
+ *      再配合 `anchor: "bottom"` ⇒ 针尖与坐标点零偏移（实测 0.5px 内，属亚像素）。 */
+:deep(.map-center-pin) {
+  width: 24px;
+  height: 24px;
+
+  /* ⛔ 必须让点击穿透：选完点会 easeTo 到该点，针正好压在画面中心，
+   *    它要是能收事件，用户想「再点一下往旁边挪挪」就点在针上、地图收不到这一下。 */
+  pointer-events: none;
+}
+
+/* ⛔⛔ SVG 默认是 inline 元素，按文字基线排 —— 底下会多出 3~4px 的 descender 空隙，
+ *    整个水滴被抬起来，尖端就对不上坐标点了（实测差 3px 多，肉眼几乎看不出来但一定偏）。
+ *    必须 display:block 把它压回盒子底边。 */
+:deep(.map-center-pin svg) {
+  display: block;
+}
+:deep(.map-center-pin__body) {
+  /* 用 filter 而不是 box-shadow：SVG 里 box-shadow 不生效 */
+  filter: drop-shadow(0 2px 3px rgb(15 23 42 / 35%));
+  fill: #059669;
+
+  /* 白描边让水滴在浅底图（灰白路网）和深底图上都能"立"起来 */
+  stroke: #ffffff;
+  stroke-width: 1.6px;
+}
+:deep(.map-center-pin__dot) {
+  fill: #ffffff;
+}
+
+/* 暗色底图上 #059669 偏闷，提亮一档才看得清。 */
+.map-view.map-dark :deep(.map-center-pin__body) {
+  filter: drop-shadow(0 2px 5px rgb(0 0 0 / 55%));
+  fill: #10b981;
+}
+
 .map-view.map-dark .map-floating-actions {
   background: linear-gradient(105deg, rgb(12 30 48 / 96%), rgb(18 28 53 / 94%) 58%, rgb(12 52 61 / 92%));
   border-color: rgb(78 211 226 / 52%);
@@ -6447,13 +7102,16 @@ onUnmounted(() => {
     0 0 22px rgb(45 212 191 / 12%);
 }
 .map-view.map-dark .map-search-box {
-  color: #9fb2c6;
+  color: #7c8ea3;
   background: rgb(16 25 35 / 94%);
   border-color: #31465b;
 }
-.map-view.map-dark .map-search-box input,
-.map-view.map-dark .map-search-box input::placeholder {
+.map-view.map-dark .map-search-box :deep(.arco-input),
+.map-view.map-dark .map-search-box :deep(.arco-input::placeholder) {
   color: #a8b6c7;
+}
+.map-view.map-dark .map-search-box :deep(.arco-input-clear-icon) {
+  color: #7c8ea3;
 }
 .map-view.map-dark .map-camera-count {
   color: #8ff7e5;
@@ -6461,13 +7119,42 @@ onUnmounted(() => {
   border-color: rgb(45 212 191 / 64%);
   box-shadow: inset 0 0 12px rgb(45 212 191 / 10%);
 }
-.map-view.map-dark .map-basemap-select {
-  color: #a8b6c7;
-  background: #101923;
-  border-color: #31465b;
+
+/* 暗色地图上的语义色：底色只是"那束光"，文字提亮到浅色一档才读得清。 */
+.map-view.map-dark .map-action--refresh.arco-btn {
+  color: #7dd3fc;
+  background: rgb(56 189 248 / 16%);
+  border-color: rgb(56 189 248 / 42%);
 }
-.map-view.map-dark .map-basemap-select select {
-  color: #dbe7f3;
+.map-view.map-dark .map-action--refresh.arco-btn:hover {
+  color: #bae6fd;
+  background: rgb(56 189 248 / 24%);
+  border-color: rgb(56 189 248 / 58%);
+}
+.map-view.map-dark .map-action--reset.arco-btn {
+  color: #fbbf24;
+  background: rgb(251 191 36 / 16%);
+  border-color: rgb(251 191 36 / 42%);
+}
+.map-view.map-dark .map-action--reset.arco-btn:hover {
+  color: #fde68a;
+  background: rgb(251 191 36 / 24%);
+  border-color: rgb(251 191 36 / 58%);
+}
+.map-view.map-dark .map-action--center.arco-btn {
+  color: #6ee7b7;
+  background: rgb(52 211 153 / 16%);
+  border-color: rgb(52 211 153 / 42%);
+}
+.map-view.map-dark .map-action--center.arco-btn:hover {
+  color: #a7f3d0;
+  background: rgb(52 211 153 / 24%);
+  border-color: rgb(52 211 153 / 58%);
+}
+.map-view.map-dark .map-action--fit.arco-btn {
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
+  border-color: var(--uvp-solid-bg);
 }
 .map-position-readout {
   position: absolute;
@@ -6543,6 +7230,32 @@ onUnmounted(() => {
   box-shadow: 0 10px 28px rgb(15 23 42 / 18%);
 }
 
+/* popup 自带的关闭按钮默认钉死在 (top:0,right:0)，会正好压在卡片圆角上：
+ * `overflow:hidden` + `border-radius:12px` 把它的左上角切掉一块，看起来像"被遮住了"。
+ * ⇒ 内缩成 22px 圆形，并给标题行让出右侧空间（.map-channel-card__head 的 padding-right）。 */
+:deep(.maplibregl-popup-close-button) {
+  top: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+  color: #86909c;
+  border-radius: 50%;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+:deep(.maplibregl-popup-close-button:hover) {
+  color: #1d2129;
+  background: #f2f3f5;
+}
+
 :deep(.map-channel-card) {
   display: flex;
   flex-direction: column;
@@ -6557,6 +7270,9 @@ onUnmounted(() => {
   gap: 6px;
   align-items: center;
   min-width: 0;
+
+  /* 给右上角那颗关闭按钮让位，否则标题一长就钻到 × 底下 */
+  padding-right: 20px;
 }
 
 :deep(.map-channel-card__dot) {
@@ -6617,6 +7333,29 @@ onUnmounted(() => {
   background: #f7f8fa;
 }
 
+/* 这四颗是**原生 `<button>`**，焦点环走浏览器默认的 `-webkit-focus-ring-color`
+ * （Chrome 下是 1px `rgb(0 95 204)`），压在深色卡片上像一圈没清干净的描边。
+ * 统一成项目里其它按钮那套「2px 品牌色 + 1px 外扩」，键盘可达性不掉。
+ * ⚠️ `:focus` 与 `:focus-visible` 同优先级，后者必须写在后面才能盖掉前者。 */
+:deep(.map-channel-card__action:focus) {
+  outline: none;
+}
+
+:deep(.map-channel-card__action:focus-visible) {
+  outline: 2px solid var(--uvp-brand, #2563eb);
+  outline-offset: 1px;
+}
+
+/* ── 卡片动作按钮：四个动作四种颜色 ────────────────────────────────────
+ * 原来只有「播放视频」是实心蓝，另外三个都是同一套白底描边，看着像三个等价按钮，
+ * 实际语义差很远：播放=主行动、轨迹=查看历史、设置位置=**写数据**、详情=纯导航。
+ * 配色沿用工具条那套语义：
+ *   播放 = 实心主色（唯一主行动，保持焦点）
+ *   轨迹 = 紫（历史/回放语义）
+ *   设置位置 = 绿（写配置，和「设为默认中心」同一族）
+ *   通道详情 = 中性灰（只是跳转，不改变任何状态）
+ * ⛔ 浅底一律「同色文字 + 低透明同色底 + 同色描边」：四颗实心饱和色并排像调色板，
+ *    而且白字压紫/绿只有 4:1 上下。 */
 :deep(.map-channel-card__action--play) {
   color: #ffffff;
   background: var(--uvp-solid-bg, #2563eb);
@@ -6632,6 +7371,52 @@ onUnmounted(() => {
   color: #ffffff;
   background: #c9cdd4;
   border-color: #c9cdd4;
+}
+
+:deep(.map-channel-card__action--trajectory) {
+  color: #6d28d9;
+  background: rgb(124 58 237 / 8%);
+  border-color: rgb(124 58 237 / 30%);
+}
+
+:deep(.map-channel-card__action--trajectory:hover:not(:disabled)) {
+  color: #5b21b6;
+  background: rgb(124 58 237 / 16%);
+  border-color: rgb(124 58 237 / 46%);
+}
+
+:deep(.map-channel-card__action--location) {
+  color: #047857;
+  background: rgb(5 150 105 / 9%);
+  border-color: rgb(5 150 105 / 30%);
+}
+
+:deep(.map-channel-card__action--location:hover:not(:disabled)) {
+  color: #065f46;
+  background: rgb(5 150 105 / 17%);
+  border-color: rgb(5 150 105 / 46%);
+}
+
+:deep(.map-channel-card__action--detail) {
+  color: #475569;
+  background: rgb(100 116 139 / 8%);
+  border-color: rgb(100 116 139 / 26%);
+}
+
+:deep(.map-channel-card__action--detail:hover:not(:disabled)) {
+  color: #334155;
+  background: rgb(100 116 139 / 15%);
+  border-color: rgb(100 116 139 / 40%);
+}
+
+/* ⛔ 按类定的色优先级高于上面那条通用的 `.map-channel-card__action:disabled`，
+ *    禁用态必须逐个显式补，否则无权限时按钮还是彩色的（看着像能点）。 */
+:deep(.map-channel-card__action--trajectory:disabled),
+:deep(.map-channel-card__action--location:disabled),
+:deep(.map-channel-card__action--detail:disabled) {
+  color: #c9cdd4;
+  background: #f7f8fa;
+  border-color: #e5e6eb;
 }
 
 /* 深色底图下的卡片 */
@@ -6653,6 +7438,109 @@ onUnmounted(() => {
   background: #33404f;
 }
 
+/* 深色卡片上，通用规则会把四颗按钮压成同一种深灰 ⇒ 必须逐个再提亮一遍。
+ * ⚠️ 这几条要放在上面两条之后：选择器都是 (0,2,0)，靠顺序取胜。 */
+:deep(.map-dark .maplibregl-popup-close-button) {
+  color: #86909c;
+}
+
+:deep(.map-dark .maplibregl-popup-close-button:hover) {
+  color: #e5e6eb;
+  background: #2a3442;
+}
+
+:deep(.map-dark .map-channel-card__action--play) {
+  color: var(--uvp-solid-text, #ffffff);
+  background: var(--uvp-solid-bg, #2563eb);
+  border-color: var(--uvp-solid-bg, #2563eb);
+}
+
+:deep(.map-dark .map-channel-card__action--play:hover:not(:disabled)) {
+  background: var(--uvp-solid-hover-bg, #1d4ed8);
+  border-color: var(--uvp-solid-hover-bg, #1d4ed8);
+}
+
+:deep(.map-dark .map-channel-card__action--trajectory) {
+  color: #c4b5fd;
+  background: rgb(139 92 246 / 18%);
+  border-color: rgb(196 181 253 / 34%);
+}
+
+:deep(.map-dark .map-channel-card__action--trajectory:hover:not(:disabled)) {
+  color: #ddd6fe;
+  background: rgb(139 92 246 / 28%);
+  border-color: rgb(196 181 253 / 52%);
+}
+
+:deep(.map-dark .map-channel-card__action--location) {
+  color: #6ee7b7;
+  background: rgb(16 185 129 / 16%);
+  border-color: rgb(110 231 183 / 34%);
+}
+
+:deep(.map-dark .map-channel-card__action--location:hover:not(:disabled)) {
+  color: #a7f3d0;
+  background: rgb(16 185 129 / 26%);
+  border-color: rgb(110 231 183 / 52%);
+}
+
+:deep(.map-dark .map-channel-card__action--detail) {
+  color: #cbd5e1;
+  background: rgb(148 163 184 / 14%);
+  border-color: rgb(148 163 184 / 30%);
+}
+
+:deep(.map-dark .map-channel-card__action--detail:hover:not(:disabled)) {
+  color: #e2e8f0;
+  background: rgb(148 163 184 / 24%);
+  border-color: rgb(148 163 184 / 46%);
+}
+
+/* 禁用态同样要压回去（否则深色下无权限的按钮仍是彩色的） */
+:deep(.map-dark .map-channel-card__action--trajectory:disabled),
+:deep(.map-dark .map-channel-card__action--location:disabled),
+:deep(.map-dark .map-channel-card__action--detail:disabled),
+:deep(.map-dark .map-channel-card__action--stop:disabled) {
+  color: #5c6675;
+  background: #252f3c;
+  border-color: #333d4c;
+}
+
+/* ⛔ 实心那两颗（播放视频 / 播放控制台）必须单独补深色禁用态：
+ *    `:deep(.map-dark .x--play)` 与 `:deep(.x--play:disabled)` 是**同优先级**（都是 3 个
+ *    类级选择器），深色块写在后面 ⇒ 深色实心蓝会把浅色的禁用灰盖掉，
+ *    表现为"没权限/离线时按钮还是亮蓝色、看着能点"。 */
+:deep(.map-dark .map-channel-card__action--play:disabled),
+:deep(.map-dark .map-channel-card__action--console:disabled) {
+  color: #5c6675;
+  background: #252f3c;
+  border-color: #333d4c;
+}
+
+/* 深色卡片底下的小三角默认是**白的**（maplibre 把 `#fff` 写死在按锚点分的规则里），
+ * 配深色卡片像贴了个白标签。
+ * ⛔ 三角是「10px transparent 边框 + 只染一条边」做出来的，
+ *    所以只能改**对应锚点方向的那一条边**；四条一起改会把它变成实心方块。 */
+:deep(.map-dark .maplibregl-popup-anchor-bottom .maplibregl-popup-tip),
+:deep(.map-dark .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip),
+:deep(.map-dark .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip) {
+  border-top-color: #1f2733;
+}
+
+:deep(.map-dark .maplibregl-popup-anchor-top .maplibregl-popup-tip),
+:deep(.map-dark .maplibregl-popup-anchor-top-left .maplibregl-popup-tip),
+:deep(.map-dark .maplibregl-popup-anchor-top-right .maplibregl-popup-tip) {
+  border-bottom-color: #1f2733;
+}
+
+:deep(.map-dark .maplibregl-popup-anchor-left .maplibregl-popup-tip) {
+  border-right-color: #1f2733;
+}
+
+:deep(.map-dark .maplibregl-popup-anchor-right .maplibregl-popup-tip) {
+  border-left-color: #1f2733;
+}
+
 :deep(.map-cluster-marker),
 :deep(.map-channel-marker) {
   box-sizing: border-box;
@@ -6662,37 +7550,20 @@ onUnmounted(() => {
   font: inherit;
   cursor: pointer;
   border: 0;
+
+  /* transform 由 MapLibre 每帧定位，禁止过渡或缩放此节点。 */
   transition:
-    transform 140ms ease,
-    box-shadow 140ms ease;
+    box-shadow 140ms ease,
+    border-color 140ms ease;
 }
 
-/* 聚合气泡：玻璃球 —— 很低的底色 alpha + 轻微背景虚化 + 亮边 + 顶部高光。
- * 尺寸/字号由数量分级（JS 给 --cluster-size）；色相仍按在线率在"蓝 ←→ 青"之间混。
- *
- * ⚠️ 只写一个百分比：`color-mix` 里两个百分比会被归一化，
- *    原来写成 `cyan 60%, brand 60%` 等价于各 50%，在线率差异被压平了。
- * ⛔⛔ **"透"的判据不是 alpha 有多低，而是底图细节还看不看得见。**
- *     第一版把 alpha 压到 48%、虚化开到 8px，配上 32% 的顶部白高光 ——
- *     底下的路网被糊成一片纯色，人眼得不到任何"后面有东西"的线索，
- *     看着就是一颗实心塑料球（老板 2026-10-21 当场否掉）。
- *     ⇒ **虚化半径必须 ≤3px、底色 alpha 必须 ≤25%，高光只留在最顶上一小片。**
- * ⛔ 透明感只能压**底色**的 alpha，文字必须保持不透明 ——
- *    直接加 `opacity` / `filter: blur()` 会把数字一起糊掉（那是"发灰"不是"玻璃"）。
- * ⛔ `backdrop-filter` 只对**元素背后**生效；聚合点是网格聚合出来的，
- *    一屏通常十几个，虚化开销可以接受。若哪天改成"每路一个气泡"，必须去掉它。
- *
- * 明暗两套走**相反**的观感，这不是疏漏：
- *   浅色底图 = 白玻璃 + 深色数字（亮底上只有"发白"才透得出底图，白字上去就没了）；
- *   深色底图 = 染色玻璃 + 白字（亮玻璃压在夜底上会变成一片灰白贴纸，见下方暗色块）。 */
+/* 深绿玻璃：保留底图路网，同时让聚合点在复杂底图上有足够存在感。 */
 :deep(.map-cluster-marker) {
-  /* ⛔ 这个兜底不能省：color-mix 里的百分比一旦非法（变量没拿到 / 写成 67 而不是 67%），
-   *    整条 `background` 声明会作废 ⇒ 气泡只剩 backdrop-filter 的虚化，变成一颗看不见字的空玻璃球。 */
+  /* ⛔ 兜底不能省：百分比一旦非法（变量没拿到 / 写成 67 而不是 67%），
+   *    整条 `background` 声明会作废 ⇒ 气泡变成一颗看不见字的空壳。 */
   --cluster-rate: 0%;
-  --cluster-tint-offline: rgb(37 99 235 / 52%);
-  --cluster-tint-online: rgb(13 148 136 / 48%);
-  --cluster-glass-top: rgb(255 255 255 / 30%);
-  --cluster-glass-bottom: rgb(255 255 255 / 12%);
+  --cluster-tint-offline: rgb(12 98 66 / 58%);
+  --cluster-tint-online: rgb(0 151 92 / 64%);
 
   width: var(--cluster-size, 40px);
   height: var(--cluster-size, 40px);
@@ -6700,80 +7571,61 @@ onUnmounted(() => {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1;
+  color: #ffffff;
 
-  /* 数字颜色同样随在线率走（深蓝 ←→ 深青），在浅玻璃上对比度都在 5:1 以上。 */
-  color: color-mix(in srgb, #0f766e var(--cluster-rate), #1e40af);
+  /* 数字保持不透明，阴影加强底图路网重叠时的可读性。 */
+  text-shadow: 0 1px 2px rgb(0 30 20 / 68%);
   background:
-    radial-gradient(120% 120% at 50% 6%, rgb(255 255 255 / 72%) 0%, rgb(255 255 255 / 10%) 54%, rgb(255 255 255 / 0%) 78%),
-    linear-gradient(180deg, var(--cluster-glass-top) 0%, var(--cluster-glass-bottom) 100%),
+    radial-gradient(120% 120% at 50% 6%, rgb(255 255 255 / 9%) 0%, rgb(255 255 255 / 1%) 30%, rgb(255 255 255 / 0%) 74%),
     color-mix(in srgb, var(--cluster-tint-online) var(--cluster-rate), var(--cluster-tint-offline));
-  border: 1.5px solid rgb(255 255 255 / 85%);
+  border: 1.5px solid rgb(150 255 207 / 88%);
   border-radius: 50%;
   box-shadow:
-    0 0 0 1px rgb(30 64 175 / 20%),
-    0 6px 16px rgb(15 23 42 / 20%),
-    inset 0 1px 2px rgb(255 255 255 / 90%),
-    inset 0 -8px 14px rgb(37 99 235 / 10%);
-  backdrop-filter: blur(3px) saturate(150%);
-  backdrop-filter: blur(3px) saturate(150%);
+    0 0 0 1px rgb(5 68 43 / 58%),
+    0 3px 9px rgb(4 30 20 / 32%),
+    inset 0 1px 1px rgb(255 255 255 / 35%),
+    inset 0 -5px 9px rgb(5 76 49 / 28%);
+  backdrop-filter: blur(0.6px) saturate(145%);
 }
 
-/* 暗色底图：去掉那两层"白玻璃"，只留染色 + 冷光晕，数字转白。
- * ⚠️ 选择器必须写全 `.map-view.map-dark`：markers 是 MapLibre 插进 `.map-container` 的，
- *    `.map-dark` 挂在 `.map-view` 自己身上，写成后代选择器一条都匹配不到。 */
-.map-view.map-dark :deep(.map-cluster-marker) {
-  --cluster-tint-offline: rgb(96 165 250 / 30%);
-  --cluster-tint-online: rgb(45 212 191 / 26%);
+/* 暗色底图：浅色数字和深青填充保证辨识度。
+ * ⚠️ 这里按实际底图选择器匹配，而不是跟随系统主题；用户可在浅色系统主题中选择深色底图。
+ *    markers 是 MapLibre 插进 `.map-container` 的，选择器必须从 `.map-view` 开始。 */
+.map-view[data-basemap="dark"] :deep(.map-cluster-marker) {
+  --cluster-tint-offline: rgb(4 72 50 / 70%);
+  --cluster-tint-online: rgb(0 126 80 / 74%);
 
   color: #ffffff;
-  text-shadow: 0 1px 3px rgb(0 0 0 / 65%);
+  text-shadow: 0 1px 2px rgb(0 0 0 / 48%);
   background:
-    radial-gradient(120% 120% at 50% 6%, rgb(255 255 255 / 30%) 0%, rgb(255 255 255 / 0%) 56%),
+    radial-gradient(120% 120% at 50% 6%, rgb(255 255 255 / 7%) 0%, rgb(255 255 255 / 0%) 42%, rgb(255 255 255 / 0%) 74%),
     color-mix(in srgb, var(--cluster-tint-online) var(--cluster-rate), var(--cluster-tint-offline));
-  border-color: rgb(255 255 255 / 55%);
+  border-color: rgb(142 255 198 / 92%);
   box-shadow:
-    0 0 0 1px rgb(147 197 253 / 20%),
-    0 0 22px rgb(59 130 246 / 28%),
-    0 8px 20px rgb(2 8 20 / 40%),
-    inset 0 1px 2px rgb(255 255 255 / 34%),
-    inset 0 -9px 15px rgb(4 14 30 / 34%);
-}
-
-/* 不支持背景虚化时（老内核 / 关闭合成）退回高不透明度：宁可少点玻璃味，也不能让数字压在花底图上。 */
-@supports not ((backdrop-filter: blur(2px)) or (-webkit-backdrop-filter: blur(2px))) {
-  :deep(.map-cluster-marker) {
-    --cluster-tint-offline: rgb(37 99 235 / 58%);
-    --cluster-tint-online: rgb(13 148 136 / 56%);
-    --cluster-glass-top: rgb(255 255 255 / 92%);
-    --cluster-glass-bottom: rgb(255 255 255 / 84%);
-  }
-
-  .map-view.map-dark :deep(.map-cluster-marker) {
-    --cluster-tint-offline: rgb(37 99 235 / 62%);
-    --cluster-tint-online: rgb(13 148 136 / 62%);
-  }
+    0 0 0 1px rgb(8 104 68 / 58%),
+    0 0 12px color-mix(in srgb, rgb(0 170 108 / 38%) var(--cluster-rate), rgb(16 94 66 / 30%)),
+    0 4px 12px rgb(0 4 12 / 38%),
+    inset 0 1px 1px rgb(215 255 237 / 28%),
+    inset 0 -5px 9px rgb(0 44 30 / 34%);
 }
 
 :deep(.map-cluster-marker:hover) {
-  border-color: rgb(255 255 255 / 96%);
+  border-color: rgb(255 255 255 / 78%);
   box-shadow:
-    0 0 0 1px rgb(37 99 235 / 26%),
-    0 3px 9px rgb(15 23 42 / 20%),
-    0 12px 26px rgb(15 23 42 / 20%),
-    inset 0 1px 1px rgb(255 255 255 / 98%),
-    inset 0 -8px 14px rgb(37 99 235 / 12%);
-  transform: scale(1.08);
+    0 0 0 1px rgb(20 100 66 / 26%),
+    0 5px 12px rgb(4 30 20 / 22%),
+    inset 0 1px 1px rgb(255 255 255 / 56%),
+    inset 0 -5px 9px rgb(12 90 60 / 14%);
 }
 
-/* 暗色 hover 保留冷光晕（上面那条 hover 会把光晕整条覆盖掉）。 */
-.map-view.map-dark :deep(.map-cluster-marker:hover) {
-  border-color: rgb(255 255 255 / 66%);
+/* 暗色 hover 保留绿色辉光（上面那条 hover 会把辉光整条覆盖掉）。 */
+.map-view[data-basemap="dark"] :deep(.map-cluster-marker:hover) {
   box-shadow:
-    0 0 0 1px rgb(147 197 253 / 26%),
-    0 0 26px rgb(59 130 246 / 40%),
-    0 10px 26px rgb(2 8 20 / 52%),
-    inset 0 1px 1px rgb(255 255 255 / 52%),
-    inset 0 -10px 16px rgb(4 14 30 / 28%);
+    0 0 0 1px rgb(10 138 89 / 70%),
+    0 0 16px color-mix(in srgb, rgb(0 190 122 / 48%) var(--cluster-rate), rgb(20 116 78 / 38%)),
+    0 5px 14px rgb(0 4 12 / 42%),
+    inset 0 1px 1px rgb(215 255 237 / 38%),
+    inset 0 -5px 9px rgb(0 44 30 / 36%);
 }
 
 :deep(.map-cluster-marker:focus-visible),
@@ -6782,34 +7634,40 @@ onUnmounted(() => {
   outline-offset: 2px;
 }
 
-/* 通道标记点：水滴 pin（左下角尖端即坐标点）+ 中心白点。
- * 在线用品牌青、离线用灰；白描边保证浅色底图上也看得清。 */
+/* 通道标记点：圆形摄像头图标，避免水滴形状与视频通道语义不匹配。
+ * 在线用青绿色，离线用深灰蓝；亮色描边和阴影保证两套底图上都能看清。 */
 :deep(.map-channel-marker) {
-  width: 22px;
-  height: 22px;
-  background: var(--uvp-text-tertiary);
-  border: 3px solid rgb(255 255 255 / 92%);
-  border-radius: 50% 50% 50% 0;
+  width: 28px;
+  height: 28px;
+  background: #475569;
+  border: 2px solid rgb(255 255 255 / 86%);
+  border-radius: 50%;
   box-shadow:
-    0 1px 2px rgb(0 0 0 / 30%),
-    0 3px 10px rgb(0 0 0 / 26%);
-  transform: rotate(-45deg);
+    0 0 0 1px rgb(4 23 35 / 35%),
+    0 2px 5px rgb(0 0 0 / 34%),
+    inset 0 1px 1px rgb(255 255 255 / 24%);
 }
 
-/* ⚠️ hover 里必须带上 rotate，否则鼠标一放上去 pin 就"转正"了 */
 :deep(.map-channel-marker:hover) {
-  transform: rotate(-45deg) scale(1.15);
+  border-color: rgb(255 255 255 / 100%);
 }
 
 :deep(.map-channel-marker.online) {
-  background: var(--uvp-brand-cyan);
+  color: #ffffff;
+  background: rgb(8 132 117 / 94%);
+  border-color: rgb(178 255 238 / 92%);
 }
 
 :deep(.map-channel-pip) {
-  width: 6px;
-  height: 6px;
-  background: #ffffff;
-  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  color: rgb(255 255 255 / 92%);
+}
+
+:deep(.map-channel-pip svg) {
+  display: block;
 }
 :deep(.maplibregl-ctrl-bottom-left) {
   right: 0;
@@ -7769,38 +8627,127 @@ onUnmounted(() => {
   }
 }
 
-/* 地图卡片里起的实时视频。定高是为了让播放器拿到稳定的容器尺寸 ——
-   高度自适应会让 EasyPlayer 的首帧计算跳一次，画面先糊后清。 */
-.map-video-body {
+/* 地图上的实时视频小窗（Popup 内容，Teleport 进来）。
+   刻意与通道卡片同一族：同样的头部圆点+名称、同样的说明行、同样的动作按钮药丸。
+   宽度按 300px 定死：够看清是"哪一路、人在不在"，又不会盖掉半块地图（旧模态是 960px）。 */
+:deep(.map-video-card) {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 300px;
+  padding: 12px;
+  background: #ffffff;
+}
+
+:deep(.map-video-card__head) {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+
+  /* 同通道卡片：给右上角那颗关闭按钮让位 */
+  padding-right: 20px;
+}
+
+/* ⛔ 高度必须定死：高度自适应会让 EasyPlayer 的首帧计算跳一次，画面先糊后清。
+   16:9 由内层播放器自己 letterbox，这里只保证容器稳定。 */
+:deep(.map-video-card__stage) {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 520px;
+  height: 156px;
   overflow: hidden;
   background: #0b0f14;
   border-radius: 8px;
 }
 
-.map-video-state {
+:deep(.map-video-card__state) {
   display: inline-flex;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
-  font-size: 13px;
+  font-size: 12px;
   color: #c9cdd4;
 }
 
-.map-video-meta {
+:deep(.map-video-card__meta) {
   display: flex;
-  gap: 16px;
+  gap: 10px;
   align-items: center;
-  margin-top: 8px;
-  font-size: 12px;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.5;
   color: #86909c;
+  white-space: nowrap;
 }
 
-/* 「设为默认中心」在工具栏里与其它 ghost 按钮同高，禁用时要看得出不可点。 */
-.map-center-btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
+:deep(.map-video-card__meta span) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:deep(.map-video-card__actions) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+/* 小窗的两颗按钮沿用卡片那套语义色，见上方「四个动作四种颜色」：
+   播放控制台 = 主行动（实心主色）；停止播放 = 中性灰（只是收尾，不该抢焦点）。 */
+:deep(.map-channel-card__action--console) {
+  color: #ffffff;
+  background: var(--uvp-solid-bg, #2563eb);
+  border-color: var(--uvp-solid-bg, #2563eb);
+}
+
+:deep(.map-channel-card__action--console:hover:not(:disabled)) {
+  background: var(--uvp-solid-hover-bg, #1d4ed8);
+  border-color: var(--uvp-solid-hover-bg, #1d4ed8);
+}
+
+:deep(.map-channel-card__action--console:disabled) {
+  color: #ffffff;
+  background: #c9cdd4;
+  border-color: #c9cdd4;
+}
+
+:deep(.map-channel-card__action--stop) {
+  color: #475569;
+  background: rgb(100 116 139 / 8%);
+  border-color: rgb(100 116 139 / 26%);
+}
+
+:deep(.map-channel-card__action--stop:hover:not(:disabled)) {
+  color: #334155;
+  background: rgb(100 116 139 / 15%);
+  border-color: rgb(100 116 139 / 40%);
+}
+
+/* 深色底图 */
+:deep(.map-dark .map-video-card) {
+  background: #1f2733;
+}
+
+:deep(.map-dark .map-channel-card__action--console) {
+  color: var(--uvp-solid-text, #ffffff);
+  background: var(--uvp-solid-bg, #2563eb);
+  border-color: var(--uvp-solid-bg, #2563eb);
+}
+
+:deep(.map-dark .map-channel-card__action--console:hover:not(:disabled)) {
+  background: var(--uvp-solid-hover-bg, #1d4ed8);
+  border-color: var(--uvp-solid-hover-bg, #1d4ed8);
+}
+
+:deep(.map-dark .map-channel-card__action--stop) {
+  color: #cbd5e1;
+  background: rgb(148 163 184 / 14%);
+  border-color: rgb(148 163 184 / 30%);
+}
+
+:deep(.map-dark .map-channel-card__action--stop:hover:not(:disabled)) {
+  color: #e2e8f0;
+  background: rgb(148 163 184 / 24%);
+  border-color: rgb(148 163 184 / 46%);
 }
 </style>

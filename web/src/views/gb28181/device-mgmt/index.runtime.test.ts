@@ -10,6 +10,7 @@ import DeviceMgmt from "./index.vue";
 // 类型上不存在,只能绕过;这些登记处让"地图点位是否真的画出来"变成可断言的事实。
 const mapInstances = (maplibreMock as unknown as { __mapInstances: any[] }).__mapInstances;
 const markerInstances = (maplibreMock as unknown as { __markerInstances: any[] }).__markerInstances;
+const popupInstances = (maplibreMock as unknown as { __popupInstances: any[] }).__popupInstances;
 
 // 一个真实形态的带坐标通道(取自 220 开发库:通道 34020000001320000010,坐标由位置订阅回写)。
 // 它落在济南,不在默认视野(北京 zoom10)内 —— 正是"视野外数据看不到"的复现条件。
@@ -57,6 +58,8 @@ const api = vi.hoisted(() => ({
   listDeviceStatusEvents: vi.fn(),
   listMapClusters: vi.fn(),
   listMapMarkers: vi.fn(),
+  getMapCenter: vi.fn(),
+  saveMapCenter: vi.fn(),
   listDeviceSubscriptions: vi.fn(),
   listMaintenanceOperations: vi.fn(),
   listFirmwareUpgrades: vi.fn(),
@@ -74,6 +77,51 @@ const user = vi.hoisted(() => ({
 
 vi.mock("./api", () => api);
 
+// 点位卡片走的是 MapLibre Popup（不是自绘浮层），必须有替身，否则
+// "点通道 → 弹卡片"这条链路一调就抛 "Popup is not a constructor"。
+// ⛔ 刻意放在 vi.mock 工厂外（vi.hoisted）：在工厂内部再声明一个 class 会让
+//    shallow 挂载下的 lucide 图标被桩成 icon-stub，连累"标记点里有图标"的既有断言。
+const { FakePopup } = vi.hoisted(() => {
+  class FakePopup {
+    content: unknown;
+    lngLat: unknown;
+    listeners: Record<string, Array<() => void>> = {};
+    static instances: any[] = [];
+    constructor() {
+      FakePopup.instances.push(this);
+    }
+    setLngLat(value: unknown) {
+      this.lngLat = value;
+      return this;
+    }
+    setDOMContent(content: unknown) {
+      this.content = content;
+      return this;
+    }
+    addTo() {
+      return this;
+    }
+    on(event: string, callback: () => void) {
+      (this.listeners[event] ??= []).push(callback);
+      return this;
+    }
+    off(event: string, callback: () => void) {
+      this.listeners[event] = (this.listeners[event] ?? []).filter(item => item !== callback);
+      return this;
+    }
+    /** 模拟"用户点 × / 地图主动关掉"：真实 MapLibre 是 remove() 之后再 fire('close')。 */
+    trigger(event: string) {
+      (this.listeners[event] ?? []).forEach(callback => callback());
+    }
+    remove() {
+      const index = FakePopup.instances.indexOf(this);
+      if (index >= 0) FakePopup.instances.splice(index, 1);
+      this.trigger("close");
+    }
+  }
+  return { FakePopup };
+});
+
 vi.mock("maplibre-gl", () => {
   // 实例登记处:地图"首轮不按视野过滤 + 拿到数据自动定位"这条链路要能断言,
   // 否则它整段都是测试盲区(历史上 FakeMap 连 getBounds/fitBounds 都没有)。
@@ -86,6 +134,12 @@ vi.mock("maplibre-gl", () => {
     onCbs: Record<string, (() => void) | undefined> = {};
     fitBoundsCalls: Array<{ options: Record<string, unknown> }> = [];
     flyToCalls: Array<{ center: [number, number]; zoom: number }> = [];
+    /** 「选取默认中心」：点完地图后镜头平移到选中的点 */
+    easeToCalls: Array<{ center: [number, number] }> = [];
+    /** 相机当前位置。选点态进入时以它作为初始选中点。 */
+    centerValue: { lng: number; lat: number } = { lng: 116.3974, lat: 39.9093 };
+    /** 真实 canvas（含 style），组件靠 `canvas.style.cursor` 切换十字准星 */
+    canvasElement: HTMLCanvasElement = document.createElement("canvas");
     /** 相机"刚好框住某个包围盒"时给出的缩放。undefined 模拟算不出来。 */
     cameraForBoundsZoom: number | undefined = 15.4;
     constructor() {
@@ -104,9 +158,26 @@ vi.mock("maplibre-gl", () => {
       this.onCbs[evt] = cb;
     }
     off() {}
+    setStyle() {}
     remove() {}
     getZoom() {
       return this.zoomValue;
+    }
+    getCenter() {
+      return this.centerValue;
+    }
+    getCanvas() {
+      return this.canvasElement;
+    }
+    // 真实 MapLibre 在平移动画结束后发 moveend；同步发掉，
+    // "点地图选点 → 镜头过去 → moveend 重取数据"这条链路在用例里才是可验证的。
+    easeTo(options: { center: [number, number] }) {
+      this.easeToCalls.push(options);
+      this.centerValue = { lng: options.center[0], lat: options.center[1] };
+      this.onCbs.moveend?.();
+    }
+    project([longitude, latitude]: [number, number]) {
+      return { x: longitude * 100000, y: latitude * 100000 };
     }
     getBounds() {
       return {
@@ -121,7 +192,7 @@ vi.mock("maplibre-gl", () => {
     }
     cameraForBounds() {
       if (this.cameraForBoundsZoom === undefined) return undefined;
-      return { center: { lng: 116.995, lat: 36.6623 }, zoom: this.cameraForBoundsZoom };
+      return { center: { lng: 116.99, lat: 36.66 }, zoom: this.cameraForBoundsZoom };
     }
     // 真实 MapLibre 在飞行动画结束后发 moveend。这里同步发,
     // "点击聚合 → 放大 → 重绘"整条链路才能在用例里跑完 —— 否则点击之后的
@@ -135,13 +206,32 @@ vi.mock("maplibre-gl", () => {
   }
   class FakeMarker {
     element: HTMLElement;
-    constructor(options: { element: HTMLElement }) {
+    offset: [number, number];
+    lngLat: unknown;
+    constructor(options: { element: HTMLElement; offset?: [number, number] }) {
       this.element = options.element;
+      this.offset = options.offset ?? [0, 0];
     }
-    setLngLat() {
+    setLngLat(value: unknown) {
+      this.lngLat = value;
       return this;
     }
+    getElement() {
+      return this.element;
+    }
     addTo() {
+      // ⛔⛔ 复刻 MapLibre 5.x 的真实约束，别改成宽松版：
+      //    `Marker.addTo()` 会**立刻**跑一次 `_update()`，里面第一件事是
+      //    `smartWrap(this._lngLat, this._flatPos, ...)`。此时 `_lngLat` 还是 undefined 就抛
+      //    `TypeError: Cannot read properties of undefined (reading 'lng')`。
+      //    后果极具迷惑性：异常在 `element.style.transform = ...` **之前**抛出 ⇒ 标记永远停在
+      //    `top:0;left:0`（"卡在左上角"），而且 `_flatPos` 也没初始化 ⇒ 之后每次 `setLngLat()`
+      //    都在同一行再抛一次 ⇒ 点地图"选不中"（pick 有更新、针永远不动）。
+      //    所以正确写法只能是 `new Marker(...).setLngLat([...]).addTo(map)`。
+      //    （2026-10-22 线上就是先 addTo 后 setLngLat，老板看到"标记一直在左上角、没法选点"。）
+      if (this.lngLat === undefined) {
+        throw new TypeError("Cannot read properties of undefined (reading 'lng')");
+      }
       // 只有真正挂上地图才算"在地图上"。remove() 里摘掉 —— 这样
       // __markerInstances 表达的是**当前**的标记集合,而不是"历史上创建过的
       // 所有标记"。否则断言会读到已被移除的残留(上一版 remove() 是空实现,
@@ -155,13 +245,14 @@ vi.mock("maplibre-gl", () => {
     }
   }
   return {
-    default: { Map: FakeMap, NavigationControl: class {}, AttributionControl: class {} },
+    default: { Map: FakeMap, Popup: FakePopup, NavigationControl: class {}, AttributionControl: class {} },
     LngLatBounds: class {
       extend() {}
     },
     Marker: FakeMarker,
     __mapInstances: mapInstances,
-    __markerInstances: markerInstances
+    __markerInstances: markerInstances,
+    __popupInstances: FakePopup.instances
   };
 });
 
@@ -196,17 +287,37 @@ vi.mock("@/api/dictionary", () => ({
   getDictItemsByDictCodeAPI: vi.fn().mockResolvedValue({ code: 0, message: "", data: [] })
 }));
 
+// 主题 store 的 darkMode 必须能被用例改：底图现在不提供手动切换，只跟系统主题走，
+// 不给一个共享 ref 就整条"换底图"链路都测不到。
+const themeState = vi.hoisted(() => ({ darkMode: null as unknown as { value: boolean } }));
 vi.mock("@/store/modules/theme-config", async () => {
   const { ref } = await import("vue");
-  return { useThemeConfig: () => ({ darkMode: ref(false) }) };
+  themeState.darkMode ??= ref(false);
+  return { useThemeConfig: () => ({ darkMode: themeState.darkMode }) };
 });
 
 vi.mock("@/store/modules/user", () => ({
   useUserStoreHook: () => user
 }));
 
+// 点播/停流：页面调的是 `@/api/gb28181` 里的真函数，不桩掉就会真的发请求。
+// 用 importOriginal 保留同模块的其它导出，避免连累其它组件模块的静态 import。
+const gbApi = vi.hoisted(() => ({
+  startPlay: vi.fn(),
+  stopPlay: vi.fn()
+}));
+
+vi.mock("@/api/gb28181", async importOriginal => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  startPlay: gbApi.startPlay,
+  stopPlay: gbApi.stopPlay
+}));
+
+// 播放控制台是全局单例（layout 里的 PlayConsoleHost），必须共享同一个 open 才能断言。
+const playbackConsoleMock = vi.hoisted(() => ({ open: vi.fn(), close: vi.fn() }));
+
 vi.mock("@/store/modules/playback-console", () => ({
-  usePlaybackConsoleStore: () => ({ open: vi.fn(), close: vi.fn() })
+  usePlaybackConsoleStore: () => playbackConsoleMock
 }));
 
 vi.mock("@arco-design/web-vue", () => ({
@@ -264,11 +375,17 @@ const passthroughStub = {
   template: "<div><slot /><slot name='fields' /><slot name='title' /><slot name='footer' /></div>"
 };
 
-function mountPage() {
+/**
+ * @param options.teleport 关掉 VTU 对 `<Teleport>` 的默认桩（`shallow` 下它会把整个
+ *   teleport 摊成一对注释，内容根本不渲染）。视频小窗是 Teleport 进 MapLibre popup 的，
+ *   要断言里面的按钮就必须打开真实 teleport。
+ */
+function mountPage(options: { teleport?: boolean } = {}) {
   return mount(DeviceMgmt, {
     shallow: true,
     global: {
       stubs: {
+        ...(options.teleport ? { teleport: false } : {}),
         DirectoryPanel: {
           name: "DirectoryPanel",
           props: ["modelValue", "resourceFilter", "selectedDeviceId"],
@@ -326,6 +443,60 @@ function mountPage() {
           </section>`
         },
         SubscriptionDialog: true,
+        // 地图视角左栏换成可定位通道树：桩要能广播 locate / focus / scopeChange，
+        // 否则"点击定位"整条链路在 index 层没有覆盖（组件自身有独立用例）。
+        MapChannelTree: {
+          name: "MapChannelTree",
+          props: ["scopeValue", "scopeLabel", "selectedChannelId", "status", "keyword"],
+          emits: ["locate", "focus", "scopeChange", "update:keyword"],
+          setup(_props: any, { emit }: { emit: (event: string, ...args: any[]) => void }) {
+            const patrolChannel = {
+              id: 3539,
+              channelId: "34020000001320000010",
+              deviceId: "34020000002000000001",
+              name: "巡逻通道",
+              alias: "",
+              status: 1,
+              longitude: 117.05,
+              latitude: 36.685,
+              positionSource: "mobile"
+            };
+            return {
+              refresh: vi.fn(),
+              locateFirst: () => emit("locate", patrolChannel),
+              focusDevice: () =>
+                emit("focus", {
+                  deviceId: "34020000002000000001",
+                  name: "巡逻一组",
+                  alias: "",
+                  online: true,
+                  channels: [
+                    patrolChannel,
+                    { ...patrolChannel, id: 3540, channelId: "34020000001320000011", longitude: 117.12, latitude: 36.71 }
+                  ]
+                }),
+              chooseScope: () =>
+                emit("scopeChange", {
+                  view: "department",
+                  node: {
+                    key: "department:dept:3",
+                    name: "园区",
+                    type: "organization",
+                    readOnly: true,
+                    count: 1,
+                    onlineCount: 1,
+                    depth: 0,
+                    children: []
+                  }
+                })
+            };
+          },
+          template: `<section>
+            <button data-testid="map-tree-locate" @click="locateFirst">定位通道</button>
+            <button data-testid="map-tree-focus" @click="focusDevice">定位设备</button>
+            <button data-testid="map-tree-scope" @click="chooseScope">选范围</button>
+          </section>`
+        },
         CustomGroupEditor: true,
         AddToGroupDialog: true,
         "s-layout-search": passthroughStub,
@@ -378,6 +549,11 @@ describe("device-mgmt round-2 修复回归", () => {
     // 登记处跨用例累积,必须清空
     mapInstances.length = 0;
     markerInstances.length = 0;
+    popupInstances.length = 0;
+    gbApi.startPlay.mockReset();
+    gbApi.stopPlay.mockReset().mockResolvedValue({ code: 0, message: "" });
+    playbackConsoleMock.open.mockReset();
+    playbackConsoleMock.close.mockReset();
     api.listDevices.mockReset().mockResolvedValue(okList());
     api.getDevice.mockReset().mockResolvedValue({
       code: 0,
@@ -395,6 +571,9 @@ describe("device-mgmt round-2 修复回归", () => {
     api.listChannels.mockReset().mockResolvedValue(okList());
     api.listMapMarkers.mockReset().mockResolvedValue(okList());
     api.listMapClusters.mockReset().mockResolvedValue({ code: 0, message: "", data: { clusters: [] } });
+    // 默认"平台还没设过中心"：进地图时不挪镜头，仍按数据包围盒走（与既有用例的假设一致）
+    api.getMapCenter.mockReset().mockResolvedValue({ code: 0, message: "", data: { center: null } });
+    api.saveMapCenter.mockReset().mockResolvedValue({ code: 0, message: "" });
     api.listDeviceStatusEvents.mockReset().mockResolvedValue(okList());
     api.listDeviceSubscriptions.mockReset().mockResolvedValue(okList());
     api.listMaintenanceOperations.mockReset().mockResolvedValue(okList());
@@ -659,14 +838,160 @@ describe("device-mgmt round-2 修复回归", () => {
     wrapper.unmount();
   });
 
-  it("forwards the selected device to both map endpoints", async () => {
+  it("底图跟随系统主题，换完必须把「正在加载地图」遮罩收掉", async () => {
     window.localStorage.setItem("uvp.gb28181.device-mgmt.view-mode", "map");
+    const wrapper = mountPage();
+    await flushPromises();
+    const view = wrapper.get(".map-view");
+    expect(view.attributes("data-basemap")).toBe("light");
+
+    // 1) 手动切换下拉已移除（两套样式只是配色不同、没有卫星），只跟 darkMode 走
+    expect(wrapper.find(".map-basemap-select").exists()).toBe(false);
+
+    themeState.darkMode.value = true;
+    await flushPromises();
+    expect(view.attributes("data-basemap")).toBe("dark");
+
+    // 2) ⛔ 回归点：`.map-state` 是 `inset:0` + 不透明底的整块遮罩，显示条件是
+    //    `!mapReady || !mapFirstRender`。早先换底图只挂了 `style.load` 把 mapReady 置 true，
+    //    `mapFirstRender` 没人置回 ⇒ 遮罩永远盖着，表现为"换了底图地图没了"。
+    mapInstances[0].onceCbs["style.load"]?.();
+    await flushPromises();
+    expect(wrapper.find(".map-state").exists()).toBe(false);
+
+    themeState.darkMode.value = false;
+    await flushPromises();
+    expect(view.attributes("data-basemap")).toBe("light");
+    mapInstances[0].onceCbs["style.load"]?.();
+    await flushPromises();
+    expect(wrapper.find(".map-state").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("设为默认中心：先在地图上点选、再确认才落库", async () => {
+    user.account.permissions = ["*:*:*"];
+    window.localStorage.setItem("uvp.gb28181.device-mgmt.view-mode", "map");
+    const wrapper = mountPage();
+    await flushPromises();
+    const map = mapInstances.at(-1)!;
+
+    // 1) 平时点地图不产生任何痕迹（监听常驻，靠标志位判定 —— 这正是不常驻就会漏掉的回归点）
+    expect(wrapper.find(".map-center-picker").exists()).toBe(false);
+    map.onCbs.click?.({ lngLat: { lng: 117.5, lat: 30.1 } });
+    await flushPromises();
+    expect(wrapper.find(".map-center-picker").exists()).toBe(false);
+    expect(api.saveMapCenter).not.toHaveBeenCalled();
+
+    // 2) 点按钮 = 进入选点态，不是"立刻存当前视野"（这就是被吐槽"别扭"的那一步）
+    await wrapper.get(".map-action--center").trigger("click");
+    await flushPromises();
+    expect(wrapper.get(".map-center-picker").text()).toContain("在地图上点击选择中心点");
+    expect(api.saveMapCenter).not.toHaveBeenCalled();
+    // 进选点态就先摆一根针在"当前中心"（用户可能只是想把这附近存下来）
+    expect(markerInstances).toHaveLength(1);
+    expect(markerInstances[0].lngLat).toEqual([116.3974, 39.9093]);
+
+    // 3) 在地图上点一下：读数、选点针、镜头都跟着这个点走
+    map.onCbs.click?.({ lngLat: { lng: 117.5, lat: 30.1 } });
+    await flushPromises();
+    expect(wrapper.get(".map-center-picker__coord").text()).toContain("117.50000");
+    expect(markerInstances).toHaveLength(1);
+    expect(markerInstances[0].lngLat).toEqual([117.5, 30.1]);
+    expect(map.easeToCalls.at(-1)).toMatchObject({ center: [117.5, 30.1] });
+
+    // 4) 确认后才发保存请求，坐标是刚挑的点；退出选点态、摘掉选点针
+    await wrapper.get(".map-center-picker__confirm").trigger("click");
+    await flushPromises();
+    expect(api.saveMapCenter).toHaveBeenCalledTimes(1);
+    expect(api.saveMapCenter).toHaveBeenCalledWith(expect.objectContaining({ longitude: 117.5, latitude: 30.1 }));
+    expect(wrapper.find(".map-center-picker").exists()).toBe(false);
+    expect(markerInstances).toHaveLength(0);
+    wrapper.unmount();
+  });
+
+  it("选中态按 Esc 直接退出，一颗字节都不落库", async () => {
+    user.account.permissions = ["*:*:*"];
+    window.localStorage.setItem("uvp.gb28181.device-mgmt.view-mode", "map");
+    const wrapper = mountPage();
+    await flushPromises();
+
+    await wrapper.get(".map-action--center").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".map-center-picker").exists()).toBe(true);
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await flushPromises();
+    expect(wrapper.find(".map-center-picker").exists()).toBe(false);
+    expect(api.saveMapCenter).not.toHaveBeenCalled();
+    // 针和光标一起收干净：留着针下次进来会看见"上一次挑的点"
+    expect(markerInstances).toHaveLength(0);
+    wrapper.unmount();
+  });
+
+  it("forwards the selected device to both map endpoints", async () => {
+    // 地图视角的左栏已经换成「可定位通道树」，不再承载"选中某台设备"这个动作；
+    // 所以先在列表视角选设备，再切到地图 —— 这正是用户的实际路径。
+    window.localStorage.setItem("uvp.gb28181.device-mgmt.view-mode", "list");
     const wrapper = mountPage();
     await flushPromises();
     await wrapper.get('[data-testid="select-device-a"]').trigger("click");
     await flushPromises();
+    await wrapper.get('[aria-label="地图视图"]').trigger("click");
+    await flushPromises();
     expect(api.listMapMarkers).toHaveBeenLastCalledWith(expect.objectContaining({ deviceId: "34020000002000000031" }));
     expect(api.listMapClusters).toHaveBeenLastCalledWith(expect.objectContaining({ deviceId: "34020000002000000031" }));
+    wrapper.unmount();
+  });
+
+  it("地图左栏点通道：飞到那个点并弹出点位卡片", async () => {
+    window.localStorage.setItem("uvp.gb28181.device-mgmt.view-mode", "map");
+    const wrapper = mountPage();
+    await flushPromises();
+    const map = mapInstances.at(-1)!;
+    popupInstances.length = 0;
+
+    await wrapper.get('[data-testid="map-tree-locate"]').trigger("click");
+    await flushPromises();
+
+    const flight = map.flyToCalls.at(-1);
+    expect(flight.center).toEqual([117.05, 36.685]);
+    // 只抬到单点档，不能无条件顶到 maxZoom（用户已经在 18 级看清门牌时点一下会被拉远）
+    expect(flight.zoom).toBeGreaterThanOrEqual(16);
+    // ⛔ 卡片必须弹出来：坐标由通道自带（视野外的通道在 markers 里查不到）
+    expect(popupInstances).toHaveLength(1);
+    expect((popupInstances[0].content as HTMLElement).textContent).toContain("巡逻通道");
+    wrapper.unmount();
+  });
+
+  it("地图左栏点设备：多个点位用包围盒框住", async () => {
+    window.localStorage.setItem("uvp.gb28181.device-mgmt.view-mode", "map");
+    const wrapper = mountPage();
+    await flushPromises();
+    const map = mapInstances.at(-1)!;
+    map.fitBoundsCalls.length = 0;
+
+    await wrapper.get('[data-testid="map-tree-focus"]').trigger("click");
+    await flushPromises();
+
+    expect(map.fitBoundsCalls).toHaveLength(1);
+    expect(map.fitBoundsCalls[0].options).toMatchObject({ padding: 80, maxZoom: 16 });
+    wrapper.unmount();
+  });
+
+  it("左栏范围下拉复用目录状态，地图查询同步收窄", async () => {
+    window.localStorage.setItem("uvp.gb28181.device-mgmt.view-mode", "map");
+    const wrapper = mountPage();
+    await flushPromises();
+
+    await wrapper.get('[data-testid="map-tree-scope"]').trigger("click");
+    await flushPromises();
+
+    expect(api.listMapMarkers).toHaveBeenLastCalledWith(
+      expect.objectContaining({ directoryView: "department", directoryKey: "department:dept:3" })
+    );
+    expect(api.listMapClusters).toHaveBeenLastCalledWith(
+      expect.objectContaining({ directoryView: "department", directoryKey: "department:dept:3" })
+    );
     wrapper.unmount();
   });
 
@@ -1008,7 +1333,13 @@ describe("device-mgmt round-2 修复回归", () => {
             centerLng: 116.995036,
             count: 1,
             onlineCount: 1,
-            single: { id: 3539, channelId: "34020000001320000010", name: "后置摄像头", status: 1 }
+            single: {
+              id: 3539,
+              channelId: "34020000001320000010",
+              deviceId: "34020000002000000001",
+              name: "后置摄像头",
+              status: 1
+            }
           })
         ]
       }
@@ -1026,8 +1357,11 @@ describe("device-mgmt round-2 修复回归", () => {
     // 让唯一那路通道顶着一个写着 "1" 的气泡,用户会以为平台聚合了一个不该聚合的东西,
     // 而且点它只会放大 —— 观感就是"点了这个数字之后标记点没了"。
     expect(markerInstances.map(instance => instance.element.className)).toEqual(["map-channel-marker online"]);
+    const icon = markerInstances[0].element.querySelector(".map-channel-pip");
+    expect(icon).not.toBeNull();
 
     wrapper.unmount();
+    expect(icon?.innerHTML).toBe("");
   });
 
   it("低 zoom 多路画聚合气泡,高 zoom 只画标记点,两者互斥", async () => {
@@ -1060,7 +1394,7 @@ describe("device-mgmt round-2 修复回归", () => {
     wrapper.unmount();
   });
 
-  it("点击聚合一次放大到标记点层,不会停在气泡层让人以为没反应", async () => {
+  it("点击分散聚合只放大地图，保留所有成员视野，不弹出通道列表", async () => {
     window.localStorage.setItem("uvp.gb28181.device-mgmt.view-mode", "map");
     api.listMapMarkers.mockReset().mockResolvedValue(okList(1, [coordinatedChannel]));
     api.listMapClusters.mockReset().mockResolvedValue({
@@ -1094,24 +1428,157 @@ describe("device-mgmt round-2 修复回归", () => {
       return markerInstances[0].element as HTMLElement;
     };
 
-    // 相机说"框住这一簇要 17.5"(点很密) —— 就用它。这一条同时证明真的参考了
-    // 簇的包围盒,而不是"当前 zoom 加个固定档位"。
+    // 用包围盒相机展开，不能弹出通道选择列表或把成员裁出视野。
     map.cameraForBoundsZoom = 17.5;
     map.flyToCalls.length = 0;
     (await bubbleAt(10)).click();
     expect(map.flyToCalls[0].zoom).toBe(17.5);
+    expect(map.flyToCalls[0].center).toEqual({ lng: 116.99, lat: 36.66 });
 
-    // 相机说"框住它只要 11.2"(点太散,人还在气泡层) —— 必须抬到标记点层以上,
-    // 否则用户点一下跟没点一样(就是"点完这个数字标记点就没了"的由来)。
+    // 点太散时保留所有成员的视野，不能强制抬到 15 级。
     map.cameraForBoundsZoom = 11.2;
     map.flyToCalls.length = 0;
     (await bubbleAt(10)).click();
-    expect(map.flyToCalls[0].zoom).toBeGreaterThanOrEqual(15);
+    expect(map.flyToCalls[0].zoom).toBe(11.2);
+    expect(popupInstances).toHaveLength(0);
 
-    // 飞过去之后必须真的画出标记点,而不是又一轮气泡或干脆什么都没有
+    wrapper.unmount();
+  });
+
+  it.each([0, 0.0001])("最大层级同坐标或相邻通道展开为独立标记，点击标记才显示操作（偏移 %s）", async offset => {
+    window.localStorage.setItem("uvp.gb28181.device-mgmt.view-mode", "map");
+    const channels = [0, 1, 2].map(index => ({
+      ...coordinatedChannel,
+      id: 6000 + index,
+      channelId: `channel-${index}`,
+      deviceId: `device-${index}`,
+      longitude: coordinatedChannel.longitude + offset * index
+    }));
+    api.listMapMarkers.mockResolvedValue(okList(3, channels));
+    const wrapper = mountPage();
     await flushPromises();
-    expect(markerInstances.map(instance => instance.element.className)).toEqual(["map-channel-marker online"]);
+    const map = mapInstances[0];
+    map.zoomValue = 16;
+    map.cameraForBoundsZoom = 22;
+    map.onCbs.moveend?.();
+    await flushPromises();
 
+    expect(markerInstances).toHaveLength(1);
+    expect(markerInstances[0].element.textContent).toBe("3");
+    markerInstances[0].element.click();
+    await flushPromises();
+    expect(map.flyToCalls.at(-1).zoom).toBe(22);
+    expect(markerInstances).toHaveLength(3);
+    expect(popupInstances).toHaveLength(0);
+    const offsets = markerInstances.map(marker => marker.offset);
+    expect(new Set(offsets.map(value => JSON.stringify(value))).size).toBe(3);
+    const positions = markerInstances.map(marker => [
+      marker.lngLat[0] * 100000 + marker.offset[0],
+      marker.lngLat[1] * 100000 + marker.offset[1]
+    ]);
+    positions.forEach((position, index) => {
+      positions.slice(index + 1).forEach(other => {
+        expect(Math.hypot(position[0] - other[0], position[1] - other[1])).toBeGreaterThan(32);
+      });
+    });
+    for (const [index, channel] of channels.entries()) {
+      expect(markerInstances[index].element.className).toBe("map-channel-marker online");
+      expect(markerInstances[index].lngLat).toEqual([channel.longitude, channel.latitude]);
+      markerInstances[index].element.click();
+      expect(popupInstances.at(-1).content.textContent).toContain(channel.channelId);
+      expect(popupInstances.at(-1).content.textContent).toContain("播放视频");
+      expect(popupInstances.at(-1).content.textContent).toContain("查看轨迹");
+      expect(popupInstances.at(-1).content.querySelector(".map-channel-choice")).toBeNull();
+      expect(popupInstances.at(-1).lngLat).toEqual([channel.longitude, channel.latitude]);
+    }
+    api.listMapMarkers.mockResolvedValue(okList(3, [...channels].reverse()));
+    map.onCbs.moveend?.();
+    await flushPromises();
+    expect(markerInstances.map(marker => marker.offset)).toEqual(offsets);
+    wrapper.unmount();
+  });
+
+  it("点击完全重合的聚合飞到最大层级，直接显示每路摄像头标记", async () => {
+    window.localStorage.setItem("uvp.gb28181.device-mgmt.view-mode", "map");
+    const channels = [0, 1, 2].map(index => ({ ...coordinatedChannel, id: 6000 + index, deviceId: `device-${index}` }));
+    api.listMapMarkers.mockResolvedValue(okList(3, channels));
+    api.listMapClusters.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        clusters: [
+          clusterOf({
+            centerLat: coordinatedChannel.latitude,
+            centerLng: coordinatedChannel.longitude,
+            count: 3
+          })
+        ]
+      }
+    });
+    const wrapper = mountPage();
+    await flushPromises();
+    markerInstances[0].element.click();
+    await flushPromises();
+    expect(mapInstances[0].flyToCalls[0]).toMatchObject({
+      center: [coordinatedChannel.longitude, coordinatedChannel.latitude],
+      zoom: 22
+    });
+    expect(popupInstances).toHaveLength(0);
+    expect(markerInstances).toHaveLength(3);
+    expect(markerInstances.every(marker => marker.element.className === "map-channel-marker online")).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("同一设备的三个分散通道各画一个标记，统计不按设备去重", async () => {
+    window.localStorage.setItem("uvp.gb28181.device-mgmt.view-mode", "map");
+    const channels = [0, 1, 2].map(index => ({
+      ...coordinatedChannel,
+      id: 6000 + index,
+      deviceId: "same-device",
+      longitude: coordinatedChannel.longitude + index * 0.001
+    }));
+    api.listMapMarkers.mockResolvedValue(okList(3, channels));
+    const wrapper = mountPage();
+    await flushPromises();
+    const map = mapInstances[0];
+    map.zoomValue = 16;
+    map.onCbs.moveend?.();
+    await flushPromises();
+    expect(markerInstances.map(marker => marker.element.className)).toEqual(Array(3).fill("map-channel-marker online"));
+    wrapper.unmount();
+  });
+
+  it("分散簇已经全部框住时继续放大，不能弹列表或停在同层级", async () => {
+    window.localStorage.setItem("uvp.gb28181.device-mgmt.view-mode", "map");
+    const channels = [0, 1, 2].map(index => ({
+      ...coordinatedChannel,
+      id: 6000 + index,
+      deviceId: `device-${index}`,
+      latitude: coordinatedChannel.latitude + index * 0.1
+    }));
+    api.listMapMarkers.mockResolvedValue(okList(3, channels));
+    api.listMapClusters.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        clusters: [
+          clusterOf({
+            centerLat: coordinatedChannel.latitude,
+            centerLng: coordinatedChannel.longitude,
+            minLat: channels[0].latitude,
+            maxLat: channels[2].latitude,
+            count: 3
+          })
+        ]
+      }
+    });
+    const wrapper = mountPage();
+    await flushPromises();
+    mapInstances[0].cameraForBoundsZoom = 11.2;
+    markerInstances[0].element.click();
+    await flushPromises();
+    expect(mapInstances[0].flyToCalls[0].zoom).toBeGreaterThan(12);
+    expect(popupInstances).toHaveLength(0);
     wrapper.unmount();
   });
 
@@ -1124,5 +1591,124 @@ describe("device-mgmt round-2 修复回归", () => {
       expect(source, `${cls} 的样式必须写成 :deep(.${cls})`).toContain(`:deep(.${cls})`);
       expect(source, `${cls} 不能再出现裸选择器`).not.toMatch(new RegExp(`^\\s*\\.${cls}\\s*[,{]`, "m"));
     }
+  });
+
+  it("选点针不许自己写 position/transform（会把 MapLibre 的定位顶掉，针直接看不见）", async () => {
+    // ⛔⛔ 这条盯的是一个"界面看着正常、地图上却没点"的坑：
+    //    MapLibre 用 `.maplibregl-marker{position:absolute;top:0;left:0}` 定位，再用
+    //    `transform: translate()` 挪位置；本组件样式表在 maplibre 之后加载、同优先级，
+    //    外层元素只要写一句 `position: relative`（或自己写 transform 去做形状），
+    //    就会把这两条顶掉 ⇒ 标记掉回普通文档流、被画布容器裁掉。
+    //    表现：提示条和坐标都正常，地图上就是没有那个点（2026-10-22 线上复现）。
+    const source = await readPageSource();
+    const block = source.match(/:deep\(\.map-center-pin\)\s*\{([^}]*)\}/);
+    expect(block, "必须存在 :deep(.map-center-pin) 样式块").not.toBeNull();
+    expect(block![1]).not.toMatch(/(^|[\s;])position\s*:/);
+    expect(block![1]).not.toMatch(/(^|[\s;])transform\s*:/);
+    // 形状画在 SVG 里 ⇒ 同样必须 :deep()，且 SVG 要 display:block（inline 会留基线空隙、针尖上浮）
+    expect(source).toContain(":deep(.map-center-pin__body)");
+    expect(source).toMatch(/:deep\(\.map-center-pin svg\)\s*\{[^}]*display:\s*block/);
+  });
+
+  // ── 实时视频小窗（贴在地图上，不再是 960px 大模态）──────────────────────
+
+  // ⛔ 别直接用 coordinatedChannel 点播：那个夹具只带坐标/状态，**没有 deviceId**，
+  //    点播入参是 (设备编码, 通道编码) 两元组，缺设备编码 playFromMap 直接早退。
+  const playableChannel = { ...coordinatedChannel, deviceId: "34020000002000000031" };
+
+  /** 进地图 → 点通道标记 → 弹出通道卡片。返回卡片内容节点。 */
+  async function openChannelCard(channels: unknown[]) {
+    window.localStorage.setItem("uvp.gb28181.device-mgmt.view-mode", "map");
+    api.listMapMarkers.mockResolvedValue(okList(channels.length, channels));
+    // 视频小窗靠真实 teleport 才渲染得出来，这里统一打开
+    const wrapper = mountPage({ teleport: true });
+    await flushPromises();
+    const map = mapInstances[0];
+    map.zoomValue = 16;
+    map.onCbs.moveend?.();
+    await flushPromises();
+    expect(markerInstances).toHaveLength(1);
+    markerInstances[0].element.click();
+    await flushPromises();
+    return { wrapper, content: popupInstances.at(-1).content as HTMLElement };
+  }
+
+  it("通道离线时「播放视频」禁用，且一个字节都不往点播接口发", async () => {
+    user.account.permissions = ["gb28181:device:view", "gb28181:play:start"];
+    const { wrapper, content } = await openChannelCard([{ ...coordinatedChannel, status: 0 }]);
+
+    const play = content.querySelector(".map-channel-card__action--play") as HTMLButtonElement;
+    expect(play.disabled).toBe(true);
+    // 离线 ≠ 无权限：两种原因的提示必须分开说，否则用户会跑去要权限
+    expect(play.title).toBe("通道离线，无法播放");
+    play.click();
+    await flushPromises();
+    expect(gbApi.startPlay).not.toHaveBeenCalled();
+    expect(popupInstances).toHaveLength(1); // 还停在通道卡片上，没有切去视频小窗
+    wrapper.unmount();
+  });
+
+  it("播放视频不再开大模态：在地图点位上弹一块小窗，并给出去控制台的入口", async () => {
+    user.account.permissions = ["gb28181:device:view", "gb28181:play:start"];
+    gbApi.startPlay.mockResolvedValue({ code: 0, message: "", data: { streamId: "stream-1", httpFlvUrl: "http://zlm/a.flv" } });
+    const { wrapper, content } = await openChannelCard([playableChannel]);
+
+    (content.querySelector(".map-channel-card__action--play") as HTMLButtonElement).click();
+    await flushPromises();
+
+    expect(gbApi.startPlay).toHaveBeenCalledWith(playableChannel.deviceId, playableChannel.channelId);
+    // 通道卡片让位，只剩一张小窗 popup，锚在同一个点位上
+    expect(popupInstances).toHaveLength(1);
+    const video = popupInstances[0];
+    expect(video.lngLat).toEqual([playableChannel.longitude, playableChannel.latitude]);
+    const card = (video.content as HTMLElement).querySelector(".map-video-card");
+    expect(card, "视频小窗必须 Teleport 进 popup，否则等于没弹").not.toBeNull();
+    expect((video.content as HTMLElement).querySelector(".map-video-card__stage")).not.toBeNull();
+    expect((video.content as HTMLElement).textContent).toContain("播放控制台");
+    expect((video.content as HTMLElement).textContent).toContain(playableChannel.channelId);
+    wrapper.unmount();
+  });
+
+  it("小窗上的「播放控制台」先把这路流停掉再交给全局控制台（同通道双流会互相顶掉）", async () => {
+    user.account.permissions = ["gb28181:device:view", "gb28181:play:start"];
+    gbApi.startPlay.mockResolvedValue({ code: 0, message: "", data: { streamId: "stream-1", httpFlvUrl: "http://zlm/a.flv" } });
+    const { wrapper, content } = await openChannelCard([playableChannel]);
+    (content.querySelector(".map-channel-card__action--play") as HTMLButtonElement).click();
+    await flushPromises();
+
+    const consoleButton = (popupInstances[0].content as HTMLElement).querySelector(
+      ".map-channel-card__action--console"
+    ) as HTMLButtonElement;
+    expect(consoleButton.disabled).toBe(false);
+    consoleButton.click();
+    await flushPromises();
+
+    // ⛔ 顺序有意义：先停流再开控制台，否则控制台那路会被小窗这路顶掉
+    expect(gbApi.stopPlay).toHaveBeenCalledWith("stream-1");
+    expect(gbApi.stopPlay.mock.invocationCallOrder[0]).toBeLessThan(playbackConsoleMock.open.mock.invocationCallOrder[0]);
+    expect(playbackConsoleMock.open).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: playableChannel.id,
+        channelId: playableChannel.channelId,
+        deviceId: playableChannel.deviceId,
+        status: 1
+      })
+    );
+    expect(popupInstances).toHaveLength(0);
+    wrapper.unmount();
+  });
+
+  it("关掉小窗（点 × 或地图把它收掉）必须立刻停流，不能只关 UI", async () => {
+    user.account.permissions = ["gb28181:device:view", "gb28181:play:start"];
+    gbApi.startPlay.mockResolvedValue({ code: 0, message: "", data: { streamId: "stream-1", httpFlvUrl: "http://zlm/a.flv" } });
+    const { wrapper, content } = await openChannelCard([playableChannel]);
+    (content.querySelector(".map-channel-card__action--play") as HTMLButtonElement).click();
+    await flushPromises();
+
+    // 真实 MapLibre 关 popup 时会 fire('close')，这里模拟用户点 ×
+    popupInstances[0].trigger("close");
+    await flushPromises();
+    expect(gbApi.stopPlay).toHaveBeenCalledWith("stream-1");
+    wrapper.unmount();
   });
 });

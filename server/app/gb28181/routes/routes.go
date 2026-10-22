@@ -1031,6 +1031,10 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.GET("/map/markers", mapController.Markers)
 			dmgmt.GET("/map/clusters", mapController.Clusters)
 			dmgmt.GET("/map/no-coord-count", mapController.NoCoordCount)
+			// 地图视角左栏的「可定位通道树」：只列有坐标的通道，按设备分组。
+			// ⛔ 它和 markers 共用同一套过滤参数（q/status/directoryView/directoryKey），
+			//   但**不吃视野框** —— 树是全局索引，不能跟着拖动地图变化。
+			dmgmt.GET("/map/channel-tree", mapController.ChannelTree)
 			// 轨迹:只有会发 MobilePosition 的移动设备(执法仪/车载)有数据,固定枪机恒空。
 			// 与 markers 同一条数据权限闸门(控制器内按 gb_channel 的归属做可见性校验)。
 			dmgmt.GET("/map/trajectory", mapController.Trajectory)

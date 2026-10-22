@@ -43,6 +43,7 @@ declare module 'vue' {
     AMenu: typeof import('@arco-design/web-vue')['Menu']
     AMenuItem: typeof import('@arco-design/web-vue')['MenuItem']
     AModal: typeof import('@arco-design/web-vue')['Modal']
+    AOptgroup: typeof import('@arco-design/web-vue')['Optgroup']
     AOption: typeof import('@arco-design/web-vue')['Option']
     APagination: typeof import('@arco-design/web-vue')['Pagination']
     APopconfirm: typeof import('@arco-design/web-vue')['Popconfirm']
