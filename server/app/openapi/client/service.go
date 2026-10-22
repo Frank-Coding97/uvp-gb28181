@@ -367,6 +367,10 @@ func (s *Service) RotateSecret(ctx context.Context, id int64, expectedRowVersion
 	if id <= 0 || expectedRowVersion <= 0 {
 		return ClientView{}, "", ErrInvalidArgument
 	}
+	// ⛔ 授权检查必须在事务**外**执行，见 preauthorizeClient 的说明。
+	if err := s.preauthorizeClient(ctx, id, expectedRowVersion, "client.rotate", actorID, false); err != nil {
+		return ClientView{}, "", err
+	}
 	secret, err := s.secretManager.GenerateSecretKey()
 	if err != nil {
 		return ClientView{}, "", ErrDependencyUnavailable
@@ -383,9 +387,6 @@ func (s *Service) RotateSecret(ctx context.Context, id int64, expectedRowVersion
 		}
 		if row.RowVersion != expectedRowVersion {
 			return ErrConflict
-		}
-		if err := s.authorizeClient(ctx, actorID, "client.rotate", row.OwnerDeptID); err != nil {
-			return err
 		}
 		newVersion := row.SecretVersion + 1
 		ciphertext, iv, err := s.secretManager.Encrypt(row.ID, row.AK, newVersion, secret)
@@ -434,6 +435,10 @@ func (s *Service) SetStatus(ctx context.Context, id int64, status string, expect
 	if id <= 0 || expectedRowVersion <= 0 || !validStatus(status) {
 		return ClientView{}, ErrInvalidArgument
 	}
+	// ⛔ 授权检查必须在事务**外**执行，见 preauthorizeClient 的说明。
+	if err := s.preauthorizeClient(ctx, id, expectedRowVersion, "client."+status, actorID, false); err != nil {
+		return ClientView{}, err
+	}
 	now := s.currentTime()
 	var view ClientView
 	err := s.db.WithContext(normalizeContext(ctx)).Transaction(func(tx *gorm.DB) error {
@@ -446,9 +451,6 @@ func (s *Service) SetStatus(ctx context.Context, id int64, status string, expect
 		}
 		if row.RowVersion != expectedRowVersion {
 			return ErrConflict
-		}
-		if err := s.authorizeClient(ctx, actorID, "client."+status, row.OwnerDeptID); err != nil {
-			return err
 		}
 		if row.Status == status {
 			view = toClientView(row)
@@ -501,6 +503,17 @@ func (s *Service) SetScope(ctx context.Context, id int64, scope string, enabled 
 	if !scopeSupported {
 		return ClientView{}, ErrUnknownScope
 	}
+	// ⛔ 授权检查必须在事务**外**执行，见 preauthorizeClient 的说明。
+	if err := s.preauthorizeClient(ctx, id, expectedRowVersion, "scope.set", actorID, true); err != nil {
+		return ClientView{}, err
+	}
+	return s.setScopePreauthorized(ctx, id, scope, enabled, expectedRowVersion, actorID)
+}
+
+// setScopePreauthorized 只做校验与写入，**不再**调用授权边界 —— 调用方必须已经
+// 完成 preauthorizeClient。批量写入（SetScopes）在外层事务里逐条调用它；若这里
+// 再授权一次，就会在事务内再取一条连接，SQLite 上直接死等直到请求超时。
+func (s *Service) setScopePreauthorized(ctx context.Context, id int64, scope string, enabled bool, expectedRowVersion int64, actorID uint) (ClientView, error) {
 	now := s.currentTime()
 	var view ClientView
 	err := s.db.WithContext(normalizeContext(ctx)).Transaction(func(tx *gorm.DB) error {
@@ -516,9 +529,6 @@ func (s *Service) SetScope(ctx context.Context, id int64, scope string, enabled 
 		}
 		if row.RowVersion != expectedRowVersion {
 			return ErrConflict
-		}
-		if err := s.authorizeClient(ctx, actorID, "scope.set", row.OwnerDeptID); err != nil {
-			return err
 		}
 		var scopeRow models.ClientScope
 		scopeResult := tx.Where("client_id = ? AND scope = ?", id, scope).First(&scopeRow)
@@ -607,6 +617,35 @@ func (s *Service) authorizeClient(ctx context.Context, actorID uint, action stri
 	}
 	return s.managementBoundary.AuthorizeClient(normalizeContext(ctx), actorID, action, ownerDeptID)
 }
+
+// preauthorizeClient 在**事务开始之前**完成「读客户端 → 状态/版本预检 → 管理边界授权」。
+//
+// ⛔⛔ 这三步绝不能搬进 Transaction 回调。原因在 SQLite：绿色包用的是
+// `gormhelper.GetOneSqliteClient()`，连接池上限被显式设成 **1**（单写者）。
+// 事务一开始就占住那唯一一条连接，而授权边界内部用的是应用库句柄（不是 tx），
+// 它要再取一条连接 ⇒ 永远等不到 ⇒ 一直卡到请求上下文被取消。
+// 现场表现：点「保存授权」转圈，随后 PUT /api/gb28181/openapi-clients/:id/scopes
+// 返回 503 `{"code":"SERVICE_UNAVAILABLE"}`，日志里是
+// `resolve trusted management scope: ... context canceled`。
+// 授权本身不是数据写入，放在事务外语义上也没问题：真正的并发保护由事务内的
+// row_version CAS 负责。
+func (s *Service) preauthorizeClient(ctx context.Context, id int64, expectedRowVersion int64, action string, actorID uint, rejectDisabled bool) error {
+	row, err := loadClient(s.db, normalizeContext(ctx), id)
+	if err != nil {
+		return err
+	}
+	if row.Status == models.StatusRevoked {
+		return ErrRevoked
+	}
+	if rejectDisabled && row.Status != models.StatusActive {
+		return ErrClientDisabled
+	}
+	if row.RowVersion != expectedRowVersion {
+		return ErrConflict
+	}
+	return s.authorizeClient(ctx, actorID, action, row.OwnerDeptID)
+}
+
 
 func (s *Service) supportedScopes(ctx context.Context) (map[string]struct{}, error) {
 	if s == nil || s.db == nil {

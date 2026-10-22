@@ -170,7 +170,7 @@ describe("OpenAPI client detail workspace", () => {
 
     await (wrapper.vm as any).saveScopes(["device:list"]);
 
-    expect(api.scopes).toHaveBeenCalledWith(7, { rowVersion: 3, scopes: ["device:list"] });
+    expect(api.scopes).toHaveBeenCalledWith(7, { rowVersion: 3, scopes: ["device:list"] }, { showErrorMessage: false });
   });
 
   it("loads call records only in their dedicated workspace", async () => {

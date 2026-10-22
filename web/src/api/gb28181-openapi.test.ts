@@ -69,9 +69,13 @@ describe("OpenAPI client management API contract", () => {
 
   it("keeps scope and lifecycle mutations separate from UI button permissions", async () => {
     await updateOpenAPIClientScopes(7, { rowVersion: 4, scopes: ["device:list"] });
-    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/openapi-clients/7/scopes", {
-      data: { rowVersion: 4, scopes: ["device:list"] }
-    });
+    // 第 4 个参数是请求配置：能力授权页自己做失败提示，必须能关掉全局红 toast。
+    expect(request).toHaveBeenLastCalledWith(
+      "put",
+      "/api/gb28181/openapi-clients/7/scopes",
+      { data: { rowVersion: 4, scopes: ["device:list"] } },
+      {}
+    );
 
     await enableOpenAPIClient(7, 5);
     expect(request).toHaveBeenLastCalledWith("post", "/api/gb28181/openapi-clients/7/enable", { data: { rowVersion: 5 } });

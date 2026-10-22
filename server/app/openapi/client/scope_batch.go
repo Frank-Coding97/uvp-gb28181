@@ -48,6 +48,10 @@ func (s *Service) SetScopes(ctx context.Context, id int64, scopes []string, vers
 			return ClientView{}, ErrUnknownScope
 		}
 	}
+	// ⛔ 授权检查必须在事务**外**执行，见 preauthorizeClient 的说明。
+	if err := s.preauthorizeClient(ctx, id, version, "scope.set", actor, true); err != nil {
+		return ClientView{}, err
+	}
 	var view ClientView
 	err = s.db.WithContext(normalizeContext(ctx)).Transaction(func(tx *gorm.DB) error {
 		nested := *s
@@ -64,9 +68,6 @@ func (s *Service) SetScopes(ctx context.Context, id int64, scopes []string, vers
 		}
 		if row.RowVersion != version {
 			return ErrConflict
-		}
-		if err := s.authorizeClient(ctx, actor, "scope.set", row.OwnerDeptID); err != nil {
-			return err
 		}
 		existing, err := nested.ListScopes(ctx, id)
 		if err != nil {
@@ -86,7 +87,7 @@ func (s *Service) SetScopes(ctx context.Context, id int64, scopes []string, vers
 			if current[scope] == wanted[scope] {
 				continue
 			}
-			view, err = nested.SetScope(ctx, id, scope, wanted[scope], view.RowVersion, actor)
+			view, err = nested.setScopePreauthorized(ctx, id, scope, wanted[scope], view.RowVersion, actor)
 			if err != nil {
 				return err
 			}

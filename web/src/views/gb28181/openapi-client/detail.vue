@@ -69,12 +69,42 @@ let allowLeave = false;
 const enabledScopes = computed(() => scopes.value.filter(scope => scope.enabled).map(scope => scope.scope));
 const grantedCount = computed(() => enabledScopes.value.filter(scope => availableScopes.value.includes(scope)).length);
 const editable = computed(() => canGrant.value && detailReady.value && catalogReady.value && client.value?.status === "active");
+// OpenAPI 管理端 5xx/4xx 的外部契约故意只给机器可读短语（service unavailable /
+// capability denied / resource not found …）。这些串直接甩到界面上，用户既看不懂
+// 也不知道该找谁。这里统一翻成中文业务文案；未知错误才回退到组件自己的一句话说明。
+const openAPIErrorMessageMap: Record<string, string> = {
+  "service unavailable": "服务暂不可用，请稍后重试；若持续出现请联系管理员",
+  "capability catalog unavailable": "能力目录暂不可用，授权已锁定",
+  "capability catalog drift detected": "能力目录与运行时不一致，请联系管理员重新发布能力目录",
+  "capability denied": "当前账号没有执行该操作的权限",
+  "resource not found": "对象不存在或已被删除，请返回列表刷新",
+  "invalid request": "提交的内容不被接受，请刷新页面后重试",
+  "request rejected": "请求被拒绝，请刷新页面后重试",
+  conflict: "数据已被其他管理员更新，请刷新后重试",
+  "rate limited": "操作过于频繁，请稍后再试"
+};
+
+const httpStatusMessage = (status: number) => {
+  if (status === 401) return "登录状态已失效，请重新登录";
+  if (status === 403) return "当前账号没有执行该操作的权限";
+  if (status === 404) return "对象不存在或已被删除，请返回列表刷新";
+  if (status === 409) return "数据已被其他管理员更新，请刷新后重试";
+  if (status === 429) return "操作过于频繁，请稍后再试";
+  if (status >= 500) return "服务暂不可用，请稍后重试；若持续出现请联系管理员";
+  return "";
+};
+
 function errorMessage(cause: unknown, fallback: string) {
+  const status = httpStatus(cause);
   if (cause && typeof cause === "object" && "response" in cause) {
-    const message = (cause as { response?: { data?: { message?: string } } }).response?.data?.message;
-    if (message) return message;
+    const message = (cause as { response?: { data?: { message?: string } } }).response?.data?.message?.trim();
+    if (message) return openAPIErrorMessageMap[message.toLowerCase()] || httpStatusMessage(status) || fallback;
   }
-  return cause instanceof Error && cause.message ? cause.message : fallback;
+  const raw = cause instanceof Error ? cause.message?.trim() : "";
+  // axios 自己生成的英文串（Request failed with status code 503 / Network Error /
+  // timeout of 15000ms exceeded）对用户没有任何信息量，一律换成中文。
+  if (raw && !/request failed with status code|network error|timeout of|aborted/i.test(raw)) return raw;
+  return httpStatusMessage(status) || fallback;
 }
 
 function httpStatus(cause: unknown) {
@@ -185,7 +215,7 @@ async function saveScopes(nextScopes: string[]) {
   saving.value = true;
   scopeError.value = "";
   try {
-    const result = await updateOpenAPIClientScopes(id, { rowVersion: version, scopes: nextScopes });
+    const result = await updateOpenAPIClientScopes(id, { rowVersion: version, scopes: nextScopes }, { showErrorMessage: false });
     if (token !== generation || client.value?.id !== id) return;
     if (!isOpenAPISuccess(result)) throw new Error(result.message || "能力授权保存失败");
     await refreshDetail();
@@ -203,6 +233,9 @@ async function saveScopes(nextScopes: string[]) {
         scopeError.value = "授权版本冲突且刷新失败，请稍后重试。";
       }
     } else scopeError.value = errorMessage(cause, "能力授权保存失败");
+    // 授权页是「左树右栏」的长页面，失败横幅在内容区顶部，用户点保存时通常已经
+    // 滚到下半屏 —— 只写 scopeError 等于没提示。必须再给一条常驻可见的提示。
+    Message.error(scopeError.value);
   } finally {
     if (token === generation) saving.value = false;
   }

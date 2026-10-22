@@ -186,8 +186,13 @@ export const getOpenAPIClient = (id: number) =>
 export const createOpenAPIClient = (data: OpenAPIClientCreateInput) =>
   http.request<OpenAPIResponse<OpenAPIClientSecretResult>>("post", baseUrlApi(path), { data });
 
-export const updateOpenAPIClientScopes = (id: number, data: OpenAPIClientScopesInput) =>
-  http.request<OpenAPIResponse<OpenAPIClientView>>("put", baseUrlApi(`${path}/${id}/scopes`), { data });
+// 能力授权保存由页面自己做提示（成功/失败都要落在用户点击的那一屏），
+// 所以全局拦截器的红 toast 必须可关，否则同一次失败会弹两条不同措辞的提示。
+export const updateOpenAPIClientScopes = (
+  id: number,
+  data: OpenAPIClientScopesInput,
+  options: { showErrorMessage?: boolean } = {}
+) => http.request<OpenAPIResponse<OpenAPIClientView>>("put", baseUrlApi(`${path}/${id}/scopes`), { data }, options);
 
 export const rotateOpenAPIClientSecret = (id: number, rowVersion: number) =>
   http.request<OpenAPIResponse<OpenAPIClientSecretResult>>("post", baseUrlApi(`${path}/${id}/rotate-secret`), {
