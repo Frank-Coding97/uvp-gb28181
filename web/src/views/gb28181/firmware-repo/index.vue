@@ -114,7 +114,12 @@ import { Search, RotateCcw, Plus, Download, Trash2, Check, Archive } from "lucid
 import { listFirmware, deleteFirmware, generateDownloadLink, updateFirmwareStatus } from "./api";
 import FirmwareUploadDialog from "./FirmwareUploadDialog.vue";
 import type { FirmwareRepository } from "./api";
-import type { TableColumnData } from "@arco-design/web-vue";
+// 同 FirmwareUploadDialog：包根导出的表格类型解析不到真实声明，
+// 必须走 es/table/interface（注意目录是单数 interface、文件名不带 s）。
+// ⛔ render 的 record 不能用 FirmwareRepository 标注：Arco 传入的是 TableData
+//   （含 key/children 的宽类型），收窄成业务类型会让整列 render 不兼容 ——
+//   strictFunctionTypes 下参数是逆变的，收窄就报 TS2322。
+import type { TableColumnData, TableData } from "@arco-design/web-vue/es/table/interface";
 
 const columns: TableColumnData[] = [
   {
@@ -131,7 +136,7 @@ const columns: TableColumnData[] = [
     title: "适用型号",
     dataIndex: "modelPattern",
     width: 200,
-    render: ({ record }: { record: FirmwareRepository }) => record.modelPattern || "-"
+    render: ({ record }: { record: TableData }) => record.modelPattern || "-"
   },
   {
     title: "文件信息",
@@ -153,7 +158,7 @@ const columns: TableColumnData[] = [
     dataIndex: "remark",
     ellipsis: true,
     tooltip: true,
-    render: ({ record }: { record: FirmwareRepository }) => record.remark || "-"
+    render: ({ record }: { record: TableData }) => record.remark || "-"
   },
   {
     title: "操作",

@@ -54,7 +54,7 @@ const multiNode = {
   rtpPortEnd: 35000
 };
 
-function mountEdit(config) {
+function mountEdit(config: Record<string, unknown>) {
   api.getConfig.mockResolvedValue(config);
   return track(
     shallowMount(NodeForm, {

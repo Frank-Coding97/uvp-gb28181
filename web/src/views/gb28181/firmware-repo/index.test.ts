@@ -30,6 +30,19 @@ vi.mock("@arco-design/web-vue", async () => {
 
 vi.mock("./api");
 
+/**
+ * `<script setup>` 的内部状态（pagination / filters / tableData / handleXxx…）都在闭包里，
+ * 组件实例类型上没有它们，直接写 `wrapper.vm.pagination` 会被 vue-tsc 报成
+ * "Property 'pagination' does not exist" —— 本文件曾因此攒出 50 条类型错误。
+ *
+ * 这些用例本来就靠 dev 模式下 VTU 暴露内部状态的 proxy 跑（vitest 恒为 dev 构建），
+ * 所以只在**测试侧**放宽 vm；不去生产组件里 defineExpose 一堆内部 ref。
+ * DOM 断言（get / find / text）仍走真实类型，不受影响。
+ */
+function mountRepo() {
+  return mount(FirmwareRepoIndex) as unknown as ReturnType<typeof mount> & { vm: Record<string, any> };
+}
+
 const mockFirmwareList: FirmwareRepository[] = [
   {
     id: 1,
@@ -89,7 +102,7 @@ describe("firmware-repo/index", () => {
 
   describe("TC7.11: 组件挂载时加载固件列表", () => {
     it("应该在 onMounted 时调用 listFirmware", async () => {
-      mount(FirmwareRepoIndex);
+      mountRepo();
       await flushPromises();
 
       expect(api.listFirmware).toHaveBeenCalledWith({
@@ -101,7 +114,7 @@ describe("firmware-repo/index", () => {
     });
 
     it("应该将返回的数据填充到 table", async () => {
-      const wrapper = mount(FirmwareRepoIndex);
+      const wrapper = mountRepo();
       await flushPromises();
 
       expect(wrapper.vm.tableData).toEqual(mockFirmwareList);
@@ -111,7 +124,7 @@ describe("firmware-repo/index", () => {
     it("加载失败时应显示错误消息", async () => {
       vi.mocked(api.listFirmware).mockRejectedValue(new Error("网络错误"));
 
-      mount(FirmwareRepoIndex);
+      mountRepo();
       await flushPromises();
 
       expect(Message.error).toHaveBeenCalledWith("网络错误");
@@ -120,7 +133,7 @@ describe("firmware-repo/index", () => {
 
   describe("TC7.12: 厂商和状态筛选", () => {
     it("点击查询按钮应传递筛选参数", async () => {
-      const wrapper = mount(FirmwareRepoIndex);
+      const wrapper = mountRepo();
       await flushPromises();
 
       wrapper.vm.filters.manufacturer = "海康威视";
@@ -137,7 +150,7 @@ describe("firmware-repo/index", () => {
     });
 
     it("点击重置按钮应清空筛选条件并重新查询", async () => {
-      const wrapper = mount(FirmwareRepoIndex);
+      const wrapper = mountRepo();
       await flushPromises();
 
       wrapper.vm.filters.manufacturer = "海康威视";
@@ -161,7 +174,7 @@ describe("firmware-repo/index", () => {
 
   describe("TC7.13: 分页参数正确传递", () => {
     it("切换页码时应更新 current 并重新查询", async () => {
-      const wrapper = mount(FirmwareRepoIndex);
+      const wrapper = mountRepo();
       await flushPromises();
       vi.clearAllMocks();
 
@@ -178,7 +191,7 @@ describe("firmware-repo/index", () => {
     });
 
     it("切换每页条数时应重置页码到第 1 页", async () => {
-      const wrapper = mount(FirmwareRepoIndex);
+      const wrapper = mountRepo();
       await flushPromises();
 
       wrapper.vm.pagination.current = 5;
@@ -208,7 +221,7 @@ describe("firmware-repo/index", () => {
         }
       } as any);
 
-      const wrapper = mount(FirmwareRepoIndex);
+      const wrapper = mountRepo();
       await flushPromises();
 
       await wrapper.vm.handleDownload(mockFirmwareList[0]);
@@ -231,7 +244,7 @@ describe("firmware-repo/index", () => {
         }
       } as any);
 
-      const wrapper = mount(FirmwareRepoIndex);
+      const wrapper = mountRepo();
       await flushPromises();
 
       await wrapper.vm.handleDownload(mockFirmwareList[0]);
@@ -245,7 +258,7 @@ describe("firmware-repo/index", () => {
       window.open = vi.fn();
       vi.mocked(api.generateDownloadLink).mockResolvedValue({ data: {} } as any);
 
-      const wrapper = mount(FirmwareRepoIndex);
+      const wrapper = mountRepo();
       await flushPromises();
 
       await wrapper.vm.handleDownload(mockFirmwareList[0]);
@@ -258,7 +271,7 @@ describe("firmware-repo/index", () => {
     it("生成下载链接失败时应显示错误", async () => {
       vi.mocked(api.generateDownloadLink).mockRejectedValue(new Error("权限不足"));
 
-      const wrapper = mount(FirmwareRepoIndex);
+      const wrapper = mountRepo();
       await flushPromises();
 
       await wrapper.vm.handleDownload(mockFirmwareList[0]);
@@ -289,7 +302,7 @@ describe("firmware-repo/index", () => {
     //   ② **不传 modalClass** —— `uvp-system-dialog` 是给 `<a-modal modal-class>` 用的（挂在
     //      .arco-modal 面板上），simple 弹窗结构不同、挂不上去，设备列表也没挂。
     it("应该用与设备列表一致的危险确认弹窗", async () => {
-      const wrapper = mount(FirmwareRepoIndex);
+      const wrapper = mountRepo();
       await flushPromises();
 
       wrapper.vm.handleDelete(mockFirmwareList[0]);
@@ -305,7 +318,7 @@ describe("firmware-repo/index", () => {
     });
 
     it("⛔ 不得退回 Modal.confirm（confirm 没有警告图标，和设备列表观感不同）", async () => {
-      const wrapper = mount(FirmwareRepoIndex);
+      const wrapper = mountRepo();
       await flushPromises();
 
       wrapper.vm.handleDelete(mockFirmwareList[0]);
@@ -315,7 +328,7 @@ describe("firmware-repo/index", () => {
     });
 
     it("归档弹窗同样用 danger 色确认按钮（全仓 9 处惯例，无一用 warning）", async () => {
-      const wrapper = mount(FirmwareRepoIndex);
+      const wrapper = mountRepo();
       await flushPromises();
 
       wrapper.vm.handleArchive(mockFirmwareList[0]);
@@ -334,7 +347,7 @@ describe("firmware-repo/index", () => {
 
       vi.mocked(api.deleteFirmware).mockResolvedValue({ data: {} } as any);
 
-      const wrapper = mount(FirmwareRepoIndex);
+      const wrapper = mountRepo();
       await flushPromises();
       vi.clearAllMocks();
 
@@ -357,7 +370,7 @@ describe("firmware-repo/index", () => {
       });
       vi.mocked(api.deleteFirmware).mockResolvedValue({ data: {} } as any);
 
-      const wrapper = mount(FirmwareRepoIndex);
+      const wrapper = mountRepo();
       await flushPromises();
 
       // 造出「第 3 页只剩 1 条」的形状
@@ -382,7 +395,7 @@ describe("firmware-repo/index", () => {
       });
       vi.mocked(api.deleteFirmware).mockRejectedValue(new Error("固件: 已被设备升级记录引用，无法删除（3 条设备升级记录）"));
 
-      const wrapper = mount(FirmwareRepoIndex);
+      const wrapper = mountRepo();
       await flushPromises();
 
       wrapper.vm.handleDelete(mockFirmwareList[0]);
@@ -401,7 +414,7 @@ describe("firmware-repo/index", () => {
 
       vi.mocked(api.deleteFirmware).mockRejectedValue(new Error("删除失败"));
 
-      const wrapper = mount(FirmwareRepoIndex);
+      const wrapper = mountRepo();
       await flushPromises();
 
       wrapper.vm.handleDelete(mockFirmwareList[0]);
@@ -421,7 +434,7 @@ describe("firmware-repo/index", () => {
      *   —— 老板 2026-10-06 亲自指出"两侧留对等的空白"。
      */
     it("操作列声明 align=center", () => {
-      const wrapper = mount(FirmwareRepoIndex);
+      const wrapper = mountRepo();
       const actionsColumn = wrapper.vm.columns.find((column: any) => column.title === "操作");
       expect(actionsColumn).toBeDefined();
       expect(actionsColumn?.align).toBe("center");
@@ -441,7 +454,7 @@ describe("firmware-repo/index", () => {
 
   describe("TC7.16: 工具函数测试", () => {
     it("formatFileSize 应该正确格式化文件大小", () => {
-      const wrapper = mount(FirmwareRepoIndex);
+      const wrapper = mountRepo();
 
       expect(wrapper.vm.formatFileSize(0)).toBe("0 B");
       expect(wrapper.vm.formatFileSize(1024)).toBe("1.00 KB");
@@ -451,7 +464,7 @@ describe("firmware-repo/index", () => {
     });
 
     it("getStatusColor 应该返回正确的颜色", () => {
-      const wrapper = mount(FirmwareRepoIndex);
+      const wrapper = mountRepo();
 
       expect(wrapper.vm.getStatusColor("draft")).toBe("gray");
       expect(wrapper.vm.getStatusColor("published")).toBe("green");
@@ -460,7 +473,7 @@ describe("firmware-repo/index", () => {
     });
 
     it("getStatusText 应该返回正确的文本", () => {
-      const wrapper = mount(FirmwareRepoIndex);
+      const wrapper = mountRepo();
 
       expect(wrapper.vm.getStatusText("draft")).toBe("草稿");
       expect(wrapper.vm.getStatusText("published")).toBe("已发布");
@@ -469,7 +482,7 @@ describe("firmware-repo/index", () => {
     });
 
     it("formatDateTime 应该格式化为中文日期时间", () => {
-      const wrapper = mount(FirmwareRepoIndex);
+      const wrapper = mountRepo();
 
       const result = wrapper.vm.formatDateTime("2024-01-15T14:30:00Z");
       // 结果依赖时区，只验证格式包含必要元素
@@ -480,7 +493,7 @@ describe("firmware-repo/index", () => {
 
   describe("TC7.17: 上传成功后刷新列表", () => {
     it("handleUploadSuccess 应该重置页码并重新加载", async () => {
-      const wrapper = mount(FirmwareRepoIndex);
+      const wrapper = mountRepo();
       await flushPromises();
       vi.clearAllMocks();
 

@@ -219,6 +219,12 @@ export interface UpgradeOperation {
 export interface FirmwareUpgradeRequest {
   confirmed: true;
   idempotencyKey: string;
+  // 两条互斥的升级路径，两种模式各填一半：
+  //   - 固件仓库模式：只填 firmwareId，版本/地址/厂商由后端按仓库记录补齐；
+  //   - 手填模式：填 firmware + fileUrl + manufacturer，firmwareId 传空串。
+  // 后端 deviceFirmwareUpgradeRequest 四个字段都在同一个结构体里（都是普通 string），
+  // 所以这里也必须声明 firmwareId，否则 Pick<> 取不到它、reactive 表单会退化成 {}。
+  firmwareId?: string;
   firmware: string;
   fileUrl: string;
   manufacturer: string;

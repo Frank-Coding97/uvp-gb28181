@@ -79,7 +79,10 @@ import { ref, computed, watch } from "vue";
 import { Message } from "@arco-design/web-vue";
 import { Upload } from "lucide-vue-next";
 import { uploadFirmware } from "./api";
-import type { FileItem } from "@arco-design/web-vue";
+// FileItem 只能从 upload 的子路径拿：包根 es/index.d.ts 虽然写着
+// `export type { FileItem } from './upload'`，但 es/upload 目录下并没有 index.d.ts，
+// 解析不到真实声明，用 `from "@arco-design/web-vue"` 会报 TS2709「Cannot use namespace as a type」。
+import type { FileItem } from "@arco-design/web-vue/es/upload/interfaces";
 
 interface Props {
   visible: boolean;

@@ -18,6 +18,18 @@ vi.mock("@arco-design/web-vue", async () => {
 
 vi.mock("./api");
 
+/**
+ * 同 index.test.ts：`form` / `touched` / `fileError` 这些都在 `<script setup>` 的闭包里，
+ * 组件实例类型上不存在，直接访问会被 vue-tsc 报 "Property 'form' does not exist"
+ * （本文件曾因此攒出 53 条）。vitest 恒为 dev 构建，VTU 的 dev proxy 能读写它们，
+ * 所以只在测试侧放宽 vm，不动生产组件的暴露面。
+ */
+function mountDialog(options: Parameters<typeof mount>[1] = {}) {
+  return mount(FirmwareUploadDialog, options) as unknown as ReturnType<typeof mount> & {
+    vm: Record<string, any>;
+  };
+}
+
 describe("FirmwareUploadDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -25,7 +37,7 @@ describe("FirmwareUploadDialog", () => {
 
   describe("TC7.6: 文件大小限制 2GB", () => {
     it("应该拒绝超过 2GB 的文件", async () => {
-      const wrapper = mount(FirmwareUploadDialog, {
+      const wrapper = mountDialog({
         props: { visible: true }
       });
 
@@ -40,7 +52,7 @@ describe("FirmwareUploadDialog", () => {
     });
 
     it("应该接受小于等于 2GB 的文件", async () => {
-      const wrapper = mount(FirmwareUploadDialog, {
+      const wrapper = mountDialog({
         props: { visible: true }
       });
 
@@ -57,7 +69,7 @@ describe("FirmwareUploadDialog", () => {
 
   describe("TC7.7: 必填字段校验", () => {
     it("未填写文件时应显示错误", async () => {
-      const wrapper = mount(FirmwareUploadDialog, {
+      const wrapper = mountDialog({
         props: { visible: true }
       });
 
@@ -68,7 +80,7 @@ describe("FirmwareUploadDialog", () => {
     });
 
     it("未填写版本时应显示错误", async () => {
-      const wrapper = mount(FirmwareUploadDialog, {
+      const wrapper = mountDialog({
         props: { visible: true }
       });
 
@@ -80,7 +92,7 @@ describe("FirmwareUploadDialog", () => {
     });
 
     it("未填写厂商时应显示错误", async () => {
-      const wrapper = mount(FirmwareUploadDialog, {
+      const wrapper = mountDialog({
         props: { visible: true }
       });
 
@@ -92,7 +104,7 @@ describe("FirmwareUploadDialog", () => {
     });
 
     it("版本号超过 50 字符应显示错误", async () => {
-      const wrapper = mount(FirmwareUploadDialog, {
+      const wrapper = mountDialog({
         props: { visible: true }
       });
 
@@ -104,7 +116,7 @@ describe("FirmwareUploadDialog", () => {
     });
 
     it("厂商名称超过 100 字符应显示错误", async () => {
-      const wrapper = mount(FirmwareUploadDialog, {
+      const wrapper = mountDialog({
         props: { visible: true }
       });
 
@@ -118,7 +130,7 @@ describe("FirmwareUploadDialog", () => {
 
   describe("TC7.8: 上传成功后触发 success 事件", () => {
     it("表单有效时应调用 API 并触发 success", async () => {
-      const wrapper = mount(FirmwareUploadDialog, {
+      const wrapper = mountDialog({
         props: { visible: true }
       });
 
@@ -149,7 +161,7 @@ describe("FirmwareUploadDialog", () => {
     });
 
     it("表单无效时应阻止提交", async () => {
-      const wrapper = mount(FirmwareUploadDialog, {
+      const wrapper = mountDialog({
         props: { visible: true }
       });
 
@@ -162,7 +174,7 @@ describe("FirmwareUploadDialog", () => {
     });
 
     it("API 失败时应显示错误消息", async () => {
-      const wrapper = mount(FirmwareUploadDialog, {
+      const wrapper = mountDialog({
         props: { visible: true }
       });
 
@@ -186,7 +198,7 @@ describe("FirmwareUploadDialog", () => {
 
   describe("TC7.9: 关闭弹窗时重置表单", () => {
     it("visible 从 true 变为 false 时应重置所有字段", async () => {
-      const wrapper = mount(FirmwareUploadDialog, {
+      const wrapper = mountDialog({
         props: { visible: true }
       });
 
@@ -216,7 +228,7 @@ describe("FirmwareUploadDialog", () => {
 
   describe("TC7.10: 可选字段 modelPattern 和 remark 为空时不传给后端", () => {
     it("modelPattern 和 remark 为空字符串时应传 undefined", async () => {
-      const wrapper = mount(FirmwareUploadDialog, {
+      const wrapper = mountDialog({
         props: { visible: true }
       });
 
