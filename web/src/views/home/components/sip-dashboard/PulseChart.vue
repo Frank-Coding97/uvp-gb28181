@@ -24,7 +24,9 @@
       />
       <div v-else class="pulse__empty">{{ currentBucket ? "等待首个完整分钟" : "暂无信令" }}</div>
     </div>
-    <div class="pulse__hint">采样 1m · 曲线仅含完整分钟 · {{ hasGap ? "统计存在缺口" : "仅显示 GB28181 事务" }}</div>
+    <div class="pulse__hint">
+      采样 1m · 曲线仅含完整分钟 · {{ hasGap ? "统计存在缺口（缺口按 0 计入）" : "仅显示 GB28181 事务" }}
+    </div>
   </div>
 </template>
 
@@ -47,7 +49,9 @@ const currentBucket = computed(() => {
 const hasSamples = computed(() => props.samples.length > 0);
 const knownSamples = computed(() => completeSamples.value.filter(sample => sample.known !== false));
 const hasGap = computed(() => props.samples.some(sample => sample.known === false));
-const hasData = computed(() => knownSamples.value.length > 0);
+// 只要拿到了完整分钟的桶就出图：统计覆盖未知的分钟按 0 绘制，不再折叠成"暂无信令"，
+// 否则整窗都是空桶时仪表盘会退化成一句占位文案，看不出"确实是 0 条"。
+const hasData = computed(() => completeSamples.value.length > 0);
 const maxMsg = computed(() => Math.max(0, ...knownSamples.value.map(sample => sample.msgPerSec)));
 const axisMax = computed(() => Math.max(1, Math.ceil(maxMsg.value * 1.1)));
 const currentMsg = computed(() => {
@@ -57,8 +61,8 @@ const currentMsg = computed(() => {
 
 interface PulseDatum {
   time: number;
-  messages: number | null;
-  failure: number | null;
+  messages: number;
+  failure: number;
   known: boolean;
 }
 function timeLabel(datum: PulseDatum): string {
@@ -66,12 +70,16 @@ function timeLabel(datum: PulseDatum): string {
 }
 
 const spec = computed<MediaChartSpec>(() => {
+  // ⛔ 曲线必须连续：统计覆盖未知的分钟按 0 绘制。
+  // 原先 unknown ⇒ null + invalidType: break，一条断成好几截的折线在仪表盘上
+  // 会被读成"采集中断/平台掉线"，而实际上那条分钟就是没有信令（= 0 条）。
+  // "存在缺口"这件事改由底部提示与 tooltip 说明承载，曲线本身不再断开。
   const values = completeSamples.value.map(sample => {
     const known = sample.known !== false;
     return {
       time: sample.t * 1000,
-      messages: known ? sample.msgPerSec : null,
-      failure: known ? sample.failPct / 10 : null,
+      messages: known ? sample.msgPerSec : 0,
+      failure: known ? sample.failPct / 10 : 0,
       known
     };
   });
@@ -91,9 +99,11 @@ const spec = computed<MediaChartSpec>(() => {
         xField: "time",
         yField: "messages",
         line: { style: { curveType: "monotone", stroke: "var(--uvp-brand)", lineWidth: 1.5 } },
+        // 面积观感对齐"媒体实时速率"：品牌色 + 纵向渐隐，靠 fillOpacity 控制整体浓度。
         area: {
           style: {
             curveType: "monotone",
+            fillOpacity: 0.22,
             fill: {
               gradient: "linear",
               x0: 0,
@@ -101,9 +111,9 @@ const spec = computed<MediaChartSpec>(() => {
               x1: 0,
               y1: 1,
               stops: [
-                { offset: 0, color: "var(--uvp-chart-area-start)" },
-                { offset: 0.68, color: "var(--uvp-chart-area-middle)" },
-                { offset: 1, color: "transparent" }
+                { offset: 0, color: "var(--uvp-brand)", opacity: 0.78 },
+                { offset: 0.68, color: "var(--uvp-brand)", opacity: 0.24 },
+                { offset: 1, color: "var(--uvp-brand)", opacity: 0.04 }
               ]
             }
           }
@@ -111,7 +121,9 @@ const spec = computed<MediaChartSpec>(() => {
         point: {
           visible: true,
           style: {
-            size: (datum: PulseDatum) => (datum.known && datum.time === last ? 6 : 0),
+            // 端点标记只看"是不是最新完整分钟"——不再要求统计已知，
+            // 否则最新一分钟是缺口时右侧末端会连点都没有，又像断了一截。
+            size: (datum: PulseDatum) => (datum.time === last ? 6 : 0),
             fill: "var(--uvp-brand)",
             stroke: "var(--uvp-panel-bg)",
             lineWidth: 1
@@ -122,7 +134,10 @@ const spec = computed<MediaChartSpec>(() => {
           dimension: {
             title: { value: timeLabel },
             content: [
-              { key: "事务", value: (datum: PulseDatum) => (datum.messages == null ? "统计未知" : `${datum.messages} 条/分钟`) }
+              {
+                key: "事务",
+                value: (datum: PulseDatum) => (datum.known ? `${datum.messages} 条/分钟` : "0 条/分钟（统计缺口）")
+              }
             ]
           }
         }
@@ -142,7 +157,7 @@ const spec = computed<MediaChartSpec>(() => {
               {
                 key: "失败率",
                 value: (datum: PulseDatum) =>
-                  datum.failure == null ? "统计未知" : datum.failure === 0 ? "0%" : `${datum.failure.toFixed(1)}%`
+                  datum.known === false ? "0%（统计缺口）" : datum.failure === 0 ? "0%" : `${datum.failure.toFixed(1)}%`
               }
             ]
           }
