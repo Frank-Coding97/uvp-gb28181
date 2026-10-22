@@ -444,6 +444,16 @@ Invoke-Native -FilePath $SetupExeOut -What '固定 ZLM secret 与节点标识' -
     '--zlm-ffmpeg', './ffmpeg.exe')
 Ok 'ZLM 身份已固定（[api] secret / [general] mediaServerId / [ffmpeg] bin → ./ffmpeg.exe）'
 
+# ⛔ [http] dirMenu 由 ports-sync 强制成 0（关闭目录浏览）。www 是录像/截图的落盘
+#   目录，开着就等于把全部历史录像挂在 HTTP 上按目录列给同网段任何人看 ——
+#   平台侧零痕迹，客户不会主动去关一个没听说过的开关。
+#   这里断言的是**结果**，不靠"脚本应该改过了"（ports-sync 对缺键只告警不报错）。
+$iniDirMenu = Get-Content -LiteralPath (Join-Path $Pkg 'vendor\zlm\config.ini') -Raw -Encoding UTF8
+if ($iniDirMenu -notmatch '(?m)^dirMenu=0') {
+    Fail 'ZLM config.ini 的 [http] dirMenu 不是 0 —— 目录浏览会把全部录像暴露出去'
+}
+Ok '[http] dirMenu=0（关闭目录浏览）'
+
 # ---- vendor\nginx ----
 Copy-Tree -Source $VendorNginx -Destination (Join-Path $Pkg 'vendor\nginx')
 # ⛔ 配置模板以**仓库版本**为唯一真源：nginx 发行包 conf\ 下那份 nginx.conf 是给

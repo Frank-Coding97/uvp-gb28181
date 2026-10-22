@@ -446,6 +446,8 @@ type zlmIniEdit struct {
 //  2. **RTP 段的真源是 [rtp_proxy] 的 port / port_range**，不是 [rtp]。
 //  3. **enableTurn 强制为 0**：开着 TURN 会占掉 Linux 的临时端口区（Windows 上同样
 //     是与系统预留段冲突的来源），而绿色包的 WebRTC 一律走 P2P。
+//  4. **[http] dirMenu 强制为 0**：那是「能不能浏览目录」，开着等于把录像库挂在
+//     HTTP 上给人随便翻（详见下面那处 edits 的注释）。
 func syncZLMIni(path string, z zlmPorts, secret, mediaServerID string) error {
 	resolved, err := resolvePath(path)
 	if err != nil {
@@ -465,6 +467,18 @@ func syncZLMIni(path string, z zlmPorts, secret, mediaServerID string) error {
 	if mediaServerID != "" {
 		edits = append(edits, zlmIniEdit{section: "general", key: "mediaServerId", value: mediaServerID})
 	}
+	// ⛔⛔ [http] dirMenu 必须强制为 0 —— 关掉 ZLM 的「目录浏览」。
+	//   开着的时候，ZLM 的 HTTP 口会把 rootPath(./www) 整个目录列成一个网页，
+	//   点进去就能逐个下载；而 ./www 正是**录像、截图、HLS 片段的落盘目录**。
+	//   [http] allow_ip_range 出厂就放行 10/172.16-31/192.168 私有段 ⇒
+	//   同网段任何人**不用登录平台**就能把全部历史录像翻一遍。
+	//   这类风险的特点：平台页面一切正常、日志里也查不到任何痕迹，
+	//   只能靠出厂默认值挡（客户不会主动去关一个他没听说过的开关）。
+	// ⛔ 为什么用 soft 而不是硬失败：ZLM 取这个键是「字符串转 bool」，
+	//   **缺键/空串本身就等于关闭**（HttpFileManager.cpp 里 `if (!dirMenu) return false`），
+	//   所以"没找到键"不是故障；把它写成硬失败，等于让一处纯加固把整个平台
+	//   卡在启动阶段（与 enableTurn 同一个理由）。
+	edits = append(edits, zlmIniEdit{section: "http", key: "dirMenu", value: "0", soft: true})
 	if z.http > 0 {
 		edits = append(edits,
 			zlmIniEdit{section: "http", key: "port", value: strconv.Itoa(z.http)},
@@ -549,7 +563,7 @@ func syncZLMIni(path string, z zlmPorts, secret, mediaServerID string) error {
 	if err := os.WriteFile(resolved, []byte(strings.Join(lines, eol)), 0o644); err != nil {
 		return fmt.Errorf("写入 ZLM config.ini 失败: %w", err)
 	}
-	note("ZLM config.ini 已同步（%d 处：端口 + 身份 + 关闭 TURN）", applied)
+	note("ZLM config.ini 已同步（%d 处：端口 + 身份 + 关闭 TURN + 关闭目录浏览）", applied)
 	if len(softMissed) > 0 {
 		// ⛔ 走 stderr：ctl 会把 stdout 归到「明细」里，这类"要人看一眼"的提示
 		//   必须能跳出来（与 shell 侧 `det` 的缩进宽度一致）。

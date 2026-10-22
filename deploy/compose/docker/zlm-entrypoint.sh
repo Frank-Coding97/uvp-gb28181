@@ -72,6 +72,11 @@ function p(off) { return base + off }
 /^\[/ { sec=$0; gsub(/[][ \t]/, "", sec); print; next }
 sec=="http"      && /^port=/             { print "port=" p(0);           next }
 sec=="http"      && /^sslport=/          { print "sslport=" p(3);        next }
+# ⛔⛔ 目录浏览必须关：开着时 ZLM 的 HTTP 口把 rootPath(./www) 整个目录列成网页，
+#   而 www 就是录像/截图/HLS 的落盘目录 ⇒ 同网段任何人不用登录就能下载全部录像。
+#   ⛔ 必须是**每次启动无条件改写**：上面 [ -f ] || cp 只在首次铺副本，
+#   老卷里那份 config.ini 会一直是 dirMenu=1，升级镜像也救不回来。
+sec=="http"      && /^dirMenu=/          { print "dirMenu=0";            next }
 sec=="rtsp"      && /^port=/             { print "port=" p(1);           next }
 sec=="rtmp"      && /^port=/             { print "port=" p(2);           next }
 sec=="srt"       && /^port=/             { print "port=" p(7);           next }

@@ -168,6 +168,8 @@ func TestSyncZLMIniIsSectionScoped(t *testing.T) {
 	checks := []struct{ section, key, want string }{
 		{"api", "secret", "uvp-secret-test"},
 		{"general", "mediaServerId", "uvp-media-server-0001"},
+		// ⛔ 目录浏览必须关：开着等于把 www（录像/截图落盘目录）列给同网段任何人看。
+		{"http", "dirMenu", "0"},
 		{"http", "port", "51004"},
 		{"http", "sslport", "51007"},
 		{"rtsp", "port", "51005"},
@@ -197,7 +199,59 @@ func TestSyncZLMIniIsSectionScoped(t *testing.T) {
 	}
 }
 
-// TestSyncZLMIniFFmpegBin 钉住 Windows 包的 [ffmpeg] bin 改写规则。
+// TestSyncZLMIniDisablesDirMenu 钉住「出厂关闭目录浏览」这条安全默认值。
+//
+// ⛔⛔ 为什么要单独钉：`dirMenu=1` 时 ZLM 的 HTTP 口会把 rootPath(./www)
+// 整个目录列成网页，而 ./www 正是录像/截图/HLS 的落盘目录，
+// allow_ip_range 又出厂放行 10/172/192 私有段 ⇒ 同网段任何人不用登录平台
+// 就能下载全部历史录像。风险点只在「客户没主动关」时暴露，平台侧零痕迹。
+//
+// ⛔ 反向断言同样是契约：
+//  1. **只能改 [http] 段里的那个** —— 这份 ini 有 11 个段，同名键被误改
+//     在别的段里看不出任何症状（与 port 的教训同一类）。
+//  2. **键不存在时不能报错** —— ZLM 取该键是字符串转 bool，缺键本身就是关闭；
+//     为它硬失败会让一处纯加固把平台卡在启动阶段。
+func TestSyncZLMIniDisablesDirMenu(t *testing.T) {
+	const ini = "[api]\r\nsecret=S3CR3T\r\n[http]\r\nport=80\r\ndirMenu=1\r\n" +
+		"[proxy]\r\ndirMenu=1\r\n[rtp_proxy]\r\nport=10000\r\n"
+
+	t.Run("改 [http] 且不碰其它段", func(t *testing.T) {
+		dst := filepath.Join(t.TempDir(), "config.ini")
+		if err := os.WriteFile(dst, []byte(ini), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := syncZLMIni(dst, zlmPorts{}, "", ""); err != nil {
+			t.Fatalf("syncZLMIni 失败: %v", err)
+		}
+		if got := iniValue(t, dst, "http", "dirMenu"); got != "0" {
+			t.Errorf("[http] dirMenu = %q，期望 0（必须关闭目录浏览）", got)
+		}
+		if got := iniValue(t, dst, "proxy", "dirMenu"); got != "1" {
+			t.Errorf("[proxy] dirMenu 被误改：%q（同名键必须按段落隔离）", got)
+		}
+		// 行尾必须仍是 CRLF：写成 LF 虽仍能读，但会让现场以为是别的工具动过配置。
+		raw, err := os.ReadFile(dst)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), "dirMenu=0\n") {
+			t.Error("行尾被改成了 LF（原文是 CRLF）")
+		}
+	})
+
+	t.Run("键不存在时不报错", func(t *testing.T) {
+		dst := filepath.Join(t.TempDir(), "config.ini")
+		plain := "[api]\r\nsecret=S3CR3T\r\n[http]\r\nport=80\r\n"
+		if err := os.WriteFile(dst, []byte(plain), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := syncZLMIni(dst, zlmPorts{}, "", ""); err != nil {
+			t.Fatalf("缺 dirMenu 不该阻断启动: %v", err)
+		}
+	})
+}
+
+
 //
 // ⛔ 背景：Windows 包的 config.ini 直接从 Linux 那份搬过来，里面写着
 //

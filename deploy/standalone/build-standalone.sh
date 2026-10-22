@@ -543,7 +543,7 @@ chmod 0755 "$PKG/vendor/zlm/bin/ffmpeg"
 #   （见 server/app/gb28181/zlm/apply.go）—— 也就是它一旦落盘就固化。
 #   所以这里出包时就写好，启动时ZLM 读到的第一眼就是正确值。
 #   secret 同理：它必须与 config.yml 里的**逐字相同**，否则平台调 ZLM 全被拒。
-log "固定 ZLM 的secret 与节点标识"
+log "固定 ZLM 的secret 与节点标识，并关闭目录浏览"
 "$PY" - "$PKG/vendor/zlm/config.ini" "$ZLM_SECRET" "$ZLM_MEDIA_SERVER_ID" <<'ZLM_INI_ID_PY'
 import re
 import sys
@@ -555,10 +555,14 @@ lines = open(path, encoding="utf-8", newline="").read().split("\n")
 
 section = None
 changed = []
+http_header = -1
+has_dirmenu = False
 for i, line in enumerate(lines):
     t = line.strip()
     if t.startswith("[") and t.endswith("]"):
         section = t[1:-1].strip().lower()
+        if section == "http":
+            http_header = i
         continue
     m = re.match(r"^(\s*)([A-Za-z_]+)(\s*=\s*)(.*?)(\r?)$", line)
     if not m:
@@ -578,10 +582,33 @@ for i, line in enumerate(lines):
     elif section == "ffmpeg" and key == "bin" and old.strip() != "./bin/ffmpeg":
         changed.append("[ffmpeg] bin: " + old.strip() + " -> ./bin/ffmpeg（包内内置）")
         lines[i] = indent + key + eq + "./bin/ffmpeg" + cr
+    # ⛔⛔ [http] dirMenu 必须出厂为 0：开着时 ZLM 的 HTTP 口把 www 目录整个列成
+    #   网页，而 www 正是录像/截图/HLS 的落盘目录 ⇒ 同网段任何人不用登录平台
+    #   就能把全部历史录像翻一遍（allow_ip_range 出厂就放行 10/172/192）。
+    #   ⛔ 这条同时也由 uvp-setup ports-sync 在每次启动时兜一次（存量包升级后靠它），
+    #     这里做的是「**随包发出去的这份文件**本身就是对的」——两者缺一不可：
+    #     只靠启动期，客户手里那份包仍是 1；只靠出包期，老现场永远不修。
+    elif section == "http" and key == "dirMenu":
+        has_dirmenu = True
+        if old.strip() != "0":
+            changed.append("[http] dirMenu: " + old.strip() + " -> 0（关闭目录浏览）")
+            lines[i] = indent + key + eq + "0" + cr
+
+# 键不存在时补一行（ZLM 缺键本身即关闭，但显式写出来现场才看得懂、才能核对）。
+if not has_dirmenu and http_header >= 0:
+    lines.insert(http_header + 1, "dirMenu=0")
+    changed.append("[http] dirMenu: (缺) -> 0（关闭目录浏览）")
 
 open(path, "w", encoding="utf-8", newline="").write("\n".join(lines))
 print("   ZLM config.ini: " + ("; ".join(changed) if changed else "已是固定值，无需改动"))
 ZLM_INI_ID_PY
+# ⛔ 对**结果**再断言一次：上面那段 python 一旦段名判据没匹配上就静默跳过
+#   （写回的是原串，照样打印"无需改动"）。而漏洞只在客户机上暴露 ——
+#   www 目录（录像/截图/HLS）会被 ZLM 的 HTTP 口按目录列给同网段任何人。
+if ! grep -q '^dirMenu=0' "$PKG/vendor/zlm/config.ini"; then
+  fail "包内 ZLM config.ini 的 [http] dirMenu 不是 0 —— 目录浏览会把全部录像暴露出去"
+fi
+log "  [http] dirMenu=0（关闭目录浏览：www 里有录像，不能按目录列出去）"
 
 log "复制 nginx（前端 + HTTPS 终止）"
 mkdir -p "$PKG/vendor/nginx"
