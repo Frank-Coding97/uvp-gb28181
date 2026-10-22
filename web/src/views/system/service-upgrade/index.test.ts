@@ -37,6 +37,7 @@ vi.mock("@/api/service-upgrade", () => ({
   rollbackServiceUpgradeTask: api.rollbackTask
 }));
 
+import { APP_VERSION } from "@/config/version";
 import ServiceUpgradePage from "./index.vue";
 import Upload from "@arco-design/web-vue/es/upload/upload";
 
@@ -1358,6 +1359,28 @@ describe("service upgrade page", () => {
     );
     expect(vm.eventColor({ event: "blocked" })).toBe("orange");
     expect(vm.eventColor({ event: "downloaded" })).toBe("blue");
+    wrapper.unmount();
+  });
+
+  it("升级助手不可用时用前端构建身份兜底版本，并把 503 换成中文原因", async () => {
+    const unavailable = () =>
+      Object.assign(new Error("Request failed with status code 503"), {
+        response: { status: 503, data: { message: "service unavailable" } }
+      });
+    api.getStatus.mockReset().mockRejectedValue(unavailable());
+    api.getPolicy.mockReset().mockRejectedValue(unavailable());
+    api.getMigrationPlan.mockReset().mockRejectedValue(unavailable());
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const text = wrapper.text();
+    // ① 不再出现「v未知」：状态接口挂了也要能说清跑的是哪个版本
+    expect(text).toContain(`v${APP_VERSION}`);
+    expect(text).not.toContain("v未知");
+    expect(text).not.toContain("部署方式未知");
+    // ② 英文 axios 串不能出现在用户界面上
+    expect(text).not.toContain("Request failed with status code");
+    expect(text).toContain("升级助手未运行或暂未就绪（HTTP 503）");
     wrapper.unmount();
   });
 });

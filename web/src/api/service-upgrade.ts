@@ -138,10 +138,16 @@ export interface UpgradeImportArtifact {
   arch: string;
 }
 
-export const getServiceUpgradeStatus = () => http.request<BaseResult<UpgradeStatus>>("get", baseUrlApi("system/upgrade/status"));
-export const getServiceUpgradePolicy = () => http.request<BaseResult<UpgradePolicy>>("get", baseUrlApi("system/upgrade/policy"));
+// 这三个 GET 是页面首屏的「状态探针」：失败时页面已经有常驻横幅说明原因，
+// 再走一次全局红 toast 就是同一次故障弹两条。调用方自己决定怎么提示。
+export const getServiceUpgradeStatus = () =>
+  http.request<BaseResult<UpgradeStatus>>("get", baseUrlApi("system/upgrade/status"), undefined, { showErrorMessage: false });
+export const getServiceUpgradePolicy = () =>
+  http.request<BaseResult<UpgradePolicy>>("get", baseUrlApi("system/upgrade/policy"), undefined, { showErrorMessage: false });
 export const getServiceUpgradeMigrationPlan = () =>
-  http.request<BaseResult<UpgradeMigrationPlan>>("get", baseUrlApi("system/upgrade/migration-plan"));
+  http.request<BaseResult<UpgradeMigrationPlan>>("get", baseUrlApi("system/upgrade/migration-plan"), undefined, {
+    showErrorMessage: false
+  });
 export const updateServiceUpgradePolicy = (policy: UpgradePolicy) =>
   http.request<BaseResult<UpgradePolicy>>("put", baseUrlApi("system/upgrade/policy"), { data: policy });
 

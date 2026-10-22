@@ -6,7 +6,8 @@
           <div>
             <div class="upgrade-caption">当前运行版本</div>
             <div class="version-title">
-              <strong>v{{ status?.current?.version || "未知" }}</strong
+              <strong :title="versionFromBundle ? '升级助手不可用，此处取自前端构建身份（与后端同包发布）' : ''"
+                >v{{ currentVersionText }}</strong
               ><a-tag color="arcoblue">{{ deploymentLabel }}</a-tag>
             </div>
             <div class="version-meta">
@@ -47,10 +48,7 @@
             ><span>{{ status?.releaseSourceConfigured ? "已配置" : "尚未配置 · 可使用离线升级包" }}</span>
           </div>
           <a-space wrap
-            ><a-link
-              @click="
-                showReleaseNotes(status?.current?.version || '未知', currentRelease?.release_notes, currentRelease?.published_at)
-              "
+            ><a-link @click="showReleaseNotes(currentVersionText, currentRelease?.release_notes, currentRelease?.published_at)"
               >本版本更新说明</a-link
             ><a-link :aria-expanded="environmentExpanded" @click="environmentExpanded = !environmentExpanded">{{
               environmentExpanded ? "收起环境详情" : "版本与环境详情"
@@ -493,6 +491,23 @@ const loading = ref(false);
 const statusError = ref("");
 const policyError = ref("");
 const migrationError = ref("");
+
+/**
+ * 把 axios 的英文异常换成用户能读懂的原因。
+ * 界面上出现 `Request failed with status code 503` 时，用户既不知道发生了什么、
+ * 也不知道该做什么，售后还要再问一遍「你是不是没开升级助手」。
+ */
+const describeUpgradeError = (cause: any, fallback: string) => {
+  const httpStatus = Number(cause?.response?.status || 0);
+  if (httpStatus === 503) return "升级助手未运行或暂未就绪（HTTP 503）";
+  if (httpStatus === 403) return "当前账号没有查看升级状态的权限（HTTP 403）";
+  if (httpStatus === 404) return "本部署不提供在线升级（HTTP 404）";
+  if (httpStatus >= 500) return `服务端异常（HTTP ${httpStatus}）`;
+  if (cause?.code === "ECONNABORTED") return "请求超时，请检查网络后重试";
+  const message = typeof cause?.message === "string" ? cause.message.trim() : "";
+  if (message && !/request failed with status code|network error|timeout of/i.test(message)) return message;
+  return fallback;
+};
 const creating = ref(false);
 const taskAction = ref("");
 const sortedTasks = computed(() =>
@@ -534,7 +549,7 @@ const deploymentLabel = computed(
       >
     )[status.value?.deployment || ""] ||
     status.value?.deployment ||
-    "部署方式未知"
+    "部署方式暂不可用"
 );
 const formatTime = (value?: string) => {
   if (!value) return "未提供时间";
@@ -664,6 +679,11 @@ const taskHint = (task: UpgradeTask) => {
 };
 const checking = ref(false);
 const status = ref<UpgradeStatus>();
+// 升级助手（独立进程）不可用时，`/system/upgrade/status` 会整体 503，连本机跑的
+// 是哪个版本都读不到。这时不能显示「v未知」——浏览器里的前端包与后端同包发布，
+// 前端构建身份就是当前运行的版本，可以作为只读兜底。
+const currentVersionText = computed(() => status.value?.current?.version?.trim() || APP_VERSION);
+const versionFromBundle = computed(() => !status.value?.current?.version?.trim());
 const update = ref<Awaited<ReturnType<typeof checkServiceUpgrade>>["data"]>();
 const errorMessage = ref("");
 const importing = ref(false);
@@ -874,7 +894,7 @@ const clientIdentityText = computed(() => `${APP_VERSION} / ${APP_BUILD_ID || "�
 const runtimeIdentityCheck = computed(() => checkRuntimeBuildIdentity(status.value?.current));
 const runtimeIdentityMismatch = computed(() => Boolean(status.value) && !runtimeIdentityCheck.value.matches);
 const serverIdentityText = computed(() => {
-  const version = status.value?.current?.version || "未知";
+  const version = status.value?.current?.version || (versionFromBundle.value ? `${APP_VERSION}（前端构建身份）` : "未知");
   const buildID = status.value?.current?.build_id || "未提供 build_id";
   return `${version} / ${buildID}`;
 });
@@ -1089,7 +1109,7 @@ const loadStatus = async () => {
       if (!runtimeIdentityMismatch.value) clearClientRefreshTarget();
       else maybeRefreshClient();
     } else {
-      statusError.value = statusResult.reason?.message || "读取升级状态失败，正在等待服务恢复";
+      statusError.value = describeUpgradeError(statusResult.reason, "读取升级状态失败，正在等待服务恢复");
     }
     if (policyResult.status === "fulfilled") {
       if (!policyBaseline.value || !policyDirty.value) {
@@ -1098,14 +1118,14 @@ const loadStatus = async () => {
       }
       policyError.value = "";
     } else {
-      policyError.value = policyResult.reason?.message || "读取无人值守策略失败";
+      policyError.value = describeUpgradeError(policyResult.reason, "读取无人值守策略失败");
     }
     if (migrationResult.status === "fulfilled") {
       migrationPlan.value = migrationResult.value.data;
       migrationError.value = "";
     } else {
       migrationPlan.value = undefined;
-      migrationError.value = migrationResult.reason?.message || "读取迁移计划失败";
+      migrationError.value = describeUpgradeError(migrationResult.reason, "读取迁移计划失败");
     }
   } finally {
     loading.value = false;
