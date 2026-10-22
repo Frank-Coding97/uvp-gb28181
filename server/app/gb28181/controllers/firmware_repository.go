@@ -177,7 +177,10 @@ func (ctrl *FirmwareRepositoryController) Upload(c *gin.Context) {
 // List 查询固件列表
 func (ctrl *FirmwareRepositoryController) List(c *gin.Context) {
 	if ctrl.repoService == nil {
-		app.ZapLog.Error("固件仓库 repoService 为 nil", zap.String("event", "firmware.list_nil_service"))
+		// 用请求 logger，别用全局 app.ZapLog：这条日志挂在"某人刚点开的列表页"上，
+		// 只有跟这次请求的访问日志同一条链，售后才能从一次操作反查到它。
+		// （controllers 包的 AST 门禁 TestLoggingGBHTTPContextWiring 明确禁止全局 logger。）
+		app.Log(c.Request.Context()).Error("固件仓库 repoService 为 nil", zap.String("event", "firmware.list_nil_service"))
 		response.Fail(c, "服务未初始化")
 		return
 	}
