@@ -72,6 +72,13 @@ func (s Snapshot) Publish(platform model.GbCascadePlatform, settings Publication
 		metadata := s.channelMetadata[target.SourceChannelID]
 		item.Manufacturer, item.Model, item.Owner = metadata.Manufacturer, metadata.Model, metadata.Owner
 		item.CivilCode, item.Address, item.Secrecy = metadata.CivilCode, metadata.Address, metadata.Secrecy
+		// PTZType is a capability signal: upstream platforms (EasyGBS, for one)
+		// hide the whole PTZ panel for a channel whose catalog entry omits it.
+		// Publish it only when PTZ is actually shared with this upstream, so the
+		// UI cannot offer control that the control boundary would reject.
+		if target.PTZAllowed {
+			item.PTZType = metadata.PTZType
+		}
 		if !validCivilCode(item.CivilCode) {
 			item.CivilCode = settings.CivilCode
 		}

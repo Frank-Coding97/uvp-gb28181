@@ -141,12 +141,16 @@ func (item catalogNotifyItemXML) MarshalXML(e *xml.Encoder, start xml.StartEleme
 				return err
 			}
 		}
-		if item.BusinessGroupID != "" {
+		if item.ptzType > 0 || (item.version == protocol.Version2016 && item.BusinessGroupID != "") {
+			info := catalogItemInfoXML{PTZType: item.ptzType}
 			if item.version == protocol.Version2016 {
-				if err := e.EncodeElement(catalogItemInfoXML{BusinessGroupID: item.BusinessGroupID}, xml.StartElement{Name: xml.Name{Local: "Info"}}); err != nil {
-					return err
-				}
-			} else if err := e.EncodeElement(item.BusinessGroupID, xml.StartElement{Name: xml.Name{Local: "BusinessGroupID"}}); err != nil {
+				info.BusinessGroupID = item.BusinessGroupID
+			}
+			if err := e.EncodeElement(info, xml.StartElement{Name: xml.Name{Local: "Info"}}); err != nil {
+				return err
+			}
+		} else if item.BusinessGroupID != "" {
+			if err := e.EncodeElement(item.BusinessGroupID, xml.StartElement{Name: xml.Name{Local: "BusinessGroupID"}}); err != nil {
 				return err
 			}
 		}
@@ -171,7 +175,7 @@ func PlanCatalogNotifications(profile protocol.Profile, target string, sn int, c
 					return nil, fmt.Errorf("unsupported catalog event")
 				}
 				n.DeviceList.Items = append(n.DeviceList.Items, catalogNotifyItemXML{catalogItemXML: catalogItemXML{
-					kind: i.Kind, version: profile.Version, DeviceID: i.ID, Name: i.Name, Manufacturer: i.Manufacturer, Model: i.Model,
+					kind: i.Kind, version: profile.Version, ptzType: i.PTZType, DeviceID: i.ID, Name: i.Name, Manufacturer: i.Manufacturer, Model: i.Model,
 					Owner: i.Owner, CivilCode: i.CivilCode, Address: i.Address, Parental: i.Parental, ParentID: i.ParentID,
 					BusinessGroupID: i.BusinessGroupID, Secrecy: i.Secrecy, Status: string(i.Status),
 				}, Event: c.Event})

@@ -148,3 +148,42 @@ func TestPublicationCivilQueryIsScopedToPublishedRegions(t *testing.T) {
 	_, err = PlanCatalogResponses(profile, "platform", s, 64, query)
 	require.ErrorIs(t, err, ErrUnknownCatalogTarget)
 }
+
+// 云台能力是"授权"而非"设备事实":上级看到的目录里带不带 PTZType,必须与
+// 该通道对这台上级的 PTZ 授权一致。否则界面会给出一个必然被拒绝的操作入口。
+func TestPublicationOmitsPTZTypeForChannelsWithoutPTZPermission(t *testing.T) {
+	p := model.GbCascadePlatform{ID: 1, LocalDeviceID: "34020000002000000001"}
+	d := model.GbCascadeDeviceProjection{ID: 1, PlatformID: 1, SourceDeviceID: 10, PublishedDeviceID: "34020000001320000001", Active: true}
+	allowed := model.GbCascadeChannelProjection{PlatformID: 1, DeviceProjectionID: 1, SourceChannelID: 20, PublishedChannelID: "34020000001320000011", Name: "allowed", PTZAllowed: true, Active: true}
+	denied := model.GbCascadeChannelProjection{PlatformID: 1, DeviceProjectionID: 1, SourceChannelID: 21, PublishedChannelID: "34020000001320000012", Name: "denied", PTZAllowed: false, Active: true}
+	facts := SourceFacts{ChannelMetadata: map[uint64]ChannelMetadata{
+		20: {PTZType: 1},
+		21: {PTZType: 1},
+	}}
+	snapshot, err := Build(repository.ProjectionSnapshot{Platform: p, Devices: []model.GbCascadeDeviceProjection{d}, Channels: []model.GbCascadeChannelProjection{allowed, denied}}, facts)
+	require.NoError(t, err)
+	profile := protocol.ProfileFor(protocol.Version2022)
+	out := snapshot.Publish(p, PublicationSettings{})
+	query, err := manscdp.BuildCatalogQueryWithProfile(profile, p.LocalDeviceID, 10)
+	require.NoError(t, err)
+	responses, err := PlanCatalogResponses(profile, p.LocalDeviceID, out, 64, query)
+	require.NoError(t, err)
+	var decoded struct {
+		Items []struct {
+			ID   string `xml:"DeviceID"`
+			Info struct {
+				PTZType *int `xml:"PTZType"`
+			} `xml:"Info"`
+		} `xml:"DeviceList>Item"`
+	}
+	require.NoError(t, manscdp.DecodeProfiledXML(profile, responses[0].Body, &decoded))
+	seen := map[string]*int{}
+	for _, item := range decoded.Items {
+		seen[item.ID] = item.Info.PTZType
+	}
+	require.Contains(t, seen, allowed.PublishedChannelID)
+	require.Contains(t, seen, denied.PublishedChannelID)
+	require.NotNil(t, seen[allowed.PublishedChannelID], "a PTZ-shared channel must advertise its PTZ type")
+	require.Equal(t, 1, *seen[allowed.PublishedChannelID])
+	require.Nil(t, seen[denied.PublishedChannelID], "a channel without PTZ permission must not advertise a PTZ type")
+}

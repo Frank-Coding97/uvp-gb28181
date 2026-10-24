@@ -51,6 +51,9 @@ type ChannelMetadata struct {
 	Model        string
 	Owner        string
 	CivilCode    string
+	// PTZType is the source channel's GB/T 28181 PTZ type (0 = the device never
+	// reported one). It is republished verbatim, never inferred from other facts.
+	PTZType int
 }
 
 // CatalogItem is the metadata whitelist available to an outbound Catalog
@@ -71,6 +74,11 @@ type CatalogItem struct {
 	Secrecy         int
 	Status          ResourceStatus
 	StatusEvent     ResourceStatus
+	// PTZType is the published channel's PTZ type. Zero means "not published"
+	// (either the device never reported one or PTZ is not shared with this
+	// upstream), and it is then omitted from the wire catalog instead of being
+	// emitted as a fabricated zero.
+	PTZType int
 }
 
 type PublishedChannelTarget struct {
@@ -210,6 +218,7 @@ func appendChannelItems(snapshot *Snapshot, platformID uint64, devices map[uint6
 		if source, ok := facts.ChannelMetadata[channel.SourceChannelID]; ok {
 			metadata.Manufacturer, metadata.Model, metadata.Owner = source.Manufacturer, source.Model, source.Owner
 			metadata.CivilCode = source.CivilCode
+			metadata.PTZType = source.PTZType
 		}
 		snapshot.channelMetadata[channel.SourceChannelID] = metadata
 		item := CatalogItem{

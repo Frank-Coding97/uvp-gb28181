@@ -418,3 +418,57 @@ func decodeCatalogItemIDs(t *testing.T, profile baseprotocol.Profile, responses 
 	}
 	return ids
 }
+
+// PTZType 必须随目录下发:EasyGBS 这类上级平台只认目录里的 <Info><PTZType>,
+// 拿不到就把通道当成"云台类型未知"、整块云台面板都不给。反过来,值为 0
+// (设备从没报过)时**不能**伪造一个 0 出去 —— 那等于告诉上级"这是固定枪机"。
+func TestCatalogPublishesPTZTypeOnlyWhenKnown(t *testing.T) {
+	const (
+		localID  = "34020000002000000001"
+		deviceID = "34020000001320000001"
+	)
+	withPTZ := "34020000001320000011"
+	unknownPTZ := "34020000001320000012"
+	items := []CatalogItem{
+		{ID: localID, Kind: CatalogItemPlatform},
+		{ID: deviceID, ParentID: localID, Kind: CatalogItemDevice},
+		{ID: withPTZ, ParentID: deviceID, Kind: CatalogItemChannel, Name: "ptz", PTZType: 1, Status: ResourceStatusOnline},
+		{ID: unknownPTZ, ParentID: deviceID, Kind: CatalogItemChannel, Name: "fixed", Status: ResourceStatusOnline},
+	}
+	for _, version := range []baseprotocol.Version{baseprotocol.Version2016, baseprotocol.Version2022} {
+		t.Run(string(version), func(t *testing.T) {
+			profile := baseprotocol.ProfileFor(version)
+			body, err := manscdp.BuildCatalogQueryWithProfile(profile, localID, 77)
+			require.NoError(t, err)
+			responses, err := PlanCatalogResponses(profile, localID, Snapshot{Items: items}, 10, body)
+			require.NoError(t, err)
+			require.Len(t, responses, 1)
+
+			var wire struct {
+				DeviceList struct {
+					Items []struct {
+						ID            string `xml:"DeviceID"`
+						PTZTypeAtItem *int   `xml:"PTZType"`
+						Info          struct {
+							PTZType *int `xml:"PTZType"`
+						} `xml:"Info"`
+					} `xml:"Item"`
+				} `xml:"DeviceList"`
+			}
+			require.NoError(t, manscdp.DecodeProfiledXML(profile, responses[0].Body, &wire))
+			require.Len(t, wire.DeviceList.Items, 4)
+
+			for _, item := range wire.DeviceList.Items {
+				switch item.ID {
+				case withPTZ:
+					require.Nil(t, item.PTZTypeAtItem, "PTZType belongs inside <Info> in both editions")
+					require.NotNil(t, item.Info.PTZType, "a known PTZ type must reach the upstream")
+					require.Equal(t, 1, *item.Info.PTZType)
+				case unknownPTZ:
+					require.Nil(t, item.PTZTypeAtItem)
+					require.Nil(t, item.Info.PTZType, "an unreported PTZ type must stay absent, never a fabricated 0")
+				}
+			}
+		})
+	}
+}

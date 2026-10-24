@@ -130,6 +130,7 @@ func buildCascadeCatalogSnapshotWithDB(ctx context.Context, db *gorm.DB, store *
 		Model        string
 		Owner        string
 		CivilCode    string
+		PTZType      int
 	}
 	var deviceIDs, channelIDs []uint64
 	for _, d := range projection.Devices {
@@ -149,7 +150,7 @@ func buildCascadeCatalogSnapshotWithDB(ctx context.Context, db *gorm.DB, store *
 	}
 	if len(channelIDs) > 0 {
 		var channels []channelRow
-		if err = db.WithContext(ctx).Table("gb_channel").Select("id,status,status_event,manufacturer,model,owner,civil_code").Where("id IN ? AND deleted_at IS NULL", channelIDs).Find(&channels).Error; err != nil {
+		if err = db.WithContext(ctx).Table("gb_channel").Select("id,status,status_event,manufacturer,model,owner,civil_code,ptz_type").Where("id IN ? AND deleted_at IS NULL", channelIDs).Find(&channels).Error; err != nil {
 			return catalog.Snapshot{}, err
 		}
 		for _, r := range channels {
@@ -160,7 +161,7 @@ func buildCascadeCatalogSnapshotWithDB(ctx context.Context, db *gorm.DB, store *
 			case "DEFECT":
 				facts.ChannelStatusEvent[r.ID] = catalog.ResourceStatusDefect
 			}
-			facts.ChannelMetadata[r.ID] = catalog.ChannelMetadata{Manufacturer: r.Manufacturer, Model: r.Model, Owner: r.Owner, CivilCode: r.CivilCode}
+			facts.ChannelMetadata[r.ID] = catalog.ChannelMetadata{Manufacturer: r.Manufacturer, Model: r.Model, Owner: r.Owner, CivilCode: r.CivilCode, PTZType: r.PTZType}
 		}
 	}
 	snapshot, err := catalog.Build(*projection, facts)

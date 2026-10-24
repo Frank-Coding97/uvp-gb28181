@@ -303,8 +303,12 @@ type catalogDeviceListXML struct {
 // It emits only facts present in the platform projection and never turns an
 // unknown PTZ type or coordinate into a fabricated zero value.
 type catalogItemXML struct {
-	kind            CatalogItemKind
-	version         protocol.Version
+	kind    CatalogItemKind
+	version protocol.Version
+	// ptzType is carried separately from the exported fields because it is
+	// emitted inside <Info>, whose shape depends on the protocol edition. Zero
+	// means "publish nothing".
+	ptzType         int
 	DeviceID        string              `xml:"DeviceID"`
 	Name            string              `xml:"Name"`
 	Manufacturer    string              `xml:"Manufacturer"`
@@ -321,6 +325,11 @@ type catalogItemXML struct {
 }
 
 type catalogItemInfoXML struct {
+	// PTZType lives in <Info> in both editions (2016: integer 1-4, 2022: string
+	// 1-7). Omitting it makes some upstreams (EasyGBS) treat the channel as
+	// "PTZ type unknown" and hide PTZ control altogether, so a real value must
+	// be published — while a zero (never reported / not shared) stays omitted.
+	PTZType         int    `xml:"PTZType,omitempty"`
 	BusinessGroupID string `xml:"BusinessGroupID,omitempty"`
 }
 
@@ -374,6 +383,7 @@ func marshalCatalogResponse(profile protocol.Profile, query manscdp.CatalogQuery
 			wireItem := catalogItemXML{
 				kind:         item.Kind,
 				version:      profile.Version,
+				ptzType:      item.PTZType,
 				DeviceID:     item.ID,
 				Name:         item.Name,
 				Manufacturer: item.Manufacturer,
@@ -386,12 +396,17 @@ func marshalCatalogResponse(profile protocol.Profile, query manscdp.CatalogQuery
 				Secrecy:      item.Secrecy,
 				Status:       string(item.Status),
 			}
-			if item.BusinessGroupID != "" {
-				if profile.Version == protocol.Version(protocol.Version2016) {
-					wireItem.Info = &catalogItemInfoXML{BusinessGroupID: item.BusinessGroupID}
-				} else {
-					wireItem.BusinessGroupID = item.BusinessGroupID
+			// <Info> carries PTZType in both editions and BusinessGroupID only in
+			// 2016; build it when either has a real value to publish.
+			info2016 := profile.Version == protocol.Version(protocol.Version2016)
+			if wireItem.ptzType > 0 || (info2016 && item.BusinessGroupID != "") {
+				wireItem.Info = &catalogItemInfoXML{PTZType: wireItem.ptzType}
+				if info2016 {
+					wireItem.Info.BusinessGroupID = item.BusinessGroupID
 				}
+			}
+			if item.BusinessGroupID != "" && !info2016 {
+				wireItem.BusinessGroupID = item.BusinessGroupID
 			}
 			response.DeviceList.Items = append(response.DeviceList.Items, wireItem)
 		}
