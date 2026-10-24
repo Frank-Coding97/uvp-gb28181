@@ -244,7 +244,18 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	if algorithm == "" {
 		algorithm = "MD5"
 	}
-	if cred.Realm != h.cfg.SIP.Domain || cred.Username != deviceID || algorithm != "MD5" {
+	// realm:部分下级平台(实测 EasyGBS 3.7)在 Authorization 里把 realm 回成空串,
+	// 不回显 401 挑战里的域。空 realm 只表示「客户端没有声明域」,并不降低强度 ——
+	// 下面仍要用平台密码算出同样的摘要才算通过;非空 realm 依然严格比对,
+	// 避免配置成别的平台域却误连过来。
+	realm := strings.TrimSpace(cred.Realm)
+	realmUnspecified := realm == ""
+	if realmUnspecified {
+		logger.Info("GB28181 注册鉴权未回显 realm,按平台域继续校验",
+			zap.String("event", "gb28181.register.realm_omitted"),
+			zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq))
+	}
+	if (!realmUnspecified && realm != h.cfg.SIP.Domain) || cred.Username != deviceID || algorithm != "MD5" {
 		h.recordSecurity(req, deviceID, gbsecurity.ReasonDigestFailure)
 		status, _ := h.respondChallenge(req, tx)
 		h.recordEnd(req, status, false)

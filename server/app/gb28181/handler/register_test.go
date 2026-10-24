@@ -172,6 +172,89 @@ func doRegisterWithServerID(t *testing.T, deviceID, serverID, password string, e
 	return int(res2.StatusCode)
 }
 
+// doRegisterWithRealm 与 doRegisterWithServerID 相同,但把挑战里的 realm 换成
+// realmOverride 后再算摘要,用来覆盖「客户端回显的 realm 缺失/不可信」这类场景。
+func doRegisterWithRealm(t *testing.T, deviceID, serverID, password, realmOverride string) int {
+	t.Helper()
+	ua, _ := sipgo.NewUA(sipgo.WithUserAgent(deviceID))
+	client, err := sipgo.NewClient(ua, sipgo.WithClientHostname("127.0.0.1"))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	recipient := sip.Uri{}
+	require.NoError(t, sip.ParseUri("sip:"+serverID+"@127.0.0.1:"+strconv.Itoa(testSIPPort), &recipient))
+	req := sip.NewRequest(sip.REGISTER, recipient)
+	req.AppendHeader(sip.NewHeader("Contact", "<sip:"+deviceID+"@127.0.0.1>"))
+	req.AppendHeader(sip.NewHeader("Expires", "3600"))
+	req.SetTransport("UDP")
+
+	ctx := context.Background()
+	tx, err := client.TransactionRequest(ctx, req, sipgo.ClientRequestRegisterBuild)
+	if err != nil {
+		t.Fatalf("首次事务: %v", err)
+	}
+	res := <-tx.Responses()
+	tx.Terminate()
+	if res == nil {
+		t.Fatal("首次无响应")
+	}
+	if res.StatusCode != 401 {
+		return int(res.StatusCode)
+	}
+
+	chal, err := digest.ParseChallenge(res.GetHeader("WWW-Authenticate").Value())
+	if err != nil {
+		t.Fatalf("解析挑战: %v", err)
+	}
+	chal.Realm = realmOverride
+	cred, err := digest.Digest(chal, digest.Options{
+		Method: "REGISTER", URI: recipient.String(), Username: deviceID, Password: password,
+	})
+	require.NoError(t, err)
+	newReq := req.Clone()
+	newReq.RemoveHeader("Via")
+	newReq.AppendHeader(sip.NewHeader("Authorization", cred.String()))
+	tx2, err := client.TransactionRequest(ctx, newReq, sipgo.ClientRequestIncreaseCSEQ, sipgo.ClientRequestAddVia)
+	if err != nil {
+		t.Fatalf("二次事务: %v", err)
+	}
+	defer tx2.Terminate()
+	res2 := <-tx2.Responses()
+	if res2 == nil {
+		t.Fatal("二次无响应")
+	}
+	return int(res2.StatusCode)
+}
+
+// 部分下级平台(实测 EasyGBS 3.7)会在 Authorization 里把 realm 回成空串。
+// 空 realm 只是「没声明域」,密码仍然要对 —— 这里锁住它不能成为连不上的理由。
+func TestRegisterAcceptsEmptyRealm(t *testing.T) {
+	setupEnv(t)
+	stop := startTestServer(t, testCfg())
+	defer stop()
+	cleanupDevice(testDeviceID)
+	defer cleanupDevice(testDeviceID)
+
+	if got := doRegisterWithRealm(t, testDeviceID, "34020000002000000001", testPassword, ""); got != 200 {
+		t.Fatalf("空 realm + 正确密码应注册成功, got %d", got)
+	}
+}
+
+// 反过来:非空但不是我方域,必须拒 —— 否则把别的平台的凭据串过来也能注册。
+func TestRegisterRejectsForeignRealm(t *testing.T) {
+	setupEnv(t)
+	stop := startTestServer(t, testCfg())
+	defer stop()
+	cleanupDevice(testDeviceID)
+	defer cleanupDevice(testDeviceID)
+
+	if got := doRegisterWithRealm(t, testDeviceID, "34020000002000000001", testPassword, "3402000009"); got != 401 {
+		t.Fatalf("异域 realm 应被拒(401), got %d", got)
+	}
+}
+
 func cleanupDevice(id string) {
 	if app.GormDbMysql != nil {
 		app.GormDbMysql.Unscoped().Where("device_id = ?", id).Delete(&gbmodels.GbDevice{})

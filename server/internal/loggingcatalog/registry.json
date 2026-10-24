@@ -538,6 +538,11 @@
       "call_id",
       "device_id"
     ],
+    "gb28181.register.realm_omitted": [
+      "call_id",
+      "cseq",
+      "device_id"
+    ],
     "gb28181.register.server_id_mismatch": [
       "call_id",
       "device_id",
