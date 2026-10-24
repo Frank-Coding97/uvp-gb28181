@@ -41,4 +41,23 @@ describe("global playback console store", () => {
     expect(store.channel).toBeNull();
     expect(store.displayMode).toBe("expanded");
   });
+
+  it("每点一次点播都递增请求序号，关闭不清零", () => {
+    // 「点播」的语义是"现在播一路"，不是"打开面板"。控制台已经开着同一通道时，
+    // `visible` 和通道都保持不变，只有这个序号能告诉控制台"这是一次新的开播请求"。
+    const store = usePlaybackConsoleStore();
+    expect(store.openSeq).toBe(0);
+
+    store.open(northGate);
+    expect(store.openSeq).toBe(1);
+
+    store.open(northGate);
+    expect(store.openSeq).toBe(2);
+
+    store.close();
+    // ⛔ 关闭不清零：清零后重新打开会和上一次的值撞车，watcher 又不触发了。
+    expect(store.openSeq).toBe(2);
+    store.open(southGate);
+    expect(store.openSeq).toBe(3);
+  });
 });

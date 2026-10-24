@@ -37,6 +37,7 @@ import PtzPresetCard from "./play-console/PtzPresetCard.vue";
 import PtzCruiseCard from "./play-console/PtzCruiseCard.vue";
 import DeviceConfigDrawer from "../device-mgmt/DeviceConfigDrawer.vue";
 import { MAX_MASK_REGIONS, type ConfigTextItem } from "../device-mgmt/deviceConfigGroups";
+import { readableHttpError } from "../device-mgmt/recordQueryState";
 import { useFrameMirrorOptions } from "../device-mgmt/useDeviceConfigDict";
 import { buildProbeOverview, probeBucketHeight } from "../probeOverview";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
@@ -150,9 +151,18 @@ const props = withDefaults(
     visible: boolean;
     channel: PlaybackChannel | null;
     displayMode?: PlaybackConsoleDisplayMode;
+    /**
+     * 「点播」请求序号，宿主每点一次就递增。
+     *
+     * ⛔ 生命周期只盯 `visible` + 通道标识是不够的：控制台已经开着同一个通道时再点一次
+     *    「点播」，两者都没变，watcher 不触发 ⇒ 用户点了没反应（画面停在上一次的错误态）。
+     *    序号是显式的"这是新的一次开播"，细节见 store 里的 `openSeq`。
+     */
+    openSeq?: number;
   }>(),
   {
-    displayMode: "expanded"
+    displayMode: "expanded",
+    openSeq: 0
   }
 );
 const emit = defineEmits<{
@@ -2272,7 +2282,12 @@ async function startSession() {
   } catch (error: any) {
     if (token !== sessionToken) return;
     phase.value = "error";
-    errorMessage.value = error?.message || "点播失败,请检查设备在线状态";
+    // ⛔ 不能直接取 `error.message`：axios 在 4xx/5xx 上的 message 是
+    //    「Request failed with status code 400」这种传输层原文，而真正的原因
+    //    （本次实测是后端 `reason_code=device_offline` 对应的「设备离线」）挂在
+    //    `error.response.data.message` 上。复用设备列表那边既有的一套翻译，
+    //    免得同一个页面里出现两套说法。
+    errorMessage.value = readableHttpError(error, "点播失败,请检查设备在线状态");
     clearMonitor();
     clearTimer();
   }
@@ -5032,7 +5047,7 @@ function handleVisibilityChange() {
 /* ────────────────────────── 生命周期 ────────────────────────── */
 
 watch(
-  [() => props.visible, () => channelContextKey()],
+  [() => props.visible, () => channelContextKey(), () => props.openSeq],
   ([visible]) => {
     if (visible && props.channel) {
       void loadDefaultPtzSpeed();

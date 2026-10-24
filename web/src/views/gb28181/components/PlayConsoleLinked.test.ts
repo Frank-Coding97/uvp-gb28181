@@ -799,6 +799,23 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
+  it("点播失败时展示后端给的原因，而不是 axios 的状态码原文", async () => {
+    // 实测踩过：级联通道的设备离线时，后端回 400 + message「设备离线」，
+    // 播放器却显示 `Request failed with status code 400` —— 用户看不出到底哪儿坏了。
+    api.startPlay.mockImplementationOnce(() =>
+      Promise.reject(
+        Object.assign(new Error("Request failed with status code 400"), {
+          response: { status: 400, data: { code: 1, message: "设备离线" } }
+        })
+      )
+    );
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    expect(wrapper.text()).toContain("设备离线");
+    expect(wrapper.text()).not.toContain("Request failed with status code");
+    wrapper.unmount();
+  });
+
   it("最小化后保留同一个播放器和点播会话，并支持拖动与恢复", async () => {
     const ModalStub = defineComponent({
       name: "PlaybackModalStub",
@@ -2261,6 +2278,28 @@ describe("PlayConsoleLinked 双区联动", () => {
     await wrapper.get("[data-testid='play-window']").trigger("click");
     expect(wrapper.text()).toContain("点播未完成");
     expect(wrapper.text()).toContain("拉流超时");
+    wrapper.unmount();
+  });
+
+  it("控制台已打开同一通道时再点一次点播会重新发起会话", async () => {
+    // ⛔ 曾经的缺陷（真实环境复现）：控制台开着、通道也没换，用户再点「点播」，
+    //    `visible` 与通道标识一个都没变 ⇒ 生命周期 watcher 不触发 ⇒
+    //    播放接口一次都没调用，画面停在上一次的错误态，只能刷新页面才恢复。
+    //    所以"每点一次点播"必须靠显式的请求序号（`openSeq`）驱动。
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel, openSeq: 1 } });
+    await flushPromises();
+    expect(api.startPlay).toHaveBeenCalledTimes(1);
+
+    // 同一个通道、面板始终可见，只有序号递增。
+    await wrapper.setProps({ openSeq: 2 });
+    await flushPromises();
+    expect(api.startPlay).toHaveBeenCalledTimes(2);
+    expect(api.startPlay).toHaveBeenLastCalledWith(channel.deviceId, channel.channelId);
+
+    // 反向守卫：序号不变时不许平白多开一次（定时器/监控刷新之类不能误触发开播）。
+    await wrapper.setProps({ openSeq: 2 });
+    await flushPromises();
+    expect(api.startPlay).toHaveBeenCalledTimes(2);
     wrapper.unmount();
   });
 
