@@ -1,10 +1,10 @@
 package routes
 
 import (
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/middleware"
-	"uvplatform.cn/uvp-gb28181/plugins/{{.DirName}}/controllers"
-	"uvplatform.cn/uvp-gb28181/app/utils/ginhelper"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/middleware"
+	"uvplatform.com/uvp-gb28181/plugins/{{.DirName}}/controllers"
+	"uvplatform.com/uvp-gb28181/app/utils/ginhelper"
 	"github.com/gin-gonic/gin"
 )
 

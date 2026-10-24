@@ -1,0 +1,1 @@
+IF EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.gb_device_firmware_upgrade') AND name=N'uk_firmware_upgrade_cascade_request') DROP INDEX [uk_firmware_upgrade_cascade_request] ON [dbo].[gb_device_firmware_upgrade];

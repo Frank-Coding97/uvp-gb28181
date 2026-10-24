@@ -17,7 +17,7 @@ type SysJobResultsListRequest struct {
 
 // Validate 验证请求参数
 func (r *SysJobResultsListRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }
 
 // Handle 获取查询条件
@@ -49,7 +49,7 @@ type SysJobResultsDeleteRequest struct {
 
 // Validate 验证请求参数
 func (r *SysJobResultsDeleteRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }
 
 // SysJobResultsGetByIDRequest 根据ID获取sys_job_results请求参数
@@ -60,5 +60,5 @@ type SysJobResultsGetByIDRequest struct {
 
 // Validate 验证请求参数
 func (r *SysJobResultsGetByIDRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }

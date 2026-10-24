@@ -1,0 +1,421 @@
+package sdp
+
+import (
+	"bufio"
+	"fmt"
+	"net"
+	"strconv"
+	"strings"
+	"time"
+
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm"
+)
+
+// CascadeVideoOffer contains the media facts needed to start a PS-over-RTP
+// sender towards an upstream GB28181 platform.
+type CascadeVideoOffer struct {
+	RemoteIP      string
+	RemotePort    int
+	SSRC          string
+	PayloadType   int
+	Transport     zlm.GBSendRTPTransport
+	Playback      bool
+	Download      bool
+	DownloadSpeed uint32
+	RecordingURI  string
+	Start         time.Time
+	End           time.Time
+}
+
+type cascadeVideoConnection struct {
+	address string
+	seen    bool
+	valid   bool
+}
+
+type cascadeVideoMedia struct {
+	kind              string
+	port              int
+	transport         string
+	pt                []int
+	invalid           bool
+	rtpmap            map[int]string
+	connection        cascadeVideoConnection
+	ssrc              string
+	ssrcSeen          bool
+	direction         string
+	setup             string
+	format            string
+	downloadSpeed     uint32
+	downloadSpeedSeen bool
+}
+
+// ParseCascadeVideoOffer parses the SDP body of an upstream real-time Play
+// offer. The returned transport is expressed in terms of the ZLM sender: a
+// TCP offer's active/passive role is therefore reversed.
+func ParseCascadeVideoOffer(body []byte) (CascadeVideoOffer, error) {
+	var sessionConnection cascadeVideoConnection
+	var sessionSSRC string
+	var sessionSSRCSeen bool
+	var sessionDirection string
+	var sessionFormat string
+	var sessionName string
+	var timing string
+	var timingCount int
+	var recordingURI string
+	var uriCount int
+	var current *cascadeVideoMedia
+	var video *cascadeVideoMedia
+
+	normalized := strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(string(body))
+	scanner := bufio.NewScanner(strings.NewReader(normalized))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		switch {
+		case strings.HasPrefix(line, "m="):
+			media := parseCascadeVideoMedia(strings.TrimPrefix(line, "m="))
+			current = media
+			if media.kind == "video" && video == nil {
+				video = media
+			}
+		case strings.HasPrefix(line, "s="):
+			sessionName = strings.TrimSpace(strings.TrimPrefix(line, "s="))
+		case strings.HasPrefix(line, "t="):
+			timing = strings.TrimSpace(strings.TrimPrefix(line, "t="))
+			timingCount++
+		case strings.HasPrefix(line, "u="):
+			if current != nil {
+				return CascadeVideoOffer{}, fmt.Errorf("recording URI must be a session field")
+			}
+			recordingURI = strings.TrimSpace(strings.TrimPrefix(line, "u="))
+			uriCount++
+		case strings.HasPrefix(line, "c="):
+			connection := parseCascadeVideoConnection(strings.TrimPrefix(line, "c="))
+			if current != nil {
+				if current == video {
+					current.connection = connection
+				}
+			} else {
+				sessionConnection = connection
+			}
+		case strings.HasPrefix(line, "y="):
+			ssrc := strings.TrimSpace(strings.TrimPrefix(line, "y="))
+			if current != nil {
+				if current == video {
+					current.ssrc = ssrc
+					current.ssrcSeen = true
+				}
+			} else {
+				sessionSSRC = ssrc
+				sessionSSRCSeen = true
+			}
+		case strings.HasPrefix(line, "f="):
+			format := strings.TrimSpace(strings.TrimPrefix(line, "f="))
+			switch {
+			case current != nil && current == video:
+				current.format = format
+			case current == nil:
+				sessionFormat = format
+			}
+		default:
+			if value, ok := cascadeVideoAttributeValue(line, "a=downloadspeed:"); ok && current != nil && current == video {
+				parsed, err := strconv.ParseUint(value, 10, 32)
+				if current.downloadSpeedSeen || err != nil || parsed == 0 {
+					return CascadeVideoOffer{}, fmt.Errorf("cascade download SDP speed is invalid")
+				}
+				current.downloadSpeedSeen = true
+				current.downloadSpeed = uint32(parsed)
+				continue
+			}
+			if value, ok := cascadeVideoAttributeValue(line, "a=rtpmap:"); ok && current != nil && current == video {
+				fields := strings.Fields(value)
+				if len(fields) >= 2 {
+					payloadType, err := strconv.Atoi(fields[0])
+					if err == nil {
+						current.rtpmap[payloadType] = strings.TrimSpace(fields[1])
+					}
+				}
+				continue
+			}
+			if value, ok := cascadeVideoAttributeValue(line, "a=setup:"); ok && current != nil && current == video {
+				current.setup = strings.ToLower(value)
+				continue
+			}
+			if direction, ok := cascadeVideoDirection(line); ok {
+				switch {
+				case current != nil && current == video:
+					current.direction = direction
+				case current == nil:
+					sessionDirection = direction
+				}
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return CascadeVideoOffer{}, err
+	}
+
+	playback := strings.EqualFold(sessionName, "Playback")
+	download := strings.EqualFold(sessionName, "Download")
+	historical := playback || download
+	if (download && uriCount != 1) || (historical && uriCount > 1) {
+		return CascadeVideoOffer{}, fmt.Errorf("cascade download SDP requires one recording URI")
+	}
+	if historical && uriCount == 1 {
+		if _, err := ParseHistoricalURI(recordingURI); err != nil {
+			return CascadeVideoOffer{}, err
+		}
+	}
+	if !historical && !strings.EqualFold(sessionName, "Play") {
+		return CascadeVideoOffer{}, fmt.Errorf("cascade video SDP session must be Play, Playback or Download")
+	}
+	var start, end time.Time
+	if historical {
+		fields := strings.Fields(timing)
+		if timingCount != 1 || len(fields) != 2 {
+			return CascadeVideoOffer{}, fmt.Errorf("cascade playback SDP requires one time range")
+		}
+		first, firstErr := strconv.ParseInt(fields[0], 10, 64)
+		last, lastErr := strconv.ParseInt(fields[1], 10, 64)
+		if firstErr != nil || lastErr != nil || first <= 0 || last <= first || last > 253402300799 {
+			return CascadeVideoOffer{}, fmt.Errorf("cascade playback SDP time range is invalid")
+		}
+		start, end = time.Unix(first, 0).UTC(), time.Unix(last, 0).UTC()
+	}
+	if video == nil {
+		return CascadeVideoOffer{}, fmt.Errorf("cascade video SDP missing video media")
+	}
+	if download && !video.downloadSpeedSeen {
+		video.downloadSpeed = 1
+	}
+	if video.invalid || video.port <= 0 || video.port > 65535 {
+		return CascadeVideoOffer{}, fmt.Errorf("cascade video SDP video port is invalid")
+	}
+	direction := strings.ToLower(strings.TrimSpace(video.direction))
+	if direction == "" {
+		direction = strings.ToLower(strings.TrimSpace(sessionDirection))
+	}
+	if direction == "" {
+		direction = "sendrecv"
+	}
+	if direction != "recvonly" && direction != "sendrecv" {
+		return CascadeVideoOffer{}, fmt.Errorf("cascade video SDP direction is not supported")
+	}
+
+	connection := video.connection
+	if !connection.seen {
+		connection = sessionConnection
+	}
+	if !connection.seen || !connection.valid {
+		return CascadeVideoOffer{}, fmt.Errorf("cascade video SDP media address is invalid")
+	}
+	parsedIP := net.ParseIP(connection.address)
+	if parsedIP == nil || parsedIP.To4() == nil || parsedIP.IsUnspecified() {
+		return CascadeVideoOffer{}, fmt.Errorf("cascade video SDP media address is invalid")
+	}
+
+	ssrc := video.ssrc
+	if !video.ssrcSeen && sessionSSRCSeen {
+		ssrc = sessionSSRC
+	}
+	if (!historical && !validCascadeVideoSSRC(ssrc)) || (historical && !validPlaybackSSRC(ssrc)) {
+		return CascadeVideoOffer{}, fmt.Errorf("cascade video SDP SSRC is missing or invalid")
+	}
+
+	format := video.format
+	if format == "" {
+		format = sessionFormat
+	}
+	payloadType := 0
+	for _, candidate := range video.pt {
+		if candidate < 96 || candidate > 127 {
+			continue
+		}
+		codec, ok := video.rtpmap[candidate]
+		if ok {
+			if strings.EqualFold(strings.TrimSpace(codec), "PS/90000") {
+				payloadType = candidate
+				break
+			}
+			continue
+		}
+		if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(format)), "V/PS/") {
+			payloadType = candidate
+			break
+		}
+	}
+	if payloadType == 0 {
+		return CascadeVideoOffer{}, fmt.Errorf("cascade video SDP missing dynamic PS/90000 payload")
+	}
+
+	var transport zlm.GBSendRTPTransport
+	switch strings.ToUpper(strings.TrimSpace(video.transport)) {
+	case "RTP/AVP":
+		transport = zlm.GBSendRTPUDP
+	case "TCP/RTP/AVP":
+		switch video.setup {
+		case "active":
+			transport = zlm.GBSendRTPTCPPassive
+		case "passive":
+			transport = zlm.GBSendRTPTCPActive
+		default:
+			return CascadeVideoOffer{}, fmt.Errorf("cascade video TCP SDP setup is not supported")
+		}
+	default:
+		return CascadeVideoOffer{}, fmt.Errorf("cascade video SDP transport is not supported: %s", video.transport)
+	}
+
+	return CascadeVideoOffer{
+		RemoteIP: parsedIP.To4().String(), RemotePort: video.port, SSRC: ssrc,
+		PayloadType: payloadType, Transport: transport,
+		Playback: playback, Download: download, DownloadSpeed: video.downloadSpeed, RecordingURI: recordingURI, Start: start, End: end,
+	}, nil
+}
+
+// BuildCascadeVideoAnswer builds the local answer for a parsed upstream Play
+// offer. The local endpoint sends the negotiated PS stream to the upstream.
+func BuildCascadeVideoAnswer(offer CascadeVideoOffer, localID, localIP string, localPort int) ([]byte, error) {
+	historical := offer.Playback || offer.Download
+	if offer.Playback && offer.Download {
+		return nil, fmt.Errorf("cascade video answer has conflicting modes")
+	}
+	localID = strings.TrimSpace(localID)
+	if localID == "" {
+		return nil, fmt.Errorf("cascade video answer local ID is required")
+	}
+	parsedIP := net.ParseIP(strings.TrimSpace(localIP))
+	if parsedIP == nil || parsedIP.To4() == nil || parsedIP.IsUnspecified() {
+		return nil, fmt.Errorf("cascade video answer local address is invalid")
+	}
+	if localPort <= 0 || localPort > 65535 {
+		return nil, fmt.Errorf("cascade video answer local port is invalid")
+	}
+	ssrc := strings.TrimSpace(offer.SSRC)
+	if (!historical && !validCascadeVideoSSRC(ssrc)) || (historical && !validPlaybackSSRC(ssrc)) {
+		return nil, fmt.Errorf("cascade video answer SSRC is missing or invalid")
+	}
+	if offer.PayloadType < 96 || offer.PayloadType > 127 {
+		return nil, fmt.Errorf("cascade video answer payload type is invalid")
+	}
+	if historical && (offer.Start.IsZero() || !offer.End.After(offer.Start)) {
+		return nil, fmt.Errorf("cascade playback answer time range is invalid")
+	}
+	if (historical && offer.RecordingURI != "") || offer.Download {
+		if _, err := ParseHistoricalURI(offer.RecordingURI); err != nil {
+			return nil, err
+		}
+	}
+
+	transport := ""
+	setup := ""
+	switch offer.Transport {
+	case zlm.GBSendRTPUDP:
+		transport = "RTP/AVP"
+	case zlm.GBSendRTPTCPActive:
+		transport = "TCP/RTP/AVP"
+		setup = "a=setup:active\r\na=connection:new\r\n"
+	case zlm.GBSendRTPTCPPassive:
+		transport = "TCP/RTP/AVP"
+		setup = "a=setup:passive\r\na=connection:new\r\n"
+	default:
+		return nil, fmt.Errorf("cascade video answer transport is not supported: %s", offer.Transport)
+	}
+
+	var answer strings.Builder
+	answer.WriteString("v=0\r\n")
+	fmt.Fprintf(&answer, "o=%s 0 0 IN IP4 %s\r\n", localID, parsedIP.To4().String())
+	if offer.Download {
+		answer.WriteString("s=Download\r\n")
+	} else if offer.Playback {
+		answer.WriteString("s=Playback\r\n")
+	} else {
+		answer.WriteString("s=Play\r\n")
+	}
+	if historical && offer.RecordingURI != "" {
+		fmt.Fprintf(&answer, "u=%s\r\n", offer.RecordingURI)
+	}
+	fmt.Fprintf(&answer, "c=IN IP4 %s\r\n", parsedIP.To4().String())
+	if historical {
+		fmt.Fprintf(&answer, "t=%d %d\r\n", offer.Start.Unix(), offer.End.Unix())
+	} else {
+		answer.WriteString("t=0 0\r\n")
+	}
+	fmt.Fprintf(&answer, "m=video %d %s %d\r\n", localPort, transport, offer.PayloadType)
+	answer.WriteString(setup)
+	answer.WriteString("a=sendonly\r\n")
+	fmt.Fprintf(&answer, "a=rtpmap:%d PS/90000\r\n", offer.PayloadType)
+	if offer.Download && offer.DownloadSpeed > 0 {
+		fmt.Fprintf(&answer, "a=downloadspeed:%d\r\n", offer.DownloadSpeed)
+	}
+	fmt.Fprintf(&answer, "y=%s\r\n", ssrc)
+	return []byte(answer.String()), nil
+}
+
+func parseCascadeVideoMedia(raw string) *cascadeVideoMedia {
+	fields := strings.Fields(raw)
+	media := &cascadeVideoMedia{rtpmap: make(map[int]string)}
+	if len(fields) < 4 {
+		media.invalid = true
+		return media
+	}
+	media.kind = strings.ToLower(fields[0])
+	var err error
+	media.port, err = strconv.Atoi(fields[1])
+	if err != nil {
+		media.invalid = true
+	}
+	media.transport = fields[2]
+	for _, value := range fields[3:] {
+		payloadType, parseErr := strconv.Atoi(value)
+		if parseErr != nil || payloadType < 0 || payloadType > 127 {
+			media.invalid = true
+			continue
+		}
+		media.pt = append(media.pt, payloadType)
+	}
+	return media
+}
+
+func parseCascadeVideoConnection(raw string) cascadeVideoConnection {
+	fields := strings.Fields(raw)
+	if len(fields) != 3 {
+		return cascadeVideoConnection{seen: true}
+	}
+	return cascadeVideoConnection{
+		address: fields[2], seen: true,
+		valid: strings.EqualFold(fields[0], "IN") && strings.EqualFold(fields[1], "IP4"),
+	}
+}
+
+func cascadeVideoAttributeValue(line, prefix string) (string, bool) {
+	if len(line) < len(prefix) || !strings.EqualFold(line[:len(prefix)], prefix) {
+		return "", false
+	}
+	return strings.TrimSpace(line[len(prefix):]), true
+}
+
+func cascadeVideoDirection(line string) (string, bool) {
+	value := strings.ToLower(strings.TrimSpace(line))
+	switch value {
+	case "a=recvonly", "a=sendrecv", "a=sendonly", "a=inactive":
+		return strings.TrimPrefix(value, "a="), true
+	default:
+		return "", false
+	}
+}
+
+func validCascadeVideoSSRC(value string) bool {
+	if len(value) != 10 || value[0] != '0' {
+		return false
+	}
+	for _, digit := range value {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+	}
+	return true
+}

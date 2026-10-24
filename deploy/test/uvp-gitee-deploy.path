@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch UVP Gitee deployment queue
+
+[Path]
+DirectoryNotEmpty=/var/lib/uvp-gitee-deployer/queue
+Unit=uvp-gitee-deploy.service
+
+[Install]
+WantedBy=multi-user.target

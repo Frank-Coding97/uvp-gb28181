@@ -1,0 +1,1 @@
+IF COL_LENGTH(N'dbo.gb_cascade_media_session', N'session_kind') IS NOT NULL BEGIN ALTER TABLE [dbo].[gb_cascade_media_session] DROP CONSTRAINT IF EXISTS [df_gb_cascade_media_session_kind]; ALTER TABLE [dbo].[gb_cascade_media_session] DROP COLUMN [session_kind]; END;

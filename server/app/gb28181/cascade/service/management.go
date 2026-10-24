@@ -1,0 +1,610 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"sort"
+	"strings"
+	"time"
+
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/repository"
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/securestore"
+)
+
+const upstreamPasswordPurpose = "upstream-password"
+
+const minRegisterExpires = 3600
+
+var (
+	ErrInvalidPlatformConfig = errors.New("invalid cascade platform config")
+	ErrInvalidBusinessGroup  = errors.New("业务分组配置无效")
+	ErrCredentialUnavailable = errors.New("cascade credential sealer unavailable")
+	ErrRuntimeUnavailable    = errors.New("cascade runtime unavailable")
+	// ErrRuntimeSyncFailed 配置已持久化但运行时同步失败:调用方应返回已提交
+	// 资源而非整体失败,客户端重试会产生唯一键冲突
+	ErrRuntimeSyncFailed         = errors.New("cascade config persisted but runtime sync failed")
+	ErrPlatformDisabled          = errors.New("cascade platform disabled")
+	ErrPlatformHasActiveSessions = errors.New("cascade platform has active media sessions")
+)
+
+type ManagementStore interface {
+	CreatePlatform(context.Context, *model.GbCascadePlatform) error
+	FindPlatform(context.Context, uint64) (*model.GbCascadePlatform, error)
+	ListPlatforms(context.Context) ([]model.GbCascadePlatform, error)
+	UpdatePlatformConfig(context.Context, *model.GbCascadePlatform, uint64) (*model.GbCascadePlatform, error)
+	SetPublishGroup(context.Context, uint64, uint64, bool) (*model.GbCascadePlatform, error)
+	SoftDeletePlatform(context.Context, uint64) error
+	ReplaceProjection(context.Context, uint64, uint64, []repository.DeviceProjectionInput, []repository.ChannelProjectionInput) error
+	ProjectionSnapshot(context.Context, uint64) (*repository.ProjectionSnapshot, error)
+	ReplaceBusinessGroup(context.Context, uint64, uint64, []repository.BusinessNodeInput, []repository.BusinessBindingInput) error
+	ListNonterminalMediaSessions(context.Context, uint64) ([]model.GbCascadeMediaSession, error)
+}
+
+type CredentialSealer interface {
+	Encrypt(string, []byte) (securestore.Envelope, error)
+}
+
+type ManagementRuntime interface {
+	Reload(context.Context) error
+	PlatformIDs() []uint64
+}
+
+type PlatformConfigInput struct {
+	Name                 string
+	UpstreamServerID     string
+	UpstreamDomain       string
+	Host                 string
+	Port                 int
+	LocalDeviceID        string
+	LocalDomain          string
+	LocalSIPIP           string
+	LocalSIPPort         int
+	MediaAdvertiseIP     string
+	AuthUsername         string
+	Password             *string
+	ProfileOverride      model.CascadeProfileOverride
+	CharsetOverride      string
+	RegisterExpires      int
+	KeepaliveInterval    int
+	RetryPolicy          string
+	Transport            string
+	CatalogBatchSize     int
+	AutoPushCatalog      bool `json:"autoPushCatalog"`
+	PublishPlatform      bool
+	PublishCivil         bool
+	PublishGroup         bool
+	MaxStreams           int
+	PTZEnabled           bool
+	DeviceControlEnabled bool `json:"deviceControlEnabled"`
+	MaintenanceEnabled   bool `json:"maintenanceEnabled"`
+	ConfigEnabled        bool `json:"configEnabled"`
+	UpgradeEnabled       bool `json:"upgradeEnabled"`
+	RecordingEnabled     bool `json:"recordingEnabled"`
+	RTCPKeepalive        bool `json:"rtcpKeepalive"`
+	Enabled              bool
+}
+
+type PlatformView struct {
+	ID                   uint64                       `json:"id"`
+	Name                 string                       `json:"name"`
+	UpstreamServerID     string                       `json:"upstreamServerId"`
+	UpstreamDomain       string                       `json:"upstreamDomain"`
+	Host                 string                       `json:"host"`
+	Port                 int                          `json:"port"`
+	LocalDeviceID        string                       `json:"localDeviceId"`
+	LocalDomain          string                       `json:"localDomain"`
+	LocalSIPIP           string                       `json:"localSipIp"`
+	LocalSIPPort         int                          `json:"localSipPort"`
+	MediaAdvertiseIP     string                       `json:"mediaAdvertiseIp,omitempty"`
+	AuthUsername         string                       `json:"authUsername,omitempty"`
+	CredentialNeedsReset bool                         `json:"credentialNeedsReset"`
+	HasPassword          bool                         `json:"hasPassword"`
+	ProfileOverride      model.CascadeProfileOverride `json:"profileOverride"`
+	EffectiveVersion     string                       `json:"effectiveVersion"`
+	EffectiveVersionFrom string                       `json:"effectiveVersionFrom"`
+	CharsetOverride      string                       `json:"charsetOverride,omitempty"`
+	RegisterExpires      int                          `json:"registerExpires"`
+	KeepaliveInterval    int                          `json:"keepaliveInterval"`
+	Transport            string                       `json:"transport"`
+	CatalogBatchSize     int                          `json:"catalogBatchSize"`
+	AutoPushCatalog      bool                         `json:"autoPushCatalog"`
+	PublishPlatform      bool                         `json:"publishPlatform"`
+	PublishCivil         bool                         `json:"publishCivil"`
+	PublishGroup         bool                         `json:"publishGroup"`
+	MaxStreams           int                          `json:"maxStreams"`
+	PTZEnabled           bool                         `json:"ptzEnabled"`
+	DeviceControlEnabled bool                         `json:"deviceControlEnabled"`
+	MaintenanceEnabled   bool                         `json:"maintenanceEnabled"`
+	ConfigEnabled        bool                         `json:"configEnabled"`
+	UpgradeEnabled       bool                         `json:"upgradeEnabled"`
+	RecordingEnabled     bool                         `json:"recordingEnabled"`
+	RTCPKeepalive        bool                         `json:"rtcpKeepalive"`
+	Enabled              bool                         `json:"enabled"`
+	ConfigRevision       uint64                       `json:"configRevision"`
+	ProjectionRevision   uint64                       `json:"projectionRevision"`
+	Registration         RegistrationState            `json:"registration"`
+	Heartbeat            HeartbeatState               `json:"heartbeat"`
+	Overall              PlatformState                `json:"overall"`
+	RegisterAt           *time.Time                   `json:"registerAt,omitempty"`
+	RegisterExpiresAt    *time.Time                   `json:"registerExpiresAt,omitempty"`
+	HeartbeatAt          *time.Time                   `json:"heartbeatAt,omitempty"`
+	LastErrorCode        string                       `json:"lastErrorCode,omitempty"`
+	LastErrorMessage     string                       `json:"lastErrorMessage,omitempty"`
+	LastErrorAt          *time.Time                   `json:"lastErrorAt,omitempty"`
+	CreatedAt            time.Time                    `json:"createdAt"`
+	UpdatedAt            time.Time                    `json:"updatedAt"`
+	RuntimeSynced        *bool                        `json:"runtimeSynced,omitempty"`
+	Subscriptions        PlatformSubscriptions        `json:"subscriptions"`
+}
+
+type SubscriptionSession struct {
+	Target           string     `json:"target"`
+	Event            string     `json:"event"`
+	SubscribedAt     time.Time  `json:"subscribedAt"`
+	RenewedAt        time.Time  `json:"renewedAt"`
+	ExpiresAt        time.Time  `json:"expiresAt"`
+	LastNotifyAt     *time.Time `json:"lastNotifyAt,omitempty"`
+	LastNotifyStatus string     `json:"lastNotifyStatus"`
+	LastNotifyCode   int        `json:"lastNotifyCode,omitempty"`
+}
+type SubscriptionTypeStatus struct {
+	State    string                `json:"state"`
+	Sessions []SubscriptionSession `json:"sessions"`
+}
+type PlatformSubscriptions struct {
+	Catalog        SubscriptionTypeStatus `json:"catalog"`
+	MobilePosition SubscriptionTypeStatus `json:"mobilePosition"`
+	PTZPosition    SubscriptionTypeStatus `json:"ptzPosition"`
+	Alarm          SubscriptionTypeStatus `json:"alarm"`
+}
+
+func NewPlatformSubscriptions(catalogState string) PlatformSubscriptions {
+	if catalogState == "" {
+		catalogState = "unavailable"
+	}
+	return PlatformSubscriptions{Catalog: SubscriptionTypeStatus{State: catalogState}, MobilePosition: SubscriptionTypeStatus{State: "unsupported"}, PTZPosition: SubscriptionTypeStatus{State: "unsupported"}, Alarm: SubscriptionTypeStatus{State: "unsupported"}}
+}
+
+type SubscriptionReader interface {
+	Subscriptions(model.GbCascadePlatform) PlatformSubscriptions
+}
+
+// DeleteResult keeps the durable deletion result separate from runtime reload.
+// A disabled platform can remain visible after the first reload failure so a
+// later request can finish the soft delete without guessing from an error.
+type DeleteResult struct {
+	Deleted       bool          `json:"deleted"`
+	RuntimeSynced bool          `json:"runtimeSynced"`
+	Platform      *PlatformView `json:"platform,omitempty"`
+}
+
+// CatalogPusher proactively reports the shared catalog to one upstream platform.
+// Implemented by the SIP boundary; nil means the SIP runtime is not available.
+type CatalogPusher interface {
+	PushCatalog(ctx context.Context, platformID uint64) (items, batches int, err error)
+}
+
+// CatalogPushResult summarizes one manual catalog push.
+type CatalogPushResult struct {
+	Items   int `json:"items"`
+	Batches int `json:"batches"`
+}
+
+type ManagementService struct {
+	store   ManagementStore
+	sealer  CredentialSealer
+	runtime ManagementRuntime
+	pusher  CatalogPusher
+	clock   Clock
+}
+
+func NewManagementService(store ManagementStore, sealer CredentialSealer, runtime ManagementRuntime, clock Clock) *ManagementService {
+	if clock == nil {
+		clock = managementWallClock{}
+	}
+	return &ManagementService{store: store, sealer: sealer, runtime: runtime, clock: clock}
+}
+
+// SetCatalogPusher wires the SIP-boundary catalog pusher after construction,
+// because the SIP transport becomes available only after the runtime starts.
+func (s *ManagementService) SetCatalogPusher(pusher CatalogPusher) { s.pusher = pusher }
+
+func (s *ManagementService) PushCatalog(ctx context.Context, id uint64) (CatalogPushResult, error) {
+	platform, err := s.store.FindPlatform(ctx, id)
+	if err != nil {
+		return CatalogPushResult{}, err
+	}
+	if !platform.Enabled {
+		return CatalogPushResult{}, ErrPlatformDisabled
+	}
+	if s.pusher == nil {
+		return CatalogPushResult{}, ErrRuntimeUnavailable
+	}
+	items, batches, err := s.pusher.PushCatalog(ctx, id)
+	if err != nil {
+		return CatalogPushResult{}, err
+	}
+	return CatalogPushResult{Items: items, Batches: batches}, nil
+}
+
+func (s *ManagementService) Create(ctx context.Context, input PlatformConfigInput) (*PlatformView, error) {
+	if s == nil || s.store == nil {
+		return nil, repository.ErrPlatformNotFound
+	}
+	if !validCatalogBatchSize(input.CatalogBatchSize) {
+		return nil, ErrInvalidPlatformConfig
+	}
+	platform, err := platformFromInput(input)
+	if err != nil {
+		return nil, err
+	}
+	if platform.PublishGroup {
+		return nil, fmt.Errorf("%w：请先保存上级平台，再配置业务分组后开启发布", ErrInvalidBusinessGroup)
+	}
+	if platform.Enabled && s.runtime == nil {
+		return nil, ErrRuntimeUnavailable
+	}
+	if err := s.applyCredential(platform, input.Password); err != nil {
+		return nil, err
+	}
+	if err := s.store.CreatePlatform(ctx, platform); err != nil {
+		return nil, err
+	}
+	if platform.Enabled {
+		if err := s.runtime.Reload(ctx); err != nil {
+			// DB 已提交:返回已保存资源 + 降级错误,不谎报整体失败
+			view := s.view(*platform)
+			view.RuntimeSynced = boolPtr(false)
+			return &view, fmt.Errorf("%w: %v", ErrRuntimeSyncFailed, err)
+		}
+	}
+	view := s.view(*platform)
+	view.RuntimeSynced = boolPtr(true)
+	return &view, nil
+}
+
+func (s *ManagementService) Get(ctx context.Context, id uint64) (*PlatformView, error) {
+	platform, err := s.store.FindPlatform(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	view := s.view(*platform)
+	return &view, nil
+}
+
+func (s *ManagementService) List(ctx context.Context) ([]PlatformView, error) {
+	platforms, err := s.store.ListPlatforms(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(platforms, func(i, j int) bool { return platforms[i].ID < platforms[j].ID })
+	views := make([]PlatformView, 0, len(platforms))
+	for _, platform := range platforms {
+		views = append(views, s.view(platform))
+	}
+	return views, nil
+}
+
+func (s *ManagementService) Update(ctx context.Context, id, expectedRevision uint64, input PlatformConfigInput) (*PlatformView, error) {
+	stored, err := s.store.FindPlatform(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !validCatalogBatchSize(input.CatalogBatchSize) && input.CatalogBatchSize != stored.CatalogBatchSize {
+		return nil, ErrInvalidPlatformConfig
+	}
+	updated, err := platformFromInput(input)
+	if err != nil {
+		return nil, err
+	}
+	updated.ID = stored.ID
+	if updated.PublishGroup && (!stored.PublishGroup || updated.LocalDeviceID != stored.LocalDeviceID) {
+		if !validGBID(updated.LocalDeviceID) || updated.LocalDeviceID[10:13] != "200" {
+			return nil, fmt.Errorf("%w：发布业务目录需要类型为 200 的本平台系统 ID", ErrInvalidBusinessGroup)
+		}
+		snapshot, err := s.store.ProjectionSnapshot(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		rootCount := 0
+		for _, node := range snapshot.Nodes {
+			if node.Kind == "group" && node.ParentCode == "" && validGBID(node.Code) && node.Code[10:13] == "215" {
+				rootCount++
+			}
+		}
+		if rootCount != 1 {
+			return nil, fmt.Errorf("%w：请先配置业务分组根，再开启发布", ErrInvalidBusinessGroup)
+		}
+	}
+	updated.SecretNonce = append([]byte(nil), stored.SecretNonce...)
+	updated.SecretCiphertext = append([]byte(nil), stored.SecretCiphertext...)
+	updated.SecretAlg = stored.SecretAlg
+	updated.SecretKeyVersion = stored.SecretKeyVersion
+	updated.RegisterAt = stored.RegisterAt
+	updated.RegisterExpiresAt = stored.RegisterExpiresAt
+	updated.HeartbeatAt = stored.HeartbeatAt
+	updated.LastErrorCode = stored.LastErrorCode
+	updated.LastErrorMessage = stored.LastErrorMessage
+	updated.LastErrorAt = stored.LastErrorAt
+	updated.ConfigRevision = stored.ConfigRevision
+	updated.ProjectionRevision = stored.ProjectionRevision
+	if err := s.applyCredential(updated, input.Password); err != nil {
+		return nil, err
+	}
+	if (stored.Enabled || updated.Enabled) && s.runtime == nil {
+		return nil, ErrRuntimeUnavailable
+	}
+	result, err := s.store.UpdatePlatformConfig(ctx, updated, expectedRevision)
+	if err != nil {
+		if errors.Is(err, repository.ErrInvalidProjection) && updated.PublishGroup {
+			return nil, fmt.Errorf("%w：%s", ErrInvalidBusinessGroup, strings.TrimPrefix(err.Error(), repository.ErrInvalidProjection.Error()+": "))
+		}
+		return nil, err
+	}
+	if stored.Enabled || result.Enabled {
+		if err := s.runtime.Reload(ctx); err != nil {
+			view := s.view(*result)
+			view.RuntimeSynced = boolPtr(false)
+			return &view, fmt.Errorf("%w: %v", ErrRuntimeSyncFailed, err)
+		}
+	}
+	view := s.view(*result)
+	view.RuntimeSynced = boolPtr(true)
+	return &view, nil
+}
+
+func (s *ManagementService) SetEnabled(ctx context.Context, id, expectedRevision uint64, enabled bool) (*PlatformView, error) {
+	if s.runtime == nil {
+		return nil, ErrRuntimeUnavailable
+	}
+	platform, err := s.store.FindPlatform(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	platform.Enabled = enabled
+	updated, err := s.store.UpdatePlatformConfig(ctx, platform, expectedRevision)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.runtime.Reload(ctx); err != nil {
+		view := s.view(*updated)
+		view.RuntimeSynced = boolPtr(false)
+		return &view, fmt.Errorf("%w: %v", ErrRuntimeSyncFailed, err)
+	}
+	view := s.view(*updated)
+	view.RuntimeSynced = boolPtr(true)
+	return &view, nil
+}
+
+// SetPublishGroup updates only the business-directory publication switch and
+// reloads the active cascade runtime without changing the platform enabled state.
+func (s *ManagementService) SetPublishGroup(ctx context.Context, id, expectedRevision uint64, publishGroup bool) (*PlatformView, error) {
+	updated, err := s.store.SetPublishGroup(ctx, id, expectedRevision, publishGroup)
+	if err != nil {
+		if errors.Is(err, repository.ErrInvalidProjection) {
+			return nil, fmt.Errorf("%w：%s", ErrInvalidBusinessGroup, strings.TrimPrefix(err.Error(), repository.ErrInvalidProjection.Error()+": "))
+		}
+		return nil, err
+	}
+	view := s.view(*updated)
+	if updated.Enabled {
+		if s.runtime == nil {
+			return &view, fmt.Errorf("%w: %v", ErrRuntimeSyncFailed, ErrRuntimeUnavailable)
+		}
+		if err := s.runtime.Reload(ctx); err != nil {
+			return &view, fmt.Errorf("%w: %v", ErrRuntimeSyncFailed, err)
+		}
+	}
+	view.RuntimeSynced = boolPtr(true)
+	return &view, nil
+}
+
+func (s *ManagementService) Delete(ctx context.Context, id uint64) (DeleteResult, error) {
+	platform, err := s.store.FindPlatform(ctx, id)
+	if err != nil {
+		return DeleteResult{}, err
+	}
+	sessions, err := s.store.ListNonterminalMediaSessions(ctx, id)
+	if err != nil {
+		return DeleteResult{}, err
+	}
+	if len(sessions) > 0 {
+		return DeleteResult{}, ErrPlatformHasActiveSessions
+	}
+	if platform.Enabled {
+		if s.runtime == nil {
+			return DeleteResult{}, ErrRuntimeUnavailable
+		}
+		platform.Enabled = false
+		updated, updateErr := s.store.UpdatePlatformConfig(ctx, platform, platform.ConfigRevision)
+		err = updateErr
+		if err != nil {
+			return DeleteResult{}, err
+		}
+		if err := s.runtime.Reload(ctx); err != nil {
+			// 禁用已持久化:降级返回,不谎报整体失败
+			view := s.view(*updated)
+			return DeleteResult{Platform: &view}, fmt.Errorf("%w: %v", ErrRuntimeSyncFailed, err)
+		}
+	}
+	if err := s.store.SoftDeletePlatform(ctx, id); err != nil {
+		view := s.view(*platform)
+		return DeleteResult{Platform: &view}, err
+	}
+	if s.runtime != nil {
+		if err := s.runtime.Reload(ctx); err != nil {
+			// 软删除已提交:降级返回,不谎报整体失败
+			return DeleteResult{Deleted: true}, fmt.Errorf("%w: %v", ErrRuntimeSyncFailed, err)
+		}
+	}
+	return DeleteResult{Deleted: true, RuntimeSynced: true}, nil
+}
+
+func (s *ManagementService) ReplaceProjection(ctx context.Context, platformID uint64, expectedProjectionRevision uint64, devices []repository.DeviceProjectionInput, channels []repository.ChannelProjectionInput) error {
+	if _, err := s.store.FindPlatform(ctx, platformID); err != nil {
+		return err
+	}
+	if err := s.store.ReplaceProjection(ctx, platformID, expectedProjectionRevision, devices, channels); err != nil {
+		return err
+	}
+	if s.runtime != nil {
+		if err := s.runtime.Reload(ctx); err != nil {
+			return fmt.Errorf("%w: %v", ErrRuntimeSyncFailed, err)
+		}
+	}
+	return nil
+}
+
+func (s *ManagementService) Projection(ctx context.Context, platformID uint64) (*repository.ProjectionSnapshot, error) {
+	return s.store.ProjectionSnapshot(ctx, platformID)
+}
+
+func (s *ManagementService) applyCredential(platform *model.GbCascadePlatform, password *string) error {
+	if password == nil || *password == "" {
+		return nil
+	}
+	if s.sealer == nil {
+		return ErrCredentialUnavailable
+	}
+	envelope, err := s.sealer.Encrypt(upstreamPasswordPurpose, []byte(*password))
+	if errors.Is(err, securestore.ErrKeyUnavailable) || errors.Is(err, securestore.ErrInvalidKey) {
+		return fmt.Errorf("%w: %w", ErrCredentialUnavailable, err)
+	}
+	if err != nil {
+		return fmt.Errorf("seal cascade credential: %w", err)
+	}
+	platform.SecretNonce = append([]byte(nil), envelope.Nonce...)
+	platform.SecretCiphertext = append([]byte(nil), envelope.Ciphertext...)
+	platform.SecretAlg = envelope.Algorithm
+	platform.SecretKeyVersion = envelope.KeyVersion
+	return nil
+}
+
+func (s *ManagementService) view(platform model.GbCascadePlatform) PlatformView {
+	state := DerivePlatformState(platform, s.clock, 0)
+	needsReset := false
+	if len(platform.SecretCiphertext) > 0 {
+		if opener, ok := s.sealer.(interface {
+			Decrypt(string, securestore.Envelope) ([]byte, error)
+		}); ok {
+			plain, err := opener.Decrypt(upstreamPasswordPurpose, securestore.Envelope{Ciphertext: platform.SecretCiphertext, Nonce: platform.SecretNonce, Algorithm: platform.SecretAlg, KeyVersion: platform.SecretKeyVersion})
+			needsReset = err != nil
+			clear(plain)
+		} else {
+			needsReset = true
+		}
+	}
+	subscriptions := NewPlatformSubscriptions("unavailable")
+	if reader, ok := s.runtime.(SubscriptionReader); ok {
+		subscriptions = reader.Subscriptions(platform)
+	}
+	return PlatformView{
+		CredentialNeedsReset: needsReset,
+		ID:                   platform.ID, Name: platform.Name, UpstreamServerID: platform.UpstreamServerID, UpstreamDomain: platform.UpstreamDomain,
+		Host: platform.Host, Port: platform.Port, LocalDeviceID: platform.LocalDeviceID, LocalDomain: platform.LocalDomain,
+		LocalSIPIP: platform.LocalSIPIP, LocalSIPPort: platform.LocalSIPPort, MediaAdvertiseIP: platform.MediaAdvertiseIP,
+		AuthUsername: platform.AuthUsername, HasPassword: len(platform.SecretCiphertext) > 0,
+		ProfileOverride: platform.ProfileOverride, EffectiveVersion: platform.EffectiveVersion, EffectiveVersionFrom: platform.EffectiveVersionFrom,
+		CharsetOverride: platform.CharsetOverride, RegisterExpires: platform.RegisterExpires, KeepaliveInterval: platform.KeepaliveInterval,
+		Transport: platform.Transport, CatalogBatchSize: platform.CatalogBatchSize, AutoPushCatalog: platform.AutoPushCatalog, PublishPlatform: platform.PublishPlatform,
+		PublishCivil: platform.PublishCivil, PublishGroup: platform.PublishGroup, MaxStreams: platform.MaxStreams, PTZEnabled: platform.PTZEnabled,
+		ConfigEnabled: platform.ConfigEnabled, UpgradeEnabled: platform.UpgradeEnabled, DeviceControlEnabled: platform.DeviceControlEnabled, MaintenanceEnabled: platform.MaintenanceEnabled, RecordingEnabled: platform.RecordingEnabled, RTCPKeepalive: platform.RTCPKeepalive,
+		Enabled: platform.Enabled, ConfigRevision: platform.ConfigRevision, ProjectionRevision: platform.ProjectionRevision,
+		Registration: state.Registration, Heartbeat: state.Heartbeat, Overall: state.Overall,
+		RegisterAt: platform.RegisterAt, RegisterExpiresAt: platform.RegisterExpiresAt, HeartbeatAt: platform.HeartbeatAt,
+		LastErrorCode: platform.LastErrorCode, LastErrorMessage: platform.LastErrorMessage, LastErrorAt: platform.LastErrorAt,
+		CreatedAt: platform.CreatedAt, UpdatedAt: platform.UpdatedAt,
+		Subscriptions: subscriptions,
+	}
+}
+
+func boolPtr(value bool) *bool { return &value }
+
+func platformFromInput(input PlatformConfigInput) (*model.GbCascadePlatform, error) {
+	input.Name = strings.TrimSpace(input.Name)
+	input.UpstreamServerID = strings.TrimSpace(input.UpstreamServerID)
+	input.UpstreamDomain = strings.TrimSpace(input.UpstreamDomain)
+	input.Host = strings.TrimSpace(input.Host)
+	input.LocalDeviceID = strings.TrimSpace(input.LocalDeviceID)
+	input.LocalDomain = strings.TrimSpace(input.LocalDomain)
+	input.LocalSIPIP = strings.TrimSpace(input.LocalSIPIP)
+	input.MediaAdvertiseIP = strings.TrimSpace(input.MediaAdvertiseIP)
+	input.AuthUsername = strings.TrimSpace(input.AuthUsername)
+	input.Transport = strings.ToUpper(strings.TrimSpace(input.Transport))
+	if input.Name == "" || !validGBID(input.UpstreamServerID) || input.UpstreamDomain == "" || !validHost(input.Host) || !validPort(input.Port) ||
+		!validGBID(input.LocalDeviceID) || input.LocalDomain == "" || net.ParseIP(input.LocalSIPIP) == nil || !validPort(input.LocalSIPPort) ||
+		(input.MediaAdvertiseIP != "" && net.ParseIP(input.MediaAdvertiseIP) == nil) || !validProfileOverride(input.ProfileOverride) ||
+		(input.Transport != "UDP" && input.Transport != "TCP") || input.RegisterExpires < minRegisterExpires || input.KeepaliveInterval <= 0 ||
+		input.CatalogBatchSize <= 0 || input.MaxStreams < 0 {
+		return nil, ErrInvalidPlatformConfig
+	}
+	return &model.GbCascadePlatform{
+		Name: input.Name, UpstreamServerID: input.UpstreamServerID, UpstreamDomain: input.UpstreamDomain, Host: input.Host, Port: input.Port,
+		LocalDeviceID: input.LocalDeviceID, LocalDomain: input.LocalDomain, LocalSIPIP: input.LocalSIPIP, LocalSIPPort: input.LocalSIPPort,
+		MediaAdvertiseIP: input.MediaAdvertiseIP, AuthUsername: input.AuthUsername, ProfileOverride: input.ProfileOverride,
+		CharsetOverride: strings.TrimSpace(input.CharsetOverride), RegisterExpires: input.RegisterExpires, KeepaliveInterval: input.KeepaliveInterval,
+		RetryPolicy: input.RetryPolicy, Transport: input.Transport, CatalogBatchSize: input.CatalogBatchSize,
+		AutoPushCatalog: input.AutoPushCatalog, DeviceControlEnabled: input.DeviceControlEnabled, MaintenanceEnabled: input.MaintenanceEnabled, ConfigEnabled: input.ConfigEnabled, UpgradeEnabled: input.UpgradeEnabled, RecordingEnabled: input.RecordingEnabled, RTCPKeepalive: input.RTCPKeepalive,
+		PublishPlatform: input.PublishPlatform, PublishCivil: input.PublishCivil, PublishGroup: input.PublishGroup,
+		MaxStreams: input.MaxStreams, PTZEnabled: input.PTZEnabled, Enabled: input.Enabled,
+	}, nil
+}
+
+func validCatalogBatchSize(value int) bool {
+	switch value {
+	case 1, 2, 4, 8, 16, 32, 64:
+		return true
+	default:
+		return false
+	}
+}
+
+func validGBID(value string) bool {
+	if len(value) != 20 {
+		return false
+	}
+	for _, char := range value {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func validHost(value string) bool {
+	if net.ParseIP(value) != nil {
+		return true
+	}
+	if value == "" || len(value) > 253 || strings.HasPrefix(value, ".") || strings.HasSuffix(value, ".") {
+		return false
+	}
+	for _, label := range strings.Split(value, ".") {
+		if label == "" || len(label) > 63 || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+			return false
+		}
+		for _, char := range label {
+			if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') && (char < '0' || char > '9') && char != '-' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func validPort(value int) bool { return value > 0 && value <= 65535 }
+
+func validProfileOverride(value model.CascadeProfileOverride) bool {
+	switch value {
+	case model.CascadeProfileOverrideAuto, model.CascadeProfileOverride2016, model.CascadeProfileOverride2022:
+		return true
+	default:
+		return false
+	}
+}
+
+type managementWallClock struct{}
+
+func (managementWallClock) Now() time.Time { return time.Now() }

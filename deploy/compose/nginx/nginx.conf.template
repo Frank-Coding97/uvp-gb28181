@@ -1,0 +1,277 @@
+# ==============================================================
+# UVP 容器版 —— nginx 配置模板（由前端容器的 entrypoint.sh 渲染）
+#
+# 职责：① 托管前端（Vue 构建产物） ② HTTPS 终止 ③ 反向代理到后端
+#
+# ⛔ 这是**容器专用**的一份，不复用 deploy/standalone/nginx.conf.template：
+#   绿色包那份的占位符是「安装根目录」体系（@ROOT@ / @ACTIVE_ROOT@），
+#   容器里的目录是固定的（web 在镜像里、uploads/logs/tls 是挂卷），
+#   硬套会让模板里出现一堆无意义的路径拼接。
+#   ⚠️ 但**转发规则必须与绿色包逐条保持一致** —— 改任何一条 location 前，
+#      先确认绿色包那份是不是也要同步改（两边不一致 = 同样的页面在两种
+#      部署方式下表现不同，而这种差异极难归因）。
+#
+# 端口规划与绿色包一致（见 deploy/standalone/PORTS.md）：
+#   51000 HTTPS（浏览器入口）  51001 HTTP（跳 HTTPS + 明文 API）
+#   51002 后端 API             51003 Redis
+#   51004-51013 ZLM 各协议      51014-51063 ZLM RTP 段   51064 SIP
+#
+# ⛔ 容器跑在 **host 网络**：后端就在本机的 127.0.0.1:51002 上，
+#   不需要 Docker 的服务名解析，也不经过任何 NAT —— 否则 SDP 里带的
+#   容器内网 IP（172.x）会让设备根本连不进来。
+#==============================================================
+
+@NGINX_WORKER_DIRECTIVE@
+
+worker_processes  auto;
+pid  @RUN_ROOT@/nginx.pid;
+error_log @LOG_ROOT@/nginx-error.log warn;
+
+events {
+    worker_connections  1024;
+}
+
+http {
+    include /opt/uvp-nginx/conf/mime.types;
+    default_type  application/octet-stream;
+
+    # ⛔ 临时目录显式指到挂卷目录：容器的 / 可能是只读的，
+    #   而默认路径在编译 prefix 下（镜像层），上传大文件时写不进去。
+    client_body_temp_path @RUN_ROOT@/nginx-client-body;
+    proxy_temp_path      @RUN_ROOT@/nginx-proxy;
+    fastcgi_temp_path    @RUN_ROOT@/nginx-fastcgi;
+    uwsgi_temp_path      @RUN_ROOT@/nginx-uwsgi;
+    scgi_temp_path       @RUN_ROOT@/nginx-scgi;
+
+    log_format uvp '$remote_addr - [$time_local] "$request" $status $body_bytes_sent '
+                   '"$http_referer" "$http_user_agent" rt=$request_time';
+    access_log @LOG_ROOT@/nginx-access.log uvp;
+
+    sendfile      on;
+    tcp_nopush    on;
+    keepalive_timeout  65;
+    server_tokens off;
+    client_max_body_size 1024m;   # ⛔ 录像/抓拍上传：默认 1m 会直接 413
+
+    gzip              on;
+    gzip_min_length   1k;
+    gzip_comp_level   5;
+    gzip_vary         on;
+    gzip_types        text/plain text/css application/json application/javascript
+                      application/xml text/xml image/svg+xml font/woff font/woff2 application/wasm;
+    gzip_proxied      any;
+
+    upstream uvp_backend {
+        server @BACKEND_HOST@:@BACKEND_PORT@;
+        keepalive 32;
+    }
+
+    # ============================================================
+    # HTTPS
+    # ============================================================
+    server {
+        listen      @HTTPS_PORT@ ssl;
+        listen      [::]:@HTTPS_PORT@ ssl;
+        http2       on;
+        server_name _;
+
+        # ⛔ 证书由安装脚本按客户实际访问的地址生成并挂在卷上（含 IP SAN）。
+        #   缺失时 entrypoint 会兜底生成一张仅含 localhost 的自签证书 ——
+        #   那张只能本机验收，浏览器用 IP 访问必然告警。
+        ssl_certificate      @TLS_CERT@;
+        ssl_certificate_key  @TLS_KEY@;
+        ssl_protocols        TLSv1.2 TLSv1.3;
+        ssl_ciphers          ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384;
+        ssl_prefer_server_ciphers off;
+        ssl_session_cache    shared:UVP:4m;
+        ssl_session_timeout  1h;
+
+        root @WEB_ROOT@;
+        index index.html;
+
+        # 内容摘要覆盖整组主脚本、worker 和 WASM；只有版本目录允许长期缓存。
+        location ~ "^/easyplayer/[0-9a-f]{16}/" {
+            expires 30d;
+            add_header Cache-Control "public, immutable";
+            try_files $uri =404;
+        }
+
+        # 旧页面仍可用固定路径；发布后必须校验，防止混用旧解码器。
+        location /easyplayer/ {
+            add_header Cache-Control "no-cache";
+            try_files $uri =404;
+        }
+
+        location = /index.html {
+            add_header Cache-Control "no-cache";
+        }
+
+        location /static/ {
+            expires 30d;
+            add_header Cache-Control "public, immutable";
+            try_files $uri =404;
+        }
+
+        # 健康检查：给 compose 的 healthcheck 用（不记日志、不落到 SPA 回落）
+        location = /healthz {
+            access_log off;
+            add_header Content-Type text/plain;
+            return 200 "ok\n";
+        }
+
+        # ⛔⛔⛔ 用户上传的资源：必须有这一条，否则**所有上传的文件都取不到**。
+        #   后端生成的 URL 带 /public/uploads/ 前缀（serverrootpath 默认 "/public"），
+        #   而 root 指向 web 根 ⇒ 两边差一个 /public 前缀；
+        #   漏了这条会落到 SPA 回落，返回 index.html 当图片
+        #   ⇒ **HTTP 200 但浏览器显示不出图，全程零报错**（绿色包实测踩过）。
+        location /public/uploads/ {
+            alias @UPLOADS_ROOT@/;
+            location ~ \.\.(php|jsp|asp|sh|py|pl|cgi)$ {
+                deny all;
+            }
+            autoindex off;
+            expires 7d;
+            add_header Cache-Control "public";
+        }
+
+        location /public/ {
+            alias @WEB_ROOT@/;
+            autoindex off;
+        }
+
+        # 升级包导入：单包可能上 GB，且不能让 nginx 缓冲（否则内存吃满）
+        location = /api/system/upgrade/import {
+            client_max_body_size 9g;
+            client_body_timeout 30m;
+            proxy_pass http://uvp_backend;
+            proxy_http_version 1.1;
+            # ⛔⛔ 2026-10-20 起 Host 用 $http_host（带端口）而不是 $host：
+            #   nginx 的 $host 丢端口，而后端（如抓拍 UploadURL、扫码配网）
+            #   从 Host/X-Forwarded-Host 派生「设备回连地址」⇒ 端口一丢，
+            #   https 部署下设备被指向 443 死地址，图传不回来且平台零报错。
+            proxy_set_header Host              $http_host;
+            proxy_set_header X-Forwarded-Host  $http_host;
+            proxy_set_header X-Real-IP         $remote_addr;
+            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Connection        "";
+            proxy_connect_timeout 15s;
+            proxy_send_timeout    30m;
+            proxy_read_timeout    30m;
+            proxy_request_buffering off;
+            proxy_buffering       off;
+        }
+
+        location /api/ {
+            proxy_pass http://uvp_backend;
+            proxy_http_version 1.1;
+            # ⛔⛔ 2026-10-20 起 Host 用 $http_host（带端口）而不是 $host：
+            #   nginx 的 $host 丢端口，而后端（如抓拍 UploadURL、扫码配网）
+            #   从 Host/X-Forwarded-Host 派生「设备回连地址」⇒ 端口一丢，
+            #   https 部署下设备被指向 443 死地址，图传不回来且平台零报错。
+            proxy_set_header Host              $http_host;
+            proxy_set_header X-Forwarded-Host  $http_host;
+            proxy_set_header X-Real-IP         $remote_addr;
+            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Connection        "";
+            proxy_connect_timeout 15s;
+            proxy_send_timeout    300s;
+            proxy_read_timeout    300s;
+            proxy_buffering       off;
+        }
+
+        location /gb28181/ {
+            proxy_pass http://uvp_backend;
+            proxy_http_version 1.1;
+            # ⛔⛔ 2026-10-20 起 Host 用 $http_host（带端口）而不是 $host：
+            #   nginx 的 $host 丢端口，而后端（如抓拍 UploadURL、扫码配网）
+            #   从 Host/X-Forwarded-Host 派生「设备回连地址」⇒ 端口一丢，
+            #   https 部署下设备被指向 443 死地址，图传不回来且平台零报错。
+            proxy_set_header Host              $http_host;
+            proxy_set_header X-Forwarded-Host  $http_host;
+            proxy_set_header X-Real-IP         $remote_addr;
+            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Connection        "";
+        }
+
+        # ⛔ SPA history 路由：未匹配的路径交回 index.html，
+        #   否则刷新 /devices/123 会 404。/api/ 与 /gb28181/ 必须排在前面，
+        #   否则会被这条吞掉返回 HTML ⇒ 前端拿 HTML 当 JSON 解析，报无关错误。
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+
+        location ~ /\. {
+            deny all;
+        }
+    }
+
+    # ============================================================
+    # HTTP：跳 HTTPS
+    # ⛔ 保留 /api/ 与 /gb28181/ 的明文转发：二维码里填的就是明文后端地址，
+    #    部分客户端（含模拟器 App）只信任这个来源。
+    # ============================================================
+    server {
+        listen      @PLAIN_HTTP_PORT@;
+        listen      [::]:@PLAIN_HTTP_PORT@;
+        server_name _;
+
+        location = /healthz {
+            access_log off;
+            add_header Content-Type text/plain;
+            return 200 "ok\n";
+        }
+
+        location /api/ {
+            proxy_pass http://uvp_backend;
+            proxy_http_version 1.1;
+            # ⛔⛔ 2026-10-20 起 Host 用 $http_host（带端口）而不是 $host：
+            #   nginx 的 $host 丢端口，而后端（如抓拍 UploadURL、扫码配网）
+            #   从 Host/X-Forwarded-Host 派生「设备回连地址」⇒ 端口一丢，
+            #   https 部署下设备被指向 443 死地址，图传不回来且平台零报错。
+            proxy_set_header Host              $http_host;
+            proxy_set_header X-Forwarded-Host  $http_host;
+            proxy_set_header X-Real-IP         $remote_addr;
+            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header Connection        "";
+            proxy_buffering off;
+        }
+
+        location /gb28181/ {
+            proxy_pass http://uvp_backend;
+            proxy_http_version 1.1;
+            # ⛔⛔ 2026-10-20 起 Host 用 $http_host（带端口）而不是 $host：
+            #   nginx 的 $host 丢端口，而后端（如抓拍 UploadURL、扫码配网）
+            #   从 Host/X-Forwarded-Host 派生「设备回连地址」⇒ 端口一丢，
+            #   https 部署下设备被指向 443 死地址，图传不回来且平台零报错。
+            proxy_set_header Host              $http_host;
+            proxy_set_header X-Forwarded-Host  $http_host;
+            proxy_set_header X-Real-IP         $remote_addr;
+            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header Connection        "";
+        }
+
+        location /public/uploads/ {
+            alias @UPLOADS_ROOT@/;
+            location ~ \.\.(php|jsp|asp|sh|py|pl|cgi)$ {
+                deny all;
+            }
+            autoindex off;
+            expires 7d;
+            add_header Cache-Control "public";
+        }
+
+        location /public/ {
+            alias @WEB_ROOT@/;
+            autoindex off;
+        }
+
+        location / {
+            # ⛔ 必须带上 HTTPS 端口：`$host` **不含端口**，
+            #   写成 https://$host$request_uri 会跳到 443（那儿没有服务）。
+            return 301 https://$host:@HTTPS_PORT@$request_uri;
+        }
+    }
+}

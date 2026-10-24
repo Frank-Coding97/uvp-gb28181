@@ -19,7 +19,7 @@ type SysJobsListRequest struct {
 
 // Validate 验证请求参数
 func (r *SysJobsListRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }
 
 // Handle 获取查询条件
@@ -71,7 +71,7 @@ type SysJobsCreateRequest struct {
 
 // Validate 验证请求参数
 func (r *SysJobsCreateRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }
 
 // SysJobsUpdateRequest 更新sys_jobs请求参数
@@ -95,7 +95,7 @@ type SysJobsUpdateRequest struct {
 
 // Validate 验证请求参数
 func (r *SysJobsUpdateRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }
 
 // SysJobsDeleteRequest 删除sys_jobs请求参数
@@ -106,7 +106,7 @@ type SysJobsDeleteRequest struct {
 
 // Validate 验证请求参数
 func (r *SysJobsDeleteRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }
 
 // SysJobsGetByIDRequest 根据ID获取sys_jobs请求参数
@@ -117,7 +117,7 @@ type SysJobsGetByIDRequest struct {
 
 // Validate 验证请求参数
 func (r *SysJobsGetByIDRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }
 
 // SysJobsSetStatusRequest 设置状态请求参数
@@ -129,7 +129,7 @@ type SysJobsSetStatusRequest struct {
 
 // Validate 验证请求参数
 func (r *SysJobsSetStatusRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }
 
 // SysJobsExecuteNowRequest 立即执行任务请求参数
@@ -140,5 +140,5 @@ type SysJobsExecuteNowRequest struct {
 
 // Validate 验证请求参数
 func (r *SysJobsExecuteNowRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }

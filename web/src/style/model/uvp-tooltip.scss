@@ -1,0 +1,56 @@
+/*
+ * 悬停提示（Arco Tooltip）统一皮肤
+ *
+ * ⛔⛔ 为什么需要：Arco 的 tooltip 底色取 `--color-tooltip-bg`，暗色下是 **#373739 中性灰**
+ *   （亮色是 `rgb(var(--gray-10))` 深灰）。平台浮层（popconfirm / 对话框）走的是
+ *   `--uvp-popconfirm-*` 深蓝 #182536 / 纯白。两套混在一起就是"灰盒子压在深蓝卡片上"，
+ *   与 VChart 的 tooltip 是同一个病（见 `uvp-chart-tooltip.scss`）。
+ *   ⇒ 这里把 **全站所有 `<a-tooltip>`** 一次性换到平台浮层 token 上，图表与普通页面同一套。
+ *
+ * ⛔⛔ 必须 `!important`：**arco.css 在 `main.ts` 里 import 在 `style/index.scss` 之后**，
+ *   同特异性时后加载的 Arco 规则会赢。少了 `!important`，`color:#fff` 会盖掉我们的文字色，
+ *   亮色主题下就是"白字压白底"= 提示直接看不见，且不报任何错。
+ *
+ * ⛔ 箭头必须单独处理：`.arco-tooltip-popup-arrow` 只是个旋转 45° 的方块，
+ *   只改面板会留下一圈"面板有边框、箭头没边框"的缺口（暗色下尤其明显）。
+ *   Arco 自己的 popconfirm / popover 就是这么写的 —— 箭头用「同底色 + 1px 同色边框」，
+ *   旋转后只露两条边，正好接上外层面板的边框（见 arco.css 的 `.arco-popconfirm-popup-arrow`）。
+ *   ⚠️ 去掉哪两条边由 Trigger 自带的
+ *   `[trigger-placement='right'] .arco-trigger-arrow { border-top:none; border-right:none }`
+ *   控制（特异性比我们高，不需要也不该在这里重写）。
+ *
+ * ⚠️ 本文件只影响 **Arco 组件产的 tooltip**。浏览器原生 `title` 属性（例如早期的
+ *   `DirectoryPanel.vue` 设备树行）**任何 CSS 都改不动**，只能换成 `<a-tooltip>` ——
+ *   门禁 `uvp-tooltip.test.ts` 会盯着设备树那一处不许退回原生 title。
+ */
+
+.arco-tooltip-content {
+  padding: 6px 10px !important;
+  font-size: 12px !important;
+  line-height: 18px !important;
+  color: var(--uvp-text-primary) !important;
+  background-color: var(--uvp-popconfirm-bg) !important;
+  border: 1px solid var(--uvp-popconfirm-border) !important;
+  border-radius: 8px !important;
+  box-shadow: var(--uvp-popconfirm-shadow) !important;
+}
+
+/* mini / 非 mini 统一成同一档字号与内边距，避免同页面两种大小的提示 */
+.arco-tooltip-mini {
+  padding: 6px 10px !important;
+  font-size: 12px !important;
+}
+
+/* 箭头：底色与描边都必须跟面板一致，否则接缝处会露出原始灰底 / 断开一条线。
+ * ⛔⛔ 这里只给 `background-color` 加 `!important`，**`border` 故意不加**：
+ *   Trigger 靠 `[trigger-placement='right'] .arco-trigger-arrow { border-top:none; border-right:none }`
+ *   把朝向面板的两条边去掉（那条规则特异性 0-2-0、且**没有** `!important`）。
+ *   我们若写 `border: … !important`，四边会全部长出来，箭头就变成贴在面板边上的小方框；
+ *   不加 `!important` 时它正好被那条规则裁成"只露外面两条斜边"，和面板 1px 边框对接。
+ *   （Arco 自己的 `.arco-popconfirm-popup-arrow` 就是这个写法：同底色 + 1px 边框。）
+ *   `background-color` 则必须 `!important` —— arco.css 在 `style/index.scss` 之后加载，
+ *   否则会被 `--color-tooltip-bg` 的灰盖回去。 */
+.arco-tooltip-popup-arrow {
+  background-color: var(--uvp-popconfirm-bg) !important;
+  border: 1px solid var(--uvp-popconfirm-border);
+}

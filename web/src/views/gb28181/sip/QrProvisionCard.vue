@@ -1,0 +1,433 @@
+<script setup lang="ts">
+import { computed, onMounted, onUnmounted, ref } from "vue";
+import { Message } from "@arco-design/web-vue";
+import { ChevronRight, Clock, Download, QrCode, RefreshCw, ShieldAlert } from "lucide-vue-next";
+import { generateSipQrToken } from "@/api/gb28181";
+import { buildQrUrl, formatCountdown, validateBaseUrl } from "./qrProvisionState";
+
+// 模拟器下载是公开资源,不该被「生成二维码」的权限卡住:
+// 无出码权限时卡片仍然渲染,只是不显示出码区.
+const props = withDefaults(defineProps<{ canGenerate?: boolean }>(), { canGenerate: true });
+
+const loading = ref(false);
+const token = ref("");
+const secondsLeft = ref(0);
+// 设备可达的接入基址 —— 由后端随 token 一起下发,前端**不自行推断**.
+// ⛔⛔ 曾经用 `window.location.origin` 当默认值,于是「用户从 nginx 自签 HTTPS
+// 打开平台 → 二维码里带 HTTPS → 设备侧证书校验失败 → 报『连不上平台,请检查
+// Wi-Fi』」。二维码是给设备用的,地址必须后端说了算。
+const baseUrl = ref("");
+// 自动续码失败后的退避重试:已重试次数 + 挂起的定时器.
+// 失败后按 5s→10s→20s 退避,最多 3 次,之后停在失效态等手动点击.
+const renewAttempts = ref(0);
+const renewFailed = ref(false);
+let timer: ReturnType<typeof setInterval> | null = null;
+let renewTimer: ReturnType<typeof setTimeout> | null = null;
+// 卸载守卫:在途请求返回后不得再调度重试
+let mounted = false;
+
+// 退避间隔(ms):第 1/2/3 次重试
+const RENEW_BACKOFF_MS = [5000, 10000, 20000];
+
+// ⛔ 失败时把地址**清空**，于是 baseUrlError 会恒为非空 ——
+// 靠它就能把「后端没给可用地址」显示出来，而不是留一片空白让人以为在加载。
+const baseUrlError = computed(() => validateBaseUrl(baseUrl.value));
+const baseUrlValid = computed(() => validateBaseUrl(baseUrl.value) === "");
+const expired = computed(() => Boolean(token.value) && secondsLeft.value <= 0);
+// 校验不过就不出码 —— 宁可不出码,不能出一个扫了会失败的码.
+const qrUrl = computed(() => (token.value && baseUrlValid.value ? buildQrUrl(baseUrl.value, token.value) : ""));
+const showQr = computed(() => Boolean(qrUrl.value) && !expired.value);
+const countdownText = computed(() => formatCountdown(secondsLeft.value));
+
+function stopTimer() {
+  if (timer !== null) {
+    clearInterval(timer);
+    timer = null;
+  }
+}
+
+function stopRenewTimer() {
+  if (renewTimer !== null) {
+    clearTimeout(renewTimer);
+    renewTimer = null;
+  }
+}
+
+// 倒计时以响应到达时刻起算 expiresInSeconds,不用绝对时间戳 —— 免受客户端时钟偏移影响.
+function startCountdown(expiresInSeconds: number) {
+  stopTimer();
+  secondsLeft.value = Math.max(0, expiresInSeconds);
+  timer = setInterval(() => {
+    secondsLeft.value = Math.max(0, secondsLeft.value - 1);
+    if (secondsLeft.value === 0) {
+      stopTimer();
+      // 二维码过期后自动续码,省去手动操作;地址不合法时停在失效态等用户修正.
+      if (baseUrlValid.value) void autoRenew();
+    }
+  }, 1000);
+}
+
+// 自动续码:失败后按退避策略重试,避免一次网络抖动就把页面停在失效态.
+async function autoRenew() {
+  const ok = await generate(true);
+  if (!mounted) return; // 卸载后在途请求返回,不再调度任何状态更新或重试
+  if (ok) {
+    renewAttempts.value = 0;
+    renewFailed.value = false;
+    return;
+  }
+  renewFailed.value = true;
+  if (renewAttempts.value >= RENEW_BACKOFF_MS.length) return;
+  const delayMs = RENEW_BACKOFF_MS[renewAttempts.value];
+  renewAttempts.value += 1;
+  renewTimer = setTimeout(() => {
+    renewTimer = null;
+    if (!mounted) return;
+    void autoRenew();
+  }, delayMs);
+}
+
+async function generate(silent = false): Promise<boolean> {
+  if (!props.canGenerate) return false;
+  // 手动生成时取消挂起的自动续码重试,避免新旧请求竞争
+  if (!silent) {
+    stopRenewTimer();
+    renewAttempts.value = 0;
+    renewFailed.value = false;
+  }
+  loading.value = true;
+  try {
+    const res = await generateSipQrToken();
+    // 卸载后在途成功响应:不更新任何状态、不重建计时器
+    if (!mounted) return false;
+    if (res.code !== 0) throw new Error(res.message || "生成接入二维码失败");
+    // 基址与 token 同源:两者一起被服务端校验,不会出现「token 有效但地址不可达」
+    baseUrl.value = res.data.baseUrl ?? "";
+    if (validateBaseUrl(baseUrl.value) !== "") {
+      throw new Error(validateBaseUrl(baseUrl.value));
+    }
+    token.value = res.data.token;
+    startCountdown(res.data.expiresInSeconds);
+    return true;
+  } catch (error: any) {
+    // ⛔ 地址不可达时**清掉旧码**:留着上一张必然扫不通的码,用户会反复扫它
+    token.value = "";
+    baseUrl.value = "";
+    stopTimer();
+    if (!silent) Message.error(error?.message || "生成接入二维码失败");
+    return false;
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function copyUrl() {
+  if (!qrUrl.value) return;
+  try {
+    await navigator.clipboard.writeText(qrUrl.value);
+    Message.success("已复制二维码链接");
+  } catch {
+    Message.warning("复制失败,请手动选中");
+  }
+}
+
+onUnmounted(() => {
+  mounted = false;
+  stopTimer();
+  stopRenewTimer();
+});
+
+// 内嵌在页面里,进入即出码;过期后自动续码.
+onMounted(() => {
+  mounted = true;
+  void generate();
+});
+</script>
+
+<template>
+  <section class="qr-card">
+    <header class="qr-card__header">
+      <span class="qr-card__icon"><QrCode :size="15" /></span>
+      <h4>扫码接入</h4>
+      <span class="qr-card__header-hint">设备扫码后自动填入接入信息</span>
+    </header>
+
+    <a class="qr-download" href="https://download.uvplatform.com/" target="_blank" rel="noopener noreferrer">
+      <span class="qr-download__icon"><Download :size="15" /></span>
+      <span class="qr-download__body">
+        <strong>移动端国标模拟器下载</strong>
+        <small>Android 端,扫码接入前请先安装本 App</small>
+      </span>
+      <ChevronRight :size="15" />
+    </a>
+
+    <p v-if="!canGenerate" class="qr-locked">当前账号无生成接入二维码的权限,如需扫码请联系管理员。</p>
+
+    <template v-if="canGenerate">
+      <div class="qr-stage">
+        <!-- :key 必须有: SQrcodeDraw 只在 onMounted 生成,不 watch text.
+                     token 是异步拿到的,没有 :key 会渲染空白码. -->
+        <div v-if="showQr" class="qr-canvas">
+          <SQrcodeDraw :key="qrUrl" :text="qrUrl" :options="{ width: 220, margin: 1 }" />
+        </div>
+        <div v-else class="qr-placeholder" :class="{ 'is-expired': expired }">
+          <span v-if="baseUrlError && !loading">{{ baseUrlError }}</span>
+          <span v-else-if="expired && renewFailed">二维码已失效,自动续码未成功</span>
+          <span v-else-if="expired">二维码已失效</span>
+          <span v-else-if="loading">正在生成…</span>
+          <span v-else>点击下方按钮生成二维码</span>
+        </div>
+
+        <div class="qr-meta">
+          <Clock :size="14" />
+          <span v-if="baseUrlError">接入地址不可用</span>
+          <span v-else-if="expired">已失效,请重新生成</span>
+          <span v-else-if="token">{{ countdownText }} 后失效</span>
+          <span v-else>尚未生成</span>
+        </div>
+
+        <div v-if="qrUrl" class="qr-url">
+          <span class="qr-url__label">二维码链接</span>
+          <code class="qr-url__value">{{ qrUrl }}</code>
+          <a-button size="mini" type="text" @click="copyUrl">复制</a-button>
+        </div>
+
+        <a-button type="primary" class="qr-generate" :loading="loading" @click="generate()">
+          <template #icon><RefreshCw :size="15" /></template>
+          {{ token ? "重新生成" : "生成二维码" }}
+        </a-button>
+      </div>
+
+      <div class="qr-tips">
+        <span class="qr-tips__icon"><ShieldAlert :size="15" /></span>
+        <div class="qr-tips__body">
+          <span>二维码含平台接入凭据,请勿截图外传;建议在可信网络内使用。</span>
+          <span>点击重新生成后,旧二维码在原到期时间前仍然有效。</span>
+        </div>
+      </div>
+    </template>
+  </section>
+</template>
+
+<style scoped>
+/* 与同页 sip-card 视觉一致的内嵌卡片 */
+.qr-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--uvp-panel-bg, #ffffff);
+  border: 1px solid var(--uvp-panel-border, #e8edf5);
+  border-radius: 12px;
+}
+
+.qr-card__header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed var(--uvp-panel-border, #e8edf5);
+}
+
+.qr-card__header h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--uvp-text-primary, #1f2937);
+}
+
+.qr-card__header-hint {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--uvp-text-tertiary, #6b7280);
+}
+
+.qr-card__icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  color: var(--uvp-brand, #2563eb);
+  background: var(--uvp-brand-soft, #e8f2ff);
+  border-radius: 7px;
+}
+
+.qr-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  align-items: center;
+}
+
+.qr-canvas {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 156px;
+  height: 156px;
+  padding: 6px;
+  background: #ffffff;
+  border: 1px solid var(--uvp-panel-border, #e8edf5);
+  border-radius: 12px;
+}
+
+.qr-canvas img {
+  width: 100%;
+  height: 100%;
+}
+
+.qr-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 156px;
+  height: 156px;
+  font-size: 12px;
+  color: var(--uvp-text-tertiary, #6b7280);
+  text-align: center;
+  background: var(--uvp-shell-muted, #eef4f8);
+  border: 1px dashed var(--uvp-panel-border, #e8edf5);
+  border-radius: 12px;
+}
+
+.qr-placeholder.is-expired {
+  color: #b7791f;
+}
+
+.qr-meta {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12.5px;
+  color: var(--uvp-text-tertiary, #6b7280);
+}
+
+.qr-url {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  background: var(--uvp-shell-muted, #eef4f8);
+  border-radius: 8px;
+}
+
+.qr-url__label {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--uvp-text-tertiary, #6b7280);
+}
+
+.qr-url__value {
+  flex: 1;
+  min-width: 0;
+  font-family: SFMono-Regular, Consolas, Menlo, monospace;
+  font-size: 12px;
+  color: var(--uvp-brand-strong, #1d4ed8);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.qr-generate {
+  width: 100%;
+}
+
+.qr-tips {
+  display: flex;
+  gap: 8px;
+  padding: 7px 9px;
+  background: var(--uvp-warning-soft, #fffbeb);
+  border: 1px solid rgb(183 121 31 / 22%);
+  border-radius: 8px;
+}
+
+.qr-tips__icon {
+  flex-shrink: 0;
+  line-height: 1;
+  color: #b7791f;
+}
+
+.qr-tips__body {
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--uvp-text-secondary, #4b5563);
+}
+
+.qr-card :deep(.arco-form-item) {
+  margin-bottom: 8px;
+}
+
+.qr-card :deep(.arco-form-message) {
+  font-size: 11px;
+}
+
+/* 模拟器下载入口:扫码接入的前置动作,放在出码区之前 */
+.qr-download {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 10px;
+  color: var(--uvp-brand-strong, #1d4ed8);
+  text-decoration: none;
+  background: var(--uvp-brand-soft, #e8f2ff);
+  border: 1px solid rgb(37 99 235 / 16%);
+  border-radius: 8px;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease;
+}
+
+.qr-download:hover {
+  background: color-mix(in srgb, var(--uvp-brand, #2563eb) 16%, var(--uvp-panel-bg, #ffffff));
+  border-color: rgb(37 99 235 / 30%);
+}
+
+.qr-download__icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: #ffffff;
+  background: #2563eb;
+  border-radius: 7px;
+}
+
+.qr-download__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.qr-download__body strong {
+  font-size: 12.5px;
+  color: var(--uvp-text-primary, #1f2937);
+}
+
+.qr-download__body small {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--uvp-text-tertiary, #6b7280);
+}
+
+.qr-download > svg {
+  flex-shrink: 0;
+  color: var(--uvp-text-tertiary, #6b7280);
+}
+
+.qr-locked {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--uvp-text-tertiary, #6b7280);
+  text-align: center;
+}
+</style>

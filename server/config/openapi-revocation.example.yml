@@ -1,0 +1,23 @@
+# 撤销控制面专用配置：必须由受信任运维维护文件及其父目录。
+# 只接受绝对路径、普通文件、不允许组/其他用户写入；建议只读挂载。
+# 这是启动时不可变快照，修改后需受控重启；不走普通节点管理 API。
+# 不能把本文件当成播放资格、网络隔离或一对一节点拓扑的验收证明。
+# API secret 取自注册表；Hook 超时预算从节点 fresh 预检读取，均不在此配置。
+# 最大 1 MiB、128 个节点。空 nodes 是不可运行示例，必须填入部署真值。
+version: 1
+nodes: []
+# - node_id: 1                       # 精确数据库 PK
+#   node_uuid: "operator-node-uuid"  # 精确 mediaServerUUID，不可复用到另一节点
+#   binding_revision: 1             # TLS/端点/Hook 信任变更时推进，不是 meta_node.revision
+#   enabled: true                   # 仅许可撤销控制，不授予播放资格
+#   endpoint: "https://control.example.com/index/api"
+#   ca_mode: "system"               # 必须显式 system 或 private
+#   ca_pem: ""                      # system 必须为空；private 使用下方 PEM 块
+#   spki_sha256: "REPLACE_WITH_64_HEX_LEAF_SPKI_SHA256"
+#   hook_base: "https://api.example.com/api/gb28181/hook"
+# 私有 CA 示例字段形式（公有证书材料，不允许混入私钥）：
+#   ca_mode: "private"
+#   ca_pem: |
+#     -----BEGIN CERTIFICATE-----
+#     ...受信任 CA 证书...
+#     -----END CERTIFICATE-----

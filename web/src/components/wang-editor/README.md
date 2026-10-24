@@ -35,10 +35,10 @@ yarn add @wangeditor/editor-for-vue @wangeditor/editor
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import WangEditor from '@/components/wang-editor/index.vue';
+import { ref } from "vue";
+import WangEditor from "@/components/wang-editor/index.vue";
 
-const content = ref('<p>默认内容</p>');
+const content = ref("<p>默认内容</p>");
 </script>
 ```
 
@@ -46,18 +46,14 @@ const content = ref('<p>默认内容</p>');
 
 ```vue
 <template>
-  <wang-editor 
-    v-model="content" 
-    mode="simple"
-    placeholder="请输入文章内容..."
-  />
+  <wang-editor v-model="content" mode="simple" placeholder="请输入文章内容..." />
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import WangEditor from '@/components/wang-editor/index.vue';
+import { ref } from "vue";
+import WangEditor from "@/components/wang-editor/index.vue";
 
-const content = ref('');
+const content = ref("");
 </script>
 ```
 
@@ -65,20 +61,17 @@ const content = ref('');
 
 ```vue
 <template>
-  <wang-editor 
-    v-model="content" 
-    @change="handleChange"
-  />
+  <wang-editor v-model="content" @change="handleChange" />
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import WangEditor from '@/components/wang-editor/index.vue';
+import { ref } from "vue";
+import WangEditor from "@/components/wang-editor/index.vue";
 
-const content = ref('');
+const content = ref("");
 
 const handleChange = (value: string) => {
-  console.log('内容已变更:', value);
+  console.log("内容已变更:", value);
 };
 </script>
 ```
@@ -87,22 +80,19 @@ const handleChange = (value: string) => {
 
 ```vue
 <template>
-  <wang-editor 
-    v-model="content" 
-    :toolbar-config="toolbarConfig"
-  />
+  <wang-editor v-model="content" :toolbar-config="toolbarConfig" />
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import WangEditor from '@/components/wang-editor/index.vue';
+import { ref } from "vue";
+import WangEditor from "@/components/wang-editor/index.vue";
 
-const content = ref('');
+const content = ref("");
 
 // 自定义工具栏配置
 const toolbarConfig = {
   // 排除某些菜单项
-  excludeKeys: ['group-video']
+  excludeKeys: ["group-video"]
 };
 </script>
 ```
@@ -111,19 +101,19 @@ const toolbarConfig = {
 
 ### Props
 
-| 属性 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| modelValue | `string` | `''` | **必填**。编辑器内容，支持 v-model 双向绑定 |
-| placeholder | `string` | `'请输入内容...'` | 编辑器占位符文本 |
-| mode | `'default' \| 'simple'` | `'default'` | 编辑器模式，default 为默认模式，simple 为简洁模式 |
-| toolbarConfig | `Record<string, any>` | `{}` | 工具栏配置对象 |
+| 属性          | 类型                    | 默认值            | 说明                                              |
+| ------------- | ----------------------- | ----------------- | ------------------------------------------------- |
+| modelValue    | `string`                | `''`              | **必填**。编辑器内容，支持 v-model 双向绑定       |
+| placeholder   | `string`                | `'请输入内容...'` | 编辑器占位符文本                                  |
+| mode          | `'default' \| 'simple'` | `'default'`       | 编辑器模式，default 为默认模式，simple 为简洁模式 |
+| toolbarConfig | `Record<string, any>`   | `{}`              | 工具栏配置对象                                    |
 
 ### Events
 
-| 事件名 | 说明 | 参数类型 |
-|--------|------|----------|
+| 事件名            | 说明                      | 参数类型 |
+| ----------------- | ------------------------- | -------- |
 | update:modelValue | 内容变化时触发（v-model） | `string` |
-| change | 内容变化时触发 | `string` |
+| change            | 内容变化时触发            | `string` |
 
 ## 样式自定义
 
@@ -131,19 +121,19 @@ const toolbarConfig = {
 
 ```scss
 .editor—wrapper {
-    border: 1px solid #cccccc;
-    z-index: 100;
-    .toolbar-container {
-        border-bottom: 1px solid #cccccc;
-    }
-    .editor-container {
-        overflow-y: hidden;
-    }
+  border: 1px solid #cccccc;
+  z-index: 100;
+  .toolbar-container {
+    border-bottom: 1px solid #cccccc;
+  }
+  .editor-container {
+    overflow-y: hidden;
+  }
 }
 
 .w-e-text-container .w-e-scroll {
-    height: 500px !important;   /* 编辑器高度 */
-    -webkit-overflow-scrolling: touch;    /* 开启平滑滚动 */
+  height: 500px !important; /* 编辑器高度 */
+  -webkit-overflow-scrolling: touch; /* 开启平滑滚动 */
 }
 ```
 
@@ -156,12 +146,12 @@ const toolbarConfig = {
 
 <style lang="scss">
 .custom-editor {
-    .editor—wrapper {
-        border-color: #1890ff;
-    }
-    .w-e-text-container .w-e-scroll {
-        height: 600px !important;
-    }
+  .editor—wrapper {
+    border-color: #1890ff;
+  }
+  .w-e-text-container .w-e-scroll {
+    height: 600px !important;
+  }
 }
 </style>
 ```
@@ -205,44 +195,42 @@ const toolbarConfig = {
 ```vue
 <template>
   <div class="editor-demo">
-    <wang-editor 
+    <wang-editor
       v-model="articleContent"
       placeholder="请输入文章内容..."
       mode="default"
       :toolbar-config="toolbarConfig"
       @change="handleContentChange"
     />
-    
-    <a-button type="primary" @click="submitArticle">
-      提交文章
-    </a-button>
+
+    <a-button type="primary" @click="submitArticle"> 提交文章 </a-button>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import WangEditor from '@/components/wang-editor/index.vue';
-import { Message } from '@arco-design/web-vue';
+import { ref } from "vue";
+import WangEditor from "@/components/wang-editor/index.vue";
+import { Message } from "@arco-design/web-vue";
 
-const articleContent = ref('');
+const articleContent = ref("");
 
 const toolbarConfig = {
   // 可根据需要配置工具栏
 };
 
 const handleContentChange = (value: string) => {
-  console.log('内容长度:', value.length);
+  console.log("内容长度:", value.length);
 };
 
 const submitArticle = () => {
   if (!articleContent.value) {
-    Message.warning('请输入文章内容');
+    Message.warning("请输入文章内容");
     return;
   }
-  
+
   // 提交逻辑
-  console.log('提交内容:', articleContent.value);
-  Message.success('提交成功');
+  console.log("提交内容:", articleContent.value);
+  Message.success("提交成功");
 };
 </script>
 
