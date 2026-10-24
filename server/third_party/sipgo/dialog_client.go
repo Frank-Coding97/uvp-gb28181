@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -566,13 +568,68 @@ func (s *DialogClientSession) isEarlyDialog() bool {
 	return s.InviteResponse != nil && s.InviteResponse.IsProvisional() && s.InviteResponse.StatusCode != 100
 }
 
+// echoedLocalContact reports whether a 2xx response repeats the UAC's own
+// Contact instead of the UAS address. WVP 2.7.4 builds the dialog Contact from
+// the upstream platform configuration, so its user part becomes our platform
+// id. Following such a Contact sends every in-dialog request back to ourselves
+// and the peer never observes the ACK, which makes it stop pushing media.
+func echoedLocalContact(inviteRequest *sip.Request, contact *sip.ContactHeader) bool {
+	if inviteRequest == nil || contact == nil {
+		return false
+	}
+	local := inviteRequest.Contact()
+	if local == nil {
+		return false
+	}
+	user := strings.TrimSpace(local.Address.User)
+	if user == "" {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(contact.Address.User), user)
+}
+
+// inviteTargetUri rebuilds the ACK Request-URI from the INVITE recipient so the
+// user part stays the original request target (RFC 3261 §13.2.2.4), while
+// host:port follow the endpoint the INVITE was really sent to. It is only used
+// when the response echoed our own Contact, never for a well-formed response.
+func inviteTargetUri(inviteRequest *sip.Request, contact *sip.ContactHeader) *sip.Uri {
+	var target *sip.Uri
+	if inviteRequest != nil {
+		target = inviteRequest.Recipient.Clone()
+	}
+	if target == nil {
+		target = contact.Address.Clone()
+	}
+	if inviteRequest == nil || target == nil {
+		return target
+	}
+	destination := inviteRequest.Destination()
+	if destination == "" {
+		return target
+	}
+	host, port, err := net.SplitHostPort(destination)
+	if err != nil || host == "" {
+		return target
+	}
+	target.Host = host
+	if parsed, convErr := strconv.Atoi(port); convErr == nil && parsed > 0 && parsed <= 65535 {
+		target.Port = parsed
+	}
+	return target
+}
+
 // newAckRequestUAC creates ACK request for 2xx INVITE
 // https://tools.ietf.org/html/rfc3261#section-13.2.2.4
 // Preserve the INVITE sent-by address while using a fresh branch for the ACK transaction.
 func newAckRequestUAC(inviteRequest *sip.Request, inviteResponse *sip.Response, body []byte) *sip.Request {
 	Recipient := &inviteRequest.Recipient
-	if contact := inviteResponse.Contact(); contact != nil {
-		Recipient = &contact.Address
+	if inviteResponse != nil {
+		if contact := inviteResponse.Contact(); contact != nil {
+			Recipient = &contact.Address
+			if echoedLocalContact(inviteRequest, contact) {
+				Recipient = inviteTargetUri(inviteRequest, contact)
+			}
+		}
 	}
 	ackRequest := sip.NewRequest(
 		sip.ACK,
