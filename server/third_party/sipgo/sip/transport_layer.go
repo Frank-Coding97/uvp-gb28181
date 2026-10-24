@@ -463,6 +463,18 @@ func (l *TransportLayer) ClientRequestConnection(ctx context.Context, req *Reque
 	// This is probably client forcing host:port
 	if laddr.IP != nil && laddr.Port > 0 {
 		c = transport.GetConnection(laddr.String())
+		if c == nil {
+			// The shared listener is normally bound to a wildcard address, so
+			// its pool key (e.g. "[::]:5060") never equals the concrete address
+			// a client pins. Fall back to the socket that actually owns the
+			// port: it is the one that can originate from laddr.Port, and
+			// responses arriving there are already routed to the transaction
+			// layer. Without this a client that declares port X in Via/Contact
+			// silently sends from an ephemeral port (see UVP_PATCH.md).
+			if byPort, ok := transport.(listenerConnectionByPort); ok {
+				c = byPort.GetListenerConnection(laddr.Port)
+			}
+		}
 	} else if l.connectionReuse {
 		addr := raddr.String()
 		c = transport.GetConnection(addr)

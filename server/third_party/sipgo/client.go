@@ -496,6 +496,16 @@ func clientRequestCreateVia(c *Client, r *sip.Request) *sip.ViaHeader {
 		Host:            c.host, // This can be rewritten by transport layer
 		Port:            c.port, // This can be rewritten by transport layer
 	}
+	// A request that pinned its local socket already knows the address it will
+	// originate from, and that address is the only correct "sent-by" value.
+	// Without this the transport layer fills the header from the connection's
+	// local address, which for a shared listener bound to a wildcard address is
+	// "[::]:port" — a value strict peers reject outright (EasyGBS answers 400
+	// and omits Via, so the client transaction can never complete).
+	if r.Laddr.Port > 0 && len(r.Laddr.IP) != 0 && !r.Laddr.IP.IsUnspecified() {
+		newvia.Host = r.Laddr.IP.String()
+		newvia.Port = r.Laddr.Port
+	}
 	// NOTE: Consider lenght of branch configurable
 	newvia.Params.Add("branch", sip.GenerateBranchN(16))
 	if c.rport {

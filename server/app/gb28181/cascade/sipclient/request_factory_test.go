@@ -149,6 +149,41 @@ func TestRequestFactoryRefreshesUserAgentForExistingClient(t *testing.T) {
 	}
 }
 
+// TestRequestFactoryPinsLocalAddrForDatagramOnly 锁住「源端口对称」契约的一半：
+// UDP 请求必须自带 Request.Laddr（=Via/Contact 声明的地址），传输层据此从共享
+// 监听 socket 发出；TCP 不能钉端口（可靠传输无法从监听端口发起，会撞端口占用）。
+func TestRequestFactoryPinsLocalAddrForDatagramOnly(t *testing.T) {
+	udp := mustFactory(t, Identity{
+		UpstreamServerID: "34020000002000000001", UpstreamDomain: "3402000000", Host: "192.0.2.10", Port: 5060,
+		LocalDeviceID: "34020000001320000001", LocalDomain: "3402000000", LocalIP: "192.0.2.20", LocalPort: 5061,
+		Transport: "udp", Profile: protocol.Version2016,
+	})
+	tcp := mustFactory(t, Identity{
+		UpstreamServerID: "34020000002000000001", UpstreamDomain: "3402000000", Host: "192.0.2.10", Port: 5060,
+		LocalDeviceID: "34020000001320000001", LocalDomain: "3402000000", LocalIP: "192.0.2.20", LocalPort: 5061,
+		Transport: "tcp", Profile: protocol.Version2016,
+	})
+
+	datagramRequests := map[string]func() (*sip.Request, error){
+		"REGISTER": func() (*sip.Request, error) { return udp.BuildRegister(3600, "pin-register") },
+		"MESSAGE":  func() (*sip.Request, error) { return udp.BuildMessage([]byte("<Query/>"), "pin-message") },
+		"INVITE": func() (*sip.Request, error) {
+			return udp.BuildAudioPull("34020000001360000001", "34020000001370000012", []byte(audioPullSDP), "pin-invite")
+		},
+	}
+	for method, build := range datagramRequests {
+		request, err := build()
+		require.NoError(t, err)
+		require.Equal(t, 5061, request.Laddr.Port, method+" must pin the declared local port")
+		require.Equal(t, "192.0.2.20", request.Laddr.IP.String(), method+" must pin the declared local IP")
+	}
+
+	streamRequest, err := tcp.BuildRegister(3600, "pin-tcp")
+	require.NoError(t, err)
+	require.Zero(t, streamRequest.Laddr.Port, "TCP must not pin a local port")
+	require.Empty(t, streamRequest.Laddr.IP, "TCP must not pin a local IP")
+}
+
 func mustFactory(t *testing.T, identity Identity) *RequestFactory {
 	t.Helper()
 	factory, err := NewRequestFactory(identity)

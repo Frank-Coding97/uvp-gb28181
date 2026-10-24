@@ -144,6 +144,23 @@ func (p *connectionPool) getUnref(a string) (c Connection) {
 	return c
 }
 
+// getMatch returns the first pooled connection accepted by match with one
+// reference added, or nil. Callers must TryClose the result when done. The pool
+// keeps the same connection under several keys, so at most one reference is
+// added regardless of how many keys matched.
+func (p *connectionPool) getMatch(match func(Connection) bool) Connection {
+	p.RLock()
+	defer p.RUnlock()
+	for _, c := range p.m {
+		if !match(c) {
+			continue
+		}
+		c.Ref(1)
+		return c
+	}
+	return nil
+}
+
 // CloseAndDelete closes connection and deletes from pool
 func (p *connectionPool) CloseAndDelete(c Connection, addr string) error {
 	p.Lock()

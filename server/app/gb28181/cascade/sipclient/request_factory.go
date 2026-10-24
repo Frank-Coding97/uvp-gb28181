@@ -34,6 +34,23 @@ type RequestFactory struct {
 	cseq      uint32
 	profileMu sync.RWMutex
 	profile   protocol.Version
+	localAddr sip.Addr
+}
+
+// applyLocalAddr pins the local socket of datagram requests to the exact
+// address advertised in Via/Contact.
+//
+// 上级平台（实测 WVP）会按「注册时的来源地址」认设备：报文里声明端口 A、
+// 实际从临时端口 B 发出时，它既不报错也不处理，整包静默丢弃 —— 表现就是
+// 注册/心跳一切正常，目录却始终 0 通道。所以 UDP 请求必须从声明的地址发出。
+//
+// TCP 不适用:可靠传输无法从监听端口发起(会撞「端口已被监听占用」),
+// 对端按连接认来源,不依赖源端口。
+func (f *RequestFactory) applyLocalAddr(request *sip.Request) {
+	if f == nil || request == nil || f.localAddr.Port <= 0 || len(f.localAddr.IP) == 0 {
+		return
+	}
+	f.localAddr.Copy(&request.Laddr)
 }
 
 func NewRequestFactory(identity Identity) (*RequestFactory, error) {
@@ -66,7 +83,11 @@ func NewRequestFactory(identity Identity) (*RequestFactory, error) {
 	}
 	identity.LocalIP = localIP.To4().String()
 	identity.Host = strings.TrimSpace(identity.Host)
-	return &RequestFactory{identity: identity, transport: transport, profile: identity.Profile}, nil
+	factory := &RequestFactory{identity: identity, transport: transport, profile: identity.Profile}
+	if transport == "UDP" {
+		factory.localAddr = sip.Addr{IP: net.ParseIP(identity.LocalIP), Port: identity.LocalPort, Hostname: identity.LocalIP}
+	}
+	return factory, nil
 }
 
 func (f *RequestFactory) BuildRegister(expires int, callID string) (*sip.Request, error) {
@@ -101,6 +122,7 @@ func (f *RequestFactory) BuildRegister(expires int, callID string) (*sip.Request
 		request.AppendHeader(sip.NewHeader("X-GB-Ver", "3.0"))
 	}
 	request.SetBody(nil)
+	f.applyLocalAddr(request)
 	return request, nil
 }
 
@@ -138,6 +160,7 @@ func (f *RequestFactory) BuildMessage(body []byte, callID string) (*sip.Request,
 		request.AppendHeader(sip.NewHeader("X-GB-Ver", "3.0"))
 	}
 	request.SetBody(body)
+	f.applyLocalAddr(request)
 	return request, nil
 }
 

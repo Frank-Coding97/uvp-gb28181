@@ -299,11 +299,42 @@ func (s *Server) UAC() *uac.UAC { return s.uac }
 
 // NewCascadeClient creates another transaction client on the server-owned UA.
 // The UA and its listeners remain owned by Server and are closed by Shutdown.
+//
+// 级联出站请求必须**从共享监听 socket 发出**：向上级平台的 Via/Contact 声明的是
+// 平台 SIP 端口，若实际源端口是临时端口，严格的对端（实测 WVP）会按「来源地址
+// 不认识」静默丢弃整包 —— 表现是注册成功但目录始终 0 通道。
+//
+// 钉本地地址这一步**不在这里做**：级联客户端是 UDP/TCP 平台共用的，而 TCP 无法
+// 从监听端口发起（会撞「端口已被监听占用」），所以由每个请求自己带上
+// `Request.Laddr`（见 cascade/sipclient.RequestFactory），UDP 才生效。
 func (s *Server) NewCascadeClient() (*sipgo.Client, error) {
 	if s == nil || s.ua == nil {
 		return nil, fmt.Errorf("GB28181 shared SIP UA is unavailable")
 	}
-	return sipgo.NewClient(s.ua, sipgo.WithClientLogger(s.logger))
+	options := []sipgo.ClientOption{sipgo.WithClientLogger(s.logger)}
+	// 401 挑战重试时 sipgo 会丢掉我们自建的 Via 并按客户端默认 host 重建
+	// (端口由真实连接补齐)。若不指定 host,通配监听会把 "::" 写进 Via,
+	// 对端据此记下的设备地址就成了非法值。
+	if hostname := s.cascadeClientHostname(); hostname != "" {
+		options = append(options, sipgo.WithClientHostname(hostname))
+	}
+	return sipgo.NewClient(s.ua, options...)
+}
+
+// cascadeClientHostname 返回可写进 Via/From 的本机地址:优先对外通告地址,
+// 其次监听地址;通配地址不可用,返回空表示交给传输层填。
+func (s *Server) cascadeClientHostname() string {
+	for _, candidate := range []string{s.cfg.SIP.AdvertiseIP, s.cfg.SIP.ListenIP} {
+		host := strings.TrimSpace(candidate)
+		if host == "" || host == "0.0.0.0" || host == "::" {
+			continue
+		}
+		if parsed := net.ParseIP(host); parsed != nil && parsed.IsUnspecified() {
+			continue
+		}
+		return host
+	}
+	return ""
 }
 
 // TraceRuntime returns the optional trace runtime for controller bootstrap wiring.

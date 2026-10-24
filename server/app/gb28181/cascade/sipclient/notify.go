@@ -66,6 +66,7 @@ func (f *RequestFactory) BuildNotify(d NotifyDialog, seq uint32, state string, b
 		req.RemoveHeader("Content-Type")
 	}
 	req.SetBody(body)
+	f.applyLocalAddr(req)
 	return req, nil
 }
 

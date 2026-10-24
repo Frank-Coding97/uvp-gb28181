@@ -37,6 +37,17 @@ type transport interface {
 	Close() error
 }
 
+// listenerConnectionByPort is optionally implemented by transports that keep
+// their serving socket in the connection pool. A datagram listener is normally
+// bound to a wildcard address, so a client that pins a concrete local address
+// (Via/Contact "sent-by") cannot find it by address string even though that
+// socket is the only one able to originate from the pinned port.
+type listenerConnectionByPort interface {
+	// GetListenerConnection returns the pooled serving socket bound on port,
+	// with one reference added, or nil when no such socket is pooled.
+	GetListenerConnection(port int) Connection
+}
+
 // TransportReadProps describes the transport read connection properties
 type TransportReadProps struct {
 	Transport  string

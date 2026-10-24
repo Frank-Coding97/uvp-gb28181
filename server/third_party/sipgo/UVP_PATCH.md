@@ -17,6 +17,60 @@ The compatibility contract is covered by
 real UDP and TCP sockets for requests and server responses. Upgrade this fork
 only after those byte-equality tests pass against the new upstream version.
 
+## Originate from the pinned local port
+
+Upstream v1.4.0 lets a client pin its local socket through
+`Client.connAddr` → `Request.Laddr`, but the lookup is a **string match** on the
+pooled connection address (`TransportLayer.ClientRequestConnection`). A datagram
+listener is normally bound to a wildcard address, so its pool key is
+`"[::]:5060"` while the pinned address is `"192.168.10.220:5060"`: the match
+always fails, the transport dials a brand new socket from an ephemeral port, and
+the request leaves from a port that the caller never advertised.
+
+UVP adds a port-level fallback: when `laddr.IP != nil && laddr.Port > 0` and no
+connection matches the address, the transport layer asks the transport for the
+pooled **serving socket** bound on that port
+(`listenerConnectionByPort`, implemented by `TransportUDP` as
+`GetListenerConnection`). That socket is the only one able to originate from the
+pinned port, and responses arriving on it are already dispatched to the
+transaction layer by branch, so the client transaction completes normally.
+
+Motivating case: GB28181 cascade registration. The downstream platform writes its
+own SIP port into `Via`/`Contact`; a strict upstream (WVP) correlates every
+message with the address the registration came from and **silently drops** a
+`MESSAGE` whose source port differs — the registration looks healthy while the
+catalog never lands (0 channels, no error in the upstream log). Loose upstreams
+(LiveGBS, EasyGBS) accept it, which is why the defect survived until cascade
+acceptance.
+
+Scope: UDP only. Reliable transports (TCP/TLS/WS) have no serving socket that can
+originate, so their behaviour is unchanged — a fresh connection from an ephemeral
+port is the correct and only option there.
+
+Regression guards: `sip/transport_udp_listener_port_test.go` (pool lookup and
+reference counting) and, in the app,
+`app/gb28181/sip/cascade_client_source_port_test.go` +
+`app/gb28181/sip/cascade_register_digest_test.go` (wire-level source port and Via
+for both the first REGISTER and the digest-challenge retry).
+
+## Sent-by comes from the pinned local address
+
+`clientRequestCreateVia` used `Client.host`/`Client.port`, which are empty unless
+the caller opted into `WithClientHostname`/`WithClientPort`. The transport layer
+then filled the gap from the connection's local address — `"[::]:52064"` for a
+shared wildcard-bound listener. That yielded `Via: SIP/2.0/UDP [::]:52064`, which
+EasyGBS answers with `400 Bad Request` **without any Via header**; the client
+transaction can never match that response, so it retransmits until timeout while
+the platform reports nothing useful.
+
+The generator now prefers `Request.Laddr` when the request pinned a usable local
+address (that address is what the socket will actually originate from), and only
+then falls back to `Client.host`/`Client.port` and the transport fill-in.
+
+Motivating case: the cascade REGISTER digest-challenge retry. sipgo rebuilds the
+Via for the retry, so a caller that pinned `Laddr` for the first attempt silently
+lost both the pinned port and a valid sent-by on the second one.
+
 ## Dialog request destination fallback
 
 UVP adds `WithClientFallbackToResponseSource` on `Client`. It is **off by

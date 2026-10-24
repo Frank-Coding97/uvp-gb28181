@@ -125,6 +125,24 @@ func (t *TransportUDP) CreateConnection(ctx context.Context, laddr Addr, raddr A
 	return t.createConnection(ctx, laddr, raddr, handler)
 }
 
+// GetListenerConnection returns the serving socket bound on port with one
+// reference added, or nil. The pool keys served sockets by their real local
+// address, which is usually a wildcard ("[::]:5060" / "0.0.0.0:5060"), so a
+// client that pinned the port but a concrete IP could not match it by address.
+func (t *TransportUDP) GetListenerConnection(port int) Connection {
+	if port <= 0 {
+		return nil
+	}
+	return t.pool.getMatch(func(c Connection) bool {
+		candidate, ok := c.(*UDPConnection)
+		if !ok || !candidate.Listener {
+			return false
+		}
+		_, candidatePort, err := ParseAddr(candidate.PacketAddr)
+		return err == nil && candidatePort == port
+	})
+}
+
 func (t *TransportUDP) createConnection(ctx context.Context, laddr Addr, raddr Addr, handler MessageHandler) (Connection, error) {
 	isNew := false
 	laddrStr := laddr.String()
