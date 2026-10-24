@@ -37,6 +37,8 @@
 | P-013 | 录像条目多的日子查询必然失败：设备 `SumNum` 与实际条目不符 ⇒ 判「不完整」⇒ 一条都不回 | **是（回放主干）** | **已关闭** | A-REC-01/03 |
 | P-015 | 级联目录不下发 `<Info><PTZType>`，EasyGBS 据此判定「云台类型未知」并**完全不给云台入口** | **是（云台用例）** | **已关闭** | A-PTZ-01 |
 | P-016 | 级联语音广播整条链路不通：应答判身份不符 → 音频 INVITE 匹配不上 → 认领与应答抢同一行 | **是（广播/对讲用例）** | **已关闭** | A-AUD-01/02 |
+| P-017 | 目录订阅被接受后的首个 NOTIFY 只带差量，目录无变化时 `SumNum=0`（等于告诉上级「没有任何资源」） | 否 | 待决策 | A-SUB-01 |
+| P-018 | 同一对话框刷新/取消时若对端轮换了 `Event: …;id=`，我方按新会话找不到而回 481 | 否 | 待定性 | A-SUB-03 |
 
 ---
 
@@ -56,6 +58,12 @@
   1. 抓一次 `publishCivil=true` 时的目录 XML，核对每个 `<DeviceID>` 位数与 `<ParentID>`；
   2. 若确认为非法编号，修法二选一：区划条目改用合法 20 位编号；或发布区划时把区划节点与真实通道**分包发送**，避免互相污染；
   3. 补一条回归用例：开启区划发布后，对端必须仍能收到真实通道。
+- **复核（2026-10-24 12:23，WVP）**：单独把 `publish_platform` 打开（`publish_civil` 保持关闭）后，
+  目录里多出「平台自身」条目 `34020000012000000001 / UVP GB28181`，两个通道的条目**带上
+  `<ParentID>34020000012000000001</ParentID>`**，WVP 侧一条不少（通道 1042/1043 仍在，另加一条节点行 1049）。
+  并且此前被卡住的两件事同时通了：`subscribe/alarm?id=35` 与 `subscribe/mobile-position?id=35` 都能订阅成功。
+  ⇒ **问题更可能出在「区划（civil）条目」而不是「平台自身条目」**，本项修法应收窄到区划节点编号/分包；
+  至于默认是否把 `publish_platform` 打开，属产品选择（默认关闭时报警与位置订阅对 WVP 不可用）。
 - **状态**：待修复
 
 ## P-002 共享 `scope=all` 不生成投影与发布编号
@@ -373,6 +381,52 @@
 
 ---
 
+## P-017 目录订阅的首个 NOTIFY 只带差量，目录没变化时 `SumNum=0`
+
+- **发现时间**：2026-10-24 12:10
+- **阶段 / 用例**：A-SUB / A-SUB-01（订阅成功但首推内容为空）
+- **对端**：WVP（`GET /api/device/query/subscribe/catalog?id=35&cycle=60`）
+- **现象**：
+  - 我方 200 OK（`Expires: 60`、Contact 正确），随即 NOTIFY：
+    `<Notify><CmdType>Catalog</CmdType><SN>344001</SN><DeviceID>34020000012000000001</DeviceID><SumNum>0</SumNum></Notify>`；
+  - 也就是说上级订阅成功，但**订阅推送里没有任何通道**；同一时刻 WVP 自己查目录是 2 条通道。
+- **根因**：`cascade_subscription.go` 的首推沿用「差量」语义——
+  `baseline` 取的是订阅被接受那一刻的目录快照，`DiffCatalog(baseline, current)` 必然为空，
+  `force` 只跳过了「空差量不发送」的早退分支，最终发出去的是一个 `SumNum=0` 的空通知。
+- **为什么这次不改**（重要）：
+  1. 现行设计假定上级在注册时已用 `Catalog` 查询拿过全量目录，订阅只承载变化；
+     实测三家（WVP/LiveGBS/EasyGBS）**确实都在注册后查过一次目录**，所以今天没有功能性失败。
+  2. 正确改法是「首推带全量、`Item` 不带 `Event` 属性」（GB 语义的目录快照，且与我方**上级侧解析器**
+     `subscribe/catalog.go:117` 完全一致：无 `Event` 视为全量、有 `Event` 视为增量）。
+     但这会改变**所有上级**在订阅时收到的首个报文内容，且会推翻多条把「首推=差量」写进断言的既有测试
+     （`TestCascadeCatalogSubscriptionLifecycle` / `…ProjectionChangeBetweenBatches…` /
+     `…ChangeImmediatelyAfterAcceptanceIsNotInitialBaseline` 等），属产品级语义变更，需先拍板。
+- **建议**：若要改，走「首推 = `Item` 无 `Event` 的全量快照」这一种，不要用 `Event=ADD` 全量（部分上级会把
+  `ADD` 当成新增通道而与已有通道重复）。落改时需同步调整上述 3 条用例的断言口径（补维度，不翻原意）。
+- **状态**：待决策
+
+---
+
+## P-018 对话框刷新/取消时对端轮换了 `Event: …;id=`，我方回 481
+
+- **发现时间**：2026-10-24 12:16
+- **阶段 / 用例**：A-SUB / A-SUB-03（订阅刷新）
+- **对端**：WVP
+- **现象**（同一 Call-ID、同一对 From/To tag，仅 `Event` 的 id 变了）：
+  - 取消：`Call-ID: 2fe8774f…`、`Expires: 0`、`Event: Catalog;id=5059` → 我方 **481**；
+  - 随即重订：同 Call-ID、同 tag、`Event: Catalog;id=6180`、`Expires: 60` → 我方仍 **481**；
+  - WVP 只好换一个新 Call-ID（`9294515a…`）重建对话框 → 200 + 首推。
+  - 位置订阅同样复现（`pos2_1224*.pcap`：`Event: Catalog;id=981` 刷新 → 481 → 新建 `id=6599` → 200）。
+- **根因**：会话键是 `平台|Call-ID|对端tag|Event全值`，而 `catalogSubscriptionEvent()` 把 `;id=<n>` 拼进了
+  `Event` 值（`cascade_subscription.go:118-140`）。WVP 每次重订都重新生成 id，于是同一个对话框永远命中不了。
+- **影响**：功能不中断（WVP 会重建对话框），但每轮刷新都会多一个 481、我方旧会话要等过期才回收，
+  且给对端留下「订阅不存在」的错误印象。GB/RFC 口径上订阅方确实应沿用同一 id，**对端不规范**。
+- **待办**：决定是「维持严格（回 481）」还是「按对话框（平台+Call-ID+对端 tag）绑定，id 变化只更新不拒」。
+  后者更利于互通，但需要同步改 `TestCascadeCatalogSubscriptionRefreshPreservesDialogURIs` 一类的断言。
+- **状态**：待定性
+
+---
+
 ## 变更记录
 
 | 日期 | 变更 |
@@ -384,3 +438,4 @@
 | 2026-10-24 | 新增 P-007~P-010：WVP 分批目录缓存日志（不改）、平台级 ConfigDownload/DeviceControl 403（待决策，有测试契约）、`Expires: 0` 订阅回 481（符合 RFC，不改）、`Date` 头格式（待修） |
 | 2026-10-24 | 新增 P-015（阻断-云台用例）：级联目录漏发 `<Info><PTZType>`，EasyGBS 完全不给云台入口；已修复（含授权门控与「不伪造 0」）并回测 `ptz_type` 0→1、云台面板出现，状态转「已关闭」 |
 | 2026-10-24 | 新增 P-016（阻断-语音广播）：应答/INVITE 身份判据过窄 + 认领与应答抢同一行，三处叠加导致 WVP 语音广播无声；已修复并回测（153 个 RTP 包到达设备端 9740 端口），状态转「已关闭」 |
+| 2026-10-24 | A-SUB/A-POS/A-ALM 实机验证：目录订阅 200 + 变更推 `Event=UPDATE`、位置订阅 200 + 经纬度 NOTIFY、报警订阅 200 均拿到抓包；新增 P-017（首推 `SumNum=0`，待决策）、P-018（`Event` id 轮换导致 481，待定性）；P-001 补复核（单独开 `publish_platform` 时 WVP 侧正常，问题指向区划条目） |
