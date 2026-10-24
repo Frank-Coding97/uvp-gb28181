@@ -53,6 +53,14 @@ func (e *stopCompletionError) Error() string { return e.err.Error() }
 
 func (e *stopCompletionError) Unwrap() error { return e.err }
 
+// MediaStopCompleted 标记「媒体已经确定停止，只剩收尾（BYE / 资源回收）失败」。
+//
+// 对账方靠这个标记判断假阳性到底有没有清掉：媒体已经没了就算清掉。
+// 典型场景是对端根本就没有这个对话（BYE 回 481 Call/Transaction Does Not Exist，
+// 例如平台重启过），此时把会话一直留在"待清理"里毫无意义，只会让该通道的
+// 每一次新点播都复用到这条死会话上，从此再也点不开。
+func (e *stopCompletionError) MediaStopCompleted() bool { return true }
+
 func completedMediaStop(err error) error {
 	if err == nil {
 		return nil

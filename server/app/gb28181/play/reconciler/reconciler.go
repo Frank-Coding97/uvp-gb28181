@@ -15,6 +15,7 @@ package reconciler
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -233,7 +234,7 @@ func (r *Reconciler) runOnce(ctx context.Context) Stats {
 			} else {
 				stopErr = r.stopper.Stop(ctx, ch.StreamID, ch.DeviceID, ch.ChannelID)
 			}
-			if stopErr != nil {
+			if stopErr != nil && !mediaStopReached(stopErr) {
 				stats.Failed++
 				app.Log(ctx).Named("play.reconcile").Warn("reconciler 清理假阳性失败",
 					zap.String("event", "play.reconcile.cleanup_failed"),
@@ -243,11 +244,15 @@ func (r *Reconciler) runOnce(ctx context.Context) Stats {
 					zap.Error(stopErr))
 			} else {
 				stats.Cleaned++
+				// 收尾失败但媒体已停仍算清理成功：这里必须把残留的错误打出来，
+				// 否则「清掉了但 BYE 被回 481」这种半成功会彻底静默。
+				// zap.Error(nil) 本身即 zap.Skip()，成功分支不会多打字段。
 				app.Log(ctx).Named("play.reconcile").Info("reconciler 已清理假阳性",
 					zap.String("event", "play.reconcile.cleanup_succeeded"),
 					zap.String("stream_id", ch.StreamID),
 					zap.String("device_id", ch.DeviceID),
-					zap.String("channel_id", ch.ChannelID))
+					zap.String("channel_id", ch.ChannelID),
+					zap.Error(stopErr))
 			}
 		case judgeProbeError:
 			stats.Failed++
@@ -287,4 +292,29 @@ type defaultLister struct{}
 
 func (defaultLister) ListPlayingChannels(ctx context.Context) (gbmodels.GbChannelList, error) {
 	return gbmodels.ListPlayingChannels(ctx)
+}
+
+// mediaStopCompleted 是 play.stopCompletionError 暴露的结构化标记：
+// 「媒体已经确定停止，只剩 BYE / 资源回收等收尾动作失败」。
+//
+// 用结构化接口而不是导入 play 包 —— reconciler 是 play 的子包，反向依赖会成环。
+type mediaStopCompleted interface {
+	MediaStopCompleted() bool
+}
+
+// mediaStopReached 判断一次清理是否已经达成了目的。
+//
+// 媒体没了就算清掉。最容易踩的是对端根本没有这个对话（BYE 被回
+// 481 Call/Transaction Does Not Exist，平台重启后很常见）：如果把它当失败，
+// 这条会话会永远留在"待清理"里，而每一次新点播又会复用它，于是该通道
+// 从此再也点不开（表现为播放器直接 websocketError，点播接口却一路 200）。
+func mediaStopReached(err error) bool {
+	if err == nil {
+		return true
+	}
+	var completed mediaStopCompleted
+	if errors.As(err, &completed) {
+		return completed.MediaStopCompleted()
+	}
+	return false
 }
