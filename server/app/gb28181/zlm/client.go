@@ -466,7 +466,8 @@ func (c *Client) IsMediaOnline(ctx context.Context, appName, stream string) (boo
 			zap.String("endpoint", c.baseURL),
 			zap.String("app", appName),
 			zap.String("stream_id", stream),
-			logging.Error(err))
+			zap.String("error_class", logging.ErrorClass(err)),
+			zap.String("error_type", logging.TypeName(err)))
 		return false, err
 	}
 	// code != 0(如 -500 流不存在)视为未就绪,不视为错误

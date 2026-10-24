@@ -26,16 +26,17 @@ func (e *PlaybackArgumentError) Error() string {
 func (e *PlaybackArgumentError) Unwrap() error { return ErrInvalidPlaybackArgument }
 
 type PlaybackParams struct {
-	ServerID  string
-	ChannelID string
-	RecvIP    string
-	RecvPort  int
-	SSRC      string
-	TCPMode   bool
-	Start     time.Time
-	End       time.Time
-	PlayFrom  time.Time
-	Extended  bool
+	ServerID     string
+	ChannelID    string
+	RecvIP       string
+	RecvPort     int
+	SSRC         string
+	TCPMode      bool
+	Start        time.Time
+	End          time.Time
+	PlayFrom     time.Time
+	Extended     bool
+	RecordingURI string
 }
 
 type DownloadParams struct {
@@ -48,6 +49,7 @@ type DownloadParams struct {
 	Start         time.Time
 	End           time.Time
 	DownloadSpeed uint32
+	RecordingURI  string
 	Extended      bool
 }
 
@@ -67,13 +69,10 @@ func BuildDownloadSDP(params DownloadParams) (string, error) {
 	if speed == 0 {
 		speed = 4
 	}
-	if speed != 1 && speed != 2 && speed != 4 && speed != 8 {
-		return "", invalidPlaybackArgument("DownloadSpeed", "must be one of 1, 2, 4, 8")
-	}
 	playback := PlaybackParams{
 		ServerID: params.ServerID, ChannelID: params.ChannelID, RecvIP: params.RecvIP,
 		RecvPort: params.RecvPort, SSRC: params.SSRC, TCPMode: params.TCPMode,
-		Start: params.Start, End: params.End, PlayFrom: params.Start, Extended: params.Extended,
+		Start: params.Start, End: params.End, PlayFrom: params.Start, Extended: params.Extended, RecordingURI: params.RecordingURI,
 	}
 	start, err := validatePlaybackParams(playback)
 	if err != nil {
@@ -92,7 +91,11 @@ func buildHistoricalSDP(params PlaybackParams, sessionName string, start, end ti
 	body.WriteString("v=0\r\n")
 	fmt.Fprintf(&body, "o=%s 0 0 IN IP4 %s\r\n", params.ServerID, params.RecvIP)
 	fmt.Fprintf(&body, "s=%s\r\n", sessionName)
-	fmt.Fprintf(&body, "u=%s:0\r\n", params.ChannelID)
+	uri := params.RecordingURI
+	if uri == "" {
+		uri = params.ChannelID + ":0"
+	}
+	fmt.Fprintf(&body, "u=%s\r\n", uri)
 	fmt.Fprintf(&body, "c=IN IP4 %s\r\n", params.RecvIP)
 	fmt.Fprintf(&body, "t=%d %d\r\n", start.Unix(), end.Unix())
 	writeVideoMediaDescription(&body, params.RecvPort, transport, params.Extended)
@@ -113,6 +116,12 @@ func validatePlaybackParams(params PlaybackParams) (time.Time, error) {
 	}
 	if strings.TrimSpace(params.ChannelID) == "" {
 		return time.Time{}, invalidPlaybackArgument("ChannelID", "must not be empty")
+	}
+	if params.RecordingURI != "" {
+		uri, err := ParseHistoricalURI(params.RecordingURI)
+		if err != nil || (uri.FilePath == "" && uri.DeviceID != params.ChannelID) {
+			return time.Time{}, invalidPlaybackArgument("RecordingURI", "must select the requested channel")
+		}
 	}
 	if strings.TrimSpace(params.RecvIP) == "" {
 		return time.Time{}, invalidPlaybackArgument("RecvIP", "must not be empty")

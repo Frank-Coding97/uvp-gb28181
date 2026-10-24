@@ -131,6 +131,53 @@ func TestCascadePlaybackOfferPreservesUnixTimeRange(t *testing.T) {
 	}
 }
 
+func TestCascadeDownloadOfferAndAnswerPreserveRangeAndSpeed(t *testing.T) {
+	body := "v=0\r\no=upper 0 0 IN IP4 192.0.2.30\r\ns=Download\r\nu=34020000001320000001:0\r\nc=IN IP4 192.0.2.30\r\n" +
+		"t=1785632400 1785636000\r\nm=video 30000 RTP/AVP 96\r\na=recvonly\r\na=rtpmap:96 PS/90000\r\na=downloadspeed:2\r\ny=1200000001\r\n"
+	offer, err := ParseCascadeVideoOffer([]byte(body))
+	require.NoError(t, err)
+	require.True(t, offer.Download)
+	require.False(t, offer.Playback)
+	require.Equal(t, uint32(2), offer.DownloadSpeed)
+	require.EqualValues(t, 1785632400, offer.Start.Unix())
+	require.EqualValues(t, 1785636000, offer.End.Unix())
+	answer, err := BuildCascadeVideoAnswer(offer, "34020000002000000002", "192.0.2.10", 31000)
+	require.NoError(t, err)
+	require.Contains(t, string(answer), "s=Download\r\n")
+	require.Contains(t, string(answer), "t=1785632400 1785636000\r\n")
+	require.Contains(t, string(answer), "a=downloadspeed:2\r\n")
+	for _, speed := range []string{"0", "-1", "4294967296", "bad", "2\r\na=downloadspeed:4"} {
+		_, err := ParseCascadeVideoOffer([]byte(strings.Replace(body, "a=downloadspeed:2", "a=downloadspeed:"+speed, 1)))
+		require.Error(t, err, speed)
+	}
+	_, err = ParseCascadeVideoOffer([]byte(strings.Replace(body, "y=1200000001", "y=0200000001", 1)))
+	require.Error(t, err)
+	defaultOffer, err := ParseCascadeVideoOffer([]byte(strings.Replace(body, "a=downloadspeed:2\r\n", "", 1)))
+	require.NoError(t, err)
+	require.Equal(t, uint32(1), defaultOffer.DownloadSpeed)
+	integerOffer, err := ParseCascadeVideoOffer([]byte(strings.Replace(body, "a=downloadspeed:2", "a=downloadspeed:3", 1)))
+	require.NoError(t, err)
+	require.Equal(t, uint32(3), integerOffer.DownloadSpeed)
+}
+
+func TestCascadeDownloadRecordingURI(t *testing.T) {
+	body := "v=0\r\ns=Download\r\nu=34020000001320000001:2\r\nc=IN IP4 192.0.2.30\r\n" +
+		"t=1785632400 1785636000\r\nm=video 30000 RTP/AVP 96\r\na=recvonly\r\na=rtpmap:96 PS/90000\r\ny=1200000001\r\n"
+	for _, uri := range []string{"34020000001320000001:0", "34020000001320000001:1", "34020000001320000001:2", "34020000001320000001:3", "http://34020000001320000001/records/one.ps"} {
+		offer, err := ParseCascadeVideoOffer([]byte(strings.Replace(body, "34020000001320000001:2", uri, 1)))
+		require.NoError(t, err, uri)
+		answer, err := BuildCascadeVideoAnswer(offer, "34020000002000000002", "192.0.2.10", 31000)
+		require.NoError(t, err)
+		require.Contains(t, string(answer), "u="+uri+"\r\n")
+	}
+	for _, uri := range []string{"", "short:0", "34020000001320000001:4", "34020000001320000001:-1", "34020000001320000001:1:2", "http://example.com/file.ps", "http://34020000001320000001/", "http://34020000001320000001/../file.ps", "http://34020000001320000001/%0Afile.ps", "34020000001320000001:0\r\nu=34020000001320000001:2"} {
+		_, err := ParseCascadeVideoOffer([]byte(strings.Replace(body, "34020000001320000001:2", uri, 1)))
+		require.Error(t, err, uri)
+	}
+	_, err := ParseCascadeVideoOffer([]byte(strings.Replace(body, "u=34020000001320000001:2\r\n", "", 1)))
+	require.Error(t, err, "download must identify recording source")
+}
+
 func TestBuildCascadeVideoAnswerTCPRoleMapping(t *testing.T) {
 	for _, test := range []struct {
 		name      string

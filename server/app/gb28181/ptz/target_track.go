@@ -56,6 +56,10 @@ type TargetTrackRequest struct {
 // targetCode 用**通道编码**（= 报文里 SN 之后的 DeviceID，标准尾注「指全景相机的球机通道」），
 // 全景通道走 req.DeviceID2。
 func (s *Service) TrackTarget(ctx context.Context, target Target, req TargetTrackRequest, actorID, actorDeptID uint, idempotencyKey string) (gbmodels.GbPTZOperation, error) {
+	return s.trackTarget(ctx, target, req, actorID, actorDeptID, idempotencyKey, nil)
+}
+
+func (s *Service) trackTarget(ctx context.Context, target Target, req TargetTrackRequest, actorID, actorDeptID uint, idempotencyKey string, authorization *CascadeTargetTrackAuthorization) (gbmodels.GbPTZOperation, error) {
 	command := manscdp.TargetTrackCommand{Mode: req.Mode, DeviceID2: req.DeviceID2, Area: req.Area}
 	if err := manscdp.ValidateTargetTrackCommand(command); err != nil {
 		return gbmodels.GbPTZOperation{}, err
@@ -74,11 +78,15 @@ func (s *Service) TrackTarget(ctx context.Context, target Target, req TargetTrac
 	// 让它连同意图一起落库：排查"框选位置不对"这类问题时，能直接对着意图表里的报文看，
 	// 不必再去 SIP 轨迹表里按 SN 捞。
 	var wire []byte
+	payload := targetTrackPayload(command, deviceID2)
+	if authorization != nil {
+		payload["cascadeTargetTrackAuthorization"] = authorization
+	}
 	operation, err := s.Execute(ctx, target, Command{
 		CmdType:          manscdp.CmdDeviceControl,
 		Action:           actionTargetTrack,
 		IdempotencyKey:   idempotencyKey,
-		Payload:          targetTrackPayload(command, deviceID2),
+		Payload:          payload,
 		ResponseRequired: false, // 9.3.1 d) + 表 1 序号 13：无应答命令，见函数注释
 		MaxAttempts:      1,
 		ActorID:          actorID,
@@ -98,6 +106,9 @@ func (s *Service) TrackTarget(ctx context.Context, target Target, req TargetTrac
 		// 没发出去就不改意图：设备什么都没收到，界面上的"当前指令"必须保持原样，
 		// 否则会出现"界面上写着已下发自动跟踪、实际设备还在按上一条指令跑"。
 		return operation, err
+	}
+	if operation.Status != gbmodels.PTZOperationSent {
+		return operation, fmt.Errorf("目标跟踪下发状态为 %s", operation.Status)
 	}
 	if err := s.persistTargetTrackIntent(ctx, operation, command, deviceID2, actorID, actorDeptID, area, wire); err != nil {
 		return operation, err

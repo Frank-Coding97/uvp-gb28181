@@ -226,7 +226,7 @@ type videoParamItemWire struct {
 	Resolution   string `xml:"Resolution"`
 	FrameRate    string `xml:"FrameRate"`
 	BitRateType  string `xml:"BitRateType"`
-	VideoBitRate string `xml:"VideoBitRate"`
+	VideoBitRate string `xml:"VideoBitRate,omitempty"`
 }
 
 // ---- 组建 ----

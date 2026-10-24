@@ -210,23 +210,23 @@ func TestManagementServiceOptionViewsReflectPersistedConfig(t *testing.T) {
 	input := validPlatformInput(nil)
 	input.Enabled = false
 	input.CatalogBatchSize = 1
-	require.NoError(t, json.Unmarshal([]byte(`{"autoPushCatalog":true,"recordingEnabled":true,"rtcpKeepalive":true}`), &input))
+	require.NoError(t, json.Unmarshal([]byte(`{"autoPushCatalog":true,"recordingEnabled":true,"rtcpKeepalive":true,"configEnabled":true,"deviceControlEnabled":true,"maintenanceEnabled":true,"upgradeEnabled":true}`), &input))
 	created, err := service.Create(context.Background(), input)
 	require.NoError(t, err)
 	encoded, err := json.Marshal(created)
 	require.NoError(t, err)
 	var view map[string]any
 	require.NoError(t, json.Unmarshal(encoded, &view))
-	for _, name := range []string{"autoPushCatalog", "recordingEnabled", "rtcpKeepalive"} {
+	for _, name := range []string{"autoPushCatalog", "recordingEnabled", "rtcpKeepalive", "configEnabled", "deviceControlEnabled", "maintenanceEnabled", "upgradeEnabled"} {
 		require.Equal(t, true, view[name], name)
 	}
-	require.NoError(t, json.Unmarshal([]byte(`{"autoPushCatalog":false,"recordingEnabled":false,"rtcpKeepalive":false}`), &input))
+	require.NoError(t, json.Unmarshal([]byte(`{"autoPushCatalog":false,"recordingEnabled":false,"rtcpKeepalive":false,"configEnabled":false,"deviceControlEnabled":false,"maintenanceEnabled":false,"upgradeEnabled":false}`), &input))
 	updated, err := service.Update(context.Background(), created.ID, created.ConfigRevision, input)
 	require.NoError(t, err)
 	encoded, err = json.Marshal(updated)
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(encoded, &view))
-	for _, name := range []string{"autoPushCatalog", "recordingEnabled", "rtcpKeepalive"} {
+	for _, name := range []string{"autoPushCatalog", "recordingEnabled", "rtcpKeepalive", "configEnabled", "deviceControlEnabled", "maintenanceEnabled", "upgradeEnabled"} {
 		require.Equal(t, false, view[name], name)
 	}
 }

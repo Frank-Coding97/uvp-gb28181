@@ -35,6 +35,7 @@ func TestPlaybackIntentINFOActualUDPAndCleanupShareDurableSequence(t *testing.T)
 	last := f.op.invite.CSeq
 	commands := []playauth.DeviceSIPINFOCommand{{Action: "play"}, {Action: "pause"}, {Action: "resume"},
 		{Action: "seek", PositionNanos: int64(time.Second), SegmentDurationNanos: int64(time.Minute)}, {Action: "scale", Scale: 2},
+		{Action: "scale", Scale: -1},
 		{Action: "seek", RangeValue: "npt=1-30", SegmentDurationNanos: int64(time.Minute)},
 		{Action: "seek", RangeValue: "smpte=0:00:12:15-0:00:30:00", SegmentDurationNanos: int64(time.Minute)}, {Action: "teardown"}}
 	for _, command := range commands {
@@ -44,6 +45,9 @@ func TestPlaybackIntentINFOActualUDPAndCleanupShareDurableSequence(t *testing.T)
 		require.Equal(t, sip.INFO, info.Method)
 		if command.RangeValue != "" {
 			require.Contains(t, string(info.Body()), "Range: "+command.RangeValue+"\r\n")
+		}
+		if command.Action == "scale" {
+			require.Contains(t, string(info.Body()), fmt.Sprintf("Scale: %s\r\n", map[float64]string{2: "2.0", -1: "-1.0"}[command.Scale]))
 		}
 		require.Equal(t, last+1, info.CSeq().SeqNo)
 		last++

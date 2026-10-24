@@ -134,6 +134,32 @@ func TestParseMobilePositionNotify_2022ListForm(t *testing.T) {
 	require.Zero(t, second.Height)
 }
 
+func TestParseMobilePositionSubscriptionQuery(t *testing.T) {
+	query, err := ParseMobilePositionSubscriptionQuery([]byte(`<?xml version="1.0" encoding="GB2312"?><Query><CmdType>MobilePosition</CmdType><SN>12</SN><DeviceID>34020000001320000001</DeviceID><Interval>30</Interval></Query>`))
+	require.NoError(t, err)
+	require.Equal(t, 12, query.SN)
+	require.Equal(t, "34020000001320000001", query.DeviceID)
+	require.Equal(t, 30, query.Interval)
+	require.True(t, query.IntervalPresent)
+}
+
+func TestParseMobilePositionSubscriptionQueryDistinguishesMissingInterval(t *testing.T) {
+	query, err := ParseMobilePositionSubscriptionQuery([]byte(`<Query><CmdType>MobilePosition</CmdType><SN>12</SN><DeviceID>D</DeviceID></Query>`))
+	require.NoError(t, err)
+	require.False(t, query.IntervalPresent)
+	require.Zero(t, query.Interval)
+
+	query, err = ParseMobilePositionSubscriptionQuery([]byte(`<Query><CmdType>MobilePosition</CmdType><SN>12</SN><DeviceID>D</DeviceID><Interval>0</Interval></Query>`))
+	require.NoError(t, err)
+	require.True(t, query.IntervalPresent)
+	require.Zero(t, query.Interval)
+}
+
+func TestParseMobilePositionSubscriptionQueryRejectsOtherCommand(t *testing.T) {
+	_, err := ParseMobilePositionSubscriptionQuery([]byte(`<Query><CmdType>Catalog</CmdType><SN>1</SN><DeviceID>D</DeviceID></Query>`))
+	require.Error(t, err)
+}
+
 // TestMobilePositionNotifyPositions_FlatFormNormalizesToSingleItem 保证 2016 扁平形态
 // 归一化后仍是「一条」，且采集时间取根 Time —— 2016 语义没有被动过。
 func TestMobilePositionNotifyPositions_FlatFormNormalizesToSingleItem(t *testing.T) {

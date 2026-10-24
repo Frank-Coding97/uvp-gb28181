@@ -20,6 +20,7 @@ import (
 
 	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.com/uvp-gb28181/app/gb28181/uac"
 )
@@ -91,17 +92,21 @@ type Request struct {
 	Manufacturer   string
 	ActorID        uint
 	ActorDeptID    uint
+	Cascade        *CascadeBinding
 }
 
 type Service struct {
-	db              *gorm.DB
-	sender          TrackedSender
-	allocator       SNAllocator
-	now             func() time.Time
-	lockMu          sync.Mutex
-	locks           map[uint]*sync.Mutex
-	lifecycleMu     sync.RWMutex
-	retired         bool
+	db          *gorm.DB
+	sender      TrackedSender
+	allocator   SNAllocator
+	now         func() time.Time
+	lockMu      sync.Mutex
+	locks       map[uint]*sync.Mutex
+	lifecycleMu sync.RWMutex
+	retired     bool
+	operations  interface {
+		BeginEpoch(context.Context, string, int64) (playauth.DeviceOperationLease, error)
+	}
 	repoService     FirmwareRepositoryService
 	tokenService    DownloadTokenService
 	downloadBaseURL string
@@ -264,7 +269,7 @@ func hasRecentDeviceReboot(tx *gorm.DB, deviceID uint, now time.Time) (bool, err
 func operationMatches(row gbmodels.GbDeviceFirmwareUpgrade, request Request) bool {
 	return row.Firmware == strings.TrimSpace(request.Firmware) &&
 		row.FileURL == strings.TrimSpace(request.FileURL) &&
-		row.Manufacturer == strings.TrimSpace(request.Manufacturer)
+		row.Manufacturer == strings.TrimSpace(request.Manufacturer) && row.CascadeBinding == encodeCascadeBinding(request.Cascade)
 }
 
 func (s *Service) findByIdempotency(ctx context.Context, deviceID uint, key string) (gbmodels.GbDeviceFirmwareUpgrade, bool, error) {
@@ -291,6 +296,19 @@ func expireDueForDevice(tx *gorm.DB, deviceID uint, now time.Time) error {
 // operation to sent; the business response and final result are handled by
 // OnMessage asynchronously.
 func (s *Service) Execute(ctx context.Context, target Target, request Request) (Operation, bool, error) {
+	return s.execute(ctx, target, request, nil)
+}
+
+// ExecuteCascade acknowledges durable acceptance before any device send. An
+// acknowledgement failure leaves a rejected task, never a resend on replay.
+func (s *Service) ExecuteCascade(ctx context.Context, target Target, request Request, accept func() error) (Operation, bool, error) {
+	if request.Cascade == nil || accept == nil {
+		return Operation{}, false, ErrInvalidArgument
+	}
+	return s.execute(ctx, target, request, accept)
+}
+
+func (s *Service) execute(ctx context.Context, target Target, request Request, accept func() error) (Operation, bool, error) {
 	if s == nil || s.db == nil {
 		return Operation{}, false, ErrServiceUnavailable
 	}
@@ -304,6 +322,9 @@ func (s *Service) Execute(ctx context.Context, target Target, request Request) (
 	}
 	if err := validateRequest(target, request); err != nil {
 		return Operation{}, false, err
+	}
+	if request.Cascade != nil && s.operations == nil {
+		return Operation{}, false, ErrCascadeUnauthorized
 	}
 	key, err := normalizeIdempotencyKey(request.IdempotencyKey)
 	if err != nil {
@@ -354,6 +375,11 @@ func (s *Service) Execute(ctx context.Context, target Target, request Request) (
 		if lockErr != nil {
 			return lockErr
 		}
+		if request.Cascade != nil {
+			if err := authorizeCascade(tx, device.ID, device.DeviceID, request.Cascade); err != nil {
+				return err
+			}
+		}
 		if err := expireDueForDevice(tx, device.ID, s.now()); err != nil {
 			return err
 		}
@@ -369,16 +395,38 @@ func (s *Service) Execute(ctx context.Context, target Target, request Request) (
 			deduplicated = true
 			return nil
 		}
+		reject := func(cause error) error {
+			if request.Cascade == nil {
+				return cause
+			}
+			createdAt := s.now()
+			createdRow = gbmodels.GbDeviceFirmwareUpgrade{
+				OperationID: uuid.NewString(), IdempotencyKey: key, DeviceID: device.ID, DeviceCode: device.DeviceID,
+				Firmware: request.Firmware, FileURL: request.FileURL, Manufacturer: request.Manufacturer, SessionID: uuid.NewString(), SN: s.nextSN(),
+				ProfileVersion: string(target.Profile.Version), ProfileCharset: string(target.Profile.Charset),
+				Status: gbmodels.FirmwareUpgradeRejected, DeviceResult: "ERROR", CascadeBusinessResult: "ERROR",
+				ErrorCode: "CASCADE_UPGRADE_REJECTED", ErrorMessage: cause.Error(), CreatedAt: createdAt, UpdatedAt: createdAt, CompletedAt: &createdAt,
+			}
+			if createdRow.SN <= 0 {
+				return ErrServiceUnavailable
+			}
+			bindCascadeRequest(&createdRow, request.Cascade)
+			if err := tx.Create(&createdRow).Error; err != nil {
+				return err
+			}
+			operation = toOperation(createdRow)
+			return nil
+		}
 		if !target.DeviceOnline || device.Status != gbmodels.DeviceStatusOnline {
-			return ErrDeviceOffline
+			return reject(ErrDeviceOffline)
 		}
 		if strings.TrimSpace(device.IP) == "" || device.Port <= 0 {
-			return fmt.Errorf("%w: 设备来源地址缺失", ErrInvalidArgument)
+			return reject(fmt.Errorf("%w: 设备来源地址缺失", ErrInvalidArgument))
 		}
 		if recent, rebootErr := hasRecentDeviceReboot(tx, device.ID, s.now()); rebootErr != nil {
 			return rebootErr
 		} else if recent {
-			return ErrDeviceRebootBusy
+			return reject(ErrDeviceRebootBusy)
 		}
 		var active int64
 		if err := tx.Model(&gbmodels.GbDeviceFirmwareUpgrade{}).
@@ -386,7 +434,7 @@ func (s *Service) Execute(ctx context.Context, target Target, request Request) (
 			return err
 		}
 		if active > 0 {
-			return ErrDeviceUpgradeBusy
+			return reject(ErrDeviceUpgradeBusy)
 		}
 		sn := s.nextSN()
 		if sn <= 0 {
@@ -407,6 +455,7 @@ func (s *Service) Execute(ctx context.Context, target Target, request Request) (
 			Status: gbmodels.FirmwareUpgradeQueued, ActorID: request.ActorID, ActorDeptID: request.ActorDeptID,
 			CreatedAt: createdAt, UpdatedAt: createdAt, DeadlineAt: timePtr(createdAt.Add(upgradeDeadline)),
 		}
+		bindCascadeRequest(&createdRow, request.Cascade)
 		if createErr := tx.Create(&createdRow).Error; createErr != nil {
 			return createErr
 		}
@@ -417,6 +466,9 @@ func (s *Service) Execute(ctx context.Context, target Target, request Request) (
 	})
 	lock.Unlock()
 	if err != nil {
+		if errors.Is(err, ErrCascadeUnauthorized) {
+			return operation, false, err
+		}
 		// A uniqueness race may have committed the same idempotency key just
 		// before this transaction observed it. Re-read only that exact key.
 		if existing, found, readErr := s.findByIdempotency(ctx, target.DeviceID, key); readErr == nil && found {
@@ -425,12 +477,44 @@ func (s *Service) Execute(ctx context.Context, target Target, request Request) (
 			}
 			replayed := toOperation(existing)
 			replayed.Deduplicated = true
+			if accept != nil {
+				if err := accept(); err != nil {
+					return replayed, true, err
+				}
+			}
 			return replayed, true, nil
 		}
 		return operation, deduplicated, err
 	}
+	if accept != nil {
+		if err := accept(); err != nil {
+			if !deduplicated && createdRow.Status != gbmodels.FirmwareUpgradeRejected {
+				_ = s.persistOutbound(ctx, createdRow.ID, uac.TrackedMessageResult{}, s.now(), err)
+			}
+			return operation, deduplicated, err
+		}
+	}
 	if deduplicated {
 		return operation, true, nil
+	}
+	if createdRow.Status == gbmodels.FirmwareUpgradeRejected {
+		return operation, false, nil
+	}
+	if request.Cascade != nil {
+		if s.operations == nil {
+			err = ErrCascadeUnauthorized
+		} else {
+			var lease playauth.DeviceOperationLease
+			lease, err = s.operations.BeginEpoch(ctx, createdRow.DeviceCode, request.Cascade.SourceDeviceEpoch)
+			if err == nil {
+				defer lease.Release()
+				ctx = lease.Context()
+			}
+		}
+		if err != nil {
+			_ = s.persistOutbound(ctx, createdRow.ID, uac.TrackedMessageResult{}, s.now(), err)
+			return operation, false, err
+		}
 	}
 	destination := net.JoinHostPort(dispatchTarget.IP, fmt.Sprintf("%d", dispatchTarget.Port))
 	if s.sender == nil {
@@ -441,7 +525,14 @@ func (s *Service) Execute(ctx context.Context, target Target, request Request) (
 		}
 		return updated, false, ErrServiceUnavailable
 	}
-	result, sendErr := s.sender.SendMessageTracked(ctx, dispatchTarget.DeviceCode, destination, dispatchTarget.Transport, dispatchBody)
+	var result uac.TrackedMessageResult
+	sendErr := s.AuthorizeCascade(ctx, createdRow)
+	if sendErr == nil {
+		sendErr = ctx.Err()
+	}
+	if sendErr == nil {
+		result, sendErr = s.sender.SendMessageTracked(ctx, dispatchTarget.DeviceCode, destination, dispatchTarget.Transport, dispatchBody)
+	}
 	observedAt := s.now()
 	if err := s.persistOutbound(ctx, createdRow.ID, result, observedAt, sendErr); err != nil {
 		return Operation{}, false, err
@@ -494,6 +585,7 @@ func (s *Service) persistOutbound(ctx context.Context, rowID uint, result uac.Tr
 	updates["error_message"] = errorMessage
 	if status == gbmodels.FirmwareUpgradeRejected {
 		updates["completed_at"] = observedAt
+		updates["cascade_business_result"] = "ERROR"
 	}
 	return s.db.Clauses(dbresolver.Write).WithContext(persistCtx).Model(&gbmodels.GbDeviceFirmwareUpgrade{}).
 		Where("id = ? AND status = ?", rowID, gbmodels.FirmwareUpgradeQueued).Updates(updates).Error
@@ -588,6 +680,9 @@ func (s *Service) OnUpgradeResultMessage(ctx context.Context, deviceCode, callID
 	if errors.Is(err, ErrProtocolResponse) {
 		return true, 400, err
 	}
+	if errors.Is(err, ErrCascadeUnauthorized) {
+		return true, 403, err
+	}
 	return true, 503, err
 }
 
@@ -652,27 +747,52 @@ func (s *Service) onDeviceControlResponse(ctx context.Context, deviceCode, callI
 }
 
 func (s *Service) applyBusiness(ctx context.Context, row gbmodels.GbDeviceFirmwareUpgrade, accepted bool, callID, cseq string) error {
-	observedAt := s.now()
-	updates := map[string]interface{}{"device_result": map[bool]string{true: "OK", false: "ERROR"}[accepted], "response_at": observedAt, "response_call_id": callID, "response_cseq": cseq, "updated_at": observedAt}
-	if accepted {
-		updates["status"] = gbmodels.FirmwareUpgradeAccepted
-		updates["accepted_at"] = gorm.Expr("COALESCE(accepted_at, ?)", observedAt)
-		updates["error_code"] = ""
-		updates["error_message"] = ""
-		updates["failed_reason"] = ""
-	} else {
-		updates["status"] = gbmodels.FirmwareUpgradeRejected
-		updates["error_code"] = "DEVICE_REJECTED"
-		updates["error_message"] = "设备拒绝设备升级命令"
-		updates["completed_at"] = observedAt
-	}
-	allowed := []gbmodels.FirmwareUpgradeStatus{gbmodels.FirmwareUpgradeQueued, gbmodels.FirmwareUpgradeSent, gbmodels.FirmwareUpgradeUnknown}
-	if accepted {
-		allowed = append(allowed, gbmodels.FirmwareUpgradeAccepted)
-	}
-	result := s.db.Clauses(dbresolver.Write).WithContext(ctx).Model(&gbmodels.GbDeviceFirmwareUpgrade{}).
-		Where("id = ? AND status IN ?", row.ID, allowed).Updates(updates)
-	return result.Error
+	return s.db.Clauses(dbresolver.Write).WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if _, err := gbmodels.LockGBDeviceForMaintenance(tx, row.DeviceID, row.DeviceCode); err != nil {
+			return err
+		}
+		if err := authorizeCascadeRow(tx, row); err != nil {
+			return err
+		}
+		if err := tx.Where("id = ?", row.ID).Take(&row).Error; err != nil {
+			return err
+		}
+		if row.CascadeBinding != "" {
+			// Business acceptance and the final notification are independent
+			// milestones. Keep the first business result without rewriting a final.
+			if row.CascadeBusinessResult != "" {
+				return nil
+			}
+			if row.Status == gbmodels.FirmwareUpgradeSucceeded || row.Status == gbmodels.FirmwareUpgradeFailed {
+				return tx.Model(&gbmodels.GbDeviceFirmwareUpgrade{}).Where("id = ? AND cascade_business_result = ''", row.ID).
+					Update("cascade_business_result", map[bool]string{true: "OK", false: "ERROR"}[accepted]).Error
+			}
+		}
+		observedAt := s.now()
+		updates := map[string]interface{}{"device_result": map[bool]string{true: "OK", false: "ERROR"}[accepted], "response_at": observedAt, "response_call_id": callID, "response_cseq": cseq, "updated_at": observedAt}
+		if row.CascadeBinding != "" {
+			updates["cascade_business_result"] = map[bool]string{true: "OK", false: "ERROR"}[accepted]
+		}
+		if accepted {
+			updates["status"] = gbmodels.FirmwareUpgradeAccepted
+			updates["accepted_at"] = gorm.Expr("COALESCE(accepted_at, ?)", observedAt)
+			updates["error_code"] = ""
+			updates["error_message"] = ""
+			updates["failed_reason"] = ""
+		} else {
+			updates["status"] = gbmodels.FirmwareUpgradeRejected
+			updates["error_code"] = "DEVICE_REJECTED"
+			updates["error_message"] = "设备拒绝设备升级命令"
+			updates["completed_at"] = observedAt
+		}
+		allowed := []gbmodels.FirmwareUpgradeStatus{gbmodels.FirmwareUpgradeQueued, gbmodels.FirmwareUpgradeSent, gbmodels.FirmwareUpgradeUnknown}
+		if accepted {
+			allowed = append(allowed, gbmodels.FirmwareUpgradeAccepted)
+		}
+		result := tx.Model(&gbmodels.GbDeviceFirmwareUpgrade{}).
+			Where("id = ? AND status IN ?", row.ID, allowed).Updates(updates)
+		return result.Error
+	})
 }
 
 func (s *Service) onUpgradeResult(ctx context.Context, deviceCode, callID, cseq string, body []byte) (bool, error) {
@@ -702,6 +822,9 @@ func (s *Service) applyFinal(ctx context.Context, row gbmodels.GbDeviceFirmwareU
 	// so a new maintenance operation cannot observe a half-applied result.
 	return s.db.Clauses(dbresolver.Write).WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if _, err := gbmodels.LockGBDeviceForMaintenance(tx, row.DeviceID, row.DeviceCode); err != nil {
+			return err
+		}
+		if err := authorizeCascadeRow(tx, row); err != nil {
 			return err
 		}
 		var current gbmodels.GbDeviceFirmwareUpgrade

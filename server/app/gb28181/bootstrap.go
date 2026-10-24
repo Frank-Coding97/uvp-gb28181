@@ -882,7 +882,7 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 		newPTZScheduler = ptz.NewScheduler(newPTZService)
 		srv.SetPTZMessageProcessor(newPTZService)
 		if app.DB() != nil {
-			newFirmwareUpgradeService, err = upgrade.NewService(app.DB(), u, newPTZService, time.Now)
+			newFirmwareUpgradeService, err = upgrade.NewAuthorizedService(app.DB(), u, newPTZService, time.Now, deviceOperations)
 			if err != nil {
 				newRecordQueryService.Close()
 				recordQueryService = nil
@@ -938,8 +938,12 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 		gbroutes.SetDeviceMgmtSubscriptionManager(subscriptionService)
 		subscriptionService.SetProcessor(gbmodels.SubscriptionKindCatalog, subscribe.NewCatalogProcessor(catalog.New(app.DB())))
 		subscriptionService.SetProcessor(gbmodels.SubscriptionKindMobilePosition, subscribe.NewPositionProcessor(app.DB(), time.Now))
-		subscriptionService.SetProcessor(gbmodels.SubscriptionKindAlarm, subscribe.NewAlarmProcessor(app.DB(), time.Now))
-		subscriptionService.SetProcessor(gbmodels.SubscriptionKindPTZPrecisePosition, subscribe.NewPTZProcessor(newPTZService))
+		alarmProcessor := subscribe.NewAlarmProcessor(app.DB(), time.Now)
+		alarmProcessor.SetRelay(cascadeAlarmNotificationBridge{})
+		subscriptionService.SetProcessor(gbmodels.SubscriptionKindAlarm, alarmProcessor)
+		ptzProcessor := subscribe.NewPTZProcessor(newPTZService)
+		ptzProcessor.SetRelay(cascadePTZNotificationBridge{})
+		subscriptionService.SetProcessor(gbmodels.SubscriptionKindPTZPrecisePosition, ptzProcessor)
 		subscriptionScheduler = subscribe.NewScheduler(subscriptionService, 30*time.Second)
 		subscriptionScheduler.Start(context.Background())
 		srv.SetSubscriptionWaker(subscriptionService)

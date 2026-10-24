@@ -508,3 +508,27 @@ func TestPlaybackRegistryPrunesTerminalSessionsAfterTTL(t *testing.T) {
 		t.Fatalf("sessions after prune=%d, want 1(超龄终态记录应被删除)", finalCount)
 	}
 }
+
+func TestPlaybackDownloadPreservesRecordingSelector(t *testing.T) {
+	now := time.Now()
+	invite := &fakeInvite{}
+	service := NewService(NewRegistry(RegistryConfig{}),
+		&fakeNodePicker{node: NodeInfo{ID: "node-1", ServerID: "34020000002000000001", Destination: "192.0.2.20:5060", RecvIP: "192.0.2.10"}},
+		&fakeRTP{}, invite, &fakeMedia{ready: MediaReady{}}, ServiceConfig{})
+	request := validCreate(now)
+	request.Mode, request.DownloadSpeed = ModeDownload, 3
+	request.SIPChannelID = "34020000001320000001"
+	request.RecordingURI = request.SIPChannelID + ":2"
+	created, err := service.Create(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Stop(context.Background(), created.Session.ID, "test finished")
+	if created.Session.RecordingURI != request.RecordingURI || !strings.Contains(invite.last.SDP, "u="+request.RecordingURI+"\r\n") || !strings.Contains(invite.last.SDP, "a=downloadspeed:3\r\n") {
+		t.Fatalf("session=%+v SDP=%q", created.Session, invite.last.SDP)
+	}
+	request.RecordingURI = request.SIPChannelID + ":1"
+	if _, err := service.Create(context.Background(), request); !errors.Is(err, ErrPlaybackBusy) {
+		t.Fatalf("idempotency must not reuse another recording selector: %v", err)
+	}
+}

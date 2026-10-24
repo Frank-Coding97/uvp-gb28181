@@ -577,16 +577,36 @@ func TestPipeline_IngestDeltaUpdatesChannelStatus(t *testing.T) {
 	item := catalog.CatalogItem{DeviceID: "37011200001310000001", Name: "入口", CivilCode: "370112", StatusOn: true}
 	require.NoError(t, p.Ingest(ctx, sender, []catalog.CatalogItem{item}))
 
-	for _, action := range []string{"OFF", "VLOST", "DEFECT"} {
+	for _, tc := range []struct {
+		action string
+		status int8
+	}{{"OFF", gbmodels.ChannelStatusOffline}, {"VLOST", gbmodels.ChannelStatusOffline}, {"DEFECT", gbmodels.ChannelStatusOffline}} {
+		action := tc.action
 		require.NoError(t, p.IngestDelta(ctx, sender, action, catalog.CatalogItem{DeviceID: item.DeviceID}))
 		var channel gbmodels.GbChannel
 		require.NoError(t, db.Where("channel_id = ?", item.DeviceID).First(&channel).Error)
-		assert.Equal(t, gbmodels.ChannelStatusOffline, channel.Status, action)
+		assert.Equal(t, tc.status, channel.Status, action)
+		var state struct{ StatusEvent string }
+		require.NoError(t, db.Table("gb_channel").Select("status_event").Where("id = ?", channel.ID).Take(&state).Error)
+		expectedEvent := action
+		if action == "OFF" {
+			expectedEvent = ""
+		}
+		assert.Equal(t, expectedEvent, state.StatusEvent)
 
 		require.NoError(t, p.IngestDelta(ctx, sender, "ON", catalog.CatalogItem{DeviceID: item.DeviceID}))
 		require.NoError(t, db.Where("channel_id = ?", item.DeviceID).First(&channel).Error)
 		assert.Equal(t, gbmodels.ChannelStatusOnline, channel.Status, action)
+		require.NoError(t, db.Table("gb_channel").Select("status_event").Where("id = ?", channel.ID).Take(&state).Error)
+		assert.Empty(t, state.StatusEvent)
 	}
+	require.NoError(t, p.IngestDelta(ctx, sender, "VLOST", catalog.CatalogItem{DeviceID: item.DeviceID}))
+	require.NoError(t, p.Ingest(ctx, sender, []catalog.CatalogItem{item}))
+	var refreshed gbmodels.GbChannel
+	require.NoError(t, db.Where("channel_id = ?", item.DeviceID).First(&refreshed).Error)
+	assert.Equal(t, gbmodels.ChannelStatusOnline, refreshed.Status)
+	assert.Empty(t, refreshed.StatusEvent, "full Catalog status refresh clears a stale fault event")
+
 }
 
 func TestPipeline_IngestRejectsUnknownDeltaAction(t *testing.T) {

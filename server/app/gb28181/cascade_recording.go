@@ -21,6 +21,7 @@ import (
 	gbplayback "uvplatform.com/uvp-gb28181/app/gb28181/playback"
 	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.com/uvp-gb28181/app/gb28181/recordquery"
+	"uvplatform.com/uvp-gb28181/app/gb28181/sdp"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
@@ -230,8 +231,13 @@ func planCascadeRecordResponses(profile protocol.Profile, query cascadeRecordQue
 			response.Name = items[0].Name
 			response.List = &cascadeRecordList{Num: len(items)}
 			for _, item := range items {
+				filePath := item.FilePath
+				if uri, err := sdp.ParseHistoricalURI(filePath); err == nil && uri.FilePath != "" {
+					uri.DeviceID = query.DeviceID
+					filePath = uri.String()
+				}
 				response.List.Items = append(response.List.Items, cascadeRecordItem{DeviceID: query.DeviceID, Name: item.Name,
-					FilePath: item.FilePath, Address: item.Address, StartTime: item.StartTime, EndTime: item.EndTime, Secrecy: item.Secrecy, Type: string(item.Type), RecorderID: localID, FileSize: item.FileSize})
+					FilePath: filePath, Address: item.Address, StartTime: item.StartTime, EndTime: item.EndTime, Secrecy: item.Secrecy, Type: string(item.Type), RecorderID: localID, FileSize: item.FileSize})
 			}
 		}
 		return manscdp.MarshalProfiledXML(profile, response)

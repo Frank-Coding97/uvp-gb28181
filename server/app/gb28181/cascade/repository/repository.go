@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
 )
@@ -68,6 +70,14 @@ type MediaSessionStore interface {
 	ListNonterminalMediaSessions(ctx context.Context, platformID uint64) ([]model.GbCascadeMediaSession, error)
 }
 
+type AlarmDeliveryStore interface {
+	EnqueueAlarmDelivery(ctx context.Context, delivery *model.GbCascadeAlarmDelivery) (bool, error)
+	ClaimAlarmDeliveries(ctx context.Context, owner string, now time.Time, lease time.Duration, limit int, deliveryKeys ...string) ([]model.GbCascadeAlarmDelivery, error)
+	CompleteAlarmDelivery(ctx context.Context, id uint64, owner string, now time.Time) (bool, error)
+	CheckpointAlarmDelivery(ctx context.Context, id uint64, owner string, now time.Time, targets string) (bool, error)
+	RetryAlarmDelivery(ctx context.Context, id uint64, owner string, now, next time.Time, deliveryErr string, maxAttempts int) (bool, error)
+}
+
 // Repository is the persistence boundary for cascade controllers and actors.
 // Callers update configuration, runtime facts, projections, and media sessions through separate methods.
 type Repository interface {
@@ -75,6 +85,7 @@ type Repository interface {
 	ProjectionStore
 	BusinessGroupStore
 	MediaSessionStore
+	AlarmDeliveryStore
 }
 
 type GormRepository struct {
@@ -83,6 +94,77 @@ type GormRepository struct {
 
 func NewGormRepository(db *gorm.DB) *GormRepository {
 	return &GormRepository{db: db}
+}
+
+func (r *GormRepository) EnqueueAlarmDelivery(ctx context.Context, delivery *model.GbCascadeAlarmDelivery) (bool, error) {
+	result := r.db.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "delivery_key"}}, DoNothing: true}).Create(delivery)
+	if result.Error != nil {
+		// SQL Server's create callback does not honor a non-primary conflict
+		// target for identity inserts. Verify durable existence after a rejected
+		// insert instead of treating every database error as a duplicate.
+		var existing model.GbCascadeAlarmDelivery
+		check := r.db.WithContext(ctx).Select("id").Where("delivery_key = ?", delivery.DeliveryKey).Limit(1).Find(&existing)
+		if check.Error == nil && check.RowsAffected == 1 {
+			return false, nil
+		}
+		return false, errors.Join(result.Error, check.Error)
+	}
+	return result.RowsAffected == 1, result.Error
+}
+
+func (r *GormRepository) ClaimAlarmDeliveries(ctx context.Context, owner string, now time.Time, lease time.Duration, limit int, deliveryKeys ...string) ([]model.GbCascadeAlarmDelivery, error) {
+	if owner == "" || lease <= 0 || limit <= 0 {
+		return nil, fmt.Errorf("invalid alarm delivery lease")
+	}
+	// Selection is advisory. Each conditional UPDATE below atomically acquires a
+	// single item without dialect-specific locks or a read-to-write transaction.
+	var candidates []model.GbCascadeAlarmDelivery
+	query := r.db.WithContext(ctx).Where("(state = ? AND next_attempt_at <= ?) OR (state = ? AND lease_until <= ?)", model.CascadeAlarmDeliveryPending, now, model.CascadeAlarmDeliveryLeased, now)
+	if len(deliveryKeys) > 0 {
+		query = query.Where("delivery_key IN ?", deliveryKeys)
+	}
+	if err := query.Order("next_attempt_at ASC, id ASC").Limit(limit).Find(&candidates).Error; err != nil {
+		return nil, err
+	}
+	var claimed []model.GbCascadeAlarmDelivery
+	until := now.Add(lease)
+	for _, item := range candidates {
+		result := r.db.WithContext(ctx).Model(&model.GbCascadeAlarmDelivery{}).
+			Where("id = ? AND attempts = ? AND ((state = ? AND next_attempt_at <= ?) OR (state = ? AND lease_until <= ?))", item.ID, item.Attempts, model.CascadeAlarmDeliveryPending, now, model.CascadeAlarmDeliveryLeased, now).
+			Updates(map[string]any{"state": model.CascadeAlarmDeliveryLeased, "lease_owner": owner, "lease_until": until, "attempts": gorm.Expr("attempts + 1"), "updated_at": now})
+		if result.Error != nil {
+			return claimed, result.Error
+		}
+		if result.RowsAffected == 1 {
+			item.State, item.LeaseOwner, item.LeaseUntil, item.Attempts = model.CascadeAlarmDeliveryLeased, owner, &until, item.Attempts+1
+			claimed = append(claimed, item)
+		}
+	}
+	return claimed, nil
+}
+
+func (r *GormRepository) CompleteAlarmDelivery(ctx context.Context, id uint64, owner string, now time.Time) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&model.GbCascadeAlarmDelivery{}).
+		Where("id = ? AND state = ? AND lease_owner = ? AND lease_until > ?", id, model.CascadeAlarmDeliveryLeased, owner, now).
+		Updates(map[string]any{"state": model.CascadeAlarmDeliverySent, "lease_owner": "", "lease_until": nil, "sent_at": now, "last_error": "", "updated_at": now})
+	return result.RowsAffected == 1, result.Error
+}
+
+func (r *GormRepository) CheckpointAlarmDelivery(ctx context.Context, id uint64, owner string, now time.Time, targets string) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&model.GbCascadeAlarmDelivery{}).
+		Where("id = ? AND state = ? AND lease_owner = ? AND lease_until > ?", id, model.CascadeAlarmDeliveryLeased, owner, now).
+		Updates(map[string]any{"notify_targets": targets, "updated_at": now})
+	return result.RowsAffected == 1, result.Error
+}
+
+func (r *GormRepository) RetryAlarmDelivery(ctx context.Context, id uint64, owner string, now, next time.Time, deliveryErr string, maxAttempts int) (bool, error) {
+	if maxAttempts <= 0 {
+		return false, fmt.Errorf("invalid alarm delivery attempt limit")
+	}
+	result := r.db.WithContext(ctx).Model(&model.GbCascadeAlarmDelivery{}).
+		Where("id = ? AND state = ? AND lease_owner = ? AND lease_until > ?", id, model.CascadeAlarmDeliveryLeased, owner, now).
+		Updates(map[string]any{"state": gorm.Expr("CASE WHEN attempts >= ? THEN ? ELSE ? END", maxAttempts, model.CascadeAlarmDeliveryFailed, model.CascadeAlarmDeliveryPending), "lease_owner": "", "lease_until": nil, "next_attempt_at": next, "last_error": deliveryErr, "updated_at": now})
+	return result.RowsAffected == 1, result.Error
 }
 
 // CreatePlatform 新建一个上级平台。
@@ -287,37 +369,41 @@ func (r *GormRepository) UpdatePlatformConfig(ctx context.Context, platform *mod
 
 func platformConfigUpdates(platform *model.GbCascadePlatform) map[string]any {
 	return map[string]any{
-		"name":               platform.Name,
-		"upstream_server_id": platform.UpstreamServerID,
-		"upstream_domain":    platform.UpstreamDomain,
-		"host":               platform.Host,
-		"port":               platform.Port,
-		"local_device_id":    platform.LocalDeviceID,
-		"local_domain":       platform.LocalDomain,
-		"local_sip_ip":       platform.LocalSIPIP,
-		"local_sip_port":     platform.LocalSIPPort,
-		"media_advertise_ip": platform.MediaAdvertiseIP,
-		"auth_username":      platform.AuthUsername,
-		"secret_nonce":       platform.SecretNonce,
-		"secret_ciphertext":  platform.SecretCiphertext,
-		"secret_alg":         platform.SecretAlg,
-		"secret_key_version": platform.SecretKeyVersion,
-		"profile_override":   platform.ProfileOverride,
-		"charset_override":   platform.CharsetOverride,
-		"register_expires":   platform.RegisterExpires,
-		"keepalive_interval": platform.KeepaliveInterval,
-		"retry_policy":       platform.RetryPolicy,
-		"transport":          platform.Transport,
-		"catalog_batch_size": platform.CatalogBatchSize,
-		"auto_push_catalog":  platform.AutoPushCatalog,
-		"publish_platform":   platform.PublishPlatform,
-		"publish_civil":      platform.PublishCivil,
-		"publish_group":      platform.PublishGroup,
-		"max_streams":        platform.MaxStreams,
-		"ptz_enabled":        platform.PTZEnabled,
-		"recording_enabled":  platform.RecordingEnabled,
-		"rtcp_keepalive":     platform.RTCPKeepalive,
-		"enabled":            platform.Enabled,
+		"name":                   platform.Name,
+		"upstream_server_id":     platform.UpstreamServerID,
+		"upstream_domain":        platform.UpstreamDomain,
+		"host":                   platform.Host,
+		"port":                   platform.Port,
+		"local_device_id":        platform.LocalDeviceID,
+		"local_domain":           platform.LocalDomain,
+		"local_sip_ip":           platform.LocalSIPIP,
+		"local_sip_port":         platform.LocalSIPPort,
+		"media_advertise_ip":     platform.MediaAdvertiseIP,
+		"auth_username":          platform.AuthUsername,
+		"secret_nonce":           platform.SecretNonce,
+		"secret_ciphertext":      platform.SecretCiphertext,
+		"secret_alg":             platform.SecretAlg,
+		"secret_key_version":     platform.SecretKeyVersion,
+		"profile_override":       platform.ProfileOverride,
+		"charset_override":       platform.CharsetOverride,
+		"register_expires":       platform.RegisterExpires,
+		"keepalive_interval":     platform.KeepaliveInterval,
+		"retry_policy":           platform.RetryPolicy,
+		"transport":              platform.Transport,
+		"catalog_batch_size":     platform.CatalogBatchSize,
+		"auto_push_catalog":      platform.AutoPushCatalog,
+		"publish_platform":       platform.PublishPlatform,
+		"publish_civil":          platform.PublishCivil,
+		"publish_group":          platform.PublishGroup,
+		"max_streams":            platform.MaxStreams,
+		"ptz_enabled":            platform.PTZEnabled,
+		"config_enabled":         platform.ConfigEnabled,
+		"upgrade_enabled":        platform.UpgradeEnabled,
+		"device_control_enabled": platform.DeviceControlEnabled,
+		"maintenance_enabled":    platform.MaintenanceEnabled,
+		"recording_enabled":      platform.RecordingEnabled,
+		"rtcp_keepalive":         platform.RTCPKeepalive,
+		"enabled":                platform.Enabled,
 	}
 }
 
@@ -746,6 +832,9 @@ func (r *GormRepository) CreateMediaSession(ctx context.Context, session *model.
 	if row.State == "" {
 		row.State = model.CascadeMediaSessionStateReceived
 	}
+	if row.Kind == "" {
+		row.Kind = model.CascadeMediaSessionKindVideo
+	}
 	now := time.Now().UTC()
 	if row.ReceivedAt == nil {
 		row.ReceivedAt = &now
@@ -773,6 +862,34 @@ func (r *GormRepository) FindMediaSessionByDialog(ctx context.Context, dialogKey
 	return &session, nil
 }
 
+// FindMediaSessionsByCallID returns non-terminal media rows for one inbound
+// SIP MESSAGE/INVITE transaction. Broadcast correlation also carries its SN
+// in the sanitized summary, so callers can disambiguate repeated upstream
+// Call-IDs without adding protocol-specific columns to the shared media table.
+func (r *GormRepository) FindMediaSessionsByCallID(ctx context.Context, callID string) ([]model.GbCascadeMediaSession, error) {
+	callID = strings.TrimSpace(callID)
+	if callID == "" {
+		return nil, nil
+	}
+	terminal := []model.CascadeMediaSessionState{
+		model.CascadeMediaSessionStateClosed,
+		model.CascadeMediaSessionStateFailed,
+		model.CascadeMediaSessionStateCancelled,
+		model.CascadeMediaSessionStateAborted,
+	}
+	var sessions []model.GbCascadeMediaSession
+	err := r.db.WithContext(ctx).Where("call_id = ? AND session_kind = ? AND state NOT IN ?", callID, model.CascadeMediaSessionKindBroadcast, terminal).Order("id DESC").Find(&sessions).Error
+	return sessions, err
+}
+
+func (r *GormRepository) ListNonterminalVideoSessions(ctx context.Context) ([]model.GbCascadeMediaSession, error) {
+	return r.listNonterminalMediaSessions(ctx, 0, model.CascadeMediaSessionKindVideo)
+}
+
+func (r *GormRepository) ListNonterminalBroadcastSessions(ctx context.Context) ([]model.GbCascadeMediaSession, error) {
+	return r.listNonterminalMediaSessions(ctx, 0, model.CascadeMediaSessionKindBroadcast)
+}
+
 func (r *GormRepository) TransitionMediaSession(ctx context.Context, dialogKey string, from, to model.CascadeMediaSessionState, at time.Time) (bool, error) {
 	if !canTransitionMedia(from, to) {
 		return false, fmt.Errorf("%w: %s -> %s", ErrInvalidMediaTransition, from, to)
@@ -792,6 +909,10 @@ func (r *GormRepository) TransitionMediaSession(ctx context.Context, dialogKey s
 }
 
 func (r *GormRepository) ListNonterminalMediaSessions(ctx context.Context, platformID uint64) ([]model.GbCascadeMediaSession, error) {
+	return r.listNonterminalMediaSessions(ctx, platformID, "")
+}
+
+func (r *GormRepository) listNonterminalMediaSessions(ctx context.Context, platformID uint64, kind model.CascadeMediaSessionKind) ([]model.GbCascadeMediaSession, error) {
 	terminal := []model.CascadeMediaSessionState{
 		model.CascadeMediaSessionStateClosed,
 		model.CascadeMediaSessionStateFailed,
@@ -800,6 +921,9 @@ func (r *GormRepository) ListNonterminalMediaSessions(ctx context.Context, platf
 	}
 	var sessions []model.GbCascadeMediaSession
 	query := r.db.WithContext(ctx).Where("state NOT IN ?", terminal).Order("id")
+	if kind != "" {
+		query = query.Where("session_kind = ?", kind)
+	}
 	if platformID != 0 {
 		query = query.Where("platform_id = ?", platformID)
 	}

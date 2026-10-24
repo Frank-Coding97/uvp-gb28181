@@ -592,15 +592,78 @@ func (m *cascadeCatalogSubscriptions) Shutdown(ctx context.Context) error {
 type cascadeSubscriptionRuntime struct {
 	cascadeRuntimeLifecycle
 	subscriptions *cascadeCatalogSubscriptions
+	positions     *cascadeMobilePositionSubscriptions
+	events        *cascadeEventSubscriptions
+	upgrades      *cascadeUpgradeRuntime
+	broadcast     *cascadeBroadcastRuntime
 }
 
 func (r *cascadeSubscriptionRuntime) Subscriptions(p model.GbCascadePlatform) cascadeservice.PlatformSubscriptions {
-	return r.subscriptions.Subscriptions(p)
+	result := r.subscriptions.Subscriptions(p)
+	if r.positions != nil {
+		position := r.positions.Subscriptions(p)
+		result.MobilePosition = position.MobilePosition
+	}
+	if r.events != nil {
+		events := r.events.Subscriptions(p)
+		result.PTZPosition = events.PTZPosition
+		result.Alarm = events.Alarm
+	}
+	return result
 }
 
 func (r *cascadeSubscriptionRuntime) Reload(ctx context.Context) error {
-	return errors.Join(r.cascadeRuntimeLifecycle.Reload(ctx), r.subscriptions.Reload(ctx))
+	if r.positions == nil && r.events == nil {
+		return errors.Join(r.cascadeRuntimeLifecycle.Reload(ctx), r.subscriptions.Reload(ctx))
+	}
+	var positionErr, eventErr error
+	if r.positions != nil {
+		positionErr = r.positions.Reload(ctx)
+	}
+	if r.events != nil {
+		eventErr = r.events.Reload(ctx)
+	}
+	return errors.Join(r.cascadeRuntimeLifecycle.Reload(ctx), r.subscriptions.Reload(ctx), positionErr, eventErr)
 }
 func (r *cascadeSubscriptionRuntime) Shutdown(ctx context.Context) error {
-	return errors.Join(r.subscriptions.Shutdown(ctx), r.cascadeRuntimeLifecycle.Shutdown(ctx))
+	var broadcastErr error
+	if r.broadcast != nil {
+		broadcastErr = r.broadcast.Shutdown(ctx)
+	}
+	var upgradeErr error
+	if r.upgrades != nil {
+		upgradeErr = r.upgrades.Shutdown(ctx)
+	}
+	if r.positions == nil && r.events == nil {
+		return errors.Join(broadcastErr, upgradeErr, r.subscriptions.Shutdown(ctx), r.cascadeRuntimeLifecycle.Shutdown(ctx))
+	}
+	var positionErr, eventErr error
+	if r.positions != nil {
+		positionErr = r.positions.Shutdown(ctx)
+	}
+	if r.events != nil {
+		eventErr = r.events.Shutdown(ctx)
+	}
+	return errors.Join(broadcastErr, upgradeErr, positionErr, eventErr, r.subscriptions.Shutdown(ctx), r.cascadeRuntimeLifecycle.Shutdown(ctx))
+}
+
+func (r *cascadeSubscriptionRuntime) BroadcastPTZ(ctx context.Context, deviceCode, callID, cseq string, body []byte) error {
+	if r.events == nil {
+		return nil
+	}
+	return r.events.BroadcastPTZ(ctx, deviceCode, callID, cseq, body)
+}
+
+func (r *cascadeSubscriptionRuntime) BroadcastAlarm(ctx context.Context, deviceCode, callID, cseq string, body []byte) error {
+	if r.events == nil {
+		return nil
+	}
+	return r.events.BroadcastAlarm(ctx, deviceCode, callID, cseq, body)
+}
+
+func (r *cascadeSubscriptionRuntime) EnqueueAlarm(ctx context.Context, deviceCode, callID, cseq string, body []byte) error {
+	if r.events == nil {
+		return fmt.Errorf("cascade Alarm acceptance runtime is unavailable")
+	}
+	return r.events.EnqueueAlarm(ctx, deviceCode, callID, cseq, body)
 }

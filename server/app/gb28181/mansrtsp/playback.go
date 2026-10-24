@@ -86,7 +86,7 @@ func BuildSeek(cseq uint32, position, segmentDuration time.Duration) ([]byte, er
 func BuildScale(cseq uint32, scale float64) ([]byte, error) {
 	wireScale, ok := playbackScale(scale)
 	if !ok {
-		return nil, invalidArgument("scale", "must be one of 0.25, 0.5, 1, 2, or 4")
+		return nil, invalidArgument("scale", "must be one of -1, 0.25, 0.5, 1, 2, or 4")
 	}
 	return buildCommand("PLAY", cseq, "Scale: "+wireScale)
 }
@@ -116,6 +116,8 @@ func buildCommand(method string, cseq uint32, headers ...string) ([]byte, error)
 
 func playbackScale(scale float64) (string, bool) {
 	switch scale {
+	case -1:
+		return "-1.0", true
 	case 0.25:
 		return "0.25", true
 	case 0.5:

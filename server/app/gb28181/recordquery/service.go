@@ -69,6 +69,11 @@ func (s *Service) QueryForCascade(ctx context.Context, request CascadeQueryReque
 	return s.query(ctx, input)
 }
 
+// Location is the wall-clock zone used to interpret device recording ranges.
+func (s *Service) Location() *time.Location {
+	return s.options.Location
+}
+
 func (s *Service) query(ctx context.Context, request QueryRequest) (QueryResult, error) {
 	if s == nil {
 		return QueryResult{}, queryError(ErrorCodeUnavailable, ErrUnavailable)

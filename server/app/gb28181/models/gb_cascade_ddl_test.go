@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -22,6 +23,8 @@ func TestCascadeModelsAutoMigrateAndUniqueConstraints(t *testing.T) {
 		&cascademodel.GbCascadeDeviceProjection{},
 		&cascademodel.GbCascadeChannelProjection{},
 		&cascademodel.GbCascadeMediaSession{},
+		&cascademodel.GbCascadeSnapshotSession{},
+		&cascademodel.GbCascadeAlarmDelivery{},
 		&cascademodel.GbCascadeBusinessNode{},
 		&cascademodel.GbCascadeBusinessBinding{},
 	))
@@ -31,6 +34,8 @@ func TestCascadeModelsAutoMigrateAndUniqueConstraints(t *testing.T) {
 		&cascademodel.GbCascadeDeviceProjection{},
 		&cascademodel.GbCascadeChannelProjection{},
 		&cascademodel.GbCascadeMediaSession{},
+		&cascademodel.GbCascadeSnapshotSession{},
+		&cascademodel.GbCascadeAlarmDelivery{},
 		&cascademodel.GbCascadeBusinessNode{},
 		&cascademodel.GbCascadeBusinessBinding{},
 	} {
@@ -42,8 +47,11 @@ func TestCascadeModelsAutoMigrateAndUniqueConstraints(t *testing.T) {
 	} {
 		require.True(t, db.Migrator().HasColumn(&cascademodel.GbCascadePlatform{}, column), column)
 	}
-	for _, column := range []string{"dialog_key", "state", "sender_ssrc", "closed_at"} {
+	for _, column := range []string{"dialog_key", "session_kind", "state", "sender_ssrc", "closed_at"} {
 		require.True(t, db.Migrator().HasColumn(&cascademodel.GbCascadeMediaSession{}, column), column)
+	}
+	for _, column := range []string{"delivery_key", "platform_id", "binding_fingerprint", "notify_targets", "payload", "state", "attempts", "next_attempt_at", "lease_owner", "lease_until", "sent_at"} {
+		require.True(t, db.Migrator().HasColumn(&cascademodel.GbCascadeAlarmDelivery{}, column), column)
 	}
 
 	platform := cascademodel.GbCascadePlatform{
@@ -83,6 +91,16 @@ func TestCascadeModelsAutoMigrateAndUniqueConstraints(t *testing.T) {
 	duplicateSession := session
 	duplicateSession.ID = 0
 	require.Error(t, db.Create(&duplicateSession).Error, "dialog keys must remain unique for idempotent invite handling")
+
+	snapshotSession := cascademodel.GbCascadeSnapshotSession{
+		PlatformID: platform.ID, UpstreamSessionID: "capture-a", PublishedChannelID: channel.PublishedChannelID,
+		SourceDeviceID: 1, SourceChannelID: 2, ConfigRevision: 1, ProjectionRevision: 1,
+		State: cascademodel.CascadeSnapshotSessionPending, ExpiresAt: time.Now().Add(time.Hour),
+	}
+	require.NoError(t, db.Create(&snapshotSession).Error)
+	duplicateSnapshotSession := snapshotSession
+	duplicateSnapshotSession.ID = 0
+	require.Error(t, db.Create(&duplicateSnapshotSession).Error, "an upstream SessionID must map to a single capture for each platform")
 }
 
 func TestCascadeMigrationContracts(t *testing.T) {

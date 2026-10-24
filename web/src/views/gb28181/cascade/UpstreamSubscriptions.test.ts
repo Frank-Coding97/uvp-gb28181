@@ -49,6 +49,33 @@ describe("upstream subscription ledger", () => {
     expect(text).toContain("失败（500）");
   });
 
+  it("renders all four active subscription kinds and their own event details", async () => {
+    const value = snapshot();
+    const catalogSession = value.catalog.sessions?.[0];
+    if (!catalogSession) throw new Error("catalog fixture needs an active session");
+    for (const [key, event] of [
+      ["mobilePosition", "presence;id=position"],
+      ["ptzPosition", "PTZPosition;id=ptz"],
+      ["alarm", "presence;id=alarm"]
+    ] as const) {
+      value[key] = {
+        state: "active",
+        sessions: [{ ...catalogSession, event }]
+      };
+    }
+    const wrapper = mount(UpstreamSubscriptions, { props: { subscriptions: value } });
+    expect(wrapper.text().match(/已订阅（/g)).toHaveLength(4);
+    expect(wrapper.text()).not.toContain("尚未接通");
+    for (const event of ["presence;id=position", "PTZPosition;id=ptz", "presence;id=alarm"]) {
+      expect(wrapper.text()).toContain(event);
+    }
+    await wrapper.setProps({ subscriptions: { ...value, alarm: { state: "inactive", sessions: [] } } });
+    expect(wrapper.text().match(/已订阅（/g)).toHaveLength(3);
+    expect(wrapper.text()).toContain("未订阅");
+    expect(wrapper.text()).not.toContain("presence;id=alarm");
+    expect(wrapper.text()).toContain("presence;id=position");
+  });
+
   it("updates after cancellation and distinguishes unavailable, unsupported and old API", async () => {
     const wrapper = mount(UpstreamSubscriptions, { props: { subscriptions: snapshot() } });
     const value = snapshot();

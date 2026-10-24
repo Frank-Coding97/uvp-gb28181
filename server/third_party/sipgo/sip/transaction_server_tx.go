@@ -142,9 +142,16 @@ func (tx *ServerTx) Respond(res *Response) error {
 	default:
 		input = server_input_user_300_plus
 	}
-	tx.spinFsmWithResponse(input, res)
-	// In case of termination or some error
-	return tx.Err()
+	// Read this send's outcome under the same lock as its FSM transition.
+	// Reliable non-INVITE transactions schedule Timer J with zero delay;
+	// reading Err after unlocking can report normal termination as a failed
+	// write, causing callers to discard successfully acknowledged work.
+	tx.fsmMu.Lock()
+	tx.fsmResp = res
+	tx.spinFsmUnsafe(input)
+	err := tx.fsmErr
+	tx.fsmMu.Unlock()
+	return err
 }
 
 // Acks makes channel for sending acks. Channel is created on demand

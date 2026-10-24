@@ -10,10 +10,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.uber.org/zap"
+
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/service"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/sipclient"
 	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 const (
@@ -563,6 +566,13 @@ func (a *Actor) run() {
 			switch event.kind {
 			case transactionRegister:
 				grantedExpires := registerExpiresForResult(a.platform, event.result)
+				if event.result.ServerDateFound {
+					if event.result.ServerDateErr != nil {
+						app.Log(context.Background()).Warn("级联上级 REGISTER Date 无效", zap.String("event", "cascade.registration.date_invalid"), zap.Uint64("platform_id", a.platform.ID), zap.Error(event.result.ServerDateErr))
+					} else {
+						app.Log(context.Background()).Info("级联上级 REGISTER Date 已观测", zap.String("event", "cascade.registration.date_observed"), zap.Uint64("platform_id", a.platform.ID), zap.Time("server_time", event.result.ServerDate), zap.Int64("offset_seconds", int64(event.result.ServerDate.Sub(now).Seconds())))
+					}
+				}
 				if event.result.Success && grantedExpires > 0 {
 					registered = true
 					heartbeatFailures = 0

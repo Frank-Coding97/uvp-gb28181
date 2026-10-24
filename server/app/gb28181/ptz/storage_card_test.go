@@ -2,6 +2,7 @@ package ptz
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
 	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
@@ -23,6 +25,37 @@ func newStorageCardTestService(t *testing.T) (*Service, *gorm.DB) {
 	})
 	require.NoError(t, err)
 	return service, db
+}
+
+func TestCascadeTeleBootAuthorizationRequiresLiveSourceChannel(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(
+		&model.GbCascadePlatform{}, &model.GbCascadeDeviceProjection{}, &model.GbCascadeChannelProjection{},
+		&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, gbmodels.GbPTZOperation{},
+	))
+	service, err := NewService(db, &fakeTrackedSender{}, time.Now)
+	require.NoError(t, err)
+	platform := model.GbCascadePlatform{Enabled: true, MaintenanceEnabled: true, ConfigRevision: 3, ProjectionRevision: 4}
+	require.NoError(t, db.Create(&platform).Error)
+	sourceDevice := gbmodels.GbDevice{DeviceID: "DEVICE", OwnerDeptID: 8}
+	require.NoError(t, db.Create(&sourceDevice).Error)
+	deviceProjection := model.GbCascadeDeviceProjection{PlatformID: platform.ID, SourceDeviceID: uint64(sourceDevice.ID), PublishedDeviceID: "PUBLISHED_DEVICE", Active: true}
+	require.NoError(t, db.Create(&deviceProjection).Error)
+	sourceChannel := gbmodels.GbChannel{DeviceID: sourceDevice.DeviceID, ChannelID: "CHANNEL", OwnerDeptID: sourceDevice.OwnerDeptID}
+	require.NoError(t, db.Create(&sourceChannel).Error)
+	channelProjection := model.GbCascadeChannelProjection{PlatformID: platform.ID, DeviceProjectionID: deviceProjection.ID, SourceChannelID: uint64(sourceChannel.ID), PublishedChannelID: "PUBLISHED_CHANNEL", Active: true}
+	require.NoError(t, db.Create(&channelProjection).Error)
+	authorization := CascadeMaintenanceAuthorization{PlatformID: platform.ID, ConfigRevision: 3, ProjectionRevision: 4, PublishedID: "PUBLISHED_CHANNEL", Action: deviceRebootAction}
+	payload, err := json.Marshal(cascadeMaintenanceAuthorizationPayload{CascadeAuthorization: &authorization})
+	require.NoError(t, err)
+	operation := gbmodels.GbPTZOperation{DeviceID: sourceDevice.ID, DeviceCode: sourceDevice.DeviceID, Action: deviceRebootAction, PayloadJSON: string(payload)}
+	require.NoError(t, service.validateCascadeMaintenanceAuthorization(t.Context(), operation))
+
+	require.NoError(t, db.Model(&sourceChannel).Update("deleted_at", time.Now()).Error)
+	require.Error(t, service.validateCascadeMaintenanceAuthorization(t.Context(), operation), "soft-deleted source channel must revoke the published-ID authorization")
+	require.NoError(t, db.Model(&sourceChannel).Updates(map[string]interface{}{"deleted_at": nil, "device_id": "OTHER"}).Error)
+	require.Error(t, service.validateCascadeMaintenanceAuthorization(t.Context(), operation), "source channel reassigned to another device must revoke authorization")
 }
 
 func createStorageCardOperation(t *testing.T, db *gorm.DB, operationID string, deviceID uint, targetCode string) gbmodels.GbPTZOperation {

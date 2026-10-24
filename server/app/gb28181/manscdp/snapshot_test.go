@@ -263,8 +263,8 @@ func TestParseUploadSnapShotFinishedRejectsUnusable(t *testing.T) {
 func TestParseUploadSnapShotFinishedAcceptsEmptyList(t *testing.T) {
 	for name, body := range map[string]string{
 		"自闭合空标签": `<Notify><CmdType>UploadSnapShotFinished</CmdType><SN>2</SN><DeviceID>D</DeviceID><SessionID>s</SessionID><SnapShotList/></Notify>`,
-		"元素整个缺席":  `<Notify><CmdType>UploadSnapShotFinished</CmdType><SN>2</SN><DeviceID>D</DeviceID><SessionID>s</SessionID></Notify>`,
-		"空白文件标识":  `<Notify><CmdType>UploadSnapShotFinished</CmdType><SN>2</SN><DeviceID>D</DeviceID><SessionID>s</SessionID><SnapShotList><SnapShotFileID>  </SnapShotFileID></SnapShotList></Notify>`,
+		"元素整个缺席": `<Notify><CmdType>UploadSnapShotFinished</CmdType><SN>2</SN><DeviceID>D</DeviceID><SessionID>s</SessionID></Notify>`,
+		"空白文件标识": `<Notify><CmdType>UploadSnapShotFinished</CmdType><SN>2</SN><DeviceID>D</DeviceID><SessionID>s</SessionID><SnapShotList><SnapShotFileID>  </SnapShotFileID></SnapShotList></Notify>`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			finished, err := ParseUploadSnapShotFinished([]byte(body))
@@ -273,6 +273,22 @@ func TestParseUploadSnapShotFinishedAcceptsEmptyList(t *testing.T) {
 			require.Equal(t, "s", finished.SessionID, "会话关联字段必须照常解析")
 		})
 	}
+}
+
+func TestBuildUploadSnapShotFinishedRewritesCascadeIdentity(t *testing.T) {
+	profile := protocol.ProfileFor(protocol.Version2022)
+	body, err := BuildUploadSnapShotFinished(profile, UploadSnapShotFinished{
+		SN: "42", DeviceID: "34020000001320000012", SessionID: "upstream-session",
+		FileIDs: []string{"source-file-1", "source-file-2"},
+	})
+	require.NoError(t, err)
+	require.Contains(t, string(body), "encoding=\"GB18030\"")
+	got, err := ParseUploadSnapShotFinished(body)
+	require.NoError(t, err)
+	require.Equal(t, "42", got.SN)
+	require.Equal(t, "34020000001320000012", got.DeviceID)
+	require.Equal(t, "upstream-session", got.SessionID)
+	require.Equal(t, []string{"source-file-1", "source-file-2"}, got.FileIDs)
 }
 
 // ==================== 私有形态（模拟器口径，兼容保留） ====================

@@ -59,10 +59,15 @@ func DiffCatalog(previous, current []CatalogItem) []CatalogChange {
 		}
 		metadata := item
 		metadata.Status = prior.Status
+		metadata.StatusEvent = prior.StatusEvent
 		if metadata != prior {
 			changes = append(changes, CatalogChange{item, "UPDATE"})
 		}
-		if item.Status != prior.Status && (item.Status == ResourceStatusOnline || item.Status == ResourceStatusOffline) {
+		if item.StatusEvent != prior.StatusEvent && (item.StatusEvent == ResourceStatusVideoLost || item.StatusEvent == ResourceStatusDefect) {
+			changes = append(changes, CatalogChange{CatalogItem{ID: item.ID}, string(item.StatusEvent)})
+		}
+		clearedFault := (prior.StatusEvent == ResourceStatusVideoLost || prior.StatusEvent == ResourceStatusDefect) && item.StatusEvent == "" && item.Status == ResourceStatusOffline
+		if (clearedFault || (item.StatusEvent != ResourceStatusVideoLost && item.StatusEvent != ResourceStatusDefect && item.Status != prior.Status)) && (item.Status == ResourceStatusOnline || item.Status == ResourceStatusOffline) {
 			changes = append(changes, CatalogChange{CatalogItem{ID: item.ID}, string(item.Status)})
 		}
 	}
@@ -232,6 +237,12 @@ func ApplyCatalogChanges(items []CatalogItem, changes []CatalogChange) []Catalog
 		case "ON", "OFF":
 			if index >= 0 {
 				out[index].Status = ResourceStatus(change.Event)
+				out[index].StatusEvent = ""
+			}
+		case "VLOST", "DEFECT":
+			if index >= 0 {
+				out[index].Status = ResourceStatusOffline
+				out[index].StatusEvent = ResourceStatus(change.Event)
 			}
 		}
 	}

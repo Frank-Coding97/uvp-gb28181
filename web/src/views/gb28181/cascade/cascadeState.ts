@@ -282,7 +282,11 @@ export function defaultCascadePlatform() {
     publishGroup: false,
     maxStreams: 0,
     ptzEnabled: false,
+    deviceControlEnabled: false,
+    maintenanceEnabled: false,
     autoPushCatalog: false,
+    configEnabled: false,
+    upgradeEnabled: false,
     recordingEnabled: false,
     rtcpKeepalive: false,
     enabled: false

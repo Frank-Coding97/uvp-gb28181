@@ -290,21 +290,25 @@ func (p *Pipeline) IngestDelta(ctx context.Context, sender Sender, action string
 	case "DEL", "DELETE":
 		return p.softDelete(ctx, sender, it.DeviceID)
 	case "ON":
-		return p.updateChannelStatus(ctx, sender, it.DeviceID, gbmodels.ChannelStatusOnline)
-	case "OFF", "VLOST", "DEFECT":
-		return p.updateChannelStatus(ctx, sender, it.DeviceID, gbmodels.ChannelStatusOffline)
+		return p.updateChannelStatus(ctx, sender, it.DeviceID, gbmodels.ChannelStatusOnline, "")
+	case "OFF":
+		return p.updateChannelStatus(ctx, sender, it.DeviceID, gbmodels.ChannelStatusOffline, "")
+	case "VLOST":
+		return p.updateChannelStatus(ctx, sender, it.DeviceID, gbmodels.ChannelStatusOffline, gbmodels.ChannelStatusEventVideoLost)
+	case "DEFECT":
+		return p.updateChannelStatus(ctx, sender, it.DeviceID, gbmodels.ChannelStatusOffline, gbmodels.ChannelStatusEventDefect)
 	default:
 		return errors.New("catalog: unknown delta action: " + action)
 	}
 }
 
-func (p *Pipeline) updateChannelStatus(ctx context.Context, sender Sender, code string, status int8) error {
+func (p *Pipeline) updateChannelStatus(ctx context.Context, sender Sender, code string, status int8, event string) error {
 	if code == "" {
 		return nil
 	}
 	return p.db.WithContext(ctx).Model(&gbmodels.GbChannel{}).
 		Where("owner_dept_id = ? AND device_id = ? AND channel_id = ?", sender.OwnerDeptID, sender.SourceDeviceID, code).
-		Update("status", status).Error
+		Updates(map[string]any{"status": status, "status_event": event}).Error
 }
 
 // softDelete 软删节点 + 关联(deleted_at)

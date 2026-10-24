@@ -80,3 +80,13 @@ func TestOnNotify_TerminatedExpiresWithoutDispatch(t *testing.T) {
 	require.Equal(t, gbmodels.SubscriptionStatusExpired, sub.Status)
 	require.Nil(t, sub.NextActionAt)
 }
+
+func TestOnAlarmNotifyStorageFailureIsNotAccepted(t *testing.T) {
+	sender := &fakeSender{response: uac.SubscriptionResponse{StatusCode: 200, Expires: 3600, CallID: "alarm-dialog", CSeq: 1}}
+	svc, db, device := newServiceTest(t, sender)
+	_, err := svc.Enable(t.Context(), device, gbmodels.SubscriptionKindAlarm)
+	require.NoError(t, err)
+	require.NoError(t, db.Migrator().DropTable(&gbmodels.GbDeviceSubscription{}))
+	err = svc.OnNotify(t.Context(), Notification{Kind: gbmodels.SubscriptionKindAlarm, DeviceCode: device.DeviceID, CallID: "alarm-dialog"})
+	require.ErrorIs(t, err, ErrAlarmNotAccepted, "a database outage cannot be mistaken for an unknown dialog and acknowledged")
+}

@@ -2,6 +2,7 @@ package subscribe
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +23,8 @@ func TestAlarmProcessor_DeduplicatesNotifyAndMessage(t *testing.T) {
 	require.NoError(t, db.Create(device).Error)
 	p := NewAlarmProcessor(db, func() time.Time { return time.Date(2026, 7, 19, 16, 40, 0, 0, time.Local) })
 	p.saveEnabled = func() bool { return true } // 出厂默认已改为不落库，落库用例需显式开启
+	relay := &alarmNotificationRelayRecorder{}
+	p.SetRelay(relay)
 	body := []byte(`<Notify><CmdType>Alarm</CmdType><SN>7</SN><DeviceID>UNKNOWN</DeviceID><AlarmTime>2026-07-19T16:39:00</AlarmTime><AlarmPriority>2</AlarmPriority><AlarmDescription>loss</AlarmDescription></Notify>`)
 	notification := Notification{CallID: "call", CSeq: "9", Body: body}
 	require.NoError(t, p.Process(context.Background(), device, notification))
@@ -31,6 +34,24 @@ func TestAlarmProcessor_DeduplicatesNotifyAndMessage(t *testing.T) {
 	require.Len(t, events, 1)
 	require.Nil(t, events[0].ChannelID)
 	require.Equal(t, "UNKNOWN", events[0].SourceCode)
+	require.Equal(t, 2, relay.calls, "each reception must reach the idempotent durable relay even when alarm history already exists")
+	require.Equal(t, body, relay.body)
+}
+
+type alarmNotificationRelayRecorder struct {
+	calls      int
+	deviceCode string
+	callID     string
+	cseq       string
+	body       []byte
+	err        error
+}
+
+func (r *alarmNotificationRelayRecorder) RelayAlarmNotify(_ context.Context, deviceCode, callID, cseq string, body []byte) error {
+	r.calls++
+	r.deviceCode, r.callID, r.cseq = deviceCode, callID, cseq
+	r.body = append([]byte(nil), body...)
+	return r.err
 }
 
 // TestAlarmProcessor_RawSummaryIsUTF8ForGB2312Body 复现 gorm Error 1366:
@@ -90,12 +111,43 @@ func TestAlarmProcessor_DisabledStillParsesButDoesNotPersist(t *testing.T) {
 	require.NoError(t, db.Create(device).Error)
 	p := NewAlarmProcessor(db, time.Now)
 	p.saveEnabled = func() bool { return false }
+	relay := &alarmNotificationRelayRecorder{}
+	p.SetRelay(relay)
 
 	body := []byte(`<Notify><CmdType>Alarm</CmdType><SN>7</SN><DeviceID>D</DeviceID><AlarmPriority>2</AlarmPriority></Notify>`)
 	require.NoError(t, p.Process(context.Background(), device, Notification{CallID: "call", CSeq: "9", Body: body}))
+	require.Equal(t, 1, relay.calls, "disabling alarm persistence must not disable cascade relay")
+	require.Equal(t, "D", relay.deviceCode)
+	require.Equal(t, "call", relay.callID)
+	require.Equal(t, "9", relay.cseq)
+	require.Equal(t, body, relay.body)
 
 	var count int64
 	require.NoError(t, db.Model(&gbmodels.GbAlarmEvent{}).Count(&count).Error)
 	require.Zero(t, count)
+	require.Equal(t, 1, relay.calls)
 	require.Error(t, p.Process(context.Background(), device, Notification{Body: []byte(`<Notify>`)}))
+}
+
+func TestAlarmProcessorRetransmissionRepairsFailedDurableRelay(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &gbmodels.GbAlarmEvent{}))
+	device := &gbmodels.GbDevice{DeviceID: "D"}
+	require.NoError(t, db.Create(device).Error)
+	p := NewAlarmProcessor(db, time.Now)
+	p.saveEnabled = func() bool { return true }
+	relay := &alarmNotificationRelayRecorder{err: fmt.Errorf("outbox unavailable")}
+	p.SetRelay(relay)
+	notification := Notification{CallID: "same-call", CSeq: "1", Body: []byte(`<Notify><CmdType>Alarm</CmdType><SN>7</SN><DeviceID>D</DeviceID></Notify>`)}
+	require.ErrorIs(t, p.Process(t.Context(), device, notification), ErrAlarmNotAccepted)
+	relay.err = nil
+	require.NoError(t, p.Process(t.Context(), device, notification))
+	require.Equal(t, 2, relay.calls, "history deduplication cannot suppress retrying the durable relay")
+	var count int64
+	require.NoError(t, db.Model(&gbmodels.GbAlarmEvent{}).Count(&count).Error)
+	require.EqualValues(t, 1, count)
+	p.saveEnabled = func() bool { return false }
+	relay.err = fmt.Errorf("still unavailable")
+	require.ErrorIs(t, p.Process(t.Context(), device, notification), ErrAlarmNotAccepted)
 }

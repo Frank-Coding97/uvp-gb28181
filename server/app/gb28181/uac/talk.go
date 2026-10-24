@@ -30,6 +30,7 @@ type TalkDialogMetadata struct {
 	DeviceID   string
 	ChannelID  string
 	SSRC       string
+	AnswerSDP  string
 }
 
 type TalkByeHandler func(TalkDialogMetadata)
@@ -40,6 +41,7 @@ type talkDialog interface {
 	Bye(context.Context) error
 	Close() error
 	StatusCode() int
+	AnswerSDP() string
 	ReadBye(*sip.Request, sip.ServerTransaction) error
 }
 
@@ -81,6 +83,13 @@ func (d *sipgoTalkDialog) StatusCode() int {
 		return 0
 	}
 	return int(d.session.InviteResponse.StatusCode)
+}
+
+func (d *sipgoTalkDialog) AnswerSDP() string {
+	if d.session.InviteResponse == nil {
+		return ""
+	}
+	return string(d.session.InviteResponse.Body())
 }
 
 func (d *sipgoTalkDialog) ReadBye(req *sip.Request, tx sip.ServerTransaction) error {
@@ -206,6 +215,12 @@ func (u *UAC) InviteTalk(ctx context.Context, in TalkInviteRequest) (TalkDialogM
 	}
 
 	metadata.StatusCode = dialog.StatusCode()
+	if metadata.StatusCode < 200 || metadata.StatusCode >= 300 {
+		_ = dialog.Close()
+		u.recordEnd(metadata.CallID, strconv.FormatUint(uint64(metadata.CSeq), 10), metadata.StatusCode, false)
+		return metadata, fmt.Errorf("TALK INVITE 未取得成功应答: %d", metadata.StatusCode)
+	}
+	metadata.AnswerSDP = dialog.AnswerSDP()
 	record := &talkDialogRecord{dialog: dialog, metadata: metadata}
 	u.talkDialogs.put(record)
 	if err := u.AckTalk(ctx, metadata.CallID); err != nil {

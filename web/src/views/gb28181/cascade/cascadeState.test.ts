@@ -27,7 +27,15 @@ describe("cascade platform state", () => {
   });
 
   it("keeps automatic catalog publication, recording authorization and RTCP opt-in", () => {
-    expect(defaultCascadePlatform()).toMatchObject({ autoPushCatalog: false, recordingEnabled: false, rtcpKeepalive: false });
+    expect(defaultCascadePlatform()).toMatchObject({
+      autoPushCatalog: false,
+      recordingEnabled: false,
+      rtcpKeepalive: false,
+      configEnabled: false,
+      upgradeEnabled: false,
+      deviceControlEnabled: false,
+      maintenanceEnabled: false
+    });
   });
   it("defaults catalog batches to one and limits new choices to powers of two through 64", () => {
     expect(defaultCascadePlatform().catalogBatchSize).toBe(1);

@@ -31,16 +31,19 @@ const (
 type ResourceStatus string
 
 const (
-	ResourceStatusOnline  ResourceStatus = "ON"
-	ResourceStatusOffline ResourceStatus = "OFF"
+	ResourceStatusOnline    ResourceStatus = "ON"
+	ResourceStatusOffline   ResourceStatus = "OFF"
+	ResourceStatusVideoLost ResourceStatus = "VLOST"
+	ResourceStatusDefect    ResourceStatus = "DEFECT"
 )
 
 // SourceFacts contains the status and channel metadata read with the projection.
 // Missing status entries are offline so a snapshot never invents an online resource.
 type SourceFacts struct {
-	DeviceOnline    map[uint64]bool
-	ChannelOnline   map[uint64]bool
-	ChannelMetadata map[uint64]ChannelMetadata
+	DeviceOnline       map[uint64]bool
+	ChannelOnline      map[uint64]bool
+	ChannelStatusEvent map[uint64]ResourceStatus
+	ChannelMetadata    map[uint64]ChannelMetadata
 }
 
 type ChannelMetadata struct {
@@ -67,6 +70,7 @@ type CatalogItem struct {
 	Parental        int
 	Secrecy         int
 	Status          ResourceStatus
+	StatusEvent     ResourceStatus
 }
 
 type PublishedChannelTarget struct {
@@ -209,11 +213,12 @@ func appendChannelItems(snapshot *Snapshot, platformID uint64, devices map[uint6
 		}
 		snapshot.channelMetadata[channel.SourceChannelID] = metadata
 		item := CatalogItem{
-			ID:       channel.PublishedChannelID,
-			ParentID: parentID,
-			Kind:     CatalogItemChannel,
-			Name:     channel.Name,
-			Status:   channelStatus(device, channel, facts),
+			ID:          channel.PublishedChannelID,
+			ParentID:    parentID,
+			Kind:        CatalogItemChannel,
+			Name:        channel.Name,
+			Status:      channelStatus(device, channel, facts),
+			StatusEvent: channelStatusEvent(device, channel, facts),
 		}
 		snapshot.Items = append(snapshot.Items, item)
 		snapshot.channels[channel.PublishedChannelID] = PublishedChannelTarget{
@@ -501,6 +506,17 @@ func channelStatus(device model.GbCascadeDeviceProjection, channel model.GbCasca
 		return ResourceStatusOnline
 	}
 	return ResourceStatusOffline
+}
+
+func channelStatusEvent(device model.GbCascadeDeviceProjection, channel model.GbCascadeChannelProjection, facts SourceFacts) ResourceStatus {
+	if !facts.DeviceOnline[device.SourceDeviceID] {
+		return ""
+	}
+	event := facts.ChannelStatusEvent[channel.SourceChannelID]
+	if event == ResourceStatusVideoLost || event == ResourceStatusDefect {
+		return event
+	}
+	return ""
 }
 
 func addPublishedID(ids map[string]struct{}, id string) error {

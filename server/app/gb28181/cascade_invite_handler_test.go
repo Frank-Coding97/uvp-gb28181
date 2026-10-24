@@ -496,6 +496,16 @@ func TestCascadeVideoCrashRecoveryStopsOnlyPersistedSender(t *testing.T) {
 	require.Empty(t, stops)
 }
 
+func TestCascadeVideoCrashRecoveryIgnoresBroadcastSessions(t *testing.T) {
+	h, db, stops := newCascadeVideoTestRuntime(t)
+	row := model.GbCascadeMediaSession{Kind: model.CascadeMediaSessionKindBroadcast, PlatformID: 1, DialogKey: "broadcast-call", CallID: "broadcast-call", State: model.CascadeMediaSessionStateAnswered, ZLMNodeID: 1, ZLMVHost: "__defaultVhost__", ZLMApp: "rtp", ZLMStream: "broadcast-source", SenderSSRC: "0200000008"}
+	require.NoError(t, db.Create(&row).Error)
+	require.NoError(t, h.recoverSenders())
+	require.Empty(t, stops, "video recovery must not stop a broadcast-owned RTP sender")
+	require.NoError(t, db.First(&row, row.ID).Error)
+	require.Equal(t, model.CascadeMediaSessionStateAnswered, row.State, "video recovery must not rewrite broadcast signaling state")
+}
+
 func TestCascadeVideoRetainsLeaseUntilFailedStopIsRetried(t *testing.T) {
 	h, _, stops := newCascadeVideoTestRuntime(t, 1)
 	req := cascadeTestRequest(15060, "0200000001")

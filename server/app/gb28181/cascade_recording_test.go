@@ -21,7 +21,7 @@ import (
 func TestCascadeRecordInfoPlanRewritesPublishedIdentityAndBatches(t *testing.T) {
 	query := cascadeRecordQuery{SN: 73, DeviceID: "34020000001320000010"}
 	items := []recordquery.Record{
-		{RecordInfoItem: manscdp.RecordInfoItem{DeviceID: "source-channel", Name: "first", StartTime: "2026-08-02T08:00:00", EndTime: "2026-08-02T08:01:00", Type: "time", RecorderID: "internal-device"}},
+		{RecordInfoItem: manscdp.RecordInfoItem{DeviceID: "source-channel", Name: "first", FilePath: "http://37010301021180000007/record/one.ps", StartTime: "2026-08-02T08:00:00", EndTime: "2026-08-02T08:01:00", Type: "time", RecorderID: "internal-device"}},
 		{RecordInfoItem: manscdp.RecordInfoItem{DeviceID: "source-channel", Name: "second", StartTime: "2026-08-02T08:01:00", EndTime: "2026-08-02T08:02:00", Type: "time"}},
 	}
 	bodies, err := planCascadeRecordResponses(protocol.ProfileFor(protocol.Version2022), query, items, "34020000002000000002", 1, nil)
@@ -36,6 +36,10 @@ func TestCascadeRecordInfoPlanRewritesPublishedIdentityAndBatches(t *testing.T) 
 		require.Equal(t, query.DeviceID, response.Items[0].DeviceID)
 		require.NotContains(t, string(body), "source-channel")
 		require.NotContains(t, string(body), "internal-device")
+		require.NotContains(t, string(body), "37010301021180000007")
+		if response.Items[0].Name == "first" {
+			require.Equal(t, "http://"+query.DeviceID+"/record/one.ps", response.Items[0].FilePath)
+		}
 	}
 	bodies, err = planCascadeRecordResponses(protocol.ProfileFor(protocol.Version2016), query, nil, "local", 1, nil)
 	require.NoError(t, err)

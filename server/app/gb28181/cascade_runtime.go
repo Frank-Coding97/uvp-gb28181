@@ -19,11 +19,13 @@ import (
 	cascadeservice "uvplatform.com/uvp-gb28181/app/gb28181/cascade/service"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/sipclient"
 	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	gbhandler "uvplatform.com/uvp-gb28181/app/gb28181/handler"
 	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 	gbroutes "uvplatform.com/uvp-gb28181/app/gb28181/routes"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
@@ -75,6 +77,23 @@ func (e *cascadeKeepaliveEncoder) EncodeKeepalive(version protocol.Version) ([]b
 type cascadePlatformClient struct {
 	transactions *sipclient.TransactionClient
 	keepalive    sipclient.KeepaliveEncoder
+}
+
+type cascadeAudioPlatformClient struct {
+	factory     *sipclient.RequestFactory
+	transport   sipclient.AudioDialogTransport
+	credentials sipclient.Credentials
+}
+
+func (c *cascadeAudioPlatformClient) WriteInvite(ctx context.Context, sourceID, receiverID string, body []byte) (sipclient.AudioDialog, error) {
+	if c == nil || c.factory == nil || c.transport == nil {
+		return nil, fmt.Errorf("cascade audio SIP dialog transport is unavailable")
+	}
+	req, err := c.factory.BuildAudioPull(sourceID, receiverID, body, "cascade-audio-"+uuid.NewString())
+	if err != nil {
+		return nil, err
+	}
+	return c.transport.WriteAudioDialog(ctx, req, c.credentials)
 }
 
 func (c *cascadePlatformClient) SetProfile(profile protocol.Version) error {
@@ -140,6 +159,29 @@ func (f *cascadePlatformClientFactory) NewClient(platform model.GbCascadePlatfor
 		transactions: transactions,
 		keepalive:    newCascadeKeepaliveEncoder(platform.LocalDeviceID, platform.CharsetOverride),
 	}, nil
+}
+
+func (f *cascadePlatformClientFactory) NewAudioClient(platform model.GbCascadePlatform) (*cascadeAudioPlatformClient, error) {
+	transport, ok := f.transport.(sipclient.AudioDialogTransport)
+	if !ok {
+		return nil, fmt.Errorf("cascade SIP transport does not support dialogs")
+	}
+	profile := effectiveCascadeProfile(platform)
+	requestFactory, err := sipclient.NewRequestFactory(sipclient.Identity{
+		UpstreamServerID: platform.UpstreamServerID, UpstreamDomain: platform.UpstreamDomain,
+		Host: platform.Host, Port: platform.Port, LocalDeviceID: platform.LocalDeviceID,
+		LocalDomain: platform.LocalDomain, LocalIP: platform.LocalSIPIP, LocalPort: platform.LocalSIPPort,
+		Transport: platform.Transport, Profile: profile, UserAgent: gbconfig.CurrentCascadeSettings().UserAgent,
+		UserAgentProvider: func() string { return gbconfig.CurrentCascadeSettings().UserAgent },
+	})
+	if err != nil {
+		return nil, err
+	}
+	credentials, err := f.credentials(platform)
+	if err != nil {
+		return nil, err
+	}
+	return &cascadeAudioPlatformClient{factory: requestFactory, transport: transport, credentials: credentials}, nil
 }
 
 func (f *cascadePlatformClientFactory) credentials(platform model.GbCascadePlatform) (sipclient.Credentials, error) {
@@ -249,9 +291,11 @@ func setupCascadeManagement(runtime cascadeservice.ManagementRuntime, cipher *se
 	db := app.DB()
 	if db == nil {
 		gbroutes.SetCascadeManagementService(nil, nil)
+		gbroutes.SetCascadeSnapshotUploadHandler(nil)
 		return
 	}
 	store := repository.NewGormRepository(db)
+	gbroutes.SetCascadeSnapshotUploadHandler(newCascadeSnapshotUploadHandler(store, nil))
 	if runtime != nil {
 		runtime = cascadeVideoManagementRuntime{runtime}
 	}
@@ -306,6 +350,7 @@ func startCascadeRuntime(cfg gbconfig.Config, server sipRuntimeServer, credentia
 	store := repository.NewGormRepository(app.DB())
 	clients := newCascadePlatformClientFactory(transport, cipher, gbconfig.SIPCommandTimeout())
 	pusher := newCascadeCatalogPusher(store, clients)
+	broadcast := newCascadeBroadcastRuntime(app.DB(), store, clients, server.UAC(), client)
 	manager := cascaderuntime.NewManager(cascaderuntime.Dependencies{
 		Store:         store,
 		Clients:       clients,
@@ -314,26 +359,67 @@ func startCascadeRuntime(cfg gbconfig.Config, server sipRuntimeServer, credentia
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), gbconfig.SIPCommandTimeout())
 	defer cancel()
+	// Retire process-local media state before Reload can register this platform
+	// upstream, whose first reverse INVITE may arrive immediately on success.
+	if err := broadcast.Start(ctx); err != nil {
+		_ = manager.Shutdown(ctx)
+		return fmt.Errorf("start cascade broadcast runtime: %w", err)
+	}
 	if err := manager.Reload(ctx); err != nil {
+		_ = broadcast.Shutdown(ctx)
 		_ = manager.Shutdown(ctx)
 		return fmt.Errorf("load cascade platforms: %w", err)
 	}
+	upgrades := newCascadeUpgradeRuntime(store, clients, firmwareUpgradeService)
 	if receiver, ok := server.(interface {
 		SetCascadeMessageHandler(func(*sipwire.Request, sipwire.ServerTransaction) bool)
 	}); ok {
-		receiver.SetCascadeMessageHandler(newCascadeMessageHandler(store, clients))
+		messageHandler := newCascadeMessageHandler(store, clients, upgrades.Handle)
+		receiver.SetCascadeMessageHandler(func(req *sipwire.Request, tx sipwire.ServerTransaction) bool {
+			if broadcast.Handle(req, tx) {
+				return true
+			}
+			return messageHandler(req, tx)
+		})
+	}
+	if receiver, ok := server.(interface {
+		SetCascadeBroadcastMessageRouter(gbhandler.CascadeBroadcastMessageRouter)
+	}); ok {
+		receiver.SetCascadeBroadcastMessageRouter(broadcast)
+	}
+	if receiver, ok := server.(interface {
+		AddCascadeDialogHandlerFirst(func(*sipwire.Request, sipwire.ServerTransaction) bool)
+	}); ok {
+		receiver.AddCascadeDialogHandlerFirst(broadcast.HandleCascadeDialog)
+	}
+	if receiver, ok := server.(interface {
+		AddCascadeCancelValidator(func(*sipwire.Request, sipwire.ServerTransaction) bool)
+	}); ok {
+		receiver.AddCascadeCancelValidator(broadcast.ValidateCascadeAudioCancel)
 	}
 
 	receiver, ok := server.(interface {
 		SetCascadeSubscribeHandler(func(*sipwire.Request, sipwire.ServerTransaction) bool)
 	})
 	if !ok {
+		_ = broadcast.Shutdown(ctx)
+		_ = upgrades.Shutdown(ctx)
 		_ = manager.Shutdown(ctx)
 		return fmt.Errorf("shared SIP server does not expose cascade SUBSCRIBE")
 	}
 	subscriptions := newCascadeCatalogSubscriptions(store, clients, 5*time.Second)
-	receiver.SetCascadeSubscribeHandler(subscriptions.Handle)
-	runtime := &cascadeSubscriptionRuntime{cascadeRuntimeLifecycle: manager, subscriptions: subscriptions}
+	positions := newCascadeMobilePositionSubscriptions(store, clients, 5*time.Second)
+	events := newCascadeEventSubscriptions(store, clients, 5*time.Second)
+	receiver.SetCascadeSubscribeHandler(func(req *sipwire.Request, tx sipwire.ServerTransaction) bool {
+		if events.Handle(req, tx) {
+			return true
+		}
+		if positions.Handle(req, tx) {
+			return true
+		}
+		return subscriptions.Handle(req, tx)
+	})
+	runtime := &cascadeSubscriptionRuntime{cascadeRuntimeLifecycle: manager, subscriptions: subscriptions, positions: positions, events: events, upgrades: upgrades, broadcast: broadcast}
 	cascadeRuntimeManager = runtime
 	setupCascadeManagement(runtime, cipher, pusher)
 	return nil

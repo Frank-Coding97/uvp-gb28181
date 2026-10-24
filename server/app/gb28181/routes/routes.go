@@ -1054,6 +1054,8 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 // operation-log middleware. Capability verification is performed by the
 // controller on every request; JWT and query-logging middleware are omitted.
 func RegisterContentRoutes(engine *gin.Engine) {
+	engine.POST("/api/gb28181/cascade-snapshots/uploads/*token", serveCascadeSnapshotUpload)
+	engine.PUT("/api/gb28181/cascade-snapshots/uploads/*token", serveCascadeSnapshotUpload)
 	// ⛔ 上传路由必须**同时**吃下三种形状，否则真机的报文连路由都进不去：
 	//   ① `POST …/uploads/<token>/`（尾斜杠）—— 海康实测就是这条，且路径到 token 就结束，
 	//      **没有文件名段**，文件名只在 multipart 部件头里（2026-09-20 真机抓包）；

@@ -58,57 +58,120 @@ var baselineRequiredTables = []string{
 type schemaProbe struct {
 	hasTable                  func(tableName string) (bool, error)
 	hasColumn                 func(tableName, columnName string) (bool, error)
+	hasIndex                  func(tableName, indexName string) (bool, error)
 	columnLength              func(tableName, columnName string) (int64, error)
 	hasPermissionRegistration func(path, method, permission string) (bool, error)
 }
 
 type baselineColumnRequirement struct {
-	table     string
-	column    string
-	minLength int64
+	table              string
+	column             string
+	minLength          int64
+	createdByMigration bool
 }
 
 var baselineColumnMigrations = map[string]baselineColumnRequirement{
-	"2026-10-13-cascade-auto-push-catalog.sql":                {table: "gb_cascade_platform", column: "auto_push_catalog"},
-	"2026-10-13-cascade-auto-push-catalog-postgresql.sql":     {table: "gb_cascade_platform", column: "auto_push_catalog"},
-	"2026-10-13-cascade-auto-push-catalog-sqlserver.sql":      {table: "gb_cascade_platform", column: "auto_push_catalog"},
-	"2026-10-13-cascade-auto-push-catalog-sqlite.sql":         {table: "gb_cascade_platform", column: "auto_push_catalog"},
-	"2026-10-13-cascade-recording-enabled.sql":                {table: "gb_cascade_platform", column: "recording_enabled"},
-	"2026-10-13-cascade-recording-enabled-postgresql.sql":     {table: "gb_cascade_platform", column: "recording_enabled"},
-	"2026-10-13-cascade-recording-enabled-sqlserver.sql":      {table: "gb_cascade_platform", column: "recording_enabled"},
-	"2026-10-13-cascade-recording-enabled-sqlite.sql":         {table: "gb_cascade_platform", column: "recording_enabled"},
-	"2026-10-13-cascade-rtcp-keepalive.sql":                   {table: "gb_cascade_platform", column: "rtcp_keepalive"},
-	"2026-10-13-cascade-rtcp-keepalive-postgresql.sql":        {table: "gb_cascade_platform", column: "rtcp_keepalive"},
-	"2026-10-13-cascade-rtcp-keepalive-sqlserver.sql":         {table: "gb_cascade_platform", column: "rtcp_keepalive"},
-	"2026-10-13-cascade-rtcp-keepalive-sqlite.sql":            {table: "gb_cascade_platform", column: "rtcp_keepalive"},
-	"2026-10-08-initial-admin-password-change.sql":            {table: "sys_users", column: "must_change_password"},
-	"2026-10-08-initial-admin-password-change-postgresql.sql": {table: "sys_users", column: "must_change_password"},
-	"2026-10-08-initial-admin-password-change-sqlserver.sql":  {table: "sys_users", column: "must_change_password"},
-	"2026-10-08-initial-admin-password-change-sqlite.sql":     {table: "sys_users", column: "must_change_password"},
-	"2026-10-08-sip-platform-hook-ip.sql":                     {table: "gb_sip_config", column: "hook_ip"},
-	"2026-10-08-sip-platform-hook-ip-postgresql.sql":          {table: "gb_sip_config", column: "hook_ip"},
-	"2026-10-08-sip-platform-hook-ip-sqlserver.sql":           {table: "gb_sip_config", column: "hook_ip"},
-	"2026-10-08-sip-platform-hook-ip-sqlite.sql":              {table: "gb_sip_config", column: "hook_ip"},
-	"2026-10-08-sip-platform-stream-ip.sql":                   {table: "gb_sip_config", column: "stream_ip"},
-	"2026-10-08-sip-platform-stream-ip-postgresql.sql":        {table: "gb_sip_config", column: "stream_ip"},
-	"2026-10-08-sip-platform-stream-ip-sqlserver.sql":         {table: "gb_sip_config", column: "stream_ip"},
-	"2026-10-08-sip-platform-stream-ip-sqlite.sql":            {table: "gb_sip_config", column: "stream_ip"},
-	"2026-10-08-meta-node-hook-ip.sql":                        {table: "meta_node", column: "hook_ip"},
-	"2026-10-08-meta-node-hook-ip-postgresql.sql":             {table: "meta_node", column: "hook_ip"},
-	"2026-10-08-meta-node-hook-ip-sqlserver.sql":              {table: "meta_node", column: "hook_ip"},
-	"2026-10-08-meta-node-hook-ip-sqlite.sql":                 {table: "meta_node", column: "hook_ip"},
-	"2026-10-09-sip-platform-sdp-ip.sql":                      {table: "gb_sip_config", column: "sdp_ip"},
-	"2026-10-09-sip-platform-sdp-ip-postgresql.sql":           {table: "gb_sip_config", column: "sdp_ip"},
-	"2026-10-09-sip-platform-sdp-ip-sqlserver.sql":            {table: "gb_sip_config", column: "sdp_ip"},
-	"2026-10-09-sip-platform-sdp-ip-sqlite.sql":               {table: "gb_sip_config", column: "sdp_ip"},
-	"2026-10-09-meta-node-sdp-ip.sql":                         {table: "meta_node", column: "sdp_ip"},
-	"2026-10-09-meta-node-sdp-ip-postgresql.sql":              {table: "meta_node", column: "sdp_ip"},
-	"2026-10-09-meta-node-sdp-ip-sqlserver.sql":               {table: "meta_node", column: "sdp_ip"},
-	"2026-10-09-meta-node-sdp-ip-sqlite.sql":                  {table: "meta_node", column: "sdp_ip"},
-	"2026-10-09-job-result-summary.sql":                       {table: "sys_job_results", column: "summary"},
-	"2026-10-09-job-result-summary-postgresql.sql":            {table: "sys_job_results", column: "summary"},
-	"2026-10-09-job-result-summary-sqlserver.sql":             {table: "sys_job_results", column: "summary"},
-	"2026-10-09-job-result-summary-sqlite.sql":                {table: "sys_job_results", column: "summary"},
+	"2026-10-23-cascade-upgrade-binding-01-binding.sql":                       {table: "gb_device_firmware_upgrade", column: "cascade_binding"},
+	"2026-10-23-cascade-upgrade-binding-02-request-key.sql":                   {table: "gb_device_firmware_upgrade", column: "cascade_request_key"},
+	"2026-10-23-cascade-upgrade-binding-03-session-key.sql":                   {table: "gb_device_firmware_upgrade", column: "cascade_session_key"},
+	"2026-10-23-cascade-upgrade-binding-04-business-result.sql":               {table: "gb_device_firmware_upgrade", column: "cascade_business_result"},
+	"2026-10-23-cascade-upgrade-binding-05-business-delivered.sql":            {table: "gb_device_firmware_upgrade", column: "cascade_business_delivered"},
+	"2026-10-23-cascade-upgrade-binding-06-final-delivered.sql":               {table: "gb_device_firmware_upgrade", column: "cascade_final_delivered"},
+	"2026-10-23-cascade-upgrade-binding-01-binding-postgresql.sql":            {table: "gb_device_firmware_upgrade", column: "cascade_binding"},
+	"2026-10-23-cascade-upgrade-binding-02-request-key-postgresql.sql":        {table: "gb_device_firmware_upgrade", column: "cascade_request_key"},
+	"2026-10-23-cascade-upgrade-binding-03-session-key-postgresql.sql":        {table: "gb_device_firmware_upgrade", column: "cascade_session_key"},
+	"2026-10-23-cascade-upgrade-binding-04-business-result-postgresql.sql":    {table: "gb_device_firmware_upgrade", column: "cascade_business_result"},
+	"2026-10-23-cascade-upgrade-binding-05-business-delivered-postgresql.sql": {table: "gb_device_firmware_upgrade", column: "cascade_business_delivered"},
+	"2026-10-23-cascade-upgrade-binding-06-final-delivered-postgresql.sql":    {table: "gb_device_firmware_upgrade", column: "cascade_final_delivered"},
+	"2026-10-23-cascade-upgrade-binding-01-binding-sqlserver.sql":             {table: "gb_device_firmware_upgrade", column: "cascade_binding"},
+	"2026-10-23-cascade-upgrade-binding-02-request-key-sqlserver.sql":         {table: "gb_device_firmware_upgrade", column: "cascade_request_key"},
+	"2026-10-23-cascade-upgrade-binding-03-session-key-sqlserver.sql":         {table: "gb_device_firmware_upgrade", column: "cascade_session_key"},
+	"2026-10-23-cascade-upgrade-binding-04-business-result-sqlserver.sql":     {table: "gb_device_firmware_upgrade", column: "cascade_business_result"},
+	"2026-10-23-cascade-upgrade-binding-05-business-delivered-sqlserver.sql":  {table: "gb_device_firmware_upgrade", column: "cascade_business_delivered"},
+	"2026-10-23-cascade-upgrade-binding-06-final-delivered-sqlserver.sql":     {table: "gb_device_firmware_upgrade", column: "cascade_final_delivered"},
+	"2026-10-23-cascade-upgrade-binding-01-binding-sqlite.sql":                {table: "gb_device_firmware_upgrade", column: "cascade_binding"},
+	"2026-10-23-cascade-upgrade-binding-02-request-key-sqlite.sql":            {table: "gb_device_firmware_upgrade", column: "cascade_request_key"},
+	"2026-10-23-cascade-upgrade-binding-03-session-key-sqlite.sql":            {table: "gb_device_firmware_upgrade", column: "cascade_session_key"},
+	"2026-10-23-cascade-upgrade-binding-04-business-result-sqlite.sql":        {table: "gb_device_firmware_upgrade", column: "cascade_business_result"},
+	"2026-10-23-cascade-upgrade-binding-05-business-delivered-sqlite.sql":     {table: "gb_device_firmware_upgrade", column: "cascade_business_delivered"},
+	"2026-10-23-cascade-upgrade-binding-06-final-delivered-sqlite.sql":        {table: "gb_device_firmware_upgrade", column: "cascade_final_delivered"},
+	"2026-10-23-cascade-snapshot-upload-01-downstream-id.sql":                 {table: "gb_cascade_snapshot_session", column: "downstream_session_id", createdByMigration: true},
+	"2026-10-23-cascade-snapshot-upload-02-upload-token.sql":                  {table: "gb_cascade_snapshot_session", column: "upload_token", createdByMigration: true},
+	"2026-10-23-cascade-snapshot-upload-03-upstream-url.sql":                  {table: "gb_cascade_snapshot_session", column: "upstream_upload_url", createdByMigration: true},
+	"2026-10-23-cascade-snapshot-upload-01-downstream-id-postgresql.sql":      {table: "gb_cascade_snapshot_session", column: "downstream_session_id", createdByMigration: true},
+	"2026-10-23-cascade-snapshot-upload-02-upload-token-postgresql.sql":       {table: "gb_cascade_snapshot_session", column: "upload_token", createdByMigration: true},
+	"2026-10-23-cascade-snapshot-upload-03-upstream-url-postgresql.sql":       {table: "gb_cascade_snapshot_session", column: "upstream_upload_url", createdByMigration: true},
+	"2026-10-23-cascade-snapshot-upload-01-downstream-id-sqlserver.sql":       {table: "gb_cascade_snapshot_session", column: "downstream_session_id", createdByMigration: true},
+	"2026-10-23-cascade-snapshot-upload-02-upload-token-sqlserver.sql":        {table: "gb_cascade_snapshot_session", column: "upload_token", createdByMigration: true},
+	"2026-10-23-cascade-snapshot-upload-03-upstream-url-sqlserver.sql":        {table: "gb_cascade_snapshot_session", column: "upstream_upload_url", createdByMigration: true},
+	"2026-10-23-cascade-snapshot-upload-01-downstream-id-sqlite.sql":          {table: "gb_cascade_snapshot_session", column: "downstream_session_id", createdByMigration: true},
+	"2026-10-23-cascade-snapshot-upload-02-upload-token-sqlite.sql":           {table: "gb_cascade_snapshot_session", column: "upload_token", createdByMigration: true},
+	"2026-10-23-cascade-snapshot-upload-03-upstream-url-sqlite.sql":           {table: "gb_cascade_snapshot_session", column: "upstream_upload_url", createdByMigration: true},
+	"2026-10-23-cascade-media-session-01-kind.sql":                            {table: "gb_cascade_media_session", column: "session_kind"},
+	"2026-10-23-cascade-media-session-01-kind-postgresql.sql":                 {table: "gb_cascade_media_session", column: "session_kind"},
+	"2026-10-23-cascade-media-session-01-kind-sqlserver.sql":                  {table: "gb_cascade_media_session", column: "session_kind"},
+	"2026-10-23-cascade-media-session-01-kind-sqlite.sql":                     {table: "gb_cascade_media_session", column: "session_kind"},
+
+	"2026-10-23-channel-status-event.sql":                      {table: "gb_channel", column: "status_event"},
+	"2026-10-23-channel-status-event-postgresql.sql":           {table: "gb_channel", column: "status_event"},
+	"2026-10-23-channel-status-event-sqlserver.sql":            {table: "gb_channel", column: "status_event"},
+	"2026-10-23-channel-status-event-sqlite.sql":               {table: "gb_channel", column: "status_event"},
+	"2026-10-23-cascade-config-enabled.sql":                    {table: "gb_cascade_platform", column: "config_enabled"},
+	"2026-10-23-cascade-config-enabled-postgresql.sql":         {table: "gb_cascade_platform", column: "config_enabled"},
+	"2026-10-23-cascade-config-enabled-sqlserver.sql":          {table: "gb_cascade_platform", column: "config_enabled"},
+	"2026-10-23-cascade-config-enabled-sqlite.sql":             {table: "gb_cascade_platform", column: "config_enabled"},
+	"2026-10-23-cascade-upgrade-enabled.sql":                   {table: "gb_cascade_platform", column: "upgrade_enabled"},
+	"2026-10-23-cascade-upgrade-enabled-postgresql.sql":        {table: "gb_cascade_platform", column: "upgrade_enabled"},
+	"2026-10-23-cascade-upgrade-enabled-sqlserver.sql":         {table: "gb_cascade_platform", column: "upgrade_enabled"},
+	"2026-10-23-cascade-upgrade-enabled-sqlite.sql":            {table: "gb_cascade_platform", column: "upgrade_enabled"},
+	"2026-10-23-cascade-device-control-enabled.sql":            {table: "gb_cascade_platform", column: "device_control_enabled"},
+	"2026-10-23-cascade-device-control-enabled-postgresql.sql": {table: "gb_cascade_platform", column: "device_control_enabled"},
+	"2026-10-23-cascade-device-control-enabled-sqlserver.sql":  {table: "gb_cascade_platform", column: "device_control_enabled"},
+	"2026-10-23-cascade-device-control-enabled-sqlite.sql":     {table: "gb_cascade_platform", column: "device_control_enabled"},
+	"2026-10-23-cascade-maintenance-enabled.sql":               {table: "gb_cascade_platform", column: "maintenance_enabled"},
+	"2026-10-23-cascade-maintenance-enabled-postgresql.sql":    {table: "gb_cascade_platform", column: "maintenance_enabled"},
+	"2026-10-23-cascade-maintenance-enabled-sqlserver.sql":     {table: "gb_cascade_platform", column: "maintenance_enabled"},
+	"2026-10-23-cascade-maintenance-enabled-sqlite.sql":        {table: "gb_cascade_platform", column: "maintenance_enabled"},
+	"2026-10-13-cascade-auto-push-catalog.sql":                 {table: "gb_cascade_platform", column: "auto_push_catalog"},
+	"2026-10-13-cascade-auto-push-catalog-postgresql.sql":      {table: "gb_cascade_platform", column: "auto_push_catalog"},
+	"2026-10-13-cascade-auto-push-catalog-sqlserver.sql":       {table: "gb_cascade_platform", column: "auto_push_catalog"},
+	"2026-10-13-cascade-auto-push-catalog-sqlite.sql":          {table: "gb_cascade_platform", column: "auto_push_catalog"},
+	"2026-10-13-cascade-recording-enabled.sql":                 {table: "gb_cascade_platform", column: "recording_enabled"},
+	"2026-10-13-cascade-recording-enabled-postgresql.sql":      {table: "gb_cascade_platform", column: "recording_enabled"},
+	"2026-10-13-cascade-recording-enabled-sqlserver.sql":       {table: "gb_cascade_platform", column: "recording_enabled"},
+	"2026-10-13-cascade-recording-enabled-sqlite.sql":          {table: "gb_cascade_platform", column: "recording_enabled"},
+	"2026-10-13-cascade-rtcp-keepalive.sql":                    {table: "gb_cascade_platform", column: "rtcp_keepalive"},
+	"2026-10-13-cascade-rtcp-keepalive-postgresql.sql":         {table: "gb_cascade_platform", column: "rtcp_keepalive"},
+	"2026-10-13-cascade-rtcp-keepalive-sqlserver.sql":          {table: "gb_cascade_platform", column: "rtcp_keepalive"},
+	"2026-10-13-cascade-rtcp-keepalive-sqlite.sql":             {table: "gb_cascade_platform", column: "rtcp_keepalive"},
+	"2026-10-08-initial-admin-password-change.sql":             {table: "sys_users", column: "must_change_password"},
+	"2026-10-08-initial-admin-password-change-postgresql.sql":  {table: "sys_users", column: "must_change_password"},
+	"2026-10-08-initial-admin-password-change-sqlserver.sql":   {table: "sys_users", column: "must_change_password"},
+	"2026-10-08-initial-admin-password-change-sqlite.sql":      {table: "sys_users", column: "must_change_password"},
+	"2026-10-08-sip-platform-hook-ip.sql":                      {table: "gb_sip_config", column: "hook_ip"},
+	"2026-10-08-sip-platform-hook-ip-postgresql.sql":           {table: "gb_sip_config", column: "hook_ip"},
+	"2026-10-08-sip-platform-hook-ip-sqlserver.sql":            {table: "gb_sip_config", column: "hook_ip"},
+	"2026-10-08-sip-platform-hook-ip-sqlite.sql":               {table: "gb_sip_config", column: "hook_ip"},
+	"2026-10-08-sip-platform-stream-ip.sql":                    {table: "gb_sip_config", column: "stream_ip"},
+	"2026-10-08-sip-platform-stream-ip-postgresql.sql":         {table: "gb_sip_config", column: "stream_ip"},
+	"2026-10-08-sip-platform-stream-ip-sqlserver.sql":          {table: "gb_sip_config", column: "stream_ip"},
+	"2026-10-08-sip-platform-stream-ip-sqlite.sql":             {table: "gb_sip_config", column: "stream_ip"},
+	"2026-10-08-meta-node-hook-ip.sql":                         {table: "meta_node", column: "hook_ip"},
+	"2026-10-08-meta-node-hook-ip-postgresql.sql":              {table: "meta_node", column: "hook_ip"},
+	"2026-10-08-meta-node-hook-ip-sqlserver.sql":               {table: "meta_node", column: "hook_ip"},
+	"2026-10-08-meta-node-hook-ip-sqlite.sql":                  {table: "meta_node", column: "hook_ip"},
+	"2026-10-09-sip-platform-sdp-ip.sql":                       {table: "gb_sip_config", column: "sdp_ip"},
+	"2026-10-09-sip-platform-sdp-ip-postgresql.sql":            {table: "gb_sip_config", column: "sdp_ip"},
+	"2026-10-09-sip-platform-sdp-ip-sqlserver.sql":             {table: "gb_sip_config", column: "sdp_ip"},
+	"2026-10-09-sip-platform-sdp-ip-sqlite.sql":                {table: "gb_sip_config", column: "sdp_ip"},
+	"2026-10-09-meta-node-sdp-ip.sql":                          {table: "meta_node", column: "sdp_ip"},
+	"2026-10-09-meta-node-sdp-ip-postgresql.sql":               {table: "meta_node", column: "sdp_ip"},
+	"2026-10-09-meta-node-sdp-ip-sqlserver.sql":                {table: "meta_node", column: "sdp_ip"},
+	"2026-10-09-meta-node-sdp-ip-sqlite.sql":                   {table: "meta_node", column: "sdp_ip"},
+	"2026-10-09-job-result-summary.sql":                        {table: "sys_job_results", column: "summary"},
+	"2026-10-09-job-result-summary-postgresql.sql":             {table: "sys_job_results", column: "summary"},
+	"2026-10-09-job-result-summary-sqlserver.sql":              {table: "sys_job_results", column: "summary"},
+	"2026-10-09-job-result-summary-sqlite.sql":                 {table: "sys_job_results", column: "summary"},
 	// rtp_receive_mode 与 rtp_proxy_port 成对出现，只需登记其中一列即可。
 	"2026-10-09-meta-node-receive-mode.sql":                {table: "meta_node", column: "rtp_receive_mode"},
 	"2026-10-09-meta-node-receive-mode-postgresql.sql":     {table: "meta_node", column: "rtp_receive_mode"},
@@ -131,6 +194,10 @@ type baselineTableRequirement struct {
 }
 
 var baselineTableMigrations = map[string]baselineTableRequirement{
+	"2026-10-23-cascade-alarm-delivery.sql":                       {tables: []string{"gb_cascade_alarm_delivery"}},
+	"2026-10-23-cascade-alarm-delivery-postgresql.sql":            {tables: []string{"gb_cascade_alarm_delivery"}},
+	"2026-10-23-cascade-alarm-delivery-sqlserver.sql":             {tables: []string{"gb_cascade_alarm_delivery"}},
+	"2026-10-23-cascade-alarm-delivery-sqlite.sql":                {tables: []string{"gb_cascade_alarm_delivery"}},
 	"2026-10-11-openapi-device-capture-session.sql":               {tables: []string{"sys_openapi_device_capture_session"}},
 	"2026-10-11-openapi-device-capture-session-postgresql.sql":    {tables: []string{"sys_openapi_device_capture_session"}},
 	"2026-10-11-openapi-device-capture-session-sqlserver.sql":     {tables: []string{"sys_openapi_device_capture_session"}},
@@ -143,6 +210,10 @@ var baselineTableMigrations = map[string]baselineTableRequirement{
 	"2026-10-13-cascade-business-group-postgresql.sql":            {tables: []string{"gb_cascade_business_node", "gb_cascade_business_binding"}},
 	"2026-10-13-cascade-business-group-sqlserver.sql":             {tables: []string{"gb_cascade_business_node", "gb_cascade_business_binding"}},
 	"2026-10-13-cascade-business-group-sqlite.sql":                {tables: []string{"gb_cascade_business_node", "gb_cascade_business_binding"}},
+	"2026-10-23-cascade-snapshot-session.sql":                     {tables: []string{"gb_cascade_snapshot_session"}},
+	"2026-10-23-cascade-snapshot-session-postgresql.sql":          {tables: []string{"gb_cascade_snapshot_session"}},
+	"2026-10-23-cascade-snapshot-session-sqlserver.sql":           {tables: []string{"gb_cascade_snapshot_session"}},
+	"2026-10-23-cascade-snapshot-session-sqlite.sql":              {tables: []string{"gb_cascade_snapshot_session"}},
 }
 
 type baselinePermissionRequirement struct {
@@ -170,6 +241,46 @@ var baselinePermissionMigrations = map[string]baselinePermissionRequirement{
 	"2026-10-18-service-upgrade-async-import-permission-sqlite.sql":     {path: "/api/system/upgrade/import/:upload_id", method: "GET", permission: "system:upgrade:read"},
 }
 
+type baselineIndexRequirement struct {
+	table string
+	index string
+}
+
+var baselineIndexMigrations = map[string]baselineIndexRequirement{
+	"2026-10-23-cascade-upgrade-binding-07-unique-request.sql":               {table: "gb_device_firmware_upgrade", index: "uk_firmware_upgrade_cascade_request"},
+	"2026-10-23-cascade-upgrade-binding-08-unique-session.sql":               {table: "gb_device_firmware_upgrade", index: "uk_firmware_upgrade_cascade_session"},
+	"2026-10-23-cascade-upgrade-binding-07-unique-request-postgresql.sql":    {table: "gb_device_firmware_upgrade", index: "uk_firmware_upgrade_cascade_request"},
+	"2026-10-23-cascade-upgrade-binding-08-unique-session-postgresql.sql":    {table: "gb_device_firmware_upgrade", index: "uk_firmware_upgrade_cascade_session"},
+	"2026-10-23-cascade-upgrade-binding-07-unique-request-sqlserver.sql":     {table: "gb_device_firmware_upgrade", index: "uk_firmware_upgrade_cascade_request"},
+	"2026-10-23-cascade-upgrade-binding-08-unique-session-sqlserver.sql":     {table: "gb_device_firmware_upgrade", index: "uk_firmware_upgrade_cascade_session"},
+	"2026-10-23-cascade-upgrade-binding-07-unique-request-sqlite.sql":        {table: "gb_device_firmware_upgrade", index: "uk_firmware_upgrade_cascade_request"},
+	"2026-10-23-cascade-upgrade-binding-08-unique-session-sqlite.sql":        {table: "gb_device_firmware_upgrade", index: "uk_firmware_upgrade_cascade_session"},
+	"2026-10-23-cascade-snapshot-upload-04-unique-downstream.sql":            {table: "gb_cascade_snapshot_session", index: "uk_cascade_snapshot_downstream"},
+	"2026-10-23-cascade-snapshot-upload-05-unique-upload.sql":                {table: "gb_cascade_snapshot_session", index: "uk_cascade_snapshot_upload"},
+	"2026-10-23-cascade-snapshot-upload-04-unique-downstream-postgresql.sql": {table: "gb_cascade_snapshot_session", index: "uk_cascade_snapshot_downstream"},
+	"2026-10-23-cascade-snapshot-upload-05-unique-upload-postgresql.sql":     {table: "gb_cascade_snapshot_session", index: "uk_cascade_snapshot_upload"},
+	"2026-10-23-cascade-snapshot-upload-04-unique-downstream-sqlserver.sql":  {table: "gb_cascade_snapshot_session", index: "uk_cascade_snapshot_downstream"},
+	"2026-10-23-cascade-snapshot-upload-05-unique-upload-sqlserver.sql":      {table: "gb_cascade_snapshot_session", index: "uk_cascade_snapshot_upload"},
+	"2026-10-23-cascade-snapshot-upload-04-unique-downstream-sqlite.sql":     {table: "gb_cascade_snapshot_session", index: "uk_cascade_snapshot_downstream"},
+	"2026-10-23-cascade-snapshot-upload-05-unique-upload-sqlite.sql":         {table: "gb_cascade_snapshot_session", index: "uk_cascade_snapshot_upload"},
+	"2026-10-23-cascade-media-session-02-kind-state-index.sql":               {table: "gb_cascade_media_session", index: "idx_cascade_media_kind_state"},
+	"2026-10-23-cascade-media-session-02-kind-state-index-postgresql.sql":    {table: "gb_cascade_media_session", index: "idx_cascade_media_kind_state"},
+	"2026-10-23-cascade-media-session-02-kind-state-index-sqlserver.sql":     {table: "gb_cascade_media_session", index: "idx_cascade_media_kind_state"},
+	"2026-10-23-cascade-media-session-02-kind-state-index-sqlite.sql":        {table: "gb_cascade_media_session", index: "idx_cascade_media_kind_state"},
+}
+
+func needsBaselineIndexUpgrade(name string, probe schemaProbe) (bool, error) {
+	requirement := baselineIndexMigrations[name]
+	if probe.hasIndex == nil {
+		return false, fmt.Errorf("索引迁移缺少索引探测器")
+	}
+	exists, err := probe.hasIndex(requirement.table, requirement.index)
+	if err != nil {
+		return false, fmt.Errorf("探测 %s.%s 索引失败: %w", requirement.table, requirement.index, err)
+	}
+	return !exists, nil
+}
+
 // needsBaselineColumnUpgrade applies only to additive column migrations whose
 // presence can be checked safely. All other embedded migrations keep the
 // normal empty-ledger baseline behavior.
@@ -186,6 +297,9 @@ func needsBaselineColumnUpgrade(name string, probe schemaProbe) (bool, error) {
 		return false, fmt.Errorf("探测 %s 表失败: %w", requirement.table, err)
 	}
 	if !exists {
+		if requirement.createdByMigration {
+			return true, nil
+		}
 		return false, fmt.Errorf("检测到旧基线缺少 %s 表，无法应用列迁移", requirement.table)
 	}
 	exists, err = probe.hasColumn(requirement.table, requirement.column)
@@ -237,6 +351,9 @@ func needsBaselineUpgrade(name string, probe schemaProbe) (bool, error) {
 	case "2026-10-18-service-upgrade-menu.sql", "2026-10-18-service-upgrade-menu-postgresql.sql",
 		"2026-10-18-service-upgrade-menu-sqlserver.sql", "2026-10-18-service-upgrade-menu-sqlite.sql":
 		return true, nil
+	}
+	if _, ok := baselineIndexMigrations[name]; ok {
+		return needsBaselineIndexUpgrade(name, probe)
 	}
 	if _, ok := baselineColumnMigrations[name]; ok {
 		return needsBaselineColumnUpgrade(name, probe)
@@ -362,6 +479,9 @@ func Up(db *gorm.DB, d Dialect) error {
 		},
 		hasColumn: func(tableName, columnName string) (bool, error) {
 			return db.Migrator().HasColumn(tableName, columnName), nil
+		},
+		hasIndex: func(tableName, indexName string) (bool, error) {
+			return db.Migrator().HasIndex(tableName, indexName), nil
 		},
 		columnLength: func(tableName, columnName string) (int64, error) {
 			if d == DialectSQLite && tableName == "gb_channel" && columnName == "parent_id" {
@@ -505,7 +625,8 @@ func run(store versionStore, lock locker, src migrationSource, exec migrationExe
 		}
 		_, isColumnMigration := baselineColumnMigrations[name]
 		_, isTableMigration := baselineTableMigrations[name]
-		if isColumnMigration || isTableMigration {
+		_, isIndexMigration := baselineIndexMigrations[name]
+		if isColumnMigration || isTableMigration || isIndexMigration {
 			// An interrupted additive migration may have created its schema object
 			// before the version row was written. Record it as applied instead of
 			// replaying a dialect-specific migration statement.

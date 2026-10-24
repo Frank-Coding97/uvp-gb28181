@@ -14,14 +14,17 @@ import (
 // CascadeVideoOffer contains the media facts needed to start a PS-over-RTP
 // sender towards an upstream GB28181 platform.
 type CascadeVideoOffer struct {
-	RemoteIP    string
-	RemotePort  int
-	SSRC        string
-	PayloadType int
-	Transport   zlm.GBSendRTPTransport
-	Playback    bool
-	Start       time.Time
-	End         time.Time
+	RemoteIP      string
+	RemotePort    int
+	SSRC          string
+	PayloadType   int
+	Transport     zlm.GBSendRTPTransport
+	Playback      bool
+	Download      bool
+	DownloadSpeed uint32
+	RecordingURI  string
+	Start         time.Time
+	End           time.Time
 }
 
 type cascadeVideoConnection struct {
@@ -31,18 +34,20 @@ type cascadeVideoConnection struct {
 }
 
 type cascadeVideoMedia struct {
-	kind       string
-	port       int
-	transport  string
-	pt         []int
-	invalid    bool
-	rtpmap     map[int]string
-	connection cascadeVideoConnection
-	ssrc       string
-	ssrcSeen   bool
-	direction  string
-	setup      string
-	format     string
+	kind              string
+	port              int
+	transport         string
+	pt                []int
+	invalid           bool
+	rtpmap            map[int]string
+	connection        cascadeVideoConnection
+	ssrc              string
+	ssrcSeen          bool
+	direction         string
+	setup             string
+	format            string
+	downloadSpeed     uint32
+	downloadSpeedSeen bool
 }
 
 // ParseCascadeVideoOffer parses the SDP body of an upstream real-time Play
@@ -57,6 +62,8 @@ func ParseCascadeVideoOffer(body []byte) (CascadeVideoOffer, error) {
 	var sessionName string
 	var timing string
 	var timingCount int
+	var recordingURI string
+	var uriCount int
 	var current *cascadeVideoMedia
 	var video *cascadeVideoMedia
 
@@ -80,6 +87,12 @@ func ParseCascadeVideoOffer(body []byte) (CascadeVideoOffer, error) {
 		case strings.HasPrefix(line, "t="):
 			timing = strings.TrimSpace(strings.TrimPrefix(line, "t="))
 			timingCount++
+		case strings.HasPrefix(line, "u="):
+			if current != nil {
+				return CascadeVideoOffer{}, fmt.Errorf("recording URI must be a session field")
+			}
+			recordingURI = strings.TrimSpace(strings.TrimPrefix(line, "u="))
+			uriCount++
 		case strings.HasPrefix(line, "c="):
 			connection := parseCascadeVideoConnection(strings.TrimPrefix(line, "c="))
 			if current != nil {
@@ -109,6 +122,15 @@ func ParseCascadeVideoOffer(body []byte) (CascadeVideoOffer, error) {
 				sessionFormat = format
 			}
 		default:
+			if value, ok := cascadeVideoAttributeValue(line, "a=downloadspeed:"); ok && current != nil && current == video {
+				parsed, err := strconv.ParseUint(value, 10, 32)
+				if current.downloadSpeedSeen || err != nil || parsed == 0 {
+					return CascadeVideoOffer{}, fmt.Errorf("cascade download SDP speed is invalid")
+				}
+				current.downloadSpeedSeen = true
+				current.downloadSpeed = uint32(parsed)
+				continue
+			}
 			if value, ok := cascadeVideoAttributeValue(line, "a=rtpmap:"); ok && current != nil && current == video {
 				fields := strings.Fields(value)
 				if len(fields) >= 2 {
@@ -138,11 +160,21 @@ func ParseCascadeVideoOffer(body []byte) (CascadeVideoOffer, error) {
 	}
 
 	playback := strings.EqualFold(sessionName, "Playback")
-	if !playback && !strings.EqualFold(sessionName, "Play") {
-		return CascadeVideoOffer{}, fmt.Errorf("cascade video SDP session must be Play or Playback")
+	download := strings.EqualFold(sessionName, "Download")
+	historical := playback || download
+	if (download && uriCount != 1) || (historical && uriCount > 1) {
+		return CascadeVideoOffer{}, fmt.Errorf("cascade download SDP requires one recording URI")
+	}
+	if historical && uriCount == 1 {
+		if _, err := ParseHistoricalURI(recordingURI); err != nil {
+			return CascadeVideoOffer{}, err
+		}
+	}
+	if !historical && !strings.EqualFold(sessionName, "Play") {
+		return CascadeVideoOffer{}, fmt.Errorf("cascade video SDP session must be Play, Playback or Download")
 	}
 	var start, end time.Time
-	if playback {
+	if historical {
 		fields := strings.Fields(timing)
 		if timingCount != 1 || len(fields) != 2 {
 			return CascadeVideoOffer{}, fmt.Errorf("cascade playback SDP requires one time range")
@@ -156,6 +188,9 @@ func ParseCascadeVideoOffer(body []byte) (CascadeVideoOffer, error) {
 	}
 	if video == nil {
 		return CascadeVideoOffer{}, fmt.Errorf("cascade video SDP missing video media")
+	}
+	if download && !video.downloadSpeedSeen {
+		video.downloadSpeed = 1
 	}
 	if video.invalid || video.port <= 0 || video.port > 65535 {
 		return CascadeVideoOffer{}, fmt.Errorf("cascade video SDP video port is invalid")
@@ -187,7 +222,7 @@ func ParseCascadeVideoOffer(body []byte) (CascadeVideoOffer, error) {
 	if !video.ssrcSeen && sessionSSRCSeen {
 		ssrc = sessionSSRC
 	}
-	if (!playback && !validCascadeVideoSSRC(ssrc)) || (playback && !validPlaybackSSRC(ssrc)) {
+	if (!historical && !validCascadeVideoSSRC(ssrc)) || (historical && !validPlaybackSSRC(ssrc)) {
 		return CascadeVideoOffer{}, fmt.Errorf("cascade video SDP SSRC is missing or invalid")
 	}
 
@@ -237,13 +272,17 @@ func ParseCascadeVideoOffer(body []byte) (CascadeVideoOffer, error) {
 	return CascadeVideoOffer{
 		RemoteIP: parsedIP.To4().String(), RemotePort: video.port, SSRC: ssrc,
 		PayloadType: payloadType, Transport: transport,
-		Playback: playback, Start: start, End: end,
+		Playback: playback, Download: download, DownloadSpeed: video.downloadSpeed, RecordingURI: recordingURI, Start: start, End: end,
 	}, nil
 }
 
 // BuildCascadeVideoAnswer builds the local answer for a parsed upstream Play
 // offer. The local endpoint sends the negotiated PS stream to the upstream.
 func BuildCascadeVideoAnswer(offer CascadeVideoOffer, localID, localIP string, localPort int) ([]byte, error) {
+	historical := offer.Playback || offer.Download
+	if offer.Playback && offer.Download {
+		return nil, fmt.Errorf("cascade video answer has conflicting modes")
+	}
 	localID = strings.TrimSpace(localID)
 	if localID == "" {
 		return nil, fmt.Errorf("cascade video answer local ID is required")
@@ -256,14 +295,19 @@ func BuildCascadeVideoAnswer(offer CascadeVideoOffer, localID, localIP string, l
 		return nil, fmt.Errorf("cascade video answer local port is invalid")
 	}
 	ssrc := strings.TrimSpace(offer.SSRC)
-	if (!offer.Playback && !validCascadeVideoSSRC(ssrc)) || (offer.Playback && !validPlaybackSSRC(ssrc)) {
+	if (!historical && !validCascadeVideoSSRC(ssrc)) || (historical && !validPlaybackSSRC(ssrc)) {
 		return nil, fmt.Errorf("cascade video answer SSRC is missing or invalid")
 	}
 	if offer.PayloadType < 96 || offer.PayloadType > 127 {
 		return nil, fmt.Errorf("cascade video answer payload type is invalid")
 	}
-	if offer.Playback && (offer.Start.IsZero() || !offer.End.After(offer.Start)) {
+	if historical && (offer.Start.IsZero() || !offer.End.After(offer.Start)) {
 		return nil, fmt.Errorf("cascade playback answer time range is invalid")
+	}
+	if (historical && offer.RecordingURI != "") || offer.Download {
+		if _, err := ParseHistoricalURI(offer.RecordingURI); err != nil {
+			return nil, err
+		}
 	}
 
 	transport := ""
@@ -284,13 +328,18 @@ func BuildCascadeVideoAnswer(offer CascadeVideoOffer, localID, localIP string, l
 	var answer strings.Builder
 	answer.WriteString("v=0\r\n")
 	fmt.Fprintf(&answer, "o=%s 0 0 IN IP4 %s\r\n", localID, parsedIP.To4().String())
-	if offer.Playback {
+	if offer.Download {
+		answer.WriteString("s=Download\r\n")
+	} else if offer.Playback {
 		answer.WriteString("s=Playback\r\n")
 	} else {
 		answer.WriteString("s=Play\r\n")
 	}
+	if historical && offer.RecordingURI != "" {
+		fmt.Fprintf(&answer, "u=%s\r\n", offer.RecordingURI)
+	}
 	fmt.Fprintf(&answer, "c=IN IP4 %s\r\n", parsedIP.To4().String())
-	if offer.Playback {
+	if historical {
 		fmt.Fprintf(&answer, "t=%d %d\r\n", offer.Start.Unix(), offer.End.Unix())
 	} else {
 		answer.WriteString("t=0 0\r\n")
@@ -299,6 +348,9 @@ func BuildCascadeVideoAnswer(offer CascadeVideoOffer, localID, localIP string, l
 	answer.WriteString(setup)
 	answer.WriteString("a=sendonly\r\n")
 	fmt.Fprintf(&answer, "a=rtpmap:%d PS/90000\r\n", offer.PayloadType)
+	if offer.Download && offer.DownloadSpeed > 0 {
+		fmt.Fprintf(&answer, "a=downloadspeed:%d\r\n", offer.DownloadSpeed)
+	}
 	fmt.Fprintf(&answer, "y=%s\r\n", ssrc)
 	return []byte(answer.String()), nil
 }

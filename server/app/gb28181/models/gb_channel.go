@@ -13,6 +13,11 @@ const (
 	ChannelStatusOnline  int8 = 1
 )
 
+const (
+	ChannelStatusEventVideoLost = "VLOST"
+	ChannelStatusEventDefect    = "DEFECT"
+)
+
 // 通道坐标来源(gb_channel.position_source)。
 //
 // 同一对 longitude/latitude 列有**三条写入通路**,来源列回答的是"这个坐标是谁写的":
@@ -72,6 +77,7 @@ type GbChannel struct {
 	PositionSource          string     `gorm:"column:position_source;size:16;not null;default:'';comment:通道坐标来源 catalog/mobile/manual,空=无坐标" json:"positionSource"`
 	PositionUpdatedAt       *time.Time `gorm:"column:position_updated_at;comment:通道坐标最近更新时间" json:"positionUpdatedAt"`
 	Status                  int8       `gorm:"column:status;default:0;comment:通道在线" json:"status"`
+	StatusEvent             string     `gorm:"column:status_event;size:8;not null;default:'';comment:目录故障事件 VLOST/DEFECT 空表示无故障事件" json:"statusEvent"`
 	StreamID                string     `gorm:"column:stream_id;size:64;comment:当前播放流ID" json:"streamId"`
 	CurrentSSRC             string     `gorm:"column:current_ssrc;size:10;not null;default:'';comment:当前实时媒体会话SSRC" json:"currentSsrc"`
 	OnDemandLive            bool       `gorm:"column:on_demand_live;default:true;comment:按需直播,无人观看自动关闭" json:"onDemandLive"`

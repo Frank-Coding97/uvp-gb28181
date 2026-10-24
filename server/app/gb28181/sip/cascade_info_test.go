@@ -62,3 +62,28 @@ func TestServerRoutesCascadePlaybackInfo(t *testing.T) {
 	require.Equal(t, 200, response.StatusCode)
 	require.True(t, strings.Contains(string(response.Body()), "CSeq: 7"))
 }
+
+func TestCascadeDialogHandlerCompositionPreservesVideoFallback(t *testing.T) {
+	server, err := NewServer(testConfig())
+	require.NoError(t, err)
+	var order []string
+	server.SetCascadeDialogHandler(func(request *sip.Request, _ sip.ServerTransaction) bool {
+		if request.Method == sip.INFO {
+			order = append(order, "video")
+			return true
+		}
+		return false
+	})
+	server.AddCascadeDialogHandlerFirst(func(request *sip.Request, _ sip.ServerTransaction) bool {
+		if request.Method == sip.BYE {
+			order = append(order, "audio")
+			return true
+		}
+		return false
+	})
+	route := server.dispatchCascadeDialog(func(*sip.Request, sip.ServerTransaction) { order = append(order, "fallback") })
+	route(sip.NewRequest(sip.BYE, sip.Uri{Scheme: "sip", User: "device"}), nil)
+	route(sip.NewRequest(sip.INFO, sip.Uri{Scheme: "sip", User: "device"}), nil)
+	route(sip.NewRequest(sip.OPTIONS, sip.Uri{Scheme: "sip", User: "device"}), nil)
+	require.Equal(t, []string{"audio", "video", "fallback"}, order)
+}

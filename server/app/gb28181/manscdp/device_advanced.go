@@ -403,11 +403,26 @@ func BuildIFrameControlWithProfile(profile protocol.Profile, deviceID string, sn
 
 // BuildRecordControlWithProfile builds a device-side recording command.
 func BuildRecordControlWithProfile(profile protocol.Profile, deviceID string, sn int, action RecordAction) ([]byte, error) {
+	return BuildRecordControlForStreamWithProfile(profile, deviceID, sn, action, nil)
+}
+
+// BuildRecordControlForStreamWithProfile preserves the optional stream selector
+// supplied by a cascaded RecordCmd. A nil selector uses the profile default.
+func BuildRecordControlForStreamWithProfile(profile protocol.Profile, deviceID string, sn int, action RecordAction, requested *int) ([]byte, error) {
 	if action != RecordStart && action != RecordStop {
 		return nil, fmt.Errorf("不支持的设备录像动作: %q", action)
 	}
 	control := advancedDeviceControl{RecordCmd: string(action)}
-	if profile.Version == protocol.Version2022 {
+	if requested != nil {
+		if profile.Version != protocol.Version2022 {
+			return nil, fmt.Errorf("2016 RecordCmd 不支持 StreamNumber")
+		}
+		if *requested < 0 || *requested > 255 {
+			return nil, fmt.Errorf("录像码流编号超出范围")
+		}
+		streamNumber := *requested
+		control.StreamNumber = &streamNumber
+	} else if profile.Version == protocol.Version2022 {
 		streamNumber := 0
 		control.StreamNumber = &streamNumber
 	}

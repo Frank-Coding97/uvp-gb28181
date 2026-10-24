@@ -10,6 +10,7 @@ import (
 
 	"github.com/emiago/sipgo/sip"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/catalog"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/control"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
@@ -107,11 +108,15 @@ func findCascadeControlPeer(req *sip.Request, platforms []model.GbCascadePlatfor
 // upstream platform, restricted to the resources explicitly shared with it.
 // Used by the query responder and the proactive manual push.
 func buildCascadeCatalogSnapshot(ctx context.Context, store *repository.GormRepository, platform *model.GbCascadePlatform) (catalog.Snapshot, error) {
+	return buildCascadeCatalogSnapshotWithDB(ctx, app.DB(), store, platform)
+}
+
+func buildCascadeCatalogSnapshotWithDB(ctx context.Context, db *gorm.DB, store *repository.GormRepository, platform *model.GbCascadePlatform) (catalog.Snapshot, error) {
 	projection, err := store.ProjectionSnapshot(ctx, platform.ID)
 	if err != nil {
 		return catalog.Snapshot{}, err
 	}
-	facts := catalog.SourceFacts{DeviceOnline: map[uint64]bool{}, ChannelOnline: map[uint64]bool{}, ChannelMetadata: map[uint64]catalog.ChannelMetadata{}}
+	facts := catalog.SourceFacts{DeviceOnline: map[uint64]bool{}, ChannelOnline: map[uint64]bool{}, ChannelStatusEvent: map[uint64]catalog.ResourceStatus{}, ChannelMetadata: map[uint64]catalog.ChannelMetadata{}}
 	// Read only the resources selected for this upstream, never the entire device catalog.
 	type statusRow struct {
 		ID     uint64
@@ -120,6 +125,7 @@ func buildCascadeCatalogSnapshot(ctx context.Context, store *repository.GormRepo
 	type channelRow struct {
 		ID           uint64
 		Status       int
+		StatusEvent  string
 		Manufacturer string
 		Model        string
 		Owner        string
@@ -134,7 +140,7 @@ func buildCascadeCatalogSnapshot(ctx context.Context, store *repository.GormRepo
 	}
 	var rows []statusRow
 	if len(deviceIDs) > 0 {
-		if err = app.DB().WithContext(ctx).Table("gb_device").Select("id,status").Where("id IN ?", deviceIDs).Find(&rows).Error; err != nil {
+		if err = db.WithContext(ctx).Table("gb_device").Select("id,status").Where("id IN ?", deviceIDs).Find(&rows).Error; err != nil {
 			return catalog.Snapshot{}, err
 		}
 		for _, r := range rows {
@@ -143,11 +149,17 @@ func buildCascadeCatalogSnapshot(ctx context.Context, store *repository.GormRepo
 	}
 	if len(channelIDs) > 0 {
 		var channels []channelRow
-		if err = app.DB().WithContext(ctx).Table("gb_channel").Select("id,status,manufacturer,model,owner,civil_code").Where("id IN ? AND deleted_at IS NULL", channelIDs).Find(&channels).Error; err != nil {
+		if err = db.WithContext(ctx).Table("gb_channel").Select("id,status,status_event,manufacturer,model,owner,civil_code").Where("id IN ? AND deleted_at IS NULL", channelIDs).Find(&channels).Error; err != nil {
 			return catalog.Snapshot{}, err
 		}
 		for _, r := range channels {
 			facts.ChannelOnline[r.ID] = r.Status == 1
+			switch r.StatusEvent {
+			case "VLOST":
+				facts.ChannelStatusEvent[r.ID] = catalog.ResourceStatusVideoLost
+			case "DEFECT":
+				facts.ChannelStatusEvent[r.ID] = catalog.ResourceStatusDefect
+			}
 			facts.ChannelMetadata[r.ID] = catalog.ChannelMetadata{Manufacturer: r.Manufacturer, Model: r.Model, Owner: r.Owner, CivilCode: r.CivilCode}
 		}
 	}
@@ -166,7 +178,7 @@ func buildCascadeCatalogSnapshot(ctx context.Context, store *repository.GormRepo
 			lookupCode += strings.Repeat("0", 6-len(code))
 		}
 		var row civilcode.SysCivilCode
-		if err := app.DB().WithContext(ctx).Where("code = ?", lookupCode).First(&row).Error; err == nil {
+		if err := db.WithContext(ctx).Where("code = ?", lookupCode).First(&row).Error; err == nil {
 			names[code] = row.Name
 		} else {
 			names[code] = ""
@@ -287,13 +299,52 @@ func newCascadeCatalogHandler(store *repository.GormRepository, clients *cascade
 // an instruction from the upstream platform, not a response to a local PTZ
 // operation; sending it through ptz.OnPTZMessage would therefore always log
 // an unmatched response.
-func newCascadeMessageHandler(store *repository.GormRepository, clients *cascadePlatformClientFactory) func(*sip.Request, sip.ServerTransaction) bool {
+func newCascadeMessageHandler(store *repository.GormRepository, clients *cascadePlatformClientFactory, upgradeHooks ...func(*sip.Request, sip.ServerTransaction) bool) func(*sip.Request, sip.ServerTransaction) bool {
+	upgradeHandler, _ := newCascadeUpgradeHandlerWithService(store, clients, firmwareUpgradeService, context.Background())
+	if len(upgradeHooks) > 0 {
+		upgradeHandler = upgradeHooks[0]
+	}
 	catalogHandler := newCascadeCatalogHandler(store, clients)
 	infoHandler := newCascadeInfoHandler(store, clients)
 	deviceStatusHandler := newCascadeDeviceStatusHandler(store, clients)
 	recordInfoHandler := newCascadeRecordInfoHandler(store, clients)
+	ptzQueryHandler := newCascadePTZQueryHandler(store, clients)
+	storageQueryHandler := newCascadeStorageQueryHandler(store, clients)
+	configQueryHandler := newCascadeConfigQueryHandler(store, clients)
+	configWriteHandler := newCascadeConfigWriteHandler(store, clients)
+	snapshotResultHandler := newCascadeSnapshotResultHandler(store, clients)
+	maintenanceControlHandler := newCascadeMaintenanceControlHandler(store, clients)
+	advancedControlHandler := newCascadeAdvancedControlHandler(store, clients)
+	targetTrackHandler := newCascadeTargetTrackHandler(store)
 	return func(req *sip.Request, tx sip.ServerTransaction) bool {
+		if upgradeHandler(req, tx) {
+			return true
+		}
+		if snapshotResultHandler(req, tx) {
+			return true
+		}
+		if targetTrackHandler(req, tx) {
+			return true
+		}
 		if recordInfoHandler(req, tx) {
+			return true
+		}
+		if ptzQueryHandler(req, tx) {
+			return true
+		}
+		if storageQueryHandler(req, tx) {
+			return true
+		}
+		if configWriteHandler(req, tx) {
+			return true
+		}
+		if maintenanceControlHandler(req, tx) {
+			return true
+		}
+		if advancedControlHandler(req, tx) {
+			return true
+		}
+		if configQueryHandler(req, tx) {
 			return true
 		}
 		if deviceStatusHandler(req, tx) {
@@ -326,6 +377,14 @@ func newCascadeMessageHandler(store *repository.GormRepository, clients *cascade
 		}
 		if matched == nil || !matched.Enabled {
 			_ = tx.Respond(sip.NewResponseFromRequest(req, 403, "Cascade Platform Not Available", nil))
+			return true
+		}
+		toID := ""
+		if req.To() != nil {
+			toID = req.To().Address.User
+		}
+		if !cascadeDeviceStatusRequestTargetsMatch(matched.LocalDeviceID, head.DeviceID, toID, req.Recipient.User) {
+			_ = tx.Respond(sip.NewResponseFromRequest(req, 403, "Cascade Control Target Mismatch", nil))
 			return true
 		}
 		// PTZ is a no-response device control in GB/T 28181-2016. Acknowledge the

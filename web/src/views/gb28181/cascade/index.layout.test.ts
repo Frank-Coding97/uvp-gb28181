@@ -5,6 +5,9 @@ import { describe, expect, it } from "vitest";
 const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/cascade/index.vue"), "utf8");
 
 describe("cascade platform editor layout", () => {
+  it("explains the whole-device scope of an upstream upgrade grant", () => {
+    expect(source).toContain("允许上级通过共享通道升级其所属整机；默认关闭");
+  });
   it("shows sharing mode as a summary and directs changes to the resource workspace", () => {
     expect(source).not.toContain('v-model="form.publishGroup"');
     expect(source).toContain('form.publishGroup ? "按照目录共享" : "按照通道共享"');
@@ -14,6 +17,10 @@ describe("cascade platform editor layout", () => {
     for (const [field, label] of [
       ["autoPushCatalog", "自动推送目录"],
       ["recordingEnabled", "允许录像查询与回放"],
+      ["configEnabled", "允许设备配置"],
+      ["upgradeEnabled", "允许设备升级"],
+      ["deviceControlEnabled", "允许录像/报警控制"],
+      ["maintenanceEnabled", "允许维护类控制"],
       ["rtcpKeepalive", "RTCP 保活"]
     ]) {
       expect(source).toContain(`v-model="form.${field}"`);

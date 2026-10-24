@@ -17,6 +17,7 @@ import (
 	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
+	"uvplatform.com/uvp-gb28181/app/gb28181/uac"
 )
 
 const (
@@ -30,13 +31,14 @@ const (
 // for a device-level TeleBoot. ChannelID/ChannelCode intentionally do not
 // exist here: a parent reboot must never be represented by a fake channel.
 type DeviceRebootTarget struct {
-	DeviceID     uint
-	DeviceCode   string
-	IP           string
-	Port         int
-	Transport    string
-	DeviceOnline bool
-	Profile      protocol.Profile
+	DeviceID             uint
+	DeviceCode           string
+	IP                   string
+	Port                 int
+	Transport            string
+	DeviceOnline         bool
+	Profile              protocol.Profile
+	CascadeAuthorization *CascadeMaintenanceAuthorization
 }
 
 type deviceRebootResult struct {
@@ -123,7 +125,14 @@ func (s *Service) executeDeviceRebootDetailed(ctx context.Context, target Device
 		return result, err
 	}
 	derivedKey := deviceRebootIdempotencyKey(target.DeviceID, normalizedKey)
-	payloadJSON, err := canonicalPayload(map[string]interface{}{"confirmed": true})
+	payload := map[string]interface{}{"confirmed": true}
+	if target.CascadeAuthorization != nil {
+		if target.CascadeAuthorization.Action != deviceRebootAction || target.CascadeAuthorization.PublishedID == "" {
+			return result, operationError(ErrorCodeHomePositionInvalidArgument, "级联维护授权无效", nil)
+		}
+		payload["cascadeAuthorization"] = target.CascadeAuthorization
+	}
+	payloadJSON, err := canonicalPayload(payload)
 	if err != nil {
 		return result, err
 	}
@@ -213,6 +222,7 @@ func (s *Service) executeDeviceRebootDetailed(ctx context.Context, target Device
 		dispatchTarget = DeviceRebootTarget{
 			DeviceID: device.ID, DeviceCode: device.DeviceID, IP: device.IP, Port: device.Port,
 			Transport: device.Transport, DeviceOnline: true, Profile: profile,
+			CascadeAuthorization: target.CascadeAuthorization,
 		}
 		return nil
 	})
@@ -307,7 +317,14 @@ func findRecentDeviceReboot(db *gorm.DB, deviceID uint, since time.Time) (gbmode
 func (s *Service) sendDeviceReboot(ctx context.Context, target DeviceRebootTarget, operation gbmodels.GbPTZOperation, body []byte) (deviceRebootResult, error) {
 	result := deviceRebootResult{operation: operation}
 	destination := net.JoinHostPort(target.IP, strconv.Itoa(target.Port))
-	tracked, sendErr := s.sender.SendMessageTracked(ctx, target.DeviceCode, destination, target.Transport, body)
+	var tracked uac.TrackedMessageResult
+	var sendErr error
+	if target.CascadeAuthorization != nil {
+		sendErr = s.validateCascadeMaintenanceAuthorization(ctx, operation)
+	}
+	if sendErr == nil {
+		tracked, sendErr = s.sender.SendMessageTracked(ctx, target.DeviceCode, destination, target.Transport, body)
+	}
 	observedAt := s.now()
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer cancel()

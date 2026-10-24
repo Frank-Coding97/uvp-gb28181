@@ -74,7 +74,16 @@ func NewGormRepo(db *gorm.DB) *GormRepo {
 	return &GormRepo{db: db}
 }
 
+// webSessions keeps generic browser/OpenAPI lifecycle operations from taking
+// ownership of cascade leases stored under the same channel unique index.
+func (r *GormRepo) webSessions(ctx context.Context) *gorm.DB {
+	return r.db.WithContext(ctx).Where("mode IN ?", []models.TalkSessionMode{models.TalkSessionModeTalk, models.TalkSessionModeBroadcast})
+}
+
 func (r *GormRepo) Create(ctx context.Context, session *models.GbTalkSession, publishToken string) error {
+	if session != nil && session.Mode != "" && !session.Mode.Valid() {
+		return ErrInvalidTalkSessionMode
+	}
 	if strings.TrimSpace(publishToken) == "" {
 		return ErrEmptyPublishToken
 	}
@@ -129,7 +138,7 @@ func (r *GormRepo) FindByOpenAPIIdempotency(ctx context.Context, clientID int64,
 		return nil, nil
 	}
 	var sessions []models.GbTalkSession
-	if err := r.db.WithContext(ctx).Where("openapi_client_id = ? AND openapi_idempotency_key = ?", clientID, key).
+	if err := r.webSessions(ctx).Where("openapi_client_id = ? AND openapi_idempotency_key = ?", clientID, key).
 		Order("id DESC").Limit(2).Find(&sessions).Error; err != nil {
 		return nil, err
 	}
@@ -167,7 +176,7 @@ func (r *GormRepo) FindByBroadcastSN(ctx context.Context, sn uint, deviceID, tar
 	if sn == 0 {
 		return nil, nil
 	}
-	query := r.db.WithContext(ctx).Where("mode = ? AND broadcast_sn = ?", models.TalkSessionModeBroadcast, sn)
+	query := r.webSessions(ctx).Where("mode = ? AND broadcast_sn = ?", models.TalkSessionModeBroadcast, sn)
 	if strings.TrimSpace(deviceID) != "" {
 		query = query.Where("device_id = ?", deviceID)
 	}
@@ -186,7 +195,7 @@ func (r *GormRepo) FindByBroadcastSN(ctx context.Context, sn uint, deviceID, tar
 
 func (r *GormRepo) FindPendingBroadcast(ctx context.Context, deviceID, targetID string) ([]models.GbTalkSession, error) {
 	var sessions []models.GbTalkSession
-	query := r.db.WithContext(ctx).Where("mode = ? AND state IN ?", models.TalkSessionModeBroadcast, nonterminalStates)
+	query := r.webSessions(ctx).Where("mode = ? AND state IN ?", models.TalkSessionModeBroadcast, nonterminalStates)
 	if strings.TrimSpace(deviceID) != "" {
 		query = query.Where("device_id = ?", deviceID)
 	}
@@ -202,7 +211,7 @@ func (r *GormRepo) ClaimBroadcastDialog(ctx context.Context, sessionID, callID s
 	if callID == "" {
 		return false, nil
 	}
-	result := r.db.WithContext(ctx).Model(&models.GbTalkSession{}).
+	result := r.webSessions(ctx).Model(&models.GbTalkSession{}).
 		Where("session_id = ? AND mode = ? AND call_id = '' AND state IN ?", sessionID, models.TalkSessionModeBroadcast,
 			[]models.TalkSessionState{models.TalkSessionPublishing, models.TalkSessionInviting}).
 		Updates(map[string]any{"call_id": callID, "dialog_cseq": cseq, "signal_phase": models.TalkSignalPhaseAnswering})
@@ -253,7 +262,7 @@ func (r *GormRepo) UpdateBroadcastFacts(ctx context.Context, sessionID string, p
 	if len(updates) == 0 {
 		return false, nil
 	}
-	result := r.db.WithContext(ctx).Model(&models.GbTalkSession{}).
+	result := r.webSessions(ctx).Model(&models.GbTalkSession{}).
 		Where("session_id = ? AND state IN ?", sessionID, nonterminalStates).
 		Updates(updates)
 	return result.RowsAffected > 0, result.Error
@@ -261,7 +270,7 @@ func (r *GormRepo) UpdateBroadcastFacts(ctx context.Context, sessionID string, p
 
 func (r *GormRepo) findOne(ctx context.Context, query string, args ...any) (*models.GbTalkSession, error) {
 	var session models.GbTalkSession
-	result := r.db.WithContext(ctx).Where(query, args...).Order("id DESC").Limit(1).Find(&session)
+	result := r.webSessions(ctx).Where(query, args...).Order("id DESC").Limit(1).Find(&session)
 	if result.Error != nil {
 		return nil, result.Error
 	}
@@ -276,7 +285,7 @@ func (r *GormRepo) Transition(ctx context.Context, sessionID string, from, to mo
 		return false, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, from, to)
 	}
 	updates := transitionUpdates(to, patch)
-	result := r.db.WithContext(ctx).Model(&models.GbTalkSession{}).
+	result := r.webSessions(ctx).Model(&models.GbTalkSession{}).
 		Where("session_id = ? AND state = ?", sessionID, from).
 		Updates(updates)
 	if result.Error != nil {
@@ -292,7 +301,7 @@ func (r *GormRepo) ConsumeToken(ctx context.Context, sessionID, publishToken str
 	if strings.TrimSpace(publishToken) == "" {
 		return false, nil
 	}
-	result := r.db.WithContext(ctx).Model(&models.GbTalkSession{}).
+	result := r.webSessions(ctx).Model(&models.GbTalkSession{}).
 		Where("session_id = ? AND publish_token_hash = ? AND token_consumed_at IS NULL", sessionID, hashPublishToken(publishToken)).
 		Where("expires_at > ? AND state IN ?", now, nonterminalStates).
 		Update("token_consumed_at", now)
@@ -314,7 +323,7 @@ func (r *GormRepo) ConsumeTokenForPublish(ctx context.Context, sessionID, publis
 	if session.TokenConsumedAt != nil {
 		return session.PublishID == publishID, nil
 	}
-	result := r.db.WithContext(ctx).Model(&models.GbTalkSession{}).
+	result := r.webSessions(ctx).Model(&models.GbTalkSession{}).
 		Where("session_id = ? AND token_consumed_at IS NULL AND publish_id = '' AND expires_at > ? AND state IN ?", sessionID, now, nonterminalStates).
 		Updates(map[string]any{"token_consumed_at": now, "publish_id": publishID})
 	if result.Error != nil {
@@ -337,7 +346,7 @@ func (r *GormRepo) ReissuePublishToken(ctx context.Context, sessionID, publishTo
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(publishToken) == "" {
 		return false, ErrEmptyPublishToken
 	}
-	result := r.db.WithContext(ctx).Model(&models.GbTalkSession{}).
+	result := r.webSessions(ctx).Model(&models.GbTalkSession{}).
 		Where("session_id = ? AND state = ? AND expires_at > ?", sessionID, models.TalkSessionReserved, now).
 		Updates(map[string]any{
 			"publish_token_hash": hashPublishToken(publishToken),
@@ -349,7 +358,7 @@ func (r *GormRepo) ReissuePublishToken(ctx context.Context, sessionID, publishTo
 
 func (r *GormRepo) ListNonterminal(ctx context.Context) ([]models.GbTalkSession, error) {
 	var sessions []models.GbTalkSession
-	err := r.db.WithContext(ctx).
+	err := r.webSessions(ctx).
 		Where("state IN ?", nonterminalStates).
 		Order("id").
 		Find(&sessions).Error
@@ -358,7 +367,7 @@ func (r *GormRepo) ListNonterminal(ctx context.Context) ([]models.GbTalkSession,
 
 func (r *GormRepo) ListExpired(ctx context.Context, now time.Time) ([]models.GbTalkSession, error) {
 	var sessions []models.GbTalkSession
-	err := r.db.WithContext(ctx).
+	err := r.webSessions(ctx).
 		Where("state IN ? AND expires_at <= ?", nonterminalStates, now).
 		Order("expires_at, id").
 		Find(&sessions).Error
@@ -366,7 +375,7 @@ func (r *GormRepo) ListExpired(ctx context.Context, now time.Time) ([]models.GbT
 }
 
 func (r *GormRepo) RenewActive(ctx context.Context, sessionID string, expiresAt time.Time) (bool, error) {
-	result := r.db.WithContext(ctx).Model(&models.GbTalkSession{}).
+	result := r.webSessions(ctx).Model(&models.GbTalkSession{}).
 		Where("session_id = ? AND state = ?", sessionID, models.TalkSessionActive).
 		Update("expires_at", expiresAt)
 	return result.RowsAffected > 0, result.Error
@@ -376,7 +385,7 @@ func (r *GormRepo) FinishAndReleaseLease(ctx context.Context, sessionID string, 
 	if !terminal.IsTerminal() {
 		return false, fmt.Errorf("%w: %s", ErrInvalidTerminalState, terminal)
 	}
-	result := r.db.WithContext(ctx).Model(&models.GbTalkSession{}).
+	result := r.webSessions(ctx).Model(&models.GbTalkSession{}).
 		Where("session_id = ? AND state IN ?", sessionID, nonterminalStates).
 		Updates(map[string]any{
 			"state":      terminal,

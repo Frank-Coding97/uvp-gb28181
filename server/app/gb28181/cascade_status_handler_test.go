@@ -382,7 +382,7 @@ func cascadeDeviceStatusFixture(t *testing.T, version string, suppliedDB ...*gor
 	require.NoError(t, db.AutoMigrate(
 		&model.GbCascadePlatform{}, &model.GbCascadeDeviceProjection{}, &model.GbCascadeChannelProjection{},
 		&model.GbCascadeBusinessNode{}, &model.GbCascadeBusinessBinding{},
-		&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &civilcode.SysCivilCode{},
+		&model.GbCascadeAlarmDelivery{}, &gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &civilcode.SysCivilCode{},
 	))
 	platform := model.GbCascadePlatform{
 		Name: "status upstream", UpstreamServerID: "34020000002000000001", UpstreamDomain: "3402000000",

@@ -79,6 +79,18 @@ type gbRTPInfoResetter interface {
 	ResetGBSendRTPInfo(context.Context, zlm.GBSendRTPRequest) error
 }
 
+// CanSampleRTPInfo reports whether the backing media node can both reset and
+// read a sender-scoped first-packet sample. Legacy nodes should not add a wait
+// to playback control when they cannot provide this optional metadata.
+func (l *SenderLease) CanSampleRTPInfo() bool {
+	if l == nil || l.client == nil {
+		return false
+	}
+	_, canRead := l.client.(gbRTPInfoReader)
+	_, canReset := l.client.(gbRTPInfoResetter)
+	return canRead && canReset
+}
+
 // RefreshRTPInfo obtains the first packet sample for this sender when the
 // backing ZLM implementation exposes it. Older nodes simply leave the cached
 // value unchanged and callers omit the optional RTP-Info header.

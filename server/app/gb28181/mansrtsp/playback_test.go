@@ -82,8 +82,9 @@ func TestMANSRTSPSeekRejectsPositionOutsideSegment(t *testing.T) {
 	}
 }
 
-func TestMANSRTSPScaleAllowsOnlyProductRates(t *testing.T) {
+func TestMANSRTSPScaleAllowsProductRatesAndRequiredReverse(t *testing.T) {
 	wants := map[float64]string{
+		-1:   "-1.0",
 		0.25: "0.25",
 		0.5:  "0.5",
 		1:    "1.0",
@@ -100,7 +101,7 @@ func TestMANSRTSPScaleAllowsOnlyProductRates(t *testing.T) {
 			t.Fatalf("BuildScale(%g) = %q, want %q", scale, body, want)
 		}
 	}
-	for _, scale := range []float64{-1, 0, 3} {
+	for _, scale := range []float64{-2, 0, 3} {
 		body, err := BuildScale(1, scale)
 		if body != nil {
 			t.Fatalf("BuildScale(%g) body = %q on invalid input", scale, body)

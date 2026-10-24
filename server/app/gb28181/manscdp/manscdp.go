@@ -27,6 +27,7 @@ type Notify struct {
 
 // MessageHead 仅解析根元素的 CmdType,用于分发(不关心根标签名)
 type MessageHead struct {
+	XMLName  xml.Name
 	CmdType  string `xml:"CmdType"`
 	SN       string `xml:"SN"`
 	DeviceID string `xml:"DeviceID"`

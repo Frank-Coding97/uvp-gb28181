@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -23,6 +24,10 @@ func TestServiceForwardsBasicControlToSourceTarget(t *testing.T) {
 		{name: "zoom", raw: "A50F0110000010D5", action: "zoom_in"},
 		{name: "focus", raw: "A50F0142080000FF", action: "focus_near"},
 		{name: "iris", raw: "A50F014800080005", action: "iris_close"},
+		{name: "preset", raw: "A50F018100030039", action: "preset_set"},
+		{name: "cruise", raw: "A50F01880200003F", action: "cruise_start"},
+		{name: "scan", raw: "A50F018902020042", action: "scan_set_right"},
+		{name: "auxiliary", raw: "A50F018C01000042", action: "aux_on"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -92,7 +97,7 @@ func TestServiceRejectsOutOfScopeControlWithoutOperation(t *testing.T) {
 	executor := &fakeExecutor{}
 	service := testService(true, true, executor)
 	_, err := service.Forward(context.Background(), ForwardRequest{
-		PlatformID: 1, CallID: "call-a", Body: controlBody("2016", 8, "published-a", "A50F018100030039"),
+		PlatformID: 1, CallID: "call-a", Body: controlBody("2016", 8, "published-a", "A50F018B00000040"),
 	})
 	require.ErrorIs(t, err, ErrFeatureUnavailable)
 	require.Zero(t, executor.calls)
@@ -194,4 +199,22 @@ func (f *fakeExecutor) Execute(_ context.Context, target ptz.Target, command ptz
 		f.operation = gbmodels.GbPTZOperation{OperationID: "op-1", Status: gbmodels.PTZOperationSent}
 	}
 	return f.operation, f.err
+}
+
+func TestServicePreservesExtendedPTZNames(t *testing.T) {
+	for _, tc := range []struct{ raw, params string }{
+		{"A50F018100030039", "<PresetName>Gate &amp; 1</PresetName>"},
+		{"A50F01880200003F", "<CruiseTrackName>Night route</CruiseTrackName>"},
+	} {
+		executor := &fakeExecutor{}
+		service := testServiceWithVersion("2022", true, true, executor)
+		body := strings.Replace(string(controlBody("2022", 7, "published-a", tc.raw)), "</Control>", "<PTZCmdParams>"+tc.params+"</PTZCmdParams></Control>", 1)
+		_, err := service.Forward(context.Background(), ForwardRequest{PlatformID: 1, CallID: "named", Body: []byte(body)})
+		require.NoError(t, err)
+		downstream, err := executor.command.Build(99)
+		require.NoError(t, err)
+		require.Contains(t, string(downstream), "<PTZCmdParams>"+tc.params+"</PTZCmdParams>")
+		require.Contains(t, string(downstream), "<SN>99</SN>")
+		require.Contains(t, string(downstream), "<DeviceID>source-channel</DeviceID>")
+	}
 }

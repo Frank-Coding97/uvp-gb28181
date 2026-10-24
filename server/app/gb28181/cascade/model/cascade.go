@@ -16,6 +16,13 @@ const (
 
 type CascadeMediaSessionState string
 
+type CascadeMediaSessionKind string
+
+const (
+	CascadeMediaSessionKindVideo     CascadeMediaSessionKind = "video"
+	CascadeMediaSessionKindBroadcast CascadeMediaSessionKind = "broadcast"
+)
+
 const (
 	CascadeMediaSessionStateReceived     CascadeMediaSessionState = "received"
 	CascadeMediaSessionStateProvisioning CascadeMediaSessionState = "provisioning"
@@ -63,15 +70,19 @@ type GbCascadePlatform struct {
 	RetryPolicy       string `gorm:"column:retry_policy;type:text" json:"retryPolicy"`
 	Transport         string `gorm:"column:transport;size:16;not null;default:UDP;uniqueIndex:uk_cascade_platform_connection,priority:6" json:"transport"`
 
-	CatalogBatchSize int  `gorm:"column:catalog_batch_size;not null;default:1" json:"catalogBatchSize"`
-	AutoPushCatalog  bool `gorm:"column:auto_push_catalog;not null;default:false" json:"autoPushCatalog"`
-	PublishPlatform  bool `gorm:"column:publish_platform;not null;default:false" json:"publishPlatform"`
-	PublishCivil     bool `gorm:"column:publish_civil;not null;default:false" json:"publishCivil"`
-	PublishGroup     bool `gorm:"column:publish_group;not null;default:false" json:"publishGroup"`
-	MaxStreams       int  `gorm:"column:max_streams;not null;default:0" json:"maxStreams"` // 0 means unlimited.
-	PTZEnabled       bool `gorm:"column:ptz_enabled;not null;default:false" json:"ptzEnabled"`
-	RecordingEnabled bool `gorm:"column:recording_enabled;not null;default:false" json:"recordingEnabled"`
-	RTCPKeepalive    bool `gorm:"column:rtcp_keepalive;not null;default:false" json:"rtcpKeepalive"`
+	CatalogBatchSize     int  `gorm:"column:catalog_batch_size;not null;default:1" json:"catalogBatchSize"`
+	AutoPushCatalog      bool `gorm:"column:auto_push_catalog;not null;default:false" json:"autoPushCatalog"`
+	PublishPlatform      bool `gorm:"column:publish_platform;not null;default:false" json:"publishPlatform"`
+	PublishCivil         bool `gorm:"column:publish_civil;not null;default:false" json:"publishCivil"`
+	PublishGroup         bool `gorm:"column:publish_group;not null;default:false" json:"publishGroup"`
+	MaxStreams           int  `gorm:"column:max_streams;not null;default:0" json:"maxStreams"` // 0 means unlimited.
+	PTZEnabled           bool `gorm:"column:ptz_enabled;not null;default:false" json:"ptzEnabled"`
+	DeviceControlEnabled bool `gorm:"column:device_control_enabled;not null;default:false" json:"deviceControlEnabled"`
+	MaintenanceEnabled   bool `gorm:"column:maintenance_enabled;not null;default:false" json:"maintenanceEnabled"`
+	ConfigEnabled        bool `gorm:"column:config_enabled;not null;default:false" json:"configEnabled"`
+	UpgradeEnabled       bool `gorm:"column:upgrade_enabled;not null;default:false" json:"upgradeEnabled"`
+	RecordingEnabled     bool `gorm:"column:recording_enabled;not null;default:false" json:"recordingEnabled"`
+	RTCPKeepalive        bool `gorm:"column:rtcp_keepalive;not null;default:false" json:"rtcpKeepalive"`
 
 	RegisterAt        *time.Time `gorm:"column:register_at" json:"registerAt"`
 	RegisterExpiresAt *time.Time `gorm:"column:register_expires_at" json:"registerExpiresAt"`
@@ -135,6 +146,7 @@ func (GbCascadeChannelProjection) TableName() string { return "gb_cascade_channe
 // GbCascadeMediaSession persists enough facts for audit and restart cleanup, never dialog recovery.
 type GbCascadeMediaSession struct {
 	ID                 uint64                   `gorm:"primaryKey" json:"id"`
+	Kind               CascadeMediaSessionKind  `gorm:"column:session_kind;size:16;not null;default:video;index:idx_cascade_media_kind_state,priority:1" json:"kind"`
 	PlatformID         uint64                   `gorm:"column:platform_id;not null;index:idx_cascade_media_platform_state,priority:1" json:"platformId"`
 	DialogKey          string                   `gorm:"column:dialog_key;size:512;not null;uniqueIndex:uk_cascade_media_dialog" json:"dialogKey"`
 	CallID             string                   `gorm:"column:call_id;size:255;not null;index:idx_cascade_media_call_id" json:"callId"`
@@ -167,3 +179,73 @@ type GbCascadeMediaSession struct {
 }
 
 func (GbCascadeMediaSession) TableName() string { return "gb_cascade_media_session" }
+
+type CascadeSnapshotSessionState string
+
+const (
+	CascadeSnapshotSessionPending    CascadeSnapshotSessionState = "pending"
+	CascadeSnapshotSessionForwarding CascadeSnapshotSessionState = "forwarding"
+	CascadeSnapshotSessionCompleted  CascadeSnapshotSessionState = "completed"
+	CascadeSnapshotSessionFailed     CascadeSnapshotSessionState = "failed"
+)
+
+// GbCascadeSnapshotSession binds an upstream capture request to its authorized
+// source and published channel so completion can be routed after a restart.
+type GbCascadeSnapshotSession struct {
+	ID                  uint64                      `gorm:"primaryKey"`
+	PlatformID          uint64                      `gorm:"column:platform_id;not null;uniqueIndex:uk_cascade_snapshot_session,priority:1;uniqueIndex:uk_cascade_snapshot_request,priority:1;index:idx_cascade_snapshot_expiry,priority:1"`
+	UpstreamSessionID   string                      `gorm:"column:upstream_session_id;size:128;not null;uniqueIndex:uk_cascade_snapshot_session,priority:2"`
+	DownstreamSessionID *string                     `gorm:"column:downstream_session_id;size:128;uniqueIndex:uk_cascade_snapshot_downstream"`
+	UploadToken         *string                     `gorm:"column:upload_token;size:64;uniqueIndex:uk_cascade_snapshot_upload"`
+	UpstreamUploadURL   string                      `gorm:"column:upstream_upload_url;type:text"`
+	RequestKey          string                      `gorm:"column:request_key;size:64;not null;uniqueIndex:uk_cascade_snapshot_request,priority:2"`
+	RequestFingerprint  string                      `gorm:"column:request_fingerprint;size:64;not null"`
+	RequestResult       string                      `gorm:"column:request_result;size:8;not null;default:''"`
+	PublishedChannelID  string                      `gorm:"column:published_channel_id;size:20;not null"`
+	SourceDeviceID      uint64                      `gorm:"column:source_device_id;not null"`
+	SourceChannelID     uint64                      `gorm:"column:source_channel_id;not null"`
+	SourceDeviceEpoch   int64                       `gorm:"column:source_device_epoch;not null;default:0"`
+	ConfigRevision      uint64                      `gorm:"column:config_revision;not null"`
+	ProjectionRevision  uint64                      `gorm:"column:projection_revision;not null"`
+	State               CascadeSnapshotSessionState `gorm:"column:state;size:16;not null;default:pending"`
+	ExpiresAt           time.Time                   `gorm:"column:expires_at;not null;index:idx_cascade_snapshot_expiry,priority:2"`
+	CompletedAt         *time.Time                  `gorm:"column:completed_at"`
+	CreatedAt           time.Time                   `gorm:"column:created_at;not null"`
+	UpdatedAt           time.Time                   `gorm:"column:updated_at;not null"`
+}
+
+func (GbCascadeSnapshotSession) TableName() string { return "gb_cascade_snapshot_session" }
+
+type CascadeAlarmDeliveryState string
+
+const (
+	CascadeAlarmDeliveryPending CascadeAlarmDeliveryState = "pending"
+	CascadeAlarmDeliveryLeased  CascadeAlarmDeliveryState = "leased"
+	CascadeAlarmDeliverySent    CascadeAlarmDeliveryState = "sent"
+	CascadeAlarmDeliveryFailed  CascadeAlarmDeliveryState = "failed"
+)
+
+// GbCascadeAlarmDelivery is a sanitized, per-upstream alarm outbox item.
+type GbCascadeAlarmDelivery struct {
+	ID                 uint64                    `gorm:"primaryKey" json:"id"`
+	DeliveryKey        string                    `gorm:"column:delivery_key;size:64;not null;uniqueIndex:uk_cascade_alarm_delivery_key" json:"deliveryKey"`
+	PlatformID         uint64                    `gorm:"column:platform_id;not null;index:idx_cascade_alarm_delivery_due,priority:1" json:"platformId"`
+	SourceDeviceCode   string                    `gorm:"column:source_device_code;size:20;not null" json:"sourceDeviceCode"`
+	SourceResourceCode string                    `gorm:"column:source_resource_code;size:20;not null" json:"sourceResourceCode"`
+	PublishedCode      string                    `gorm:"column:published_code;size:20;not null" json:"publishedCode"`
+	ProfileVersion     string                    `gorm:"column:profile_version;size:16;not null" json:"profileVersion"`
+	BindingFingerprint string                    `gorm:"column:binding_fingerprint;size:64;not null" json:"-"`
+	Payload            []byte                    `gorm:"column:payload;type:blob;not null" json:"-"`
+	NotifyTargets      string                    `gorm:"column:notify_targets;type:text" json:"-"`
+	State              CascadeAlarmDeliveryState `gorm:"column:state;size:16;not null;default:pending;index:idx_cascade_alarm_delivery_due,priority:2" json:"state"`
+	Attempts           int                       `gorm:"column:attempts;not null;default:0" json:"attempts"`
+	NextAttemptAt      time.Time                 `gorm:"column:next_attempt_at;not null;index:idx_cascade_alarm_delivery_due,priority:3" json:"nextAttemptAt"`
+	LeaseOwner         string                    `gorm:"column:lease_owner;size:64;not null;default:''" json:"leaseOwner"`
+	LeaseUntil         *time.Time                `gorm:"column:lease_until;index:idx_cascade_alarm_delivery_lease" json:"leaseUntil"`
+	LastError          string                    `gorm:"column:last_error;type:text" json:"lastError"`
+	SentAt             *time.Time                `gorm:"column:sent_at" json:"sentAt"`
+	CreatedAt          time.Time                 `gorm:"column:created_at;not null" json:"createdAt"`
+	UpdatedAt          time.Time                 `gorm:"column:updated_at;not null" json:"updatedAt"`
+}
+
+func (GbCascadeAlarmDelivery) TableName() string { return "gb_cascade_alarm_delivery" }

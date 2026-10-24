@@ -223,6 +223,7 @@ func upsertChannel(
 			"owner":        item.Owner,
 			"civil_code":   resolvedCivilCode,
 			"status":       status,
+			"status_event": "",
 		}
 		// 状态类 UPDATE 可能只带 DeviceID/Status，不能清空已知的物理父关系。
 		if strings.TrimSpace(item.ParentID) != "" {

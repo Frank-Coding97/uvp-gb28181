@@ -94,6 +94,9 @@ func (s *Service) OnPTZMessage(ctx context.Context, deviceCode, callID, cseq str
 		// 聚合无关（见 applyStorageCardResponse 的注释），所以单独一支。
 		return s.applyStorageCardResponse(ctx, operation, callID, cseq, body)
 	case manscdp.CmdConfigDownload:
+		if operation.Action == actionCascadeConfigRead {
+			return s.applyCascadeConfigResponse(ctx, operation, callID, cseq, body)
+		}
 		// 配置读取的**两条链路共用这一个 CmdType**，靠 action 分流，别按 CmdType 猜：
 		//  - 视频参数属性（A-5）：按码流逐行落 gb_device_video_param；
 		//  - 配置家族（通用容器）：按 config_type 整块落 gb_device_config。
@@ -104,6 +107,9 @@ func (s *Service) OnPTZMessage(ctx context.Context, deviceCode, callID, cseq str
 		}
 		return s.applyConfigDownloadResponse(ctx, operation, callID, cseq, body)
 	case manscdp.CmdDeviceConfig:
+		if operation.Action == actionCascadeConfigWrite {
+			return s.applyCascadeConfigWriteResponse(ctx, operation, callID, cseq, body)
+		}
 		// 配置写入应答（A.2.6.8）。配置族那条支路**不会**把 operation 收在 accepted 就结束：
 		// 它会在同一个事务里追加一条 ConfigDownload 对账子 operation，
 		// 因为写入应答没有回显，Result=OK 说明不了值有没有生效。
@@ -364,7 +370,11 @@ func (s *Service) applyDeviceControlResponse(ctx context.Context, operation gbmo
 		return s.applyRejectedPTZResponse(ctx, operation, callID, cseq, "", ptzErrorProtocolInvalid, parseErr.Error())
 	}
 	if response.Result == manscdp.DeviceControlResultError {
-		return s.applyRejectedPTZResponse(ctx, operation, callID, cseq, string(response.Result), ptzErrorDeviceRejected, "设备返回 Result=ERROR")
+		err := s.applyRejectedPTZResponse(ctx, operation, callID, cseq, string(response.Result), ptzErrorDeviceRejected, "设备返回 Result=ERROR")
+		if err == nil {
+			s.observeCascadeQuery(operation, body, true)
+		}
+		return err
 	}
 	if operation.Action == "home_position" {
 		return s.applyAcceptedHomePositionControl(ctx, operation, callID, cseq, body)
@@ -386,6 +396,7 @@ func (s *Service) applyDeviceControlResponse(ctx context.Context, operation gbmo
 		return err
 	}
 	if applied {
+		s.observeCascadeQuery(operation, body, true)
 		return s.SyncPresetOperation(ctx, operation)
 	}
 	return nil

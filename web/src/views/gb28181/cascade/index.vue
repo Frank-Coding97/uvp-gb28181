@@ -394,6 +394,18 @@
               }}</a-tag>
             </label>
             <label><span>允许云台控制</span><a-switch v-model="form.ptzEnabled" /></label>
+            <label title="允许上级对已共享通道执行录像启停、布撤防和报警复位"
+              ><span>允许录像/报警控制</span><a-switch v-model="form.deviceControlEnabled"
+            /></label>
+            <label title="独立授权设备重启与存储卡格式化；默认关闭"
+              ><span>允许维护类控制</span><a-switch v-model="form.maintenanceEnabled"
+            /></label>
+            <label title="允许上级修改已共享通道及其所属设备的国标配置"
+              ><span>允许设备配置</span><a-switch v-model="form.configEnabled"
+            /></label>
+            <label title="允许上级通过共享通道升级其所属整机；默认关闭"
+              ><span>允许设备升级</span><a-switch v-model="form.upgradeEnabled"
+            /></label>
             <label><span>自动推送目录</span><a-switch v-model="form.autoPushCatalog" /></label>
             <label><span>允许录像查询与回放</span><a-switch v-model="form.recordingEnabled" /></label>
             <label><span>RTCP 保活</span><a-switch v-model="form.rtcpKeepalive" /></label>
@@ -542,6 +554,38 @@
                   <dt>云台控制</dt>
                   <dd>
                     <a-tag size="small" :color="form.ptzEnabled ? 'blue' : 'gray'">{{ form.ptzEnabled ? "允许" : "禁止" }}</a-tag>
+                  </dd>
+                </div>
+                <div>
+                  <dt>允许录像/报警控制</dt>
+                  <dd>
+                    <a-tag size="small" :color="form.deviceControlEnabled ? 'blue' : 'gray'">{{
+                      form.deviceControlEnabled ? "允许" : "禁止"
+                    }}</a-tag>
+                  </dd>
+                </div>
+                <div>
+                  <dt>允许维护类控制</dt>
+                  <dd>
+                    <a-tag size="small" :color="form.maintenanceEnabled ? 'blue' : 'gray'">{{
+                      form.maintenanceEnabled ? "允许" : "禁止"
+                    }}</a-tag>
+                  </dd>
+                </div>
+                <div>
+                  <dt>允许设备配置</dt>
+                  <dd>
+                    <a-tag size="small" :color="form.configEnabled ? 'blue' : 'gray'">{{
+                      form.configEnabled ? "允许" : "禁止"
+                    }}</a-tag>
+                  </dd>
+                </div>
+                <div>
+                  <dt>允许设备升级</dt>
+                  <dd>
+                    <a-tag size="small" :color="form.upgradeEnabled ? 'blue' : 'gray'">{{
+                      form.upgradeEnabled ? "允许" : "禁止"
+                    }}</a-tag>
                   </dd>
                 </div>
                 <div>
@@ -860,7 +904,11 @@ function openEdit(platform: CascadePlatform) {
     publishGroup: platform.publishGroup,
     maxStreams: platform.maxStreams,
     ptzEnabled: platform.ptzEnabled,
+    deviceControlEnabled: platform.deviceControlEnabled ?? false,
+    maintenanceEnabled: platform.maintenanceEnabled ?? false,
     autoPushCatalog: platform.autoPushCatalog ?? false,
+    configEnabled: platform.configEnabled ?? false,
+    upgradeEnabled: platform.upgradeEnabled ?? false,
     recordingEnabled: platform.recordingEnabled ?? false,
     rtcpKeepalive: platform.rtcpKeepalive ?? false,
     enabled: platform.enabled,

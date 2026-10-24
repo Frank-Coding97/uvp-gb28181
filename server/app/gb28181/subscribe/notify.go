@@ -2,6 +2,7 @@ package subscribe
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -47,12 +48,18 @@ func (s *Service) OnNotify(ctx context.Context, notification Notification) error
 	query := s.db.WithContext(ctx).
 		Where("kind = ? AND enabled = ? AND call_id = ?", notification.Kind, true, notification.CallID)
 	result := query.Limit(1).Find(&sub)
-	if result.Error != nil || result.RowsAffected == 0 {
+	if result.Error != nil {
+		return notificationStorageError(notification.Kind, result.Error)
+	}
+	if result.RowsAffected == 0 {
 		return fmt.Errorf("未匹配到活动订阅")
 	}
 	var device gbmodels.GbDevice
 	result = s.db.WithContext(ctx).Where("id = ?", sub.DeviceID).Limit(1).Find(&device)
-	if result.Error != nil || result.RowsAffected == 0 {
+	if result.Error != nil {
+		return notificationStorageError(notification.Kind, result.Error)
+	}
+	if result.RowsAffected == 0 {
 		return fmt.Errorf("订阅设备不存在")
 	}
 	if notification.DeviceCode != device.DeviceID {
@@ -60,7 +67,10 @@ func (s *Service) OnNotify(ctx context.Context, notification Notification) error
 		channelResult := s.db.WithContext(ctx).
 			Where("device_id = ? AND channel_id = ?", device.DeviceID, notification.DeviceCode).
 			Limit(1).Find(&channel)
-		if channelResult.Error != nil || channelResult.RowsAffected == 0 {
+		if channelResult.Error != nil {
+			return notificationStorageError(notification.Kind, channelResult.Error)
+		}
+		if channelResult.RowsAffected == 0 {
 			return fmt.Errorf("通知设备编码不属于订阅设备")
 		}
 	}
@@ -81,4 +91,11 @@ func (s *Service) OnNotify(ctx context.Context, notification Notification) error
 		updates["expires_at"] = expiresAt
 	}
 	return s.db.WithContext(ctx).Model(&sub).Updates(updates).Error
+}
+
+func notificationStorageError(kind gbmodels.SubscriptionKind, err error) error {
+	if kind == gbmodels.SubscriptionKindAlarm {
+		return errors.Join(ErrAlarmNotAccepted, err)
+	}
+	return err
 }

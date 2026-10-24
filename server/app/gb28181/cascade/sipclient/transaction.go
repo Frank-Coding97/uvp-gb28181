@@ -28,6 +28,20 @@ type Transport interface {
 	DoDigestAuth(context.Context, *sip.Request, *sip.Response, Credentials) (*sip.Response, error)
 }
 
+type AudioDialog interface {
+	WaitAnswer(context.Context) error
+	AnswerSDP() []byte
+	Ack(context.Context) error
+	Bye(context.Context) error
+	Close() error
+	MatchesRequest(*sip.Request) bool
+	ReadBye(*sip.Request, sip.ServerTransaction) error
+}
+
+type AudioDialogTransport interface {
+	WriteAudioDialog(context.Context, *sip.Request, Credentials) (AudioDialog, error)
+}
+
 // SipgoTransport adapts the shared-UA sipgo client for cascade transactions.
 type SipgoTransport struct {
 	client *sipgo.Client
@@ -57,6 +71,57 @@ func (t *SipgoTransport) DoDigestAuth(ctx context.Context, request *sip.Request,
 	})
 }
 
+func (t *SipgoTransport) WriteAudioDialog(ctx context.Context, request *sip.Request, credentials Credentials) (AudioDialog, error) {
+	if t == nil || t.client == nil || request == nil || request.Contact() == nil {
+		return nil, fmt.Errorf("cascade audio dialog is unavailable")
+	}
+	cache := sipgo.NewDialogClientCache(t.client, *request.Contact())
+	session, err := cache.WriteInvite(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	return &sipgoAudioDialog{session: session, credentials: credentials}, nil
+}
+
+type sipgoAudioDialog struct {
+	session     *sipgo.DialogClientSession
+	credentials Credentials
+}
+
+func (d *sipgoAudioDialog) WaitAnswer(ctx context.Context) error {
+	return d.session.WaitAnswer(ctx, sipgo.AnswerOptions{Username: d.credentials.Username, Password: d.credentials.Password})
+}
+func (d *sipgoAudioDialog) AnswerSDP() []byte {
+	if d == nil || d.session == nil || d.session.InviteResponse == nil || !d.session.InviteResponse.IsSuccess() {
+		return nil
+	}
+	return append([]byte(nil), d.session.InviteResponse.Body()...)
+}
+func (d *sipgoAudioDialog) Ack(ctx context.Context) error { return d.session.Ack(ctx) }
+func (d *sipgoAudioDialog) Bye(ctx context.Context) error { return d.session.Bye(ctx) }
+func (d *sipgoAudioDialog) Close() error                  { return d.session.Close() }
+func (d *sipgoAudioDialog) MatchesRequest(request *sip.Request) bool {
+	if d == nil || d.session == nil || request == nil || request.Method != sip.BYE || request.CallID() == nil || request.CSeq() == nil || request.CSeq().MethodName != sip.BYE || d.session.InviteRequest.CallID() == nil || d.session.InviteResponse == nil {
+		return false
+	}
+	from, to := request.From(), request.To()
+	inviteFrom, responseTo := d.session.InviteRequest.From(), d.session.InviteResponse.To()
+	if from == nil || to == nil || inviteFrom == nil || responseTo == nil || request.CallID().Value() != d.session.InviteRequest.CallID().Value() {
+		return false
+	}
+	fromTag, _ := from.Params.Get("tag")
+	inviteFromTag, _ := inviteFrom.Params.Get("tag")
+	toTag, _ := to.Params.Get("tag")
+	remoteTag, _ := responseTo.Params.Get("tag")
+	return fromTag != "" && toTag != "" && fromTag == remoteTag && toTag == inviteFromTag
+}
+func (d *sipgoAudioDialog) ReadBye(request *sip.Request, tx sip.ServerTransaction) error {
+	if !d.MatchesRequest(request) {
+		return fmt.Errorf("cascade audio BYE dialog mismatch")
+	}
+	return d.session.ReadBye(request, tx)
+}
+
 // KeepaliveEncoder owns the profile-aware MANSCDP wire representation.
 // The SIP transaction layer deliberately does not construct standard XML.
 type KeepaliveEncoder interface {
@@ -73,6 +138,9 @@ type TransactionResult struct {
 	Challenge           bool
 	Retried             bool
 	Success             bool
+	ServerDate          time.Time
+	ServerDateFound     bool
+	ServerDateErr       error
 	GrantedExpires      int
 	GrantedExpiresFound bool
 	GrantedExpiresErr   error
@@ -121,11 +189,78 @@ func (c *TransactionClient) Register(ctx context.Context, expires int, callID st
 	if err != nil {
 		return TransactionResult{BuildErr: err}
 	}
-	return c.execute(ctx, request)
+	seen := map[string]struct{}{request.Recipient.String(): {}}
+	for redirects := 0; ; redirects++ {
+		result := c.execute(ctx, request)
+		if result.StatusCode != sip.StatusMovedTemporarily {
+			return result
+		}
+		if redirects >= 3 {
+			result.BuildErr = fmt.Errorf("cascade REGISTER redirect limit exceeded")
+			return result
+		}
+		target, redirectErr := c.factory.registerRedirectTarget(result.Response)
+		if redirectErr != nil {
+			result.BuildErr = redirectErr
+			return result
+		}
+		key := strings.ToLower(target.String())
+		if _, exists := seen[key]; exists {
+			result.BuildErr = fmt.Errorf("cascade REGISTER redirect loop")
+			return result
+		}
+		seen[key] = struct{}{}
+		request, err = c.factory.buildRedirectRegister(expires, callID, target)
+		if err != nil {
+			result.BuildErr = err
+			return result
+		}
+	}
 }
 
 func (c *TransactionClient) Logout(ctx context.Context, callID string) TransactionResult {
 	return c.Register(ctx, 0, callID)
+}
+
+func (f *RequestFactory) registerRedirectTarget(response *sip.Response) (sip.Uri, error) {
+	if f == nil || response == nil {
+		return sip.Uri{}, fmt.Errorf("cascade REGISTER redirect response is unavailable")
+	}
+	contacts := response.GetHeaders("Contact")
+	if len(contacts) != 1 {
+		return sip.Uri{}, fmt.Errorf("cascade REGISTER redirect must contain one Contact")
+	}
+	contact, ok := contacts[0].(*sip.ContactHeader)
+	if !ok {
+		return sip.Uri{}, fmt.Errorf("cascade REGISTER redirect Contact is invalid")
+	}
+	target := contact.Address
+	if !strings.EqualFold(target.Scheme, "sip") || target.Wildcard || target.User != f.identity.UpstreamServerID || target.Password != "" || target.Host == "" || target.UriParams.Length() != 0 || target.Headers.Length() != 0 {
+		return sip.Uri{}, fmt.Errorf("cascade REGISTER redirect Contact is not allowed")
+	}
+	if !strings.EqualFold(target.Host, f.identity.UpstreamDomain) && !strings.EqualFold(target.Host, f.identity.Host) {
+		return sip.Uri{}, fmt.Errorf("cascade REGISTER redirect host is outside the configured upstream trust")
+	}
+	if target.Port < 0 || target.Port > 65535 || target.Port == 0 && target.Host == "" {
+		return sip.Uri{}, fmt.Errorf("cascade REGISTER redirect port is invalid")
+	}
+	if target.Port == 0 {
+		target.Port = 5060
+	}
+	if !validHostToken(target.Host) {
+		return sip.Uri{}, fmt.Errorf("cascade REGISTER redirect host is invalid")
+	}
+	return target, nil
+}
+
+func (f *RequestFactory) buildRedirectRegister(expires int, callID string, target sip.Uri) (*sip.Request, error) {
+	request, err := f.BuildRegister(expires, callID)
+	if err != nil {
+		return nil, err
+	}
+	request.Recipient = *target.Clone()
+	request.SetDestination(net.JoinHostPort(target.Host, strconv.Itoa(target.Port)))
+	return request, nil
 }
 
 func (c *TransactionClient) Keepalive(ctx context.Context, callID string, encoder KeepaliveEncoder) TransactionResult {
@@ -163,6 +298,7 @@ func (c *TransactionClient) execute(parent context.Context, request *sip.Request
 	result := transactionResult(response)
 	if request.Method == sip.REGISTER && result.Success {
 		annotateRegisterVersion(&result, response)
+		annotateRegisterDate(&result, response)
 		result.GrantedExpires, result.GrantedExpiresFound, result.GrantedExpiresErr = grantedRegisterExpires(request, response)
 		if result.GrantedExpiresErr != nil {
 			result.Success = false
@@ -184,6 +320,7 @@ func (c *TransactionClient) execute(parent context.Context, request *sip.Request
 	next := transactionResult(response)
 	if request.Method == sip.REGISTER && next.Success {
 		annotateRegisterVersion(&next, response)
+		annotateRegisterDate(&next, response)
 		next.GrantedExpires, next.GrantedExpiresFound, next.GrantedExpiresErr = grantedRegisterExpires(request, response)
 		if next.GrantedExpiresErr != nil {
 			next.Success = false
@@ -192,6 +329,32 @@ func (c *TransactionClient) execute(parent context.Context, request *sip.Request
 	next.Challenge = true
 	next.Retried = true
 	return next
+}
+
+func annotateRegisterDate(result *TransactionResult, response *sip.Response) {
+	if result == nil || response == nil {
+		return
+	}
+	headers := response.GetHeaders("Date")
+	if len(headers) == 0 {
+		return
+	}
+	result.ServerDateFound = true
+	if len(headers) != 1 {
+		result.ServerDateErr = fmt.Errorf("ambiguous REGISTER Date header")
+		return
+	}
+	parsed, err := time.Parse(time.RFC1123, strings.TrimSpace(headers[0].Value()))
+	if err != nil {
+		result.ServerDateErr = fmt.Errorf("invalid REGISTER Date header: %w", err)
+		return
+	}
+	zone, offset := parsed.Zone()
+	if zone != "GMT" || offset != 0 {
+		result.ServerDateErr = fmt.Errorf("REGISTER Date must use GMT")
+		return
+	}
+	result.ServerDate = parsed.UTC()
 }
 
 func annotateRegisterVersion(result *TransactionResult, response *sip.Response) {

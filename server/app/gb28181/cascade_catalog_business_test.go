@@ -37,6 +37,26 @@ func (t *catalogBusinessTransport) DoDigestAuth(_ context.Context, _ *sip.Reques
 	return sip.NewResponse(sip.StatusOK, "OK"), nil
 }
 
+func TestCascadeCatalogSnapshotPropagatesChannelStatusEvents(t *testing.T) {
+	db, platform, store := cascadeDeviceStatusFixture(t, "2022")
+	previous, err := buildCascadeCatalogSnapshot(t.Context(), store, &platform)
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Where("id = ?", 20).Updates(map[string]any{"status": gbmodels.ChannelStatusOffline, "status_event": gbmodels.ChannelStatusEventVideoLost}).Error)
+	lost, err := buildCascadeCatalogSnapshot(t.Context(), store, &platform)
+	require.NoError(t, err)
+	require.Equal(t, []catalog.CatalogChange{{Item: catalog.CatalogItem{ID: "34020000001320000012"}, Event: "VLOST"}}, catalog.DiffCatalog(previous.Items, lost.Items))
+
+	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Where("id = ?", 20).Updates(map[string]any{"status": gbmodels.ChannelStatusOffline, "status_event": gbmodels.ChannelStatusEventDefect}).Error)
+	defect, err := buildCascadeCatalogSnapshot(t.Context(), store, &platform)
+	require.NoError(t, err)
+	require.Equal(t, []catalog.CatalogChange{{Item: catalog.CatalogItem{ID: "34020000001320000012"}, Event: "DEFECT"}}, catalog.DiffCatalog(lost.Items, defect.Items))
+
+	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Where("id = ?", 20).Updates(map[string]any{"status": gbmodels.ChannelStatusOffline, "status_event": ""}).Error)
+	offline, err := buildCascadeCatalogSnapshot(t.Context(), store, &platform)
+	require.NoError(t, err)
+	require.Equal(t, []catalog.CatalogChange{{Item: catalog.CatalogItem{ID: "34020000001320000012"}, Event: "OFF"}}, catalog.DiffCatalog(defect.Items, offline.Items))
+}
+
 func TestCascadeCatalogHandlerAndPusherUseBusinessSnapshot(t *testing.T) {
 	db := cascadeInviteTestDB(t)
 	require.NoError(t, db.AutoMigrate(

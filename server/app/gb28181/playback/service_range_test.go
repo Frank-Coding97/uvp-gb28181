@@ -9,6 +9,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type reverseScalePlaybackInviter struct {
+	fakeInvite
+	scale float64
+}
+
+func (f *reverseScalePlaybackInviter) Action(ctx context.Context, callID, action string, position, scale float64, duration time.Duration) (float64, float64, error) {
+	f.scale = scale
+	return f.fakeInvite.Action(ctx, callID, action, position, scale, duration)
+}
+
 type rangePlaybackInviter struct {
 	fakeInvite
 	value string
@@ -31,6 +41,19 @@ func TestPlaybackRangeReachesDeviceWithoutDroppingEnd(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, value, invite.value)
 	require.InDelta(t, 12.5, updated.PositionSeconds, 0.000001)
+}
+
+func TestPlaybackServiceAllowsRequiredReverseScale(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	invite := &reverseScalePlaybackInviter{}
+	s := NewService(NewRegistry(RegistryConfig{}), &fakeNodePicker{node: NodeInfo{ID: "1", RecvIP: "192.0.2.10", ServerID: "34020000002000000001"}}, &fakeRTP{}, invite, &fakeMedia{}, ServiceConfig{})
+	created, err := s.Create(context.Background(), validCreate(now))
+	require.NoError(t, err)
+	updated, err := s.Action(context.Background(), created.Session.ID, "u1", ActionRequest{Action: "scale", Scale: -1})
+	require.NoError(t, err)
+	require.Equal(t, int32(1), invite.actionCalls.Load())
+	require.Equal(t, float64(-1), invite.scale)
+	require.Equal(t, float64(2), updated.Scale, "the device action result remains authoritative")
 }
 
 func TestPlaybackRangeRejectsInvalidValuesBeforeDeviceAction(t *testing.T) {

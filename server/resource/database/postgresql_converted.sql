@@ -1,8 +1,8 @@
 -- UVP-GB28181 PostgreSQL release initialization script
--- Model-derived additions: gb_cascade_business_binding, gb_cascade_business_node.
+-- Model-derived additions: gb_cascade_alarm_delivery, gb_cascade_business_binding, gb_cascade_business_node, gb_cascade_snapshot_session.
 -- Generated from the development schema by
 -- server/resource/database/baseline/generate_sql.py. Do not edit by hand.
--- Schema fingerprint: c780de8efae7054b4474e95f542a77b12dba130c5be9eb678baf1bacf90450ae
+-- Schema fingerprint: d17d657a6c2c8bd41e98953dfef6d5307e588faa1fed2ddceb017a729bd43610
 -- Contains production table structures and release baseline data only.
 
 SET client_min_messages TO WARNING;
@@ -184,6 +184,7 @@ CREATE INDEX idx_cascade_device_platform_active ON "gb_cascade_device_projection
 DROP TABLE IF EXISTS "gb_cascade_media_session";
 CREATE TABLE "gb_cascade_media_session" (
   "id" BIGSERIAL PRIMARY KEY,
+  "session_kind" VARCHAR(16) NOT NULL DEFAULT 'video',
   "platform_id" BIGINT NOT NULL,
   "dialog_key" VARCHAR(512) NOT NULL,
   "call_id" VARCHAR(255) NOT NULL,
@@ -217,6 +218,36 @@ CREATE TABLE "gb_cascade_media_session" (
 );
 CREATE INDEX idx_cascade_media_call_id ON "gb_cascade_media_session" ("call_id");
 CREATE INDEX idx_cascade_media_platform_state ON "gb_cascade_media_session" ("platform_id", "state");
+CREATE INDEX idx_cascade_media_kind_state ON "gb_cascade_media_session" ("session_kind", "state");
+
+DROP TABLE IF EXISTS "gb_cascade_snapshot_session";
+CREATE TABLE "gb_cascade_snapshot_session" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "platform_id" BIGINT NOT NULL,
+  "upstream_session_id" VARCHAR(128) NOT NULL,
+  "downstream_session_id" VARCHAR(128),
+  "upload_token" VARCHAR(64),
+  "upstream_upload_url" TEXT,
+  "request_key" VARCHAR(64) NOT NULL,
+  "request_fingerprint" VARCHAR(64) NOT NULL,
+  "request_result" VARCHAR(8) NOT NULL DEFAULT '',
+  "published_channel_id" VARCHAR(20) NOT NULL,
+  "source_device_id" BIGINT NOT NULL,
+  "source_channel_id" BIGINT NOT NULL,
+  "source_device_epoch" BIGINT NOT NULL DEFAULT 0,
+  "config_revision" BIGINT NOT NULL,
+  "projection_revision" BIGINT NOT NULL,
+  "state" VARCHAR(16) NOT NULL DEFAULT 'pending',
+  "expires_at" TIMESTAMP(3) NOT NULL,
+  "completed_at" TIMESTAMP(3),
+  "created_at" TIMESTAMP(3) NOT NULL,
+  "updated_at" TIMESTAMP(3) NOT NULL,
+  CONSTRAINT uk_cascade_snapshot_session UNIQUE ("platform_id", "upstream_session_id"),
+  CONSTRAINT uk_cascade_snapshot_request UNIQUE ("platform_id", "request_key"),
+  CONSTRAINT uk_cascade_snapshot_downstream UNIQUE ("downstream_session_id"),
+  CONSTRAINT uk_cascade_snapshot_upload UNIQUE ("upload_token")
+);
+CREATE INDEX idx_cascade_snapshot_expiry ON "gb_cascade_snapshot_session" ("platform_id", "expires_at");
 
 DROP TABLE IF EXISTS "gb_cascade_platform";
 CREATE TABLE "gb_cascade_platform" (
@@ -254,6 +285,7 @@ CREATE TABLE "gb_cascade_platform" (
   "publish_group" BOOLEAN NOT NULL DEFAULT false,
   "max_streams" INTEGER NOT NULL DEFAULT 0,
   "ptz_enabled" BOOLEAN NOT NULL DEFAULT false,
+  "upgrade_enabled" BOOLEAN NOT NULL DEFAULT false,
   "recording_enabled" BOOLEAN NOT NULL DEFAULT false,
   "rtcp_keepalive" BOOLEAN NOT NULL DEFAULT false,
   "register_at" TIMESTAMP(3),
@@ -354,6 +386,7 @@ CREATE TABLE "gb_channel" (
   "position_source" VARCHAR(16) NOT NULL DEFAULT '',
   "position_updated_at" TIMESTAMP(3),
   "status" SMALLINT DEFAULT 0,
+  "status_event" VARCHAR(8) NOT NULL DEFAULT '',
   "stream_id" VARCHAR(64) NOT NULL DEFAULT '',
   "current_ssrc" VARCHAR(10) NOT NULL DEFAULT '',
   "on_demand_live" BOOLEAN NOT NULL DEFAULT true,
@@ -400,6 +433,7 @@ COMMENT ON COLUMN "gb_channel"."latitude" IS '纬度';
 COMMENT ON COLUMN "gb_channel"."position_source" IS 'é€šé“åæ ‡æ¥æº catalog/mobile/manual,ç©º=æ— åæ ‡';
 COMMENT ON COLUMN "gb_channel"."position_updated_at" IS 'é€šé“åæ ‡æœ€è¿‘æ›´æ–°æ—¶é—´';
 COMMENT ON COLUMN "gb_channel"."status" IS '通道在线 0离线 1在线';
+COMMENT ON COLUMN "gb_channel"."status_event" IS '目录故障事件 VLOST/DEFECT 空表示无故障事件';
 COMMENT ON COLUMN "gb_channel"."stream_id" IS '当前播放流ID(ZLM app/stream),空=未点播';
 COMMENT ON COLUMN "gb_channel"."current_ssrc" IS '当前实时媒体会话SSRC';
 COMMENT ON COLUMN "gb_channel"."on_demand_live" IS '按需直播 1=无人观看自动关闭';
@@ -694,10 +728,18 @@ CREATE TABLE "gb_device_firmware_upgrade" (
   "response_at" TIMESTAMP(6),
   "response_call_id" VARCHAR(255),
   "response_cseq" VARCHAR(64),
+  "cascade_binding" TEXT,
+  "cascade_request_key" VARCHAR(64),
+  "cascade_session_key" VARCHAR(64),
+  "cascade_business_result" VARCHAR(16),
+  "cascade_business_delivered" SMALLINT NOT NULL DEFAULT 0,
+  "cascade_final_delivered" SMALLINT NOT NULL DEFAULT 0,
   CONSTRAINT uk_firmware_upgrade_device_idempotency UNIQUE ("device_id", "idempotency_key"),
   CONSTRAINT uk_firmware_upgrade_device_session UNIQUE ("device_id", "session_id"),
   CONSTRAINT uk_firmware_upgrade_operation UNIQUE ("operation_id"),
-  CONSTRAINT uk_firmware_upgrade_sn UNIQUE ("sn")
+  CONSTRAINT uk_firmware_upgrade_sn UNIQUE ("sn"),
+  CONSTRAINT uk_firmware_upgrade_cascade_request UNIQUE ("cascade_request_key"),
+  CONSTRAINT uk_firmware_upgrade_cascade_session UNIQUE ("cascade_session_key")
 );
 CREATE INDEX idx_firmware_upgrade_deadline ON "gb_device_firmware_upgrade" ("deadline_at");
 CREATE INDEX idx_firmware_upgrade_device_session ON "gb_device_firmware_upgrade" ("device_code", "session_id");
@@ -2775,6 +2817,32 @@ COMMENT ON COLUMN "sys_users"."avatar" IS '头像';
 COMMENT ON COLUMN "sys_users"."description" IS '描述';
 COMMENT ON COLUMN "sys_users"."created_by" IS '创建人';
 
+DROP TABLE IF EXISTS "gb_cascade_alarm_delivery";
+CREATE TABLE "gb_cascade_alarm_delivery" (
+  "id" BIGSERIAL PRIMARY KEY,
+  "delivery_key" VARCHAR(64) NOT NULL,
+  "platform_id" BIGINT NOT NULL,
+  "source_device_code" VARCHAR(20) NOT NULL,
+  "source_resource_code" VARCHAR(20) NOT NULL,
+  "published_code" VARCHAR(20) NOT NULL,
+  "profile_version" VARCHAR(16) NOT NULL,
+  "binding_fingerprint" VARCHAR(64) NOT NULL,
+  "payload" BYTEA NOT NULL,
+  "notify_targets" TEXT,
+  "state" VARCHAR(16) NOT NULL DEFAULT 'pending',
+  "attempts" INTEGER NOT NULL DEFAULT 0,
+  "next_attempt_at" TIMESTAMP(3) NOT NULL,
+  "lease_owner" VARCHAR(64) NOT NULL DEFAULT '',
+  "lease_until" TIMESTAMP(3),
+  "last_error" TEXT,
+  "sent_at" TIMESTAMP(3),
+  "created_at" TIMESTAMP(3) NOT NULL,
+  "updated_at" TIMESTAMP(3) NOT NULL,
+  CONSTRAINT uk_cascade_alarm_delivery_key UNIQUE ("delivery_key")
+);
+CREATE INDEX idx_cascade_alarm_delivery_due ON "gb_cascade_alarm_delivery" ("platform_id", "state", "next_attempt_at");
+CREATE INDEX idx_cascade_alarm_delivery_lease ON "gb_cascade_alarm_delivery" ("lease_until");
+
 -- openapi-capability-catalog:begin
 
 DROP TABLE IF EXISTS "sys_openapi_capability";
@@ -3394,7 +3462,11 @@ INSERT INTO "sys_api" ("id", "title", "path", "method", "api_group", "created_at
 (650, '保存国标服务配置', '/api/gb28181/sip/service-config', 'PUT', '国标平台', NULL, NULL, NULL, 1),
 (651, '查看级联业务分组', '/api/gb28181/cascade/platforms/:id/business-group', 'GET', '国标级联', NULL, NULL, NULL, 1),
 (652, '保存级联业务分组', '/api/gb28181/cascade/platforms/:id/business-group', 'PUT', '国标级联', NULL, NULL, NULL, 1),
-(653, '设置级联业务分组发布', '/api/gb28181/cascade/platforms/:id/publish-group', 'PUT', '国标级联', NULL, NULL, NULL, 1);
+(653, '设置级联业务分组发布', '/api/gb28181/cascade/platforms/:id/publish-group', 'PUT', '国标级联', NULL, NULL, NULL, 1),
+(678, '查询通道移动轨迹', '/api/gb28181/device-mgmt/map/trajectory', 'GET', '设备管理', '2026-10-21 21:30:00.000000', '2026-10-21 21:30:00.000000', NULL, 1),
+(679, '读取地图默认中心点', '/api/gb28181/device-mgmt/map/center', 'GET', '设备管理', '2026-10-21 21:30:00.000000', '2026-10-21 21:30:00.000000', NULL, 1),
+(680, '保存地图默认中心点', '/api/gb28181/device-mgmt/map/center', 'PUT', '设备管理', '2026-10-21 21:30:00.000000', '2026-10-21 21:30:00.000000', NULL, 1),
+(681, '查询可定位通道树', '/api/gb28181/device-mgmt/map/channel-tree', 'GET', '设备管理', '2026-10-21 22:40:00.000000', '2026-10-21 22:40:00.000000', NULL, 1);
 INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5") VALUES
 (6266, 'g', 'user_1', 'role_1', '*', '', '', ''),
 (8166, 'p', 'role_3', '/api/users/logout', 'POST', '*', '', ''),
@@ -3905,7 +3977,14 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (10296, 'p', 'role_1', '/api/gb28181/sip/service-config', 'PUT', '*', '', ''),
 (10297, 'p', 'role_1', '/api/gb28181/cascade/platforms/:id/business-group', 'GET', '*', '', ''),
 (10298, 'p', 'role_1', '/api/gb28181/cascade/platforms/:id/business-group', 'PUT', '*', '', ''),
-(10299, 'p', 'role_1', '/api/gb28181/cascade/platforms/:id/publish-group', 'PUT', '*', '', '');
+(10299, 'p', 'role_1', '/api/gb28181/cascade/platforms/:id/publish-group', 'PUT', '*', '', ''),
+(10347, 'p', 'role_1', '/api/gb28181/device-mgmt/map/trajectory', 'GET', '*', '', ''),
+(10348, 'p', 'role_3', '/api/gb28181/device-mgmt/map/trajectory', 'GET', '*', '', ''),
+(10349, 'p', 'role_1', '/api/gb28181/device-mgmt/map/center', 'GET', '*', '', ''),
+(10350, 'p', 'role_3', '/api/gb28181/device-mgmt/map/center', 'GET', '*', '', ''),
+(10351, 'p', 'role_1', '/api/gb28181/device-mgmt/map/center', 'PUT', '*', '', ''),
+(10352, 'p', 'role_1', '/api/gb28181/device-mgmt/map/channel-tree', 'GET', '*', '', ''),
+(10353, 'p', 'role_3', '/api/gb28181/device-mgmt/map/channel-tree', 'GET', '*', '', '');
 INSERT INTO "sys_civil_code" ("code", "name", "short_name", "parent_code", "level", "pinyin", "created_at", "updated_at") VALUES
 ('110000', '北京市', '北京市', '', 1, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),
 ('110100', '北京市市辖区', '市辖区', '110000', 2, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),
@@ -8224,7 +8303,11 @@ INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (140610, 635),
 (140610, 636),
 (140610, 637),
-(140610, 638);
+(140610, 638),
+(140452, 678),
+(140452, 679),
+(140452, 680),
+(140452, 681);
 INSERT INTO "sys_role" ("id", "name", "sort", "status", "description", "parent_id", "created_at", "updated_at", "deleted_at", "created_by", "data_scope", "checked_depts") VALUES
 (1, '系统管理员', 0, 1, '最高权限管理员角色', 0, '2025-09-01 17:32:12.000000', '2025-09-30 15:53:24.000000', NULL, 1, 1, ''),
 (3, '游客', 0, 1, '只读游客：允许业务查看、实时观看和录像回放；禁止下载、控制与修改', 0, '2026-08-24 20:29:31.000000', '2026-09-05 18:46:37.000000', NULL, 1, 4, '');
@@ -8455,8 +8538,8 @@ INSERT INTO "sys_users" ("id", "username", "password", "email", "status", "dept_
 -- 自增水位：种子行用的是显式 id，PostgreSQL 的序列不会自己前进，
 -- 不补这一步，全新装环境第一次 INSERT 就会撞主键。
 SELECT setval(pg_get_serial_sequence('gb_sip_security_policy', 'id'), 1, true);
-SELECT setval(pg_get_serial_sequence('sys_api', 'id'), 653, true);
-SELECT setval(pg_get_serial_sequence('sys_casbin_rule', 'id'), 10299, true);
+SELECT setval(pg_get_serial_sequence('sys_api', 'id'), 681, true);
+SELECT setval(pg_get_serial_sequence('sys_casbin_rule', 'id'), 10353, true);
 SELECT setval(pg_get_serial_sequence('sys_department', 'id'), 1, true);
 SELECT setval(pg_get_serial_sequence('sys_dict', 'id'), 38, true);
 SELECT setval(pg_get_serial_sequence('sys_dict_item', 'id'), 299, true);

@@ -134,6 +134,70 @@ func TestTransactionClientOnlyUsesFinalDigestResponseVersion(t *testing.T) {
 	}
 }
 
+func TestTransactionClientObservesRegisterDateWithoutChangingSuccess(t *testing.T) {
+	t.Run("valid GMT", func(t *testing.T) {
+		response := sip.NewResponse(sip.StatusOK, "OK")
+		response.AppendHeader(sip.NewHeader("Date", "Fri, 23 Oct 2026 12:34:56 GMT"))
+		result := mustTransactionClient(t, protocol.Version2016, &fakeTransport{doResponses: []*sip.Response{response}}).Register(context.Background(), 3600, "register-date")
+		want := time.Date(2026, time.October, 23, 12, 34, 56, 0, time.UTC)
+		if !result.Success || !result.ServerDateFound || result.ServerDateErr != nil || !result.ServerDate.Equal(want) {
+			t.Fatalf("result=%+v", result)
+		}
+	})
+
+	for _, raw := range []string{"not a date", "Fri, 23 Oct 2026 12:34:56 UTC"} {
+		t.Run(raw, func(t *testing.T) {
+			response := sip.NewResponse(sip.StatusOK, "OK")
+			response.AppendHeader(sip.NewHeader("Date", raw))
+			result := mustTransactionClient(t, protocol.Version2016, &fakeTransport{doResponses: []*sip.Response{response}}).Register(context.Background(), 3600, "register-date-invalid")
+			if !result.Success || !result.ServerDateFound || result.ServerDateErr == nil {
+				t.Fatalf("optional invalid Date must not reject REGISTER: result=%+v", result)
+			}
+		})
+	}
+}
+
+func TestRegisterFollowsBoundedTrustedRedirect(t *testing.T) {
+	redirect := sip.NewResponse(sip.StatusMovedTemporarily, "Moved Temporarily")
+	redirect.AppendHeader(&sip.ContactHeader{Address: sip.Uri{Scheme: "sip", User: "34020000002000000001", Host: "3402000000"}})
+	accepted := sip.NewResponse(sip.StatusOK, "OK")
+	accepted.AppendHeader(sip.NewHeader("Expires", "3600"))
+	transport := &fakeTransport{doResponses: []*sip.Response{redirect, accepted}}
+	result := mustTransactionClient(t, protocol.Version2016, transport).Register(context.Background(), 3600, "redirected-register")
+	if !result.Success || result.StatusCode != sip.StatusOK || len(transport.doRequests) != 2 {
+		t.Fatalf("result=%+v requests=%d", result, len(transport.doRequests))
+	}
+	first, second := transport.doRequests[0], transport.doRequests[1]
+	if second.Recipient.Host != "3402000000" || second.Recipient.User != "34020000002000000001" || second.Destination() != "3402000000:5060" {
+		t.Fatalf("redirect request target=%+v destination=%q", second.Recipient, second.Destination())
+	}
+	if first.CSeq().SeqNo == second.CSeq().SeqNo || first.CallID().Value() != second.CallID().Value() {
+		t.Fatalf("redirect must keep Call-ID and use a new CSeq: first=%v second=%v", first.CSeq(), second.CSeq())
+	}
+}
+
+func TestRegisterRejectsUntrustedRedirectAndRedirectLoop(t *testing.T) {
+	t.Run("untrusted host", func(t *testing.T) {
+		redirect := sip.NewResponse(sip.StatusMovedTemporarily, "Moved Temporarily")
+		redirect.AppendHeader(&sip.ContactHeader{Address: sip.Uri{Scheme: "sip", User: "34020000002000000001", Host: "attacker.example"}})
+		transport := &fakeTransport{doResponses: []*sip.Response{redirect}}
+		result := mustTransactionClient(t, protocol.Version2016, transport).Register(context.Background(), 3600, "redirect-untrusted")
+		if result.Success || result.StatusCode != sip.StatusMovedTemporarily || result.BuildErr == nil || len(transport.doRequests) != 1 {
+			t.Fatalf("result=%+v requests=%d", result, len(transport.doRequests))
+		}
+	})
+
+	t.Run("loop", func(t *testing.T) {
+		redirect := sip.NewResponse(sip.StatusMovedTemporarily, "Moved Temporarily")
+		redirect.AppendHeader(&sip.ContactHeader{Address: sip.Uri{Scheme: "sip", User: "34020000002000000001", Host: "3402000000"}})
+		transport := &fakeTransport{doResponses: []*sip.Response{redirect, redirect}}
+		result := mustTransactionClient(t, protocol.Version2016, transport).Register(context.Background(), 3600, "redirect-loop")
+		if result.Success || result.BuildErr == nil || len(transport.doRequests) != 2 {
+			t.Fatalf("result=%+v requests=%d", result, len(transport.doRequests))
+		}
+	})
+}
+
 func TestTransactionClientDoesNotTreatUnknownVersionAsNegotiated(t *testing.T) {
 	response := sip.NewResponse(sip.StatusOK, "OK")
 	response.AppendHeader(sip.NewHeader("X-GB-Ver", "9.9"))

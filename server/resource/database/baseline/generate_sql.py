@@ -911,7 +911,10 @@ def render_table(profile: Profile, table: dict,
             if dropped:
                 dropped_notes.append(f"-- NOTE: {unique['name']} 的 {', '.join(dropped)} 使用前缀索引，"
                                      f"SQL Server 无等价语法，已从唯一约束中移除。")
-            body.append(f"  CONSTRAINT {q(named(unique))} UNIQUE ({', '.join(cols)})")
+            # SQL Server UNIQUE permits only one NULL. Routing values are
+            # optional for legacy rows and unique only when present.
+            if not unique.get("nulls_distinct"):
+                body.append(f"  CONSTRAINT {q(named(unique))} UNIQUE ({', '.join(cols)})")
         for check in table.get("checks", []):
             body.append(profile.render_check(table, check))
         # CREATE TABLE 本体嵌在 IF ... BEGIN 里（缩 2 空格），列定义再缩一级对齐。
@@ -919,6 +922,17 @@ def render_table(profile: Profile, table: dict,
         lines.append("  );")
         lines.append("END;")
         lines.extend(dropped_notes)
+        for unique in table["uniques"]:
+            if not unique.get("nulls_distinct"):
+                continue
+            cols, _ = index_columns(profile, unique["columns"])
+            predicate = " AND ".join(f"{col} IS NOT NULL" for col in cols)
+            index_name = named(unique)
+            lines.append(
+                f"IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'{name}') "
+                f"AND name=N'{index_name}')"
+            )
+            lines.append(f"  CREATE UNIQUE INDEX {q(index_name)} ON {q(name)} ({', '.join(cols)}) WHERE {predicate};")
         for index in table["indexes"]:
             cols, dropped = index_columns(profile, index["columns"])
             if dropped:

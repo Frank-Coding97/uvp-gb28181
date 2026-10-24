@@ -142,3 +142,24 @@ func TestBuildDownloadSDP(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildDownloadSDPPreservesRecordingSelector(t *testing.T) {
+	for _, selector := range []string{"34020000001320000001:2", "http://34020000001320000001/records/one.ps"} {
+		got, err := BuildDownloadSDP(DownloadParams{
+			ServerID: "34020000002000000001", ChannelID: "34020000001320000001",
+			RecvIP: "192.0.2.10", RecvPort: 30000, SSRC: "1402000001",
+			Start: time.Unix(1_000, 0), End: time.Unix(2_000, 0), RecordingURI: selector,
+		})
+		if err != nil || !strings.Contains(got, "u="+selector+"\r\n") {
+			t.Fatalf("selector=%q sdp=%q error=%v", selector, got, err)
+		}
+	}
+	_, err := BuildDownloadSDP(DownloadParams{
+		ServerID: "34020000002000000001", ChannelID: "34020000001320000001",
+		RecvIP: "192.0.2.10", RecvPort: 30000, SSRC: "1402000001",
+		Start: time.Unix(1_000, 0), End: time.Unix(2_000, 0), RecordingURI: "34020000001320000999:2",
+	})
+	if !errors.Is(err, ErrInvalidPlaybackArgument) {
+		t.Fatalf("mismatching source accepted: %v", err)
+	}
+}

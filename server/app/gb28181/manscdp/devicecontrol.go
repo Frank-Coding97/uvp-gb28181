@@ -110,12 +110,13 @@ type PTZExtendedCommand struct {
 }
 
 type deviceControl struct {
-	XMLName  xml.Name    `xml:"Control"`
-	CmdType  string      `xml:"CmdType"`
-	SN       int         `xml:"SN"`
-	DeviceID string      `xml:"DeviceID"`
-	PTZCmd   string      `xml:"PTZCmd"`
-	Info     controlInfo `xml:"Info"`
+	XMLName      xml.Name          `xml:"Control"`
+	CmdType      string            `xml:"CmdType"`
+	SN           int               `xml:"SN"`
+	DeviceID     string            `xml:"DeviceID"`
+	PTZCmd       string            `xml:"PTZCmd"`
+	PTZCmdParams *PTZCommandParams `xml:"PTZCmdParams,omitempty"`
+	Info         controlInfo       `xml:"Info"`
 }
 
 type controlInfo struct {

@@ -3,6 +3,7 @@ package ptz
 import (
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"sort"
 	"strings"
@@ -25,10 +26,13 @@ type stagedCruiseTrack struct {
 }
 
 type queryResponseStage struct {
-	cmdType  string
-	expected int
-	presets  map[int]manscdp.Preset
-	tracks   map[int]stagedCruiseTrack
+	cmdType       string
+	expected      int
+	presets       map[int]manscdp.Preset
+	tracks        map[int]stagedCruiseTrack
+	detail        *manscdp.CruiseTrack
+	detailPages   map[[32]byte]struct{}
+	detailSummary []byte
 }
 
 const (
@@ -128,8 +132,27 @@ func (s *Service) RefreshHomePosition(ctx context.Context, target Target, actorI
 }
 
 func (s *Service) applyQueryResponse(ctx context.Context, operation gbmodels.GbPTZOperation, callID, cseq string, head manscdp.MessageHead, body []byte) error {
+	var envelope struct {
+		XMLName xml.Name `xml:"Response"`
+	}
+	if len(body) > maxQueryStageBodyBytes {
+		return s.applyRejectedPTZResponse(ctx, operation, callID, cseq, "ERROR", ptzErrorProtocolInvalid, "PTZ query response exceeds size limit")
+	}
+	if err := manscdp.DecodeProfiledXML(operationProtocolProfile(operation), body, &envelope); err != nil {
+		return s.applyRejectedPTZResponse(ctx, operation, callID, cseq, "ERROR", ptzErrorProtocolInvalid, err.Error())
+	}
 	if head.CmdType == manscdp.CmdHomePositionQuery {
-		return s.applyHomePositionQueryResponse(ctx, operation, callID, cseq, body)
+		err := s.applyHomePositionQueryResponse(ctx, operation, callID, cseq, body)
+		if err == nil {
+			current, readErr := s.GetOperation(ctx, operation.OperationID)
+			if readErr != nil {
+				return readErr
+			}
+			if current.Status == gbmodels.PTZOperationAccepted {
+				s.observeCascadeQuery(operation, body, true)
+			}
+		}
+		return err
 	}
 	if err := validateQueryResponse(operation, head.CmdType, body); err != nil {
 		return s.applyRejectedPTZResponse(ctx, operation, callID, cseq, "ERROR", ptzErrorProtocolInvalid, err.Error())
@@ -199,6 +222,9 @@ func (s *Service) applyQueryResponse(ctx context.Context, operation gbmodels.GbP
 		delete(s.queryStages, operation.OperationID)
 	} else if stage != nil {
 		s.queryStages[operation.OperationID] = *stage
+	}
+	if applied {
+		s.observeCascadeQuery(operation, body, terminalApplied)
 	}
 	return nil
 }
@@ -380,7 +406,7 @@ func (s *Service) persistQueryCacheTx(ctx context.Context, tx *gorm.DB, operatio
 }
 
 func (s *Service) accumulateQueryStage(operation gbmodels.GbPTZOperation, cmdType string, body []byte) (*queryResponseStage, bool, error) {
-	if cmdType != manscdp.CmdPresetQuery && cmdType != manscdp.CmdCruiseTrackListQuery {
+	if cmdType != manscdp.CmdPresetQuery && cmdType != manscdp.CmdCruiseTrackListQuery && cmdType != manscdp.CmdCruiseTrackQuery {
 		return nil, false, nil
 	}
 	// 解析前先限输入体积:单页超大 XML 不允许进入解析器
@@ -394,6 +420,8 @@ func (s *Service) accumulateQueryStage(operation gbmodels.GbPTZOperation, cmdTyp
 	stage.cmdType = cmdType
 
 	switch cmdType {
+	case manscdp.CmdCruiseTrackQuery:
+		return accumulateCruiseDetailStage(stage, body)
 	case manscdp.CmdPresetQuery:
 		response, err := manscdp.ParsePresetResponse(body)
 		if err != nil {
@@ -435,6 +463,16 @@ func (s *Service) accumulateQueryStage(operation gbmodels.GbPTZOperation, cmdTyp
 
 func cloneQueryResponseStage(source queryResponseStage) queryResponseStage {
 	clone := queryResponseStage{cmdType: source.cmdType, expected: source.expected}
+	if source.detail != nil {
+		detail := *source.detail
+		detail.PointList.Points = append([]manscdp.CruisePoint(nil), detail.PointList.Points...)
+		clone.detail = &detail
+		clone.detailSummary = append([]byte(nil), source.detailSummary...)
+		clone.detailPages = make(map[[32]byte]struct{}, len(source.detailPages))
+		for key := range source.detailPages {
+			clone.detailPages[key] = struct{}{}
+		}
+	}
 	if source.presets != nil {
 		clone.presets = make(map[int]manscdp.Preset, len(source.presets))
 		for id, item := range source.presets {
@@ -464,6 +502,11 @@ func maxQueryStageExpected(current, reported, received int) int {
 func (s *Service) finalizeQueryStageTx(ctx context.Context, tx *gorm.DB, operation gbmodels.GbPTZOperation, stage queryResponseStage, now time.Time) error {
 	tx = tx.WithContext(ctx)
 	switch stage.cmdType {
+	case manscdp.CmdCruiseTrackQuery:
+		if stage.detail == nil || len(stage.detail.PointList.Points) != stage.expected {
+			return fmt.Errorf("incomplete cruise detail")
+		}
+		return upsertCruiseTrack(tx, operation, *stage.detail, stage.detailSummary, now, true)
 	case manscdp.CmdPresetQuery:
 		ids := sortedPresetIDs(stage.presets)
 		for _, id := range ids {

@@ -53,34 +53,38 @@ type ManagementRuntime interface {
 }
 
 type PlatformConfigInput struct {
-	Name              string
-	UpstreamServerID  string
-	UpstreamDomain    string
-	Host              string
-	Port              int
-	LocalDeviceID     string
-	LocalDomain       string
-	LocalSIPIP        string
-	LocalSIPPort      int
-	MediaAdvertiseIP  string
-	AuthUsername      string
-	Password          *string
-	ProfileOverride   model.CascadeProfileOverride
-	CharsetOverride   string
-	RegisterExpires   int
-	KeepaliveInterval int
-	RetryPolicy       string
-	Transport         string
-	CatalogBatchSize  int
-	AutoPushCatalog   bool `json:"autoPushCatalog"`
-	PublishPlatform   bool
-	PublishCivil      bool
-	PublishGroup      bool
-	MaxStreams        int
-	PTZEnabled        bool
-	RecordingEnabled  bool `json:"recordingEnabled"`
-	RTCPKeepalive     bool `json:"rtcpKeepalive"`
-	Enabled           bool
+	Name                 string
+	UpstreamServerID     string
+	UpstreamDomain       string
+	Host                 string
+	Port                 int
+	LocalDeviceID        string
+	LocalDomain          string
+	LocalSIPIP           string
+	LocalSIPPort         int
+	MediaAdvertiseIP     string
+	AuthUsername         string
+	Password             *string
+	ProfileOverride      model.CascadeProfileOverride
+	CharsetOverride      string
+	RegisterExpires      int
+	KeepaliveInterval    int
+	RetryPolicy          string
+	Transport            string
+	CatalogBatchSize     int
+	AutoPushCatalog      bool `json:"autoPushCatalog"`
+	PublishPlatform      bool
+	PublishCivil         bool
+	PublishGroup         bool
+	MaxStreams           int
+	PTZEnabled           bool
+	DeviceControlEnabled bool `json:"deviceControlEnabled"`
+	MaintenanceEnabled   bool `json:"maintenanceEnabled"`
+	ConfigEnabled        bool `json:"configEnabled"`
+	UpgradeEnabled       bool `json:"upgradeEnabled"`
+	RecordingEnabled     bool `json:"recordingEnabled"`
+	RTCPKeepalive        bool `json:"rtcpKeepalive"`
+	Enabled              bool
 }
 
 type PlatformView struct {
@@ -112,6 +116,10 @@ type PlatformView struct {
 	PublishGroup         bool                         `json:"publishGroup"`
 	MaxStreams           int                          `json:"maxStreams"`
 	PTZEnabled           bool                         `json:"ptzEnabled"`
+	DeviceControlEnabled bool                         `json:"deviceControlEnabled"`
+	MaintenanceEnabled   bool                         `json:"maintenanceEnabled"`
+	ConfigEnabled        bool                         `json:"configEnabled"`
+	UpgradeEnabled       bool                         `json:"upgradeEnabled"`
 	RecordingEnabled     bool                         `json:"recordingEnabled"`
 	RTCPKeepalive        bool                         `json:"rtcpKeepalive"`
 	Enabled              bool                         `json:"enabled"`
@@ -503,7 +511,7 @@ func (s *ManagementService) view(platform model.GbCascadePlatform) PlatformView 
 		CharsetOverride: platform.CharsetOverride, RegisterExpires: platform.RegisterExpires, KeepaliveInterval: platform.KeepaliveInterval,
 		Transport: platform.Transport, CatalogBatchSize: platform.CatalogBatchSize, AutoPushCatalog: platform.AutoPushCatalog, PublishPlatform: platform.PublishPlatform,
 		PublishCivil: platform.PublishCivil, PublishGroup: platform.PublishGroup, MaxStreams: platform.MaxStreams, PTZEnabled: platform.PTZEnabled,
-		RecordingEnabled: platform.RecordingEnabled, RTCPKeepalive: platform.RTCPKeepalive,
+		ConfigEnabled: platform.ConfigEnabled, UpgradeEnabled: platform.UpgradeEnabled, DeviceControlEnabled: platform.DeviceControlEnabled, MaintenanceEnabled: platform.MaintenanceEnabled, RecordingEnabled: platform.RecordingEnabled, RTCPKeepalive: platform.RTCPKeepalive,
 		Enabled: platform.Enabled, ConfigRevision: platform.ConfigRevision, ProjectionRevision: platform.ProjectionRevision,
 		Registration: state.Registration, Heartbeat: state.Heartbeat, Overall: state.Overall,
 		RegisterAt: platform.RegisterAt, RegisterExpiresAt: platform.RegisterExpiresAt, HeartbeatAt: platform.HeartbeatAt,
@@ -539,7 +547,7 @@ func platformFromInput(input PlatformConfigInput) (*model.GbCascadePlatform, err
 		MediaAdvertiseIP: input.MediaAdvertiseIP, AuthUsername: input.AuthUsername, ProfileOverride: input.ProfileOverride,
 		CharsetOverride: strings.TrimSpace(input.CharsetOverride), RegisterExpires: input.RegisterExpires, KeepaliveInterval: input.KeepaliveInterval,
 		RetryPolicy: input.RetryPolicy, Transport: input.Transport, CatalogBatchSize: input.CatalogBatchSize,
-		AutoPushCatalog: input.AutoPushCatalog, RecordingEnabled: input.RecordingEnabled, RTCPKeepalive: input.RTCPKeepalive,
+		AutoPushCatalog: input.AutoPushCatalog, DeviceControlEnabled: input.DeviceControlEnabled, MaintenanceEnabled: input.MaintenanceEnabled, ConfigEnabled: input.ConfigEnabled, UpgradeEnabled: input.UpgradeEnabled, RecordingEnabled: input.RecordingEnabled, RTCPKeepalive: input.RTCPKeepalive,
 		PublishPlatform: input.PublishPlatform, PublishCivil: input.PublishCivil, PublishGroup: input.PublishGroup,
 		MaxStreams: input.MaxStreams, PTZEnabled: input.PTZEnabled, Enabled: input.Enabled,
 	}, nil

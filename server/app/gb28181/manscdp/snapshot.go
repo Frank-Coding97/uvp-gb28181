@@ -122,6 +122,47 @@ func ParseUploadSnapShotFinished(body []byte) (UploadSnapShotFinished, error) {
 	return result, nil
 }
 
+// BuildUploadSnapShotFinished rebuilds a capture completion notification after
+// a cascade boundary has translated its SN and DeviceID.
+func BuildUploadSnapShotFinished(profile protocol.Profile, notification UploadSnapShotFinished) ([]byte, error) {
+	if notification.SN == "" || strings.TrimSpace(notification.DeviceID) == "" || strings.TrimSpace(notification.SessionID) == "" {
+		return nil, fmt.Errorf("抓拍完成通知缺少 SN、DeviceID 或 SessionID")
+	}
+	type snapshotList struct {
+		FileIDs []string `xml:"SnapShotFileID,omitempty"`
+	}
+	wire := struct {
+		XMLName   xml.Name       `xml:"Notify"`
+		CmdType   string         `xml:"CmdType"`
+		SN        string         `xml:"SN"`
+		DeviceID  string         `xml:"DeviceID"`
+		SessionID string         `xml:"SessionID"`
+		Lists     []snapshotList `xml:"SnapShotList,omitempty"`
+	}{
+		CmdType: CmdUploadSnapShotFinished, SN: strings.TrimSpace(notification.SN),
+		DeviceID: strings.TrimSpace(notification.DeviceID), SessionID: strings.TrimSpace(notification.SessionID),
+	}
+	if len(notification.FileIDs) > 0 {
+		list := snapshotList{FileIDs: make([]string, 0, len(notification.FileIDs))}
+		seen := make(map[string]struct{}, len(notification.FileIDs))
+		for _, raw := range notification.FileIDs {
+			id := strings.TrimSpace(raw)
+			if id == "" {
+				continue
+			}
+			if _, exists := seen[id]; exists {
+				continue
+			}
+			seen[id] = struct{}{}
+			list.FileIDs = append(list.FileIDs, id)
+		}
+		if len(list.FileIDs) > 0 {
+			wire.Lists = []snapshotList{list}
+		}
+	}
+	return MarshalProfiledXML(profile, wire)
+}
+
 // ==================== 私有形态完成通知（本仓自造口径，兼容保留） ====================
 
 type SnapshotNotify struct {

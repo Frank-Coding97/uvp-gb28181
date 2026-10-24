@@ -141,6 +141,7 @@ func TestLoggingBackgroundEventsMessage(t *testing.T) {
 	row := t14RecordWithEvent(t, sink, "gb28181.message.alarm_failed")
 	require.Equal(t, deviceID, row["device_id"])
 	require.Equal(t, "message-t14-alarm", row["call_id"])
+	require.Equal(t, "unknown", row["error_class"])
 	require.NotContains(t, sink.String(), "alarm backend secret t14")
 }
 

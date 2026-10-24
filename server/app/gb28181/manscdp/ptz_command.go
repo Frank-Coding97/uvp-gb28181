@@ -24,14 +24,21 @@ type PTZControl struct {
 	SN       int
 	DeviceID string
 	Command  ParsedPTZCommand
+	Params   *PTZCommandParams
+}
+
+type PTZCommandParams struct {
+	PresetName      string `xml:"PresetName,omitempty"`
+	CruiseTrackName string `xml:"CruiseTrackName,omitempty"`
 }
 
 type ptzControlXML struct {
-	XMLName  xml.Name `xml:"Control"`
-	CmdType  string   `xml:"CmdType"`
-	SN       int      `xml:"SN"`
-	DeviceID string   `xml:"DeviceID"`
-	PTZCmd   string   `xml:"PTZCmd"`
+	XMLName  xml.Name          `xml:"Control"`
+	CmdType  string            `xml:"CmdType"`
+	SN       int               `xml:"SN"`
+	DeviceID string            `xml:"DeviceID"`
+	PTZCmd   string            `xml:"PTZCmd"`
+	Params   *PTZCommandParams `xml:"PTZCmdParams"`
 }
 
 func ParsePTZControlWithProfile(profile protocol.Profile, body []byte) (PTZControl, error) {
@@ -47,19 +54,21 @@ func ParsePTZControlWithProfile(profile protocol.Profile, body []byte) (PTZContr
 	if err != nil {
 		return PTZControl{}, err
 	}
-	return PTZControl{SN: wire.SN, DeviceID: strings.TrimSpace(wire.DeviceID), Command: command}, nil
+	if err := validatePTZCommandParams(profile, command, wire.Params); err != nil {
+		return PTZControl{}, err
+	}
+	return PTZControl{SN: wire.SN, DeviceID: strings.TrimSpace(wire.DeviceID), Command: command, Params: wire.Params}, nil
 }
 
 // ParsePTZCommand validates the standard eight-byte front-end command from
-// GB/T 28181 Annex A. Basic PTZ and FI commands are accepted; extended
-// preset/cruise/scan instructions remain outside the first cascade release.
+// GB/T 28181 Annex A, including preset, cruise, scan and auxiliary commands.
 func ParsePTZCommand(raw string) (ParsedPTZCommand, error) {
 	raw = strings.TrimSpace(raw)
 	decoded, err := hex.DecodeString(raw)
 	if err != nil || len(decoded) != 8 {
 		return ParsedPTZCommand{}, fmt.Errorf("%w: PTZCmd must contain 8 hex bytes", ErrInvalidPTZCommand)
 	}
-	if decoded[0] != 0xA5 || decoded[1] != 0x0F || decoded[2] != 0x01 {
+	if decoded[0] != 0xA5 || decoded[1] != 0x0F {
 		return ParsedPTZCommand{}, fmt.Errorf("%w: invalid header", ErrInvalidPTZCommand)
 	}
 	var checksum byte
@@ -70,11 +79,60 @@ func ParsePTZCommand(raw string) (ParsedPTZCommand, error) {
 		return ParsedPTZCommand{}, fmt.Errorf("%w: checksum mismatch", ErrInvalidPTZCommand)
 	}
 
-	action, err := classifyPTZInstruction(decoded[3])
+	var action string
+	if decoded[3]&0x80 != 0 {
+		action, err = classifyExtendedPTZInstruction(decoded[3], decoded[4], decoded[5], decoded[6])
+	} else {
+		action, err = classifyPTZInstruction(decoded[3])
+	}
 	if err != nil {
 		return ParsedPTZCommand{}, err
 	}
 	return ParsedPTZCommand{Raw: raw, Action: action}, nil
+}
+
+func classifyExtendedPTZInstruction(instruction, data1, data2, data3 byte) (string, error) {
+	invalid := func() (string, error) {
+		return "", fmt.Errorf("%w: invalid parameters for 0x%02X", ErrInvalidPTZCommand, instruction)
+	}
+	switch instruction {
+	case 0x81, 0x82, 0x83:
+		if data1 != 0 || data2 == 0 {
+			return invalid()
+		}
+		return map[byte]string{0x81: "preset_set", 0x82: "preset_call", 0x83: "preset_delete"}[instruction], nil
+	case 0x84:
+		if data2 == 0 {
+			return invalid()
+		}
+		return "cruise_add_stop", nil
+	case 0x85:
+		if data2 == 0 {
+			return "cruise_delete_path", nil
+		}
+		return "cruise_delete_stop", nil
+	case 0x86, 0x87, 0x8A:
+		if data2 == 0 && data3>>4 == 0 {
+			return invalid()
+		}
+		return map[byte]string{0x86: "cruise_set_speed", 0x87: "cruise_set_dwell", 0x8A: "scan_set_speed"}[instruction], nil
+	case 0x88:
+		if data2 != 0 {
+			return invalid()
+		}
+		return "cruise_start", nil
+	case 0x89:
+		if data2 > 2 {
+			return invalid()
+		}
+		return []string{"scan_start", "scan_set_left", "scan_set_right"}[data2], nil
+	case 0x8C:
+		return "aux_on", nil
+	case 0x8D:
+		return "aux_off", nil
+	default:
+		return "", fmt.Errorf("%w: 0x%02X", ErrUnsupportedPTZInstruction, instruction)
+	}
 }
 
 func classifyPTZInstruction(instruction byte) (string, error) {
@@ -111,7 +169,7 @@ func classifyPTZInstruction(instruction byte) (string, error) {
 	case 0x20:
 		return "zoom_out", nil
 	default:
-		return "", fmt.Errorf("%w: 0x%02X", ErrUnsupportedPTZInstruction, instruction)
+		return "ptz_combined", nil
 	}
 }
 
@@ -131,11 +189,15 @@ func classifyFIInstruction(instruction byte) (string, error) {
 	case 0x48:
 		return "iris_close", nil
 	default:
-		return "", fmt.Errorf("%w: 0x%02X", ErrUnsupportedPTZInstruction, instruction)
+		return "fi_combined", nil
 	}
 }
 
 func BuildRawPTZControlWithProfile(profile protocol.Profile, channelID string, sn int, raw string) ([]byte, error) {
+	return BuildRawPTZControlParamsWithProfile(profile, channelID, sn, raw, nil)
+}
+
+func BuildRawPTZControlParamsWithProfile(profile protocol.Profile, channelID string, sn int, raw string, params *PTZCommandParams) ([]byte, error) {
 	if strings.TrimSpace(channelID) == "" {
 		return nil, fmt.Errorf("通道编码不能为空")
 	}
@@ -146,8 +208,35 @@ func BuildRawPTZControlWithProfile(profile protocol.Profile, channelID string, s
 	if err != nil {
 		return nil, err
 	}
+	if err := validatePTZCommandParams(profile, command, params); err != nil {
+		return nil, err
+	}
 	return MarshalProfiledXML(profile, deviceControl{
 		CmdType: CmdDeviceControl, SN: sn, DeviceID: strings.TrimSpace(channelID),
-		PTZCmd: command.Raw, Info: controlInfo{ControlPriority: 5},
+		PTZCmd: command.Raw, PTZCmdParams: params, Info: controlInfo{ControlPriority: 5},
 	})
+}
+
+func validatePTZCommandParams(profile protocol.Profile, command ParsedPTZCommand, params *PTZCommandParams) error {
+	if params == nil {
+		return nil
+	}
+	if (params.PresetName != "" && command.Action != "preset_set") ||
+		(params.CruiseTrackName != "" && !strings.HasPrefix(command.Action, "cruise_")) {
+		return fmt.Errorf("%w: PTZCmdParams does not match instruction", ErrInvalidPTZCommand)
+	}
+	if params.CruiseTrackName != "" {
+		_, encoder, err := profileCharset(profile)
+		if err != nil {
+			return err
+		}
+		encoded := []byte(params.CruiseTrackName)
+		if encoder != nil {
+			encoded, err = encoder.NewEncoder().Bytes(encoded)
+		}
+		if err != nil || len(encoded) > 32 {
+			return fmt.Errorf("%w: CruiseTrackName exceeds wire limit or cannot be encoded", ErrInvalidPTZCommand)
+		}
+	}
+	return nil
 }

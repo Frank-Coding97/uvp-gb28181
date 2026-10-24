@@ -318,7 +318,11 @@ export interface CascadePlatform {
   publishGroup: boolean;
   maxStreams: number;
   ptzEnabled: boolean;
+  deviceControlEnabled: boolean;
+  maintenanceEnabled: boolean;
   autoPushCatalog: boolean;
+  configEnabled: boolean;
+  upgradeEnabled: boolean;
   recordingEnabled: boolean;
   rtcpKeepalive: boolean;
   enabled: boolean;

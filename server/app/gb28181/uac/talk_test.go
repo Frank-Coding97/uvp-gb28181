@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
 	"github.com/emiago/sipgo/siptest"
 )
@@ -17,6 +18,7 @@ type fakeTalkDialog struct {
 	ackErr     error
 	byeErr     error
 	statusCode int
+	answerSDP  string
 
 	mu         sync.Mutex
 	ackCalls   int
@@ -52,7 +54,49 @@ func (d *fakeTalkDialog) Close() error {
 	return nil
 }
 
-func (d *fakeTalkDialog) StatusCode() int { return d.statusCode }
+func (d *fakeTalkDialog) StatusCode() int   { return d.statusCode }
+func (d *fakeTalkDialog) AnswerSDP() string { return d.answerSDP }
+
+func TestTalkDialogAdapterReadsActualAnswerBody(t *testing.T) {
+	dialog := &sipgoTalkDialog{session: &sipgo.DialogClientSession{}}
+	if dialog.AnswerSDP() != "" {
+		t.Fatal("unanswered dialog must not fabricate SDP")
+	}
+	response := sip.NewResponse(200, "OK")
+	response.SetBody([]byte("v=0\r\ns=Talk\r\n"))
+	dialog.session.InviteResponse = response
+	if dialog.AnswerSDP() != string(response.Body()) {
+		t.Fatal("adapter must return the negotiated response body")
+	}
+}
+
+func TestInviteTalkReturnsNegotiatedSDP(t *testing.T) {
+	answer := "v=0\r\ns=Talk\r\nc=IN IP4 192.0.2.20\r\nt=0 0\r\nm=audio 30000 TCP/RTP/AVP 8\r\na=setup:active\r\na=sendrecv\r\na=rtpmap:8 PCMA/8000\r\ny=0200000001\r\n"
+	dialog := &fakeTalkDialog{statusCode: 200, answerSDP: answer}
+	u, _ := newTalkTestUAC(dialog)
+	meta, err := u.InviteTalk(context.Background(), validTalkInvite())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.AnswerSDP != answer {
+		t.Fatalf("answer was lost: %+v", meta)
+	}
+	if record := u.talkDialogs.get(meta.CallID); record == nil || record.metadata.AnswerSDP != answer {
+		t.Fatal("dialog must retain negotiated SDP")
+	}
+}
+
+func TestInviteTalkDoesNotAcceptNonSuccessAnswer(t *testing.T) {
+	dialog := &fakeTalkDialog{statusCode: 486, answerSDP: "rejected body"}
+	u, _ := newTalkTestUAC(dialog)
+	meta, err := u.InviteTalk(context.Background(), validTalkInvite())
+	if err == nil || meta.StatusCode != 486 {
+		t.Fatalf("metadata=%+v err=%v", meta, err)
+	}
+	if meta.AnswerSDP != "" || dialog.ackCalls != 0 || dialog.closeCalls != 1 || u.talkDialogs.get(meta.CallID) != nil {
+		t.Fatal("rejected answer must not create an acknowledged dialog")
+	}
+}
 
 func (d *fakeTalkDialog) ReadBye(req *sip.Request, tx sip.ServerTransaction) error {
 	return tx.Respond(sip.NewResponseFromRequest(req, sip.StatusOK, "OK", nil))

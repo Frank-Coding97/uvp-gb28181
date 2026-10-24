@@ -675,7 +675,18 @@ func (s *Scheduler) dispatchPreparedAttempt(dispatchCtx context.Context, attempt
 				body, err = buildScheduledPTZBody(operation)
 			}
 			if err == nil {
-				result, err = s.service.sender.SendMessageTracked(ctx, operation.DeviceCode, destination, transport, body)
+				if operation.Action == actionCascadeConfigWrite {
+					err = s.service.validateCascadeConfigWriteAuthorization(ctx, operation)
+				} else if isCascadeAdvancedControlOperation(operation) {
+					err = s.service.validateCascadeAdvancedControlAuthorization(ctx, operation)
+				} else if isCascadeMaintenanceOperation(operation) {
+					err = s.service.validateCascadeMaintenanceAuthorization(ctx, operation)
+				} else if isCascadeTargetTrackOperation(operation) {
+					err = s.service.validateCascadeTargetTrackAuthorization(ctx, operation)
+				}
+				if err == nil {
+					result, err = s.service.sender.SendMessageTracked(ctx, operation.DeviceCode, destination, transport, body)
+				}
 			}
 		}
 	}
@@ -712,6 +723,9 @@ func (s *Scheduler) schedulerTarget(ctx context.Context, operation gbmodels.GbPT
 		return "", "", errors.New("PTZ 设备地址不可用")
 	}
 	if operation.TargetScope == gbmodels.ControlTargetScopeDevice {
+		return net.JoinHostPort(device.IP, strconv.Itoa(device.Port)), device.Transport, nil
+	}
+	if isCascadeAdvancedControlOperation(operation) && (operation.Action == "guard_set" || operation.Action == "guard_reset" || operation.Action == "alarm_reset") && operation.TargetCode == device.DeviceID {
 		return net.JoinHostPort(device.IP, strconv.Itoa(device.Port)), device.Transport, nil
 	}
 	// 通道级重试路径必须复核通道:设备在线而通道已离线或目录已变更时,
@@ -777,6 +791,9 @@ func buildScheduledPTZBody(operation gbmodels.GbPTZOperation) ([]byte, error) {
 		}
 		return manscdp.BuildConfigDownloadQueryWithProfile(profile, targetCode, operation.SN, payload.ConfigTypes)
 	case manscdp.CmdDeviceConfig:
+		if operation.Action == actionCascadeConfigWrite {
+			return buildCascadeConfigWriteOperation(operation)
+		}
 		// ⛔ `VideoParamAttribute`（A-5）与配置族共用 `CmdType=DeviceConfig`，所以这里
 		// **必须分流**，只看 CmdType 会把两者混成一件事。
 		//
@@ -821,15 +838,19 @@ func buildScheduledPTZBody(operation gbmodels.GbPTZOperation) ([]byte, error) {
 	case manscdp.CmdPTZPreciseCtrl:
 		return buildPrecise()
 	case manscdp.CmdDeviceControl:
+		if operation.Action == actionTargetTrack {
+			return buildCascadeTargetTrackOperation(operation)
+		}
 		if operation.Action == "precise" {
 			return buildPrecise()
 		}
 		if operation.Action == "record_start" || operation.Action == "record_stop" || operation.Action == "guard_set" || operation.Action == "guard_reset" || operation.Action == "alarm_reset" || operation.Action == "teleboot" || operation.Action == "iframe" || operation.Action == "drag_zoom_in" || operation.Action == "drag_zoom_out" || operation.Action == actionFormatStorageCard {
 			var payload struct {
-				Action      string                 `json:"action"`
-				AlarmMethod string                 `json:"alarmMethod"`
-				AlarmType   string                 `json:"alarmType"`
-				Region      manscdp.DragZoomRegion `json:"region"`
+				Action       string                 `json:"action"`
+				AlarmMethod  string                 `json:"alarmMethod"`
+				AlarmType    string                 `json:"alarmType"`
+				Region       manscdp.DragZoomRegion `json:"region"`
+				StreamNumber *int                   `json:"streamNumber"`
 				// CardIndex 是存储卡格式化（A.2.3.1.13）的卡编号；0 表示"全部卡"，
 				// 所以这里同样**不能用零值判断"没给"**，得由 Action 先分流。
 				CardIndex int `json:"cardIndex"`
@@ -842,9 +863,9 @@ func buildScheduledPTZBody(operation gbmodels.GbPTZOperation) ([]byte, error) {
 			case "iframe":
 				return manscdp.BuildIFrameControlWithProfile(profile, targetCode, operation.SN)
 			case "record_start":
-				return manscdp.BuildRecordControlWithProfile(profile, targetCode, operation.SN, manscdp.RecordStart)
+				return manscdp.BuildRecordControlForStreamWithProfile(profile, targetCode, operation.SN, manscdp.RecordStart, payload.StreamNumber)
 			case "record_stop":
-				return manscdp.BuildRecordControlWithProfile(profile, targetCode, operation.SN, manscdp.RecordStop)
+				return manscdp.BuildRecordControlForStreamWithProfile(profile, targetCode, operation.SN, manscdp.RecordStop, payload.StreamNumber)
 			case "guard_set":
 				return manscdp.BuildGuardControlWithProfile(profile, targetCode, operation.SN, manscdp.GuardSet)
 			case "guard_reset":

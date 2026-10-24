@@ -1,8 +1,8 @@
 -- UVP-GB28181 SQL Server release initialization script
--- Model-derived additions: gb_cascade_business_binding, gb_cascade_business_node.
+-- Model-derived additions: gb_cascade_alarm_delivery, gb_cascade_business_binding, gb_cascade_business_node, gb_cascade_snapshot_session.
 -- Generated from the development schema by
 -- server/resource/database/baseline/generate_sql.py. Do not edit by hand.
--- Schema fingerprint: c780de8efae7054b4474e95f542a77b12dba130c5be9eb678baf1bacf90450ae
+-- Schema fingerprint: d17d657a6c2c8bd41e98953dfef6d5307e588faa1fed2ddceb017a729bd43610
 -- Contains production table structures and release baseline data only.
 
 -- 方言差异（由 profile 消化，阅读时注意）：
@@ -233,6 +233,7 @@ IF OBJECT_ID(N'gb_cascade_media_session', N'U') IS NULL
 BEGIN
   CREATE TABLE [gb_cascade_media_session] (
     [id] BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    [session_kind] NVARCHAR(16) NOT NULL DEFAULT N'video',
     [platform_id] BIGINT NOT NULL,
     [dialog_key] NVARCHAR(512) NOT NULL,
     [call_id] NVARCHAR(255) NOT NULL,
@@ -269,6 +270,43 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_cascade_
   CREATE INDEX [idx_cascade_media_call_id] ON [gb_cascade_media_session] ([call_id]);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_cascade_media_session') AND name=N'idx_cascade_media_platform_state')
   CREATE INDEX [idx_cascade_media_platform_state] ON [gb_cascade_media_session] ([platform_id], [state]);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_cascade_media_session') AND name=N'idx_cascade_media_kind_state')
+  CREATE INDEX [idx_cascade_media_kind_state] ON [gb_cascade_media_session] ([session_kind], [state]);
+
+IF OBJECT_ID(N'gb_cascade_snapshot_session', N'U') IS NOT NULL DROP TABLE [gb_cascade_snapshot_session];
+IF OBJECT_ID(N'gb_cascade_snapshot_session', N'U') IS NULL
+BEGIN
+  CREATE TABLE [gb_cascade_snapshot_session] (
+    [id] BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    [platform_id] BIGINT NOT NULL,
+    [upstream_session_id] NVARCHAR(128) NOT NULL,
+    [downstream_session_id] NVARCHAR(128),
+    [upload_token] NVARCHAR(64),
+    [upstream_upload_url] NVARCHAR(MAX),
+    [request_key] NVARCHAR(64) NOT NULL,
+    [request_fingerprint] NVARCHAR(64) NOT NULL,
+    [request_result] NVARCHAR(8) NOT NULL DEFAULT N'',
+    [published_channel_id] NVARCHAR(20) NOT NULL,
+    [source_device_id] BIGINT NOT NULL,
+    [source_channel_id] BIGINT NOT NULL,
+    [source_device_epoch] BIGINT NOT NULL DEFAULT 0,
+    [config_revision] BIGINT NOT NULL,
+    [projection_revision] BIGINT NOT NULL,
+    [state] NVARCHAR(16) NOT NULL DEFAULT N'pending',
+    [expires_at] DATETIME2(3) NOT NULL,
+    [completed_at] DATETIME2(3),
+    [created_at] DATETIME2(3) NOT NULL,
+    [updated_at] DATETIME2(3) NOT NULL,
+    CONSTRAINT [uk_cascade_snapshot_session] UNIQUE ([platform_id], [upstream_session_id]),
+    CONSTRAINT [uk_cascade_snapshot_request] UNIQUE ([platform_id], [request_key])
+  );
+END;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_cascade_snapshot_session') AND name=N'uk_cascade_snapshot_downstream')
+  CREATE UNIQUE INDEX [uk_cascade_snapshot_downstream] ON [gb_cascade_snapshot_session] ([downstream_session_id]) WHERE [downstream_session_id] IS NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_cascade_snapshot_session') AND name=N'uk_cascade_snapshot_upload')
+  CREATE UNIQUE INDEX [uk_cascade_snapshot_upload] ON [gb_cascade_snapshot_session] ([upload_token]) WHERE [upload_token] IS NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_cascade_snapshot_session') AND name=N'idx_cascade_snapshot_expiry')
+  CREATE INDEX [idx_cascade_snapshot_expiry] ON [gb_cascade_snapshot_session] ([platform_id], [expires_at]);
 
 IF OBJECT_ID(N'gb_cascade_platform', N'U') IS NOT NULL DROP TABLE [gb_cascade_platform];
 IF OBJECT_ID(N'gb_cascade_platform', N'U') IS NULL
@@ -308,6 +346,7 @@ BEGIN
     [publish_group] BIT NOT NULL DEFAULT 0,
     [max_streams] INT NOT NULL DEFAULT 0,
     [ptz_enabled] BIT NOT NULL DEFAULT 0,
+    [upgrade_enabled] BIT NOT NULL DEFAULT 0,
     [recording_enabled] BIT NOT NULL DEFAULT 0,
     [rtcp_keepalive] BIT NOT NULL DEFAULT 0,
     [register_at] DATETIME2(3),
@@ -409,6 +448,7 @@ BEGIN
     [position_source] NVARCHAR(16) NOT NULL DEFAULT N'',
     [position_updated_at] DATETIME2(3),
     [status] TINYINT DEFAULT 0,
+    [status_event] NVARCHAR(8) NOT NULL DEFAULT N'',
     [stream_id] NVARCHAR(64) NOT NULL DEFAULT N'',
     [current_ssrc] NVARCHAR(10) NOT NULL DEFAULT N'',
     [on_demand_live] BIT NOT NULL DEFAULT 1,
@@ -731,12 +771,22 @@ BEGIN
     [response_at] DATETIME2(6),
     [response_call_id] NVARCHAR(255) COLLATE Latin1_General_100_BIN2,
     [response_cseq] NVARCHAR(64) COLLATE Latin1_General_100_BIN2,
+    [cascade_binding] NVARCHAR(MAX),
+    [cascade_request_key] NVARCHAR(64) COLLATE Latin1_General_100_BIN2,
+    [cascade_session_key] NVARCHAR(64) COLLATE Latin1_General_100_BIN2,
+    [cascade_business_result] NVARCHAR(16) COLLATE Latin1_General_100_BIN2,
+    [cascade_business_delivered] TINYINT NOT NULL DEFAULT 0,
+    [cascade_final_delivered] TINYINT NOT NULL DEFAULT 0,
     CONSTRAINT [uk_firmware_upgrade_device_idempotency] UNIQUE ([device_id], [idempotency_key]),
     CONSTRAINT [uk_firmware_upgrade_device_session] UNIQUE ([device_id], [session_id]),
     CONSTRAINT [uk_firmware_upgrade_operation] UNIQUE ([operation_id]),
     CONSTRAINT [uk_firmware_upgrade_sn] UNIQUE ([sn])
   );
 END;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_device_firmware_upgrade') AND name=N'uk_firmware_upgrade_cascade_request')
+  CREATE UNIQUE INDEX [uk_firmware_upgrade_cascade_request] ON [gb_device_firmware_upgrade] ([cascade_request_key]) WHERE [cascade_request_key] IS NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_device_firmware_upgrade') AND name=N'uk_firmware_upgrade_cascade_session')
+  CREATE UNIQUE INDEX [uk_firmware_upgrade_cascade_session] ON [gb_device_firmware_upgrade] ([cascade_session_key]) WHERE [cascade_session_key] IS NOT NULL;
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_device_firmware_upgrade') AND name=N'idx_firmware_upgrade_deadline')
   CREATE INDEX [idx_firmware_upgrade_deadline] ON [gb_device_firmware_upgrade] ([deadline_at]);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_device_firmware_upgrade') AND name=N'idx_firmware_upgrade_device_session')
@@ -2987,6 +3037,37 @@ BEGIN
   );
 END;
 
+IF OBJECT_ID(N'gb_cascade_alarm_delivery', N'U') IS NOT NULL DROP TABLE [gb_cascade_alarm_delivery];
+IF OBJECT_ID(N'gb_cascade_alarm_delivery', N'U') IS NULL
+BEGIN
+  CREATE TABLE [gb_cascade_alarm_delivery] (
+    [id] BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    [delivery_key] NVARCHAR(64) NOT NULL,
+    [platform_id] BIGINT NOT NULL,
+    [source_device_code] NVARCHAR(20) NOT NULL,
+    [source_resource_code] NVARCHAR(20) NOT NULL,
+    [published_code] NVARCHAR(20) NOT NULL,
+    [profile_version] NVARCHAR(16) NOT NULL,
+    [binding_fingerprint] NVARCHAR(64) NOT NULL,
+    [payload] VARBINARY(MAX) NOT NULL,
+    [notify_targets] NVARCHAR(MAX),
+    [state] NVARCHAR(16) NOT NULL DEFAULT N'pending',
+    [attempts] INT NOT NULL DEFAULT 0,
+    [next_attempt_at] DATETIME2(3) NOT NULL,
+    [lease_owner] NVARCHAR(64) NOT NULL DEFAULT N'',
+    [lease_until] DATETIME2(3),
+    [last_error] NVARCHAR(MAX),
+    [sent_at] DATETIME2(3),
+    [created_at] DATETIME2(3) NOT NULL,
+    [updated_at] DATETIME2(3) NOT NULL,
+    CONSTRAINT [uk_cascade_alarm_delivery_key] UNIQUE ([delivery_key])
+  );
+END;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_cascade_alarm_delivery') AND name=N'idx_cascade_alarm_delivery_due')
+  CREATE INDEX [idx_cascade_alarm_delivery_due] ON [gb_cascade_alarm_delivery] ([platform_id], [state], [next_attempt_at]);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_cascade_alarm_delivery') AND name=N'idx_cascade_alarm_delivery_lease')
+  CREATE INDEX [idx_cascade_alarm_delivery_lease] ON [gb_cascade_alarm_delivery] ([lease_until]);
+
 -- openapi-capability-catalog:begin
 
 IF OBJECT_ID(N'sys_openapi_capability', N'U') IS NOT NULL DROP TABLE [sys_openapi_capability];
@@ -3641,7 +3722,11 @@ INSERT INTO [sys_api] ([id], [title], [path], [method], [api_group], [created_at
 (650, N'保存国标服务配置', N'/api/gb28181/sip/service-config', N'PUT', N'国标平台', NULL, NULL, NULL, 1),
 (651, N'查看级联业务分组', N'/api/gb28181/cascade/platforms/:id/business-group', N'GET', N'国标级联', NULL, NULL, NULL, 1),
 (652, N'保存级联业务分组', N'/api/gb28181/cascade/platforms/:id/business-group', N'PUT', N'国标级联', NULL, NULL, NULL, 1),
-(653, N'设置级联业务分组发布', N'/api/gb28181/cascade/platforms/:id/publish-group', N'PUT', N'国标级联', NULL, NULL, NULL, 1);
+(653, N'设置级联业务分组发布', N'/api/gb28181/cascade/platforms/:id/publish-group', N'PUT', N'国标级联', NULL, NULL, NULL, 1),
+(678, N'查询通道移动轨迹', N'/api/gb28181/device-mgmt/map/trajectory', N'GET', N'设备管理', N'2026-10-21 21:30:00.000000', N'2026-10-21 21:30:00.000000', NULL, 1),
+(679, N'读取地图默认中心点', N'/api/gb28181/device-mgmt/map/center', N'GET', N'设备管理', N'2026-10-21 21:30:00.000000', N'2026-10-21 21:30:00.000000', NULL, 1),
+(680, N'保存地图默认中心点', N'/api/gb28181/device-mgmt/map/center', N'PUT', N'设备管理', N'2026-10-21 21:30:00.000000', N'2026-10-21 21:30:00.000000', NULL, 1),
+(681, N'查询可定位通道树', N'/api/gb28181/device-mgmt/map/channel-tree', N'GET', N'设备管理', N'2026-10-21 22:40:00.000000', N'2026-10-21 22:40:00.000000', NULL, 1);
 SET IDENTITY_INSERT [sys_api] OFF;
 SET IDENTITY_INSERT [sys_casbin_rule] ON;
 INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]) VALUES
@@ -4154,7 +4239,14 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 (10296, N'p', N'role_1', N'/api/gb28181/sip/service-config', N'PUT', N'*', N'', N''),
 (10297, N'p', N'role_1', N'/api/gb28181/cascade/platforms/:id/business-group', N'GET', N'*', N'', N''),
 (10298, N'p', N'role_1', N'/api/gb28181/cascade/platforms/:id/business-group', N'PUT', N'*', N'', N''),
-(10299, N'p', N'role_1', N'/api/gb28181/cascade/platforms/:id/publish-group', N'PUT', N'*', N'', N'');
+(10299, N'p', N'role_1', N'/api/gb28181/cascade/platforms/:id/publish-group', N'PUT', N'*', N'', N''),
+(10347, N'p', N'role_1', N'/api/gb28181/device-mgmt/map/trajectory', N'GET', N'*', N'', N''),
+(10348, N'p', N'role_3', N'/api/gb28181/device-mgmt/map/trajectory', N'GET', N'*', N'', N''),
+(10349, N'p', N'role_1', N'/api/gb28181/device-mgmt/map/center', N'GET', N'*', N'', N''),
+(10350, N'p', N'role_3', N'/api/gb28181/device-mgmt/map/center', N'GET', N'*', N'', N''),
+(10351, N'p', N'role_1', N'/api/gb28181/device-mgmt/map/center', N'PUT', N'*', N'', N''),
+(10352, N'p', N'role_1', N'/api/gb28181/device-mgmt/map/channel-tree', N'GET', N'*', N'', N''),
+(10353, N'p', N'role_3', N'/api/gb28181/device-mgmt/map/channel-tree', N'GET', N'*', N'', N'');
 SET IDENTITY_INSERT [sys_casbin_rule] OFF;
 INSERT INTO [sys_civil_code] ([code], [name], [short_name], [parent_code], [level], [pinyin], [created_at], [updated_at]) VALUES
 (N'110000', N'北京市', N'北京市', N'', 1, N'', N'2026-07-18 17:27:38.000000', N'2026-07-18 17:27:38.000000'),
@@ -8482,7 +8574,11 @@ INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
 (140610, 635),
 (140610, 636),
 (140610, 637),
-(140610, 638);
+(140610, 638),
+(140452, 678),
+(140452, 679),
+(140452, 680),
+(140452, 681);
 SET IDENTITY_INSERT [sys_role] ON;
 INSERT INTO [sys_role] ([id], [name], [sort], [status], [description], [parent_id], [created_at], [updated_at], [deleted_at], [created_by], [data_scope], [checked_depts]) VALUES
 (1, N'系统管理员', 0, 1, N'最高权限管理员角色', 0, N'2025-09-01 17:32:12.000000', N'2025-09-30 15:53:24.000000', NULL, 1, 1, N''),

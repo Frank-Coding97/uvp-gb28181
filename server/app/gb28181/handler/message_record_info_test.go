@@ -150,6 +150,23 @@ func TestMessageHandlerAcknowledgesPlaybackFileToEndBeforeFinalizer(t *testing.T
 	require.Equal(t, "34020000001320000001", sink.device)
 }
 
+func TestMessageHandlerStandardMediaStatusFileEndReachesFinalizer(t *testing.T) {
+	req := recordInfoRequest([]byte(`<Notify><CmdType>MediaStatus</CmdType><SN>19</SN><DeviceID>34020000001320000002</DeviceID><NotifyType>121</NotifyType></Notify>`))
+	tx := siptest.NewServerTxRecorder(req)
+	defer tx.Terminate()
+	sink := &playbackEndSink{started: make(chan struct{})}
+	h := NewMessageHandler(gbconfig.Config{})
+	h.SetPlaybackEndSink(sink)
+	h.Handle(req, tx)
+	require.Len(t, tx.Result(), 1)
+	require.Equal(t, 200, tx.Result()[0].StatusCode)
+	select {
+	case <-sink.started:
+	default:
+		t.Fatal("standard MediaStatus NotifyType=121 did not finalize playback")
+	}
+}
+
 func closedSignal() chan struct{} {
 	ch := make(chan struct{})
 	close(ch)

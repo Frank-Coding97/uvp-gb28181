@@ -87,6 +87,7 @@ type Session struct {
 	RecordKey       string
 	Mode            Mode
 	DownloadSpeed   uint32
+	RecordingURI    string
 	IdempotencyKey  string
 	NodeID          string
 	StreamID        string
@@ -125,6 +126,7 @@ type CreateRequest struct {
 	PlayFrom                                          time.Time
 	Mode                                              Mode
 	DownloadSpeed                                     uint32
+	RecordingURI                                      string
 	TCPMode                                           bool
 	DefaultProtocol                                   string
 	Secure                                            bool

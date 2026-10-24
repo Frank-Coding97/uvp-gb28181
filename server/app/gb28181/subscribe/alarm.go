@@ -3,6 +3,7 @@ package subscribe
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -20,13 +21,26 @@ type AlarmProcessor struct {
 	db          *gorm.DB
 	now         func() time.Time
 	saveEnabled func() bool
+	relay       AlarmNotificationRelay
 }
+
+type AlarmNotificationRelay interface {
+	RelayAlarmNotify(context.Context, string, string, string, []byte) error
+}
+
+var ErrAlarmNotAccepted = errors.New("alarm was not durably accepted")
 
 func NewAlarmProcessor(db *gorm.DB, now func() time.Time) *AlarmProcessor {
 	if now == nil {
 		now = time.Now
 	}
 	return &AlarmProcessor{db: db, now: now, saveEnabled: gbconfig.SaveAlarmMessages}
+}
+
+func (p *AlarmProcessor) SetRelay(relay AlarmNotificationRelay) {
+	if p != nil {
+		p.relay = relay
+	}
 }
 
 func (p *AlarmProcessor) Process(ctx context.Context, device *gbmodels.GbDevice, notification Notification) error {
@@ -38,6 +52,11 @@ func (p *AlarmProcessor) Process(ctx context.Context, device *gbmodels.GbDevice,
 		return err
 	}
 	if p.saveEnabled != nil && !p.saveEnabled() {
+		if p.relay != nil {
+			if err := p.relay.RelayAlarmNotify(ctx, device.DeviceID, notification.CallID, notification.CSeq, notification.Body); err != nil {
+				return errors.Join(ErrAlarmNotAccepted, err)
+			}
+		}
 		return nil
 	}
 	var channel gbmodels.GbChannel
@@ -68,7 +87,16 @@ func (p *AlarmProcessor) Process(ctx context.Context, device *gbmodels.GbDevice,
 	if alarm.Longitude != 0 || alarm.Latitude != 0 {
 		row.Longitude, row.Latitude = floatPtr(alarm.Longitude), floatPtr(alarm.Latitude)
 	}
-	return p.db.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "dedupe_key"}}, DoNothing: true}).Create(&row).Error
+	result := p.db.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "dedupe_key"}}, DoNothing: true}).Create(&row)
+	if result.Error != nil {
+		return errors.Join(ErrAlarmNotAccepted, result.Error)
+	}
+	if p.relay != nil {
+		if err := p.relay.RelayAlarmNotify(ctx, device.DeviceID, notification.CallID, notification.CSeq, notification.Body); err != nil {
+			return errors.Join(ErrAlarmNotAccepted, err)
+		}
+	}
+	return nil
 }
 
 func (s *Service) OnAlarmMessage(ctx context.Context, deviceCode, callID, cseq string, body []byte) error {
@@ -81,7 +109,10 @@ func (s *Service) OnAlarmMessage(ctx context.Context, deviceCode, callID, cseq s
 	}
 	var device gbmodels.GbDevice
 	result := s.db.WithContext(ctx).Where("device_id = ?", deviceCode).Limit(1).Find(&device)
-	if result.Error != nil || result.RowsAffected == 0 {
+	if result.Error != nil {
+		return errors.Join(ErrAlarmNotAccepted, result.Error)
+	}
+	if result.RowsAffected == 0 {
 		return fmt.Errorf("报警设备不存在")
 	}
 	return processor.(Processor).Process(ctx, &device, Notification{Kind: gbmodels.SubscriptionKindAlarm, DeviceCode: deviceCode, CallID: callID, CSeq: cseq, Body: body})

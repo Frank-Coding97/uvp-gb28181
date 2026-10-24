@@ -61,6 +61,9 @@ func BuildDeviceUpgradeControlWithProfile(profile protocol.Profile, deviceID str
 	if err := validateDeviceUpgradeSessionID(command.SessionID); err != nil {
 		return nil, err
 	}
+	if err := validateUpgradeFile(command); err != nil {
+		return nil, err
+	}
 	command.Firmware = strings.TrimSpace(command.Firmware)
 	command.FileURL = strings.TrimSpace(command.FileURL)
 	command.Manufacturer = strings.TrimSpace(command.Manufacturer)
@@ -106,7 +109,7 @@ type deviceUpgradeResultXML struct {
 	SessionID           string   `xml:"SessionID"`
 	UpgradeResult       string   `xml:"UpgradeResult"`
 	Firmware            string   `xml:"Firmware"`
-	UpgradeFailedReason string   `xml:"UpgradeFailedReason"`
+	UpgradeFailedReason string   `xml:"UpgradeFailedReason,omitempty"`
 }
 
 // ParseDeviceUpgradeResult parses and validates A.2.5.9.
@@ -119,6 +122,9 @@ func ParseDeviceUpgradeResult(body []byte) (*DeviceUpgradeResultNotify, error) {
 func ParseDeviceUpgradeResultWithProfile(profile protocol.Profile, body []byte) (*DeviceUpgradeResultNotify, error) {
 	if profile.Version != protocol.Version2022 {
 		return nil, fmt.Errorf("设备升级结果仅支持 GB/T 28181-2022 profile")
+	}
+	if err := validateUpgradeXMLShape(profile, body, "Notify"); err != nil {
+		return nil, err
 	}
 	var wire deviceUpgradeResultXML
 	if err := DecodeProfiledXML(profile, body, &wire); err != nil {

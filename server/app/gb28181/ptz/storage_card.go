@@ -2,6 +2,7 @@ package ptz
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -15,10 +16,8 @@ import (
 
 // RefreshStorageCards 发起一次「存储卡状态查询」（A.2.4.14）。
 //
-// 与 RefreshHomePosition 同族，刻意不走 Refresh 的 QueryKind 分支：
-// 存储卡是**设备级**查询（标准的 DeviceID 是"查询目标设备编码"），
-// 而 QueryKind 那套是给"通道级云台资源"用的，混在一起会让调用方以为
-// 传 channelCode 才是对的。
+// 存储卡查询独立于云台 QueryKind。使用与设备维护接口一致的通道目标编码，
+// 不把未发布的父设备隐式提升为可查询资源。
 //
 // ⛔ 这里**不为 2022 版本设门禁**。理由同 HomePositionQuery：
 // profile 只是"登记的说法"，不是事实；一台被登记成 2016、实际按 2022 应答的
@@ -52,6 +51,26 @@ func (s *Service) RefreshStorageCards(ctx context.Context, target Target, actorI
 // 契约名**：改名等于让历史记录断档，别随手改。
 const actionFormatStorageCard = "format_sd"
 
+type CascadeMaintenanceAuthorization struct {
+	PlatformID         uint64 `json:"platformId"`
+	ConfigRevision     uint64 `json:"configRevision"`
+	ProjectionRevision uint64 `json:"projectionRevision"`
+	PublishedID        string `json:"publishedId"`
+	Action             string `json:"action"`
+}
+
+type cascadeMaintenanceAuthorizationPayload struct {
+	CascadeAuthorization *CascadeMaintenanceAuthorization `json:"cascadeAuthorization,omitempty"`
+}
+
+func isCascadeMaintenanceOperation(operation gbmodels.GbPTZOperation) bool {
+	if operation.Action != actionFormatStorageCard && operation.Action != deviceRebootAction {
+		return false
+	}
+	var payload cascadeMaintenanceAuthorizationPayload
+	return json.Unmarshal([]byte(operation.PayloadJSON), &payload) == nil && payload.CascadeAuthorization != nil
+}
+
 // FormatStorageCard 下发「存储卡格式化控制命令」（GB/T 28181-2022 A.2.3.1.13）。
 //
 // ⛔ 这是**破坏性动作**：卡上的录像会被清空。门禁分三层，本函数只管最后一层：
@@ -68,6 +87,14 @@ const actionFormatStorageCard = "format_sd"
 // 对破坏性动作则可能把"已下发、仅应答丢失"重新执行一次。宁可让 operation 停在
 // `unknown`（运维能看到"已下发未确认"），也不替操作员再按一次按钮。
 func (s *Service) FormatStorageCard(ctx context.Context, target Target, cardIndex int, actorID, actorDeptID uint, idempotencyKey string) (gbmodels.GbPTZOperation, error) {
+	return s.formatStorageCard(ctx, target, cardIndex, actorID, actorDeptID, idempotencyKey, nil)
+}
+
+func (s *Service) FormatStorageCardForCascade(ctx context.Context, target Target, cardIndex int, authorization CascadeMaintenanceAuthorization, idempotencyKey string) (gbmodels.GbPTZOperation, error) {
+	return s.formatStorageCard(ctx, target, cardIndex, 0, 0, idempotencyKey, &authorization)
+}
+
+func (s *Service) formatStorageCard(ctx context.Context, target Target, cardIndex int, actorID, actorDeptID uint, idempotencyKey string, authorization *CascadeMaintenanceAuthorization) (gbmodels.GbPTZOperation, error) {
 	if cardIndex < 0 {
 		return gbmodels.GbPTZOperation{}, fmt.Errorf("存储卡编号不能为负数: %d", cardIndex)
 	}
@@ -81,11 +108,18 @@ func (s *Service) FormatStorageCard(ctx context.Context, target Target, cardInde
 	if targetCode == "" {
 		return gbmodels.GbPTZOperation{}, fmt.Errorf("存储卡格式化缺少目标通道编码")
 	}
+	payload := map[string]interface{}{"action": actionFormatStorageCard, "cardIndex": cardIndex}
+	if authorization != nil {
+		if authorization.PlatformID == 0 || authorization.ConfigRevision == 0 || authorization.ProjectionRevision == 0 || authorization.PublishedID == "" || authorization.Action != actionFormatStorageCard {
+			return gbmodels.GbPTZOperation{}, fmt.Errorf("维护类控制授权无效")
+		}
+		payload["cascadeAuthorization"] = authorization
+	}
 	return s.Execute(ctx, target, Command{
 		CmdType:          manscdp.CmdDeviceControl,
 		Action:           actionFormatStorageCard,
 		IdempotencyKey:   idempotencyKey,
-		Payload:          map[string]interface{}{"action": actionFormatStorageCard, "cardIndex": cardIndex},
+		Payload:          payload,
 		ResponseRequired: false, // 9.3.1 d)：无应答命令，见函数注释
 		MaxAttempts:      1,
 		ActorID:          actorID,
@@ -97,6 +131,45 @@ func (s *Service) FormatStorageCard(ctx context.Context, target Target, cardInde
 		},
 		Profile: profile,
 	})
+}
+
+func (s *Service) validateCascadeMaintenanceAuthorization(ctx context.Context, operation gbmodels.GbPTZOperation) error {
+	var payload cascadeMaintenanceAuthorizationPayload
+	if err := json.Unmarshal([]byte(operation.PayloadJSON), &payload); err != nil {
+		return err
+	}
+	a := payload.CascadeAuthorization
+	if a == nil || a.PlatformID == 0 || a.ConfigRevision == 0 || a.ProjectionRevision == 0 || a.PublishedID == "" || a.Action != operation.Action {
+		return fmt.Errorf("maintenance publication authorization missing")
+	}
+	query := ptzWriter(s.db).WithContext(ctx).Table("gb_cascade_platform AS platform").
+		Joins("JOIN gb_cascade_device_projection AS device ON device.platform_id=platform.id").
+		Joins("JOIN gb_device AS source_device ON source_device.id=device.source_device_id")
+	query = query.Where("platform.id=? AND platform.enabled=? AND platform.maintenance_enabled=? AND platform.deleted_at IS NULL AND platform.config_revision=? AND platform.projection_revision=?", a.PlatformID, true, true, a.ConfigRevision, a.ProjectionRevision).
+		Where("device.active=? AND device.source_device_id=?", true, operation.DeviceID).
+		Where("source_device.deleted_at IS NULL AND source_device.device_id=?", operation.DeviceCode)
+	if operation.Action == actionFormatStorageCard {
+		query = ptzWriter(s.db).WithContext(ctx).Table("gb_cascade_platform AS platform").
+			Joins("JOIN gb_cascade_channel_projection AS channel ON channel.platform_id=platform.id").
+			Joins("JOIN gb_cascade_device_projection AS device ON device.id=channel.device_projection_id AND device.platform_id=platform.id").
+			Joins("JOIN gb_device AS source_device ON source_device.id=device.source_device_id").
+			Joins("JOIN gb_channel AS source_channel ON source_channel.id=channel.source_channel_id AND source_channel.device_id=source_device.device_id AND source_channel.owner_dept_id=source_device.owner_dept_id").
+			Where("platform.id=? AND platform.enabled=? AND platform.maintenance_enabled=? AND platform.deleted_at IS NULL AND platform.config_revision=? AND platform.projection_revision=?", a.PlatformID, true, true, a.ConfigRevision, a.ProjectionRevision).
+			Where("channel.active=? AND device.active=? AND channel.published_channel_id=? AND device.source_device_id=? AND channel.source_channel_id=?", true, true, a.PublishedID, operation.DeviceID, operation.ChannelID).
+			Where("source_device.deleted_at IS NULL AND source_channel.deleted_at IS NULL AND source_device.device_id=? AND source_channel.channel_id=?", operation.DeviceCode, operation.ChannelCode)
+	} else if operation.Action == "teleboot" {
+		query = query.Where("device.published_device_id=? OR EXISTS (SELECT 1 FROM gb_cascade_channel_projection AS channel JOIN gb_channel AS source_channel ON source_channel.id=channel.source_channel_id AND source_channel.device_id=source_device.device_id AND source_channel.owner_dept_id=source_device.owner_dept_id WHERE channel.platform_id=platform.id AND channel.device_projection_id=device.id AND channel.active=? AND channel.published_channel_id=? AND source_channel.deleted_at IS NULL)", a.PublishedID, true, a.PublishedID)
+	} else {
+		return fmt.Errorf("unsupported maintenance authorization action %q", operation.Action)
+	}
+	var count int64
+	if err := query.Count(&count).Error; err != nil {
+		return fmt.Errorf("check maintenance publication: %w", err)
+	}
+	if count != 1 {
+		return fmt.Errorf("maintenance publication authorization revoked")
+	}
+	return nil
 }
 
 // applyStorageCardResponse 处理设备回来的 SDCardStatus 应答。
@@ -114,7 +187,7 @@ func (s *Service) applyStorageCardResponse(ctx context.Context, operation gbmode
 		return s.applyRejectedPTZResponse(ctx, operation, callID, cseq, "ERROR", ptzErrorProtocolInvalid, parseErr.Error())
 	}
 	completedAt := s.now()
-	return schedulerTransaction(ctx, s.db, func(tx *gorm.DB) error {
+	err := schedulerTransaction(ctx, s.db, func(tx *gorm.DB) error {
 		applied, err := applyPTZResponseTransition(tx, operation, callID, cseq, ptzResponseTransition{
 			Status: gbmodels.PTZOperationAccepted, DeviceResult: "OK",
 		}, completedAt)
@@ -126,6 +199,10 @@ func (s *Service) applyStorageCardResponse(ctx context.Context, operation gbmode
 		}
 		return s.persistStorageCardsWithDB(ctx, tx, operation, status, body)
 	})
+	if err == nil {
+		s.observeCascadeQuery(operation, body, true)
+	}
+	return err
 }
 
 // persistStorageCardsWithDB 把一次查询结果落成"每张卡一行"。

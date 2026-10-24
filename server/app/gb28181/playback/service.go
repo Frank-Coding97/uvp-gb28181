@@ -430,11 +430,11 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (out Create
 	if session.Mode == ModeDownload {
 		body, err = sdp.BuildDownloadSDP(sdp.DownloadParams{ServerID: serverID, ChannelID: sipChannelID, RecvIP: node.RecvIP,
 			RecvPort: allocation.Port, SSRC: ssrc, TCPMode: tcpMode, Start: start, End: end,
-			DownloadSpeed: session.DownloadSpeed, Extended: gbconfig.SDPExtensionEnabled()})
+			DownloadSpeed: session.DownloadSpeed, RecordingURI: session.RecordingURI, Extended: gbconfig.SDPExtensionEnabled()})
 	} else {
 		body, err = sdp.BuildPlaybackSDP(sdp.PlaybackParams{ServerID: serverID, ChannelID: sipChannelID, RecvIP: node.RecvIP,
 			RecvPort: allocation.Port, SSRC: ssrc, TCPMode: tcpMode, Start: start, End: end, PlayFrom: playFrom,
-			Extended: gbconfig.SDPExtensionEnabled()})
+			RecordingURI: session.RecordingURI, Extended: gbconfig.SDPExtensionEnabled()})
 	}
 	if err != nil {
 		return CreateResult{}, s.fail(ctx, session.ID, "invite", "invalid_sdp", err, resources)
@@ -811,5 +811,5 @@ func (s *Service) Action(ctx context.Context, sessionID, ownerID string, request
 }
 
 func validScale(scale float64) bool {
-	return scale == 0.25 || scale == 0.5 || scale == 1 || scale == 2 || scale == 4
+	return scale == -1 || scale == 0.25 || scale == 0.5 || scale == 1 || scale == 2 || scale == 4
 }

@@ -106,6 +106,47 @@ func TestCascadeSubscriptionSnapshotFiltersExpiredAndMultipleDialogs(t *testing.
 	require.Len(t, provider.Subscriptions(p).Catalog.Sessions, 2)
 }
 
+func TestCascadeManagementSubscriptionSnapshotCombinesAllTypes(t *testing.T) {
+	_, p, store := cascadeDeviceStatusFixture(t, "2022")
+	catalogs := newCascadeCatalogSubscriptions(store, nil, time.Hour)
+	positions := newCascadeMobilePositionSubscriptions(store, nil, time.Hour)
+	events := newCascadeEventSubscriptions(store, nil, time.Hour)
+	now := time.Now()
+	expires := now.Add(time.Minute)
+	catalogs.sessions["catalog"] = &cascadeCatalogSubscription{
+		key: "catalog", platform: p, target: p.LocalDeviceID, expires: expires,
+		subscribedAt: now, renewedAt: now, dialog: subscriptionSnapshotDialog("catalog"),
+	}
+	positions.sessions["position"] = &cascadeMobilePositionSubscription{
+		key: "position", platform: p, target: p.LocalDeviceID, expires: expires,
+		subscribedAt: now, renewedAt: now, dialog: sipclient.NotifyDialog{CallID: "position", Event: "presence"},
+	}
+	events.sessions["ptz"] = &cascadeEventSubscription{
+		key: "ptz", kind: cascadeEventPTZ, platform: p, target: "34020000001320000012", expires: expires,
+		subscribedAt: now, renewedAt: now, dialog: sipclient.NotifyDialog{CallID: "ptz", Event: "PTZPosition"},
+	}
+	events.sessions["alarm"] = &cascadeEventSubscription{
+		key: "alarm", kind: cascadeEventAlarm, platform: p, target: p.LocalDeviceID, expires: expires,
+		subscribedAt: now, renewedAt: now, dialog: sipclient.NotifyDialog{CallID: "alarm", Event: "presence"},
+	}
+	runtime := &cascadeSubscriptionRuntime{subscriptions: catalogs, positions: positions, events: events}
+	var reader cascadeservice.SubscriptionReader = cascadeVideoManagementRuntime{runtime}
+	status := reader.Subscriptions(p)
+	require.Equal(t, "active", status.Catalog.State)
+	require.Equal(t, "active", status.MobilePosition.State)
+	require.Equal(t, "active", status.PTZPosition.State)
+	require.Equal(t, "active", status.Alarm.State)
+	require.Len(t, status.Catalog.Sessions, 1)
+	require.Len(t, status.MobilePosition.Sessions, 1)
+	require.Len(t, status.PTZPosition.Sessions, 1)
+	require.Len(t, status.Alarm.Sessions, 1)
+	require.Equal(t, "34020000001320000012", status.PTZPosition.Sessions[0].Target)
+	require.Equal(t, "PTZPosition", status.PTZPosition.Sessions[0].Event)
+	require.NoError(t, catalogs.Shutdown(context.Background()))
+	require.NoError(t, positions.Shutdown(context.Background()))
+	require.NoError(t, events.Shutdown(context.Background()))
+}
+
 func subscriptionSnapshotDialog(id string) sipclient.NotifyDialog {
 	return sipclient.NotifyDialog{CallID: id, Event: "Catalog;id=1"}
 }

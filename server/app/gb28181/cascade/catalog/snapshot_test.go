@@ -75,6 +75,31 @@ func TestBuildSnapshotEmptyAndOfflineResources(t *testing.T) {
 	require.Equal(t, ResourceStatusOffline, offline.Items[1].Status)
 }
 
+func TestBuildKeepsChannelStatusEventSeparateFromDirectoryStatus(t *testing.T) {
+	device := model.GbCascadeDeviceProjection{ID: 1, PlatformID: 1, SourceDeviceID: 10, PublishedDeviceID: "34020000001320000001", Active: true}
+	channel := model.GbCascadeChannelProjection{PlatformID: 1, DeviceProjectionID: 1, SourceChannelID: 20, PublishedChannelID: "34020000001320000011", Active: true}
+	for _, tc := range []struct {
+		name   string
+		online bool
+		event  ResourceStatus
+		want   ResourceStatus
+	}{
+		{name: "online source propagates VLOST", online: true, event: ResourceStatusVideoLost, want: ResourceStatusVideoLost},
+		{name: "online source propagates DEFECT", online: true, event: ResourceStatusDefect, want: ResourceStatusDefect},
+		{name: "offline parent suppresses channel event", online: false, event: ResourceStatusVideoLost},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshot, err := Build(repository.ProjectionSnapshot{
+				Platform: model.GbCascadePlatform{ID: 1}, Devices: []model.GbCascadeDeviceProjection{device},
+				Channels: []model.GbCascadeChannelProjection{channel}, Revision: 1,
+			}, SourceFacts{DeviceOnline: map[uint64]bool{10: tc.online}, ChannelOnline: map[uint64]bool{20: false}, ChannelStatusEvent: map[uint64]ResourceStatus{20: tc.event}})
+			require.NoError(t, err)
+			require.Equal(t, ResourceStatusOffline, snapshot.Items[1].Status)
+			require.Equal(t, tc.want, snapshot.Items[1].StatusEvent)
+		})
+	}
+}
+
 func TestBuildSnapshotReparentsOnlyToPublishedNodesAndIsRevisionStable(t *testing.T) {
 	platform := model.GbCascadePlatform{ID: 1, LocalDeviceID: "34020000002000000001", PublishPlatform: true, ProjectionRevision: 8}
 	device := model.GbCascadeDeviceProjection{ID: 1, PlatformID: 1, SourceDeviceID: 10, PublishedDeviceID: "34020000001320000001", Active: true}

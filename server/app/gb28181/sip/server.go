@@ -31,6 +31,7 @@ import (
 // Server 封装 GB28181 SIP 服务(双栈 UDP+TCP)
 type Server struct {
 	cascadeDialog      func(*siplib.Request, siplib.ServerTransaction) bool
+	cascadeCancel      func(*siplib.Request, siplib.ServerTransaction) bool
 	cascadeMessageMu   sync.RWMutex
 	cascadeMessage     func(*siplib.Request, siplib.ServerTransaction) bool
 	cascadeSubscribe   func(*siplib.Request, siplib.ServerTransaction) bool
@@ -692,6 +693,15 @@ func (s *Server) SetBroadcastMessageProcessor(processor handler.BroadcastMessage
 	}
 }
 
+// SetCascadeBroadcastMessageRouter installs the cascade response router ahead
+// of the local TALK Broadcast processor. The two flows share the same MANSCDP
+// CmdType but have different ownership and upstream correlation rules.
+func (s *Server) SetCascadeBroadcastMessageRouter(router handler.CascadeBroadcastMessageRouter) {
+	if s.msgH != nil {
+		s.msgH.SetCascadeBroadcastProcessor(router)
+	}
+}
+
 func (s *Server) SetBroadcastInviteProcessor(processor handler.BroadcastInviteProcessor) {
 	s.broadcastProcessor = processor
 }
@@ -926,17 +936,54 @@ func (s *Server) SetCascadeDialogHandler(fn func(*siplib.Request, siplib.ServerT
 	s.cascadeMessageMu.Unlock()
 }
 
+// AddCascadeDialogHandlerFirst adds a specific cascade dialog owner while
+// preserving the previously installed video and ordinary broadcast handlers.
+func (s *Server) AddCascadeDialogHandlerFirst(fn func(*siplib.Request, siplib.ServerTransaction) bool) {
+	if s == nil || fn == nil {
+		return
+	}
+	s.cascadeMessageMu.Lock()
+	previous := s.cascadeDialog
+	s.cascadeDialog = func(req *siplib.Request, tx siplib.ServerTransaction) bool {
+		return fn(req, tx) || (previous != nil && previous(req, tx))
+	}
+	s.cascadeMessageMu.Unlock()
+}
+
 // SetCascadeCancelValidator protects pending cascade video INVITE transactions
 // before sipgo's transaction layer consumes CANCEL.
 func (s *Server) SetCascadeCancelValidator(fn func(*siplib.Request, siplib.ServerTransaction) bool) {
 	if s == nil || s.srv == nil {
 		return
 	}
+	s.cascadeMessageMu.Lock()
+	s.cascadeCancel = fn
+	s.cascadeMessageMu.Unlock()
 	s.srv.SetCancelValidator(func(req *siplib.Request, tx *siplib.ServerTx) bool {
-		if fn == nil {
-			return true
-		}
-		return fn(req, tx)
+		s.cascadeMessageMu.RLock()
+		validator := s.cascadeCancel
+		s.cascadeMessageMu.RUnlock()
+		return validator == nil || validator(req, tx)
+	})
+}
+
+// AddCascadeCancelValidator composes a subsystem check with the current
+// validator instead of replacing its INVITE ownership boundary.
+func (s *Server) AddCascadeCancelValidator(fn func(*siplib.Request, siplib.ServerTransaction) bool) {
+	if s == nil || s.srv == nil || fn == nil {
+		return
+	}
+	s.cascadeMessageMu.Lock()
+	previous := s.cascadeCancel
+	s.cascadeCancel = func(req *siplib.Request, tx siplib.ServerTransaction) bool {
+		return (previous == nil || previous(req, tx)) && fn(req, tx)
+	}
+	s.cascadeMessageMu.Unlock()
+	s.srv.SetCancelValidator(func(req *siplib.Request, tx *siplib.ServerTx) bool {
+		s.cascadeMessageMu.RLock()
+		validator := s.cascadeCancel
+		s.cascadeMessageMu.RUnlock()
+		return validator == nil || validator(req, tx)
 	})
 }
 func (s *Server) dispatchCascadeDialog(fallback func(*siplib.Request, siplib.ServerTransaction)) func(*siplib.Request, siplib.ServerTransaction) {

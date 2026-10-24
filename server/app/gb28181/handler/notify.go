@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"sync"
@@ -64,7 +65,8 @@ func (h *NotifyHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	ctx := context.Background()
 	callID, cseq := sipPairKey(req)
 	logger := app.Log(ctx).Named("gb28181.notify")
-	defer func() { _ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil)) }()
+	status, reason := 200, "OK"
+	defer func() { _ = tx.Respond(sip.NewResponseFromRequest(req, status, reason, nil)) }()
 	if h == nil {
 		return
 	}
@@ -116,5 +118,8 @@ func (h *NotifyHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			zap.String("event", "gb28181.notify.process_failed"),
 			zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
 			logging.Error(err))
+		if kind == gbmodels.SubscriptionKindAlarm && errors.Is(err, subscribe.ErrAlarmNotAccepted) {
+			status, reason = 503, "Alarm storage unavailable"
+		}
 	}
 }

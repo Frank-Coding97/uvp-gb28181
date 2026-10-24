@@ -169,7 +169,7 @@ func (r *Registry) Create(ctx context.Context, request CreateRequest) (CreateRes
 				if session.Authorization != request.Authorization || session.DeviceID != request.DeviceID || session.ChannelID != request.ChannelID ||
 					session.Mode != request.Mode || session.RecordKey != request.RecordKey ||
 					!session.SegmentStart.Equal(request.SegmentStart) || !session.SegmentEnd.Equal(request.SegmentEnd) || !session.PlayFrom.Equal(request.PlayFrom) ||
-					session.DownloadSpeed != request.DownloadSpeed {
+					session.DownloadSpeed != request.DownloadSpeed || session.RecordingURI != request.RecordingURI {
 					return CreateResult{}, ErrPlaybackBusy
 				}
 				return CreateResult{Session: session, Existing: true}, nil
@@ -183,6 +183,7 @@ func (r *Registry) Create(ctx context.Context, request CreateRequest) (CreateRes
 			active := record.session.clone()
 			record.mu.Unlock()
 			if !active.State.IsTerminal() && active.Authorization == request.Authorization && active.DeviceID == request.DeviceID && active.Mode == request.Mode &&
+				active.RecordingURI == request.RecordingURI && active.DownloadSpeed == request.DownloadSpeed &&
 				active.SegmentStart.Equal(request.SegmentStart) && active.SegmentEnd.Equal(request.SegmentEnd) {
 				if request.IdempotencyKey != "" {
 					r.idempotentByKey[idempotencyKey(request.OwnerID, request.ChannelID, request.IdempotencyKey)] = activeID
@@ -204,7 +205,7 @@ func (r *Registry) Create(ctx context.Context, request CreateRequest) (CreateRes
 	}
 	session := Session{ID: id, OwnerID: request.OwnerID, DeviceID: request.DeviceID, ChannelID: request.ChannelID, RecordKey: request.RecordKey,
 		Authorization: request.Authorization,
-		Mode:          request.Mode, DownloadSpeed: request.DownloadSpeed,
+		Mode:          request.Mode, DownloadSpeed: request.DownloadSpeed, RecordingURI: request.RecordingURI,
 		IdempotencyKey: request.IdempotencyKey, SegmentStart: request.SegmentStart, SegmentEnd: request.SegmentEnd,
 		PlayFrom: request.PlayFrom,
 		State:    StateCreating, Scale: 1, CreatedAt: now, LastActivityAt: now,

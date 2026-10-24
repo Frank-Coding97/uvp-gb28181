@@ -11,12 +11,15 @@ import (
 	"time"
 
 	"github.com/emiago/sipgo/sip"
+	"go.uber.org/zap"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/catalog"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/media"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 	"uvplatform.com/uvp-gb28181/app/gb28181/mansrtsp"
 	gbplayback "uvplatform.com/uvp-gb28181/app/gb28181/playback"
 	"uvplatform.com/uvp-gb28181/app/gb28181/sdp"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
 type cascadePlaybackService interface {
@@ -35,6 +38,7 @@ type cascadePlaybackLease struct {
 	session       *cascadeVideoSession
 	service       cascadePlaybackService
 	id, owner     string
+	download      bool
 	row           *model.GbCascadeMediaSession
 	sender        *media.SenderLease
 	closing       bool
@@ -46,7 +50,9 @@ func (l *cascadePlaybackLease) beforeCleanup(ctx context.Context) error {
 		return err
 	}
 	// The INVITE owner sends BYE exactly once, after sender shutdown succeeds.
-	l.session.cancel()
+	if !l.download {
+		l.session.cancel()
+	}
 	return nil
 }
 
@@ -99,12 +105,23 @@ func (h *cascadeVideoRuntime) acquirePlayback(ctx context.Context, session *casc
 		return media.StartResult{}, nil, err
 	}
 	owner := fmt.Sprintf("cascade:%d:%s", session.platform.ID, session.dialog.ID)
-	lease := &cascadePlaybackLease{runtime: h, session: session, service: h.playback, owner: owner}
+	lease := &cascadePlaybackLease{runtime: h, session: session, service: h.playback, owner: owner, download: offer.Download}
+	mode := gbplayback.ModePlayback
+	if offer.Download {
+		mode = gbplayback.ModeDownload
+	}
+	recordingURI := ""
+	if offer.RecordingURI != "" {
+		recordingURI, err = h.resolveRecordingURI(ctx, source, target.SourceChannelID, offer)
+		if err != nil {
+			return media.StartResult{}, nil, err
+		}
+	}
 	created, err := h.playback.Create(ctx, gbplayback.CreateRequest{OwnerID: owner, DeviceID: source.device.DeviceID,
 		ChannelID: strconv.FormatUint(target.SourceChannelID, 10), SIPChannelID: source.channel.ChannelID, Authorization: source.authorization,
 		RecordKey: owner, IdempotencyKey: session.dialog.ID, SegmentStart: offer.Start, SegmentEnd: offer.End, PlayFrom: offer.Start,
 		Destination: net.JoinHostPort(source.device.IP, strconv.Itoa(source.device.Port)), Transport: source.device.Transport, PreferredNodeID: source.device.ZLMNodeID,
-		Mode: gbplayback.ModePlayback, BeforeCleanup: lease.beforeCleanup})
+		Mode: mode, DownloadSpeed: offer.DownloadSpeed, RecordingURI: recordingURI, BeforeCleanup: lease.beforeCleanup})
 	if err != nil {
 		return media.StartResult{}, nil, err
 	}
@@ -158,19 +175,37 @@ func (h *cascadeVideoRuntime) playbackInfo(req *sip.Request, tx sip.ServerTransa
 		return
 	}
 	refreshed := true
-	if command.Action == "seek" || command.Action == "resume" {
-		// A seek/resume changes the first packet that belongs to this PLAY
-		// response. Clear the old sample before forwarding the control command;
-		// enhanced ZLM nodes also reset their next-packet sampler.
+	if statusOKForPlaybackAction(command.Action) {
+		// Every PLAY may change the next emitted packet (including a Scale-only
+		// request). Clear the old sample before forwarding control so RTP-Info
+		// can never describe a packet from the previous PLAY.
 		session.rtpInfo = nil
 		if session.sender != nil {
-			refreshed = session.sender.ResetRTPInfo(ctx) == nil
+			refreshed = session.sender.CanSampleRTPInfo() && session.sender.ResetRTPInfo(ctx) == nil
 		}
 	}
 	_, err = lease.service.Action(ctx, lease.id, lease.owner, gbplayback.ActionRequest{Action: command.Action, PositionSeconds: command.PositionSeconds, Scale: command.Scale, RangeValue: command.RangeValue})
 	if err == nil && statusOKForPlaybackAction(command.Action) && refreshed && session.sender != nil {
-		if info, refreshErr := session.sender.RefreshRTPInfo(ctx); refreshErr == nil && info != nil && strings.TrimSpace(info.URL) != "" {
-			session.rtpInfo = &mansrtsp.RTPInfo{URL: info.URL, Seq: info.Seq, RTPTime: info.RTPTime}
+		// The downstream INFO transaction can complete before the sender emits
+		// its first packet. Poll briefly for the sample tied to this PLAY; older
+		// media nodes without the optional sampler still omit RTP-Info.
+		sampleCtx, sampleCancel := context.WithTimeout(ctx, time.Second)
+		defer sampleCancel()
+		for {
+			info, refreshErr := session.sender.RefreshRTPInfo(sampleCtx)
+			if refreshErr != nil || info != nil && strings.TrimSpace(info.URL) != "" {
+				if refreshErr == nil && info != nil && strings.TrimSpace(info.URL) != "" {
+					session.rtpInfo = &mansrtsp.RTPInfo{URL: info.URL, Seq: info.Seq, RTPTime: info.RTPTime}
+				}
+				break
+			}
+			select {
+			case <-sampleCtx.Done():
+				break
+			case <-time.After(20 * time.Millisecond):
+				continue
+			}
+			break
 		}
 	}
 	status, reason := 200, "OK"
@@ -227,7 +262,34 @@ func (h *cascadeVideoRuntime) waitCascadeVideo(ctx context.Context, session *cas
 			ended := false
 			if lease := session.playback; lease != nil {
 				current, ok := lease.service.PeekForOwner(lease.id, lease.owner)
+				if ok && lease.download && current.State == gbplayback.StateStopping {
+					// Wait for the source cleanup outcome before distinguishing a
+					// complete download from an interrupted/expired source.
+					continue
+				}
 				ended = !ok || current.State.IsTerminal() || current.State == gbplayback.StateStopping
+				if ok && lease.download && current.State == gbplayback.StateEnded && current.EndReason == "file-to-end" {
+					if err := h.notifyDownloadComplete(ctx, session); err != nil {
+						app.Log(ctx).Warn("级联录像下载完成通知失败",
+							zap.String("event", "cascade.download.completion_notify_failed"),
+							zap.Uint64("platform_id", session.platform.ID), zap.String("call_id", session.dialog.InviteRequest.CallID().Value()), zap.Error(err))
+					} else {
+						// GB/T 28181-2022 9.9.2.1: after acknowledging the
+						// completion MESSAGE the receiver ends the dialog with BYE.
+						// Bound the wait so an absent receiver cannot retain it forever.
+						timeout := h.downloadByeTimeout
+						if timeout <= 0 {
+							timeout = 32 * time.Second
+						}
+						timer := time.NewTimer(timeout)
+						defer timer.Stop()
+						select {
+						case <-ctx.Done():
+							return
+						case <-timer.C:
+						}
+					}
+				}
 				if !ended && current.State == gbplayback.StatePlaying && session.acknowledged.Load() {
 					_, _ = lease.service.GetForOwner(lease.id, lease.owner)
 				}
@@ -250,4 +312,26 @@ func (h *cascadeVideoRuntime) waitCascadeVideo(ctx context.Context, session *cas
 			}
 		}
 	}
+}
+
+func (h *cascadeVideoRuntime) notifyDownloadComplete(ctx context.Context, session *cascadeVideoSession) error {
+	session.controlMu.Lock()
+	defer session.controlMu.Unlock()
+	body, err := manscdp.BuildMediaStatusFileEnd(cascadeWireProfile(session.platform), session.source.SenderID, 1)
+	if err != nil {
+		return err
+	}
+	request := sip.NewRequest(sip.MESSAGE, session.dialog.InviteRequest.Contact().Address)
+	request.AppendHeader(sip.NewHeader("Content-Type", "Application/MANSCDP+xml"))
+	request.SetBody(body)
+	sendCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	response, err := session.dialog.Do(sendCtx, request)
+	if err != nil {
+		return fmt.Errorf("notify download completion: %w", err)
+	}
+	if response == nil || response.StatusCode != 200 {
+		return fmt.Errorf("download completion was not acknowledged")
+	}
+	return nil
 }

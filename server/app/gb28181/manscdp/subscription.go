@@ -17,6 +17,64 @@ type subscriptionQuery struct {
 	Interval *int     `xml:"Interval,omitempty"`
 }
 
+// MobilePositionSubscriptionQuery is the inbound MANSCDP query carried by an
+// upstream presence subscription. It is exported so the cascade UAS uses the
+// same charset-aware decoder as device-side subscription processing.
+type MobilePositionSubscriptionQuery struct {
+	SN              int
+	DeviceID        string
+	Interval        int
+	IntervalPresent bool
+}
+
+// SubscriptionQuery is the common MANSCDP query carried by an inbound
+// upstream SUBSCRIBE. The caller validates the command against the SIP Event.
+type SubscriptionQuery struct {
+	CmdType         string
+	SN              int
+	DeviceID        string
+	Interval        int
+	IntervalPresent bool
+}
+
+// ParseSubscriptionQuery decodes a subscription query with the negotiated
+// MANSCDP charset. It intentionally does not constrain CmdType so the SIP
+// layer can dispatch Catalog, MobilePosition, PTZPosition and Alarm
+// subscriptions consistently.
+func ParseSubscriptionQuery(body []byte) (SubscriptionQuery, error) {
+	var wire struct {
+		CmdType  string `xml:"CmdType"`
+		SN       int    `xml:"SN"`
+		DeviceID string `xml:"DeviceID"`
+		Interval *int   `xml:"Interval"`
+	}
+	if err := newDecoder(body).Decode(&wire); err != nil {
+		return SubscriptionQuery{}, fmt.Errorf("解析订阅请求失败: %w", err)
+	}
+	if strings.TrimSpace(wire.CmdType) == "" || wire.SN <= 0 || strings.TrimSpace(wire.DeviceID) == "" {
+		return SubscriptionQuery{}, fmt.Errorf("非法订阅请求")
+	}
+	query := SubscriptionQuery{CmdType: wire.CmdType, SN: wire.SN, DeviceID: wire.DeviceID}
+	if wire.Interval != nil {
+		query.Interval = *wire.Interval
+		query.IntervalPresent = true
+	}
+	return query, nil
+}
+
+// ParseMobilePositionSubscriptionQuery parses a MobilePosition SUBSCRIBE body
+// using the protocol decoder, including GB2312/GB18030 bodies.
+func ParseMobilePositionSubscriptionQuery(body []byte) (MobilePositionSubscriptionQuery, error) {
+	query, err := ParseSubscriptionQuery(body)
+	if err != nil {
+		return MobilePositionSubscriptionQuery{}, fmt.Errorf("解析 MobilePosition 订阅请求失败: %w", err)
+	}
+	if query.CmdType != CmdMobilePosition {
+		return MobilePositionSubscriptionQuery{}, fmt.Errorf("非法 MobilePosition 订阅请求")
+	}
+	return MobilePositionSubscriptionQuery{SN: query.SN, DeviceID: query.DeviceID, Interval: query.Interval, IntervalPresent: query.IntervalPresent}, nil
+}
+
 // BuildSubscriptionQuery returns the MANSCDP body and SIP Event header for one device-level subscription.
 func BuildSubscriptionQuery(kind gbmodels.SubscriptionKind, deviceID string, sn, interval int) ([]byte, string, error) {
 	return BuildSubscriptionQueryWithProfile(protocol.ProfileFor(protocol.Version2016), kind, deviceID, sn, interval)

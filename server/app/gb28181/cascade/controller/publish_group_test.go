@@ -39,7 +39,7 @@ func TestPublishGroupHTTPChangesSettingWithoutReturningSecretsAndReportsRuntimeF
 		Name: "上级", UpstreamServerID: "34020000002000000002", UpstreamDomain: "3402000000", Host: "192.0.2.1", Port: 5060,
 		LocalDeviceID: "34020000002000000001", LocalDomain: "3402000000", LocalSIPIP: "192.0.2.2", LocalSIPPort: 5060,
 		SecretCiphertext: []byte("credential-sentinel"), SecretNonce: []byte("nonce-sentinel"), SecretAlg: "AES-256-GCM", SecretKeyVersion: "key-v1",
-		RetryPolicy: `{"initialMs":100}`, AutoPushCatalog: true, PublishCivil: true, Enabled: true, ConfigRevision: 1,
+		RetryPolicy: `{"initialMs":100}`, ConfigEnabled: true, AutoPushCatalog: true, PublishCivil: true, Enabled: true, ConfigRevision: 1,
 	}
 	require.NoError(t, repo.CreatePlatform(context.Background(), platform))
 	require.NoError(t, repo.ReplaceBusinessGroup(context.Background(), platform.ID, 0, []repository.BusinessNodeInput{{Code: "34020000002150000001", Name: "业务根", Kind: "group"}}, nil))
@@ -69,6 +69,7 @@ func TestPublishGroupHTTPChangesSettingWithoutReturningSecretsAndReportsRuntimeF
 	require.Equal(t, []byte("nonce-sentinel"), stored.SecretNonce)
 	require.Equal(t, `{"initialMs":100}`, stored.RetryPolicy)
 	require.True(t, stored.AutoPushCatalog)
+	require.True(t, stored.ConfigEnabled)
 	require.True(t, stored.PublishCivil)
 	require.True(t, stored.Enabled)
 

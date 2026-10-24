@@ -131,7 +131,18 @@ func (s *Service) resolveForwardTarget(ctx context.Context, snapshot *repository
 	if !channel.PTZAllowed {
 		return control, channel, device, ptz.Target{}, fmt.Errorf("%w: channel %q PTZ permission disabled", ErrControlUnauthorized, control.DeviceID)
 	}
-	target, err := s.targets.Load(ctx, device.SourceDeviceID, channel.SourceChannelID)
+	var target ptz.Target
+	if authorized, ok := s.executor.(interface{ RequiresDeviceAuthorization() bool }); ok && authorized.RequiresDeviceAuthorization() {
+		loader, ok := s.targets.(interface {
+			LoadAuthorized(context.Context, uint64, uint64) (ptz.Target, error)
+		})
+		if !ok {
+			return control, channel, device, ptz.Target{}, ErrFeatureUnavailable
+		}
+		target, err = loader.LoadAuthorized(ctx, device.SourceDeviceID, channel.SourceChannelID)
+	} else {
+		target, err = s.targets.Load(ctx, device.SourceDeviceID, channel.SourceChannelID)
+	}
 	if err != nil {
 		return control, channel, device, ptz.Target{}, err
 	}
@@ -149,10 +160,11 @@ func (s *Service) buildForwardCommand(request ForwardRequest, callID string, con
 		Payload: map[string]interface{}{
 			"platformId": request.PlatformID, "callId": callID, "upstreamSn": control.SN,
 			"publishedChannelId": control.DeviceID, "rawPtz": raw,
+			"ptzCmdParams": control.Params,
 		},
 		Profile: profile,
 		Build: func(sn int) ([]byte, error) {
-			return manscdp.BuildRawPTZControlWithProfile(profile, target.ChannelCode, sn, raw)
+			return manscdp.BuildRawPTZControlParamsWithProfile(profile, target.ChannelCode, sn, raw, control.Params)
 		},
 	}
 }

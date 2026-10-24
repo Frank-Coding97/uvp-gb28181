@@ -17,7 +17,7 @@ const sdcardOneCard = `<?xml version="1.0" encoding="GB2312"?>
 <SN>12</SN>
 <DeviceID>34020000001320000001</DeviceID>
 <SumNum>1</SumNum>
-<SDCardStatusInfo>
+<SDCardStatusInfo Num="1">
 <Item>
 <ID>1</ID>
 <HddName>SD Card 1</HddName>
@@ -85,7 +85,7 @@ func TestParseSDCardStatusResponseWithoutCards(t *testing.T) {
 
 func TestParseSDCardStatusResponseKeepsOptionalProgressAbsent(t *testing.T) {
 	body := `<Response><CmdType>SDCardStatus</CmdType><SN>3</SN><DeviceID>D</DeviceID><SumNum>1</SumNum>` +
-		`<SDCardStatusInfo><Item><ID>1</ID><HddName>X</HddName><Status>unformatted</Status>` +
+		`<SDCardStatusInfo Num="1"><Item><ID>1</ID><HddName>X</HddName><Status>unformatted</Status>` +
 		`<Capacity>100</Capacity><FreeSpace>0</FreeSpace></Item></SDCardStatusInfo></Response>`
 	status, err := manscdp.ParseSDCardStatusResponse([]byte(body))
 	require.NoError(t, err)
@@ -107,7 +107,7 @@ func TestParseSDCardStatusResponseStatusIsCaseInsensitiveAndUnknownSafe(t *testi
 	for raw, want := range cases {
 		t.Run(raw, func(t *testing.T) {
 			body := `<Response><CmdType>SDCardStatus</CmdType><SN>1</SN><DeviceID>D</DeviceID><SumNum>1</SumNum>` +
-				`<SDCardStatusInfo><Item><ID>1</ID><HddName>X</HddName><Status>` + raw + `</Status>` +
+				`<SDCardStatusInfo Num="1"><Item><ID>1</ID><HddName>X</HddName><Status>` + raw + `</Status>` +
 				`<Capacity>1</Capacity><FreeSpace>1</FreeSpace></Item></SDCardStatusInfo></Response>`
 			status, err := manscdp.ParseSDCardStatusResponse([]byte(body))
 			require.NoError(t, err, "未知状态不该让整条应答解析失败")
@@ -122,7 +122,7 @@ func TestParseSDCardStatusResponseRejectsMoreThanEightItems(t *testing.T) {
 		items.WriteString(`<Item><ID>` + itoa(i) + `</ID><HddName>X</HddName><Status>ok</Status><Capacity>1</Capacity><FreeSpace>1</FreeSpace></Item>`)
 	}
 	body := `<Response><CmdType>SDCardStatus</CmdType><SN>1</SN><DeviceID>D</DeviceID><SumNum>9</SumNum>` +
-		`<SDCardStatusInfo>` + items.String() + `</SDCardStatusInfo></Response>`
+		`<SDCardStatusInfo Num="9">` + items.String() + `</SDCardStatusInfo></Response>`
 	_, err := manscdp.ParseSDCardStatusResponse([]byte(body))
 	require.Error(t, err)
 	var parseErr *manscdp.SDCardParseError
@@ -136,7 +136,7 @@ func TestParseSDCardStatusResponseAcceptsEightItems(t *testing.T) {
 		items.WriteString(`<Item><ID>` + itoa(i) + `</ID><HddName>X</HddName><Status>ok</Status><Capacity>1</Capacity><FreeSpace>1</FreeSpace></Item>`)
 	}
 	body := `<Response><CmdType>SDCardStatus</CmdType><SN>1</SN><DeviceID>D</DeviceID><SumNum>8</SumNum>` +
-		`<SDCardStatusInfo>` + items.String() + `</SDCardStatusInfo></Response>`
+		`<SDCardStatusInfo Num="8">` + items.String() + `</SDCardStatusInfo></Response>`
 	status, err := manscdp.ParseSDCardStatusResponse([]byte(body))
 	require.NoError(t, err, "正好 8 条是边界内，必须收")
 	require.Len(t, status.Items, 8)
@@ -170,7 +170,7 @@ func TestParseSDCardStatusResponseRejectsMissingRequiredItemFields(t *testing.T)
 	} {
 		t.Run(name, func(t *testing.T) {
 			body := `<Response><CmdType>SDCardStatus</CmdType><SN>1</SN><DeviceID>D</DeviceID><SumNum>1</SumNum>` +
-				`<SDCardStatusInfo>` + item + `</SDCardStatusInfo></Response>`
+				`<SDCardStatusInfo Num="1">` + item + `</SDCardStatusInfo></Response>`
 			_, err := manscdp.ParseSDCardStatusResponse([]byte(body))
 			require.Error(t, err, "必选整数缺失必须报错，不能静默当 0")
 		})
@@ -185,7 +185,7 @@ func TestParseSDCardStatusResponseRejectsRangeViolations(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			body := `<Response><CmdType>SDCardStatus</CmdType><SN>1</SN><DeviceID>D</DeviceID><SumNum>1</SumNum>` +
-				`<SDCardStatusInfo>` + item + `</SDCardStatusInfo></Response>`
+				`<SDCardStatusInfo Num="1">` + item + `</SDCardStatusInfo></Response>`
 			_, err := manscdp.ParseSDCardStatusResponse([]byte(body))
 			require.Error(t, err)
 		})
@@ -217,4 +217,41 @@ func itoa(value int) string {
 		value /= 10
 	}
 	return string(digits)
+}
+
+func TestParseSDCardStatusRejectsIncompleteOrAmbiguousList(t *testing.T) {
+	item := `<Item><ID>1</ID><HddName>SD</HddName><Status>ok</Status><Capacity>100</Capacity><FreeSpace>90</FreeSpace></Item>`
+	for name, payload := range map[string]string{
+		"missing nonempty list": `<SumNum>1</SumNum>`,
+		"missing Num":           `<SumNum>1</SumNum><SDCardStatusInfo>` + item + `</SDCardStatusInfo>`,
+		"wrong Num":             `<SumNum>1</SumNum><SDCardStatusInfo Num="2">` + item + `</SDCardStatusInfo>`,
+		"partial total":         `<SumNum>2</SumNum><SDCardStatusInfo Num="1">` + item + `</SDCardStatusInfo>`,
+		"zero total with item":  `<SumNum>0</SumNum><SDCardStatusInfo Num="1">` + item + `</SDCardStatusInfo>`,
+		"duplicate card":        `<SumNum>2</SumNum><SDCardStatusInfo Num="2">` + item + item + `</SDCardStatusInfo>`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := manscdp.ParseSDCardStatusResponse([]byte(`<Response><CmdType>SDCardStatus</CmdType><SN>1</SN><DeviceID>D</DeviceID>` + payload + `</Response>`))
+			require.Error(t, err, "a partial or ambiguous storage list must not replace the complete cache")
+		})
+	}
+}
+
+func TestSDCardStatusResponseBuilderChangesOnlyPublishedEnvelope(t *testing.T) {
+	for _, version := range []protocol.Version{protocol.Version2016, protocol.Version2022} {
+		t.Run(string(version), func(t *testing.T) {
+			status, err := manscdp.ParseSDCardStatusResponse([]byte(sdcardOneCard))
+			require.NoError(t, err)
+			status.Items[0].HddName = "录像卡"
+			body, err := manscdp.BuildSDCardStatusResponseWithProfile(protocol.ProfileFor(version), "34020000001320000012", 97, status)
+			require.NoError(t, err)
+			result, err := manscdp.ParseSDCardStatusResponseFor(body, manscdp.SDCardStatusExpectation{SN: 97, DeviceID: "34020000001320000012"})
+			require.NoError(t, err)
+			require.Equal(t, status.Items, result.Items)
+			require.Contains(t, string(body), `SDCardStatusInfo Num="1"`)
+		})
+	}
+	for _, result := range []string{"ERROR", "FAIL"} {
+		_, err := manscdp.ParseSDCardStatusResponse([]byte(`<Response><CmdType>SDCardStatus</CmdType><SN>1</SN><DeviceID>D</DeviceID><Result>` + result + `</Result><SumNum>0</SumNum></Response>`))
+		require.Error(t, err, "an explicit error must not be normalized into no cards")
+	}
 }

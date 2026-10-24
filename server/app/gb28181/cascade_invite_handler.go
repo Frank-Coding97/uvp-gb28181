@@ -173,16 +173,19 @@ type cascadeVideoSession struct {
 }
 
 type cascadeVideoRuntime struct {
-	client          *sipgo.Client
-	store           *repository.GormRepository
-	sources         *media.Provider
-	sender          *media.Sender
-	nodes           media.SenderNodeLookup
-	playback        cascadePlaybackService
-	monitorInterval time.Duration
-	mu              sync.Mutex
-	sessions        map[string]*cascadeVideoSession
-	sourcePending   map[cascadeSourceKey]cascadeInviteKey
+	client             *sipgo.Client
+	store              *repository.GormRepository
+	sources            *media.Provider
+	sender             *media.Sender
+	nodes              media.SenderNodeLookup
+	playback           cascadePlaybackService
+	recordings         cascadeRecordingQuerier
+	recordingLocation  *time.Location
+	monitorInterval    time.Duration
+	downloadByeTimeout time.Duration
+	mu                 sync.Mutex
+	sessions           map[string]*cascadeVideoSession
+	sourcePending      map[cascadeSourceKey]cascadeInviteKey
 	// ZLM's stop API addresses a sender by source + SSRC, not SIP dialog.
 	senders map[string]bool
 	closed  bool
@@ -218,6 +221,10 @@ func setupCascadeVideoRuntime(server sipRuntimeServer) error {
 		return err
 	}
 	h := &cascadeVideoRuntime{client: client, store: repository.NewGormRepository(app.DB()), sources: media.NewProvider(media.NewPlayServiceAdapter(playSvc)), sender: media.NewSender(zlmRegistry, nil), nodes: zlmRegistry, playback: playbackService, sessions: map[string]*cascadeVideoSession{}, senders: map[string]bool{}}
+	if recordQueryService != nil {
+		h.recordings = recordQueryService
+		h.recordingLocation = recordQueryService.Location()
+	}
 	// Persisted sender identities allow cleanup after a process crash. Never
 	// reconstruct a SIP dialog from stale rows or stop the shared source stream.
 	if err := h.recoverSenders(); err != nil {
@@ -374,7 +381,7 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 		return
 	}
 	platformID = platform.ID
-	if offer.Playback && !platform.RecordingEnabled {
+	if (offer.Playback || offer.Download) && !platform.RecordingEnabled {
 		fail(403, fmt.Errorf("recording sharing is disabled"))
 		return
 	}
@@ -383,7 +390,7 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 		fail(400, fmt.Errorf("missing Subject"))
 		return
 	}
-	identity, subjectErr := parseCascadeMediaSourceIdentity(subject.Value(), offer.Playback)
+	identity, subjectErr := parseCascadeMediaSourceIdentity(subject.Value(), offer.Playback || offer.Download)
 	if subjectErr != nil {
 		fail(400, subjectErr)
 		return
@@ -391,6 +398,13 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 	if identity.SenderID != req.Recipient.User || identity.ReceiverID != platform.UpstreamServerID {
 		fail(403, fmt.Errorf("subject identity mismatch"))
 		return
+	}
+	if offer.RecordingURI != "" && (offer.Playback || offer.Download) {
+		uri, err := sdp.ParseHistoricalURI(offer.RecordingURI)
+		if err != nil || uri.DeviceID != identity.SenderID {
+			fail(403, fmt.Errorf("recording URI target differs from published channel"))
+			return
+		}
 	}
 	projection, err := h.store.ProjectionSnapshot(ctx, platform.ID)
 	if err != nil {
@@ -418,7 +432,7 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 		return
 	}
 	var deviceEpoch int64
-	if !offer.Playback {
+	if !offer.Playback && !offer.Download {
 		security, err := playauth.NewDeviceSecurityStore(app.DB()).Load(ctx, source.DeviceCode)
 		if err != nil || security.CleanupCompletedEpoch != security.AccessEpoch {
 			fail(503, play.ErrPlayAuthorizationUnavailable)
@@ -486,7 +500,7 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 	defer provisionCancel()
 	var sourceMedia media.StartResult
 	var releaseSource func()
-	if offer.Playback {
+	if offer.Playback || offer.Download {
 		sourceMedia, releaseSource, err = h.acquirePlayback(provisionCtx, session, target, offer)
 	} else {
 		var lease *media.Lease
@@ -548,7 +562,7 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 	}
 	defer func() { h.mu.Lock(); delete(h.senders, key); h.mu.Unlock() }()
 	latest, err := h.store.FindPlatform(provisionCtx, platform.ID)
-	if err != nil || !latest.Enabled || (offer.Playback && !latest.RecordingEnabled) || latest.ConfigRevision != platform.ConfigRevision || latest.ProjectionRevision != platform.ProjectionRevision {
+	if err != nil || !latest.Enabled || ((offer.Playback || offer.Download) && !latest.RecordingEnabled) || latest.ConfigRevision != platform.ConfigRevision || latest.ProjectionRevision != platform.ProjectionRevision {
 		fail(403, fmt.Errorf("platform or sharing changed during INVITE"))
 		return
 	}
@@ -820,7 +834,7 @@ func (h *cascadeVideoRuntime) stopSender(ctx context.Context, row model.GbCascad
 func (h *cascadeVideoRuntime) recoverSenders() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	rows, err := h.store.ListNonterminalMediaSessions(ctx, 0)
+	rows, err := h.store.ListNonterminalVideoSessions(ctx)
 	if err != nil {
 		return err
 	}

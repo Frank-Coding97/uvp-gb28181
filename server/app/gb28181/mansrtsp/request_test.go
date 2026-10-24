@@ -15,6 +15,7 @@ func TestParseRequestPlaybackControls(t *testing.T) {
 		{"PLAY RTSP/1.0\r\nCSeq: 1\r\nRange: npt=now-\r\n\r\n", "resume", 0, 0},
 		{"PLAY RTSP/1.0\r\nCSeq: 1\r\nRange: npt=12.5-\r\n\r\n", "seek", 12.5, 0},
 		{"PLAY RTSP/1.0\r\nCSeq: 1\r\nScale: 2.0\r\n\r\n", "scale", 0, 2},
+		{"PLAY RTSP/1.0\r\nCSeq: 1\r\nScale: -1.0\r\n\r\n", "scale", 0, -1},
 		{"TEARDOWN RTSP/1.0\r\nCSeq: 1\r\n\r\n", "stop", 0, 0},
 	} {
 		t.Run(test.action, func(t *testing.T) {
@@ -32,6 +33,7 @@ func TestParseRequestPlaybackControls(t *testing.T) {
 		"PLAY RTSP/1.0\r\nCSeq: 1\r\nCSeq: 2\r\n\r\n",
 		"PLAY RTSP/1.0\r\nCSeq: 1\r\nRange: npt=NaN-\r\n\r\n",
 		"PLAY RTSP/1.0\r\nCSeq: 1\r\nRange: npt=-1-\r\n\r\n",
+		"PLAY RTSP/1.0\r\nCSeq: 1\r\nScale: -2\r\n\r\n",
 		"PLAY RTSP/1.0\r\nCSeq: 1\r\nScale: 8\r\n\r\n",
 		"PLAY RTSP/1.0\r\nCSeq: 1\r\nScale: 2\r\nRange: npt=1-\r\n\r\n",
 	} {

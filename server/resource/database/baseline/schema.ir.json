@@ -4,13 +4,15 @@
     "source_database": "uvp_gb28181",
     "source_server_version": "8.0.46",
     "live_table_count": 114,
-    "included_table_count": 113,
+    "included_table_count": 116,
     "excluded_table_count": 20,
-    "schema_fingerprint": "c780de8efae7054b4474e95f542a77b12dba130c5be9eb678baf1bacf90450ae",
+    "schema_fingerprint": "d17d657a6c2c8bd41e98953dfef6d5307e588faa1fed2ddceb017a729bd43610",
     "policy_rev": 1,
     "model_derived_tables": [
+      "gb_cascade_alarm_delivery",
       "gb_cascade_business_binding",
-      "gb_cascade_business_node"
+      "gb_cascade_business_node",
+      "gb_cascade_snapshot_session"
     ],
     "baseline_only_tables": [
       "sys_openapi_device_capture_session"
@@ -1491,6 +1493,15 @@
           "collation": null
         },
         {
+          "name": "session_kind",
+          "type": "varchar(16)",
+          "nullable": false,
+          "default": "video",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
           "name": "platform_id",
           "type": "bigint unsigned",
           "nullable": false,
@@ -1788,6 +1799,277 @@
             },
             {
               "name": "state",
+              "prefix": null
+            }
+          ]
+        },
+        {
+          "name": "idx_cascade_media_kind_state",
+          "columns": [
+            {
+              "name": "session_kind",
+              "prefix": null
+            },
+            {
+              "name": "state",
+              "prefix": null
+            }
+          ]
+        }
+      ],
+      "foreign_keys": [],
+      "checks": [],
+      "seeded": false
+    },
+    {
+      "name": "gb_cascade_snapshot_session",
+      "comment": "",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": null,
+          "extra": "auto_increment",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "platform_id",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "upstream_session_id",
+          "type": "varchar(128)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "downstream_session_id",
+          "type": "varchar(128)",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "upload_token",
+          "type": "varchar(64)",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "upstream_upload_url",
+          "type": "text",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "request_key",
+          "type": "varchar(64)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "request_fingerprint",
+          "type": "varchar(64)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "request_result",
+          "type": "varchar(8)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "published_channel_id",
+          "type": "varchar(20)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "source_device_id",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "source_channel_id",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "source_device_epoch",
+          "type": "bigint",
+          "nullable": false,
+          "default": "0",
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "config_revision",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "projection_revision",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "state",
+          "type": "varchar(16)",
+          "nullable": false,
+          "default": "pending",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "expires_at",
+          "type": "datetime(3)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "completed_at",
+          "type": "datetime(3)",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "updated_at",
+          "type": "datetime(3)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        }
+      ],
+      "primary_key": [
+        {
+          "name": "id",
+          "prefix": null
+        }
+      ],
+      "uniques": [
+        {
+          "name": "uk_cascade_snapshot_session",
+          "columns": [
+            {
+              "name": "platform_id",
+              "prefix": null
+            },
+            {
+              "name": "upstream_session_id",
+              "prefix": null
+            }
+          ]
+        },
+        {
+          "name": "uk_cascade_snapshot_request",
+          "columns": [
+            {
+              "name": "platform_id",
+              "prefix": null
+            },
+            {
+              "name": "request_key",
+              "prefix": null
+            }
+          ]
+        },
+        {
+          "name": "uk_cascade_snapshot_downstream",
+          "columns": [
+            {
+              "name": "downstream_session_id",
+              "prefix": null
+            }
+          ],
+          "nulls_distinct": true
+        },
+        {
+          "name": "uk_cascade_snapshot_upload",
+          "columns": [
+            {
+              "name": "upload_token",
+              "prefix": null
+            }
+          ],
+          "nulls_distinct": true
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_cascade_snapshot_expiry",
+          "columns": [
+            {
+              "name": "platform_id",
+              "prefix": null
+            },
+            {
+              "name": "expires_at",
               "prefix": null
             }
           ]
@@ -2104,6 +2386,16 @@
         },
         {
           "name": "ptz_enabled",
+          "type": "tinyint(1)",
+          "nullable": false,
+          "default": "0",
+          "extra": "",
+          "comment": "",
+          "collation": null,
+          "boolean": true
+        },
+        {
+          "name": "upgrade_enabled",
           "type": "tinyint(1)",
           "nullable": false,
           "default": "0",
@@ -2881,6 +3173,15 @@
           "collation": null,
           "boolean": false,
           "integer_reason": "policy:not_boolean_columns（模型字段为整数类型）"
+        },
+        {
+          "name": "status_event",
+          "type": "varchar(8)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "目录故障事件 VLOST/DEFECT 空表示无故障事件",
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "stream_id",
@@ -5145,6 +5446,60 @@
           "extra": "",
           "comment": "",
           "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "cascade_binding",
+          "type": "text",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "cascade_request_key",
+          "type": "varchar(64)",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "cascade_session_key",
+          "type": "varchar(64)",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "cascade_business_result",
+          "type": "varchar(16)",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_bin"
+        },
+        {
+          "name": "cascade_business_delivered",
+          "type": "tinyint(1)",
+          "nullable": false,
+          "default": "0",
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "cascade_final_delivered",
+          "type": "tinyint(1)",
+          "nullable": false,
+          "default": "0",
+          "extra": "",
+          "comment": "",
+          "collation": null
         }
       ],
       "primary_key": [
@@ -5197,6 +5552,26 @@
               "prefix": null
             }
           ]
+        },
+        {
+          "name": "uk_firmware_upgrade_cascade_request",
+          "columns": [
+            {
+              "name": "cascade_request_key",
+              "prefix": null
+            }
+          ],
+          "nulls_distinct": true
+        },
+        {
+          "name": "uk_firmware_upgrade_cascade_session",
+          "columns": [
+            {
+              "name": "cascade_session_key",
+              "prefix": null
+            }
+          ],
+          "nulls_distinct": true
         }
       ],
       "indexes": [
@@ -21945,6 +22320,231 @@
       "foreign_keys": [],
       "checks": [],
       "seeded": true
+    },
+    {
+      "name": "gb_cascade_alarm_delivery",
+      "comment": "",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": null,
+          "extra": "auto_increment",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "delivery_key",
+          "type": "varchar(64)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "platform_id",
+          "type": "bigint unsigned",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "source_device_code",
+          "type": "varchar(20)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "source_resource_code",
+          "type": "varchar(20)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "published_code",
+          "type": "varchar(20)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "profile_version",
+          "type": "varchar(16)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "binding_fingerprint",
+          "type": "varchar(64)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "payload",
+          "type": "longblob",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "notify_targets",
+          "type": "text",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "state",
+          "type": "varchar(16)",
+          "nullable": false,
+          "default": "pending",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "attempts",
+          "type": "int",
+          "nullable": false,
+          "default": "0",
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "next_attempt_at",
+          "type": "datetime(3)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "lease_owner",
+          "type": "varchar(64)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "lease_until",
+          "type": "datetime(3)",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "last_error",
+          "type": "text",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "sent_at",
+          "type": "datetime(3)",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "updated_at",
+          "type": "datetime(3)",
+          "nullable": false,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": null
+        }
+      ],
+      "primary_key": [
+        {
+          "name": "id",
+          "prefix": null
+        }
+      ],
+      "uniques": [
+        {
+          "name": "uk_cascade_alarm_delivery_key",
+          "columns": [
+            {
+              "name": "delivery_key",
+              "prefix": null
+            }
+          ]
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_cascade_alarm_delivery_due",
+          "columns": [
+            {
+              "name": "platform_id",
+              "prefix": null
+            },
+            {
+              "name": "state",
+              "prefix": null
+            },
+            {
+              "name": "next_attempt_at",
+              "prefix": null
+            }
+          ]
+        },
+        {
+          "name": "idx_cascade_alarm_delivery_lease",
+          "columns": [
+            {
+              "name": "lease_until",
+              "prefix": null
+            }
+          ]
+        }
+      ],
+      "foreign_keys": [],
+      "checks": [],
+      "seeded": false
     }
   ]
 }

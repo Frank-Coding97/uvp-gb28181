@@ -15,6 +15,7 @@ import (
 	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 	"uvplatform.com/uvp-gb28181/app/gb28181/metrics"
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/subscribe"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 	"uvplatform.com/uvp-gb28181/app/utils/logging"
 
@@ -23,21 +24,22 @@ import (
 
 // MessageHandler 处理 MESSAGE(MANSCDP):本期处理 Keepalive 心跳
 type MessageHandler struct {
-	recorder           metrics.Recorder // 可选:埋点 SIP 事务
-	catalogTrigger     CatalogTrigger   // 可选:设备从离线恢复后重新拉 Catalog
-	subscriptionWaker  SubscriptionWaker
-	alarmProcessor     AlarmMessageProcessor
-	ptzProcessor       PTZMessageProcessor
-	upgradeMu          sync.RWMutex
-	upgradeProcessor   UpgradeMessageProcessor
-	recordInfoMu       sync.RWMutex
-	recordInfoSink     RecordInfoSink
-	snapshotMu         sync.RWMutex
-	snapshotSink       SnapshotSink
-	playbackEndMu      sync.RWMutex
-	playbackEndSink    PlaybackEndSink
-	broadcastMu        sync.RWMutex
-	broadcastProcessor BroadcastMessageProcessor
+	recorder                  metrics.Recorder // 可选:埋点 SIP 事务
+	catalogTrigger            CatalogTrigger   // 可选:设备从离线恢复后重新拉 Catalog
+	subscriptionWaker         SubscriptionWaker
+	alarmProcessor            AlarmMessageProcessor
+	ptzProcessor              PTZMessageProcessor
+	upgradeMu                 sync.RWMutex
+	upgradeProcessor          UpgradeMessageProcessor
+	recordInfoMu              sync.RWMutex
+	recordInfoSink            RecordInfoSink
+	snapshotMu                sync.RWMutex
+	snapshotSink              SnapshotSink
+	playbackEndMu             sync.RWMutex
+	playbackEndSink           PlaybackEndSink
+	broadcastMu               sync.RWMutex
+	broadcastProcessor        BroadcastMessageProcessor
+	cascadeBroadcastProcessor CascadeBroadcastMessageRouter
 }
 
 type AlarmMessageProcessor interface {
@@ -85,6 +87,13 @@ type SnapshotSink interface {
 
 type BroadcastMessageProcessor interface {
 	OnBroadcastMessage(context.Context, string, []byte) error
+}
+
+// CascadeBroadcastMessageRouter gets first refusal for a device Broadcast
+// response. It returns handled=false when the response belongs to a local TALK
+// session, allowing the ordinary processor to retain its existing behavior.
+type CascadeBroadcastMessageRouter interface {
+	RouteBroadcastMessage(context.Context, string, []byte) (handled bool, err error)
 }
 
 // NewMessageHandler 创建消息处理器
@@ -141,6 +150,12 @@ func (h *MessageHandler) SetBroadcastProcessor(processor BroadcastMessageProcess
 	h.broadcastMu.Unlock()
 }
 
+func (h *MessageHandler) SetCascadeBroadcastProcessor(router CascadeBroadcastMessageRouter) {
+	h.broadcastMu.Lock()
+	h.cascadeBroadcastProcessor = router
+	h.broadcastMu.Unlock()
+}
+
 func (h *MessageHandler) getBroadcastProcessor() BroadcastMessageProcessor {
 	h.broadcastMu.RLock()
 	defer h.broadcastMu.RUnlock()
@@ -184,6 +199,9 @@ func (h *MessageHandler) getPlaybackEndSink() PlaybackEndSink {
 }
 
 func isPlaybackFileToEnd(body []byte) bool {
+	if notify, err := manscdp.ParseMediaStatusNotify(body); err == nil {
+		return notify.NotifyType == "121"
+	}
 	normalized := strings.ToLower(strings.Join(strings.Fields(string(body)), ""))
 	return strings.Contains(normalized, "filetoend") ||
 		strings.Contains(normalized, "file-end") ||
@@ -322,7 +340,23 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	if head.DeviceID != "" {
 		if head.CmdType == manscdp.CmdBroadcast {
 			_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
-			if processor := h.getBroadcastProcessor(); processor != nil {
+			h.broadcastMu.RLock()
+			router := h.cascadeBroadcastProcessor
+			processor := h.broadcastProcessor
+			h.broadcastMu.RUnlock()
+			if router != nil {
+				handled, routeErr := router.RouteBroadcastMessage(ctx, ptzDeviceCode(req, head.DeviceID), req.Body())
+				if routeErr != nil {
+					logger.Warn("级联 Broadcast Response 处理失败",
+						zap.String("event", "gb28181.message.cascade_broadcast_failed"),
+						zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+						logging.Error(routeErr))
+				}
+				if handled {
+					return
+				}
+			}
+			if processor != nil {
 				if err := processor.OnBroadcastMessage(ctx, ptzDeviceCode(req, head.DeviceID), req.Body()); err != nil {
 					logger.Warn("GB28181 Broadcast Response 处理失败",
 						zap.String("event", "gb28181.message.broadcast_failed"),
@@ -479,11 +513,18 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			}
 		case manscdp.CmdAlarm:
 			if h.alarmProcessor != nil {
-				if err := h.alarmProcessor.OnAlarmMessage(ctx, head.DeviceID, callID, cseq, req.Body()); err != nil {
+				if err := h.alarmProcessor.OnAlarmMessage(ctx, ptzDeviceCode(req, head.DeviceID), callID, cseq, req.Body()); err != nil {
 					logger.Warn("GB28181 MESSAGE 报警处理失败",
 						zap.String("event", "gb28181.message.alarm_failed"),
 						zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
-						logging.Error(err))
+						zap.String("error_class", logging.ErrorClass(err)))
+					if errors.Is(err, subscribe.ErrAlarmNotAccepted) {
+						_ = tx.Respond(sip.NewResponseFromRequest(req, 503, "Alarm storage unavailable", nil))
+						if h.recorder != nil && kind != metrics.TxUnknown && callID != "" {
+							h.recorder.End(callID, cseq, 503, false)
+						}
+						return
+					}
 				}
 			}
 		}

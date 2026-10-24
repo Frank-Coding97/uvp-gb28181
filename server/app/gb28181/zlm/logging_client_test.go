@@ -73,11 +73,9 @@ func TestLoggingGBHTTPZLMIsMediaOnlineTransportFailureUsesSafeError(t *testing.T
 	require.False(t, online)
 	entry := findZLMLog(t, observed, "zlm.media_online.request_failed")
 	require.Equal(t, "zlm-online-transport", entry.ContextMap()["request_id"])
-	errorField, ok := entry.ContextMap()["error"].(map[string]interface{})
-	require.True(t, ok)
-	require.NotEmpty(t, errorField["class"])
-	require.NotEmpty(t, errorField["type"])
-	require.NotContains(t, fmt.Sprint(errorField), rawError)
+	require.NotEmpty(t, entry.ContextMap()["error_class"])
+	require.NotEmpty(t, entry.ContextMap()["error_type"])
+	require.NotContains(t, fmt.Sprint(entry.ContextMap()), rawError)
 	require.Equal(t, mockZLMNodeID, entry.ContextMap()["node_id"])
 }
 

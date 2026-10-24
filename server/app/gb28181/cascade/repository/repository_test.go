@@ -33,8 +33,72 @@ func newTestRepository(t *testing.T) *GormRepository {
 		&model.GbCascadeBusinessNode{},
 		&model.GbCascadeBusinessBinding{},
 		&model.GbCascadeMediaSession{},
+		&model.GbCascadeAlarmDelivery{},
 	))
 	return NewGormRepository(db)
+}
+
+func TestAlarmDeliveryOutboxDeduplicatesClaimsRecoversAndRetries(t *testing.T) {
+	repo := newTestRepository(t)
+	ctx := context.Background()
+	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+	item := &model.GbCascadeAlarmDelivery{DeliveryKey: "event-upstream-a", PlatformID: 7, SourceDeviceCode: "source-device", SourceResourceCode: "source-channel", PublishedCode: "34020000001320000012", ProfileVersion: "2022", Payload: []byte("<Notify/>"), NextAttemptAt: now}
+	created, err := repo.EnqueueAlarmDelivery(ctx, item)
+	require.NoError(t, err)
+	require.True(t, created)
+	duplicate := *item
+	duplicate.ID = 0
+	created, err = repo.EnqueueAlarmDelivery(ctx, &duplicate)
+	require.NoError(t, err)
+	require.False(t, created)
+
+	first, err := repo.ClaimAlarmDeliveries(ctx, "worker-a", now, time.Minute, 10)
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+	require.Equal(t, 1, first[0].Attempts)
+	second, err := repo.ClaimAlarmDeliveries(ctx, "worker-b", now, time.Minute, 10)
+	require.NoError(t, err)
+	require.Empty(t, second, "a live lease cannot be claimed twice")
+
+	next := now.Add(2 * time.Second)
+	updated, err := repo.RetryAlarmDelivery(ctx, first[0].ID, "worker-a", now, next, "upstream timeout", 3)
+	require.NoError(t, err)
+	require.True(t, updated)
+	second, err = repo.ClaimAlarmDeliveries(ctx, "worker-b", next, time.Minute, 10)
+	require.NoError(t, err)
+	require.Len(t, second, 1)
+	require.Equal(t, 2, second[0].Attempts)
+
+	updated, err = repo.CompleteAlarmDelivery(ctx, second[0].ID, "worker-b", next)
+	require.NoError(t, err)
+	require.True(t, updated)
+	third, err := repo.ClaimAlarmDeliveries(ctx, "worker-c", next.Add(time.Hour), time.Minute, 10)
+	require.NoError(t, err)
+	require.Empty(t, third, "sent deliveries are terminal")
+}
+
+func TestAlarmDeliveryLeaseExpiryAndAttemptLimit(t *testing.T) {
+	repo := newTestRepository(t)
+	ctx := context.Background()
+	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+	item := &model.GbCascadeAlarmDelivery{DeliveryKey: "event-upstream-b", PlatformID: 8, SourceDeviceCode: "source-device", SourceResourceCode: "source-channel", PublishedCode: "34020000001320000013", ProfileVersion: "2016", Payload: []byte("<Notify/>"), NextAttemptAt: now}
+	_, err := repo.EnqueueAlarmDelivery(ctx, item)
+	require.NoError(t, err)
+	first, err := repo.ClaimAlarmDeliveries(ctx, "worker-a", now, time.Second, 1)
+	require.NoError(t, err)
+	second, err := repo.ClaimAlarmDeliveries(ctx, "worker-b", now.Add(time.Second), time.Minute, 1)
+	require.NoError(t, err)
+	require.Len(t, second, 1, "expired worker leases recover after a crash")
+	require.Equal(t, 2, second[0].Attempts)
+	updated, err := repo.RetryAlarmDelivery(ctx, second[0].ID, "worker-b", now.Add(time.Second), now.Add(time.Hour), "permanent error", 2)
+	require.NoError(t, err)
+	require.True(t, updated)
+	third, err := repo.ClaimAlarmDeliveries(ctx, "worker-c", now.Add(2*time.Hour), time.Minute, 1)
+	require.NoError(t, err)
+	require.Empty(t, third, "max attempts transitions to terminal failed state")
+	updated, err = repo.CompleteAlarmDelivery(ctx, first[0].ID, "worker-a", now)
+	require.NoError(t, err)
+	require.False(t, updated, "a stale lease owner cannot complete another worker's delivery")
 }
 
 func newPlatform(name, localID string) *model.GbCascadePlatform {
@@ -231,13 +295,17 @@ func TestPlatformOptionsPersistAcrossCreateUpdateReload(t *testing.T) {
 		require.NoError(t, err)
 		var options map[string]any
 		require.NoError(t, json.Unmarshal(encoded, &options))
-		for _, name := range []string{"autoPushCatalog", "recordingEnabled", "rtcpKeepalive"} {
+		for _, name := range []string{"autoPushCatalog", "recordingEnabled", "rtcpKeepalive", "configEnabled", "deviceControlEnabled", "maintenanceEnabled", "upgradeEnabled"} {
 			require.Equal(t, enabled, options[name], name)
 		}
 	}
 	assertPlatformOptions(stored, false)
 	configured := newPlatform("configured-options", "34020000001320000004")
 	configured.AutoPushCatalog = true
+	configured.ConfigEnabled = true
+	require.NoError(t, json.Unmarshal([]byte(`{"upgradeEnabled":true}`), configured))
+	configured.DeviceControlEnabled = true
+	configured.MaintenanceEnabled = true
 	configured.RecordingEnabled = true
 	configured.RTCPKeepalive = true
 	require.NoError(t, repo.CreatePlatform(ctx, configured))
@@ -246,7 +314,7 @@ func TestPlatformOptionsPersistAcrossCreateUpdateReload(t *testing.T) {
 	assertPlatformOptions(created, true)
 	for _, enabled := range []bool{true, false} {
 		options, err := json.Marshal(map[string]bool{
-			"autoPushCatalog": enabled, "recordingEnabled": enabled, "rtcpKeepalive": enabled,
+			"autoPushCatalog": enabled, "recordingEnabled": enabled, "rtcpKeepalive": enabled, "configEnabled": enabled, "deviceControlEnabled": enabled, "maintenanceEnabled": enabled, "upgradeEnabled": enabled,
 		})
 		require.NoError(t, err)
 		require.NoError(t, json.Unmarshal(options, stored))
@@ -495,6 +563,38 @@ func TestMediaSessionTerminalStateIsMonotonicAndNonterminalScanExcludesClosed(t 
 	require.NoError(t, err)
 	require.Equal(t, model.CascadeMediaSessionStateClosed, stored.State)
 	require.NotNil(t, stored.ClosedAt)
+}
+
+func TestMediaSessionQueriesKeepVideoAndBroadcastOwnershipSeparate(t *testing.T) {
+	repo := newTestRepository(t)
+	ctx := context.Background()
+	platform := newPlatform("media-session-kinds", "34020000001320000001")
+	require.NoError(t, repo.CreatePlatform(ctx, platform))
+	video := &model.GbCascadeMediaSession{PlatformID: platform.ID, DialogKey: "video-dialog", CallID: "shared-call", State: model.CascadeMediaSessionStateActive}
+	broadcast := &model.GbCascadeMediaSession{Kind: model.CascadeMediaSessionKindBroadcast, PlatformID: platform.ID, DialogKey: "broadcast-dialog", CallID: "shared-call", State: model.CascadeMediaSessionStateAnswered}
+	require.NoError(t, repo.CreateMediaSession(ctx, video))
+	require.NoError(t, repo.CreateMediaSession(ctx, broadcast))
+
+	videos, err := repo.ListNonterminalVideoSessions(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{video.ID}, mediaSessionIDs(videos))
+	broadcasts, err := repo.ListNonterminalBroadcastSessions(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{broadcast.ID}, mediaSessionIDs(broadcasts))
+	byCallID, err := repo.FindMediaSessionsByCallID(ctx, "shared-call")
+	require.NoError(t, err)
+	require.Equal(t, []uint64{broadcast.ID}, mediaSessionIDs(byCallID))
+	all, err := repo.ListNonterminalMediaSessions(ctx, platform.ID)
+	require.NoError(t, err)
+	require.Len(t, all, 2, "management must still see every live cascade session before platform deletion")
+}
+
+func mediaSessionIDs(rows []model.GbCascadeMediaSession) []uint64 {
+	ids := make([]uint64, len(rows))
+	for index := range rows {
+		ids[index] = rows[index].ID
+	}
+	return ids
 }
 
 func TestSameLocalIdentityAcrossUpstreamPorts(t *testing.T) {

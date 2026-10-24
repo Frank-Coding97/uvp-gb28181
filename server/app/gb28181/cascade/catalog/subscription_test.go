@@ -31,6 +31,42 @@ func TestSubscriptionScopeAndDelta(t *testing.T) {
 	require.Empty(t, DiffCatalog([]CatalogItem{a, b}, []CatalogItem{a, b}))
 }
 
+func TestDiffCatalogPropagatesVideoLossAndDefectAsEvents(t *testing.T) {
+	const id = "34020000001320000012"
+	base := CatalogItem{ID: id, Kind: CatalogItemChannel, Status: ResourceStatusOnline}
+	lost := base
+	lost.Status = ResourceStatusOffline
+	lost.StatusEvent = ResourceStatusVideoLost
+	changes := DiffCatalog([]CatalogItem{base}, []CatalogItem{lost})
+	require.Equal(t, []CatalogChange{{Item: CatalogItem{ID: id}, Event: "VLOST"}}, changes)
+	for _, version := range []protocol.Version{protocol.Version2016, protocol.Version2022} {
+		bodies, err := PlanCatalogNotifications(protocol.ProfileFor(version), "34020000002000000001", 17, changes, 1, nil)
+		require.NoError(t, err)
+		require.Len(t, bodies, 1)
+		parsed, err := manscdp.ParseCatalogNotify(bodies[0].Body)
+		require.NoError(t, err)
+		require.Equal(t, "VLOST", parsed.DeviceList.Items[0].Event)
+		require.Equal(t, 17, parsed.SN)
+	}
+	confirmed := ApplyCatalogChanges([]CatalogItem{base}, changes)
+	require.Equal(t, ResourceStatusOffline, confirmed[0].Status)
+	require.Equal(t, ResourceStatusVideoLost, confirmed[0].StatusEvent)
+	require.Empty(t, DiffCatalog(confirmed, []CatalogItem{lost}), "accepted state events must not repeat")
+
+	defect := lost
+	defect.StatusEvent = ResourceStatusDefect
+	changes = DiffCatalog([]CatalogItem{lost}, []CatalogItem{defect})
+	require.Equal(t, []CatalogChange{{Item: CatalogItem{ID: id}, Event: "DEFECT"}}, changes)
+	confirmed = ApplyCatalogChanges([]CatalogItem{lost}, changes)
+	require.Equal(t, ResourceStatusDefect, confirmed[0].StatusEvent)
+	cleared := base
+	cleared.Status = ResourceStatusOffline
+	require.Equal(t, []CatalogChange{{Item: CatalogItem{ID: id}, Event: "OFF"}}, DiffCatalog([]CatalogItem{defect}, []CatalogItem{cleared}))
+
+	recovered := base
+	require.Equal(t, []CatalogChange{{Item: CatalogItem{ID: id}, Event: "ON"}}, DiffCatalog([]CatalogItem{defect}, []CatalogItem{recovered}))
+}
+
 func TestSubscriptionNotifyBatchesUseBatchTotalAndOriginalSN(t *testing.T) {
 	for _, version := range []protocol.Version{protocol.Version2016, protocol.Version2022} {
 		profile := protocol.ProfileFor(version)

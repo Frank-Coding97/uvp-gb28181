@@ -118,16 +118,30 @@ func TestPlatformRequestUsesCamelCaseAndKeepsPasswordWriteOnly(t *testing.T) {
 
 func TestPlatformRequestMapsCascadeOptionFields(t *testing.T) {
 	var request platformRequest
-	require.NoError(t, json.Unmarshal([]byte(`{"autoPushCatalog":true,"recordingEnabled":true,"rtcpKeepalive":true}`), &request))
+	require.NoError(t, json.Unmarshal([]byte(`{"autoPushCatalog":true,"recordingEnabled":true,"rtcpKeepalive":true,"configEnabled":true,"deviceControlEnabled":true,"maintenanceEnabled":true,"upgradeEnabled":true}`), &request))
 	input := request.input()
 	require.True(t, input.AutoPushCatalog)
 	require.True(t, input.RecordingEnabled)
 	require.True(t, input.RTCPKeepalive)
-	require.NoError(t, json.Unmarshal([]byte(`{"autoPushCatalog":false,"recordingEnabled":false,"rtcpKeepalive":false}`), &request))
+	require.True(t, input.ConfigEnabled)
+	require.True(t, input.DeviceControlEnabled)
+	require.True(t, input.MaintenanceEnabled)
+	require.True(t, input.UpgradeEnabled)
+	encoded, err := json.Marshal(input)
+	require.NoError(t, err)
+	require.Contains(t, string(encoded), `"upgradeEnabled":true`)
+	require.NoError(t, json.Unmarshal([]byte(`{"autoPushCatalog":false,"recordingEnabled":false,"rtcpKeepalive":false,"configEnabled":false,"deviceControlEnabled":false,"maintenanceEnabled":false,"upgradeEnabled":false}`), &request))
 	input = request.input()
 	require.False(t, input.AutoPushCatalog)
 	require.False(t, input.RecordingEnabled)
 	require.False(t, input.RTCPKeepalive)
+	require.False(t, input.ConfigEnabled)
+	require.False(t, input.DeviceControlEnabled)
+	require.False(t, input.MaintenanceEnabled)
+	require.False(t, input.UpgradeEnabled)
+	encoded, err = json.Marshal(input)
+	require.NoError(t, err)
+	require.Contains(t, string(encoded), `"upgradeEnabled":false`)
 }
 
 func TestManagementFailureLogsDuplicateWithoutFieldValues(t *testing.T) {

@@ -16,9 +16,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/media"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
+	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 	"uvplatform.com/uvp-gb28181/app/gb28181/play"
 	gbplayback "uvplatform.com/uvp-gb28181/app/gb28181/playback"
+	"uvplatform.com/uvp-gb28181/app/gb28181/recordquery"
 	"uvplatform.com/uvp-gb28181/app/gb28181/routes"
+	"uvplatform.com/uvp-gb28181/app/gb28181/uac"
 	"uvplatform.com/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 	"uvplatform.com/uvp-gb28181/app/global/app"
@@ -94,7 +97,7 @@ func (f *cascadePlaybackFake) Action(_ context.Context, id, owner string, reques
 
 func cascadePlaybackRequest(port int, ssrc string) *sip.Request {
 	req := cascadeTestRequest(port, ssrc)
-	req.SetBody([]byte(strings.Replace(strings.Replace(string(req.Body()), "s=Play\r\n", "s=Playback\r\n", 1), "t=0 0", "t=1785632400 1785636000", 1)))
+	req.SetBody([]byte(strings.Replace(strings.Replace(string(req.Body()), "s=Play\r\n", "s=Playback\r\nu="+req.Recipient.User+":0\r\n", 1), "t=0 0", "t=1785632400 1785636000", 1)))
 	return req
 }
 
@@ -131,9 +134,11 @@ func TestCascadeVideoInitialAssemblyCapturesReadyPlaybackService(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(&model.GbCascadeMediaSession{}))
 
 	previousPlaySvc, previousPlaybackService, previousRegistry := playSvc, playbackService, zlmRegistry
+	previousRecordQueryService := recordQueryService
 	previousCascadeVideo := cascadeVideo.Swap(nil)
 	t.Cleanup(func() {
 		playSvc, playbackService, zlmRegistry = previousPlaySvc, previousPlaybackService, previousRegistry
+		recordQueryService = previousRecordQueryService
 		cascadeVideo.Store(previousCascadeVideo)
 		routes.SetCascadeSourceLeaseChecker(nil)
 	})
@@ -141,6 +146,12 @@ func TestCascadeVideoInitialAssemblyCapturesReadyPlaybackService(t *testing.T) {
 	playSvc = &play.Service{}
 	playbackService = gbplayback.NewService(gbplayback.NewRegistry(gbplayback.RegistryConfig{}), nil, nil, nil, nil, gbplayback.ServiceConfig{})
 	zlmRegistry = node.NewRegistry(nil)
+	queryService, err := recordquery.NewService(cascadeRecordSenderFunc(func(context.Context, string, string, string, []byte) (uac.TrackedMessageResult, error) {
+		return uac.TrackedMessageResult{}, nil
+	}), recordquery.Options{Timeout: time.Second, MaxActiveQueries: 1, MaxRecordsPerQuery: 10, ResultTTL: time.Minute, Location: time.FixedZone("CST", 8*60*60)})
+	require.NoError(t, err)
+	t.Cleanup(queryService.Close)
+	recordQueryService = queryService
 	ua, err := sipgo.NewUA()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ua.Close() })
@@ -152,6 +163,8 @@ func TestCascadeVideoInitialAssemblyCapturesReadyPlaybackService(t *testing.T) {
 	runtime := cascadeVideo.Load()
 	require.NotNil(t, runtime)
 	require.Same(t, playbackService, runtime.playback, "first cascade runtime must capture the playback service assembled by bootstrap")
+	require.Same(t, queryService, runtime.recordings)
+	require.Same(t, queryService.Location(), runtime.recordingLocation)
 	require.NotNil(t, server.handler)
 }
 
@@ -162,6 +175,120 @@ func TestCascadePlaybackRequiresRecordingAuthorization(t *testing.T) {
 	defer tx.Terminate()
 	go h.Handle(req, tx)
 	require.Equal(t, 403, cascadeAwaitResponse(t, tx).StatusCode)
+}
+
+func TestCascadeDownloadCreatesDownloadSourceAndCleansOnBye(t *testing.T) {
+	h, fake, stops := newCascadePlaybackTestRuntime(t)
+	req := cascadePlaybackRequest(15060, "1200000001")
+	req.SetBody([]byte(strings.Replace(string(req.Body()), "s=Playback\r\n", "s=Download\r\n", 1) + "a=downloadspeed:2\r\n"))
+	tx := &cascadeInviteTestTx{siptest.NewServerTxRecorder(req), make(chan *sip.Response, 10)}
+	defer tx.Terminate()
+	finished := make(chan struct{})
+	go func() { h.Handle(req, tx); close(finished) }()
+	res := cascadeAwaitResponse(t, tx)
+	require.Equal(t, 200, res.StatusCode)
+	require.Contains(t, string(res.Body()), "s=Download\r\n")
+	require.True(t, h.Handle(cascadeDialogRequest(req, res, sip.ACK), tx))
+	fake.mu.Lock()
+	requests := append([]gbplayback.CreateRequest(nil), fake.requests...)
+	fake.mu.Unlock()
+	require.Len(t, requests, 1)
+	require.Equal(t, gbplayback.ModeDownload, requests[0].Mode)
+	require.Equal(t, uint32(2), requests[0].DownloadSpeed)
+	require.EqualValues(t, 1785632400, requests[0].SegmentStart.Unix())
+	require.EqualValues(t, 1785636000, requests[0].SegmentEnd.Unix())
+	bye := cascadeDialogRequest(req, res, sip.BYE)
+	byeTx := siptest.NewServerTxRecorder(bye)
+	defer byeTx.Terminate()
+	require.True(t, h.Handle(bye, byeTx))
+	select {
+	case <-finished:
+	case <-time.After(3 * time.Second):
+		t.Fatal("download session did not stop after BYE")
+	}
+	require.NotEmpty(t, stops)
+	require.NotEmpty(t, fake.stopped)
+}
+
+func TestCascadeDownloadRejectsDifferentRecordingTarget(t *testing.T) {
+	h, fake, _ := newCascadePlaybackTestRuntime(t)
+	req := cascadePlaybackRequest(15060, "1200000001")
+	req.SetBody([]byte(strings.Replace(strings.Replace(string(req.Body()), "s=Playback", "s=Download", 1), "u="+req.Recipient.User+":0", "u=34020000001320000999:2", 1)))
+	tx := &cascadeInviteTestTx{siptest.NewServerTxRecorder(req), make(chan *sip.Response, 10)}
+	defer tx.Terminate()
+	go h.Handle(req, tx)
+	require.Equal(t, 403, cascadeAwaitResponse(t, tx).StatusCode)
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	require.Empty(t, fake.requests, "unpublished recording must never start a source")
+}
+
+func TestCascadeDownloadRequiresRecordingAuthorization(t *testing.T) {
+	h, _, _ := newCascadeVideoTestRuntime(t)
+	req := cascadePlaybackRequest(15060, "1200000001")
+	req.SetBody([]byte(strings.Replace(string(req.Body()), "s=Playback", "s=Download", 1)))
+	tx := &cascadeInviteTestTx{siptest.NewServerTxRecorder(req), make(chan *sip.Response, 10)}
+	defer tx.Terminate()
+	go h.Handle(req, tx)
+	require.Equal(t, 403, cascadeAwaitResponse(t, tx).StatusCode)
+}
+
+func TestCascadeDownloadSendsCompletionOnlyForFileEnd(t *testing.T) {
+	for _, cause := range []string{"file-to-end", "media-offline", "playback session expired"} {
+		t.Run(cause, func(t *testing.T) {
+			h, fake, _ := newCascadePlaybackTestRuntime(t)
+			messages := make(chan *sip.Request, 3)
+			h.client.TxRequester = &siptest.ClientTxRequester{OnRequest: func(req *sip.Request) *sip.Response {
+				messages <- req.Clone()
+				return sip.NewResponseFromRequest(req, 200, "OK", nil)
+			}}
+			req := cascadePlaybackRequest(15060, "1200000001")
+			req.SetBody([]byte(strings.Replace(string(req.Body()), "s=Playback", "s=Download", 1)))
+			tx := &cascadeInviteTestTx{siptest.NewServerTxRecorder(req), make(chan *sip.Response, 10)}
+			defer tx.Terminate()
+			done := make(chan struct{})
+			go func() { h.Handle(req, tx); close(done) }()
+			res := cascadeAwaitResponse(t, tx)
+			require.Equal(t, 200, res.StatusCode)
+			require.True(t, h.Handle(cascadeDialogRequest(req, res, sip.ACK), tx))
+			fake.mu.Lock()
+			fake.sessions["playback-1"].State = gbplayback.StateEnded
+			fake.sessions["playback-1"].EndReason = cause
+			fake.mu.Unlock()
+			first := awaitCascadeStatusResponse(t, messages)
+			if cause == "file-to-end" {
+				require.Equal(t, sip.MESSAGE, first.Method)
+				notify, err := manscdp.ParseMediaStatusNotify(first.Body())
+				require.NoError(t, err)
+				require.Equal(t, "121", notify.NotifyType)
+				require.Equal(t, req.Recipient.User, notify.DeviceID)
+				require.Equal(t, req.CallID().Value(), first.CallID().Value())
+				from := first.From().AsTo()
+				require.Equal(t, res.To().Value(), from.Value())
+				require.NotContains(t, string(first.Body()), "source-only")
+				select {
+				case unexpected := <-messages:
+					t.Fatalf("sender must wait for receiver BYE; got %s", unexpected.Method)
+				case <-done:
+					t.Fatal("download dialog closed before receiver BYE")
+				case <-time.After(50 * time.Millisecond):
+				}
+				bye := cascadeDialogRequest(req, res, sip.BYE)
+				byeTx := &cascadeInviteTestTx{siptest.NewServerTxRecorder(bye), make(chan *sip.Response, 10)}
+				defer byeTx.Terminate()
+				require.True(t, h.Handle(bye, byeTx))
+				require.Equal(t, 200, cascadeAwaitResponse(t, byeTx).StatusCode)
+			} else {
+				require.Equal(t, sip.BYE, first.Method, "interruptions must not claim successful download")
+			}
+			select {
+			case <-done:
+			case <-time.After(3 * time.Second):
+				t.Fatal("download did not finish")
+			}
+			require.Empty(t, messages)
+		})
+	}
 }
 
 func TestCascadePlaybackSameChannelUsesIndependentSourcesPerDialog(t *testing.T) {
@@ -576,6 +703,100 @@ func TestCascadePlaybackRangeReachesServiceAndReportsControlFailure(t *testing.T
 	require.Contains(t, string(infoTx.Result()[0].Body()), "RTSP/1.0 501 Range Not Supported")
 }
 
+type delayedCascadeRTPInfoSender struct {
+	mu          sync.Mutex
+	reads       int
+	resetCalls  int
+	firstPacket *zlm.GBRTPInfo
+}
+
+func (s *delayedCascadeRTPInfoSender) StartGBSendRTP(context.Context, zlm.GBSendRTPRequest) (*zlm.GBSendRTPResult, error) {
+	return &zlm.GBSendRTPResult{LocalPort: 31000}, nil
+}
+func (*delayedCascadeRTPInfoSender) StopSendRtp(context.Context, string, string, string, string) error {
+	return nil
+}
+func (s *delayedCascadeRTPInfoSender) ResetGBSendRTPInfo(context.Context, zlm.GBSendRTPRequest) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.resetCalls++
+	s.reads = 0
+	s.firstPacket = &zlm.GBRTPInfo{URL: "rtsp://192.168.10.220/rtp/playback-1", Seq: 22, RTPTime: 22000}
+	return nil
+}
+func (s *delayedCascadeRTPInfoSender) GetGBSendRTPInfo(context.Context, zlm.GBSendRTPRequest) (*zlm.GBRTPInfo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reads++
+	if s.reads < 2 {
+		return nil, nil
+	}
+	return s.firstPacket, nil
+}
+
+func TestCascadePlaybackScaleRefreshesFirstPacketRTPInfo(t *testing.T) {
+	h, db, _ := newCascadeVideoTestRuntime(t)
+	defer cleanupCascadeSubjectRuntime(h)
+	require.NoError(t, db.Model(&model.GbCascadePlatform{}).Where("id = 1").Updates(map[string]interface{}{"media_advertise_ip": "192.0.2.10", "recording_enabled": true}).Error)
+	fake := &cascadePlaybackFake{sessions: map[string]*gbplayback.Session{}, stopped: make(chan string, 10)}
+	h.playback = fake
+	sender := &delayedCascadeRTPInfoSender{}
+	h.sender = media.NewSender(h.nodes, func(*node.Node) media.GBSenderClient { return sender })
+	h.client.TxRequester = &siptest.ClientTxRequester{OnRequest: func(request *sip.Request) *sip.Response {
+		return sip.NewResponseFromRequest(request, 200, "OK", nil)
+	}}
+	req := cascadePlaybackRequest(15060, "1200000001")
+	tx := &cascadeInviteTestTx{siptest.NewServerTxRecorder(req), make(chan *sip.Response, 10)}
+	defer tx.Terminate()
+	go h.Handle(req, tx)
+	res := cascadeAwaitResponse(t, tx)
+	h.Handle(cascadeDialogRequest(req, res, sip.ACK), tx)
+
+	info := cascadeDialogRequest(req, res, sip.INFO)
+	info.CSeq().SeqNo = 2
+	info.AppendHeader(sip.NewHeader("Content-Type", "Application/MANSRTSP"))
+	info.SetBody([]byte("PLAY RTSP/1.0\r\nCSeq: 10\r\nScale: 2\r\n\r\n"))
+	infoTx := siptest.NewServerTxRecorder(info)
+	defer infoTx.Terminate()
+	require.True(t, h.Handle(info, infoTx))
+	body := string(infoTx.Result()[0].Body())
+	require.Contains(t, body, "RTP-Info: url=rtsp://192.168.10.220/rtp/playback-1;seq=22;rtptime=22000")
+	sender.mu.Lock()
+	defer sender.mu.Unlock()
+	require.Equal(t, 1, sender.resetCalls)
+	require.GreaterOrEqual(t, sender.reads, 2, "must wait for the post-PLAY packet sample")
+}
+
+func TestCascadePlaybackLegacySenderDoesNotWaitForOptionalRTPInfo(t *testing.T) {
+	h, db, _ := newCascadeVideoTestRuntime(t)
+	defer cleanupCascadeSubjectRuntime(h)
+	require.NoError(t, db.Model(&model.GbCascadePlatform{}).Where("id = 1").Updates(map[string]interface{}{"media_advertise_ip": "192.0.2.10", "recording_enabled": true}).Error)
+	fake := &cascadePlaybackFake{sessions: map[string]*gbplayback.Session{}, stopped: make(chan string, 10)}
+	h.playback = fake
+	sender := &cascadeMonitorSender{}
+	h.sender = media.NewSender(h.nodes, func(*node.Node) media.GBSenderClient { return sender })
+	h.client.TxRequester = &siptest.ClientTxRequester{OnRequest: func(request *sip.Request) *sip.Response {
+		return sip.NewResponseFromRequest(request, 200, "OK", nil)
+	}}
+	req := cascadePlaybackRequest(15060, "1200000001")
+	tx := &cascadeInviteTestTx{siptest.NewServerTxRecorder(req), make(chan *sip.Response, 10)}
+	defer tx.Terminate()
+	go h.Handle(req, tx)
+	res := cascadeAwaitResponse(t, tx)
+	h.Handle(cascadeDialogRequest(req, res, sip.ACK), tx)
+
+	info := cascadeDialogRequest(req, res, sip.INFO)
+	info.CSeq().SeqNo = 2
+	info.AppendHeader(sip.NewHeader("Content-Type", "Application/MANSRTSP"))
+	info.SetBody([]byte("PLAY RTSP/1.0\r\nCSeq: 10\r\nScale: 2\r\n\r\n"))
+	infoTx := siptest.NewServerTxRecorder(info)
+	defer infoTx.Terminate()
+	start := time.Now()
+	require.True(t, h.Handle(info, infoTx))
+	require.Less(t, time.Since(start), 500*time.Millisecond)
+	require.NotContains(t, string(infoTx.Result()[0].Body()), "RTP-Info:")
+}
+
 func TestCascadePlaybackCleanupStopFailureKeepsDialogAndSource(t *testing.T) {
 	h, fake, stops := newCascadePlaybackTestRuntime(t, 1)
 	defer cleanupCascadeSubjectRuntime(h)
@@ -638,4 +859,263 @@ func TestCascadeSenderRepeatedProbeErrorsEndSession(t *testing.T) {
 	}
 	require.Len(t, stops, 1)
 	require.False(t, h.sources.HasLease("shared-source"))
+}
+
+// Keep the real registry's stopping/finalization semantics while replacing only
+// the downstream network/media provisioning in this local cascade test.
+type cascadeRegistryPlayback struct {
+	*gbplayback.Service
+	registry  *gbplayback.Registry
+	resources gbplayback.CleanupResources
+}
+
+func (s *cascadeRegistryPlayback) Create(ctx context.Context, request gbplayback.CreateRequest) (gbplayback.CreateResult, error) {
+	request.Resources = s.resources
+	created, err := s.registry.Create(ctx, request)
+	if err != nil {
+		return created, err
+	}
+	err = s.registry.Update(created.Session.ID, func(current *gbplayback.Session) error {
+		current.NodeID, current.StreamID, current.State = "1", "download-registry", gbplayback.StatePlaying
+		return nil
+	})
+	created.Session, _ = s.registry.Get(created.Session.ID)
+	return created, err
+}
+
+type cascadeDownloadCleanup struct {
+	started chan struct{}
+	finish  <-chan struct{}
+}
+
+func (c *cascadeDownloadCleanup) Teardown(ctx context.Context) error {
+	close(c.started)
+	select {
+	case <-c.finish:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+func (*cascadeDownloadCleanup) CloseRTP(context.Context) error { return nil }
+func (*cascadeDownloadCleanup) Unbind(context.Context) error   { return nil }
+
+func TestCascadeDownloadWaitsForRegistryFinalizationBeforeCompletion(t *testing.T) {
+	h, _, stops := newCascadePlaybackTestRuntime(t)
+	finish := make(chan struct{})
+	cleanup := &cascadeDownloadCleanup{started: make(chan struct{}), finish: finish}
+	registry := gbplayback.NewRegistry(gbplayback.RegistryConfig{})
+	h.playback = &cascadeRegistryPlayback{Service: gbplayback.NewService(registry, nil, nil, nil, nil, gbplayback.ServiceConfig{}), registry: registry, resources: cleanup}
+	messages := make(chan *sip.Request, 3)
+	h.client.TxRequester = &siptest.ClientTxRequester{OnRequest: func(req *sip.Request) *sip.Response {
+		messages <- req.Clone()
+		return sip.NewResponseFromRequest(req, 200, "OK", nil)
+	}}
+	req := cascadePlaybackRequest(15060, "1200000001")
+	req.SetBody([]byte(strings.Replace(string(req.Body()), "s=Playback", "s=Download", 1)))
+	tx := &cascadeInviteTestTx{siptest.NewServerTxRecorder(req), make(chan *sip.Response, 10)}
+	defer tx.Terminate()
+	done := make(chan struct{})
+	go func() { h.Handle(req, tx); close(done) }()
+	res := cascadeAwaitResponse(t, tx)
+	require.Equal(t, 200, res.StatusCode)
+	require.True(t, h.Handle(cascadeDialogRequest(req, res, sip.ACK), tx))
+	h.mu.Lock()
+	var lease *cascadePlaybackLease
+	for _, session := range h.sessions {
+		lease = session.playback
+	}
+	h.mu.Unlock()
+	require.NotNil(t, lease)
+	finalized := make(chan error, 1)
+	go func() { finalized <- registry.Finalize(lease.id, gbplayback.StateEnded, "file-to-end") }()
+	select {
+	case <-cleanup.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("source cleanup did not start")
+	}
+	current, ok := registry.Get(lease.id)
+	require.True(t, ok)
+	require.Equal(t, gbplayback.StateStopping, current.State)
+	select {
+	case <-stops:
+	default:
+		t.Fatal("sender must stop before releasing source")
+	}
+	select {
+	case early := <-messages:
+		t.Fatalf("notification before source cleanup outcome: %s", early.Method)
+	case <-done:
+		t.Fatal("sender guard canceled download before finalization")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(finish)
+	require.NoError(t, <-finalized)
+	notify := awaitCascadeStatusResponse(t, messages)
+	require.Equal(t, sip.MESSAGE, notify.Method)
+	body, err := manscdp.ParseMediaStatusNotify(notify.Body())
+	require.NoError(t, err)
+	require.Equal(t, "121", body.NotifyType)
+	bye := cascadeDialogRequest(req, res, sip.BYE)
+	byeTx := siptest.NewServerTxRecorder(bye)
+	defer byeTx.Terminate()
+	require.True(t, h.Handle(bye, byeTx))
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("download did not close after receiver BYE")
+	}
+	require.Empty(t, messages)
+	require.Empty(t, stops, "final cleanup must not stop the sender twice")
+	require.Zero(t, registry.ActiveCount())
+}
+
+func TestCascadeDownloadCompletionFailureAndMissingByeReleaseDialog(t *testing.T) {
+	for _, notifyStatus := range []int{200, 500} {
+		t.Run(fmt.Sprint(notifyStatus), func(t *testing.T) {
+			h, fake, _ := newCascadePlaybackTestRuntime(t)
+			h.downloadByeTimeout = 60 * time.Millisecond
+			messages := make(chan *sip.Request, 3)
+			h.client.TxRequester = &siptest.ClientTxRequester{OnRequest: func(req *sip.Request) *sip.Response {
+				messages <- req.Clone()
+				status := 200
+				if req.Method == sip.MESSAGE {
+					status = notifyStatus
+				}
+				return sip.NewResponseFromRequest(req, status, "test", nil)
+			}}
+			req := cascadePlaybackRequest(15060, "1200000001")
+			req.SetBody([]byte(strings.Replace(string(req.Body()), "s=Playback", "s=Download", 1)))
+			tx := &cascadeInviteTestTx{siptest.NewServerTxRecorder(req), make(chan *sip.Response, 10)}
+			defer tx.Terminate()
+			done := make(chan struct{})
+			go func() { h.Handle(req, tx); close(done) }()
+			res := cascadeAwaitResponse(t, tx)
+			require.Equal(t, 200, res.StatusCode)
+			require.True(t, h.Handle(cascadeDialogRequest(req, res, sip.ACK), tx))
+			fake.mu.Lock()
+			fake.sessions["playback-1"].State, fake.sessions["playback-1"].EndReason = gbplayback.StateEnded, "file-to-end"
+			fake.mu.Unlock()
+			first := awaitCascadeStatusResponse(t, messages)
+			require.Equal(t, sip.MESSAGE, first.Method)
+			bye := awaitCascadeStatusResponse(t, messages)
+			require.Equal(t, sip.BYE, bye.Method)
+			require.Greater(t, bye.CSeq().SeqNo, first.CSeq().SeqNo)
+			select {
+			case <-done:
+			case <-time.After(3 * time.Second):
+				t.Fatal("download retained after completion timeout/failure")
+			}
+			require.Empty(t, messages)
+		})
+	}
+}
+
+func TestCascadeDownloadRewritesRecordingURIWithoutLosingSelector(t *testing.T) {
+	for _, suffix := range []string{":2", "/records/one.ps"} {
+		t.Run(suffix, func(t *testing.T) {
+			h, fake, _ := newCascadePlaybackTestRuntime(t)
+			published := "34020000001320000099"
+			sourceCode := "34020000001320000010"
+			require.NoError(t, app.DB().Table("gb_cascade_channel_projection").Where("platform_id = ?", 1).Update("published_channel_id", published).Error)
+			req := cascadePlaybackRequest(15060, "1200000001")
+			req.Recipient.User, req.To().Address.User = published, published
+			subject := req.GetHeader("Subject").Value()
+			req.RemoveHeader("Subject")
+			req.AppendHeader(sip.NewHeader("Subject", strings.Replace(subject, sourceCode, published, 1)))
+			uri := published + suffix
+			wantURI := sourceCode + suffix
+			if strings.HasPrefix(suffix, "/") {
+				uri = "http://" + uri
+				wantURI = "http://37010301021180000007" + suffix
+				h.recordingLocation = time.FixedZone("CST", 8*60*60)
+				h.recordings = cascadeRecordingQueryFunc(func(_ context.Context, request recordquery.CascadeQueryRequest) (recordquery.QueryResult, error) {
+					require.Equal(t, sourceCode, request.ChannelCode)
+					require.Equal(t, "37010301021180000007", request.DeviceCode)
+					return recordquery.QueryResult{Records: []recordquery.Record{{RecordInfoItem: manscdp.RecordInfoItem{
+						DeviceID: sourceCode, FilePath: wantURI,
+						StartTime: recordquery.FormatMANSCDPWallClock(request.StartTime, h.recordingLocation),
+						EndTime:   recordquery.FormatMANSCDPWallClock(request.EndTime, h.recordingLocation),
+					}}}}, nil
+				})
+			}
+			body := strings.Replace(string(req.Body()), "s=Playback", "s=Download", 1)
+			body = strings.Replace(body, "u="+sourceCode+":0", "u="+uri, 1)
+			req.SetBody([]byte(body))
+			tx := &cascadeInviteTestTx{siptest.NewServerTxRecorder(req), make(chan *sip.Response, 10)}
+			defer tx.Terminate()
+			done := make(chan struct{})
+			go func() { h.Handle(req, tx); close(done) }()
+			res := cascadeAwaitResponse(t, tx)
+			require.Equal(t, 200, res.StatusCode)
+			require.Contains(t, string(res.Body()), "u="+uri+"\r\n")
+			require.NotContains(t, string(res.Body()), sourceCode)
+			fake.mu.Lock()
+			actualURI := fake.requests[0].RecordingURI
+			fake.mu.Unlock()
+			require.Equal(t, wantURI, actualURI)
+			require.True(t, h.Handle(cascadeDialogRequest(req, res, sip.ACK), tx))
+			bye := cascadeDialogRequest(req, res, sip.BYE)
+			byeTx := siptest.NewServerTxRecorder(bye)
+			defer byeTx.Terminate()
+			require.True(t, h.Handle(bye, byeTx))
+			select {
+			case <-done:
+			case <-time.After(3 * time.Second):
+				t.Fatal("download did not release")
+			}
+		})
+	}
+}
+
+func TestCascadeDownloadFileURIRequiresAuthorizedRecordingMatch(t *testing.T) {
+	h, fake, _ := newCascadePlaybackTestRuntime(t)
+	req := cascadePlaybackRequest(15060, "1200000001")
+	req.SetBody([]byte(strings.Replace(strings.Replace(string(req.Body()), "s=Playback", "s=Download", 1), "u="+req.Recipient.User+":0", "u=http://"+req.Recipient.User+"/another-channel/secret.ps", 1)))
+	tx := &cascadeInviteTestTx{siptest.NewServerTxRecorder(req), make(chan *sip.Response, 10)}
+	defer tx.Terminate()
+	go h.Handle(req, tx)
+	res := cascadeAwaitResponse(t, tx)
+	require.NotEqual(t, 200, res.StatusCode, "a file URI must be tied to records of the authorized channel")
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	require.Empty(t, fake.requests)
+}
+
+type cascadeRecordingQueryFunc func(context.Context, recordquery.CascadeQueryRequest) (recordquery.QueryResult, error)
+
+func (f cascadeRecordingQueryFunc) QueryForCascade(ctx context.Context, req recordquery.CascadeQueryRequest) (recordquery.QueryResult, error) {
+	return f(ctx, req)
+}
+
+func TestCascadeDownloadFileURIRejectsUnmatchedAndIncompleteResults(t *testing.T) {
+	for _, mismatch := range []string{"path", "channel", "range", "incomplete"} {
+		t.Run(mismatch, func(t *testing.T) {
+			h, fake, _ := newCascadePlaybackTestRuntime(t)
+			h.recordingLocation = time.FixedZone("CST", 8*60*60)
+			h.recordings = cascadeRecordingQueryFunc(func(_ context.Context, request recordquery.CascadeQueryRequest) (recordquery.QueryResult, error) {
+				item := manscdp.RecordInfoItem{DeviceID: request.ChannelCode, FilePath: "http://37010301021180000007/records/one.ps",
+					StartTime: recordquery.FormatMANSCDPWallClock(request.StartTime, h.recordingLocation),
+					EndTime:   recordquery.FormatMANSCDPWallClock(request.EndTime, h.recordingLocation)}
+				switch mismatch {
+				case "path":
+					item.FilePath = "http://37010301021180000007/another-channel/other.ps"
+				case "channel":
+					item.DeviceID = "another-channel"
+				case "range":
+					item.EndTime = recordquery.FormatMANSCDPWallClock(request.StartTime.Add(time.Second), h.recordingLocation)
+				}
+				return recordquery.QueryResult{Incomplete: mismatch == "incomplete", Records: []recordquery.Record{{RecordInfoItem: item}}}, nil
+			})
+			req := cascadePlaybackRequest(15060, "1200000001")
+			req.SetBody([]byte(strings.Replace(strings.Replace(string(req.Body()), "s=Playback", "s=Download", 1), "u="+req.Recipient.User+":0", "u=http://"+req.Recipient.User+"/records/one.ps", 1)))
+			tx := &cascadeInviteTestTx{siptest.NewServerTxRecorder(req), make(chan *sip.Response, 10)}
+			defer tx.Terminate()
+			go h.Handle(req, tx)
+			require.NotEqual(t, 200, cascadeAwaitResponse(t, tx).StatusCode)
+			fake.mu.Lock()
+			defer fake.mu.Unlock()
+			require.Empty(t, fake.requests, "unverified file must never provision a download source")
+		})
+	}
 }

@@ -97,10 +97,12 @@ type Service struct {
 	sn          atomic.Uint64
 	// locks + lockTableMu 组成可回收的通道锁表:acquire 与删除都在表锁内完成,
 	// 保证同一 channel 永远只有一个有效锁,且锁表不随历史通道无限累积
-	lockTableMu  sync.Mutex
-	locks        map[uint]*channelLockEntry
-	queryStageMu sync.Mutex
-	queryStages  map[string]queryResponseStage
+	lockTableMu    sync.Mutex
+	locks          map[uint]*channelLockEntry
+	queryStageMu   sync.Mutex
+	queryStages    map[string]queryResponseStage
+	cascadeQueryMu sync.Mutex
+	cascadeQueries map[string]*cascadeQueryWaiter
 	// configReadMu / configReadStages 是配置读取(A.2.4.7)的"同 SN 多响应"收集期,
 	// 与 queryStages 同构但语义不同(按配置类型聚合,判据见 device_config_read.go),
 	// 所以单独一张表 —— 混进 queryStages 会让两套收敛判据互相解释。
@@ -254,6 +256,7 @@ func (s *Service) Retire() {
 	}
 	s.clearQueryStages()
 	s.clearConfigReadStages()
+	s.clearCascadeQueries()
 }
 
 // FlushResults preserves synchronous sends across a failed root teardown.

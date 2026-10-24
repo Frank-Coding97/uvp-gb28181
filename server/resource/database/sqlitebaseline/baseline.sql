@@ -1,6 +1,6 @@
 -- SQLite baseline for the UVP standalone green package.
 -- Generated from uvp-gb28181.sql; DO NOT EDIT (run generate.py instead).
--- Model-derived additions: gb_cascade_business_binding, gb_cascade_business_node.
+-- Model-derived additions: gb_cascade_alarm_delivery, gb_cascade_business_binding, gb_cascade_business_node, gb_cascade_snapshot_session.
 --
 -- Type mapping: auto_increment(single int pk) -> INTEGER PRIMARY KEY AUTOINCREMENT;
 --   text/blob/json -> TEXT; datetime/date/timestamp -> DATETIME; decimal -> NUMERIC.
@@ -138,6 +138,7 @@ CREATE TABLE IF NOT EXISTS "gb_cascade_device_projection" (
 );
 CREATE TABLE IF NOT EXISTS "gb_cascade_media_session" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT CHECK ("id" IS NULL OR (typeof("id") = 'integer' AND "id" >= 0)),
+  "session_kind" TEXT NOT NULL CHECK ("session_kind" IS NULL OR length("session_kind") <= 16) DEFAULT 'video',
   "platform_id" INTEGER NOT NULL CHECK ("platform_id" IS NULL OR (typeof("platform_id") = 'integer' AND "platform_id" >= 0)),
   "dialog_key" TEXT NOT NULL CHECK ("dialog_key" IS NULL OR length("dialog_key") <= 512),
   "call_id" TEXT NOT NULL CHECK ("call_id" IS NULL OR length("call_id") <= 255),
@@ -165,6 +166,28 @@ CREATE TABLE IF NOT EXISTS "gb_cascade_media_session" (
   "answered_at" DATETIME NULL,
   "active_at" DATETIME NULL,
   "closed_at" DATETIME NULL,
+  "created_at" DATETIME NOT NULL,
+  "updated_at" DATETIME NOT NULL
+);
+CREATE TABLE IF NOT EXISTS "gb_cascade_snapshot_session" (
+  "id" INTEGER PRIMARY KEY AUTOINCREMENT CHECK ("id" IS NULL OR (typeof("id") = 'integer' AND "id" >= 0)),
+  "platform_id" INTEGER NOT NULL CHECK ("platform_id" IS NULL OR (typeof("platform_id") = 'integer' AND "platform_id" >= 0)),
+  "upstream_session_id" TEXT NOT NULL CHECK ("upstream_session_id" IS NULL OR length("upstream_session_id") <= 128),
+  "downstream_session_id" TEXT NULL CHECK ("downstream_session_id" IS NULL OR length("downstream_session_id") <= 128),
+  "upload_token" TEXT NULL CHECK ("upload_token" IS NULL OR length("upload_token") <= 64),
+  "upstream_upload_url" TEXT NULL,
+  "request_key" TEXT NOT NULL CHECK ("request_key" IS NULL OR length("request_key") <= 64),
+  "request_fingerprint" TEXT NOT NULL CHECK ("request_fingerprint" IS NULL OR length("request_fingerprint") <= 64),
+  "request_result" TEXT NOT NULL CHECK ("request_result" IS NULL OR length("request_result") <= 8) DEFAULT '',
+  "published_channel_id" TEXT NOT NULL CHECK ("published_channel_id" IS NULL OR length("published_channel_id") <= 20),
+  "source_device_id" INTEGER NOT NULL CHECK ("source_device_id" IS NULL OR (typeof("source_device_id") = 'integer' AND "source_device_id" >= 0)),
+  "source_channel_id" INTEGER NOT NULL CHECK ("source_channel_id" IS NULL OR (typeof("source_channel_id") = 'integer' AND "source_channel_id" >= 0)),
+  "source_device_epoch" INTEGER NOT NULL CHECK ("source_device_epoch" IS NULL OR typeof("source_device_epoch") = 'integer') DEFAULT 0,
+  "config_revision" INTEGER NOT NULL CHECK ("config_revision" IS NULL OR (typeof("config_revision") = 'integer' AND "config_revision" >= 0)),
+  "projection_revision" INTEGER NOT NULL CHECK ("projection_revision" IS NULL OR (typeof("projection_revision") = 'integer' AND "projection_revision" >= 0)),
+  "state" TEXT NOT NULL CHECK ("state" IS NULL OR length("state") <= 16) DEFAULT 'pending',
+  "expires_at" DATETIME NOT NULL,
+  "completed_at" DATETIME NULL,
   "created_at" DATETIME NOT NULL,
   "updated_at" DATETIME NOT NULL
 );
@@ -203,6 +226,7 @@ CREATE TABLE IF NOT EXISTS "gb_cascade_platform" (
   "publish_group" INTEGER NOT NULL CHECK ("publish_group" IS NULL OR typeof("publish_group") = 'integer') CHECK ("publish_group" IS NULL OR "publish_group" IN (0, 1)) DEFAULT 0,
   "max_streams" INTEGER NOT NULL CHECK ("max_streams" IS NULL OR typeof("max_streams") = 'integer') DEFAULT 0,
   "ptz_enabled" INTEGER NOT NULL CHECK ("ptz_enabled" IS NULL OR typeof("ptz_enabled") = 'integer') CHECK ("ptz_enabled" IS NULL OR "ptz_enabled" IN (0, 1)) DEFAULT 0,
+  "upgrade_enabled" INTEGER NOT NULL CHECK ("upgrade_enabled" IS NULL OR typeof("upgrade_enabled") = 'integer') CHECK ("upgrade_enabled" IS NULL OR "upgrade_enabled" IN (0, 1)) DEFAULT 0,
   "recording_enabled" INTEGER NOT NULL CHECK ("recording_enabled" IS NULL OR typeof("recording_enabled") = 'integer') CHECK ("recording_enabled" IS NULL OR "recording_enabled" IN (0, 1)) DEFAULT 0,
   "rtcp_keepalive" INTEGER NOT NULL CHECK ("rtcp_keepalive" IS NULL OR typeof("rtcp_keepalive") = 'integer') CHECK ("rtcp_keepalive" IS NULL OR "rtcp_keepalive" IN (0, 1)) DEFAULT 0,
   "register_at" DATETIME NULL,
@@ -285,6 +309,7 @@ CREATE TABLE IF NOT EXISTS "gb_channel" (
   "position_source" TEXT NOT NULL CHECK ("position_source" IS NULL OR length("position_source") <= 16) DEFAULT '',
   "position_updated_at" DATETIME NULL,
   "status" INTEGER NULL CHECK ("status" IS NULL OR typeof("status") = 'integer') CHECK ("status" IS NULL OR "status" IN (0, 1)) DEFAULT 0,
+  "status_event" TEXT NOT NULL CHECK ("status_event" IS NULL OR length("status_event") <= 8) DEFAULT '',
   "stream_id" TEXT NOT NULL CHECK ("stream_id" IS NULL OR length("stream_id") <= 64) DEFAULT '',
   "current_ssrc" TEXT NOT NULL CHECK ("current_ssrc" IS NULL OR length("current_ssrc") <= 10) DEFAULT '',
   "on_demand_live" INTEGER NOT NULL CHECK ("on_demand_live" IS NULL OR typeof("on_demand_live") = 'integer') CHECK ("on_demand_live" IS NULL OR "on_demand_live" IN (0, 1)) DEFAULT 1,
@@ -329,6 +354,7 @@ CREATE TABLE IF NOT EXISTS "gb_channel" (
   -- "position_source": é€šé“åæ ‡æ¥æº catalog/mobile/manual,ç©º=æ— åæ ‡
   -- "position_updated_at": é€šé“åæ ‡æœ€è¿‘æ›´æ–°æ—¶é—´
   -- "status": 通道在线 0离线 1在线
+  -- "status_event": 目录故障事件 VLOST/DEFECT 空表示无故障事件
   -- "stream_id": 当前播放流ID(ZLM app/stream),空=未点播
   -- "current_ssrc": 当前实时媒体会话SSRC
   -- "on_demand_live": 按需直播 1=无人观看自动关闭
@@ -561,7 +587,13 @@ CREATE TABLE IF NOT EXISTS "gb_device_firmware_upgrade" (
   "deadline_at" DATETIME NULL,
   "response_at" DATETIME NULL,
   "response_call_id" TEXT NULL CHECK ("response_call_id" IS NULL OR length("response_call_id") <= 255),
-  "response_cseq" TEXT NULL CHECK ("response_cseq" IS NULL OR length("response_cseq") <= 64)
+  "response_cseq" TEXT NULL CHECK ("response_cseq" IS NULL OR length("response_cseq") <= 64),
+  "cascade_binding" TEXT NULL,
+  "cascade_request_key" TEXT NULL CHECK ("cascade_request_key" IS NULL OR length("cascade_request_key") <= 64),
+  "cascade_session_key" TEXT NULL CHECK ("cascade_session_key" IS NULL OR length("cascade_session_key") <= 64),
+  "cascade_business_result" TEXT NULL CHECK ("cascade_business_result" IS NULL OR length("cascade_business_result") <= 16),
+  "cascade_business_delivered" INTEGER NOT NULL CHECK ("cascade_business_delivered" IS NULL OR typeof("cascade_business_delivered") = 'integer') CHECK ("cascade_business_delivered" IS NULL OR "cascade_business_delivered" IN (0, 1)) DEFAULT 0,
+  "cascade_final_delivered" INTEGER NOT NULL CHECK ("cascade_final_delivered" IS NULL OR typeof("cascade_final_delivered") = 'integer') CHECK ("cascade_final_delivered" IS NULL OR "cascade_final_delivered" IN (0, 1)) DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS "gb_device_grant" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT CHECK ("id" IS NULL OR (typeof("id") = 'integer' AND "id" >= 0)),
@@ -2191,6 +2223,27 @@ CREATE TABLE IF NOT EXISTS "sys_users" (
   -- "avatar": 头像
   -- "description": 描述
   -- "created_by": 创建人
+CREATE TABLE IF NOT EXISTS "gb_cascade_alarm_delivery" (
+  "id" INTEGER PRIMARY KEY AUTOINCREMENT CHECK ("id" IS NULL OR (typeof("id") = 'integer' AND "id" >= 0)),
+  "delivery_key" TEXT NOT NULL CHECK ("delivery_key" IS NULL OR length("delivery_key") <= 64),
+  "platform_id" INTEGER NOT NULL CHECK ("platform_id" IS NULL OR (typeof("platform_id") = 'integer' AND "platform_id" >= 0)),
+  "source_device_code" TEXT NOT NULL CHECK ("source_device_code" IS NULL OR length("source_device_code") <= 20),
+  "source_resource_code" TEXT NOT NULL CHECK ("source_resource_code" IS NULL OR length("source_resource_code") <= 20),
+  "published_code" TEXT NOT NULL CHECK ("published_code" IS NULL OR length("published_code") <= 20),
+  "profile_version" TEXT NOT NULL CHECK ("profile_version" IS NULL OR length("profile_version") <= 16),
+  "binding_fingerprint" TEXT NOT NULL CHECK ("binding_fingerprint" IS NULL OR length("binding_fingerprint") <= 64),
+  "payload" TEXT NOT NULL,
+  "notify_targets" TEXT NULL,
+  "state" TEXT NOT NULL CHECK ("state" IS NULL OR length("state") <= 16) DEFAULT 'pending',
+  "attempts" INTEGER NOT NULL CHECK ("attempts" IS NULL OR typeof("attempts") = 'integer') DEFAULT 0,
+  "next_attempt_at" DATETIME NOT NULL,
+  "lease_owner" TEXT NOT NULL CHECK ("lease_owner" IS NULL OR length("lease_owner") <= 64) DEFAULT '',
+  "lease_until" DATETIME NULL,
+  "last_error" TEXT NULL,
+  "sent_at" DATETIME NULL,
+  "created_at" DATETIME NOT NULL,
+  "updated_at" DATETIME NOT NULL
+);
 CREATE TABLE IF NOT EXISTS "sys_openapi_capability" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT CHECK ("id" IS NULL OR typeof("id") = 'integer'),
   "group_id" INTEGER NOT NULL CHECK ("group_id" IS NULL OR typeof("group_id") = 'integer'),
@@ -2340,6 +2393,12 @@ CREATE INDEX IF NOT EXISTS "idx_cascade_device_platform_active" ON "gb_cascade_d
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_cascade_media_dialog" ON "gb_cascade_media_session" ("dialog_key");
 CREATE INDEX IF NOT EXISTS "idx_cascade_media_call_id" ON "gb_cascade_media_session" ("call_id");
 CREATE INDEX IF NOT EXISTS "idx_cascade_media_platform_state" ON "gb_cascade_media_session" ("platform_id", "state");
+CREATE INDEX IF NOT EXISTS "idx_cascade_media_kind_state" ON "gb_cascade_media_session" ("session_kind", "state");
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_cascade_snapshot_session" ON "gb_cascade_snapshot_session" ("platform_id", "upstream_session_id");
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_cascade_snapshot_request" ON "gb_cascade_snapshot_session" ("platform_id", "request_key");
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_cascade_snapshot_downstream" ON "gb_cascade_snapshot_session" ("downstream_session_id");
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_cascade_snapshot_upload" ON "gb_cascade_snapshot_session" ("upload_token");
+CREATE INDEX IF NOT EXISTS "idx_cascade_snapshot_expiry" ON "gb_cascade_snapshot_session" ("platform_id", "expires_at");
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_cascade_platform_connection" ON "gb_cascade_platform" ("local_device_id", "local_domain", "upstream_server_id", "host", "port", "transport");
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_cascade_platform_name" ON "gb_cascade_platform" ("name");
 CREATE INDEX IF NOT EXISTS "idx_cascade_platform_deleted_at" ON "gb_cascade_platform" ("deleted_at");
@@ -2391,6 +2450,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uk_firmware_upgrade_device_idempotency" ON "g
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_firmware_upgrade_device_session" ON "gb_device_firmware_upgrade" ("device_id", "session_id");
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_firmware_upgrade_operation" ON "gb_device_firmware_upgrade" ("operation_id");
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_firmware_upgrade_sn" ON "gb_device_firmware_upgrade" ("sn");
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_firmware_upgrade_cascade_request" ON "gb_device_firmware_upgrade" ("cascade_request_key");
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_firmware_upgrade_cascade_session" ON "gb_device_firmware_upgrade" ("cascade_session_key");
 CREATE INDEX IF NOT EXISTS "idx_firmware_upgrade_deadline" ON "gb_device_firmware_upgrade" ("deadline_at");
 CREATE INDEX IF NOT EXISTS "idx_firmware_upgrade_device_session" ON "gb_device_firmware_upgrade" ("device_code", "session_id");
 CREATE INDEX IF NOT EXISTS "idx_firmware_upgrade_device_sn" ON "gb_device_firmware_upgrade" ("device_code", "sn");
@@ -2610,6 +2671,9 @@ CREATE INDEX IF NOT EXISTS "idx_client_ip" ON "sys_user_sessions" ("client_ip");
 CREATE INDEX IF NOT EXISTS "idx_session_valid" ON "sys_user_sessions" ("revoked_at", "session_expires_at", "login_at");
 CREATE INDEX IF NOT EXISTS "idx_user_id" ON "sys_user_sessions" ("user_id");
 CREATE UNIQUE INDEX IF NOT EXISTS "username" ON "sys_users" ("username");
+CREATE UNIQUE INDEX IF NOT EXISTS "uk_cascade_alarm_delivery_key" ON "gb_cascade_alarm_delivery" ("delivery_key");
+CREATE INDEX IF NOT EXISTS "idx_cascade_alarm_delivery_due" ON "gb_cascade_alarm_delivery" ("platform_id", "state", "next_attempt_at");
+CREATE INDEX IF NOT EXISTS "idx_cascade_alarm_delivery_lease" ON "gb_cascade_alarm_delivery" ("lease_until");
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_openapi_capability_group_capability_code" ON "sys_openapi_capability" ("group_id", "code");
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_openapi_capability_scope" ON "sys_openapi_capability" ("scope");
 CREATE INDEX IF NOT EXISTS "idx_openapi_capability_deleted" ON "sys_openapi_capability" ("deleted_at");
@@ -3087,7 +3151,11 @@ INSERT INTO "sys_api" ("id", "title", "path", "method", "api_group", "created_at
 (650, '保存国标服务配置', '/api/gb28181/sip/service-config', 'PUT', '国标平台', NULL, NULL, NULL, 1),
 (651, '查看级联业务分组', '/api/gb28181/cascade/platforms/:id/business-group', 'GET', '国标级联', NULL, NULL, NULL, 1),
 (652, '保存级联业务分组', '/api/gb28181/cascade/platforms/:id/business-group', 'PUT', '国标级联', NULL, NULL, NULL, 1),
-(653, '设置级联业务分组发布', '/api/gb28181/cascade/platforms/:id/publish-group', 'PUT', '国标级联', NULL, NULL, NULL, 1);
+(653, '设置级联业务分组发布', '/api/gb28181/cascade/platforms/:id/publish-group', 'PUT', '国标级联', NULL, NULL, NULL, 1),
+(678, '查询通道移动轨迹', '/api/gb28181/device-mgmt/map/trajectory', 'GET', '设备管理', '2026-10-21 21:30:00.000000', '2026-10-21 21:30:00.000000', NULL, 1),
+(679, '读取地图默认中心点', '/api/gb28181/device-mgmt/map/center', 'GET', '设备管理', '2026-10-21 21:30:00.000000', '2026-10-21 21:30:00.000000', NULL, 1),
+(680, '保存地图默认中心点', '/api/gb28181/device-mgmt/map/center', 'PUT', '设备管理', '2026-10-21 21:30:00.000000', '2026-10-21 21:30:00.000000', NULL, 1),
+(681, '查询可定位通道树', '/api/gb28181/device-mgmt/map/channel-tree', 'GET', '设备管理', '2026-10-21 22:40:00.000000', '2026-10-21 22:40:00.000000', NULL, 1);
 INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5") VALUES
 (6266, 'g', 'user_1', 'role_1', '*', '', '', ''),
 (8166, 'p', 'role_3', '/api/users/logout', 'POST', '*', '', ''),
@@ -3596,7 +3664,14 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (10296, 'p', 'role_1', '/api/gb28181/sip/service-config', 'PUT', '*', '', ''),
 (10297, 'p', 'role_1', '/api/gb28181/cascade/platforms/:id/business-group', 'GET', '*', '', ''),
 (10298, 'p', 'role_1', '/api/gb28181/cascade/platforms/:id/business-group', 'PUT', '*', '', ''),
-(10299, 'p', 'role_1', '/api/gb28181/cascade/platforms/:id/publish-group', 'PUT', '*', '', '');
+(10299, 'p', 'role_1', '/api/gb28181/cascade/platforms/:id/publish-group', 'PUT', '*', '', ''),
+(10347, 'p', 'role_1', '/api/gb28181/device-mgmt/map/trajectory', 'GET', '*', '', ''),
+(10348, 'p', 'role_3', '/api/gb28181/device-mgmt/map/trajectory', 'GET', '*', '', ''),
+(10349, 'p', 'role_1', '/api/gb28181/device-mgmt/map/center', 'GET', '*', '', ''),
+(10350, 'p', 'role_3', '/api/gb28181/device-mgmt/map/center', 'GET', '*', '', ''),
+(10351, 'p', 'role_1', '/api/gb28181/device-mgmt/map/center', 'PUT', '*', '', ''),
+(10352, 'p', 'role_1', '/api/gb28181/device-mgmt/map/channel-tree', 'GET', '*', '', ''),
+(10353, 'p', 'role_3', '/api/gb28181/device-mgmt/map/channel-tree', 'GET', '*', '', '');
 INSERT INTO "sys_civil_code" ("code", "name", "short_name", "parent_code", "level", "pinyin", "created_at", "updated_at") VALUES
 ('110000', '北京市', '北京市', '', 1, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),
 ('110100', '北京市市辖区', '市辖区', '110000', 2, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),
@@ -7895,7 +7970,11 @@ INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (140610, 635),
 (140610, 636),
 (140610, 637),
-(140610, 638);
+(140610, 638),
+(140452, 678),
+(140452, 679),
+(140452, 680),
+(140452, 681);
 INSERT INTO "sys_role" ("id", "name", "sort", "status", "description", "parent_id", "created_at", "updated_at", "deleted_at", "created_by", "data_scope", "checked_depts") VALUES
 (1, '系统管理员', 0, 1, '最高权限管理员角色', 0, '2025-09-01 17:32:12.000000', '2025-09-30 15:53:24.000000', NULL, 1, 1, ''),
 (3, '游客', 0, 1, '只读游客：允许业务查看、实时观看和录像回放；禁止下载、控制与修改', 0, '2026-08-24 20:29:31.000000', '2026-09-05 18:46:37.000000', NULL, 1, 4, '');

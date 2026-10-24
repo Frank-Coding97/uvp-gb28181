@@ -77,8 +77,7 @@ type SDCardStatus struct {
 	CmdType  string
 	SN       int
 	DeviceID string
-	// SumNum 是标准里的必选字段「查询结果总数」。注意它与 Items 的真实条数
-	// 可能不一致（设备报 0 张卡时 SumNum=0 且不带任何 Item）。
+	// SDCardStatus 一次返回完整列表，SumNum 必须等于 Items 的真实条数。
 	SumNum int
 	Items  []SDCardItem
 }
@@ -116,11 +115,13 @@ type sdcardStatusWire struct {
 	CmdType  string          `xml:"CmdType"`
 	SN       int             `xml:"SN"`
 	DeviceID string          `xml:"DeviceID"`
+	Result   string          `xml:"Result,omitempty"`
 	SumNum   *int            `xml:"SumNum"`
 	Info     *sdcardInfoWire `xml:"SDCardStatusInfo"`
 }
 
 type sdcardInfoWire struct {
+	Num   *int             `xml:"Num,attr"`
 	Items []sdcardItemWire `xml:"Item"`
 }
 
@@ -153,15 +154,20 @@ func BuildSDCardStatusQueryWithProfile(profile protocol.Profile, deviceID string
 
 // ParseSDCardStatusResponse 解析 A.2.6.16。
 //
-// 刻意**不校验 Result**：标准 A.2.6.16 的 schema 里没有 Result 元素，
-// 但现场设备习惯性地带一个，校严了反而会把合规应答判成失败。
+// 标准不要求 Result；兼容设备的 OK 扩展，但显式失败不能当成无卡成功。
 func ParseSDCardStatusResponse(body []byte) (SDCardStatus, error) {
+	if len(body) > 1<<20 {
+		return SDCardStatus{}, &SDCardParseError{Code: SDCardErrorMalformed, Msg: "应答超过大小限制"}
+	}
 	var wire sdcardStatusWire
 	if err := DecodeProfiledXML(protocol.ProfileFor(protocol.Version2016), body, &wire); err != nil {
 		return SDCardStatus{}, &SDCardParseError{Code: SDCardErrorMalformed, Msg: err.Error()}
 	}
 	if wire.CmdType != CmdSDCardStatus {
 		return SDCardStatus{}, &SDCardParseError{Code: SDCardErrorCmdType, Msg: fmt.Sprintf("got %q", wire.CmdType)}
+	}
+	if result := strings.TrimSpace(wire.Result); result != "" && !strings.EqualFold(result, "OK") {
+		return SDCardStatus{}, &SDCardParseError{Code: SDCardErrorMalformed, Msg: "设备报告查询失败"}
 	}
 	if wire.SN <= 0 || strings.TrimSpace(wire.DeviceID) == "" {
 		return SDCardStatus{}, &SDCardParseError{Code: SDCardErrorMalformed, Msg: "SN 或 DeviceID 缺失"}
@@ -180,6 +186,9 @@ func ParseSDCardStatusResponse(body []byte) (SDCardStatus, error) {
 		SumNum:   *wire.SumNum,
 	}
 	if wire.Info == nil {
+		if status.SumNum != 0 {
+			return SDCardStatus{}, &SDCardParseError{Code: SDCardErrorMalformed, Msg: "非空结果缺少存储卡列表"}
+		}
 		return status, nil
 	}
 	if len(wire.Info.Items) > maxSDCardItems {
@@ -188,16 +197,52 @@ func ParseSDCardStatusResponse(body []byte) (SDCardStatus, error) {
 			Msg:  fmt.Sprintf("Item 条数 %d 超过标准上限 %d", len(wire.Info.Items), maxSDCardItems),
 		}
 	}
+	if wire.Info.Num == nil || *wire.Info.Num != len(wire.Info.Items) || status.SumNum != len(wire.Info.Items) {
+		return SDCardStatus{}, &SDCardParseError{Code: SDCardErrorMalformed, Msg: "SumNum、Num 与完整列表条数不一致"}
+	}
 	items := make([]SDCardItem, 0, len(wire.Info.Items))
+	seen := make(map[int]bool, len(wire.Info.Items))
 	for index, raw := range wire.Info.Items {
 		item, err := parseSDCardItem(raw, index)
 		if err != nil {
 			return SDCardStatus{}, err
 		}
+		if seen[item.ID] {
+			return SDCardStatus{}, &SDCardParseError{Code: SDCardErrorMalformed, Msg: "重复的存储卡编号"}
+		}
+		seen[item.ID] = true
 		items = append(items, item)
 	}
 	status.Items = items
 	return status, nil
+}
+
+// BuildSDCardStatusResponseWithProfile rebuilds only the standard fields. Source
+// identities and vendor extensions must not be forwarded across a publication.
+func BuildSDCardStatusResponseWithProfile(profile protocol.Profile, deviceID string, sn int, status SDCardStatus) ([]byte, error) {
+	if err := validatePTZQueryTarget(deviceID, sn); err != nil {
+		return nil, err
+	}
+	wire := sdcardStatusWire{CmdType: CmdSDCardStatus, SN: sn, DeviceID: deviceID, SumNum: &status.SumNum}
+	if len(status.Items) > 0 {
+		num := len(status.Items)
+		wire.Info = &sdcardInfoWire{Num: &num}
+		for _, item := range status.Items {
+			raw := sdcardItemWire{ID: strconv.Itoa(item.ID), HddName: item.HddName, Status: string(item.Status), Capacity: strconv.Itoa(item.Capacity), FreeSpace: strconv.Itoa(item.FreeSpace)}
+			if item.FormatProgress != nil {
+				raw.FormatProgress = strconv.Itoa(*item.FormatProgress)
+			}
+			wire.Info.Items = append(wire.Info.Items, raw)
+		}
+	}
+	body, err := MarshalProfiledXML(profile, wire)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := ParseSDCardStatusResponse(body); err != nil {
+		return nil, err
+	}
+	return body, nil
 }
 
 // ParseSDCardStatusResponseFor 在解析基础上核对 SN / DeviceID。

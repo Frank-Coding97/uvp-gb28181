@@ -11,6 +11,8 @@ type TalkSignalPhase string
 const (
 	TalkSessionModeBroadcast TalkSessionMode = "broadcast"
 	TalkSessionModeTalk      TalkSessionMode = "talk"
+	// Cascade uses the shared channel lease but owns its own SIP/media lifecycle.
+	TalkSessionModeCascade TalkSessionMode = "cascade"
 )
 
 const (
