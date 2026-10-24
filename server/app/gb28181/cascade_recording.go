@@ -83,6 +83,11 @@ func cascadeRecordingProjection(ctx context.Context, store *repository.GormRepos
 	return target, nil
 }
 
+// cascadeRecordQueryBudget 是级联录像查询在聚合阶段最多等多久。
+// 必须明显小于上级默认的等待时间（LiveGBS 15 秒），否则我方即使拿到条目也已经超时。
+// 声明为变量是为了让测试能压到毫秒级。
+var cascadeRecordQueryBudget = 8 * time.Second
+
 func newCascadeRecordInfoHandler(store *repository.GormRepository, clients *cascadePlatformClientFactory) func(*sip.Request, sip.ServerTransaction) bool {
 	return func(req *sip.Request, tx sip.ServerTransaction) bool {
 		if req == nil {
@@ -98,6 +103,11 @@ func newCascadeRecordInfoHandler(store *repository.GormRepository, clients *casc
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
+		// 上级等应答的耐心有限（LiveGBS 15 秒就报 "wait for recordinfo timeout"），
+		// 而设备常在 2 秒内把条目推完。给聚合阶段单独压一个更小的预算：
+		// 到点还没凑齐 declaredTotal 就先按已收到的条目回，别把上级拖到超时。
+		queryBudgetCtx, queryBudgetCancel := context.WithTimeout(ctx, cascadeRecordQueryBudget)
+		defer queryBudgetCancel()
 		platforms, err := store.ListPlatforms(ctx)
 		if err != nil {
 			return fail(500)
@@ -156,12 +166,29 @@ func newCascadeRecordInfoHandler(store *repository.GormRepository, clients *casc
 		if err := tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil)); err != nil {
 			return true
 		}
-		result, err := recordQueryService.QueryForCascade(ctx, recordquery.CascadeQueryRequest{ChannelID: uint(target.SourceChannelID), DeviceCode: source.device.DeviceID,
+		result, err := recordQueryService.QueryForCascade(queryBudgetCtx, recordquery.CascadeQueryRequest{ChannelID: uint(target.SourceChannelID), DeviceCode: source.device.DeviceID,
 			ChannelCode: source.channel.ChannelID, Destination: net.JoinHostPort(source.device.IP, strconv.Itoa(source.device.Port)), Transport: source.device.Transport,
 			ProtocolVersion: protocol.Version(source.device.EffectiveVersion), StartTime: start, EndTime: end, Type: query.Type, Secrecy: query.Secrecy})
-		if err != nil || result.Incomplete {
-			logCascadeRecordQueryFailed(ctx, platform.ID, cascadeCallID(req), errors.Join(err, fmt.Errorf("incomplete recording query")))
+		if err != nil {
+			logCascadeRecordQueryFailed(ctx, platform.ID, cascadeCallID(req), err)
 			return true
+		}
+		// 不完整的结果也要回给上级：设备上报的 SumNum 与实际条目长期不一致（实测 199 vs 386），
+		// 一旦按「不完整即丢弃」处理，上级在录像多的日子会看到「没有录像」，比给一份部分列表更糟。
+		// 只有一条都没拿到时才保持原行为（不回响应），避免把「查询失败」伪装成「确实没录像」。
+		if result.Incomplete {
+			if len(result.Records) == 0 {
+				logCascadeRecordQueryFailed(ctx, platform.ID, cascadeCallID(req), fmt.Errorf("incomplete recording query without records"))
+				return true
+			}
+			app.Log(ctx).Warn("级联录像查询结果不完整,按实际条目返回",
+				zap.String("event", "cascade.record.partial_returned"),
+				zap.Uint64("platform_id", platform.ID),
+				zap.String("call_id", cascadeCallID(req)),
+				zap.String("status", string(result.Status)),
+				zap.Int("received", result.ReceivedCount),
+				zap.Int("declared_total", result.DeclaredTotal),
+				zap.Int("rejected", result.RejectedCount))
 		}
 		var fits func([]byte) bool
 		if strings.EqualFold(platform.Transport, "UDP") {
