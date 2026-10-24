@@ -57,6 +57,99 @@ func cascadeAudioBindingFixture(t *testing.T) (*gorm.DB, *repository.GormReposit
 	return db, store, rows[0], req
 }
 
+// 真机（大华，2026-10-24 抓包）发起广播音频 INVITE 时把收件人写成**通道编码**：
+//   INVITE sip:37010301021320000006@<平台>:52064
+// 平台编码反而没出现在收件人里。这种写法必须仍能匹配到本次广播，否则设备只能
+// 收到 403，语音广播整条链路就是断的。
+func TestCascadeAudioPullAcceptsInviteAddressedToChannelCode(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+	db, store, row, req := cascadeAudioBindingFixture(t)
+	req.To().Address.User = "34020000001320000002"
+	req.Recipient.User = "34020000001320000002"
+	match, err := resolveCascadeBroadcastPull(t.Context(), db, store, req, time.Now().UTC())
+	require.NoError(t, err)
+	require.NotNil(t, match)
+	require.Equal(t, row.DialogKey, match.Row.DialogKey)
+}
+
+// 收件人既不是平台编码也不是通道编码时仍然必须拒绝（不能因为放宽就把任意
+// 音频 INVITE 都收进来）。
+func TestCascadeAudioPullRejectsInviteAddressedElsewhere(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+	db, store, _, req := cascadeAudioBindingFixture(t)
+	req.To().Address.User = "34020000001320000099"
+	req.Recipient.User = "34020000001320000099"
+	match, err := resolveCascadeBroadcastPull(t.Context(), db, store, req, time.Now().UTC())
+	require.NoError(t, err)
+	require.Nil(t, match)
+}
+
+// 2026-10-24 大华真机抓包原样（收件人写通道编码 + Subject 里 SSRC 是十六进制）：
+//   INVITE sip:37010301021320000006@<平台>:52064
+//   Subject: 34020000012000000001:03d7a8ef3276a8ef327,37010301021320000006:0552354c54f3354c54f
+//   v=0 ... s=Play ... m=audio 9728 RTP/AVP 8 96 ... a=recvonly ... y=0003363721
+// 这套信封必须能匹配；否则语音广播永远停在 488。
+func TestCascadeAudioPullAcceptsDahuaBroadcastEnvelope(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+	db, store, row, req := cascadeAudioBindingFixture(t)
+	req.To().Address.User = "34020000001320000002"
+	req.Recipient.User = "34020000001320000002"
+	req.ReplaceHeader(sip.NewHeader("Subject", "34020000002000000002:03d7a8ef3276a8ef327,34020000001320000002:0552354c54f3354c54f"))
+	match, err := resolveCascadeBroadcastPull(t.Context(), db, store, req, time.Now().UTC())
+	require.NoError(t, err)
+	require.NotNil(t, match)
+	require.Equal(t, row.DialogKey, match.Row.DialogKey)
+}
+
+// Subject 里的 SSRC 段仍然不能乱写（夹带分隔符/空值/超长一律拒绝）。
+func TestMediaSequenceTokenRejectsMalformedValues(t *testing.T) {
+	for _, value := range []string{"", "12:34", "0x1f", "123456789012345678901", "zz"} {
+		require.False(t, mediaSequenceToken(value), value)
+	}
+	for _, value := range []string{"0", "0003363721", "03d7a8ef3276a8ef327"} {
+		require.True(t, mediaSequenceToken(value), value)
+	}
+}
+
+// 设备发完 Broadcast 应答会立刻发音频 INVITE；应答落库（DeviceResult 写进同一行的
+// sdp_summary）与音频认领是并发写同一行。认领必须在这种并发下仍然成功，且不能
+// 把应答结果覆盖掉，否则设备只能收到 486，语音广播永远建不起来（真机复现）。
+func TestCascadeAudioClaimSurvivesConcurrentBroadcastResultWrite(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+	db, store, row, req := cascadeAudioBindingFixture(t)
+	now := time.Now().UTC()
+	match, err := resolveCascadeBroadcastPull(t.Context(), db, store, req, now)
+	require.NoError(t, err)
+	require.NotNil(t, match)
+	// 模拟「应答处理」在 resolve 之后、Claim 之前改写 sdp_summary。
+	var live model.GbCascadeMediaSession
+	require.NoError(t, db.First(&live, row.ID).Error)
+	var binding cascadeBroadcastBinding
+	require.NoError(t, json.Unmarshal([]byte(live.SDPSummary), &binding))
+	binding.DeviceResult = "OK"
+	binding.NotifyStatus = 200
+	updated, err := json.Marshal(binding)
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&live).Update("sdp_summary", string(updated)).Error)
+
+	require.NoError(t, match.Claim(t.Context(), db, req, now))
+	var persisted model.GbCascadeMediaSession
+	require.NoError(t, db.First(&persisted, row.ID).Error)
+	var after cascadeBroadcastBinding
+	require.NoError(t, json.Unmarshal([]byte(persisted.SDPSummary), &after))
+	require.Equal(t, "OK", after.DeviceResult, "认领不能把应答结果覆盖掉")
+	require.NotEmpty(t, after.AudioCallID)
+	require.Equal(t, match.Binding.AudioLeaseID, after.AudioLeaseID)
+}
+
 func TestCascadeAudioPullBindsOriginalBroadcastAndSharesChannelLease(t *testing.T) {
 	if !authoritytest.InProcess(t) {
 		return
@@ -172,7 +265,19 @@ func TestCascadeAudioPullClaimFailsWithoutLeakingLease(t *testing.T) {
 				lease := gbmodels.GbTalkSession{SessionID: "web", ChannelID: 20, DeviceID: "34020000001320000001", State: gbmodels.TalkSessionReserved, ExpiresAt: now.Add(time.Minute)}
 				require.NoError(t, talk.NewGormRepo(db).Create(t.Context(), &lease, "token"))
 			} else {
-				require.NoError(t, db.Model(&row).Update("sdp_summary", row.SDPSummary+" ").Error)
+				// ⛔ 这里必须改**授权相关**的字段。早先的写法是往 sdp_summary 末尾
+				// 补一个空格（等于只改格式），用来代表"绑定被别的流程改过"；但真机上
+				// 设备应答会合法地改写同一行的结果字段，纯粹格式变化/结果变化都不能
+				// 再判失败（见 TestCascadeAudioClaimSurvivesConcurrentBroadcastResultWrite）。
+				// 现在改成把通道编码换掉，语义上就是"授权绑定变了"，仍须拒绝。
+				var live model.GbCascadeMediaSession
+				require.NoError(t, db.First(&live, row.ID).Error)
+				var binding cascadeBroadcastBinding
+				require.NoError(t, json.Unmarshal([]byte(live.SDPSummary), &binding))
+				binding.ChannelCode = "34020000001320000099"
+				changed, err := json.Marshal(binding)
+				require.NoError(t, err)
+				require.NoError(t, db.Model(&live).Update("sdp_summary", string(changed)).Error)
 			}
 			require.Error(t, match.Claim(t.Context(), db, req, now))
 			leases, err := talk.NewGormRepo(db).ListCascadeLeases(t.Context())

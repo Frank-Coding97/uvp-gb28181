@@ -119,6 +119,15 @@ func (m *cascadeBroadcastRuntime) handleCascadeAudioInvite(req *sip.Request, tx 
 		return true
 	}
 	if err != nil {
+		// 这里必须留一条可诊断的日志：488 是设备侧唯一能看到的线索，
+		// 而真正的原因（Subject/租约/过期/对端地址）只有服务端知道。
+		callID := ""
+		if req.CallID() != nil {
+			callID = req.CallID().Value()
+		}
+		app.Log(ctx).Warn("级联广播音频 INVITE 被拒绝",
+			zap.String("event", "cascade.broadcast.audio_offer_rejected"),
+			zap.String("call_id", callID), zap.Error(err))
 		return reject(488, "Invalid Cascade Audio Offer")
 	}
 	if _, ok := m.clients.transport.(sipclient.AudioDialogTransport); !ok {

@@ -127,6 +127,52 @@ func TestCascadeBroadcastDeviceResponseRoutesToOriginalUpstream(t *testing.T) {
 	require.Nil(t, row.ClosedAt)
 }
 
+// 真机（大华，2026-10-24 抓包）在 Broadcast 应答里回的是**通道编码**、且不带
+// TargetID：
+//   <Response><CmdType>Broadcast</CmdType><SN>3</SN>
+//   <DeviceID>37010301021320000006</DeviceID><Result>OK</Result></Response>
+// 这种应答必须能匹配上会话并把结果原样转给上级；只认父设备编码会让上级永远
+// 等不到广播结果。
+func TestCascadeBroadcastAcceptsDeviceResponseEchoingChannelCode(t *testing.T) {
+	if !authoritytest.InProcess(t) {
+		return
+	}
+	db, platform, store := prepareCascadeBroadcastFixture(t)
+	var downstreamSN int
+	sender := cascadeRecordSenderFunc(func(_ context.Context, _, _, _ string, body []byte) (uac.TrackedMessageResult, error) {
+		notify, err := manscdp.ParseCascadeBroadcastNotify(protocol.ProfileFor(protocol.Version2022), body)
+		require.NoError(t, err)
+		downstreamSN = notify.SN
+		return uac.TrackedMessageResult{StatusCode: 200, Attempted: true}, nil
+	})
+	transport := &cascadeStatusTransport{requests: make(chan *sip.Request, 1)}
+	runtime := newCascadeBroadcastRuntime(db, store, newCascadePlatformClientFactory(transport, nil, time.Second), sender)
+	body, err := manscdp.BuildBroadcastNotifyWithProfile(protocol.ProfileFor(protocol.Version2022), manscdp.BroadcastNotify{SN: 97, SourceID: platform.UpstreamServerID, TargetID: "34020000001320000012"})
+	require.NoError(t, err)
+	req := newCascadeStatusRequest(platform, platform.LocalDeviceID, platform.LocalDeviceID, body)
+	callID := sip.CallIDHeader("upstream-broadcast-channel-echo")
+	req.ReplaceHeader(&callID)
+	tx := siptest.NewServerTxRecorder(req)
+	defer tx.Terminate()
+	require.True(t, runtime.Handle(req, tx))
+	require.Equal(t, 200, tx.Result()[0].StatusCode)
+	require.Positive(t, downstreamSN)
+	responseBody := []byte(fmt.Sprintf(`<Response><CmdType>Broadcast</CmdType><SN>%d</SN><DeviceID>34020000001320000002</DeviceID><Result>OK</Result></Response>`, downstreamSN))
+	handled, err := runtime.RouteBroadcastMessage(context.Background(), "34020000001320000001", responseBody)
+	require.NoError(t, err)
+	require.True(t, handled)
+	select {
+	case upstream := <-transport.requests:
+		response, err := manscdp.ParseBroadcastResponse(upstream.Body())
+		require.NoError(t, err)
+		require.Equal(t, 97, response.SN)
+		require.Equal(t, "34020000001320000012", response.DeviceID)
+		require.Equal(t, "OK", response.Result)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for upstream Broadcast response")
+	}
+}
+
 func TestCascadeBroadcastEntryLeavesDeviceResponsesForDeviceRouter(t *testing.T) {
 	body, err := manscdp.BuildBroadcastResponseWithProfile(protocol.ProfileFor(protocol.Version2022), 7, "34020000001320000001", "OK")
 	require.NoError(t, err)

@@ -236,7 +236,15 @@ func (m *cascadeBroadcastRuntime) RouteBroadcastMessage(ctx context.Context, dev
 	if err != nil || platform == nil || !platform.Enabled || platform.ConfigRevision != binding.ConfigRevision || platform.ProjectionRevision != binding.ProjectionRevision || string(effectiveCascadeProfile(*platform)) != binding.ProfileVersion {
 		return true, fmt.Errorf("cascade broadcast authorization changed")
 	}
-	if response.DeviceID != binding.DeviceCode || (response.TargetID != "" && response.TargetID != binding.ChannelCode) {
+	// 真机（大华，2026-10-24 抓包）在 Broadcast 应答里回的是**通道编码**而不是
+	// 所属设备的父编码，且不带 TargetID：
+	//   <Response><CmdType>Broadcast</CmdType><SN>3</SN>
+	//   <DeviceID>37010301021320000006</DeviceID><Result>OK</Result></Response>
+	// 而我们下发 Notify 时 TargetID 本来就是通道编码，所以「回显的是哪个 ID」本身
+	// 没有歧义 —— 只接受父编码会把合法应答判成身份不符，进而让上级永远收不到
+	// 广播结果。这里两个编码都认，其余校验（平台版本/来源绑定/租约）保持不变。
+	if !broadcastResponseIDMatches(response.DeviceID, binding.DeviceCode, binding.ChannelCode) ||
+		(response.TargetID != "" && !broadcastResponseIDMatches(response.TargetID, binding.DeviceCode, binding.ChannelCode)) {
 		return true, fmt.Errorf("cascade broadcast response identity mismatch")
 	}
 	if binding.Source.DeviceEpoch <= 0 || uint64(binding.Source.DeviceID) != row.SourceDeviceID || uint64(binding.Source.ChannelID) != row.SourceChannelID || binding.PublishedChannelID != row.PublishedChannelID {
@@ -284,6 +292,22 @@ func (m *cascadeBroadcastRuntime) RouteBroadcastMessage(ctx context.Context, dev
 		return true, fmt.Errorf("cascade broadcast response delivery failed: status=%d", send.StatusCode)
 	}
 	return true, m.finishBroadcastResult(ctx, row.DialogKey, result, time.Now())
+}
+
+// broadcastResponseIDMatches 允许应答里的标识是「父设备编码」或「通道编码」之一。
+// 两者都是我们下发 Notify 时用过的值（TargetID 用通道编码、SourceID 用平台编码），
+// 不同厂商回显哪个并不统一，所以不能只认一个。
+func broadcastResponseIDMatches(value string, candidates ...string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	for _, candidate := range candidates {
+		if candidate != "" && value == strings.TrimSpace(candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *cascadeBroadcastRuntime) acquire(parent context.Context, timeout time.Duration) (context.Context, func(), bool) {

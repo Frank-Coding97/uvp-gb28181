@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -65,7 +66,12 @@ func resolveCascadeBroadcastPull(ctx context.Context, db *gorm.DB, store *reposi
 		if localSource == "" {
 			localSource = platform.LocalDeviceID
 		}
-		if req.Recipient.User != localSource && req.To().Address.User != localSource {
+		// 真机（大华，2026-10-24 抓包）发起广播音频 INVITE 时，收件人写的是
+		// **通道编码**（INVITE sip:37010301021320000006@...）而不是平台编码。
+		// 粗筛阶段两个值都认（真正要求"两个收件人字段都指向本次广播"的严格
+		// 校验在下面对信封的检查里）。
+		if !cascadeAudioCalleeMatches(req.Recipient.User, localSource, binding.ChannelCode) &&
+			!cascadeAudioCalleeMatches(req.To().Address.User, localSource, binding.ChannelCode) {
 			continue
 		}
 		if match != nil {
@@ -87,7 +93,7 @@ func resolveCascadeBroadcastPull(ctx context.Context, db *gorm.DB, store *reposi
 	if b.Source.DeviceEpoch <= 0 || uint64(b.Source.DeviceID) != match.Row.SourceDeviceID || uint64(b.Source.ChannelID) != match.Row.SourceChannelID || b.PublishedChannelID != match.Row.PublishedChannelID || b.Source.DeviceCode != b.DeviceCode || b.Source.ChannelCode != b.ChannelCode || !validCascadeGBID(b.UpstreamSourceID) {
 		return nil, fmt.Errorf("inconsistent cascade broadcast source binding")
 	}
-	if req.Recipient.User != b.LocalSourceID || req.To().Address.User != b.LocalSourceID || req.CallID() == nil || len(req.CallID().Value()) == 0 || len(req.CallID().Value()) > 255 || req.CSeq() == nil || req.CSeq().MethodName != sip.INVITE || req.CSeq().SeqNo == 0 || len(req.GetHeaders("Subject")) != 1 {
+	if !cascadeAudioCalleeMatches(req.Recipient.User, b.LocalSourceID, b.ChannelCode) || !cascadeAudioCalleeMatches(req.To().Address.User, b.LocalSourceID, b.ChannelCode) || req.CallID() == nil || len(req.CallID().Value()) == 0 || len(req.CallID().Value()) > 255 || req.CSeq() == nil || req.CSeq().MethodName != sip.INVITE || req.CSeq().SeqNo == 0 || len(req.GetHeaders("Subject")) != 1 {
 		return nil, fmt.Errorf("invalid cascade broadcast INVITE envelope")
 	}
 	if tag, _ := req.To().Params.Get("tag"); tag != "" {
@@ -101,7 +107,7 @@ func resolveCascadeBroadcastPull(ctx context.Context, db *gorm.DB, store *reposi
 		return nil, fmt.Errorf("cascade broadcast INVITE peer mismatch")
 	}
 	subject, err := parseCascadeMediaSourceIdentity(req.GetHeader("Subject").Value(), false)
-	if err != nil || subject.SenderID != b.LocalSourceID || subject.ReceiverID != b.ChannelCode || !decimalMediaSequence(subject.SenderSequence) || !decimalMediaSequence(subject.ReceiverSequence) {
+	if err != nil || subject.SenderID != b.LocalSourceID || subject.ReceiverID != b.ChannelCode || !mediaSequenceToken(subject.SenderSequence) || !mediaSequenceToken(subject.ReceiverSequence) {
 		return nil, fmt.Errorf("cascade broadcast INVITE Subject mismatch")
 	}
 	contentType := req.GetHeader("Content-Type")
@@ -138,8 +144,35 @@ func resolveCascadeBroadcastPull(ctx context.Context, db *gorm.DB, store *reposi
 	return match, nil
 }
 
-func decimalMediaSequence(value string) bool {
-	return value != "" && len(value) <= 20 && strings.Trim(value, "0123456789") == ""
+// cascadeAudioCalleeMatches 判定音频 INVITE 的收件人是否指向本次广播。
+// 平台编码是常规写法；部分设备（大华实测）会把收件人写成被广播的通道编码，
+// 这两种都算「打给我们」，其余取值一律不认。
+func cascadeAudioCalleeMatches(value string, candidates ...string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	for _, candidate := range candidates {
+		if candidate != "" && value == strings.TrimSpace(candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+// mediaSequenceToken 校验 Subject 里 SSRC 那一段的形态。
+// 国标写的是十进制 SSRC，但真机（大华，2026-10-24 抓包）发的是 19 位的
+// **十六进制**串：
+//
+//	Subject: 34020000012000000001:03d7a8ef3276a8ef327,37010301021320000006:0552354c54f3354c54f
+//
+// 这一段只是媒体流标识，不参与鉴权与绑定（真正锁死身份的是 SenderID/ReceiverID
+// 与租约），所以十进制与十六进制都认，只拦空值和超长/夹带分隔符的写法。
+func mediaSequenceToken(value string) bool {
+	if value == "" || len(value) > 20 {
+		return false
+	}
+	return strings.Trim(value, "0123456789abcdefABCDEF") == ""
 }
 
 func cascadeAudioRequestHash(req *sip.Request) string {
@@ -158,6 +191,24 @@ func (m *cascadeBroadcastPull) validateLease(ctx context.Context, db *gorm.DB, n
 	return nil
 }
 
+// cascadeBroadcastBindingStable 只比较两份绑定里**授权相关**的部分。
+// 结果类字段（DeviceResult / NotifyStatus / ResultDelivered / ResultAttempt*）与
+// 音频认领字段，会由「设备应答处理」在 INVITE 到达前后并发写入同一行；
+// 把它们纳入比较就等于要求"设备必须先 INVITE 再应答"，与真机顺序相反。
+func cascadeBroadcastBindingStable(a, b cascadeBroadcastBinding) bool {
+	a.DeviceResult, b.DeviceResult = "", ""
+	a.NotifyStatus, b.NotifyStatus = 0, 0
+	a.ResultDelivered, b.ResultDelivered = false, false
+	a.ResultAttemptAt, b.ResultAttemptAt = nil, nil
+	a.ResultAttempts, b.ResultAttempts = 0, 0
+	a.AudioCallID, b.AudioCallID = "", ""
+	a.AudioCSeq, b.AudioCSeq = 0, 0
+	a.AudioFromTag, b.AudioFromTag = "", ""
+	a.AudioBranch, b.AudioBranch = "", ""
+	a.AudioRequestHash, b.AudioRequestHash = "", ""
+	return reflect.DeepEqual(a, b)
+}
+
 // Claim binds the device transaction to the lease already reserved before
 // Notify. Revalidation and the binding CAS use the same database transaction.
 func (m *cascadeBroadcastPull) Claim(ctx context.Context, db *gorm.DB, req *sip.Request, now time.Time) error {
@@ -171,20 +222,46 @@ func (m *cascadeBroadcastPull) Claim(ctx context.Context, db *gorm.DB, req *sip.
 			return fmt.Errorf("cascade broadcast already claimed by another audio request")
 		}
 	}
-	binding := m.Binding
-	binding.AudioCallID, binding.AudioCSeq, binding.AudioFromTag, binding.AudioBranch, binding.AudioRequestHash = key.CallID, key.CSeq, key.FromTag, key.Branch, hash
-	summary, err := json.Marshal(binding)
-	if err != nil {
-		return err
-	}
-	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	// ⛔ 不能在事务外用 resolve 时拿到的 sdp_summary 做 CAS：设备发完 Broadcast
+	// 应答会立刻发音频 INVITE，而应答处理（recordBroadcastResult）正好会把
+	// DeviceResult 写进同一行的 sdp_summary。用旧快照比对必然 RowsAffected=0，
+	// 表现为设备收到 486「Cascade Audio Reservation Changed」，广播永远建不起来
+	// （2026-10-24 大华真机复现）。所以在事务内**重读当前行**，只改音频认领字段，
+	// 其余字段（应答结果、投递状态）原样保留。
+	var binding cascadeBroadcastBinding
+	var summary []byte
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := m.Authorization.Validate(ctx, tx, repository.NewGormRepository(tx)); err != nil {
 			return err
 		}
 		if err := m.validateLease(ctx, tx, now); err != nil {
 			return err
 		}
-		result := tx.Model(&model.GbCascadeMediaSession{}).Where("id = ? AND sdp_summary = ? AND state IN ?", m.Row.ID, m.Row.SDPSummary, []model.CascadeMediaSessionState{model.CascadeMediaSessionStateProvisioning, model.CascadeMediaSessionStateAnswered, model.CascadeMediaSessionStateActive}).Updates(map[string]any{"sdp_summary": string(summary), "updated_at": now})
+		var current model.GbCascadeMediaSession
+		if err := tx.Where("id = ?", m.Row.ID).Take(&current).Error; err != nil {
+			return err
+		}
+		if current.State != model.CascadeMediaSessionStateProvisioning && current.State != model.CascadeMediaSessionStateAnswered && current.State != model.CascadeMediaSessionStateActive {
+			return fmt.Errorf("cascade broadcast is not accepting audio")
+		}
+		var live cascadeBroadcastBinding
+		if err := json.Unmarshal([]byte(current.SDPSummary), &live); err != nil {
+			return err
+		}
+		if !cascadeBroadcastBindingStable(m.Binding, live) {
+			return fmt.Errorf("cascade broadcast binding changed while claiming audio")
+		}
+		if live.AudioCallID != "" && (live.AudioCallID != key.CallID || live.AudioCSeq != key.CSeq || live.AudioFromTag != key.FromTag || live.AudioBranch != key.Branch || live.AudioRequestHash != hash) {
+			return fmt.Errorf("cascade broadcast already claimed by another audio request")
+		}
+		binding = live
+		binding.AudioCallID, binding.AudioCSeq, binding.AudioFromTag, binding.AudioBranch, binding.AudioRequestHash = key.CallID, key.CSeq, key.FromTag, key.Branch, hash
+		var marshalErr error
+		summary, marshalErr = json.Marshal(binding)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		result := tx.Model(&model.GbCascadeMediaSession{}).Where("id = ? AND sdp_summary = ? AND state IN ?", current.ID, current.SDPSummary, []model.CascadeMediaSessionState{model.CascadeMediaSessionStateProvisioning, model.CascadeMediaSessionStateAnswered, model.CascadeMediaSessionStateActive}).Updates(map[string]any{"sdp_summary": string(summary), "updated_at": now})
 		if result.Error != nil {
 			return result.Error
 		}
