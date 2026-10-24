@@ -82,7 +82,72 @@ func (p cascadePeer) identify(platform model.GbCascadePlatform) bool {
 
 // match 是严格口径：身份一致之外，源 IP 也要对上配置的 Host。
 func (p cascadePeer) match(platform model.GbCascadePlatform) bool {
-	return p.identify(platform) && cascadePeerHostMatches(p.host, platform.Host)
+	return p.identify(platform) && p.trustedSource(platform)
+}
+
+// trustedSource 决定「源 IP 是否可信」。两条互补的通道，任一成立即可：
+//
+//	① 来源地址等于配置里的 Host（含域名 DNS 解析）——最严格的原始口径；
+//	② 来源地址等于**该平台用自己的凭据成功注册时被记录下来的那个地址**。
+//
+// 为什么必须有②：GB28181 的 Host 是「人工填的接入地址」，而报文实际从
+// 哪里来由对端的网络环境决定。下级平台部署在同机 docker 里（出站源 IP 是
+// 172.x 容器网段）、或位于 NAT 之后时，配置的 Host 与真实源 IP 天然对不上，
+// 于是上级发来的 SUBSCRIBE / MESSAGE 会被一律 403 —— 表现为「级联目录订阅
+// 永远失败」，而注册、心跳、点播却全都正常，非常难反推。
+//
+// 为什么②依然安全：这条通道只认「同一份凭据已经通过 Digest 鉴权的那台机器」。
+// 注册处理器在鉴权通过后调用 security.TrustEndpoint 把实测地址记进安全运行时
+// （IP + 传输 + 有效期），由注册有效期约束、过期自动失效；一个陌生 IP 拿不到
+// 这条记录，也就进不来。因此它不改变「陌生源地址必须被拒」这一契约，只是多认
+// 一个「已验证过的地址」。
+//
+// ⚠️ 该记录在内存里，平台自身重启后会被清空：此时上级必须先重新 REGISTER 一次
+// 才会恢复，期间它的控制类消息仍会被 403。实测 WVP 在我方重启后 1 分钟内就会
+// 自动重注册，所以窗口很短；若将来遇到「重启后订阅一直失败」，先看最近一条
+// event=cascade.subscription.rejected 的 from/peer，再确认上级是否重新注册过。
+func (p cascadePeer) trustedSource(platform model.GbCascadePlatform) bool {
+	if cascadePeerHostMatches(p.host, platform.Host) {
+		return true
+	}
+	return cascadePeerTrustedMatches(p.fromUser, p.host)
+}
+
+// cascadePeerTrusted resolves the last address that authenticated with this
+// platform's own credentials. Tests replace the lookup so the matcher stays
+// hermetic (same pattern as cascadePeerDNS).
+var cascadePeerTrusted = struct {
+	sync.RWMutex
+	lookup func(deviceID string) (string, bool)
+}{lookup: registeredCascadePeerAddress}
+
+func registeredCascadePeerAddress(deviceID string) (string, bool) {
+	if strings.TrimSpace(deviceID) == "" {
+		return "", false
+	}
+	runtime := SecurityRuntime()
+	if runtime == nil {
+		return "", false
+	}
+	endpoint, ok := runtime.TrustedEndpoint(deviceID)
+	if !ok || strings.TrimSpace(endpoint.Address) == "" {
+		return "", false
+	}
+	return endpoint.Address, true
+}
+
+func cascadePeerTrustedMatches(deviceID, observed string) bool {
+	cascadePeerTrusted.RLock()
+	lookup := cascadePeerTrusted.lookup
+	cascadePeerTrusted.RUnlock()
+	if lookup == nil {
+		return false
+	}
+	trusted, ok := lookup(deviceID)
+	if !ok {
+		return false
+	}
+	return cascadePeerHostMatches(observed, trusted)
 }
 
 func cascadePeerHostMatches(observed, configured string) bool {

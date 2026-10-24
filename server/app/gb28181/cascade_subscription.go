@@ -160,7 +160,33 @@ func (m *cascadeCatalogSubscriptions) Handle(req *sip.Request, tx sip.ServerTran
 	if req == nil || tx == nil || req.Method != sip.SUBSCRIBE {
 		return false
 	}
+	// 拒绝分支必须留痕。以前这里只回状态码、一行日志都不打，于是最典型的
+	// 故障形态——注册/心跳/点播全正常，只有目录订阅一直失败——在日志里完全
+	// 静默，只能靠抓包反推源地址。对端还会不停重试，没有日志就等于"没发生过"。
+	var loadedPlatforms []model.GbCascadePlatform
 	reject := func(code int, reason string) bool {
+		fromUser := ""
+		if from := req.From(); from != nil {
+			fromUser = from.Address.User
+		}
+		hint := ""
+		if peer, ok := cascadePeerFromRequest(req); ok {
+			for i := range loadedPlatforms {
+				// 身份（平台编码/端口/传输）对得上、只有源地址对不上：这就是
+				// NAT / 同机容器场景的唯一可辨认特征，直接写进日志省掉下一次抓包。
+				if peer.identify(loadedPlatforms[i]) && !cascadePeerHostMatches(peer.host, loadedPlatforms[i].Host) {
+					hint = "（身份匹配但源地址不一致：检查上级平台是否在同机容器或 NAT 之后）"
+					break
+				}
+			}
+		}
+		app.Log(m.ctx).Warn("级联目录订阅被拒"+hint,
+			zap.String("event", "cascade.subscription.rejected"),
+			zap.Int("status", code),
+			zap.String("reason", reason),
+			zap.String("peer", req.Source()),
+			zap.String("transport", req.Transport()),
+			zap.String("from", fromUser))
 		_ = tx.Respond(sip.NewResponseFromRequest(req, code, reason, nil))
 		return true
 	}
@@ -194,6 +220,7 @@ func (m *cascadeCatalogSubscriptions) Handle(req *sip.Request, tx sip.ServerTran
 	if err != nil {
 		return reject(503, "Subscription store unavailable")
 	}
+	loadedPlatforms = platforms
 	p, ambiguous := findCascadeControlPeer(req, platforms)
 	if p == nil || ambiguous || !p.Enabled {
 		return reject(403, "Subscription upstream rejected")

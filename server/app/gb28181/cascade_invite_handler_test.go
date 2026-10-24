@@ -102,6 +102,57 @@ func TestCascadePeerMatchesAllResolvedDomainAddressesAndRejectsResolutionFailure
 	require.False(t, (&cascadePeer{host: "192.0.2.10", port: 8160, transport: "udp", fromUser: p.UpstreamServerID}).match(p))
 }
 
+// stubCascadePeerTrusted replaces the "address learned from authenticated
+// REGISTER" lookup so the matcher can be exercised without a security runtime.
+func stubCascadePeerTrusted(t *testing.T, lookup func(string) (string, bool)) {
+	t.Helper()
+	previous := cascadePeerTrusted.lookup
+	cascadePeerTrusted.Lock()
+	cascadePeerTrusted.lookup = lookup
+	cascadePeerTrusted.Unlock()
+	t.Cleanup(func() {
+		cascadePeerTrusted.Lock()
+		cascadePeerTrusted.lookup = previous
+		cascadePeerTrusted.Unlock()
+	})
+}
+
+func TestCascadePeerAcceptsAddressLearnedFromAuthenticatedRegister(t *testing.T) {
+	// 同级联平台的真实形态：配置 Host 是人工填的接入地址，而报文实际来自
+	// 同机容器的 172.x 网段（NAT 场景同理）。注册鉴权通过后源地址会被记下来，
+	// 匹配器必须在「配置 Host 对不上」时改认这个已验证过的地址。
+	p := model.GbCascadePlatform{UpstreamServerID: "35020000002000000001", Host: "192.168.10.220", Port: 8160, Transport: "UDP"}
+	peer := cascadePeer{host: "172.21.0.3", port: 8160, transport: "udp", fromUser: p.UpstreamServerID}
+
+	// 未学习到地址前仍按配置 Host 判，陌生来源必须被拒。
+	stubCascadePeerTrusted(t, func(string) (string, bool) { return "", false })
+	require.False(t, peer.match(p))
+
+	// 该平台用自己的凭据注册过 → 记录下来的 172.21.0.3 可信。
+	stubCascadePeerTrusted(t, func(deviceID string) (string, bool) {
+		if deviceID != p.UpstreamServerID {
+			return "", false
+		}
+		return "172.21.0.3", true
+	})
+	require.True(t, peer.match(p))
+
+	// 记录的地址不是本次来源 → 依然拒绝，不能因为「有这个平台」就整体放行。
+	peer.host = "172.21.0.99"
+	require.False(t, peer.match(p))
+
+	// 身份维度不因地址可信而放宽：端口 / From 用户 / 传输层各自独立校验。
+	peer.host = "172.21.0.3"
+	peer.port = 5060
+	require.False(t, peer.match(p))
+	peer.port = 8160
+	peer.fromUser = "34020000002000000001"
+	require.False(t, peer.match(p))
+	peer.fromUser = p.UpstreamServerID
+	peer.transport = "tcp"
+	require.False(t, peer.match(p))
+}
+
 func TestCascadePeerKeepsEstablishedSourceBindingWhenDNSChanges(t *testing.T) {
 	original := cascadePeer{host: "192.0.2.10", port: 8160, transport: "udp", fromUser: "35020000002000000001"}
 	observed := original
