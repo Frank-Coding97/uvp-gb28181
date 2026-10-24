@@ -878,9 +878,14 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 	}
 	recvPort := rtpFallback
 	if pickedNode == nil || pickedNode.EffectiveRTPReceiveMode() != "single" {
-		rtpRes, openErr := client.OpenRtpServerWithSSRC(playCtx, zlm.OpenRtpServerRequest{
-			StreamID: streamID, SSRC: ssrc, Port: 0, TCPMode: tcpMode, OnlyTrack: onlyTrack,
-		})
+		openReq := zlm.OpenRtpServerRequest{StreamID: streamID, Port: 0, TCPMode: tcpMode, OnlyTrack: onlyTrack}
+		if tcpMode == 0 {
+			// UDP 用 SSRC 做隔离；TCP 本身是连接级隔离，且无法像 UDP 那样事后
+			// 重开监听（会断开对端已建立的连接），所以不绑定 SSRC，避免下级改用
+			// 自定义 SSRC 时整路被判不匹配丢弃。
+			openReq.SSRC = ssrc
+		}
+		rtpRes, openErr := client.OpenRtpServerWithSSRC(playCtx, openReq)
 		if openErr != nil {
 			s.unbindLocation(liveRef)
 			return nil, fmt.Errorf("申请 ZLM 收流端口失败: %w", openErr)
@@ -956,6 +961,30 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 	}
 	app.Log(playCtx).Named("play").Info("设备已接受点播 INVITE", zap.String("event", "gb28181.play.invite_accepted"), zap.String("stage", "sip_invite"), zap.String("outcome", "succeeded"), zap.String("device_id", deviceID), zap.String("channel_id", channelID), zap.Int64("node_id", pickedNodeID), zap.String("stream_id", streamID), zap.String("correlation_id", sess.RequestID), zap.String("call_id", outcome.CallID), zap.String("cseq", outcome.CSeq))
 	s.recordLifecycle(playCtx, req, LifecycleEvent{Stage: StageInvite, EventName: EventInviteAccepted, FactState: FactConfirmed, Source: SourceSIP, StreamID: streamID, NodeID: pickedNodeID, SSRC: ssrc, CallID: outcome.CallID, CSeq: outcome.CSeq})
+
+	// 下级可能在 200 OK 的 y= 里声明它实际使用的 SSRC(WVP 默认改用自定义
+	// SSRC),与上级 SDP 指定的不同。收流端仍按旧值校验时 ZLM 会整路丢弃
+	// ("ssrc mismatched, rtp dropped"),表现为 SIP 全通、页面却一直等不到画面。
+	// 这里按对端声明的值重开同一端口。TCP 模式是连接级隔离,且重开监听会断开
+	// 对端已建立的连接,因此只在 UDP 下校正。
+	if answerSSRC := sdp.ParseAnswerSSRC(outcome.AnswerSDP); answerSSRC != "" && answerSSRC != ssrc && tcpMode == 0 {
+		correctionCtx, correctionCancel := context.WithTimeout(detachedContext(playCtx), 3*time.Second)
+		correctionErr := client.CloseRtpServer(correctionCtx, streamID)
+		if correctionErr == nil {
+			reopened, reopenErr := client.OpenRtpServerWithSSRC(correctionCtx, zlm.OpenRtpServerRequest{StreamID: streamID, SSRC: answerSSRC, Port: recvPort, TCPMode: tcpMode, OnlyTrack: onlyTrack})
+			if reopenErr != nil {
+				correctionErr = reopenErr
+			} else if reopened.Port != 0 {
+				recvPort = reopened.Port
+			}
+		}
+		correctionCancel()
+		if correctionErr != nil {
+			app.Log(playCtx).Named("play").Warn("按对端 SSRC 校正收流端失败", zap.String("event", "gb28181.play.ssrc_correction_failed"), zap.String("stream_id", streamID), zap.String("requested_ssrc", ssrc), zap.String("peer_ssrc", answerSSRC), zap.Error(correctionErr))
+		} else {
+			app.Log(playCtx).Named("play").Info("已按对端 SSRC 重开收流端", zap.String("event", "gb28181.play.ssrc_corrected"), zap.String("stream_id", streamID), zap.String("requested_ssrc", ssrc), zap.String("peer_ssrc", answerSSRC), zap.Int("port", recvPort))
+		}
+	}
 
 	// 7. WaitReady:the hook only wakes the waiter. The exact generation and
 	// target node must still own the stream and report the media online.

@@ -36,6 +36,11 @@ type InviteOutcome struct {
 	AckSucceeded    bool
 	AckAt           time.Time
 	Error           error
+
+	// AnswerSDP 是 200 OK 携带的 SDP 原文。下级可能在这里用 y= 声明它实际
+	// 使用的 SSRC(与上级 SDP 指定的不同),收流端必须据此校正,否则会把对端
+	// 推来的整路流判为 ssrc 不匹配而丢弃。
+	AnswerSDP []byte
 }
 
 // inviteDialog is the narrow dialog contract needed by the live INVITE path.
@@ -83,6 +88,14 @@ func (d *sipgoInviteDialog) WaitAnswer(ctx context.Context) error {
 func (d *sipgoInviteDialog) Ack(ctx context.Context) error { return d.session.Ack(ctx) }
 func (d *sipgoInviteDialog) Bye(ctx context.Context) error { return d.session.Bye(ctx) }
 func (d *sipgoInviteDialog) Close() error                  { return d.session.Close() }
+
+// answerBody 返回 200 OK 的 SDP 原文(副本),供上层读取对端声明的 SSRC。
+func (d *sipgoInviteDialog) answerBody() []byte {
+	if d == nil || d.session == nil || d.session.InviteResponse == nil {
+		return nil
+	}
+	return append([]byte(nil), d.session.InviteResponse.Body()...)
+}
 
 func (d *sipgoInviteDialog) FinalStatus() int {
 	if d == nil || d.session == nil || d.session.InviteResponse == nil {
@@ -211,6 +224,9 @@ func (u *UAC) InviteTracked(ctx context.Context, m *SessionManager, s *Session, 
 	}
 	outcome.AckSucceeded = true
 	outcome.AckAt = time.Now()
+	if direct, ok := dialog.(*sipgoInviteDialog); ok {
+		outcome.AnswerSDP = direct.answerBody()
+	}
 	s.dialog = dialog
 	s.State = StateEstablished
 	if m != nil && !m.PutIfCurrent(s) {
