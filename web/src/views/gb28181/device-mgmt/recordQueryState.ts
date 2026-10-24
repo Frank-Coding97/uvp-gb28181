@@ -41,6 +41,27 @@ export function serializeRecordQueryForm(form: RecordQueryForm): RecordQueryRequ
   };
 }
 
+/**
+ * 录像查询请求的额外超时余量。
+ *
+ * 后端聚合录像目录的时限由 `record_query.timeout_sec` 决定(交付包默认 15 秒),到点
+ * 它会返回「部分结果」而不是失败。如果前端也卡在 15 秒(全局 axios 默认值),就会
+ * 在后端写出响应之前十几毫秒先断开 —— 实测后端 15015ms、前端 15000ms,于是用户
+ * 永远只看到「请求超时」,明明已经查到的录像段一条也拿不到。
+ *
+ * 所以前端必须比后端多留一截:既保证后端的结论一定送达,又不至于让用户白等。
+ */
+export const RECORD_QUERY_TIMEOUT_MARGIN_MS = 5000;
+
+export const RECORD_QUERY_DEFAULT_TIMEOUT_SECONDS = 15;
+
+export function recordQueryTimeoutMs(options?: Pick<RecordQueryOptions, "timeoutSeconds"> | null): number {
+  const backendSeconds = Number(options?.timeoutSeconds);
+  const effectiveSeconds =
+    Number.isFinite(backendSeconds) && backendSeconds > 0 ? backendSeconds : RECORD_QUERY_DEFAULT_TIMEOUT_SECONDS;
+  return effectiveSeconds * 1000 + RECORD_QUERY_TIMEOUT_MARGIN_MS;
+}
+
 export function validateRecordQueryForm(
   form: RecordQueryForm,
   options: Pick<RecordQueryOptions, "maxRangeHours" | "supportedTypes" | "timezone">

@@ -29,6 +29,7 @@ import {
   mapRecordQueryError,
   readableHttpError,
   recordQueryRequestTypes,
+  recordQueryTimeoutMs,
   recordQueryTypeText,
   serializeRecordQueryForm,
   validateRecordQueryForm,
@@ -253,7 +254,12 @@ async function runQuery() {
   queryState.value = "querying";
   queryMessage.value = "";
   try {
-    const response = await queryDeviceRecords(playbackChannelId, serializeRecordQueryForm(form.value), queryAbort.signal);
+    const response = await queryDeviceRecords(
+      playbackChannelId,
+      serializeRecordQueryForm(form.value),
+      queryAbort.signal,
+      recordQueryTimeoutMs(options.value)
+    );
     if (token !== queryToken.value) return;
     result.value = response.data;
     records.value = response.data.list;

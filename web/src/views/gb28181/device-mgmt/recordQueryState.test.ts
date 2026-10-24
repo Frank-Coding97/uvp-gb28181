@@ -9,6 +9,7 @@ import {
   paginateRecordQueryItems,
   recordQueryOptionsPath,
   recordQueryPath,
+  recordQueryTimeoutMs,
   readableHttpError,
   recordQueryTypeText,
   serializeRecordQueryForm,
@@ -165,5 +166,27 @@ describe("readableHttpError", () => {
     expect(mapRecordQueryError({ response: { data: { data: { errorCode: "record_query_device_offline" } } } }).message).toBe(
       "设备当前离线，无法查询录像"
     );
+  });
+
+  // 前端请求超时必须严格长于后端聚合时限：两者都是 15 秒时实测后端 15015ms 才写出
+  // 「部分结果」，前端 15000ms 就断了，用户永远看不到已经查到的录像段。
+  describe("recordQueryTimeoutMs", () => {
+    it("在后端时限之上多留 5 秒余量", () => {
+      expect(recordQueryTimeoutMs({ timeoutSeconds: 15 })).toBe(20000);
+      expect(recordQueryTimeoutMs({ timeoutSeconds: 30 })).toBe(35000);
+    });
+
+    it("后端时限缺失或非法时按 15 秒兜底", () => {
+      expect(recordQueryTimeoutMs(null)).toBe(20000);
+      expect(recordQueryTimeoutMs(undefined)).toBe(20000);
+      expect(recordQueryTimeoutMs({ timeoutSeconds: 0 })).toBe(20000);
+      expect(recordQueryTimeoutMs({ timeoutSeconds: Number.NaN })).toBe(20000);
+    });
+
+    it("必须严格大于后端时限，否则后端结论送不出去", () => {
+      for (const seconds of [5, 15, 30, 60]) {
+        expect(recordQueryTimeoutMs({ timeoutSeconds: seconds })).toBeGreaterThan(seconds * 1000);
+      }
+    });
   });
 });

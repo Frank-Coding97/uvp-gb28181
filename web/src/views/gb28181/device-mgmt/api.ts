@@ -593,11 +593,17 @@ export const getRecordQueryOptions = (id: number) => {
   return http.request<BaseResult<RecordQueryOptions>>("get", baseUrlApi(recordQueryOptionsPath(id)));
 };
 
-export const queryDeviceRecords = (id: number, data: RecordQueryRequest, signal?: AbortSignal) => {
+export const queryDeviceRecords = (id: number, data: RecordQueryRequest, signal?: AbortSignal, timeoutMs?: number) => {
   if (shouldUseRecordQueryMock(import.meta.env)) {
     return mockQueryDeviceRecords(id, data, resolveRecordQueryMockScenario(), signal);
   }
-  return http.request<BaseResult<RecordQueryResult>>("post", baseUrlApi(recordQueryPath(id)), { data, signal });
+  // timeoutMs 必须比后端 record_query.timeout_sec 长,否则后端返回的「部分结果」
+  // 还没写出来前端就先断了(详情见 recordQueryTimeoutMs 的注释)。
+  return http.request<BaseResult<RecordQueryResult>>("post", baseUrlApi(recordQueryPath(id)), {
+    data,
+    signal,
+    ...(timeoutMs && timeoutMs > 0 ? { timeout: timeoutMs } : {})
+  });
 };
 
 export const listChannelMounts = (id: number) =>

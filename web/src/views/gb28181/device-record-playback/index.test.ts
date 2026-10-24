@@ -418,7 +418,14 @@ describe("device record playback workspace", () => {
 
     expect(api.getRecordQueryOptions).toHaveBeenCalledTimes(1);
     expect(api.queryDeviceRecords).toHaveBeenCalledTimes(1);
-    expect(api.queryDeviceRecords).toHaveBeenCalledWith(31, expect.objectContaining({ type: "all" }), expect.any(AbortSignal));
+    // 第 4 个参数是请求超时：后端 timeoutSeconds=15，前端必须多留 5 秒余量，
+    // 否则后端的「部分结果」写出来之前 axios 就先断了（见 recordQueryTimeoutMs）。
+    expect(api.queryDeviceRecords).toHaveBeenCalledWith(
+      31,
+      expect.objectContaining({ type: "all" }),
+      expect.any(AbortSignal),
+      20000
+    );
   });
 
   it("writes a range picked on the Arco range picker back into the query payload", async () => {
@@ -443,7 +450,8 @@ describe("device record playback workspace", () => {
     expect(api.queryDeviceRecords).toHaveBeenCalledWith(
       31,
       expect.objectContaining({ startTime: "2026-08-02T07:00:00", endTime: "2026-08-02T09:30:00" }),
-      expect.any(AbortSignal)
+      expect.any(AbortSignal),
+      20000
     );
   });
 

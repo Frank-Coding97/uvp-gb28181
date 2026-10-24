@@ -28,6 +28,7 @@ import {
   mapRecordQueryError,
   paginateRecordQueryItems,
   recordQueryRequestTypes,
+  recordQueryTimeoutMs,
   recordQueryTypeText,
   serializeRecordQueryForm,
   sortRecordQueryItems,
@@ -181,7 +182,12 @@ async function submitQuery() {
   result.value = null;
   page.value = 1;
   try {
-    const response = await queryDeviceRecords(props.channel.id, serializeRecordQueryForm(form), controller.signal);
+    const response = await queryDeviceRecords(
+      props.channel.id,
+      serializeRecordQueryForm(form),
+      controller.signal,
+      recordQueryTimeoutMs(options.value)
+    );
     if (token !== queryToken || controller.signal.aborted || !props.visible) return;
     if (response.code !== 0) throw new Error(response.message || "查询失败");
     result.value = { ...response.data, list: sortRecordQueryItems(response.data.list || []) };
