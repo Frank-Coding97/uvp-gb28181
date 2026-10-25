@@ -1534,6 +1534,9 @@ CREATE TABLE IF NOT EXISTS "gb_talk_session" (
   "target_id" TEXT NOT NULL CHECK ("target_id" IS NULL OR length("target_id") <= 20) DEFAULT '',
   "actor_id" INTEGER NOT NULL CHECK ("actor_id" IS NULL OR (typeof("actor_id") = 'integer' AND "actor_id" >= 0)) DEFAULT 0,
   "actor_dept_id" INTEGER NOT NULL CHECK ("actor_dept_id" IS NULL OR (typeof("actor_dept_id") = 'integer' AND "actor_dept_id" >= 0)) DEFAULT 0,
+  "openapi_client_id" INTEGER NOT NULL CHECK ("openapi_client_id" IS NULL OR typeof("openapi_client_id") = 'integer') DEFAULT 0,
+  "openapi_idempotency_key" TEXT NULL CHECK ("openapi_idempotency_key" IS NULL OR length("openapi_idempotency_key") <= 128),
+  "openapi_request_hash" TEXT NOT NULL CHECK ("openapi_request_hash" IS NULL OR length("openapi_request_hash") <= 64) DEFAULT '',
   "mode" TEXT NOT NULL CHECK ("mode" IS NULL OR length("mode") <= 16) DEFAULT 'talk',
   "broadcast_sn" INTEGER NOT NULL CHECK ("broadcast_sn" IS NULL OR (typeof("broadcast_sn") = 'integer' AND "broadcast_sn" >= 0)) DEFAULT 0,
   "broadcast_reply_status" TEXT NOT NULL CHECK ("broadcast_reply_status" IS NULL OR length("broadcast_reply_status") <= 32) DEFAULT '',
@@ -2613,6 +2616,7 @@ CREATE INDEX IF NOT EXISTS "idx_talk_session_broadcast_match" ON "gb_talk_sessio
 CREATE INDEX IF NOT EXISTS "idx_talk_session_broadcast_sn" ON "gb_talk_session" ("broadcast_sn");
 CREATE INDEX IF NOT EXISTS "idx_talk_session_call_id" ON "gb_talk_session" ("call_id");
 CREATE INDEX IF NOT EXISTS "idx_talk_session_channel_created" ON "gb_talk_session" ("channel_id", "created_at");
+CREATE INDEX IF NOT EXISTS "idx_talk_session_openapi_idempotency" ON "gb_talk_session" ("openapi_client_id", "openapi_idempotency_key");
 CREATE INDEX IF NOT EXISTS "idx_talk_session_recv" ON "gb_talk_session" ("node_id", "recv_stream");
 CREATE INDEX IF NOT EXISTS "idx_talk_session_source" ON "gb_talk_session" ("node_id", "app", "source_stream");
 CREATE INDEX IF NOT EXISTS "idx_talk_session_state_expires" ON "gb_talk_session" ("state", "expires_at");

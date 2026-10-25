@@ -2,7 +2,7 @@
 -- Model-derived additions: gb_cascade_alarm_delivery, gb_cascade_business_binding, gb_cascade_business_node, gb_cascade_snapshot_session.
 -- Generated from the development schema (8.0.46) by
 -- server/resource/database/baseline/generate_sql.py. Do not edit by hand.
--- Schema fingerprint: d17d657a6c2c8bd41e98953dfef6d5307e588faa1fed2ddceb017a729bd43610
+-- Schema fingerprint: 8ad4da483ae4adfb0f65353c2910c2587789e8eac718949ead65ff1905e70e06
 -- Contains production table structures and release baseline data only.
 -- Excludes demo content and all environment-specific device, media-node,
 -- SIP, cascade, alarm, trace, and operation data.
@@ -1946,6 +1946,9 @@ CREATE TABLE `gb_talk_session` (
   `target_id` varchar(20) NOT NULL DEFAULT '',
   `actor_id` bigint unsigned NOT NULL DEFAULT 0,
   `actor_dept_id` bigint unsigned NOT NULL DEFAULT 0,
+  `openapi_client_id` bigint NOT NULL DEFAULT 0,
+  `openapi_idempotency_key` varchar(128) NULL,
+  `openapi_request_hash` varchar(64) NOT NULL DEFAULT '',
   `mode` varchar(16) NOT NULL DEFAULT 'talk',
   `broadcast_sn` bigint unsigned NOT NULL DEFAULT 0,
   `broadcast_reply_status` varchar(32) NOT NULL DEFAULT '',
@@ -1989,6 +1992,7 @@ CREATE TABLE `gb_talk_session` (
   KEY `idx_talk_session_broadcast_sn` (`broadcast_sn`),
   KEY `idx_talk_session_call_id` (`call_id`),
   KEY `idx_talk_session_channel_created` (`channel_id`,`created_at`),
+  KEY `idx_talk_session_openapi_idempotency` (`openapi_client_id`,`openapi_idempotency_key`),
   KEY `idx_talk_session_recv` (`node_id`,`recv_stream`),
   KEY `idx_talk_session_source` (`node_id`,`app`,`source_stream`),
   KEY `idx_talk_session_state_expires` (`state`,`expires_at`)

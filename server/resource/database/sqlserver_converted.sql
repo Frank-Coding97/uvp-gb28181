@@ -2,7 +2,7 @@
 -- Model-derived additions: gb_cascade_alarm_delivery, gb_cascade_business_binding, gb_cascade_business_node, gb_cascade_snapshot_session.
 -- Generated from the development schema by
 -- server/resource/database/baseline/generate_sql.py. Do not edit by hand.
--- Schema fingerprint: d17d657a6c2c8bd41e98953dfef6d5307e588faa1fed2ddceb017a729bd43610
+-- Schema fingerprint: 8ad4da483ae4adfb0f65353c2910c2587789e8eac718949ead65ff1905e70e06
 -- Contains production table structures and release baseline data only.
 
 -- 方言差异（由 profile 消化，阅读时注意）：
@@ -2214,6 +2214,9 @@ BEGIN
     [target_id] NVARCHAR(20) NOT NULL DEFAULT N'',
     [actor_id] BIGINT NOT NULL DEFAULT 0,
     [actor_dept_id] BIGINT NOT NULL DEFAULT 0,
+    [openapi_client_id] BIGINT NOT NULL DEFAULT 0,
+    [openapi_idempotency_key] NVARCHAR(128),
+    [openapi_request_hash] NVARCHAR(64) NOT NULL DEFAULT N'',
     [mode] NVARCHAR(16) NOT NULL DEFAULT N'talk',
     [broadcast_sn] BIGINT NOT NULL DEFAULT 0,
     [broadcast_reply_status] NVARCHAR(32) NOT NULL DEFAULT N'',
@@ -2262,6 +2265,8 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_talk_ses
   CREATE INDEX [idx_talk_session_call_id] ON [gb_talk_session] ([call_id]);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_talk_session') AND name=N'idx_talk_session_channel_created')
   CREATE INDEX [idx_talk_session_channel_created] ON [gb_talk_session] ([channel_id], [created_at]);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_talk_session') AND name=N'idx_talk_session_openapi_idempotency')
+  CREATE INDEX [idx_talk_session_openapi_idempotency] ON [gb_talk_session] ([openapi_client_id], [openapi_idempotency_key]);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_talk_session') AND name=N'idx_talk_session_recv')
   CREATE INDEX [idx_talk_session_recv] ON [gb_talk_session] ([node_id], [recv_stream]);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'gb_talk_session') AND name=N'idx_talk_session_source')

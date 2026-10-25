@@ -6,7 +6,7 @@
     "live_table_count": 114,
     "included_table_count": 116,
     "excluded_table_count": 20,
-    "schema_fingerprint": "d17d657a6c2c8bd41e98953dfef6d5307e588faa1fed2ddceb017a729bd43610",
+    "schema_fingerprint": "8ad4da483ae4adfb0f65353c2910c2587789e8eac718949ead65ff1905e70e06",
     "policy_rev": 1,
     "model_derived_tables": [
       "gb_cascade_alarm_delivery",
@@ -15630,6 +15630,33 @@
           "collation": null
         },
         {
+          "name": "openapi_client_id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "0",
+          "extra": "",
+          "comment": "",
+          "collation": null
+        },
+        {
+          "name": "openapi_idempotency_key",
+          "type": "varchar(128)",
+          "nullable": true,
+          "default": null,
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "openapi_request_hash",
+          "type": "varchar(64)",
+          "nullable": false,
+          "default": "",
+          "extra": "",
+          "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
           "name": "mode",
           "type": "varchar(16)",
           "nullable": false,
@@ -16025,6 +16052,19 @@
             },
             {
               "name": "created_at",
+              "prefix": null
+            }
+          ]
+        },
+        {
+          "name": "idx_talk_session_openapi_idempotency",
+          "columns": [
+            {
+              "name": "openapi_client_id",
+              "prefix": null
+            },
+            {
+              "name": "openapi_idempotency_key",
               "prefix": null
             }
           ]

@@ -2,7 +2,7 @@
 -- Model-derived additions: gb_cascade_alarm_delivery, gb_cascade_business_binding, gb_cascade_business_node, gb_cascade_snapshot_session.
 -- Generated from the development schema by
 -- server/resource/database/baseline/generate_sql.py. Do not edit by hand.
--- Schema fingerprint: d17d657a6c2c8bd41e98953dfef6d5307e588faa1fed2ddceb017a729bd43610
+-- Schema fingerprint: 8ad4da483ae4adfb0f65353c2910c2587789e8eac718949ead65ff1905e70e06
 -- Contains production table structures and release baseline data only.
 
 SET client_min_messages TO WARNING;
@@ -1958,6 +1958,9 @@ CREATE TABLE "gb_talk_session" (
   "target_id" VARCHAR(20) NOT NULL DEFAULT '',
   "actor_id" BIGINT NOT NULL DEFAULT 0,
   "actor_dept_id" BIGINT NOT NULL DEFAULT 0,
+  "openapi_client_id" BIGINT NOT NULL DEFAULT 0,
+  "openapi_idempotency_key" VARCHAR(128),
+  "openapi_request_hash" VARCHAR(64) NOT NULL DEFAULT '',
   "mode" VARCHAR(16) NOT NULL DEFAULT 'talk',
   "broadcast_sn" BIGINT NOT NULL DEFAULT 0,
   "broadcast_reply_status" VARCHAR(32) NOT NULL DEFAULT '',
@@ -2002,6 +2005,7 @@ CREATE INDEX idx_talk_session_broadcast_match ON "gb_talk_session" ("device_id",
 CREATE INDEX idx_talk_session_broadcast_sn ON "gb_talk_session" ("broadcast_sn");
 CREATE INDEX idx_talk_session_call_id ON "gb_talk_session" ("call_id");
 CREATE INDEX idx_talk_session_channel_created ON "gb_talk_session" ("channel_id", "created_at");
+CREATE INDEX idx_talk_session_openapi_idempotency ON "gb_talk_session" ("openapi_client_id", "openapi_idempotency_key");
 CREATE INDEX idx_talk_session_recv ON "gb_talk_session" ("node_id", "recv_stream");
 CREATE INDEX idx_talk_session_source ON "gb_talk_session" ("node_id", "app", "source_stream");
 CREATE INDEX idx_talk_session_state_expires ON "gb_talk_session" ("state", "expires_at");
