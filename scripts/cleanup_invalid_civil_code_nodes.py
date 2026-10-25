@@ -9,9 +9,12 @@
 见 `catalog/civil_code_length_test.go`），但**存量那条还在库里**，本脚本负责清掉它。
 
 清理动作（`--apply` 才真写）：
-  1. 把脏节点的子树整体提升一层：`parent_id` 置空、`path` 剥掉 `/脏id/` 前缀、
-     `depth` 减一 —— 不连坐删掉挂在它下面的真实资源；
-  2. 软删脏节点本身（`deleted_at`），不做物理删除，留痕可回滚。
+  1. 脏节点子树里，**树别处已有同一份资源的节点算重复副本，直接软删** ——
+     实测环境里脏分支下确实挂着一条通道节点，而同一个通道在正常行政区链路下
+     另有一个节点，提升上来只会变成挂在根上的孤儿；
+  2. 剩下的（没有重复的）子树整体提升一层：`path` 剥掉 `/脏id/` 前缀、
+     `depth` 减一、直接子节点改挂到脏节点的父级 —— 不连坐删掉真实资源；
+  3. 软删脏节点本身（`deleted_at`），不做物理删除，留痕可回滚。
 
 用法：
     python3 cleanup_invalid_civil_code_nodes.py /path/to/uvp.db            # 只盘点
@@ -51,12 +54,17 @@ def has_column(cur: sqlite3.Cursor, table: str, column: str) -> bool:
     return column in {row[1] for row in cur.execute(f'PRAGMA table_info("{table}")')}
 
 
+def _now() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("db")
     parser.add_argument("--apply", action="store_true", help="真写库；缺省只盘点")
     parser.add_argument("--clear-channel-civil-codes", action="store_true")
     args = parser.parse_args()
+    MARK = "" if args.apply else "  [预览，随后回滚]"
 
     con = sqlite3.connect(args.db)
     con.row_factory = sqlite3.Row
@@ -66,20 +74,37 @@ def main() -> int:
         print(f"✗ 库里没有 {TABLE}，路径对吗？")
         return 1
 
-    rows = list(
-        cur.execute(
-            f"SELECT id, owner_dept_id, parent_id, code, civil_code, name, path, depth "
-            f"FROM {TABLE} WHERE node_type='civil_code' AND deleted_at IS NULL ORDER BY id"
+    # 先只取 id：脏节点可能层层嵌套（Ci 套 Civi），处理外层时会把内层往上提。
+    # 若用一开始的快照去算内层的 path/parent_id/depth，就会拿旧路径重新嵌回已删的父级。
+    rows = [
+        row[0]
+        for row in cur.execute(
+            f"SELECT id FROM {TABLE} WHERE node_type='civil_code' AND deleted_at IS NULL ORDER BY id"
         )
-    )
+    ]
     dirty = []
-    for row in rows:
+    for node_id in rows:
+        row = cur.execute(
+            f"SELECT id, owner_dept_id, parent_id, code, civil_code, name, path, depth "
+            f"FROM {TABLE} WHERE id=? AND deleted_at IS NULL",
+            (node_id,),
+        ).fetchone()
+        if row is None:
+            continue
         reason = invalid_reason(row["code"], row["civil_code"])
         if reason:
-            dirty.append((row, reason))
+            dirty.append((node_id, reason))
 
     print(f"· 行政区节点共 {len(rows)} 个，其中不合法 {len(dirty)} 个")
-    for row, reason in dirty:
+    for node_id, reason in dirty:
+        # 每轮重新读：外层脏节点处理完可能已经把内层提升了一级。
+        row = cur.execute(
+            f"SELECT id, owner_dept_id, parent_id, code, civil_code, name, path, depth "
+            f"FROM {TABLE} WHERE id=? AND deleted_at IS NULL",
+            (node_id,),
+        ).fetchone()
+        if row is None:
+            continue
         prefix = f"/{row['id']}/"
         # 脏节点的父级路径段：子树要提升到这一层，不能一律当根（可能挂在别的目录下）。
         parent_prefix = (row["path"] or "").rstrip("/")
@@ -95,21 +120,43 @@ def main() -> int:
         )
         subtree = list(
             cur.execute(
-                f"SELECT id, path, depth FROM {TABLE} "
+                f"SELECT id, code, node_type, name, path, depth FROM {TABLE} "
                 f"WHERE owner_dept_id=? AND id<>? AND path LIKE ? AND deleted_at IS NULL",
                 (row["owner_dept_id"], row["id"], prefix + "%"),
             )
         )
+        # 子树分两类：树里别处已经有同一份资源的节点属于「重复副本」，删掉更干净；
+        # 只有这一份的才提升保留，否则它就会变成挂在根上的孤儿节点。
+        duplicates, promote = [], []
+        for node in subtree:
+            if node["node_type"] == "civil_code":
+                promote.append(node)
+                continue
+            twin = cur.execute(
+                f"SELECT id FROM {TABLE} WHERE owner_dept_id=? AND code=? AND node_type=? "
+                f"AND deleted_at IS NULL AND id<>? AND path NOT LIKE ? LIMIT 1",
+                (row["owner_dept_id"], node["code"], node["node_type"], node["id"], prefix + "%"),
+            ).fetchone()
+            (duplicates if twin else promote).append(node)
+
         print(f"  ✗ id={row['id']} name={row['name']!r} {reason}")
-        print(f"    直接子节点 {len(children)} 个，整棵子树 {len(subtree)} 个")
+        print(
+            f"    直接子节点 {len(children)} 个，整棵子树 {len(subtree)} 个"
+            f"（重复可删 {len(duplicates)} / 需提升 {len(promote)}）"
+        )
         for child in children[:5]:
             print(f"      - [{child['node_type']}] {child['name']}")
 
-        if not args.apply:
-            continue
-
-        # 子树整体提升一层：先改 path/depth（按行算），再把直接子节点改挂到脏节点的父级。
-        for node in subtree:
+        # 预览模式同样真跑一遍、最后统一回滚 —— 嵌套脏节点（Ci 套 Civi）下
+        # 只有真改过 path 才算得出内层准确的子树规模，否则数字会失真。
+        for node in duplicates:
+            cur.execute(
+                f"UPDATE {TABLE} SET deleted_at=? WHERE id=?",
+                (_now(), node["id"]),
+            )
+            print(f"    - 删除重复副本 id={node['id']} [{node['node_type']}] {node['name']}{MARK}")
+        # 保留的子树整体提升一层：先改 path/depth（按行算），再把直接子节点改挂到脏节点的父级。
+        for node in promote:
             old = node["path"]
             if not old.startswith(prefix):
                 continue
@@ -119,7 +166,8 @@ def main() -> int:
                 (new_path, max(0, int(node["depth"]) - 1), node["id"]),
             )
         cur.execute(
-            f"UPDATE {TABLE} SET parent_id=?, depth=? WHERE owner_dept_id=? AND parent_id=?",
+            f"UPDATE {TABLE} SET parent_id=?, depth=? "
+            f"WHERE owner_dept_id=? AND parent_id=? AND deleted_at IS NULL",
             (
                 row["parent_id"],
                 max(0, int(row["depth"])),
@@ -129,9 +177,9 @@ def main() -> int:
         )
         cur.execute(
             f"UPDATE {TABLE} SET deleted_at=? WHERE id=?",
-            (datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f"), row["id"]),
+            (_now(), row["id"]),
         )
-        print(f"    ✓ 已提升子树并软删 id={row['id']}")
+        print(f"    ✓ 提升子树并软删 id={row['id']}{MARK}")
 
     if args.clear_channel_civil_codes and has_column(cur, "gb_channel", "civil_code"):
         bad_channels = list(
@@ -141,16 +189,16 @@ def main() -> int:
         print(f"· gb_channel 中 civil_code 不合法的通道 {len(bad_channels)} 条")
         for channel in bad_channels[:10]:
             print(f"  - id={channel['id']} {channel['channel_id']} civil_code={channel['civil_code']!r}")
-        if args.apply:
-            for channel in bad_channels:
-                cur.execute("UPDATE gb_channel SET civil_code='' WHERE id=?", (channel["id"],))
-            print("  ✓ 已清空这些通道的 civil_code（目录树会落到「未知行政区」兜底）")
+        for channel in bad_channels:
+            cur.execute("UPDATE gb_channel SET civil_code='' WHERE id=?", (channel["id"],))
+        print(f"  ✓ 清空这些通道的 civil_code（目录树会落到「未知行政区」兜底）{MARK}")
 
     if args.apply:
         con.commit()
         print("✓ 已提交")
     else:
-        print("· 未写入（加 --apply 才真清理）")
+        con.rollback()
+        print("· 预览结束，改动已回滚（加 --apply 才真写库）")
     con.close()
     return 0
 
