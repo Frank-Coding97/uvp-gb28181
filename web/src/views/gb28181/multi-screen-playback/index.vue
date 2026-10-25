@@ -151,7 +151,10 @@ async function playSlot(target: PlaybackSlot, silentRequestError = false) {
   } catch (error: any) {
     if (target.token !== token || target.channel?.id !== channel.id) return false;
     target.status = "error";
-    target.error = error?.message || "点播失败，请重试";
+    // 优先用后端 message：点播失败的真实原因（对端状态码 + reason，例如
+    // "对端拒绝点播: 400 none rtp data receive on udp://…"）只在这里，
+    // axios 自带的 "Request failed with status code 400" 没有任何排查价值。
+    target.error = error?.response?.data?.message || error?.message || "点播失败，请重试";
     return false;
   }
 }

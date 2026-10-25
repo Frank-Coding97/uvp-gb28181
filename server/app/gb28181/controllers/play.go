@@ -469,6 +469,14 @@ func mapPlayErr(err error) string {
 		return "流就绪超时,设备未推流"
 	case errors.Is(err, play.ErrPlayTimeout):
 		return "点播超时"
+	case errors.Is(err, play.ErrInviteRejected):
+		// 对端明确拒绝了 INVITE,通常会把真实原因写进 reason phrase
+		// (例如 LiveGBS 的 "none rtp data receive on udp://…:30050")。
+		// 只回一句"点播失败"会把排查方向彻底抹掉,必须透传。
+		if detail := play.InviteRejectionDetail(err); detail != "" {
+			return "对端拒绝点播: " + detail
+		}
+		return "对端拒绝点播"
 	default:
 		return "点播失败"
 	}

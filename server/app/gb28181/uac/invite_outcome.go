@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/emiago/sipgo"
@@ -16,6 +17,46 @@ import (
 // ErrStaleInviteGeneration 本 INVITE 的 ACK 已完成,但较新的代次已占据同一
 // streamID,结果被 SessionManager 拒绝写入。设备端会话已 BYE,本地 dialog 已关。
 var ErrStaleInviteGeneration = errors.New("uac: stale invite generation")
+
+// ErrInviteRejected 对端用 3xx-5xx 终态明确拒绝了 INVITE。
+//
+// ⛔ 必须和"超时"分开判定:超时是"没人回答"(查注册/网络/端口),拒绝是
+// "对方答了但不同意"(看它写的原因)。混成一句"点播失败"等于把排查方向抹掉。
+var ErrInviteRejected = errors.New("uac: invite rejected")
+
+// InviteRejectedError 携带对端状态码与 reason phrase。
+//
+// 对端常把真实原因写在 reason 里 —— LiveGBS 3.6.10 实际回的是
+// `400 ack sms[...] failed, res[400] none rtp data receive on udp://...:30050`,
+// 这条串一路透传到页面才有排查价值,只回 "点播失败" 等于什么都没说。
+type InviteRejectedError struct {
+	Status int
+	Reason string
+}
+
+// Detail 返回 "状态码 reason" 的形式,供上层直接拼进用户可见文案。
+func (e *InviteRejectedError) Detail() string {
+	if e == nil {
+		return ""
+	}
+	if reason := strings.TrimSpace(e.Reason); reason != "" {
+		return strconv.Itoa(e.Status) + " " + reason
+	}
+	return strconv.Itoa(e.Status)
+}
+
+func (e *InviteRejectedError) Error() string {
+	if e == nil {
+		return "对端拒绝 INVITE"
+	}
+	if strings.TrimSpace(e.Reason) == "" {
+		return fmt.Sprintf("对端拒绝 INVITE: %d", e.Status)
+	}
+	return "对端拒绝 INVITE: " + e.Detail()
+}
+
+// Is 让 errors.Is(err, ErrInviteRejected) 对任意状态码都成立。
+func (e *InviteRejectedError) Is(target error) bool { return target == ErrInviteRejected }
 
 // ErrStaleInviteCleanupFailed stale 会话的设备端清理(BYE/Close)未确认成功,
 // 设备可能仍按旧代次推流 —— 调用方需隔离 SSRC,防止回池后被新代次复用造成双流冲突。
@@ -32,6 +73,7 @@ type InviteOutcome struct {
 	SentAt      time.Time
 
 	FinalStatus     int
+	FinalReason     string
 	FinalResponseAt time.Time
 	AckSucceeded    bool
 	AckAt           time.Time
@@ -51,6 +93,9 @@ type inviteDialog interface {
 	Bye(context.Context) error
 	Close() error
 	FinalStatus() int
+	// FinalReason 是终态应答的 reason phrase。对端把真实拒绝原因写在这里,
+	// 必须能取出来透传给调用方(见 InviteRejectedError)。
+	FinalReason() string
 }
 
 type inviteDialogTransport interface {
@@ -108,6 +153,17 @@ func (d *sipgoInviteDialog) FinalStatus() int {
 	return status
 }
 
+// FinalReason 返回终态应答的 reason phrase(如 "ack sms[...] failed, res[400] ...")。
+func (d *sipgoInviteDialog) FinalReason() string {
+	if d == nil || d.session == nil || d.session.InviteResponse == nil {
+		return ""
+	}
+	if d.session.InviteResponse.StatusCode < 200 {
+		return ""
+	}
+	return d.session.InviteResponse.Reason
+}
+
 func newInviteRequestID(s *Session) string {
 	if s != nil && s.RequestID != "" {
 		return s.RequestID
@@ -121,8 +177,23 @@ func (o *InviteOutcome) captureFinalStatus(dialog inviteDialog) {
 	}
 	if status := dialog.FinalStatus(); status >= 200 {
 		o.FinalStatus = status
+		o.FinalReason = dialog.FinalReason()
 		o.FinalResponseAt = time.Now()
 	}
+}
+
+// inviteAnswerFailure 统一"等到应答但没成功"的错误形态。
+//
+// 对端给了 3xx-5xx 终态就是**拒绝**(带状态码 + reason phrase,可 errors.Is
+// 到 ErrInviteRejected);其余情况(事务终止、内部错误)原样带出。
+func inviteAnswerFailure(waitErr error, outcome InviteOutcome) error {
+	if outcome.FinalStatus >= 300 {
+		return fmt.Errorf("等待 INVITE 应答失败: %w", &InviteRejectedError{
+			Status: outcome.FinalStatus,
+			Reason: outcome.FinalReason,
+		})
+	}
+	return fmt.Errorf("等待 INVITE 应答失败: %w", waitErr)
 }
 
 // InviteTracked is the structured-result form of Invite. Every path returns
@@ -130,7 +201,9 @@ func (o *InviteOutcome) captureFinalStatus(dialog inviteDialog) {
 // original wrapped error for callers that still use error semantics.
 func (u *UAC) InviteTracked(ctx context.Context, m *SessionManager, s *Session, sdpBody string) (InviteOutcome, error) {
 	outcome := InviteOutcome{RequestID: newInviteRequestID(s)}
-	ctx, cancel := withSIPCommandTimeout(ctx)
+	// 等待窗口 = SIP 命令超时 + 迟到应答宽限。理由见 withInviteAnswerWindow:
+	// 下级常在自己的媒体超时(≈10s)之后才回 4xx,恰好落在我方超时之后。
+	ctx, cancel := withInviteAnswerWindow(ctx)
 	defer cancel()
 
 	if s == nil {
@@ -199,7 +272,7 @@ func (u *UAC) InviteTracked(ctx context.Context, m *SessionManager, s *Session, 
 			s.State = StateIdle
 			_ = dialog.Close()
 			u.recordEnd(callID, cseq, outcome.FinalStatus, false)
-			wrapped := fmt.Errorf("等待 INVITE 应答失败: %w", waitErr)
+			wrapped := inviteAnswerFailure(waitErr, outcome)
 			outcome.Error = wrapped
 			return outcome, wrapped
 		}

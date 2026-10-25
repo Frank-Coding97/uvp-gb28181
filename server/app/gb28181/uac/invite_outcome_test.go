@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/emiago/sipgo/sip"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
 	"uvplatform.com/uvp-gb28181/app/gb28181/metrics"
 )
 
@@ -15,6 +16,7 @@ type inviteOutcomeDialog struct {
 	waitErr    error
 	ackErr     error
 	statusCode int
+	reason     string
 
 	byeErr   error
 	closeErr error
@@ -33,7 +35,8 @@ func (d *inviteOutcomeDialog) Close() error {
 	d.closeCalls++
 	return d.closeErr
 }
-func (d *inviteOutcomeDialog) FinalStatus() int { return d.statusCode }
+func (d *inviteOutcomeDialog) FinalStatus() int    { return d.statusCode }
+func (d *inviteOutcomeDialog) FinalReason() string { return d.reason }
 
 type inviteOutcomeTransport struct {
 	dialog inviteDialog
@@ -289,5 +292,85 @@ func TestInviteCompatibilityWrapperPreservesErrorContract(t *testing.T) {
 
 	if err == nil || !errors.Is(err, ackErr) {
 		t.Fatalf("legacy Invite error=%v, want wrapped ACK error", err)
+	}
+}
+
+// TestInviteTrackedRejectionCarriesPeerReason 回归 2026-10-25 级联验收缺陷:
+// 对端(LiveGBS)回 400 时把真实原因写在 reason phrase 里,原实现只留一句
+// "等待 INVITE 应答失败",控制器再翻译成"点播失败" —— 原因彻底丢失。
+func TestInviteTrackedRejectionCarriesPeerReason(t *testing.T) {
+	const reason = "ack sms[34020000002020000001] failed, res[400] none rtp data receive on udp://192.0.2.9:30050"
+	dialog := &inviteOutcomeDialog{
+		waitErr:    errors.New("Invite failed with response: SIP/2.0 400 " + reason),
+		statusCode: sip.StatusBadRequest,
+		reason:     reason,
+	}
+	u := newInviteOutcomeTestUAC(&inviteOutcomeTransport{dialog: dialog})
+	s := validInviteOutcomeSession()
+
+	outcome, err := u.InviteTracked(context.Background(), NewSessionManager(), s, "v=0\r\n")
+
+	if err == nil || !errors.Is(err, ErrInviteRejected) {
+		t.Fatalf("err=%v, want ErrInviteRejected", err)
+	}
+	if outcome.FinalStatus != sip.StatusBadRequest || outcome.FinalReason != reason {
+		t.Fatalf("outcome=%+v, want 400 + peer reason", outcome)
+	}
+	var rejected *InviteRejectedError
+	if !errors.As(err, &rejected) {
+		t.Fatalf("err=%v, want *InviteRejectedError in chain", err)
+	}
+	if want := "400 " + reason; rejected.Detail() != want {
+		t.Fatalf("detail=%q, want %q", rejected.Detail(), want)
+	}
+	// 拒绝不是超时:不能让调用方按"没人应答"处理(查注册/网络)。
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err=%v, rejection must not look like a deadline", err)
+	}
+}
+
+// TestInviteTrackedRejectionWithoutReasonKeepsStatusCode 对端只给状态码时,
+// 文案仍要带状态码 —— "对端拒绝 INVITE: 403" 比"点播失败"有排查价值。
+func TestInviteTrackedRejectionWithoutReasonKeepsStatusCode(t *testing.T) {
+	dialog := &inviteOutcomeDialog{
+		waitErr:    errors.New("Invite failed with response: SIP/2.0 403 Forbidden"),
+		statusCode: sip.StatusForbidden,
+	}
+	u := newInviteOutcomeTestUAC(&inviteOutcomeTransport{dialog: dialog})
+
+	_, err := u.InviteTracked(context.Background(), NewSessionManager(), validInviteOutcomeSession(), "v=0\r\n")
+
+	var rejected *InviteRejectedError
+	if !errors.As(err, &rejected) || rejected.Detail() != "403" {
+		t.Fatalf("err=%v, want rejection with bare status code", err)
+	}
+}
+
+// TestInviteAnswerWindowCapsAtParentBudget 保证 INVITE 等待窗口:
+//   - 预算充足时 = SIP 命令超时 + 宽限(接住对端迟到的终态应答);
+//   - 点播总预算更紧时不得突破父 ctx 的 deadline(否则页面会比后端先超时)。
+func TestInviteAnswerWindowCapsAtParentBudget(t *testing.T) {
+	soft := gbconfig.SIPCommandTimeout()
+
+	roomy, cancel := withInviteAnswerWindow(context.Background())
+	defer cancel()
+	deadline, ok := roomy.Deadline()
+	if !ok {
+		t.Fatal("window must carry a deadline")
+	}
+	if remaining := time.Until(deadline); remaining < soft+inviteLateAnswerGrace-time.Second {
+		t.Fatalf("window=%v, want about %v", remaining, soft+inviteLateAnswerGrace)
+	}
+
+	parent, parentCancel := context.WithTimeout(context.Background(), time.Second)
+	defer parentCancel()
+	limited, limitedCancel := withInviteAnswerWindow(parent)
+	defer limitedCancel()
+	limitedDeadline, ok := limited.Deadline()
+	if !ok {
+		t.Fatal("limited window must carry a deadline")
+	}
+	if remaining := time.Until(limitedDeadline); remaining > time.Second {
+		t.Fatalf("window=%v, must not outlive the parent budget", remaining)
 	}
 }

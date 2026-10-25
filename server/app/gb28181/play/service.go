@@ -155,7 +155,22 @@ var (
 	ErrStreamNotReady          = errors.New("流就绪等待超时")
 	ErrPlayTimeout             = errors.New("点播总超时")
 	ErrRequiredNodeUnavailable = errors.New("指定 ZLM 节点不可用")
+
+	// ErrInviteRejected 对端(设备或下级平台)用 3xx-5xx 终态拒绝了 INVITE。
+	// ⛔ 与超时严格区分:拒绝是"对方答了但不同意",对端通常会把原因写进
+	// reason phrase,必须原样透传到页面(见 InviteRejectionDetail)。
+	ErrInviteRejected = uac.ErrInviteRejected
 )
+
+// InviteRejectionDetail 取对端拒绝时的"状态码 + reason phrase",用于用户可见文案。
+// 非拒绝类错误返回 ""。
+func InviteRejectionDetail(err error) string {
+	var rejected *uac.InviteRejectedError
+	if errors.As(err, &rejected) {
+		return rejected.Detail()
+	}
+	return ""
+}
 
 // Service 点播 service:串联 ZLM 收流 + UAC INVITE + 流就绪等待
 //
