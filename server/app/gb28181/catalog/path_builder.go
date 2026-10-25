@@ -52,27 +52,22 @@ func DepthFromPath(path string) uint8 {
 // findOrCreateCivilCodeChain 行政区码逐级找节点;不存在则建
 //
 // 例:civilCode="370112" → 先找/建 "37"(省) → "3701"(市) → "370112"(区县)三级节点
-// 返回最末端节点。注:当前简化实现按 6 位级别(2+2+2)拆分,实际 GB/T 2260
-// 行政区码可能要按字典层级拆,Phase 2 可优化。
+// 返回最末端节点。GB/T 28181-2022 附录 J 允许 2/4/6/8 位编码，逐级按
+// "省(2) → 市(4) → 区县(6) → 街道/乡镇(8)" 每两位一级挂链。
 func findOrCreateCivilCodeChain(
 	db *gorm.DB,
 	ownerDeptID uint,
 	civilCode string,
 	cache map[string]*gbmodels.GbCatalogNode,
 ) (*gbmodels.GbCatalogNode, error) {
+	civilCode = normalizeCivilCodeChain(civilCode)
 	if civilCode == "" {
 		return nil, nil
 	}
-	// 按 6 位前缀:2 / 4 / 6 三级
-	codes := []string{}
-	if len(civilCode) >= 2 {
-		codes = append(codes, civilCode[:2])
-	}
-	if len(civilCode) >= 4 {
-		codes = append(codes, civilCode[:4])
-	}
-	if len(civilCode) == 6 || len(civilCode) == 8 {
-		codes = append(codes, civilCode)
+	// 按偶数位前缀逐级:2 / 4 / 6 / 8
+	codes := make([]string, 0, len(civilCode)/2)
+	for n := 2; n <= len(civilCode); n += 2 {
+		codes = append(codes, civilCode[:n])
 	}
 
 	var prev *gbmodels.GbCatalogNode
@@ -182,7 +177,7 @@ func findOrCreateNodeWithSource(
 		Source:         gbmodels.NodeSourceCatalog,
 	}
 	if nodeType == gbmodels.NodeTypeCivilCode {
-		n.CivilCode = code
+		n.CivilCode = catalogNodeCivilCode(code)
 	}
 	if err := db.Create(n).Error; err != nil {
 		return nil, err
@@ -291,4 +286,52 @@ func nodeDepthFromPath(path string) uint8 {
 // 真实名走 civilcode.Service.Lookup,这里给个兜底
 func civilCodeDisplayName(code string) string {
 	return "行政区 " + code
+}
+
+// normalizeCivilCodeChain 把上报的行政区划编码收敛成一个能建链的编码。
+//
+// ⛔⛔ 为什么必须收敛:GB/T 28181-2022 附录 J 允许行政区域目录项用 2/4/6/8 位
+// 编码,而 `gb_catalog_node.civil_code` 只有 6 位宽(SQLite 侧还物化成
+// `CHECK (length(civil_code) <= 6)`)。2026-10-25 用 LiveGBS 3.6.10 做级联验收时
+// 它上报 8 位 `37010301`,入库当场
+//
+//	constraint failed: CHECK constraint failed: civil_code (275)
+//
+// 单条事务回滚 ⇒ 整批 Catalog 一条都没进库,页面上通道全空;而日志里只有一句
+// "部分通道未入库",看起来像对端没发目录。
+//
+// 规则(只做"收敛",不改节点身份 —— 完整编码仍进 `code` 列):
+//   - 非纯数字 ⇒ ""(不建行政区节点,由上层 4 层兜底接管)
+//   - 长度 >= 8 ⇒ 前 8 位;6~7 ⇒ 前 6 位;4~5 ⇒ 前 4 位;2~3 ⇒ 前 2 位
+//   - 长度 < 2 ⇒ ""
+func normalizeCivilCodeChain(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if !isAllDigit(trimmed) {
+		return ""
+	}
+	switch {
+	case len(trimmed) >= 8:
+		return trimmed[:8]
+	case len(trimmed) >= 6:
+		return trimmed[:6]
+	case len(trimmed) >= 4:
+		return trimmed[:4]
+	case len(trimmed) >= 2:
+		return trimmed[:2]
+	default:
+		return ""
+	}
+}
+
+// catalogNodeCivilCode 返回能写进 `gb_catalog_node.civil_code`(6 位)的值。
+//
+// 8 位街道/乡镇级节点在这一列只保留前 6 位(它所属的区县)——该列是
+// "关联行政区(冗余加速过滤)",不是节点自身的身份;节点身份由 `code` 列承担。
+// 这一层是 normalizeCivilCodeChain 之外的第二道闸:任何调用方漏收敛都不会
+// 再触发 CHECK 约束、把整批目录拖下水。
+func catalogNodeCivilCode(code string) string {
+	if len(code) > 6 {
+		return code[:6]
+	}
+	return code
 }
