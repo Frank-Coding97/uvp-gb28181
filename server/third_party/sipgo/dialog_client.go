@@ -698,6 +698,14 @@ func newByeRequestUAC(inviteRequest *sip.Request, inviteResponse *sip.Response, 
 	if cont != nil {
 		// BYE is subsequent request
 		recipient = &cont.Address
+		// 部分下级平台会在 200 OK 里把本 UAC 的 Contact 原样回显（WVP-Pro
+		// v2.7.4 实测如此）。按 RFC 3261 §12.1.1 那确实是 remote target，
+		// 但指向自己的 BYE 只会打回本机监听端口、被自己的 SIP 栈回 481，
+		// 对端会话永远拆不掉，于是每次停播都报失败、对端还留着一条死会话。
+		// 与 newAckRequestUAC 保持同一处理：改用 INVITE 真正发往的地址。
+		if echoedLocalContact(inviteRequest, cont) {
+			recipient = inviteTargetUri(inviteRequest, cont)
+		}
 	}
 
 	byeRequest := sip.NewRequest(

@@ -573,3 +573,47 @@ func TestDialogClientRefreshDestinationPreservesDialogAndRoutes(t *testing.T) {
 		})
 	}
 }
+
+// TestNewByeRequestUACFallsBackWhenResponseEchoesLocalContact 钉住「对端回显
+// 我方 Contact 时 BYE 不能打回自己」这一条。
+//
+// WVP-Pro v2.7.4 之类的下级平台会在 200 OK 里把 UAC 的 Contact 原样抄回来。
+// 直接拿它当 Request-URI，BYE 会发向本机监听端口、被自己的 SIP 栈回
+// 481 Call/Transaction Does Not Exist：停播看起来永远失败，对端那条会话
+// 也永远拆不掉（下一个点播还会撞上它）。
+func TestNewByeRequestUACFallsBackWhenResponseEchoesLocalContact(t *testing.T) {
+	invite := newByeFixtureInvite()
+	invite.SetDestination("172.21.0.3:8160")
+
+	resp := sip.NewResponseFromRequest(invite, 200, "OK", nil)
+	resp.AppendHeader(sip.NewHeader("Contact", "<sip:34020000012000000001@192.168.10.220:52064>"))
+
+	bye := newByeRequestUAC(invite, resp, nil)
+	assert.Equal(t, "sip:34020000001320000001@172.21.0.3:8160", bye.Recipient.String(),
+		"回显我方 Contact 时必须回退到 INVITE 的实际目标，否则 BYE 打回自己")
+}
+
+// TestNewByeRequestUACKeepsWellFormedContact 是上面那条的反向守卫：
+// 对端正常给出自己的 Contact 时，BYE 必须原样用它，不能被回退逻辑误改。
+func TestNewByeRequestUACKeepsWellFormedContact(t *testing.T) {
+	invite := newByeFixtureInvite()
+	invite.SetDestination("172.21.0.3:8160")
+
+	resp := sip.NewResponseFromRequest(invite, 200, "OK", nil)
+	resp.AppendHeader(sip.NewHeader("Contact", "<sip:35020000002000000001@172.21.0.3:8160>"))
+
+	bye := newByeRequestUAC(invite, resp, nil)
+	assert.Equal(t, "sip:35020000002000000001@172.21.0.3:8160", bye.Recipient.String())
+}
+
+// newByeFixtureInvite 造一条带齐 dialog 必需头的最小 INVITE，供 BYE 构造测试使用。
+func newByeFixtureInvite() *sip.Request {
+	invite := sip.NewRequest(sip.INVITE, sip.Uri{User: "34020000001320000001", Host: "3402000001"})
+	invite.AppendHeader(sip.NewHeader("Via", "SIP/2.0/UDP 192.168.10.220:52064;branch=z9hG4bK.bye-fixture"))
+	invite.AppendHeader(sip.NewHeader("From", "<sip:34020000012000000001@3402000001>;tag=fixture-from"))
+	invite.AppendHeader(sip.NewHeader("To", "<sip:34020000001320000001@3402000001>"))
+	invite.AppendHeader(sip.NewHeader("Call-ID", "bye-fixture-call"))
+	invite.AppendHeader(sip.NewHeader("CSeq", "1 INVITE"))
+	invite.AppendHeader(sip.NewHeader("Contact", "<sip:34020000012000000001@192.168.10.220:52064>"))
+	return invite
+}
