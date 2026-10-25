@@ -119,6 +119,10 @@ func (dc *DirectoryController) Tree(c *gin.Context) {
 		dc.Fail(c, "筛选目录资源失败", err, http.StatusInternalServerError)
 		return
 	}
+	if err = fillDirectoryDeviceChannelCounts(c.Request.Context(), db, tree); err != nil {
+		dc.Fail(c, "统计设备通道数失败", err, http.StatusInternalServerError)
+		return
+	}
 	if c.Query("sync") == "1" {
 		scope, _ := json.Marshal([]any{deptIDs, view, c.Query("assetKind"), strings.TrimSpace(c.Query("q")), c.Query("status")})
 		dc.Success(c, dc.syncCache.Sync(string(scope), c.Query("since"), tree))

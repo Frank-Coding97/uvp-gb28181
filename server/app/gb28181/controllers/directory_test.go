@@ -238,7 +238,7 @@ func TestDirectoryControllerCustomUngroupedNodesAreDeptScopedAndReadable(t *test
 	app.Response = response.NewResponseHandler()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbCustomGroup{}, &gbmodels.GbCustomGroupDevice{}, &basemodels.SysDepartment{}))
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &gbmodels.GbCustomGroup{}, &gbmodels.GbCustomGroupDevice{}, &basemodels.SysDepartment{}))
 	require.NoError(t, db.Create(&[]basemodels.SysDepartment{
 		{BaseModel: basemodels.BaseModel{ID: 10}, Name: "研发部"},
 		{BaseModel: basemodels.BaseModel{ID: 20}, Name: "运维部"},
