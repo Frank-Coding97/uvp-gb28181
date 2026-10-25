@@ -267,6 +267,13 @@ func (m *cascadeCatalogSubscriptions) Handle(req *sip.Request, tx sip.ServerTran
 	}
 	response := sip.NewResponseFromRequest(req, 200, "OK", nil)
 	response.AppendHeader(sip.NewHeader("Expires", strconv.Itoa(expires)))
+	// 200 必须回显 Event（含订阅标识 id）。上级平台把这条响应当成订阅事务的唯一凭据：
+	// WVP 收到 200 后用 SipTransactionInfo(response) 存 Call-ID / 两个 tag / **Event id**，
+	// 到期续订时沿用存下来的 id。响应里没有 Event 头 => 它存到 null => 续订时
+	// `createSubscribeRequest` 走 `Math.random()` 重新生成 id => 我们按
+	// platformID|CallID|FromTag|event 建索引就永远查不到 => 每次续订都 481，
+	// 表现为「订阅只活一个周期、目录变更再也不会自动同步」。
+	response.AppendHeader(sip.NewHeader("Event", event))
 	response.AppendHeader(&sip.ContactHeader{Address: sip.Uri{Scheme: "sip", User: p.LocalDeviceID, Host: p.LocalSIPIP, Port: p.LocalSIPPort}})
 	cloned := req.Clone()
 	from := response.To().AsFrom()
@@ -343,6 +350,9 @@ func (m *cascadeCatalogSubscriptions) refresh(ctx context.Context, req *sip.Requ
 	}
 	response := sip.NewResponseFromRequest(req, 200, "OK", nil)
 	response.AppendHeader(sip.NewHeader("Expires", strconv.Itoa(expires)))
+	// 续订的 200 同样要回显 Event：对端拿这条响应重建事务信息，漏了就等于
+	// 每个周期都换一次订阅标识，下一轮照样 481。
+	response.AppendHeader(sip.NewHeader("Event", event))
 	response.AppendHeader(&sip.ContactHeader{Address: sip.Uri{Scheme: "sip", User: p.LocalDeviceID, Host: p.LocalSIPIP, Port: p.LocalSIPPort}})
 	if err := tx.Respond(response); err != nil {
 		return true

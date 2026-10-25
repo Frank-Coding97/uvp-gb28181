@@ -39,6 +39,8 @@ func TestCascadeCatalogSubscriptionLifecycle(t *testing.T) {
 			defer tx.Terminate()
 			require.True(t, manager.Handle(req, tx))
 			require.Equal(t, 200, tx.Result()[0].StatusCode)
+			// 200 必须回显 Event：对端（WVP）就是用这条响应里的 Event id 续订的。
+			require.Equal(t, "Catalog;id=7", tx.Result()[0].GetHeader("Event").Value())
 			notify := awaitCascadeStatusResponse(t, transport.requests)
 			require.Equal(t, sip.NOTIFY, notify.Method)
 			require.Equal(t, req.CallID().Value(), notify.CallID().Value())
@@ -63,6 +65,8 @@ func TestCascadeCatalogSubscriptionLifecycle(t *testing.T) {
 			defer refreshTx.Terminate()
 			require.True(t, manager.Handle(refresh, refreshTx))
 			require.Equal(t, 200, refreshTx.Result()[0].StatusCode)
+			// 续订的 200 同样要回显，否则下一个周期又会换标识。
+			require.Equal(t, "Catalog;id=7", refreshTx.Result()[0].GetHeader("Event").Value())
 			active := awaitCascadeStatusResponse(t, transport.requests)
 			require.Contains(t, active.GetHeader("Subscription-State").Value(), "active")
 			cancel := refresh.Clone()
@@ -317,6 +321,32 @@ func TestCascadeCatalogSubscriptionRequiresEventID(t *testing.T) {
 	req.RemoveHeader("Event")
 	req.AppendHeader(sip.NewHeader("Event", "Catalog"))
 	require.Equal(t, 489, subscribeCatalog(t, m, req).StatusCode)
+}
+
+// 上级平台（WVP）把 200 OK 里的 Event id 当作订阅事务凭据：收到 200 时用
+// SipTransactionInfo(response) 记下 Call-ID / 两个 tag / Event id，到期续订沿用。
+// 200 里漏了 Event 头，它存到的 id 就是 null，续订时改用 Math.random() 重新生成，
+// 订阅索引立刻对不上 —— 表现为「订阅只活一个周期，之后每轮续订都 481」。
+func TestCascadeCatalogSubscriptionEchoesEventIDForUpstreamRefresh(t *testing.T) {
+	_, p, store := cascadeDeviceStatusFixture(t, "2022")
+	tr := &cascadeStatusTransport{requests: make(chan *sip.Request, 10)}
+	m := newCascadeCatalogSubscriptions(store, newCascadePlatformClientFactory(tr, nil, time.Hour), time.Hour)
+	defer m.Shutdown(context.Background())
+	req := newCatalogSubscribeRequest(t, p, p.LocalDeviceID)
+	accepted := subscribeCatalog(t, m, req)
+	require.Equal(t, 200, accepted.StatusCode)
+	require.Equal(t, "Catalog;id=1", accepted.GetHeader("Event").Value())
+	awaitCascadeStatusResponse(t, tr.requests)
+
+	// 续订沿用 200 里回显的 id，必须认成同一个 dialog，而不是 481。
+	tag, _ := accepted.To().Params.Get("tag")
+	refresh := req.Clone()
+	refresh.To().Params.Add("tag", tag)
+	refresh.CSeq().SeqNo = 2
+	refreshed := subscribeCatalog(t, m, refresh)
+	require.Equal(t, 200, refreshed.StatusCode)
+	require.Equal(t, "Catalog;id=1", refreshed.GetHeader("Event").Value())
+	awaitCascadeStatusResponse(t, tr.requests)
 }
 
 func TestCascadeCatalogSubscriptionMultipleUpstreamsKeepPublishedIDsSeparate(t *testing.T) {
