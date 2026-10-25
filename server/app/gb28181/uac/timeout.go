@@ -20,6 +20,17 @@ func withSIPCommandTimeout(parent context.Context) (context.Context, context.Can
 	return context.WithTimeout(parent, gbconfig.SIPCommandTimeout())
 }
 
+// InviteAnswerWindow 是实时点播 INVITE 的完整等待窗口(含迟到终态宽限)。
+//
+// ⛔⛔ 调用方**不要**再用 SIPCommandTimeout() 给父 ctx 加限制:
+// context.WithTimeout 只取更早的那个 deadline,父层一旦卡在 SIP 命令超时,
+// 这里的宽限会被整段吃掉,迟到的终态照样丢。2026-10-25 就这么踩过:
+// play/service.go 在调用 InviteTracked 前套了 SIPCommandTimeout(),窗口实测
+// 仍是 10.0s,直到把这层换成本函数才真正生效。
+func InviteAnswerWindow() time.Duration {
+	return gbconfig.SIPCommandTimeout() + inviteLateAnswerGrace
+}
+
 // withInviteAnswerWindow 给实时点播的 INVITE 一个比 SIP 命令超时略宽的等待窗口。
 //
 // ⛔ 为什么不能只用 SIP 命令超时(默认 10s):下级平台/设备常常要等**自己的媒体
@@ -38,5 +49,5 @@ func withInviteAnswerWindow(parent context.Context) (context.Context, context.Ca
 	if parent == nil {
 		parent = context.Background()
 	}
-	return context.WithTimeout(parent, gbconfig.SIPCommandTimeout()+inviteLateAnswerGrace)
+	return context.WithTimeout(parent, InviteAnswerWindow())
 }

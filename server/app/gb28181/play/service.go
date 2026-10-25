@@ -935,7 +935,10 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 		Transport:  dev.Transport,
 	}
 
-	inviteCtx, inviteCancel := context.WithTimeout(playCtx, gbconfig.SIPCommandTimeout())
+	// ⛔ 这里必须用 InviteAnswerWindow 而不是 SIPCommandTimeout:后者会把父
+	// deadline 卡在 SIP 命令超时上,InviteTracked 内部的"迟到的终态"宽限
+	// 会被 context.WithTimeout 取更早 deadline 的规则整段吃掉。
+	inviteCtx, inviteCancel := context.WithTimeout(playCtx, uac.InviteAnswerWindow())
 	defer inviteCancel()
 	outcome, inviteErr := s.inviter.InviteTracked(inviteCtx, s.sessions, sess, body)
 	if outcome.RequestSent {

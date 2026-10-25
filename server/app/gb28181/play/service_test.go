@@ -27,6 +27,14 @@ func TestMain(m *testing.M) {
 	if app.ZapLog == nil {
 		app.ZapLog = zap.NewNop()
 	}
+	// ⛔⛔ 必须给一个显式关闭"固定点播地址"的默认配置。
+	// FixedAddressPlaybackSettingsFrom 对 nil 配置的默认值是 FixedAddressEnabled=true
+	// (2026-10-20 交付包口径改成默认开启),而本包的 service 都用单节点 New() 构造,
+	// 一旦走固定地址分支就直接撞 ErrFixedPlaybackRequiresManagedNode ——
+	// 这也是本包二十来个用例长期红的唯一原因。需要测固定地址的用例自己覆盖此值。
+	if app.ConfigYml == nil {
+		app.ConfigYml = playbackSource(15000)
+	}
 	os.Exit(m.Run())
 }
 
@@ -108,10 +116,15 @@ func (f *fakePlaybackRecordingLifecycle) EndPlayback(context.Context, string) er
 type delayedInviter struct {
 	delay     time.Duration
 	onSuccess func(*uac.Session)
-	byeCalls  atomic.Int32
+	// onEnter 在 InviteTracked 一进来就调用,用来观察调用方给的 ctx 窗口。
+	onEnter  func(context.Context)
+	byeCalls atomic.Int32
 }
 
 func (m *delayedInviter) InviteTracked(ctx context.Context, _ *uac.SessionManager, s *uac.Session, _ string) (uac.InviteOutcome, error) {
+	if m.onEnter != nil {
+		m.onEnter(ctx)
+	}
 	outcome := uac.InviteOutcome{RequestID: s.RequestID, CallID: "delayed-call", CSeq: "1", RequestSent: true, SentAt: time.Now()}
 	select {
 	case <-time.After(m.delay):
@@ -163,6 +176,11 @@ func playbackSource(timeoutMs int) *playbackSettingsSource {
 		gbconfig.PlayRequestTimeoutMsConfigKey:         timeoutMs,
 		gbconfig.DefaultChannelOnDemandLiveConfigKey:   true,
 		gbconfig.DefaultChannelCloudRecordingConfigKey: false,
+		// ⛔ 必须显式关掉: FixedAddressPlaybackSettingsFrom 对"未配置"的默认值
+		// 是 **true**(2026-10-20 交付包口径改成默认开启)。不关的话这些用例会走
+		// 固定点播地址分支,而 New() 是单节点 service,直接撞
+		// ErrFixedPlaybackRequiresManagedNode —— 这就是本包 21 个用例长期红的原因。
+		gbconfig.FixedAddressEnabledConfigKey: false,
 	}}
 }
 
@@ -286,7 +304,7 @@ func testCfg() gbconfig.Config {
 		SIP: gbconfig.SIPConfig{ServerID: "34020000002000000001", Domain: "3402000000"},
 		// SDPIP 是必填的：没有它点播会以「未配置 SDP 地址」失败 ——
 		// 这正是防住「SDP 写 127.0.0.1、注册成功却没有画面」的那道闸。
-		ZLM: gbconfig.ZLMConfig{Host: "192.168.10.222", SDPIP: "192.168.10.222", HTTPPort: 80, RTPPort: 40000},
+		ZLM:   gbconfig.ZLMConfig{Host: "192.168.10.222", SDPIP: "192.168.10.222", HTTPPort: 80, RTPPort: 40000},
 		Media: gbconfig.MediaConfig{StreamNoneReaderTimeout: 20},
 	}
 }
@@ -953,5 +971,52 @@ func TestStartReuseMultipleClients(t *testing.T) {
 	// 只应开一次 RTP 端口
 	if z.openCalls.Load() != 1 {
 		t.Errorf("应只开一次 RTP 端口,实际调用 %d 次", z.openCalls.Load())
+	}
+}
+
+// TestInviteWindowKeepsLateAnswerGrace 守住"InviteTracked 的等待窗口必须比
+// SIP 命令超时更宽"这条契约。
+//
+// ⛔ 曾经的真实缺陷(2026-10-25): Start 在调用 InviteTracked 之前套了一层
+// context.WithTimeout(playCtx, SIPCommandTimeout()),而 context.WithTimeout
+// 只取更早的 deadline ⇒ InviteTracked 内部"超时 + 2s 宽限"被压回 10.0s,
+// 对端在超时之后才回的 4xx 依旧整条丢失,修复形同没做。
+func TestInviteWindowKeepsLateAnswerGrace(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	// 总预算必须远大于 INVITE 窗口,否则父 deadline 合法地成为瓶颈,
+	// 这个用例就测不出"谁把窗口压小了"。
+	app.ConfigYml = playbackSource(60000)
+
+	window := make(chan time.Duration, 1)
+	inv := &delayedInviter{
+		delay: 50 * time.Millisecond,
+		onEnter: func(ctx context.Context) {
+			if deadline, ok := ctx.Deadline(); ok {
+				window <- time.Until(deadline)
+				return
+			}
+			window <- 0
+		},
+	}
+	s, _, _ := newSvc(t, &mockZLM{port: 40000}, inv, onlineDevice(), aChannel())
+	s.SetReadyTimings(200*time.Millisecond, 10*time.Millisecond)
+
+	// 父 ctx 必须比 INVITE 窗口宽,否则它自己就成了瓶颈,测不出真实窗口。
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	go func() { _, _ = s.Start(ctx, "34020000001320000002", "12345678911116666661") }()
+
+	select {
+	case got := <-window:
+		base := gbconfig.SIPCommandTimeout()
+		if got <= base {
+			t.Fatalf("INVITE 窗口 %v 未超过 SIP 命令超时 %v: 迟到终态的宽限被父 deadline 吃掉了", got, base)
+		}
+		if got > base+3*time.Second {
+			t.Fatalf("INVITE 窗口 %v 超出预期(SIP 命令超时 %v + 宽限 2s)", got, base)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("五秒内没有进入 INVITE 阶段")
 	}
 }
