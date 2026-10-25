@@ -42,7 +42,7 @@ func loadStatements(t *testing.T) []string {
 
 // TestBaselineGoldenCounts 钉住「基线能切出多少个对象」。
 //
-// ⛔ 这三个数字是 Linux 绿色包安装时打印的那三个（`114 张表 · 315 个索引 ·
+// ⛔ 这三个数字是 Linux 绿色包安装时打印的那三个（`116 张表 · 327 个索引 ·
 //
 //	38 条种子语句`）。数字变了就说明 baseline.sql 换了版本 —— 那时应当**显式**
 //	更新本用例，而不是让它悄悄漂移。
@@ -50,6 +50,11 @@ func loadStatements(t *testing.T) []string {
 // ⚠️ 2026-10-19 对齐：基线在 b8051d62（菜单排序/图标去重）里重新生成过
 //	（manifest.json 的 tables 已经是 114），而本用例当时没跟着改 ⇒ 一直是红的。
 //	以后核对的捷径：`jq .tables manifest.json` 必须等于这里的建表数。
+//
+// ⚠️ 2026-10-25 再次对齐：期间又进了两张表（manifest 已 116），指数涨到 326，
+//	本用例仍停在 114/315 ⇒ 又是红的。同日 gb_talk_session 补了 3 个 openapi 列
+//	和 idx_talk_session_openapi_idempotency，索引 326 → 327。
+//	**这次的教训**：改了 schema 就要顺手跑本用例，否则 golden 数字会一直落后。
 func TestBaselineGoldenCounts(t *testing.T) {
 	stmts := loadStatements(t)
 	phases, counted, dupes, total := planStatements(stmts)
@@ -60,11 +65,11 @@ func TestBaselineGoldenCounts(t *testing.T) {
 			counts[phases[i]]++
 		}
 	}
-	if got := counts[phaseTable]; got != 114 {
-		t.Errorf("建表语句数 = %d，期望 114", got)
+	if got := counts[phaseTable]; got != 116 {
+		t.Errorf("建表语句数 = %d，期望 116", got)
 	}
-	if got := counts[phaseIndex]; got != 315 {
-		t.Errorf("能真正建出的索引数 = %d，期望 315", got)
+	if got := counts[phaseIndex]; got != 327 {
+		t.Errorf("能真正建出的索引数 = %d，期望 327", got)
 	}
 	if got := counts[phaseSeed]; got != 38 {
 		t.Errorf("种子数据语句数 = %d，期望 38", got)
