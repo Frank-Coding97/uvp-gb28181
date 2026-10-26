@@ -39,6 +39,11 @@
 | P-016 | 级联语音广播整条链路不通：应答判身份不符 → 音频 INVITE 匹配不上 → 认领与应答抢同一行 | **是（广播/对讲用例）** | **已关闭** | A-AUD-01/02 |
 | P-017 | 目录订阅被接受后的首个 NOTIFY 只带差量，目录无变化时 `SumNum=0`（等于告诉上级「没有任何资源」） | 否 | 待决策 | A-SUB-01 |
 | P-018 | 同一对话框刷新/取消时若对端轮换了 `Event: …;id=`，我方按新会话找不到而回 481 | 否 | 待定性 | A-SUB-03 |
+| **P-019** | **「下级注销后级联列表仍显示在线」= 误判**（该行是「上级方向」的注册事实，与下级无关） | 否 | **非缺陷** | B-REG-04 |
+| P-020 | 播放控制台「拉流超时」后反复重试永远超时（失败实例未被销毁） | 否 | **已关闭** | B-LIVE-01/03/04 |
+| P-021 | 停播收尾告警被当成失败 ⇒ 整个 DELETE 返回 400（提示「停止流失败」），随后该通道无法正常重播 | 否 | **已修复** | B-LIVE-02 |
+| P-022 | 下级不提供 `DeviceName` 时设备名为空串，列表把同一个编码显示两遍（名称列 + 编码列） | 否 | 待修复 | B-REG-01 |
+| P-023 | 对端不支持的 `Event: PTZPosition` 订阅会按 1s/2s/4s… 无限重传，无退避上限 | 否 | 待定性 | B-CTRL-01 |
 
 ---
 
@@ -427,6 +432,150 @@
 
 ---
 
+## P-019 「下级注销后级联列表仍显示在线」= 误判，非缺陷
+
+- **发现时间**：2026-10-26 18:5x（方向 B，LiveGBS 作下级）；复核 19:1x
+- **原始记录**：9.5 节记为「LiveGBS 关开关会真的发注销，`gb_device.status` 立刻变 0，但级联列表一直显示在线」，
+  并据此推断 `gb_cascade_platform.register_at/register_expires_at` 缺写入。
+- **复核结论：该推断不成立。** 两个列表说的不是同一条关系：
+
+  | 界面 | 数据来源 | 表示的关系 |
+  |---|---|---|
+  | **设备列表 / 通道列表** | `gb_device.status`、`gb_channel.status` | 下级平台注册到**我方**（我方作上级） |
+  | **国标级联页（上级平台列表）** | `gb_cascade_platform.register_at / register_expires_at / heartbeat_at` | **我方**向上级注册（我方作下级） |
+
+  `gb_cascade_platform` 整张表是「上级方向」的：页面只有「新增上级」、列头是「上级平台 / 本平台身份」。
+  它的两个时间字段由 `cascade/runtime` 在**我方发出的** REGISTER / MESSAGE Keepalive 成功后写入，
+  与「别人注册到我方」无关。因此下级注销后该行仍在线是**正确**的 —— 我方对上级的注册还活着。
+- **现场证据（2026-10-26 19:1x）**：
+  1. 页面关掉 `LiveGBS-220` 行的启用开关（我方主动向上级注销）→ 3 秒内
+     `register_at/register_expires_at` 变 NULL、行显示「已停用」；重新打开 → 6 秒内「在线」，
+     「最近注册」刷新为 `19:13:11`。⇒ **上级方向的注销/重注册本来就是通的**。
+  2. 低位（下级）方向另行实测：LiveGBS 侧关级联 → 我方 19:19:55 收到
+     `event=gb28181.register.unregistered device_id=34020000002000000001 cseq=140`，
+     `gb_device.status` 立即 0（`offline_at=19:19:55`）、通道 `gb_channel.status` 同一毫秒一并置 0，
+     记录**未删除**；重新启用后 19:22:30 重注册，设备与通道双双回到在线。
+     ⇒ 方向 B 的注销链路（设备 + 通道 + 不删记录）**本来就是对的**。
+- **顺带排除的怀疑**：现场这台 220 存在**互相指向的环配置**（我方把 LiveGBS 配成上级、LiveGBS 又把我方配成上级），
+  所以「我方 级联页在线」与「下级设备离线」会同时出现。这是两台机器各配了一条，不是状态算错。
+- **不做的事（重要）**：**不要**为了「让下级注销影响级联行」往 handler 里加回写。
+  这样会在环配置下用「别人的注册」覆盖「我方自己的注册事实」，把一行真实在线覆盖成离线。
+- **状态**：非缺陷（误判），无需改代码。
+
+---
+
+## P-020 播放控制台「拉流超时」后反复重试永远超时
+
+- **发现时间**：2026-10-26 18:0x–18:4x（方向 B 点播阶段）
+- **现象**：同一通道第一次「拉流超时」后，点「重试」只会继续超时；把整个浏览器会话关掉重开才恢复。
+  控制台同时报 `TypeError: Cannot read properties of null (reading 'appendChild')`。
+- **根因**：`PlayWindow.vue` 的 `p.on("error")` / `p.on("timeout")` 只把 `errorMsg` 写出来，
+  **不销毁播放器实例**。EasyPlayer 同族（flv↔flv）切换按设计复用实例，于是重试等于在**一个已经坏掉的实例**上重放
+  ⇒ 永远不会自愈。
+- **修复**（`web/src/views/gb28181/components/PlayWindow.vue`）：新增 `discardBrokenInstance()`，
+  在 error / timeout / 初始化 catch 三条失败路径上 `destroy()`（仅当实例仍是当前实例时，避免误杀新实例）。
+- **验证**：
+  - 单测 `PlayWindow.test.ts` 新增「销毁超时的播放器实例，让重试能拿到全新实例」，
+    断言 timeout 后首个实例 `destroy` 被调用、再次 `play` 拿到的是**第 2 个**实例；该文件 22 条全绿；
+  - 现场（220，部署后）：`Camera 01` 在「点播未完成 / 拉流超时」状态下点一次「重试」→ 12 秒内转「播放中」并出图。
+- **状态**：已关闭（前端已部署回测）。
+
+---
+
+## P-021 停播收尾告警被当成失败 ⇒ 整个 DELETE 返回 400
+
+- **现象**（EasyGBS 作下级，`Camera 01`）：点「关闭」后前端顶部弹「停止流失败」，播放区停在
+  「点播未完成 / 拉流超时」；此后点「重试」仍然超时，**只有刷新页面**才能重新点播。
+- **日志**（220，2026-10-26 19:58:16）：
+  ```
+  WARN play  停播清理失败  reason_code=cleanup_failed duration_ms=105
+  INFO app   请求被拒  error="BYE 失败: Invite failed with response: SIP/2.0 400 pusher not exits"
+             route=/api/gb28181/play/:streamId method=DELETE http_status=400
+  ```
+  同一时刻 ZLM 的 5 个 schema 全部 `on_stream_changed regist=false` —— **媒体确实已经停了**。
+- **根因（2026-10-26 20:4x 现场复核后修正）**：最初怀疑的是 `recovery.go` 里
+  `if closeErr != nil { return errors.Join(byeErr, closeErr) }` 这条裸错误分支，**复核后排除**：
+  - `zlm.Client.CloseRtpServer`（`client.go:265`）已经把 `msg` 含 `not exist` / `不存在`
+    的返回码归一到 `nil`，所以「ZLM 早已拆掉收流服务」这一情形**根本不会**产生 `closeErr`；
+  - 现场 20:28:17 那次日志里只有一条 BYE 错误（`errors.Join` 多错误会用换行拼），
+    且 `CloseRtpServer` 之后确实解绑/清库成功，进一步证实 `closeErr == nil`；
+  - 真正的问题在**下游没人读标记**：`stopCurrentResult` 确实对 BYE 失败做了
+    `completedMediaStop(...)` 包装，但那个标记只被协调器 `finishStop` 用来判断
+    「要不要把会话留在待清理」，**HTTP 停播口只看 `err != nil`** ⇒ 媒体已停、BYE 告警，
+    照样 `FailAndAbort("停止流失败")` 回 400。
+  - ⛔ 同时确认 `recovery_stop_failure_test.go` 里已有反向断言：`closeErr` 失败必须
+    **保留 generation / SSRC / 授权**以便重试（`TestServiceStopCloseFailureKeepsGenerationTrackableAndRetryable`）。
+    所以正确修法是「补一个对外的判定入口」，而不是把 `closeErr` 一律包成已完成。
+- **为什么影响重播**：前端拿到 400 后认为停播没成功，本地会话状态不清理；
+  下次点播复用坏状态（后端其实点播成功，日志 `play.completed outcome=succeeded`，前端仍超时）。
+- **修法（已实施）**：
+  1. `play/coordinator.go`：把内部标记对外暴露成一对 —— `CompletedMediaStop(err)` 打标记、
+     `IsMediaStopCompleted(err)` 读标记（nil 视为已完成）；
+  2. `controllers/play.go` 停播口：`err != nil` 且**不是**收尾告警才回 400，
+     收尾告警一律按成功返回 `{released:true}`；真失败（ZLM 关流没走通）路径完全不变；
+  3. `play/service.go` 的 `stopDirect`（无协调器条目的老路径）同一处补齐：
+     `closeErr == nil` 时把 BYE/落库收尾失败也打上标记；`closeErr != nil` 仍然返回裸错误
+     （媒体状态未知，必须保持可重试）；
+  4. `openapi/play/dispatcher.go` 第三方停播口同源修正（同一个标记，不再回 `unavailable`，
+     否则客户端重试只会拿到 not-found）；
+  5. `play/service.go` 停播收尾的 WARN 补 `error` 字段，并把收尾告警的文案改成
+     「停播已完成，收尾告警」（事件名/等级不变）。**以前这句 WARN 不带任何错误细节**，
+     排查只能翻 SIP 抓包。
+- **验证**：
+  - 单测：`play` 包补「BYE 失败 ⇒ 标记成立」「关流失败 ⇒ 标记不成立」两条断言；
+    `controllers` 包补 `TestPlayControllerStopTreatsCompletedMediaStopAsSuccess`（200 + released）；
+    三个包（play / controllers / openapi-play）全量绿；
+  - 现场（220，2026-10-26 20:28:17）：点「停止当前直播」**正好命中原始条件**
+    （ZLM 5 个 schema `regist=false`、`停播清理失败` WARN），HTTP 已经是
+    `method=DELETE http_status=200`，前端弹「已停止直播」；随后再点「点播」11 秒转「播放中」并出图。
+- **状态**：已修复（2026-10-26，前端无需改动 —— 弹窗来自 axios 全局拦截器对非 2xx 的处理）。
+
+## P-022 下级不提供 `DeviceName` 时设备名为空，列表重复显示编码
+
+- **现象**（EasyGBS 作下级）：设备列表里该设备显示成
+  `34020000002000000003` / `34020000002000000003` 两行完全一样的编码，没有可读名称。
+- **证据**：
+  - 库里 `gb_device.name` 是**空串**；
+  - 后端日志 `DeviceInfo 回写成功 updated_field_count=3 name_updated=false
+    manufacturer_updated=true model_updated=true firmware_updated=true`
+    ⇒ EasyGBS 的 DeviceInfo 应答里确实没给 `DeviceName`（厂商/型号/固件都有）。
+- **定性**：不是解析 bug，属**对端不提供字段 + 前端兜底不当**。
+  期望兜底显示「未命名设备」之类，而不是拿编码顶两次。
+- **状态**：待修复（前端兜底）。
+
+## P-023 `Event: PTZPosition` 订阅被对端忽略时无限重传
+
+- **现象**（EasyGBS 作下级，我方注册成功后自动订阅）：我方对 `34020000002000000003` 连发
+  `SUBSCRIBE Event: PTZPosition`，EasyGBS **从头到尾没回过 200**，于是我方按
+  1s → 2s → 4s … 持续重发，`Call-ID: subscription-1793014955720587046`、`CSeq: 1` 完全不变。
+  抓包时间点：`19:42:35.720 / 36.221 / 37.222 / 39.222 / 43.223`。
+- **对照**：同一批 `Event: Catalog`、`Event: presence`（`CmdType=MobilePosition` / `Alarm`）
+  都拿到了 200，不发散 ⇒ 只有对端不支持的事件被无限重传。
+- **风险**：长期挂着一个不响应的订阅会周期性打空包；若多台下级都这样，信令链路会被无谓占用。
+- **建议**：给订阅重传设上限（如 64×T1/超时后放弃并记 WARN），别无限循环。
+- **状态**：待定性（是否属"对端不响应该放弃"还是"必须一直重试"，需产品口径）。
+
+---
+
+## 附：方向 B 在 EasyGBS 上的关键更正（推翻上一轮一条结论）
+
+上一轮（2026-10-26 17:5x）曾按「`cascade_event_subscriptions.go` 只实现响应、没有主动发
+SUBSCRIBE 的代码」判定 **B-ALM / B-SUB 链路缺失**。本轮抓包证明**该结论错误**：
+
+我方在下级注册成功后会主动发出 4 类订阅，EasyGBS 均正常应答：
+
+| 订阅 | 报文 | 对端应答 |
+|---|---|---|
+| 目录 | `SUBSCRIBE Event: Catalog` + `<CmdType>Catalog</CmdType>` | 200 + 两包 `NOTIFY`（`SumNum=7`） |
+| 位置 | `SUBSCRIBE Event: presence` + `<CmdType>MobilePosition</CmdType><Interval>30</Interval>` | 200 + `<Response><Result>ERROR</Result><Reason>Cann't get Position</Reason>`（对端无 GPS，属正常） |
+| 报警 | `SUBSCRIBE Event: presence` + `<CmdType>Alarm</CmdType>` | 200 |
+| 云台位置 | `SUBSCRIBE Event: PTZPosition` | **无应答**（见 P-023） |
+
+⇒ B-SUB-01（订阅下级目录）实际**已具备**；B-ALM-03（报警订阅）链路**通**，
+只是本轮没有报警源可触发（EasyGBS 侧无报警设备配置），无法验证推送内容。
+
+---
+
 ## 变更记录
 
 | 日期 | 变更 |
@@ -439,3 +588,6 @@
 | 2026-10-24 | 新增 P-015（阻断-云台用例）：级联目录漏发 `<Info><PTZType>`，EasyGBS 完全不给云台入口；已修复（含授权门控与「不伪造 0」）并回测 `ptz_type` 0→1、云台面板出现，状态转「已关闭」 |
 | 2026-10-24 | 新增 P-016（阻断-语音广播）：应答/INVITE 身份判据过窄 + 认领与应答抢同一行，三处叠加导致 WVP 语音广播无声；已修复并回测（153 个 RTP 包到达设备端 9740 端口），状态转「已关闭」 |
 | 2026-10-24 | A-SUB/A-POS/A-ALM 实机验证：目录订阅 200 + 变更推 `Event=UPDATE`、位置订阅 200 + 经纬度 NOTIFY、报警订阅 200 均拿到抓包；新增 P-017（首推 `SumNum=0`，待决策）、P-018（`Event` id 轮换导致 481，待定性）；P-001 补复核（单独开 `publish_platform` 时 WVP 侧正常，问题指向区划条目） |
+| 2026-10-26 | 方向 B 补测：B-CAT-02/03/04、B-CTRL-04、B-LIVE-03/04、B-REG-03/04、B-ST-02 通过；新增 P-019（「注销后仍显示在线」复核为误判，附两方向分别实测）、P-020（播放器失败实例不销毁，已修复并回测） |
+| 2026-10-26 | 方向 B 第三家 **EasyGBS** 跑完：注册/注销/目录（含手工刷新 7/7）/中文名/实时点播/停播回收/云台八方向全部通过；回放因对端无设备录像入口而明确提示空；新增 P-021（停播 400）、P-022（设备名为空）、P-023（PTZPosition 无限重传）；**更正上一轮「我方不主动订阅下级」的错误结论**（抓包见我方主动发 Catalog / MobilePosition / Alarm / PTZPosition 四类 SUBSCRIBE） |
+| 2026-10-26 | P-021 修复并现场回测：**根因修正**（不是 `CloseRtpServer` 报错 —— 那个已归一为 nil，而是「媒体已停」标记只在协调器内部生效、HTTP 停播口只看 `err != nil`）。新增对外判定 `CompletedMediaStop` / `IsMediaStopCompleted`，停播口与 OpenAPI 停播口都按标记区分真失败；`stopDirect` 同源补齐；停播收尾 WARN 补 `error` 字段。20:28:17 现场命中原始条件，DELETE 由 400 转 200，随后 11 秒重播成功。状态转「已修复」 |

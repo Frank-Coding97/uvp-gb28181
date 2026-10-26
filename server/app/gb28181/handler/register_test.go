@@ -44,7 +44,9 @@ func setupEnv(t *testing.T) {
 	if app.GormDbMysql == nil {
 		dsn := c.GetString("gormv2.mysql.write.user") + ":" + c.GetString("gormv2.mysql.write.pass") +
 			"@tcp(" + c.GetString("gormv2.mysql.write.host") + ":" + strconv.Itoa(c.GetInt("gormv2.mysql.write.port")) + ")/" +
-			c.GetString("gormv2.mysql.write.database") + "?charset=utf8mb4&parseTime=True&loc=Local"
+			// timeout: 不加的话开发库不可达时 SYN 会一直挂起，整个包要跑满 10 分钟
+			// 测试超时才 FAIL；加了之后 t.Skipf 能立刻生效（正常连通时无影响）。
+			c.GetString("gormv2.mysql.write.database") + "?charset=utf8mb4&parseTime=True&loc=Local&timeout=3s"
 		db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
 		if err != nil {
 			t.Skipf("跳过(无法连接 MySQL): %v", err)
