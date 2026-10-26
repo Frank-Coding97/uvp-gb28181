@@ -246,6 +246,7 @@ type cascadeVideoRuntime struct {
 	playback           cascadePlaybackService
 	recordings         cascadeRecordingQuerier
 	recordingLocation  *time.Location
+	recordingLookback  time.Duration
 	monitorInterval    time.Duration
 	downloadByeTimeout time.Duration
 	mu                 sync.Mutex
@@ -366,6 +367,17 @@ func (h *cascadeVideoRuntime) Handle(req *sip.Request, tx sip.ServerTransaction)
 	}
 	if !matchCascadeSessionPeer(req, session) {
 		if req.Method != sip.ACK {
+			// 上级换了源地址/端口（NAT 重绑定、上平台重启）时，后续 BYE/INFO 会落到这里。
+			// 不记日志的话，现象是「上级停不掉/控不了」而我方日志一片安静。
+			if app.ZapLog != nil {
+				app.ZapLog.Warn("级联点播会话对端不匹配,拒绝请求",
+					zap.String("event", "cascade.video.rejected"),
+					zap.String("method", req.Method.String()),
+					zap.Uint64("platform_id", session.platform.ID),
+					zap.String("call_id", cascadeCallID(req)),
+					zap.String("peer", cascadePeerLabel(req)),
+					zap.String("session_peer", session.peer.String()))
+			}
 			_ = tx.Respond(sip.NewResponseFromRequest(req, 403, "Forbidden", nil))
 		}
 		return true
@@ -566,7 +578,7 @@ func (h *cascadeVideoRuntime) invite(req *sip.Request, tx sip.ServerTransaction)
 	var sourceMedia media.StartResult
 	var releaseSource func()
 	if offer.Playback || offer.Download {
-		sourceMedia, releaseSource, err = h.acquirePlayback(provisionCtx, session, target, offer)
+		sourceMedia, releaseSource, err = h.acquirePlayback(provisionCtx, session, target, &offer)
 	} else {
 		var lease *media.Lease
 		lease, err = h.sources.Acquire(provisionCtx, media.AcquireRequest{ConsumerKey: dialog.ID, DeviceID: source.DeviceCode, ChannelID: source.ChannelCode, DeviceEpoch: deviceEpoch})

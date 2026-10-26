@@ -36,6 +36,13 @@ type PlaybackDialogMetadata struct {
 	CSeq                                      uint32
 	StatusCode                                int
 	DeviceID, ChannelID, SSRC                 string
+	// Destination 是 INVITE 实际发往的地址（对端设备的收件人 URI）。
+	//
+	// 它是 dialog 内后续请求（INFO）的**可靠兜底**：RemoteTarget 取自 200 OK 的
+	// Contact，而对端不一定填对（实测 2026-10-26 的 WVP 把 Contact 填成了**我方**
+	// 平台编码 + 我方监听地址）。而 `deviceURI` 走的是**本平台域**，对下级平台
+	// 并不成立，两者都不能单独作为兜底。
+	Destination string
 	// ViaHost/ViaPort/Transport 记录 INVITE 实际写入的 Via sent-by。
 	//
 	// dialog 内的后续请求（INFO/BYE）必须复用同一个 sent-by：sipgo 只在请求
@@ -152,6 +159,9 @@ func (d *sipgoPlaybackDialog) Metadata() PlaybackDialogMetadata {
 		if cseq := request.CSeq(); cseq != nil {
 			metadata.CSeq = cseq.SeqNo
 		}
+		if recipient := request.Recipient; recipient.Host != "" {
+			metadata.Destination = recipient.String()
+		}
 	}
 	if response == nil {
 		return metadata
@@ -160,8 +170,12 @@ func (d *sipgoPlaybackDialog) Metadata() PlaybackDialogMetadata {
 	if to := response.To(); to != nil {
 		metadata.RemoteTag, _ = to.Params.Get("tag")
 	}
-	if contact := response.Contact(); contact != nil {
-		metadata.RemoteTarget = contact.Address.String()
+	// ⛔ 不要直接用 `response.Contact()`：有一类对端(实测 WVP-Pro v2.7.4 作下级
+	//    平台)会把**我方**的 Contact 原样回显，照抄会把 INFO 打回本机监听端口，
+	//    被自己的 SIP 栈回 481，拆除永远不收敛。DialogRequestRecipient 复用了
+	//    ACK/BYE 已有的"回显识别"判据，回显时改用 INVITE 的真实收件人。
+	if recipient := sipgo.DialogRequestRecipient(request, response); recipient != nil {
+		metadata.RemoteTarget = recipient.String()
 	}
 	for _, route := range response.GetHeaders("record-route") {
 		metadata.RouteSet = append(metadata.RouteSet, route.Value())
@@ -344,15 +358,54 @@ func buildPlaybackInfoBody(request PlaybackInfoRequest, cseq uint32) ([]byte, er
 // dialog 的远端目标是设备在 INVITE 应答里给出的 Contact(逐跳可达地址),
 // 而 deviceURI 用的是平台自身域(公网地址),两者并不相同。所有在既有 dialog
 // 内发送的请求都必须优先采用 Contact,否则报文会被发往平台自己而不是设备。
+//
+// 但 Contact 是**对端填的**,不保证填对。实测 2026-10-26 的 WVP-Pro 2.7.4
+// (作为下级平台级联时)在 200 OK 里把 Contact 写成了
+// `<sip:34020000012000000001@192.168.10.220:52064>` —— 即"我方平台编码 + 我方
+// SIP 监听地址"。照抄这个 Contact 会让 TEARDOWN 的 INFO 被发回自己、当场收到
+// `481 Dialog Does Not Exist`,接着 BYE 又正常发往对端 ⇒ 拆除永远是
+// "control 被拒 + BYE 已发出"的混合态,HTTP 层固定 502。
+//
+// 因此这里按"可信度"降级选择,并且**任何指向本平台监听地址的候选一律丢弃**:
+//  1. Contact(RemoteTarget) —— RFC 3261 §12.2.1.1 的 dialog 远端目标;
+//  2. INVITE 的真实收件人(Destination) —— 报文确实到达过对端(拿到过 200 OK);
+//  3. deviceURI —— 历史会话缺前两者时的既有兜底,行为保持不变。
 func (u *UAC) playbackControlRecipient(metadata PlaybackDialogMetadata) sip.Uri {
-	recipient := u.deviceURI(metadata.ChannelID)
 	if target := strings.TrimSpace(metadata.RemoteTarget); target != "" {
-		var parsedTarget sip.Uri
-		if err := sip.ParseUri(strings.Trim(target, "<>"), &parsedTarget); err == nil {
-			recipient = parsedTarget
+		if parsedTarget, ok := u.parsePlaybackRecipient(target); ok {
+			return parsedTarget
 		}
 	}
-	return recipient
+	if target := strings.TrimSpace(metadata.Destination); target != "" {
+		if parsedTarget, ok := u.parsePlaybackRecipient(target); ok {
+			return parsedTarget
+		}
+	}
+	return u.deviceURI(metadata.ChannelID)
+}
+
+// parsePlaybackRecipient 解析单个候选地址,并剔除"发回本平台"的错误候选。
+//
+// 判据 = 主机是本平台对外宣告地址,且用户部分是我方平台编码、或端口就是我方
+// SIP 监听端口。Contact 描述的是对端自己的可达地址,命中这两条之一就说明对端
+// 填错了。之所以**不只看主机**:同机部署的模拟器/网关会和平台共用同一个出口 IP,
+// 那属于合法对端,不能一概判死。
+func (u *UAC) parsePlaybackRecipient(target string) (sip.Uri, bool) {
+	var parsed sip.Uri
+	if err := sip.ParseUri(strings.Trim(target, "<>"), &parsed); err != nil {
+		return sip.Uri{}, false
+	}
+	if parsed.Host == "" {
+		return sip.Uri{}, false
+	}
+	if u.advertiseIP != "" && parsed.Host == u.advertiseIP {
+		samePlatform := u.serverID != "" && parsed.User == u.serverID
+		samePort := u.sipPort > 0 && parsed.Port == u.sipPort
+		if samePlatform || samePort {
+			return sip.Uri{}, false
+		}
+	}
+	return parsed, true
 }
 
 // bindPlaybackVia 给 dialog 内的后续请求补上可路由的 Via sent-by。

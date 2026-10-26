@@ -111,3 +111,35 @@ route set or the peer target.
 The upstream module archive does not include the TLS certificate fixtures
 referenced by its root integration tests. `go test ./sip` is the available
 upstream transport regression suite for this pinned source archive.
+
+## Exported `DialogRequestRecipient`
+
+Upstream only applies the "peer echoed our own Contact" correction inside
+`newAckRequestUAC` / `newByeRequestUAC`. UVP has to build MANSRTSP `INFO`
+requests by hand (playback TEARDOWN / pause / seek), and it was doing so from
+`InviteResponse.Contact()` alone — which reintroduced exactly the bug those two
+helpers were patched to avoid.
+
+`DialogRequestRecipient(inviteRequest, inviteResponse) *sip.Uri` exposes the
+same decision:
+
+- no `inviteResponse` / no Contact → the INVITE recipient;
+- Contact whose user part equals our own Contact user part (the echo case,
+  measured against WVP-Pro v2.7.4 acting as a lower-level cascade platform,
+  which answers `Contact: <sip:34020000012000000001@<our address>:<our port>>`)
+  → the INVITE target (`inviteRequest.Recipient` with host/port taken from
+  `inviteRequest.Destination()`);
+- otherwise the Contact URI, per RFC 3261 §12.1.1.
+
+Why it matters: the echoed Contact is an **address literal**, so the
+`WithClientFallbackToResponseSource` fallback above deliberately does not fire
+(it only applies to non-literal hosts). The `INFO` therefore left for our own
+listening socket, our own stack answered `481 Dialog Does Not Exist`, and every
+playback stop reported `playback control failed` (HTTP 502) while the peer kept
+a dead dialog.
+
+Pinned by `app/gb28181/uac/playback_recipient_echo_test.go`
+(`TestDialogRequestRecipientRejectsEchoedLocalContact`,
+`TestDialogRequestRecipientKeepsWellFormedContact`,
+`TestDialogRequestRecipientFallsBackToInviteTarget`).
+

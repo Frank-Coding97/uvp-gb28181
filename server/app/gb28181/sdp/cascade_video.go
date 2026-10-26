@@ -25,6 +25,13 @@ type CascadeVideoOffer struct {
 	RecordingURI  string
 	Start         time.Time
 	End           time.Time
+	// RangeUnknown 表示上级没有指定回放时间范围 —— SDP 把它写成 `t=0 0`。
+	//
+	// WVP / LiveGBS / EasyGBS 三家都出现过这种写法：它们把「播这段录像」的
+	// 语义完全交给 `u=` 里的录像标识，时间范围留空。此时 Start/End 是零值，
+	// 解析阶段不拒绝，由调用方用设备录像清单把真实范围补出来
+	// （见 cascade_recording_uri.go 的 resolveRecordingSource）。
+	RangeUnknown bool
 }
 
 type cascadeVideoConnection struct {
@@ -174,6 +181,7 @@ func ParseCascadeVideoOffer(body []byte) (CascadeVideoOffer, error) {
 		return CascadeVideoOffer{}, fmt.Errorf("cascade video SDP session must be Play, Playback or Download")
 	}
 	var start, end time.Time
+	rangeUnknown := false
 	if historical {
 		fields := strings.Fields(timing)
 		if timingCount != 1 || len(fields) != 2 {
@@ -181,10 +189,22 @@ func ParseCascadeVideoOffer(body []byte) (CascadeVideoOffer, error) {
 		}
 		first, firstErr := strconv.ParseInt(fields[0], 10, 64)
 		last, lastErr := strconv.ParseInt(fields[1], 10, 64)
-		if firstErr != nil || lastErr != nil || first <= 0 || last <= first || last > 253402300799 {
-			return CascadeVideoOffer{}, fmt.Errorf("cascade playback SDP time range is invalid")
+		switch {
+		case firstErr != nil || lastErr != nil:
+			// 带上原文：不同上级对回放时间范围的写法差异很大
+			// （有的写 t=0 0，有的把起止写成同一个值），只报「invalid」时
+			// 排查只能靠抓包。
+			return CascadeVideoOffer{}, fmt.Errorf("cascade playback SDP time range is invalid: t=%q", timing)
+		case first == 0 && last == 0:
+			// ⛔ `t=0 0` 是**合法**的回放请求，不是脏数据：EasyGBS 3.7.451
+			// 与 WVP 都这么发，含义是「范围未指定，按 u= 里的录像标识播放」。
+			// 早期这里直接判非法，表征是上级每次点回放都收 488。
+			rangeUnknown = true
+		case first <= 0 || last <= first || last > 253402300799:
+			return CascadeVideoOffer{}, fmt.Errorf("cascade playback SDP time range is invalid: t=%q", timing)
+		default:
+			start, end = time.Unix(first, 0).UTC(), time.Unix(last, 0).UTC()
 		}
-		start, end = time.Unix(first, 0).UTC(), time.Unix(last, 0).UTC()
 	}
 	if video == nil {
 		return CascadeVideoOffer{}, fmt.Errorf("cascade video SDP missing video media")
@@ -273,6 +293,7 @@ func ParseCascadeVideoOffer(body []byte) (CascadeVideoOffer, error) {
 		RemoteIP: parsedIP.To4().String(), RemotePort: video.port, SSRC: ssrc,
 		PayloadType: payloadType, Transport: transport,
 		Playback: playback, Download: download, DownloadSpeed: video.downloadSpeed, RecordingURI: recordingURI, Start: start, End: end,
+		RangeUnknown: rangeUnknown,
 	}, nil
 }
 
@@ -301,7 +322,10 @@ func BuildCascadeVideoAnswer(offer CascadeVideoOffer, localID, localIP string, l
 	if offer.PayloadType < 96 || offer.PayloadType > 127 {
 		return nil, fmt.Errorf("cascade video answer payload type is invalid")
 	}
-	if historical && (offer.Start.IsZero() || !offer.End.After(offer.Start)) {
+	if historical && offer.Start.IsZero() && !offer.RangeUnknown {
+		return nil, fmt.Errorf("cascade playback answer time range is invalid")
+	}
+	if historical && !offer.Start.IsZero() && !offer.End.After(offer.Start) {
 		return nil, fmt.Errorf("cascade playback answer time range is invalid")
 	}
 	if (historical && offer.RecordingURI != "") || offer.Download {
@@ -339,9 +363,11 @@ func BuildCascadeVideoAnswer(offer CascadeVideoOffer, localID, localIP string, l
 		fmt.Fprintf(&answer, "u=%s\r\n", offer.RecordingURI)
 	}
 	fmt.Fprintf(&answer, "c=IN IP4 %s\r\n", parsedIP.To4().String())
-	if historical {
+	if historical && offer.End.After(offer.Start) {
+		// 范围已由调用方补出（上级写 t=0 0 时从录像清单回填）——回真实区间。
 		fmt.Fprintf(&answer, "t=%d %d\r\n", offer.Start.Unix(), offer.End.Unix())
 	} else {
+		// 实时点播，或上级本来就没给范围：原样回 t=0 0。
 		answer.WriteString("t=0 0\r\n")
 	}
 	fmt.Fprintf(&answer, "m=video %d %s %d\r\n", localPort, transport, offer.PayloadType)

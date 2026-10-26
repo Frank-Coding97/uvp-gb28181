@@ -618,6 +618,33 @@ func inviteTargetUri(inviteRequest *sip.Request, contact *sip.ContactHeader) *si
 	return target
 }
 
+// DialogRequestRecipient 给出 dialog 内后续请求(INFO/BYE)应当使用的 Request-URI。
+//
+// 正常情况就是 200 OK 的 Contact(RFC 3261 §12.1.1 的 remote target)。但有一类
+// 对端会把**本 UAC 自己的 Contact** 原样回显回来 —— 实测 WVP-Pro v2.7.4 作为下级
+// 平台级联时,200 OK 里给的是 `<sip:34020000012000000001@<我方地址>:<我方端口>>`。
+// 照抄它只会把报文打回本机监听端口、被自己的 SIP 栈回 `481 Dialog Does Not Exist`,
+// 对端会话永远拆不掉(每次停播都报失败,对端还留着一条死会话)。
+//
+// ACK/BYE 已经在 newAckRequestUAC / newByeRequestUAC 里按这个判据处理过了;
+// 本函数把这套判据暴露出来,让调用方手写 INFO(GB28181 的 MANSRTSP 拆除/暂停/
+// 拖动)时不必再自己发明一套"是不是发给自己"的判断。
+func DialogRequestRecipient(inviteRequest *sip.Request, inviteResponse *sip.Response) *sip.Uri {
+	if inviteRequest == nil {
+		return nil
+	}
+	recipient := inviteRequest.Recipient.Clone()
+	if inviteResponse != nil {
+		if contact := inviteResponse.Contact(); contact != nil {
+			recipient = contact.Address.Clone()
+			if echoedLocalContact(inviteRequest, contact) {
+				recipient = inviteTargetUri(inviteRequest, contact)
+			}
+		}
+	}
+	return recipient
+}
+
 // newAckRequestUAC creates ACK request for 2xx INVITE
 // https://tools.ietf.org/html/rfc3261#section-13.2.2.4
 // Preserve the INVITE sent-by address while using a fresh branch for the ACK transaction.

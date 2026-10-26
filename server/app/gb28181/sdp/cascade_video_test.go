@@ -125,7 +125,17 @@ func TestCascadePlaybackOfferPreservesUnixTimeRange(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(answer), "s=Playback\r\n")
 	require.Contains(t, string(answer), "t=1785632400 1785636000\r\n")
-	for _, replacement := range []string{"t=0 0", "t=1785632400 1785632400", "t=invalid 1785636000"} {
+	// ⛔ `t=0 0` **不是**非法报文：EasyGBS 3.7.451 / WVP 都用它表示
+	// 「范围未指定，按 u= 的录像标识播放」。这里断言它被解析成 RangeUnknown，
+	// 而不是被拒（早期版本拒了它 ⇒ 上级每次点回放都收 488）。
+	unknown, err := ParseCascadeVideoOffer([]byte(strings.Replace(string(body), "t=1785632400 1785636000", "t=0 0", 1)))
+	require.NoError(t, err)
+	require.True(t, unknown.RangeUnknown)
+	require.True(t, unknown.Start.IsZero())
+	answerUnknown, err := BuildCascadeVideoAnswer(unknown, "34020000002000000002", "192.0.2.10", 31000)
+	require.NoError(t, err)
+	require.Contains(t, string(answerUnknown), "t=0 0\r\n")
+	for _, replacement := range []string{"t=1785632400 1785632400", "t=invalid 1785636000"} {
 		_, err = ParseCascadeVideoOffer([]byte(strings.Replace(string(body), "t=1785632400 1785636000", replacement, 1)))
 		require.Error(t, err)
 	}
@@ -219,7 +229,9 @@ func TestParseCascadeVideoOfferRejectsUnsupportedOrMalformedOffers(t *testing.T)
 		body string
 	}{
 		{name: "audio only", body: strings.Replace(valid, "m=video 30000 RTP/AVP 96", "m=audio 30000 RTP/AVP 96", 1)},
-		{name: "playback", body: strings.Replace(valid, "s=Play", "s=Playback", 1)},
+		// 回放**没有** t= 行时仍然是非法报文（t=0 0 已被接受，见
+		// TestCascadePlaybackOfferPreservesUnixTimeRange）。
+		{name: "playback without time range", body: strings.Replace(strings.Replace(valid, "s=Play", "s=Playback", 1), "t=0 0\r\n", "", 1)},
 		{name: "invalid address", body: strings.Replace(valid, "192.0.2.30", "not-an-ip", 2)},
 		{name: "zero port", body: strings.Replace(valid, "video 30000", "video 0", 1)},
 		{name: "out of range port", body: strings.Replace(valid, "video 30000", "video 65536", 1)},

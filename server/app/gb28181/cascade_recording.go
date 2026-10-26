@@ -97,12 +97,25 @@ func newCascadeRecordInfoHandler(store *repository.GormRepository, clients *casc
 		if manscdp.DecodeProfiledXML(protocol.ProfileFor(protocol.Version2016), req.Body(), &query) != nil || query.XMLName.Local != "Query" || query.CmdType != manscdp.CmdRecordInfo {
 			return false
 		}
-		fail := func(code int) bool {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		// 拒绝上级必须留痕：SIP 应答只有一个状态码，上级界面只会显示「录像查询失败」。
+		// 历史上一整轮 400/403 全静默，排查只能靠抓包反推是哪一道闸门拦的，
+		// 于是把 code 换成「状态码 + 一句话原因 + 对端/通道定位字段」一起落日志。
+		reject := func(code int, reason string, details ...zap.Field) bool {
+			fields := make([]zap.Field, 0, len(details)+6)
+			fields = append(fields,
+				zap.String("event", "cascade.record.query_rejected"),
+				zap.Int("status", code),
+				zap.String("reason", reason),
+				zap.String("call_id", cascadeCallID(req)),
+				zap.String("peer", cascadePeerLabel(req)),
+				zap.String("device_id", strings.TrimSpace(query.DeviceID)),
+			)
+			app.Log(ctx).Warn("级联录像查询被拒绝: "+reason, append(fields, details...)...)
 			_ = tx.Respond(sip.NewResponseFromRequest(req, code, "Record query rejected", nil))
 			return true
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
 		// 上级等应答的耐心有限（LiveGBS 15 秒就报 "wait for recordinfo timeout"），
 		// 而设备常在 2 秒内把条目推完。给聚合阶段单独压一个更小的预算：
 		// 到点还没凑齐 declaredTotal 就先按已收到的条目回，别把上级拖到超时。
@@ -110,57 +123,91 @@ func newCascadeRecordInfoHandler(store *repository.GormRepository, clients *casc
 		defer queryBudgetCancel()
 		platforms, err := store.ListPlatforms(ctx)
 		if err != nil {
-			return fail(500)
+			return reject(500, "platform list unavailable", zap.Error(err))
 		}
 		peer, ok := cascadePeerFromRequest(req)
 		if !ok {
-			return fail(400)
+			return reject(400, "peer identity unparsable")
 		}
 		var platform *model.GbCascadePlatform
 		for i := range platforms {
 			if peer.match(platforms[i]) {
 				if platform != nil {
-					return fail(403)
+					return reject(403, "ambiguous platform", zap.String("first_platform_id", strconv.FormatUint(platform.ID, 10)),
+						zap.String("second_platform_id", strconv.FormatUint(platforms[i].ID, 10)))
 				}
 				platform = &platforms[i]
 			}
 		}
-		if platform == nil || !platform.Enabled || !platform.RecordingEnabled {
-			return fail(403)
+		if platform == nil {
+			return reject(403, "no cascade platform matches peer")
+		}
+		if !platform.Enabled {
+			return reject(403, "platform disabled", zap.Uint64("platform_id", platform.ID))
+		}
+		if !platform.RecordingEnabled {
+			return reject(403, "recording not shared to platform", zap.Uint64("platform_id", platform.ID))
 		}
 		profile := cascadeWireProfile(*platform)
 		if manscdp.DecodeProfiledXML(profile, req.Body(), &query) != nil || query.SN <= 0 {
-			return fail(400)
+			return reject(400, "query body unparsable or SN invalid", zap.Uint64("platform_id", platform.ID), zap.Int("sn", query.SN))
 		}
 		target, err := cascadeRecordingProjection(ctx, store, *platform, strings.TrimSpace(query.DeviceID))
 		if err != nil {
-			return fail(404)
+			return reject(404, "recording channel not published", zap.Uint64("platform_id", platform.ID), zap.Error(err))
 		}
 		if req.To() == nil || (req.To().Address.User != platform.LocalDeviceID && req.To().Address.User != query.DeviceID) ||
 			(req.Recipient.User != platform.LocalDeviceID && req.Recipient.User != query.DeviceID) {
-			return fail(403)
+			toUser := ""
+			if req.To() != nil {
+				toUser = req.To().Address.User
+			}
+			return reject(403, "request target mismatch", zap.Uint64("platform_id", platform.ID),
+				zap.String("request_uri_user", toUser), zap.String("recipient_user", req.Recipient.User),
+				zap.String("local_device_id", platform.LocalDeviceID))
 		}
 		source, err := loadCascadeRecordingTarget(ctx, target)
 		if err != nil {
-			return fail(404)
+			return reject(404, "shared recording source unavailable", zap.Uint64("platform_id", platform.ID), zap.Error(err))
 		}
 		if source.device.Status != gbmodels.DeviceStatusOnline {
-			return fail(480)
+			return reject(480, "source device offline", zap.Uint64("platform_id", platform.ID),
+				zap.String("source_device", source.device.DeviceID), zap.String("source_channel", source.channel.ChannelID),
+				zap.Int("device_status", int(source.device.Status)))
 		}
 		config := gbconfig.Load().RecordQuery
 		start, startErr := recordquery.ParseWallClock(query.StartTime, config.Location)
 		end, endErr := recordquery.ParseWallClock(query.EndTime, config.Location)
-		if startErr != nil || endErr != nil || !end.After(start) || end.Sub(start) > time.Duration(config.MaxRangeHours)*time.Hour ||
-			(query.Type != "" && query.Type != manscdp.RecordInfoQueryTypeAll && query.Type != manscdp.RecordInfoQueryTypeManual && query.Type != manscdp.RecordInfoQueryTypeAlarm) ||
+		if startErr != nil || endErr != nil || !end.After(start) {
+			return reject(400, "invalid time range", zap.String("start_time", query.StartTime), zap.String("end_time", query.EndTime),
+				zap.Bool("parse_failed", startErr != nil || endErr != nil),
+				zap.Bool("end_not_after_start", startErr == nil && endErr == nil && !end.After(start)))
+		}
+		// 跨度不再是拒绝条件：24 小时只是「一次查询的常规粒度」，上级（WVP/LiveGBS）
+		// 普遍按「今天 0 点到现在」或最近 3 天取，硬拒会让上级把「设备不支持」当成结论。
+		// 真正的保护是 MaxRecordsPerQuery 与聚合超时预算，跨度只做告警，方便发现异常大的请求。
+		if limit := time.Duration(config.MaxRangeHours) * time.Hour; limit > 0 && end.Sub(start) > limit {
+			app.Log(ctx).Info("级联录像查询跨度超出常规值,继续查询",
+				zap.String("event", "cascade.record.long_range"),
+				zap.String("call_id", cascadeCallID(req)),
+				zap.Uint64("platform_id", platform.ID),
+				zap.String("device_id", query.DeviceID),
+				zap.String("start_time", query.StartTime),
+				zap.String("end_time", query.EndTime),
+				zap.Float64("span_hours", end.Sub(start).Hours()),
+				zap.Int("threshold_hours", config.MaxRangeHours))
+		}
+		if (query.Type != "" && query.Type != manscdp.RecordInfoQueryTypeAll && query.Type != manscdp.RecordInfoQueryTypeManual && query.Type != manscdp.RecordInfoQueryTypeAlarm) ||
 			(query.Secrecy != 0 && query.Secrecy != 1) || (query.RecorderID != "" && query.RecorderID != platform.LocalDeviceID) {
-			return fail(400)
+			return reject(400, "unsupported query filter", zap.Uint64("platform_id", platform.ID),
+				zap.String("type", string(query.Type)), zap.Int("secrecy", query.Secrecy), zap.String("recorder_id", query.RecorderID))
 		}
 		if recordQueryService == nil || clients == nil {
-			return fail(503)
+			return reject(503, "record query service unavailable", zap.Uint64("platform_id", platform.ID))
 		}
 		client, err := clients.NewClient(*platform)
 		if err != nil {
-			return fail(503)
+			return reject(503, "cascade client unavailable", zap.Uint64("platform_id", platform.ID), zap.Error(err))
 		}
 		outbound := client.(*cascadePlatformClient)
 		if err := tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil)); err != nil {

@@ -96,7 +96,7 @@ func (l *cascadePlaybackLease) release() {
 	}
 }
 
-func (h *cascadeVideoRuntime) acquirePlayback(ctx context.Context, session *cascadeVideoSession, target catalog.PublishedChannelTarget, offer sdp.CascadeVideoOffer) (media.StartResult, func(), error) {
+func (h *cascadeVideoRuntime) acquirePlayback(ctx context.Context, session *cascadeVideoSession, target catalog.PublishedChannelTarget, offer *sdp.CascadeVideoOffer) (media.StartResult, func(), error) {
 	if h.playback == nil {
 		return media.StartResult{}, nil, fmt.Errorf("playback service unavailable")
 	}
@@ -111,15 +111,24 @@ func (h *cascadeVideoRuntime) acquirePlayback(ctx context.Context, session *casc
 		mode = gbplayback.ModeDownload
 	}
 	recordingURI := ""
-	if offer.RecordingURI != "" {
-		recordingURI, err = h.resolveRecordingURI(ctx, source, target.SourceChannelID, offer)
-		if err != nil {
-			return media.StartResult{}, nil, err
+	segmentStart, segmentEnd := offer.Start, offer.End
+	if offer.RecordingURI != "" || offer.RangeUnknown {
+		recording, resolveErr := h.resolveRecordingSource(ctx, source, target.SourceChannelID, *offer, time.Now())
+		if resolveErr != nil {
+			return media.StartResult{}, nil, resolveErr
+		}
+		recordingURI = recording.URI
+		if recording.RangeResolved {
+			// 上级用 t=0 0 表示「范围未指定」：这里已经用录像清单补出真实区间。
+			// 通过 ***指针*** 回写到调用方，answer 的 t= 行才会回真实区间
+			// （传值的话上级只能看到原样的 t=0 0）。
+			segmentStart, segmentEnd = recording.Start, recording.End
+			offer.Start, offer.End, offer.RangeUnknown = recording.Start, recording.End, false
 		}
 	}
 	created, err := h.playback.Create(ctx, gbplayback.CreateRequest{OwnerID: owner, DeviceID: source.device.DeviceID,
 		ChannelID: strconv.FormatUint(target.SourceChannelID, 10), SIPChannelID: source.channel.ChannelID, Authorization: source.authorization,
-		RecordKey: owner, IdempotencyKey: session.dialog.ID, SegmentStart: offer.Start, SegmentEnd: offer.End, PlayFrom: offer.Start,
+		RecordKey: owner, IdempotencyKey: session.dialog.ID, SegmentStart: segmentStart, SegmentEnd: segmentEnd, PlayFrom: segmentStart,
 		Destination: net.JoinHostPort(source.device.IP, strconv.Itoa(source.device.Port)), Transport: source.device.Transport, PreferredNodeID: source.device.ZLMNodeID,
 		Mode: mode, DownloadSpeed: offer.DownloadSpeed, RecordingURI: recordingURI, BeforeCleanup: lease.beforeCleanup})
 	if err != nil {
@@ -141,21 +150,45 @@ func (h *cascadeVideoRuntime) acquirePlayback(ctx context.Context, session *casc
 func (h *cascadeVideoRuntime) playbackInfo(req *sip.Request, tx sip.ServerTransaction, session *cascadeVideoSession) {
 	session.controlMu.Lock()
 	defer session.controlMu.Unlock()
+	// 回放控制（暂停/拖动/停止）失败时，上级只会显示「操作失败」。
+	// 这四道校验以前全静默：一次「拖动没生效」要抓包才能判断是会话没 ACK、
+	// 媒体类型不对、CSeq 走乱还是 MANSRTSP 解析失败，所以拒绝时必须留痕。
+	reject := func(code int, reason string, details ...zap.Field) {
+		if app.ZapLog != nil {
+			fields := append([]zap.Field{
+				zap.String("event", "cascade.playback.control_rejected"),
+				zap.Int("status", code),
+				zap.String("reason", reason),
+				zap.String("call_id", cascadeCallID(req)),
+				zap.String("peer", cascadePeerLabel(req)),
+				zap.Uint64("platform_id", session.platform.ID),
+			}, details...)
+			app.ZapLog.Warn("级联回放控制被拒绝: "+reason, fields...)
+		}
+		_ = tx.Respond(sip.NewResponseFromRequest(req, code, reason, nil))
+	}
 	if !session.acknowledged.Load() || session.playback == nil || req.CSeq() == nil {
-		_ = tx.Respond(sip.NewResponseFromRequest(req, 481, "Playback Dialog Does Not Exist", nil))
+		reject(481, "Playback Dialog Does Not Exist",
+			zap.Bool("acknowledged", session.acknowledged.Load()),
+			zap.Bool("has_playback", session.playback != nil),
+			zap.Bool("has_cseq", req.CSeq() != nil))
 		return
 	}
 	if contentType := req.GetHeader("Content-Type"); contentType == nil || !strings.EqualFold(strings.TrimSpace(strings.SplitN(contentType.Value(), ";", 2)[0]), mansrtsp.ContentType) {
-		_ = tx.Respond(sip.NewResponseFromRequest(req, 415, "Unsupported Media Type", nil))
+		observed := ""
+		if contentType != nil {
+			observed = contentType.Value()
+		}
+		reject(415, "Unsupported Media Type", zap.String("content_type", observed), zap.String("expected", mansrtsp.ContentType))
 		return
 	}
 	if err := session.dialog.ReadRequest(req, tx); err != nil {
-		_ = tx.Respond(sip.NewResponseFromRequest(req, 500, "Invalid Dialog CSeq", nil))
+		reject(500, "Invalid Dialog CSeq", zap.Error(err))
 		return
 	}
 	command, err := mansrtsp.ParseRequest(req.Body())
 	if err != nil {
-		_ = tx.Respond(sip.NewResponseFromRequest(req, 400, "Invalid Playback Control", nil))
+		reject(400, "Invalid Playback Control", zap.Error(err), zap.String("body", string(req.Body())))
 		return
 	}
 	ctx, cancel := context.WithTimeout(session.dialog.Context(), 15*time.Second)
@@ -163,7 +196,19 @@ func (h *cascadeVideoRuntime) playbackInfo(req *sip.Request, tx sip.ServerTransa
 	latest, err := h.store.FindPlatform(ctx, session.platform.ID)
 	if err != nil || !latest.Enabled || !latest.RecordingEnabled || latest.ConfigRevision != session.platform.ConfigRevision || latest.ProjectionRevision != session.platform.ProjectionRevision {
 		session.cancel()
-		_ = tx.Respond(sip.NewResponseFromRequest(req, 403, "Playback Permission Changed", nil))
+		// 这里最容易被误判成「设备不支持拖动」：实际是共享关系/配置在会话期间被改过，
+		// 平台侧按 fail-closed 主动断开。日志要把两侧 revision 都带上才对得上账。
+		details := []zap.Field{zap.Error(err)}
+		if latest != nil {
+			details = append(details,
+				zap.Bool("platform_enabled", latest.Enabled),
+				zap.Bool("recording_enabled", latest.RecordingEnabled),
+				zap.Uint64("platform_config_revision", latest.ConfigRevision),
+				zap.Uint64("session_config_revision", session.platform.ConfigRevision),
+				zap.Uint64("platform_projection_revision", latest.ProjectionRevision),
+				zap.Uint64("session_projection_revision", session.platform.ProjectionRevision))
+		}
+		reject(403, "Playback Permission Changed", details...)
 		return
 	}
 	lease := session.playback
@@ -260,6 +305,8 @@ func (h *cascadeVideoRuntime) waitCascadeVideo(ctx context.Context, session *cas
 			return
 		case <-ticker.C:
 			ended := false
+			// paused 用于**跳过发送方存活检查**，见下面的注释。
+			paused := false
 			if lease := session.playback; lease != nil {
 				current, ok := lease.service.PeekForOwner(lease.id, lease.owner)
 				if ok && lease.download && current.State == gbplayback.StateStopping {
@@ -268,6 +315,7 @@ func (h *cascadeVideoRuntime) waitCascadeVideo(ctx context.Context, session *cas
 					continue
 				}
 				ended = !ok || current.State.IsTerminal() || current.State == gbplayback.StateStopping
+				paused = ok && current.State == gbplayback.StatePaused
 				if ok && lease.download && current.State == gbplayback.StateEnded && current.EndReason == "file-to-end" {
 					if err := h.notifyDownloadComplete(ctx, session); err != nil {
 						app.Log(ctx).Warn("级联录像下载完成通知失败",
@@ -294,7 +342,14 @@ func (h *cascadeVideoRuntime) waitCascadeVideo(ctx context.Context, session *cas
 					_, _ = lease.service.GetForOwner(lease.id, lease.owner)
 				}
 			}
-			if !ended && sender != nil {
+			// ⛔⛔ 回放**暂停中**不能按发送方存活来判死。
+			//
+			// 暂停时设备停发 RTP，ZLM 的 rtp_proxy 在 timeoutSec(15s) 后关掉
+			// RTP 服务器 ⇒ listRtpSender 里没有这条了 ⇒ IsActive=false。
+			// 但此时 SIP 对话框是**有效**的：上级接着会发 MANSRTSP PLAY 恢复。
+			// 早期这里不看状态，暂停超过一个巡检周期就 cancel 会话 ⇒ 上级恢复时
+			// 收到 481 Dialog Does Not Exist（实测 LiveGBS 暂停 25 秒必现）。
+			if !ended && !paused && sender != nil {
 				checkCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 				active, err := sender.IsActive(checkCtx)
 				cancel()
