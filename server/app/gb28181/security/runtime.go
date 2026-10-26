@@ -45,6 +45,11 @@ type Runtime struct {
 	stop           chan struct{}
 	done           chan struct{}
 	closeOnce      sync.Once
+
+	// peerMu 保护 peerTrust。它不在 mu 里,因为 peerTrust 会在传输层读路径
+	// 上被调用,而 mu 保护的是策略快照,两者锁序无关,分开能避免读路径等策略更新。
+	peerMu    sync.RWMutex
+	peerTrust func(sourceIP, transport string) bool
 }
 
 func NewRuntime(policy Policy, clock Clock, agent FirewallAgentClient, nonceSecret []byte) *Runtime {
@@ -59,9 +64,51 @@ func NewRuntime(policy Policy, clock Clock, agent FirewallAgentClient, nonceSecr
 	r.agentHealth = initialAgentStatus(agent)
 	r.admit.SetTrustedSource(func(source, transport, deviceID string) bool {
 		endpoint, ok := r.scorer.TrustedEndpoint(deviceID)
-		return ok && endpoint.Address == source && strings.EqualFold(endpoint.Transport, transport)
+		if ok && endpoint.Address == source && strings.EqualFold(endpoint.Transport, transport) {
+			return true
+		}
+		return r.peerTrusted(source, transport)
 	})
 	return r
+}
+
+// SetPeerTrustResolver 注册「可信对端」判定,用于放行**级联平台**发来的 INVITE。
+//
+// 为什么必须有它:准入层对 INVITE 有一条额外闸门(见 Admission.admitMessage),
+// 只认「被叫编码是某台已认证设备」。可级联点播的被叫编码是**发布出去的通道编号**,
+// 在本机设备表里根本不存在,于是上级平台的每一次点播 INVITE 都被判成
+// reason=unknown_invite_rate 并**静默丢弃**(连 4xx 都不回),上级侧表现为
+// 「12 秒 INVITE 应答超时」。实测:同一份报文从私网源地址重放能拿到 403,
+// 从公网源地址发则石沉大海、只有安全事件表里一行 unknown_invite_rate。
+//
+// 安全性:这里只放宽「准入层」这一道,真正的身份校验仍由级联处理器完成 ——
+// From 用户必须等于平台登记的上级编号、源端口/传输层必须与配置一致、
+// 源地址必须是配置的 Host 或该平台凭据鉴权成功时记录的地址、Subject 里的
+// 收发双方身份也要对上。换言之,陌生 IP 即使借用平台地址混过准入,
+// 也过不了后面那四道。
+//
+// ⚠️ 入参 transport 是**归一化后的大写值**(UDP/TCP/TLS,见 normalizedTransport),
+// 别写成小写比较,否则判定恒为 false、现象与「没装判定器」一模一样。
+func (r *Runtime) SetPeerTrustResolver(fn func(sourceIP, transport string) bool) {
+	if r == nil {
+		return
+	}
+	r.peerMu.Lock()
+	r.peerTrust = fn
+	r.peerMu.Unlock()
+}
+
+func (r *Runtime) peerTrusted(sourceIP, transport string) bool {
+	if r == nil {
+		return false
+	}
+	r.peerMu.RLock()
+	fn := r.peerTrust
+	r.peerMu.RUnlock()
+	if fn == nil {
+		return false
+	}
+	return fn(sourceIP, transport)
 }
 
 // NewPersistentRuntime restores policy and recent state before exposing the

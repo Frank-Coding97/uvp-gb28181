@@ -787,10 +787,15 @@ func setupSecurityRuntime() *gbsecurity.Runtime {
 		agent = gbsecurity.NewSocketPresenceClient(unixAgent, socketPath)
 	}
 	secret := []byte(os.Getenv("UVP_GB28181_NONCE_SECRET"))
+	// ⛔ 必须挂在两条装配路径上(持久化 / 内存降级都算):准入层对 INVITE 的那道
+	// 闸门只认「被叫编码是已认证设备」,而级联点播的被叫是发布出去的通道编号,
+	// 必然不在该表里 ⇒ 不挂这个判定器,上级每一次点播都会被静默丢弃(unknown_invite_rate)。
+	peerTrust := newCascadePlatformPeerTrust(app.DB())
 	if app.DB() != nil {
 		store := gbsecurity.NewGormStore(app.DB())
 		runtime, err := gbsecurity.NewPersistentRuntime(context.Background(), store, clock, agent, secret)
 		if err == nil {
+			runtime.SetPeerTrustResolver(peerTrust)
 			gbroutes.SetSecurityRuntime(runtime)
 			return runtime
 		}
@@ -801,6 +806,7 @@ func setupSecurityRuntime() *gbsecurity.Runtime {
 	// Without authenticated-device history an automatic source ban could lock
 	// out a legitimate shared egress. Admission still rejects unsafe packets.
 	runtime.SetAutoBanEnabled(false)
+	runtime.SetPeerTrustResolver(peerTrust)
 	gbroutes.SetSecurityRuntime(runtime)
 	return runtime
 }
