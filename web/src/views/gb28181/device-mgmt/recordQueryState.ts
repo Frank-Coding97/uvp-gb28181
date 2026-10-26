@@ -73,9 +73,8 @@ export function validateRecordQueryForm(
   if (!form.endTime || !end.isValid()) errors.endTime = "请选择有效的结束时间";
   if (!errors.startTime && !errors.endTime) {
     if (!end.isAfter(start)) errors.endTime = "结束时间必须晚于开始时间";
-    else if (end.diff(start, "hour", true) > options.maxRangeHours) {
-      errors.endTime = `单次查询不能超过 ${options.maxRangeHours} 小时`;
-    }
+    // 不再按 maxRangeHours 拦截：跨度是用户的真实诉求，设备侧由条目上限与查询超时兜底。
+    // 保留该字段只为展示「常规跨度」，超了照常查询。
   }
   if (!options.supportedTypes.includes(form.type)) errors.type = "请选择设备支持的录像类型";
   if (!Number.isInteger(form.secrecy) || form.secrecy < 0) errors.secrecy = "保密属性必须是非负整数";

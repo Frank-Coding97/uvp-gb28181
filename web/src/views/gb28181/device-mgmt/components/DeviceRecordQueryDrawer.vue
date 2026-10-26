@@ -296,7 +296,7 @@ function fileSizeText(value: number | null) {
             <span>平台时区</span><strong>{{ options.timezone }}</strong>
           </div>
           <div class="context-meta">
-            <span>最长跨度</span><strong>{{ options.maxRangeHours }} 小时</strong>
+            <span>常规跨度</span><strong>{{ options.maxRangeHours }} 小时</strong>
           </div>
         </section>
 

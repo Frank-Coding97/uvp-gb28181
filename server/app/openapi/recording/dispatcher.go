@@ -355,7 +355,8 @@ func (d *Dispatcher) search(ctx context.Context, request Request) (RecordPage, e
 		return RecordPage{}, adapters.ErrInvalidRequest
 	}
 	end, err := time.Parse(time.RFC3339Nano, input.EndTime)
-	if err != nil || !end.After(start) || end.Sub(start) > time.Duration(d.config.MaxRangeHours)*time.Hour {
+	// 同 HTTP 接口策略：跨度只作为常规值展示，不在这里拒绝。
+	if err != nil || !end.After(start) {
 		return RecordPage{}, adapters.ErrInvalidRequest
 	}
 	target, err := d.resolveTarget(ctx, request)

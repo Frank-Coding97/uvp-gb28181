@@ -4312,7 +4312,8 @@ components:
                 name: {type: string}
             timezone: {type: string}
             serverNow: {type: string, format: date-time}
-            maxRangeHours: {type: integer, minimum: 1}
+            # 常规跨度，仅用于界面提示；超出不会被拒绝（由查询超时与条目上限兜底）。
+            maxRangeHours: {type: integer, minimum: 1, description: "常规时间跨度(小时)，超出仍可查询"}
             supportedTypes:
               type: array
               items: {type: string, enum: [all, manual, alarm]}

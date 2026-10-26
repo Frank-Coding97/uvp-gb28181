@@ -734,9 +734,14 @@ func CurrentSnapshotUploadBaseURL() (string, error) {
 
 // RecordQueryConfig controls device-local RecordInfo queries.
 type RecordQueryConfig struct {
-	Timezone           string
-	Location           *time.Location
-	TimeoutSec         int
+	Timezone   string
+	Location   *time.Location
+	TimeoutSec int
+	// MaxRangeHours 是「常规时间跨度」而非硬上限：超出只在日志里告警一次，
+	// 仍然照常查询。真正的保护是 TimeoutSec 与 MaxRecordsPerQuery ——
+	// 跨度只是条目数的粗略代理（凌晨查一周可能只有几条，白天查 2 小时可能上千条），
+	// 拿它当拒绝条件会让上级/用户的合法请求（今天 0 点到现在、最近三天）
+	// 变成「录像查询失败」，误判成设备不支持。
 	MaxRangeHours      int
 	MaxActiveQueries   int
 	MaxRecordsPerQuery int

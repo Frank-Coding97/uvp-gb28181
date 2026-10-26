@@ -245,7 +245,10 @@ func decodeRecordQueryBody(c *gin.Context, cfg gbconfig.RecordQueryConfig) (reco
 	body.RecorderID = strings.TrimSpace(body.RecorderID)
 	startTime, startErr := time.ParseInLocation(recordQueryWallClockLayout, body.StartTime, cfg.Location)
 	endTime, endErr := time.ParseInLocation(recordQueryWallClockLayout, body.EndTime, cfg.Location)
-	if startErr != nil || endErr != nil || !endTime.After(startTime) || endTime.Sub(startTime) > time.Duration(cfg.MaxRangeHours)*time.Hour {
+	// 跨度上限不作为拒绝条件：真正兜底的是条目上限与查询超时，
+	// 而「查多久」是用户/上级的真实诉求。设备录像少的时段查一周可能只有几条，
+	// 用 24 小时卡死只会让合法请求变成 422。max_range_hours 退化为展示用的常规值。
+	if startErr != nil || endErr != nil || !endTime.After(startTime) {
 		return body, time.Time{}, time.Time{}, errors.New("invalid record query time range")
 	}
 	if body.Type != "all" && body.Type != "manual" && body.Type != "alarm" {

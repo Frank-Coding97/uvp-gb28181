@@ -57,7 +57,7 @@ describe("record query contract helpers", () => {
     });
   });
 
-  it("rejects inverted, oversized and non-standard queries before sending", () => {
+  it("rejects inverted and non-standard queries but allows spans beyond the conventional limit", () => {
     expect(
       validateRecordQueryForm(
         {
@@ -70,6 +70,7 @@ describe("record query contract helpers", () => {
         options
       )
     ).toMatchObject({ endTime: expect.any(String) });
+    // 超过常规跨度（24 小时）不再拦截：真实兜底是设备侧条目上限与查询超时。
     expect(
       validateRecordQueryForm(
         {
@@ -81,7 +82,7 @@ describe("record query contract helpers", () => {
         },
         options
       )
-    ).toMatchObject({ endTime: expect.stringContaining("24") });
+    ).toEqual({});
     expect(
       validateRecordQueryForm(
         {

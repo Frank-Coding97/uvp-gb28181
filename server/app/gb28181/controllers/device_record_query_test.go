@@ -187,7 +187,6 @@ func TestDeviceRecordQueryRejectsInvalidInputBeforeService(t *testing.T) {
 	cases := []string{
 		`{}`,
 		`{"startTime":"2026-08-04T09:00:00","endTime":"2026-08-04T08:00:00","type":"all","secrecy":0,"recorderId":""}`,
-		`{"startTime":"2026-08-03T08:00:00","endTime":"2026-08-04T09:00:00","type":"all","secrecy":0,"recorderId":""}`,
 		`{"startTime":"2026-08-04T08:00:00","endTime":"2026-08-04T09:00:00","type":"time","secrecy":0,"recorderId":""}`,
 		`{"startTime":"2026-08-04T08:00:00","endTime":"2026-08-04T09:00:00","type":"all","secrecy":0,"recorderId":"","deviceCode":"spoof"}`,
 	}
@@ -197,6 +196,18 @@ func TestDeviceRecordQueryRejectsInvalidInputBeforeService(t *testing.T) {
 		require.Equal(t, "record_query_invalid_argument", recordQueryErrorCode(t, result))
 	}
 	require.Zero(t, fixture.service.callCount())
+}
+
+// 跨度不再是拒绝条件：上级/用户按「今天 0 点到现在」「最近一周」查是常态，
+// 24 小时硬卡会把合法请求变成 422。条目上限与查询超时才是真正的兜底。
+func TestDeviceRecordQueryAllowsTimeRangeBeyondConventionalSpan(t *testing.T) {
+	fixture := newRecordQueryFixture(t, 10)
+	path := "/channel/" + uintStr(fixture.channel.ID) + "/record-query"
+	body := `{"startTime":"2026-07-05T08:00:00","endTime":"2026-08-04T09:00:00","type":"all","secrecy":0,"recorderId":""}`
+	result := fixture.request(http.MethodPost, path, body)
+	require.Equal(t, http.StatusOK, result.Code, result.Body.String())
+	require.Equal(t, 1, fixture.service.callCount())
+	require.Equal(t, 721, int(fixture.service.request.EndTime.Sub(fixture.service.request.StartTime).Hours()))
 }
 
 func TestDeviceRecordQueryMapsOfflineAndServiceErrors(t *testing.T) {
