@@ -77,3 +77,31 @@ func TestTrackerRecordsFailureAfterPersist(t *testing.T) {
 	require.Equal(t, StatusFailed, progress.Status)
 	require.Equal(t, "persist failed", progress.ErrorMessage)
 }
+
+// 剪枝标记只对「手动刷新」生效，且必须按 deviceID + SN 对齐 ——
+// 它是删除动作的前置开关，错一次就会删掉真实通道。
+func TestTrackerPruneRequestRequiresMatchingActiveOperation(t *testing.T) {
+	tracker := NewTracker(time.Minute, time.Minute)
+
+	// 没有活跃任务时要求剪枝：不能凭空为某台设备打开开关
+	tracker.RequestPrune("device-1")
+	require.False(t, tracker.NeedPrune("device-1", 0))
+
+	started := tracker.Start("device-1")
+	tracker.Bind(started.Snapshot.OperationID, 7)
+	// 注册成功后自动触发的 Catalog 不标记 ⇒ 默认不剪
+	require.False(t, tracker.NeedPrune("device-1", 7))
+
+	tracker.RequestPrune("device-1")
+	require.True(t, tracker.NeedPrune("device-1", 7))
+	// SN 对不上（这次应答属于另一次查询）不剪
+	require.False(t, tracker.NeedPrune("device-1", 9))
+
+	// 别的设备不受影响
+	require.False(t, tracker.NeedPrune("device-2", 7))
+
+	// Finish 之后任务摘除，开关随之失效
+	tracker.Finish("device-1", 7, nil)
+	require.False(t, tracker.NeedPrune("device-1", 7))
+	require.NotEmpty(t, started.Snapshot.OperationID)
+}

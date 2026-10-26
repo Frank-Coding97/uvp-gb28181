@@ -269,6 +269,62 @@ func ingestByType(ctx context.Context, tx *gorm.DB, sender Sender, it CatalogIte
 	return nil
 }
 
+// PruneChannels 把本次**完整**目录应答中未出现的通道软删。
+//
+// 为什么需要它：`Ingest` 只做 upsert，对端"把某条通道撤掉/换编号"时旧记录会
+// 永久留在库里 —— 界面上它还占一格，点它必然失败（实测 WVP：把共享通道的
+// 自定义编号从 A 改成 B 后只对 B 发 UPDATE，库里 A、B 各一条，点 A 就是
+// `[上级INVITE] 通道不存在，返回404`）。靠对端补一条 `Event=DEL` 不可指望，
+// 只有"完整快照差集"能自愈。
+//
+// ⛔ 只在**手动刷新目录**这条显式路径上调用（见 handler.HandleCatalogResponse 的
+//    prune 分支）：自动 Catalog 查询应答不剪，避免任何"对端这次少报了几条"的
+//    异常被当成删除执行。
+// ⛔ keepCodes 为空时**直接不剪**：空快照无法区分"对端把通道全撤了"与
+//    "对端这次没报通道层"，宁漏不误。
+// ⛔ 删除复用 softDelete：与 `Event=DEL` 走同一套清理（挂载点、报警绑定、
+//    anomaly 记录、孤儿通道），不要另写一份 Delete。
+func (p *Pipeline) PruneChannels(ctx context.Context, sender Sender, keepCodes []string) (int, error) {
+	if sender.SourceDeviceID == "" {
+		return 0, fmt.Errorf("%w: sourceDeviceId is empty", ErrOwnerDeptRequired)
+	}
+	if len(keepCodes) == 0 {
+		return 0, nil
+	}
+	if sender.OwnerDeptID == 0 {
+		sender.OwnerDeptID = p.resolveOwnerDeptID(ctx, sender)
+	}
+	if sender.OwnerDeptID == 0 {
+		return 0, fmt.Errorf("%w: sourceDeviceId=%s", ErrOwnerDeptRequired, sender.SourceDeviceID)
+	}
+
+	var stale []string
+	query := p.db.WithContext(ctx).Model(&gbmodels.GbCatalogNode{}).
+		Where("owner_dept_id = ? AND node_type = ? AND source_device_id = ?",
+			sender.OwnerDeptID, gbmodels.NodeTypeChannel, strings.TrimSpace(sender.SourceDeviceID)).
+		Where("(source = ? OR source = ?)", gbmodels.NodeSourceCatalog, "").
+		Where("code NOT IN ?", keepCodes)
+	if err := query.Distinct().Pluck("code", &stale).Error; err != nil {
+		return 0, err
+	}
+
+	pruned := 0
+	var firstErr error
+	for _, code := range stale {
+		if strings.TrimSpace(code) == "" {
+			continue
+		}
+		if err := p.softDelete(ctx, sender, code); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		pruned++
+	}
+	return pruned, firstErr
+}
+
 // IngestDelta Subscribe NOTIFY 单条增量入库(G1 task 调用入口)
 //
 // action:add / update / del / on / off / vlost / defect

@@ -54,6 +54,10 @@ func (dc *DeviceMgmtController) RefreshDeviceCatalog(c *gin.Context) {
 
 	dest := fmt.Sprintf("%s:%d", d.IP, d.Port)
 	started := catalogprogress.Default.Start(d.DeviceID)
+	// ⛔ 手动刷新是唯一允许"按快照差集剪枝"的入口：对端撤掉/改编号的通道只有
+	//    完整快照能自愈（自动 Catalog 应答不标记，行为不变）。
+	//    去重命中也照样标记：用户点的是刷新，命中的是哪次任务不影响"要一次权威快照"。
+	catalogprogress.Default.RequestPrune(d.DeviceID)
 	if !started.Deduplicated {
 		triggerContext := catalogprogress.WithOperationID(context.WithoutCancel(c.Request.Context()), started.Snapshot.OperationID)
 		dc.catalogTrigger.Trigger(triggerContext, d.DeviceID, dest, d.Transport)

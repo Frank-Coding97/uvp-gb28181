@@ -10,6 +10,7 @@ import (
 	"uvplatform.com/uvp-gb28181/app/gb28181/catalog"
 	"uvplatform.com/uvp-gb28181/app/gb28181/catalogprogress"
 	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 	"uvplatform.com/uvp-gb28181/app/utils/logging"
 
@@ -236,6 +237,9 @@ func HandleCatalogResponse(ctx context.Context, body []byte, deviceID, callID, c
 	catalogprogress.Default.Observe(resp.DeviceID, resp.SN, received, sumNum, done)
 	if done {
 		pipeline := getCatalogPipeline()
+		// ⛔ 必须在 Finish 之前取：Finish 会把该设备从 activeByDevice 摘掉，
+		//    之后 NeedPrune 恒为 false。
+		pruneRequested := catalogprogress.Default.NeedPrune(resp.DeviceID, resp.SN)
 		if pipeline != nil {
 			items := make([]catalog.CatalogItem, 0, len(aggregated))
 			for _, it := range aggregated {
@@ -251,6 +255,7 @@ func HandleCatalogResponse(ctx context.Context, body []byte, deviceID, callID, c
 					zap.String("device_id", resp.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
 					logging.Error(e))
 			} else {
+				pruneStaleChannels(ctx, logger, pipeline, resp.DeviceID, items, pruneRequested)
 				catalogprogress.Default.Finish(resp.DeviceID, resp.SN, nil)
 				triggerCapabilityRefresh(ctx, resp.DeviceID, resp.SN)
 			}
@@ -278,6 +283,47 @@ func HandleCatalogResponse(ctx context.Context, body []byte, deviceID, callID, c
 		zap.Int("sn", resp.SN),
 		zap.Int("item_count", len(resp.DeviceList.Items)),
 		zap.Int("received_count", received), zap.Int("total_count", sumNum), zap.Bool("complete", done))
+}
+
+// pruneStaleChannels 手动刷新目录收齐后，按"完整快照差集"剪掉对端已不再提供的通道。
+//
+// 触发条件**三重**，缺一不剪（删除动作，宁漏不误）：
+//  1. 本次刷新由用户手动发起（catalogprogress.RequestPrune 标记过）；
+//  2. 本批条目里**确实有通道**——对端只报设备层时不剪，否则会把整层通道误删；
+//  3. keep 列表非空（PruneChannels 内部再兜一次）。
+//
+// 失败只记 Warn：剪枝失败最坏结果就是"僵尸通道还在"，与修复前一致，
+// 不该因此把整个刷新任务判成 failed。
+func pruneStaleChannels(ctx context.Context, logger *zap.Logger, pipeline *catalog.Pipeline, deviceID string, items []catalog.CatalogItem, requested bool) {
+	if !requested {
+		return
+	}
+	keep := make([]string, 0, len(items))
+	channelCount := 0
+	for _, it := range items {
+		keep = append(keep, it.DeviceID)
+		if catalog.Classify(it.DeviceID).NodeType == gbmodels.NodeTypeChannel {
+			channelCount++
+		}
+	}
+	if channelCount == 0 {
+		logger.Info("Catalog 剪枝跳过：本批没有通道条目",
+			zap.String("event", "gb28181.catalog.prune_skipped"),
+			zap.String("device_id", deviceID), zap.String("reason_code", "no_channel_items"))
+		return
+	}
+	pruned, err := pipeline.PruneChannels(ctx, catalog.Sender{SourceDeviceID: deviceID}, keep)
+	if err != nil {
+		logger.Warn("Catalog 剪枝失败(僵尸通道可能残留)",
+			zap.String("event", "gb28181.catalog.prune_failed"),
+			zap.String("device_id", deviceID), logging.Error(err))
+		return
+	}
+	if pruned > 0 {
+		logger.Info("Catalog 剪枝完成：已移除对端不再提供的通道",
+			zap.String("event", "gb28181.catalog.pruned"),
+			zap.String("device_id", deviceID), zap.Int("pruned_count", pruned))
+	}
 }
 
 // manscdpToCatalogItem 把 manscdp DTO 转 catalog DTO(无依赖,易测)

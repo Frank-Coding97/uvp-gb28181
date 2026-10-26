@@ -53,7 +53,10 @@ type StartResult struct {
 type operation struct {
 	snapshot Snapshot
 	sn       int
-	timer    *time.Timer
+	// prune 表示这次刷新是**用户手动触发**的，应答收齐后允许按快照差集
+	// 剪掉对端已不再提供的通道（见 catalog.Pipeline.PruneChannels）。
+	prune bool
+	timer *time.Timer
 }
 
 type Tracker struct {
@@ -108,6 +111,33 @@ func (t *Tracker) Bind(operationID string, sn int) {
 		current.sn = sn
 		current.snapshot.UpdatedAt = time.Now()
 	}
+}
+
+// RequestPrune 标记该设备当前活跃的刷新任务：应答收齐后需要剪枝。
+//
+// 只有「手动刷新目录」会调它（controllers.RefreshDeviceCatalog）。注册成功后
+// 自动触发的 Catalog 查询不标记 ⇒ 自动路径的行为完全不变。
+// ⛔ 必须在 Trigger 之前调用：Trigger 可能同步失败并 Finish，事后标记就没有意义了。
+func (t *Tracker) RequestPrune(deviceID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if current := t.activeOperationLocked(deviceID); current != nil {
+		current.prune = true
+	}
+}
+
+// NeedPrune 报告本次应答（按 deviceID + sn 匹配）是否要求剪枝。
+//
+// 与 Finish 同款匹配：操作已不存在、或 sn 对不上（应答属于另一次查询）时一律
+// 返回 false —— 剪枝是删除动作，宁可漏一次也不要错剪一批。
+func (t *Tracker) NeedPrune(deviceID string, sn int) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	current := t.activeOperationLocked(deviceID)
+	if current == nil || (current.sn != 0 && current.sn != sn) {
+		return false
+	}
+	return current.prune
 }
 
 func (t *Tracker) Fail(operationID string, err error) {
