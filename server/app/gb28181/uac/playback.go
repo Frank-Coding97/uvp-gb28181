@@ -268,7 +268,7 @@ func (u *UAC) InvitePlayback(ctx context.Context, in PlaybackInviteRequest) (Pla
 	if u == nil || u.playbackDialogs == nil || u.playbackDialogs.transport == nil {
 		return PlaybackDialogMetadata{}, ErrPlaybackUnavailable
 	}
-	ctx, cancel := withSIPCommandTimeout(ctx)
+	ctx, cancel := withPlaybackInviteAnswerWindow(ctx)
 	defer cancel()
 	req, metadata, err := u.buildPlaybackInviteRequest(in)
 	if err != nil {

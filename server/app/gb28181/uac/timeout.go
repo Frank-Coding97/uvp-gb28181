@@ -31,6 +31,36 @@ func InviteAnswerWindow() time.Duration {
 	return gbconfig.SIPCommandTimeout() + inviteLateAnswerGrace
 }
 
+// playbackInviteWindowMultiplier 是回放 INVITE 等待窗口相对 SIP 命令超时的倍数。
+//
+// ⛔⛔ 回放 INVITE 常常是**嵌套**的：上级把回放 INVITE 发给下级平台，下级收到后
+// 还要先把自己设备侧的回放流拉起来（它同样要等一个 SIP 命令超时），媒体就绪之后
+// 才回 200 OK。两级用同一个窗口 ⇒ 上级必然在下级刚好等满的那一刻先放弃并发 CANCEL，
+// 下级收到 CANCEL 把自己的 ctx 一起取消 ⇒ 上级只看到「PLAYBACK INVITE 应答超时」，
+// 而媒体其实 1~2 秒后就绪。
+//
+// 2026-10-26 实测（62 上级 / 236 下级，通道 34020000001320000025）：
+// 冷启动 14s 才建立，第 10s 被上级 CANCEL；紧接着重试因为设备已预热，1s 就建立。
+// 所以窗口取 2 倍：给下级留够"它自己的设备窗口 + 媒体就绪"的时间。
+const playbackInviteWindowMultiplier = 2
+
+// PlaybackInviteAnswerWindow 是录像回放 INVITE 的完整等待窗口（含迟到终态宽限）。
+func PlaybackInviteAnswerWindow() time.Duration {
+	return time.Duration(playbackInviteWindowMultiplier)*gbconfig.SIPCommandTimeout() + inviteLateAnswerGrace
+}
+
+// withPlaybackInviteAnswerWindow 给回放 INVITE 一个够跨过"下级二次拉流"的等待窗口。
+//
+// ⛔ 别改回 withSIPCommandTimeout：那等于要求"上级的等待"与"下级的等待"一样长，
+// 下级一旦真的用到自己的超时上沿就必然失败（见 playbackInviteWindowMultiplier）。
+// 窗口上限仍受父 ctx 约束（httpserver.handler_timeout 默认 30s）。
+func withPlaybackInviteAnswerWindow(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	return context.WithTimeout(parent, PlaybackInviteAnswerWindow())
+}
+
 // withInviteAnswerWindow 给实时点播的 INVITE 一个比 SIP 命令超时略宽的等待窗口。
 //
 // ⛔ 为什么不能只用 SIP 命令超时(默认 10s):下级平台/设备常常要等**自己的媒体
