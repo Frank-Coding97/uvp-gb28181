@@ -248,15 +248,30 @@ async function play(u: string, token: number) {
     });
 
     // 事件订阅
+    //
+    // ⛔⛔ 出错/超时后**必须销毁实例**，不能留给下一次重试复用。
+    //    EasyPlayer 的失败是"实例级"的：内部 demux/解码器/定时器一旦坏掉就不会自愈，
+    //    同族（flv↔flv）切换又按设计复用实例（见 switchTo），于是**第一次失败之后
+    //    每次重试都复用那个坏实例** ⇒ 表现为"窗口怎么点都是拉流超时，只能刷新整页"。
+    //    现场证据：反复重试后控制台抛
+    //    `TypeError: Cannot read properties of null (reading 'appendChild')` ——
+    //    坏实例还在往已被清空的容器里挂解码节点。
+    //    销毁后 player.value 归 null，下一次 play() 会走全新实例，重试才有意义。
+    const discardBrokenInstance = () => {
+      if (player.value !== p) return;
+      void destroy();
+    };
     p.on("error", (err: any) => {
       errorMsg.value = `EasyPlayer 错误: ${typeof err === "string" ? err : JSON.stringify(err)}`;
       emit("error", errorMsg.value);
       reportPlayerError("player_error");
+      discardBrokenInstance();
     });
     p.on("timeout", () => {
       errorMsg.value = "拉流超时";
       emit("error", errorMsg.value);
       reportPlayerError("player_timeout");
+      discardBrokenInstance();
     });
     p.on("timeUpdate", (timestamp: unknown) => {
       if (typeof timestamp === "number" && Number.isFinite(timestamp)) emit("timeupdate", timestamp);
@@ -284,6 +299,8 @@ async function play(u: string, token: number) {
     stopFirstFrame?.();
     errorMsg.value = `初始化失败: ${(e as Error).message || e}`;
     emit("error", errorMsg.value);
+    // 同上：初始化失败的实例不可复用，销毁以便重试能重建。
+    void destroy();
   }
 }
 

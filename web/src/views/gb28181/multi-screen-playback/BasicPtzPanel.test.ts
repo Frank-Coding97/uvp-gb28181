@@ -11,6 +11,8 @@ const account = vi.hoisted(() => ({ permissions: ["*:*:*"] as string[] }));
 vi.mock("@/api/gb28181", () => api);
 vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => ({ account }) }));
 
+import { Message } from "@arco-design/web-vue";
+
 import BasicPtzPanel from "./BasicPtzPanel.vue";
 
 const onlineChannel = {
@@ -161,5 +163,42 @@ describe("BasicPtzPanel", () => {
     wrapper.unmount();
     await flushPromises();
     expect(api.controlPtz).toHaveBeenCalledWith(2, expect.objectContaining({ action: "stop" }));
+  });
+
+  // ⛔ HTTP 层失败（离线通道实测是 400）已经由 `utils/http` 统一弹后端 message，
+  //    组件再弹一次就会多出一条 axios 技术串「Request failed with status code 400」。
+  it("keeps the axios technical message out of the toast when the HTTP layer fails", async () => {
+    const errorSpy = vi.spyOn(Message, "error").mockImplementation((() => undefined) as any);
+    api.controlPtz.mockRejectedValueOnce(
+      Object.assign(new Error("Request failed with status code 400"), {
+        isAxiosError: true,
+        response: { status: 400, data: { message: "通道离线,无法下发云台控制" } }
+      })
+    );
+
+    const wrapper = mount(BasicPtzPanel, { props: { channel: onlineChannel } });
+    await flushPromises();
+    await wrapper.get("[data-test=ptz-up]").trigger("pointerdown");
+    await flushPromises();
+
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+    wrapper.unmount();
+  });
+
+  // 业务失败（HTTP 200 + code!=0）拦截器不管，必须由组件自己提示。
+  it("still reports a business failure returned with HTTP 200", async () => {
+    const errorSpy = vi.spyOn(Message, "error").mockImplementation((() => undefined) as any);
+    api.controlPtz.mockResolvedValueOnce({ code: 1, message: "通道离线,无法下发云台控制" });
+
+    const wrapper = mount(BasicPtzPanel, { props: { channel: onlineChannel } });
+    await flushPromises();
+    await wrapper.get("[data-test=ptz-up]").trigger("pointerdown");
+    await flushPromises();
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith("通道离线,无法下发云台控制");
+    errorSpy.mockRestore();
+    wrapper.unmount();
   });
 });

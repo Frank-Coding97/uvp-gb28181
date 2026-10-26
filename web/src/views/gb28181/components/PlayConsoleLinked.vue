@@ -2731,9 +2731,19 @@ async function sendPtz(action: string) {
       speed: levelToProtocolSpeed(moveSpeed.value),
       idempotencyKey: `${props.channel.id}-${action}-${Date.now()}`
     });
-    if (response.code !== 0) throw new Error(response.message || "云台指令失败");
+    // ⛔ 业务失败（HTTP 200 + code!=0）拦截器不管，必须在这里提示。
+    //    HTTP 层失败（本次实测离线通道是 400）由 `utils/http` 统一弹后端 message
+    //    （「通道离线,无法下发云台控制」），这里**不能再弹**——以前弹的是
+    //    `error.message`，即 axios 的技术串，于是用户同时看到业务提示和
+    //    「Request failed with status code 400」两条。
+    if (response.code !== 0) Message.error(response.message || `云台指令 ${action} 失败`);
   } catch (error: any) {
-    Message.error(error?.message || `云台指令 ${action} 失败`);
+    // HTTP 层失败（本次实测离线通道是 400）已由 `utils/http` 统一弹后端 message
+    // （「通道离线,无法下发云台控制」），这里**不能再弹**——以前弹的是
+    // `error.message`，即 axios 的技术串，于是用户同时看到业务提示和
+    // 「Request failed with status code 400」两条。
+    // 只有非 HTTP 异常（本地代码抛错）才需要在这里兜底，否则会一条错误弹两次。
+    if (!error?.isAxiosError) Message.error(error?.message || `云台指令 ${action} 失败`);
   }
 }
 

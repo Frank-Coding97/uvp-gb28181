@@ -69,9 +69,14 @@ async function send(channelId: number, action: string) {
   if (!canControlPtz.value) return;
   try {
     const response = await controlPtz(channelId, payload(channelId, action));
-    if (response.code !== 0) throw new Error(response.message || "云台指令失败");
+    // ⛔ 业务失败（HTTP 200 + code!=0）拦截器不管，必须在这里提示；
+    //    HTTP 层失败已由 `utils/http` 统一弹后端 message，这里不再重复弹
+    //    （重复时多出来的那条是 axios 技术串「Request failed with status code 400」）。
+    if (response.code !== 0) Message.error(response.message || "云台指令失败");
   } catch (error: any) {
-    Message.error(error?.message || "云台指令失败");
+    // HTTP 层失败已由全局拦截器按后端 message 提示，这里不再重复弹；只有非 HTTP
+    // 异常（本地代码抛错，拦截器管不到）才需要兜底，否则一条错误会弹两次。
+    if (!error?.isAxiosError) Message.error(error?.message || "云台指令失败");
   }
 }
 

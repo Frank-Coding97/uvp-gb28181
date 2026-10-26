@@ -248,6 +248,51 @@ describe("PlayWindow playback embedding", () => {
     wrapper.unmount();
   });
 
+  /**
+   * 现场故障：反复重试后整页播放全废，控制台报
+   * `TypeError: Cannot read properties of null (reading 'appendChild')`，
+   * 只能刷新页面才能恢复。
+   *
+   * 契约：**失败（timeout / error / 初始化抛错）的实例必须立刻销毁**。
+   * 否则 player.value 一直指向那个坏实例，同族切换又按设计复用实例，
+   * 于是每次「重试」都往坏实例上再撞一次，永远好不了。
+   */
+  it("销毁超时的播放器实例，让重试能拿到全新实例", async () => {
+    const instances: Array<{ on: any; play: any; destroy: any }> = [];
+    const listeners: Record<string, (value?: unknown) => void> = {};
+    class FakeEasyPlayer {
+      on = vi.fn((event: string, callback: (value?: unknown) => void) => {
+        listeners[event] = callback;
+      });
+      play = vi.fn();
+      destroy = vi.fn();
+      constructor() {
+        instances.push(this);
+      }
+    }
+    (globalThis as { EasyPlayerPro?: unknown }).EasyPlayerPro = FakeEasyPlayer;
+
+    const wrapper = mount(PlayWindow, { props: { url: "ws://zlm/live.flv" } });
+    await flushPromises();
+    expect(instances).toHaveLength(1);
+    expect(instances[0].destroy).not.toHaveBeenCalled();
+
+    listeners.timeout?.();
+    await flushPromises();
+
+    expect(instances[0].destroy).toHaveBeenCalledTimes(1);
+    expect(wrapper.get(".err").text()).toContain("拉流超时");
+
+    // 重试：URL 先清空再设回，必须重新构造实例（而不是复用已销毁的那个）。
+    await wrapper.setProps({ url: "" });
+    await flushPromises();
+    await wrapper.setProps({ url: "ws://zlm/live.flv" });
+    await flushPromises();
+    expect(instances.length).toBe(2);
+    expect(instances[1].play).toHaveBeenCalledWith("ws://zlm/live.flv");
+    wrapper.unmount();
+  });
+
   it("reports the first decoded frame once per playback URL", async () => {
     vi.useFakeTimers();
     class FakeEasyPlayer {
