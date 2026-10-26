@@ -105,8 +105,7 @@ func TestSinglePortStopRetainsIdentityUntilCleanupConfirmed(t *testing.T) {
 	require.Empty(t, channels.c.StreamID)
 }
 
-func TestSinglePortRecoveryRestoresHexStreamAfterSwitchToMulti(t *testing.T) {
-	withFixedAddressPlaybackSettings(t, false, false)
+func TestSinglePortRecoveryRestoresHexStreamAfterSwitchToMulti(t *testing.T) {	withFixedAddressPlaybackSettings(t, false, false)
 	ch := aChannel()
 	ch.CurrentSSRC = "0200000007"
 	ch.StreamID, _ = zlm.SinglePortStreamID(ch.CurrentSSRC)
@@ -121,4 +120,46 @@ func TestSinglePortRecoveryRestoresHexStreamAfterSwitchToMulti(t *testing.T) {
 	require.NoError(t, s.stopDirect(context.Background(), ch.StreamID))
 	require.Equal(t, 1, z.sharedClose)
 	require.Zero(t, z.closeCalls.Load())
+}
+
+// mediaListSharedMockZLM 是"既能单端口收流、又能查媒体列表"的节点客户端，
+// 对应生产里的 *zlm.Client。
+type mediaListSharedMockZLM struct {
+	sharedMockZLM
+	media     []zlm.MediaInfo
+	mediaErr  error
+	mediaArgs [3]string
+}
+
+func (m *mediaListSharedMockZLM) GetMediaList(_ context.Context, vhost, app, stream string) ([]zlm.MediaInfo, error) {
+	m.mediaArgs = [3]string{vhost, app, stream}
+	return m.media, m.mediaErr
+}
+
+// ⛔ 回归防守：receiveModeClient 内嵌的是 ZLM 接口（只有收流三方法），包装后
+// 底层 *zlm.Client 的 GetMediaList 会消失。StopOnNoneReader 靠
+// client.(mediaListClient) 断言查 readerCount，断言一失败就变成
+// ErrReaderCountUnavailable ⇒ 无人观看时永不断流 ⇒ 实时流一直挂在 ZLM 上。
+func TestReceiveModeClientForwardsMediaListForReaderCount(t *testing.T) {
+	base := &mediaListSharedMockZLM{media: []zlm.MediaInfo{{ReaderCount: 0}}}
+	wrapped := wrapReceiveModeClient(base)
+
+	lister, ok := wrapped.(mediaListClient)
+	require.True(t, ok, "包装后必须仍能查询 readerCount，否则 on_stream_none_reader 永远关不掉流")
+
+	got, err := lister.GetMediaList(context.Background(), "__defaultVhost__", "rtp", "S")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, [3]string{"__defaultVhost__", "rtp", "S"}, base.mediaArgs)
+}
+
+// 底层确实查不到列表时必须如实报"不可用"，不能伪装成 0 个观众——
+// 那会让上层以为无人观看，直接把正在被观看的流关掉。
+func TestReceiveModeClientReportsUnavailableWhenBackendCannotListMedia(t *testing.T) {
+	wrapped := wrapReceiveModeClient(&sharedMockZLM{})
+
+	lister, ok := wrapped.(mediaListClient)
+	require.True(t, ok)
+	_, err := lister.GetMediaList(context.Background(), "__defaultVhost__", "rtp", "S")
+	require.ErrorIs(t, err, ErrReaderCountUnavailable)
 }
