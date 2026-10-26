@@ -1,6 +1,9 @@
 package stream
 
-import "sync"
+import (
+	"strings"
+	"sync"
+)
 
 // LiveRef identifies one generation of a live stream.
 type LiveRef struct {
@@ -25,8 +28,16 @@ func NewLocationMap() *LocationMap {
 	return &LocationMap{streams: make(map[string]LiveRef)}
 }
 
-// Bind 绑定流到节点(同一 streamID 多次 Bind 覆盖,最后写胜出)
+// Bind 绑定流到节点(同一 streamID 多次 Bind 覆盖,最后写胜出)。
+//
+// ⛔ 必须拒绝空 streamID 和非正 nodeID：这两个值都会被当成「有效绑定」，
+// 下游的 Lookup 会返回 (0, true)。云录像正是踩在这上面 —— 它拿到 node_id=0
+// 就写了一条 node_id=0 的录像会话，停录时查不到节点，通道被判 failed
+// 且文案是「ZLM 节点 0 不可用」，完全指不出真正的原因。
 func (m *LocationMap) Bind(streamID string, nodeID int64) {
+	if strings.TrimSpace(streamID) == "" || nodeID <= 0 {
+		return
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if current, ok := m.streams[streamID]; ok && current.Generation > 0 {

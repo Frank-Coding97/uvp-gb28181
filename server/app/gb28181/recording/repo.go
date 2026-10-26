@@ -166,10 +166,15 @@ func (r *GormRepo) MarkSessionStopped(ctx context.Context, sessionID uint64, mes
 		}).Error
 }
 
+// ListUnfinishedSessions 返回还需要收尾的会话。
+//
+// ⛔ failed 必须一起排除：它是终态，判失败时节点已经够不着、录制也确实没在跑。
+// 只排 stopped 会让这些死会话每轮对账都被捞回来 —— 空壳会话（channel_id=0）
+// 甚至会把「通道 0」拿去对账，然后在库里凭空多出一条 failed 记录。
 func (r *GormRepo) ListUnfinishedSessions(ctx context.Context) ([]models.GbRecordingSession, error) {
 	var sessions []models.GbRecordingSession
 	err := r.db.WithContext(ctx).
-		Where("state <> ?", models.RecordingSessionStateStopped).
+		Where("state NOT IN ?", []string{models.RecordingSessionStateStopped, models.RecordingSessionStateFailed}).
 		Order("id").
 		Find(&sessions).Error
 	return sessions, err

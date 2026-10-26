@@ -241,6 +241,12 @@ func TestConcurrentEnableDoesNotStartRecorder(t *testing.T) {
 	require.Zero(t, client.startCalls.Load())
 }
 
+// 契约（2026-10-26 按产品要求调整）：
+// 「云端录像开关开着」= 这条通道只要有流就录，不管流是谁拉起来的。
+// 旧契约是「流注册一律不起录，只等浏览器点播的 REST 接口来调 BeginPlayback」，
+// 结果是级联拉流（上级发 INVITE，不走那个接口）永远不录。
+//
+// 同一个 on_stream_changed 可能重复到达，所以两次注册只能起一次录。
 func TestObserveRegisteredStreamStartsEnabledRecordingOnce(t *testing.T) {
 	repo, channel := seedRecordingChannel(t, true)
 	channel.StreamID = "stream-observed"
@@ -252,10 +258,10 @@ func TestObserveRegisteredStreamStartsEnabledRecordingOnce(t *testing.T) {
 
 	require.NoError(t, service.ObserveStream(context.Background(), channel.StreamID, true))
 	require.NoError(t, service.ObserveStream(context.Background(), channel.StreamID, true))
-	require.Zero(t, client.startCalls.Load())
+	require.EqualValues(t, 1, client.startCalls.Load())
 	stored, err := repo.GetChannel(context.Background(), channel.ID)
 	require.NoError(t, err)
-	require.Equal(t, models.CloudRecordingStateWaiting, stored.CloudRecordingState)
+	require.Equal(t, models.CloudRecordingStateRecording, stored.CloudRecordingState)
 }
 
 func TestEndPlaybackStopsRecordingAndKeepsEnabledForNextPlayback(t *testing.T) {
