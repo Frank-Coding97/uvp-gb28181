@@ -345,5 +345,5 @@ func (s *Service) stopCurrentResult(ctx context.Context, result *Result) error {
 	s.terminateAuthorizationGeneration(result.Generation)
 
 	_, clearErr := s.channels.ClearIfCurrent(ctx, ref.StreamID, ref.SSRC)
-	return completedMediaStop(errors.Join(byeErr, clearErr))
+	return CompletedMediaStop(errors.Join(byeErr, clearErr))
 }

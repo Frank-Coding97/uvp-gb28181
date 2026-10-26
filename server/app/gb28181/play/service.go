@@ -1262,7 +1262,17 @@ func (s *Service) Stop(ctx context.Context, streamID, deviceID, channelID string
 				DeviceCode: deviceID, ChannelCode: channelID, StreamID: streamID, NodeID: nodeID,
 				ReasonCode: ReasonCleanupPartialFailed,
 			})
-			logger.Warn("停播清理失败", append(fields, zap.String("event", "gb28181.play.stop_failed"), zap.String("stage", "cleanup"), zap.String("outcome", "failed"), zap.String("reason_code", "cleanup_failed"))...)
+			// 两种语义共用这一个事件名(WARN 等级,按名统计仍可比):
+			//   ① 真失败 —— 媒体没关掉,通道留在"可重试"状态,停播口回 400;
+			//   ② 收尾告警 —— 媒体已确定停止,只剩 BYE/落库没走通(对端推流器先没了),
+			//      停播口回 200,但必须留痕,否则线上 BYE 481/400 彻底看不见。
+			// ⛔ 以前这里不带 error 字段,20:28 那次只留下一句"停播清理失败",
+			//    到底是哪一步失败全靠翻 SIP 抓包(P-021 排查代价即此)。
+			message := "停播清理失败"
+			if IsMediaStopCompleted(err) {
+				message = "停播已完成，收尾告警"
+			}
+			logger.Warn(message, append(fields, zap.String("event", "gb28181.play.stop_failed"), zap.String("stage", "cleanup"), zap.String("outcome", "failed"), zap.String("reason_code", "cleanup_failed"), logging.Error(err))...)
 			return
 		}
 		s.recordStreamLifecycle(ctx, streamID, nodeID, LifecycleEvent{
@@ -1396,13 +1406,16 @@ func (s *Service) stopDirect(ctx context.Context, streamID string) error {
 		s.ssrcAllocator.Release(currentSSRC)
 	}
 
-	if byeErr != nil {
-		return byeErr
-	}
 	if closeErr != nil {
-		return closeErr
+		// 媒体状态未知(ZLM 没确认收流服务已消失) ⇒ 必须保持失败、留给重试,
+		// 不能打"已完成"标记。
+		return errors.Join(closeErr, byeErr)
 	}
-	return clearErr
+	// 走到这里 closeErr 为空 = ZLM 已确认这路 RTP 收流服务不存在或已关闭 ⇒ 媒体确实停了。
+	// 只剩 BYE / 落库收尾失败时必须打上已完成标记:对端推流器先没了时 BYE 会被回
+	// `400 pusher not exits`(EasyGBS 实测),那不是"停播失败"(P-021)。
+	// 错误本身仍然原样返回,errors.Is 与日志口径都不变。
+	return CompletedMediaStop(errors.Join(byeErr, clearErr))
 }
 
 // ShouldCloseOnNoneReader 返回通道无人观看时是否应关闭上行流。

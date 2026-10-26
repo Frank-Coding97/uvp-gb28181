@@ -61,11 +61,28 @@ func (e *stopCompletionError) Unwrap() error { return e.err }
 // 每一次新点播都复用到这条死会话上，从此再也点不开。
 func (e *stopCompletionError) MediaStopCompleted() bool { return true }
 
-func completedMediaStop(err error) error {
+// CompletedMediaStop 给「媒体已确定停止、只剩收尾失败」的错误打上标记。
+//
+// ⛔ 只有 ZLM 明确回「这路 RTP 收流服务不存在/已关闭」时才能调用；关流本身没走通
+// （超时、节点不可达、owner 节点查不到）一律原样返回裸错误，否则会把真失败吞成
+// 成功，留下一条再也打不开的通道。
+func CompletedMediaStop(err error) error {
 	if err == nil {
 		return nil
 	}
 	return &stopCompletionError{err: err}
+}
+
+// IsMediaStopCompleted 读取 CompletedMediaStop 打的标记（nil 视为没有失败）。
+//
+// HTTP 停播口靠它区分「真失败」与「收尾告警」：对端推流器早就没了时，BYE 常被回
+// `400 pusher not exits` / `481 Call/Transaction Does Not Exist`（EasyGBS 实测），
+// 这类情形媒体确实已经停了 —— 再回 400 会让前端认为流还在、本地会话状态不清理，
+// 下一次点播顶着坏状态继续超时（P-021）。
+//
+// 与类型上的 MediaStopCompleted() 方法同义，这里只是包外可读的入口。
+func IsMediaStopCompleted(err error) bool {
+	return stopReachedMediaTerminal(err)
 }
 
 func stopReachedMediaTerminal(err error) bool {

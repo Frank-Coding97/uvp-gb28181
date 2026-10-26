@@ -171,7 +171,7 @@ func TestCoordinatorClearDeviceBeforeRetriesCloseFailureAndKeepsTerminalWarning(
 		if calls.Add(1) == 1 {
 			return errors.New("close failed")
 		}
-		return completedMediaStop(errors.New("bye warning"))
+		return CompletedMediaStop(errors.New("bye warning"))
 	}, func(Request) int64 { return 1 })
 	ensureCleanupEntry(t, c, Request{DeviceID: "D", ChannelID: "ch"})
 

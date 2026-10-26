@@ -161,7 +161,11 @@ func (d *Dispatcher) Stop(ctx context.Context, request auth.PlayRequest) (any, e
 	if err := d.quota.Release(ctx, request.ClientID, grant.GrantID); err != nil {
 		return nil, auth.ErrPlayUnavailable
 	}
-	if stopErr != nil {
+	// Media already confirmed gone (ZLM 关流成功 / 收流服务本就不存在), only the
+	// BYE or bookkeeping tail failed: the stream this client asked to end is
+	// ended. Reporting unavailable here would make the client retry a stop whose
+	// grant is already retired — the retry then answers not-found (P-021).
+	if stopErr != nil && !gbplay.IsMediaStopCompleted(stopErr) {
 		return nil, auth.ErrPlayUnavailable
 	}
 	return LiveStopResult{Released: streamID != "", StreamID: streamID}, nil

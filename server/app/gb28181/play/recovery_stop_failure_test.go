@@ -133,6 +133,10 @@ func TestServiceStopByeFailureClosesBeforeClearingPersistence(t *testing.T) {
 	}
 	if err := service.Stop(context.Background(), result.StreamID, "", ""); !errors.Is(err, errBye) {
 		t.Fatalf("stop error=%v, want BYE failure", err)
+	} else if !IsMediaStopCompleted(err) {
+		// 关流成功 ⇒ 媒体确实停了,只剩 BYE 没走通。这个标记必须立起来,
+		// 否则 HTTP 停播口会把"对端推流器早就没了"判成 400(P-021)。
+		t.Fatalf("BYE-only failure not marked as completed media stop: %v", err)
 	}
 	if !reflect.DeepEqual(events, []string{"bye", "close", "clear"}) {
 		t.Fatalf("stop order=%v, want BYE then close then persistence cleanup", events)
@@ -176,6 +180,10 @@ func TestServiceStopCloseFailureKeepsGenerationTrackableAndRetryable(t *testing.
 
 	if err := service.Stop(context.Background(), result.StreamID, "", ""); !errors.Is(err, errClose) {
 		t.Fatalf("stop error=%v, want close failure", err)
+	} else if IsMediaStopCompleted(err) {
+		// 关流没走通 = 媒体状态未知。这个标记一旦立起来,停播口就会把真失败
+		// 报成成功,通道从此打不开 —— 必须保持"未完成"。
+		t.Fatalf("close failure must not be marked as completed media stop: %v", err)
 	}
 	if current, ok := service.CurrentLiveRef(result.StreamID); !ok || current != resultLiveRef(result) {
 		t.Fatalf("close failure lost tracked generation: current=%+v ok=%v", current, ok)

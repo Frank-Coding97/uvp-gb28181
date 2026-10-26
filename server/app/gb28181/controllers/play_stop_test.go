@@ -131,6 +131,27 @@ func TestPlayControllerStopReleasesUnrecordedStream(t *testing.T) {
 	assert.EqualValues(t, 1, service.stopCalls.Load())
 }
 
+// 媒体已经确定停止、只剩 BYE/落库收尾失败(=对端推流器先没了,BYE 被回
+// `400 pusher not exits`)时,停播口必须回 200:前端靠它清本地会话状态,
+// 否则下一次点播顶着坏状态继续超时(P-021,EasyGBS 实测)。
+func TestPlayControllerStopTreatsCompletedMediaStopAsSuccess(t *testing.T) {
+	service := &stopTestPlayService{
+		stopErr: play.CompletedMediaStop(errors.New("BYE 失败: 400 pusher not exits")),
+	}
+	router := buildStopRouter(t, service)
+
+	recorder := serveStop(router, "dept10-stream")
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	body := unmarshal(t, recorder)
+	assert.EqualValues(t, 0, body["code"])
+	assert.Equal(t, "已停止直播", body["message"])
+	data, ok := body["data"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, true, data["released"])
+	assert.EqualValues(t, 1, service.stopCalls.Load())
+}
+
 func TestPlayControllerStopReturnsErrorWhenServiceFails(t *testing.T) {
 	service := &stopTestPlayService{stopErr: errors.New("bye 失败")}
 	router := buildStopRouter(t, service)

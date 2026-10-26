@@ -447,8 +447,15 @@ func (pc *PlayController) Stop(c *gin.Context) {
 		deviceID, channelID = ch.DeviceID, ch.ChannelID
 	}
 	if err := pc.svc.Stop(c.Request.Context(), streamID, deviceID, channelID); err != nil {
-		pc.FailAndAbort(c, "停止流失败", err)
-		return
+		// 媒体已经确定停止、只剩 BYE / 落库收尾没走通（对端推流器本来就没了时会回
+		// `400 pusher not exits` 或 `481`）—— 对用户而言停播是成功的。
+		// ⛔ 不能因为这类收尾告警回 400：前端拿到 400 会认为流还在、本地会话状态不
+		//    清理，下一次点播顶着坏状态继续超时（P-021，EasyGBS 实测）。
+		//    真失败（ZLM 关流没走通）不带这个标记，仍然回 400 并保持可重试。
+		if !play.IsMediaStopCompleted(err) {
+			pc.FailAndAbort(c, "停止流失败", err)
+			return
+		}
 	}
 	pc.Success(c, gin.H{
 		"released": true,
