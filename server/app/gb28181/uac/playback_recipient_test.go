@@ -22,20 +22,22 @@ func TestPlaybackControlRecipientPrefersDeviceContact(t *testing.T) {
 	require.Equal(t, 5060, recipient.Port)
 }
 
+// 兜底分支用 deviceURI：其域取**目标编码自己的域**（3402000000），不再是平台域。
+// RemoteTarget 与 Destination 都缺时本来就没有可路由地址，这里只钉「走哪条分支」。
 func TestPlaybackControlRecipientFallsBackWhenContactMissing(t *testing.T) {
-	u := &UAC{domain: "192.0.2.10"}
+	u := &UAC{domain: "3701000000"}
 	recipient := u.playbackControlRecipient(PlaybackDialogMetadata{ChannelID: "34020000001320000001"})
-	require.Equal(t, "192.0.2.10", recipient.Host)
+	require.Equal(t, "3402000000", recipient.Host)
 	require.Equal(t, "34020000001320000001", recipient.User)
 }
 
 func TestPlaybackControlRecipientIgnoresUnparsableContact(t *testing.T) {
-	u := &UAC{domain: "192.0.2.10"}
+	u := &UAC{domain: "3701000000"}
 	recipient := u.playbackControlRecipient(PlaybackDialogMetadata{
 		ChannelID:    "34020000001320000001",
 		RemoteTarget: "not-a-sip-uri",
 	})
-	require.Equal(t, "192.0.2.10", recipient.Host)
+	require.Equal(t, "3402000000", recipient.Host)
 	require.Equal(t, "34020000001320000001", recipient.User)
 }
 

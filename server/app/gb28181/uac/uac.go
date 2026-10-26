@@ -218,12 +218,39 @@ func detectMessageKind(body []byte) metrics.TxKind {
 	return metrics.TxUnknown
 }
 
+// deviceURI 构造发往设备的请求行 URI。
+//
+// 请求行的域必须取**目标编码自己的域**（国标 20 位编码的前 10 位），不能一律用
+// 本平台域。级联场景下上级拿到的是下级平台发布的通道编码（如 34020000001320000025），
+// 其域是下级平台的 3402000000；若把域写成上级自己的 3701000000，下级会判定
+// 「不是发给我的」而**静默丢弃、连 100 Trying 都不回** —— 实测 236 收到 6 个
+// INVITE（765B）却零响应，上级侧表现为 12 秒点播超时。
+//
+// 本地接入设备的编码前 10 位本来就等于平台域，因此本改动对单平台场景无变化。
 func (u *UAC) deviceURI(deviceID string) sip.Uri {
+	domain := u.domain
+	if d, ok := deviceDomain(deviceID); ok {
+		domain = d
+	}
 	uri := sip.Uri{}
-	if err := sip.ParseUri(fmt.Sprintf("sip:%s@%s", deviceID, u.domain), &uri); err != nil {
+	if err := sip.ParseUri(fmt.Sprintf("sip:%s@%s", deviceID, domain), &uri); err != nil {
 		return sip.Uri{}
 	}
 	return uri
+}
+
+// deviceDomain 取国标编码的域部分：20 位纯数字时返回前 10 位。
+// 长度或字符不合规一律回落，避免把不合规的 deviceID 拆成非法 SIP 域。
+func deviceDomain(deviceID string) (string, bool) {
+	if len(deviceID) != 20 {
+		return "", false
+	}
+	for i := 0; i < len(deviceID); i++ {
+		if deviceID[i] < '0' || deviceID[i] > '9' {
+			return "", false
+		}
+	}
+	return deviceID[:10], true
 }
 
 // platformFromHeader 构造平台端 From 头(GB28181 § 9.1.1 要求)
