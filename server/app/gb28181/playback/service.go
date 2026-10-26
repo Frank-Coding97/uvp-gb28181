@@ -111,7 +111,9 @@ type ServiceConfig struct {
 	RequireIntents func() bool
 	ServerID       string
 	Metrics        *Metrics
-	MediaWait      time.Duration
+	// MediaWait 是「等设备把媒体送上来」的固定预算，0 表示不设等待上限
+	// （沿用旧行为，仅供测试/特殊部署）。
+	MediaWait time.Duration
 }
 
 type Service struct {
@@ -185,6 +187,10 @@ func (s *Service) SetMediaReadyObserver(observer func(Session)) {
 		s.mediaReady = observer
 	}
 }
+
+// playbackMediaWaitCleanupTimeout 是「收流超时」后拆除会话的独立预算。
+// 拆除（BYE/TEARDOWN + 关 RTP 端口）不能借请求上下文，见 Create 里的说明。
+const playbackMediaWaitCleanupTimeout = 10 * time.Second
 
 func randomPlaybackValue(prefix string) string {
 	var raw [8]byte
@@ -499,15 +505,24 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (out Create
 	if err := ctx.Err(); err != nil {
 		return CreateResult{}, s.fail(ctx, session.ID, "invite", "cancelled", err, resources)
 	}
+	// ⛔ 等待预算是固定值，不随回放窗口长短变化：国标回放是 S=Play + RANGE，
+	// 设备从**起点**按 1x 顺序推流，定位开销只取决于起点在哪、设备本身多快，
+	// 终点有多远不影响首包到达（这里等的是 ZLM 收到首包后把流登记为在线）。
 	mediaCtx := ctx
 	mediaCancel := func() {}
-	if s.config.MediaWait > 0 {
-		mediaCtx, mediaCancel = context.WithTimeout(ctx, s.config.MediaWait)
+	if budget := s.config.MediaWait; budget > 0 {
+		mediaCtx, mediaCancel = context.WithTimeout(ctx, budget)
 	}
 	ready, err := s.media.Wait(mediaCtx, streamID)
 	mediaCancel()
 	if err != nil {
-		return CreateResult{}, s.fail(ctx, session.ID, "media_wait", "timeout", fmt.Errorf("%w: %w", ErrMediaWait, err), resources)
+		// 收流超时：预算内设备没把回放媒体送上来，判定失败并立即拆掉本次会话
+		// （MANSRTSP/BYE + 关 RTP 端口 + 释放通道绑定），让用户能马上重试。
+		// ⛔ 拆除必须脱离请求上下文：浏览器请求超时后 ctx 会被取消，用它去
+		// BYE/关端口会当场失败，只在库里留一条 cleanupPending 的幽灵会话。
+		cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), playbackMediaWaitCleanupTimeout)
+		defer cancelCleanup()
+		return CreateResult{}, s.fail(cleanupCtx, session.ID, "media_wait", "timeout", fmt.Errorf("%w: %w", ErrMediaWait, err), resources)
 	}
 	if err := ctx.Err(); err != nil {
 		return CreateResult{}, s.fail(ctx, session.ID, "media_wait", "cancelled", err, resources)
@@ -700,6 +715,20 @@ func (s *Service) OnPlaybackStreamEnded(ctx context.Context, streamID, reason st
 		s.config.Metrics.Cleaned.Add(1)
 	}
 	return err
+}
+
+// PlaybackPausedByStream 报告该流对应的回放会话是否处于「暂停」态。
+// 供 ZLM `on_rtp_server_timeout` 区分「设备没推流」与「上级让我们暂停了」：
+// 暂停期间设备按协议停发 RTP，超时是预期行为，不能据此拆会话。
+func (s *Service) PlaybackPausedByStream(_ context.Context, streamID string) (bool, bool) {
+	if s == nil || s.registry == nil || streamID == "" {
+		return false, false
+	}
+	session, ok := s.registry.GetByStreamID(streamID)
+	if !ok {
+		return false, false
+	}
+	return session.State == StatePaused, true
 }
 
 func (s *Service) Action(ctx context.Context, sessionID, ownerID string, request ActionRequest) (*Session, error) {

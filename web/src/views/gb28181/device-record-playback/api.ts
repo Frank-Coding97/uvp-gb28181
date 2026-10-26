@@ -70,6 +70,16 @@ export interface PlaybackRequestOptions {
 
 const defaultRequestOptions: PlaybackRequestOptions = {};
 
+/**
+ * 建会话的请求超时，必须长于服务端的「收流超时」判定。
+ *
+ * 服务端要等设备把回放媒体送上来（`gb28181.playback.media_wait_sec`，默认 15 秒），
+ * 等不到就判收流超时并当场拆会话，再返回 504。全局 15 秒会**同时**超时 ⇒ 浏览器
+ * 先断开，用户看到的是笼统的网络错误，真实原因（收流超时）永远到不了前端。
+ * 所以这两个接口单独放宽到 30 秒（15 秒等待 + 拆除与响应余量）。
+ */
+const HISTORICAL_SESSION_TIMEOUT_MS = 30_000;
+
 function sessionCollectionPath(channelId: number) {
   return `gb28181/device-mgmt/channel/${channelId}/playback-sessions`;
 }
@@ -89,7 +99,8 @@ export function createPlaybackSession(
     baseUrlApi(sessionCollectionPath(channelId)),
     {
       data,
-      headers: { "Idempotency-Key": idempotencyKey }
+      headers: { "Idempotency-Key": idempotencyKey },
+      timeout: HISTORICAL_SESSION_TIMEOUT_MS
     },
     options
   );
@@ -101,7 +112,8 @@ export function createDownloadSession(channelId: number, data: CreateDownloadSes
     baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/download-sessions`),
     {
       data,
-      headers: { "Idempotency-Key": idempotencyKey }
+      headers: { "Idempotency-Key": idempotencyKey },
+      timeout: HISTORICAL_SESSION_TIMEOUT_MS
     }
   );
 }

@@ -31,7 +31,9 @@ describe("device record playback API", () => {
       "/api/gb28181/device-mgmt/channel/31/playback-sessions",
       {
         data: { recordKey: "opaque-record-key", playFrom: "2026-08-02T08:10:00+08:00" },
-        headers: { "Idempotency-Key": "playback-create-key" }
+        headers: { "Idempotency-Key": "playback-create-key" },
+        // 必须长于服务端 15 秒的收流超时，否则浏览器先断、真实原因到不了前端。
+        timeout: 30_000
       },
       {}
     );

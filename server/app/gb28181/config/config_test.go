@@ -417,7 +417,8 @@ func TestRecordRuntimeConfigDefaults(t *testing.T) {
 	if cfg.RecordQuery.Location == nil || cfg.RecordQuery.Location.String() != "Asia/Shanghai" {
 		t.Fatalf("查询时区未装配: %v", cfg.RecordQuery.Location)
 	}
-	if cfg.Playback.MediaWaitSec != 10 || cfg.Playback.IdleTimeoutSec != 60 || cfg.Playback.MaxSessionSec != 86400 {
+	if cfg.Playback.MediaWaitSec != 15 ||
+		cfg.Playback.IdleTimeoutSec != 60 || cfg.Playback.MaxSessionSec != 86400 {
 		t.Fatalf("回放默认值不正确: %+v", cfg.Playback)
 	}
 }
@@ -455,7 +456,8 @@ func TestRecordRuntimeConfigCustomValues(t *testing.T) {
 	if cfg.RecordQuery.Location.String() != "UTC" {
 		t.Fatalf("时区覆盖值未保留: %v", cfg.RecordQuery.Location)
 	}
-	if cfg.Playback.MediaWaitSec != 5 || cfg.Playback.IdleTimeoutSec != 30 || cfg.Playback.MaxSessionSec != 3600 {
+	if cfg.Playback.MediaWaitSec != 5 ||
+		cfg.Playback.IdleTimeoutSec != 30 || cfg.Playback.MaxSessionSec != 3600 {
 		t.Fatalf("回放覆盖值未保留: %+v", cfg.Playback)
 	}
 }
@@ -471,6 +473,7 @@ func TestRecordRuntimeConfigRejectsInvalidValues(t *testing.T) {
 		{name: "TTL 为零", key: "gb28181.record_query.result_ttl_sec", value: 0},
 		{name: "TTL 超限", key: "gb28181.record_query.result_ttl_sec", value: MaxResultTTLSec + 1},
 		{name: "媒体等待超限", key: "gb28181.playback.media_wait_sec", value: MaxMediaWaitSec + 1},
+		{name: "媒体等待为零", key: "gb28181.playback.media_wait_sec", value: 0},
 		{name: "空闲超时为零", key: "gb28181.playback.idle_timeout_sec", value: 0},
 		{name: "空闲超时超限", key: "gb28181.playback.idle_timeout_sec", value: MaxPlaybackIdleSec + 1},
 		{name: "会话上限为零", key: "gb28181.playback.max_session_sec", value: 0},

@@ -57,7 +57,7 @@ const (
 	DefaultRecordQueryMaxActiveQueries   = 128
 	DefaultRecordQueryMaxRecordsPerQuery = 20000
 	DefaultRecordQueryResultTTLSec       = 1800
-	DefaultPlaybackMediaWaitSec          = 10
+	DefaultPlaybackMediaWaitSec          = 15
 	DefaultPlaybackIdleTimeoutSec        = 60
 	DefaultPlaybackMaxSessionSec         = 86400
 	DefaultSIPCommandTimeoutSec          = 10
@@ -750,6 +750,10 @@ func (c RecordQueryConfig) ResultTTL() time.Duration {
 
 // PlaybackConfig controls device-local playback session lifetimes.
 type PlaybackConfig struct {
+	// MediaWaitSec 是「等设备把回放媒体送上来」的固定预算，**与回放窗口
+	// 长短无关**（国标回放是从起点按 1x 顺序推，起流只取决于起点定位和
+	// 设备本身快慢，终点有多远不影响首包到达）。
+	// 等不到就判收流超时并拆会话，所以在同步请求里必须小于前端请求超时。
 	MediaWaitSec   int
 	IdleTimeoutSec int
 	MaxSessionSec  int
@@ -758,6 +762,7 @@ type PlaybackConfig struct {
 func (c PlaybackConfig) MediaWait() time.Duration {
 	return time.Duration(c.MediaWaitSec) * time.Second
 }
+
 func (c PlaybackConfig) IdleTimeout() time.Duration {
 	return time.Duration(c.IdleTimeoutSec) * time.Second
 }

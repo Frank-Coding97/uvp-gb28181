@@ -115,6 +115,28 @@ type PlaybackMediaSink interface {
 	OnPlaybackStreamEnded(context.Context, string, string) error
 }
 
+// PlaybackPauseProbe 是 PlaybackMediaSink 的**可选**扩展：让
+// `on_rtp_server_timeout` 区分「设备没推流」与「我们让它暂停了」。
+//
+// ⛔⛔ 回放暂停后设备按协议停发 RTP，ZLM 的 rtp_proxy 超时到点必然触发，
+// 这不是设备故障。若照普通超时把会话拆掉，上级 resume 时会拿到
+// `400 481 Dialog Does Not Exist`（LiveGBS/WVP 实测必现），表现为
+//「暂停超过十几秒就再也播不回来」。
+type PlaybackPauseProbe interface {
+	// PlaybackPausedByStream 返回 (是否暂停中, 是否存在该流对应的回放会话)。
+	PlaybackPausedByStream(context.Context, string) (bool, bool)
+}
+
+// playbackPausedByStream 安全地探测暂停状态；sink 不支持探测时一律返回 false。
+func playbackPausedByStream(sink PlaybackMediaSink, streamID string) bool {
+	probe, ok := sink.(PlaybackPauseProbe)
+	if !ok || streamID == "" {
+		return false
+	}
+	paused, found := probe.PlaybackPausedByStream(context.Background(), streamID)
+	return found && paused
+}
+
 // FlowReport is the normalized subset of ZLM on_flow_report used by traffic
 // accounting. The hook remains fail-open: a collector failure is logged and
 // ZLM still receives a successful response so media teardown is not blocked.
@@ -472,7 +494,18 @@ func (h *HookController) OnStreamChanged(c *gin.Context) {
 		})
 	}
 	if !body.Regist && h.playbackMedia != nil && body.Stream != "" {
-		h.notifyPlaybackEnded(hookAsyncContext(c), body.Stream, "media-offline")
+		// ⛔ 暂停中的回放流会「被下线」：设备停发 RTP ⇒ ZLM 收流超时 ⇒ 关掉 RTP
+		// 服务器 ⇒ 流从注册表移除。这只是暂停的**副作用**，不是媒体真的没了。
+		// 当成 media-offline 结束会话的话，上级 resume 只能收到 481
+		// （实测 LiveGBS 暂停 25 秒必现）。暂停中一律不联动终态。
+		if playbackPausedByStream(h.playbackMedia, body.Stream) {
+			hookLog(c).Info("回放暂停中，流下线不结束会话",
+				zap.String("event", "gb28181.hook.stream.offline_playback_paused"),
+				zap.String("stream_id", body.Stream),
+				zap.String("media_server_id", body.MediaServerID))
+		} else {
+			h.notifyPlaybackEnded(hookAsyncContext(c), body.Stream, "media-offline")
+		}
 	}
 	if !body.Regist && body.App == "rtp" && body.Stream != "" && body.MediaServerID != "" {
 		if _, _, err := play.ParseFixedStreamID(body.Stream); err == nil {
@@ -675,6 +708,17 @@ func (h *HookController) OnRtpServerTimeout(c *gin.Context) {
 			}
 		}
 	} else if h.stopper != nil && body.StreamID != "" {
+		if playbackPausedByStream(h.playbackMedia, body.StreamID) {
+			// ⛔ 回放正被上级暂停：设备按协议停发 RTP，超时是我们自己造成的，
+			// 不能当「设备没推流」拆会话 —— 拆了以后上级 resume 只能收到
+			// 481/黑屏。这里只让 RTP 收流按 ZLM 的策略结束，会话保留。
+			hookLog(c).Info("回放暂停中，RTP 超时不拆会话",
+				zap.String("event", "gb28181.hook.rtp_timeout_playback_paused"),
+				zap.String("stream_id", body.StreamID),
+				zap.String("media_server_id", body.MediaServerID))
+			hookOK(c)
+			return
+		}
 		asyncContext := hookAsyncContext(c)
 		app.BackgroundWork.Go(func() {
 			ctx, cancel := context.WithTimeout(asyncContext, 5*time.Second)

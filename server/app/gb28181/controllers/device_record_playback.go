@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
@@ -215,6 +216,14 @@ func (dc *DeviceMgmtController) DeletePlaybackSession(c *gin.Context) {
 	}
 	err := service.StopForOwner(c.Request.Context(), c.Param("sessionId"), strconv.FormatUint(uint64(claims.UserID), 10), "user stop")
 	if err != nil {
+		// ⛔ 停止失败必须留下原因：历史上这条路径只回一个 `playback_control_failed`
+		//    的 502，服务端一行日志都没有，排查时只能靠抓包猜是 SIP、ZLM 还是
+		//    设备操作租约的问题（实测一次 10ms 就返回的 502，根本没有 SIP 交互）。
+		app.Log(c.Request.Context()).Warn("回放会话停止失败",
+			zap.String("event", "gb28181.playback.stop.failed"),
+			zap.String("session_id", c.Param("sessionId")),
+			zap.String("channel_id", c.Param("id")),
+			zap.Error(err))
 		status, code, stage, message := mapPlaybackStopError(err)
 		writePlaybackFailure(c, status, code, message, stage, string(code))
 		return
@@ -306,7 +315,7 @@ func mapPlaybackServiceError(err error) (int, string, string, string) {
 	if errors.As(err, &serviceErr) {
 		switch serviceErr.Stage {
 		case "media_wait":
-			return http.StatusGatewayTimeout, playbackFailure, serviceErr.Stage, "回放媒体等待超时"
+			return http.StatusGatewayTimeout, playbackFailure, serviceErr.Stage, "收流超时：设备未回传回放媒体，已清理本次会话"
 		case "node":
 			return http.StatusBadGateway, playbackFailure, serviceErr.Stage, "无可用媒体节点"
 		case "rtp":
@@ -325,7 +334,7 @@ func mapPlaybackServiceError(err error) (int, string, string, string) {
 	case errors.Is(err, gbplayback.ErrInvalidSession), errors.Is(err, gbplayback.ErrInvalidTransition):
 		return http.StatusUnprocessableEntity, playbackInvalid, "control", "回放控制参数或状态不合法"
 	case errors.Is(err, context.DeadlineExceeded):
-		return http.StatusGatewayTimeout, playbackFailure, "media_wait", "回放媒体等待超时"
+		return http.StatusGatewayTimeout, playbackFailure, "media_wait", "收流超时：设备未回传回放媒体，已清理本次会话"
 	default:
 		return http.StatusBadGateway, playbackControl, "control", "回放控制失败"
 	}
