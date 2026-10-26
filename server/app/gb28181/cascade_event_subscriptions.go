@@ -167,13 +167,15 @@ func (m *cascadeEventSubscriptions) Handle(req *sip.Request, tx sip.ServerTransa
 	m.mu.Lock()
 	existing := m.sessions[key]
 	m.mu.Unlock()
-	if localTag != "" {
-		if existing == nil {
-			return reject(481, "Subscription Does Not Exist")
-		}
+	if localTag != "" && existing != nil {
 		return m.refresh(ctx, req, tx, existing, *p, expires, event)
 	}
-	if existing != nil || expires == 0 {
+	// ⛔ 走到这里可能是首包，也可能是「对端以为自己在续订」：它带着 To-tag 来，
+	// 但我方没有对应会话（进程重启过 / 上一轮被终止 / 对端自己保留了 tag）。
+	// 按 RFC 该回 481，但三家上级实测都会把 481 当致命错误并**放弃订阅**
+	// （LiveGBS 的报警订阅因此永远建不起来）。兼容做法：当新建处理，
+	// 并沿用对端给的 To-tag 作为我方对话 tag（response 从 req 克隆，tag 自然保留）。
+	if expires == 0 {
 		return reject(481, "Subscription Does Not Exist")
 	}
 	query, err := manscdp.ParseSubscriptionQuery(req.Body())
@@ -279,6 +281,14 @@ func cascadeSubscriptionEventKind(req *sip.Request) (cascadeEventSubscriptionKin
 		}
 		if query.CmdType == manscdp.CmdAlarm {
 			return cascadeEventAlarm, event, true
+		}
+		// ⛔ `Event: presence` 也被用来承载**云台位置**订阅（LiveGBS 3.6.10 实测：
+		// `Event: presence` + `<CmdType>PTZPosition</CmdType>`）。这种写法下逻辑事件
+		// 必须取 body 的 CmdType 而不是 SIP 头的 presence —— 否则
+		// cascadeSubscriptionQueryMatches 会判「Event 与 CmdType 不一致」，
+		// 且下发的 NOTIFY 也会带错误的 Event 头。
+		if query.CmdType == manscdp.CmdPTZPosition || query.CmdType == manscdp.CmdPTZPrecisePosition {
+			return cascadeEventPTZ, query.CmdType, true
 		}
 	}
 	return "", "", false
@@ -457,7 +467,39 @@ func (m *cascadeEventSubscriptions) notifyActive(s *cascadeEventSubscription) {
 	if s.generation != generation {
 		return
 	}
-	s.force = s.recordNotifyResult(result) != nil && s.reason == ""
+	s.force = s.recordPlaceholderNotifyResult(result)
+}
+
+// recordPlaceholderNotifyResult 处理**首包占位 NOTIFY**（空 body，只用于把
+// Subscription-State 报成 active）的结果，返回「是否还值得再发一次」。
+//
+// ⛔⛔ 这里刻意不复用 recordNotifyResult：那个函数把 4xx 一律当致命错误
+// （reason=noresource → 主动发 terminated 并销毁会话）。而占位包被拒**只说明
+// 对端不认空 body 的 NOTIFY**，不代表订阅对话失效。
+// LiveGBS 3.6.10 实测：它回 `400 unknow message`，我方照 4xx 终止后
+// 订阅只活了 1 秒；对端随后按原标题续订（To 带 tag）又被判「对话不存在」
+// 回 481，表现为「报警订阅永远建不起来」。
+// 正确做法：占位被拒就**不再发占位**，但保留订阅等真实数据。
+func (s *cascadeEventSubscription) recordPlaceholderNotifyResult(result sipclient.NotifyResult) bool {
+	at := time.Now()
+	s.lastNotifyAt, s.lastNotifyCode = &at, result.StatusCode
+	if result.Success && result.StatusCode == 200 {
+		s.lastNotifyStatus, s.failures = "success", 0
+		return false
+	}
+	s.lastNotifyStatus = "failed"
+	s.failures++
+	// 4xx 是对端的明确表态：不再重发占位，但订阅必须留着。
+	if result.StatusCode >= 400 && result.StatusCode < 500 && result.StatusCode != 429 {
+		return false
+	}
+	// 临时性失败（5xx / 超时）仍按原契约「有上限重试后终止」——
+	// TestCascadeEventInitialStatusRetriesBoundedly 锁的就是这个行为。
+	if errors.Is(result.TransportErr, context.DeadlineExceeded) || errors.Is(result.TransportErr, sip.ErrTransactionTimeout) || s.failures >= 3 {
+		s.reason = "noresource"
+		s.signal()
+	}
+	return s.reason == ""
 }
 
 // Caller holds s.mu. A received SIP rejection can have no transport error;

@@ -116,6 +116,20 @@ func parseMobilePositionSubscription(req *sip.Request) (manscdp.MobilePositionSu
 	return manscdp.ParseMobilePositionSubscriptionQuery(req.Body())
 }
 
+// cascadePresenceQueryCmdType 只取 body 里的 CmdType 供分发判断用。
+// 空 body / 解不出来一律返回 ""（调用方按原路径继续，最终由解析错误给出 400），
+// 这样「presence 事件但没有 body」的老行为不受影响。
+func cascadePresenceQueryCmdType(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	query, err := manscdp.ParseSubscriptionQuery(body)
+	if err != nil {
+		return ""
+	}
+	return query.CmdType
+}
+
 func cascadeMobilePositionInterval(query manscdp.MobilePositionSubscriptionQuery) (time.Duration, error) {
 	if !query.IntervalPresent {
 		return defaultCascadeMobilePositionInterval, nil
@@ -136,6 +150,15 @@ func (m *cascadeMobilePositionSubscriptions) Handle(req *sip.Request, tx sip.Ser
 	}
 	eventHeaders := req.GetHeaders("Event")
 	if len(eventHeaders) != 1 || !strings.EqualFold(strings.TrimSpace(strings.Split(eventHeaders[0].Value(), ";")[0]), "presence") {
+		return false
+	}
+	// ⛔⛔ `Event: presence` 是**共用**事件名：报警（CmdType=Alarm）、移动位置
+	// （MobilePosition）、云台位置（PTZPosition）都复用它。这里是「移动位置订阅」
+	// 的入口，只该接 MobilePosition；以前不看 body 就一律接管，导致 PTZPosition
+	// 订阅被送进 ParseMobilePositionSubscriptionQuery 判成
+	// `非法 MobilePosition 订阅请求` → 400（LiveGBS 3.6.10 实测，2026-10-26）。
+	// 其余 CmdType 原样放行，交给报警/云台/目录那三个入口。
+	if cmdType := cascadePresenceQueryCmdType(req.Body()); cmdType != "" && cmdType != manscdp.CmdMobilePosition {
 		return false
 	}
 	expires, err := catalogSubscriptionExpires(req)
@@ -164,13 +187,13 @@ func (m *cascadeMobilePositionSubscriptions) Handle(req *sip.Request, tx sip.Ser
 	m.mu.Lock()
 	existing := m.sessions[key]
 	m.mu.Unlock()
-	if localTag != "" {
-		if existing == nil {
-			return reject(481, "Subscription Does Not Exist")
-		}
+	if localTag != "" && existing != nil {
 		return m.refresh(ctx, req, tx, existing, *p, expires)
 	}
-	if existing != nil || expires == 0 {
+	// ⛔ 带 To-tag 但没有对应会话（进程重启/上一轮被终止/对端自留 tag）时，
+	// 按 RFC 应回 481；但上级实测会把 481 当致命错误放弃订阅。兼容为「当新建」，
+	// 并沿用对端给的 To-tag 作为我方对话 tag。
+	if expires == 0 {
 		return reject(481, "Subscription Does Not Exist")
 	}
 	q, err := parseMobilePositionSubscription(req)

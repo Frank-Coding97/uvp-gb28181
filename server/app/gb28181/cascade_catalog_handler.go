@@ -363,30 +363,47 @@ func newCascadeMessageHandler(store *repository.GormRepository, clients *cascade
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
+		// 云台控制被拒时上级只显示「操作失败」。这里以前四个分支全静默，
+		// 排查只能靠抓包区分「平台没匹配上 / 没启用 / 目标对不上 / 存储查询失败」。
+		reject := func(code int, reason string, details ...zap.Field) bool {
+			if app.ZapLog != nil {
+				fields := append([]zap.Field{
+					zap.String("event", "cascade.control.rejected"),
+					zap.Int("status", code),
+					zap.String("reason", reason),
+					zap.String("device_id", head.DeviceID),
+					zap.String("call_id", cascadeCallID(req)),
+					zap.String("peer", cascadePeerLabel(req)),
+				}, details...)
+				app.ZapLog.Warn("级联设备控制被拒绝: "+reason, fields...)
+			}
+			_ = tx.Respond(sip.NewResponseFromRequest(req, code, reason, nil))
+			return true
+		}
 		platforms, err := store.ListPlatforms(ctx)
 		if err != nil {
-			_ = tx.Respond(sip.NewResponseFromRequest(req, 500, "Cascade Control Failed", nil))
-			return true
+			return reject(500, "Cascade Control Failed", zap.Error(err))
 		}
 		matched, ambiguous := findCascadeControlPeer(req, platforms)
 		if matched == nil && !ambiguous {
 			return false
 		}
 		if ambiguous {
-			_ = tx.Respond(sip.NewResponseFromRequest(req, 403, "Ambiguous Cascade Platform", nil))
-			return true
+			return reject(403, "Ambiguous Cascade Platform")
 		}
 		if matched == nil || !matched.Enabled {
-			_ = tx.Respond(sip.NewResponseFromRequest(req, 403, "Cascade Platform Not Available", nil))
-			return true
+			return reject(403, "Cascade Platform Not Available")
 		}
 		toID := ""
 		if req.To() != nil {
 			toID = req.To().Address.User
 		}
 		if !cascadeDeviceStatusRequestTargetsMatch(matched.LocalDeviceID, head.DeviceID, toID, req.Recipient.User) {
-			_ = tx.Respond(sip.NewResponseFromRequest(req, 403, "Cascade Control Target Mismatch", nil))
-			return true
+			return reject(403, "Cascade Control Target Mismatch",
+				zap.Uint64("platform_id", matched.ID),
+				zap.String("local_device_id", matched.LocalDeviceID),
+				zap.String("recipient_user", req.Recipient.User),
+				zap.String("request_uri_user", toID))
 		}
 		// PTZ is a no-response device control in GB/T 28181-2016. Acknowledge the
 		// upstream MESSAGE immediately, then forward it to the shared channel.

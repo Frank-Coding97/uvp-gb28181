@@ -77,6 +77,21 @@ func (p *cascadeCatalogPusher) PushCatalog(ctx context.Context, platformID uint6
 		return 0, 0, err
 	}
 	sent := 0
+	// ⛔ 目录被切成多包时留一条 warn：部分上级（EasyGBS 3.7.451 实测）对同一设备的
+	// 连续 Catalog 做「**每包全量替换**」，只会留下最后一包，前面的通道全丢；
+	// 而它们又从不 SUBSCRIBE 目录，丢了没有自愈机会。
+	// 我方无法替对端决定累积语义，所以只能把「为什么只剩一条」讲清楚：
+	// 传输方式改 TCP（无 UDP MTU 折半）+ 批次 ≥ 目录条数，就能一包发完。
+	if len(responses) > 1 {
+		app.Log(ctx).Warn("级联目录分包发送",
+			zap.String("event", "cascade.catalog.push_split"),
+			zap.Uint64("platform_id", matched.ID),
+			zap.Int("items", len(snapshot.Items)),
+			zap.Int("batches", len(responses)),
+			zap.Int("batch_size", matched.CatalogBatchSize),
+			zap.String("transport", matched.Transport),
+			zap.String("hint", "部分上级按每包全量替换目录；建议 transport=TCP 且每批条数不小于目录总数"))
+	}
 	for _, response := range responses {
 		current, checkErr := p.store.FindPlatform(ctx, matched.ID)
 		if checkErr != nil {
