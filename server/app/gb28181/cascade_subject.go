@@ -38,6 +38,38 @@ func parseCascadeMediaSourceIdentity(raw string, playback bool) (cascadeMediaSou
 	return identity, nil
 }
 
+// parseCascadeBroadcastSourceIdentity 是**语音广播/对讲音频 INVITE** 的 Subject 解析。
+//
+// 与 parseCascadeMediaSourceIdentity 只差一处：**不校验序列号的首字符**。
+// 国标把序列号首字符当「实时(0) / 回放(1)」标记，但语音广播复用同一个字段；
+// EasyGBS 3.7.451 实测发的是
+//
+//	Subject: 34020000012000000001:1,37010301021180000010:2
+//
+// 也就是「平台编码:序号,设备编码:序号」——序列号就是 1、2 这种纯序号。
+// 用严格解析会直接判 Subject 非法，上级 UI 表现为「点了语音没反应」。
+// 序列号只是媒体流标识，不参与鉴权（锚是租约 + 已发布通道 + 设备纪元 + 来源地址），
+// 所以这里只要求「长度与字符集合法」，前缀语义留给视频那条路径继续严格校验。
+func parseCascadeBroadcastSourceIdentity(raw string) (cascadeMediaSourceIdentity, error) {
+	var identity cascadeMediaSourceIdentity
+	parts := strings.Split(raw, ",")
+	if len(parts) != 2 {
+		return identity, fmt.Errorf("invalid Subject")
+	}
+	left := strings.Split(strings.TrimSpace(parts[0]), ":")
+	right := strings.Split(strings.TrimSpace(parts[1]), ":")
+	if len(left) != 2 || len(right) != 2 {
+		return identity, fmt.Errorf("invalid Subject")
+	}
+	identity = cascadeMediaSourceIdentity{left[0], left[1], right[0], right[1]}
+	if len(left[0]) != 20 || len(right[0]) != 20 ||
+		len(left[1]) == 0 || len(left[1]) > 20 || len(right[1]) == 0 || len(right[1]) > 20 ||
+		strings.ContainsAny(raw, "\r\n") {
+		return cascadeMediaSourceIdentity{}, fmt.Errorf("invalid Subject media source identity")
+	}
+	return identity, nil
+}
+
 type cascadeInviteKey struct {
 	CallID          string
 	CSeq            uint32

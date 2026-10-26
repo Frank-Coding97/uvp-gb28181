@@ -103,16 +103,41 @@ func (m *cascadeBroadcastRuntime) Handle(req *sip.Request, tx sip.ServerTransact
 		return false
 	}
 	if m == nil || m.store == nil || m.clients == nil || m.sender == nil || m.db == nil {
+		if app.ZapLog != nil {
+			app.ZapLog.Warn("级联广播运行时未就绪",
+				zap.String("event", "cascade.broadcast.unavailable"),
+				zap.String("reason", "runtime_not_ready"),
+				zap.String("call_id", cascadeCallID(req)),
+				zap.String("peer", cascadePeerLabel(req)))
+		}
 		_ = tx.Respond(sip.NewResponseFromRequest(req, 503, "Cascade Broadcast Unavailable", nil))
 		return true
 	}
 	ctx, release, ok := m.acquire(context.Background(), 10*time.Second)
 	if !ok {
+		if app.ZapLog != nil {
+			app.ZapLog.Warn("级联广播运行时忙",
+				zap.String("event", "cascade.broadcast.unavailable"),
+				zap.String("reason", "runtime_busy"),
+				zap.String("call_id", cascadeCallID(req)),
+				zap.String("peer", cascadePeerLabel(req)))
+		}
 		_ = tx.Respond(sip.NewResponseFromRequest(req, 503, "Cascade Broadcast Unavailable", nil))
 		return true
 	}
 	defer release()
 	reject := func(status int, reason string) bool {
+		// 对讲/广播失败在上游表现为「点了没反应」。被拒原因必须留痕，
+		// 否则只能靠 SIP 抓包区分「平台没匹配上 / 目标不符 / 服务未就绪」。
+		if app.ZapLog != nil {
+			app.ZapLog.Warn("级联广播请求被拒绝",
+				zap.String("event", "cascade.broadcast.rejected"),
+				zap.Int("status", status),
+				zap.String("reason", reason),
+				zap.String("call_id", cascadeCallID(req)),
+				zap.String("peer", cascadePeerLabel(req)),
+				zap.String("device_id", strings.TrimSpace(head.DeviceID)))
+		}
 		_ = tx.Respond(sip.NewResponseFromRequest(req, status, reason, nil))
 		return true
 	}
@@ -124,7 +149,7 @@ func (m *cascadeBroadcastRuntime) Handle(req *sip.Request, tx sip.ServerTransact
 	if platform == nil || ambiguous || !platform.Enabled {
 		return reject(403, "Cascade Broadcast Upstream Rejected")
 	}
-	if req.To() == nil || req.To().Address.User != platform.LocalDeviceID || req.Recipient.User != platform.LocalDeviceID || req.CallID() == nil || req.CSeq() == nil || req.CSeq().MethodName != sip.MESSAGE || req.CSeq().SeqNo == 0 {
+	if req.To() == nil || req.CallID() == nil || req.CSeq() == nil || req.CSeq().MethodName != sip.MESSAGE || req.CSeq().SeqNo == 0 {
 		return reject(403, "Cascade Broadcast Target Mismatch")
 	}
 	profile := cascadeWireProfile(*platform)
@@ -135,6 +160,29 @@ func (m *cascadeBroadcastRuntime) Handle(req *sip.Request, tx sip.ServerTransact
 	binding, err := resolveCascadeTalkAuthorization(ctx, m.db, m.store, *platform, notify.TargetID)
 	if err != nil {
 		return reject(403, "Cascade Broadcast Target Not Published")
+	}
+	// ⛔⛔ 目标校验必须放在**知道本次广播目标之后**，且要认两种写法：
+	// 有的上级严格按「平台级联」把 MESSAGE 寻址到平台号；有的把级联平台当
+	//「设备」用，RequestURI/To 写的是**被广播通道的编码**（LiveGBS 3.6.10 实测：
+	// `MESSAGE sip:37010301021320000002@3402000001`，端口与 From 都是平台侧的）。
+	// 只认平台号会让语音广播直接 403，对端 UI 表现为「点了没反应」。
+	// 放宽范围仅限「平台号 / 本次广播的发布通道 ID / 该通道与设备的编码」，
+	// 其余校验（TargetID 必须已发布、授权、租约、下行 Notify 结果）一律不变。
+	if !cascadeBroadcastCalleeMatches(req.To().Address.User, platform.LocalDeviceID, notify.TargetID, binding.Source.ChannelCode, binding.Source.DeviceCode) ||
+		!cascadeBroadcastCalleeMatches(req.Recipient.User, platform.LocalDeviceID, notify.TargetID, binding.Source.ChannelCode, binding.Source.DeviceCode) {
+		if app.ZapLog != nil {
+			app.ZapLog.Warn("级联广播目标不匹配",
+				zap.String("event", "cascade.broadcast.target_mismatch"),
+				zap.String("call_id", cascadeCallID(req)),
+				zap.String("peer", cascadePeerLabel(req)),
+				zap.String("request_uri_user", req.Recipient.User),
+				zap.String("to_user", req.To().Address.User),
+				zap.String("local_device_id", platform.LocalDeviceID),
+				zap.String("published_channel_id", notify.TargetID),
+				zap.String("channel_code", binding.Source.ChannelCode),
+				zap.String("device_code", binding.Source.DeviceCode))
+		}
+		return reject(403, "Cascade Broadcast Target Mismatch")
 	}
 	if binding.Source.Profile.Version == "" {
 		return reject(503, "Cascade Broadcast Protocol Profile Unavailable")
@@ -308,6 +356,13 @@ func broadcastResponseIDMatches(value string, candidates ...string) bool {
 		}
 	}
 	return false
+}
+
+// cascadeBroadcastCalleeMatches 判定广播 MESSAGE 的收件人是否指向本次广播。
+// 平台编码是规范写法；把级联平台当「设备」用的实现（LiveGBS 3.6.10 实测）
+// 会把收件人写成通道编码。两者都算「打给我们」，其余取值一律不认。
+func cascadeBroadcastCalleeMatches(value string, candidates ...string) bool {
+	return broadcastResponseIDMatches(value, candidates...)
 }
 
 func (m *cascadeBroadcastRuntime) acquire(parent context.Context, timeout time.Duration) (context.Context, func(), bool) {

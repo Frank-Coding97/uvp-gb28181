@@ -214,3 +214,39 @@ func TestCascadeSubjectPlaybackReplacementPreservesSourceUntilSenderStopped(t *t
 		})
 	}
 }
+
+// 真实报文（EasyGBS 3.7.451，2026-10-26 实测）：
+//
+//	Subject: 34020000012000000001:1,37010301021180000010:2
+//
+// 序列号就是 1、2 这种纯序号，没有国标里「0 开头＝实时 / 1 开头＝回放」的前缀；
+// 接收者写的是**设备编码**而不是通道编码。严格解析会把 Subject 判成非法，
+// 上级 UI 表现为「点了语音没反应」（没有任何报错），所以广播路径必须放宽。
+// 视频 INVITE 那条路径仍由 TestCascadeSubjectRejectsMissingOrInvalidSequence 锁死。
+func TestCascadeBroadcastSubjectAcceptsPlainSequence(t *testing.T) {
+	identity, err := parseCascadeBroadcastSourceIdentity("34020000012000000001:1,37010301021180000010:2")
+	require.NoError(t, err)
+	require.Equal(t, "34020000012000000001", identity.SenderID)
+	require.Equal(t, "1", identity.SenderSequence)
+	require.Equal(t, "37010301021180000010", identity.ReceiverID)
+	require.Equal(t, "2", identity.ReceiverSequence)
+
+	binding := cascadeBroadcastBinding{
+		LocalSourceID: "34020000012000000001",
+		DeviceCode:    "37010301021180000010",
+		ChannelCode:   "37292800001320003005",
+	}
+	require.True(t, cascadeAudioSubjectMatches(identity, binding), "接收者写成设备编码也要认")
+
+	// 结构坏掉、编码长度不对、夹带换行的仍然要拒。
+	for _, raw := range []string{
+		"",
+		"34020000012000000001:1",
+		"34020000012000000001:1,3701030102118000001:2",
+		"3402000001200000001:1,37010301021180000010:2",
+		"34020000012000000001:1,37010301021180000010:2\r\nX: y",
+	} {
+		_, err := parseCascadeBroadcastSourceIdentity(raw)
+		require.Error(t, err, raw)
+	}
+}

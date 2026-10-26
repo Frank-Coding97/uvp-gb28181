@@ -106,9 +106,16 @@ func resolveCascadeBroadcastPull(ctx context.Context, db *gorm.DB, store *reposi
 	if !ok || !cascadePeerHostMatches(peer.host, b.Source.IP) || peer.port != b.Source.Port || !strings.EqualFold(peer.transport, b.Source.Transport) {
 		return nil, fmt.Errorf("cascade broadcast INVITE peer mismatch")
 	}
-	subject, err := parseCascadeMediaSourceIdentity(req.GetHeader("Subject").Value(), false)
-	if err != nil || subject.SenderID != b.LocalSourceID || subject.ReceiverID != b.ChannelCode || !mediaSequenceToken(subject.SenderSequence) || !mediaSequenceToken(subject.ReceiverSequence) {
-		return nil, fmt.Errorf("cascade broadcast INVITE Subject mismatch")
+	subject, err := parseCascadeBroadcastSourceIdentity(req.GetHeader("Subject").Value())
+	if err != nil || !cascadeAudioSubjectMatches(subject, b) || !mediaSequenceToken(subject.SenderSequence) || !mediaSequenceToken(subject.ReceiverSequence) {
+		// ⛔ Subject 只是「媒体流标识铭牌」，真正的鉴权锚是租约 + 已发布通道 +
+		// 设备纪元（上面全都校验过了）。不同厂商往里写哪个编码并不统一：
+		// 国标写平台号，有的实现写设备号或通道号（实测三家上级各不相同）。
+		// 只认一种写法等于「换一家上级就播不了」，所以这里放宽到本次广播涉及的
+		// 那几个编码，但**两边都必须是本次广播的编码之一**，不放行任意值。
+		// 拒绝时把原文带出来，否则只能靠抓包判断是哪一家写了什么。
+		return nil, fmt.Errorf("cascade broadcast INVITE Subject mismatch: subject=%q sender=%q receiver=%q local=%q device=%q channel=%q",
+			req.GetHeader("Subject").Value(), subject.SenderID, subject.ReceiverID, b.LocalSourceID, b.DeviceCode, b.ChannelCode)
 	}
 	contentType := req.GetHeader("Content-Type")
 	if contentType == nil || len(req.GetHeaders("Content-Type")) != 1 || !strings.EqualFold(strings.TrimSpace(strings.Split(contentType.Value(), ";")[0]), "application/sdp") {
@@ -158,6 +165,18 @@ func cascadeAudioCalleeMatches(value string, candidates ...string) bool {
 		}
 	}
 	return false
+}
+
+// cascadeAudioSubjectMatches 判定广播音频 INVITE 的 Subject 是否描述本次广播。
+//
+// 国标写法是「发送者=本级平台编码，接收者=被广播通道编码」，但实测厂商各有取舍：
+// 有的把发送者写成设备编码，有的把接收者写成平台编码。这里放宽成
+//「发送者与接收者分别取自 {本级平台编码, 设备编码, 通道编码}，且两者不同」，
+// 既不认任意值，也不再绑定单一写法。
+func cascadeAudioSubjectMatches(subject cascadeMediaSourceIdentity, b cascadeBroadcastBinding) bool {
+	senderOK := cascadeAudioCalleeMatches(subject.SenderID, b.LocalSourceID, b.DeviceCode, b.ChannelCode)
+	receiverOK := cascadeAudioCalleeMatches(subject.ReceiverID, b.ChannelCode, b.DeviceCode, b.LocalSourceID)
+	return senderOK && receiverOK && subject.SenderID != subject.ReceiverID
 }
 
 // mediaSequenceToken 校验 Subject 里 SSRC 那一段的形态。
