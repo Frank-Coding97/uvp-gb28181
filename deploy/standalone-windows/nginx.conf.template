@@ -34,6 +34,16 @@ events {
 }
 
 http {
+
+    # 上游若已声明协议（外层 TLS 终止：NPM / SLB / 客户 nginx），沿用它的；
+    # 只有直连（没有该头）时才用本跳 $scheme。
+    # ⛔ 不要写回 `$scheme`：内层这一跳恒为 http，会把上游的 https 覆盖掉，
+    #   于是一切「后端拼绝对地址」的功能（对讲 WHIP 上行、抓拍回调、扫码配网）
+    #   都会拿到 http 地址，在 https 页面里被浏览器判为混合内容。
+    map $http_x_forwarded_proto $uvp_forwarded_proto {
+        default $http_x_forwarded_proto;
+        ""      $scheme;
+    }
     include       "@ROOT@/vendor/nginx/conf/mime.types";
     default_type  application/octet-stream;
 
@@ -139,7 +149,7 @@ http {
             proxy_set_header X-Forwarded-Host  $http_host;
             proxy_set_header X-Real-IP         $remote_addr;
             proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Forwarded-Proto $uvp_forwarded_proto;
             proxy_connect_timeout 15s;
             proxy_send_timeout    30m;
             proxy_read_timeout    30m;
@@ -158,7 +168,7 @@ http {
             proxy_set_header X-Forwarded-Host  $http_host;
             proxy_set_header X-Real-IP         $remote_addr;
             proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Forwarded-Proto $uvp_forwarded_proto;
             proxy_set_header Connection        "";
             proxy_connect_timeout 15s;
             proxy_send_timeout    300s;
@@ -177,7 +187,7 @@ http {
             proxy_set_header X-Forwarded-Host  $http_host;
             proxy_set_header X-Real-IP         $remote_addr;
             proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Forwarded-Proto $uvp_forwarded_proto;
             proxy_set_header Connection        "";
         }
 
