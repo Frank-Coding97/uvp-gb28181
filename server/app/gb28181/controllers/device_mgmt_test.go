@@ -529,6 +529,27 @@ func TestDeviceMgmt_ListChannels_FilterStatus(t *testing.T) {
 	assert.EqualValues(t, 1, data["total"])
 }
 
+func TestDeviceMgmt_ListChannels_OrdersOnlineBeforeOfflineBeforePagination(t *testing.T) {
+	r, db := newDeviceMgmtRouter(t)
+	_, onlineID, offlineID := seedDevicesAndChannels(t, db)
+	newOnline := &gbmodels.GbChannel{DeviceID: "34020000002000000001", ChannelID: "37011200001310000003", Status: gbmodels.ChannelStatusOnline}
+	newOffline := &gbmodels.GbChannel{DeviceID: newOnline.DeviceID, ChannelID: "37011200001310000004", Status: gbmodels.ChannelStatusOffline}
+	require.NoError(t, db.Create(newOnline).Error)
+	require.NoError(t, db.Create(newOffline).Error)
+
+	for page, expectedID := range []uint{newOnline.ID, onlineID, newOffline.ID, offlineID} {
+		w := httptest.NewRecorder()
+		path := fmt.Sprintf("/api/gb28181/device-mgmt/channels?page=%d&pageSize=1", page+1)
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		data := unmarshal(t, w)["data"].(map[string]any)
+		list := data["list"].([]any)
+		require.Len(t, list, 1)
+		assert.EqualValues(t, expectedID, list[0].(map[string]any)["id"])
+	}
+}
+
 func TestDeviceMgmt_ListChannels_SearchMatchesDisplayedAlias(t *testing.T) {
 	r, db := newDeviceMgmtRouter(t)
 	device := gbmodels.GbDevice{DeviceID: "34020000002000000001", Name: "源设备"}

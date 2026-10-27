@@ -665,7 +665,7 @@ func (dc *DeviceMgmtController) ListChannels(c *gin.Context) {
 		return
 	}
 	var list []gbmodels.GbChannel
-	if err := q.Order("id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error; err != nil {
+	if err := q.Order("status DESC, id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error; err != nil {
 		dc.FailAndAbort(c, "查询失败", err)
 		return
 	}
