@@ -171,6 +171,10 @@ func buildServeRuntime(options serveOptions) (*serveRuntime, error) {
 		if loadErr != nil {
 			return nil, loadErr
 		}
+		// Registrations written before the release source became built-in carry
+		// no online entry point. Fill it here so an existing installation starts
+		// checking for updates after a plain helper restart.
+		loaded = loaded.WithOfficialDefaults()
 		registration = &loaded
 		adapter, err = upgrade.NewRegisteredAdapter(loaded)
 		if err != nil {
@@ -840,6 +844,9 @@ func runRegistration(args []string) {
 		ReleaseSource:  releaseSource,
 	}
 	registration.TrustedKeys = registrationTrustedKeys(config.Get("upgrade.trusted_keys"))
+	// The release source and trust root are built into the binary; configuration
+	// is only an override for self-hosted channels, never a requirement.
+	registration = registration.WithOfficialDefaults()
 	probeURL := *readinessURL
 	if probeURL == "" && *deployment != "compose" {
 		probeURL, err = registrationReadinessURL(config.GetString("httpserver.port"))

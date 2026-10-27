@@ -17,10 +17,8 @@
           </div>
           <a-space wrap class="version-actions">
             <a-button :loading="loading" @click="loadStatus">刷新状态</a-button>
-            <span :title="status?.releaseSourceConfigured ? '' : '尚未配置发布站点'"
-              ><a-button :loading="checking" :disabled="!status?.capabilities.onlineCheck || Boolean(statusError)" @click="check"
-                >检查在线更新</a-button
-              ></span
+            <a-button :loading="checking" :disabled="!status?.capabilities.onlineCheck || Boolean(statusError)" @click="check"
+              >检查在线更新</a-button
             >
             <a-upload
               v-if="canManage"
@@ -43,10 +41,7 @@
           </a-space>
         </div>
         <div class="version-footer">
-          <div class="version-source">
-            <span class="upgrade-caption">发布站点</span
-            ><span>{{ status?.releaseSourceConfigured ? "已配置" : "尚未配置 · 可使用离线升级包" }}</span>
-          </div>
+          <div class="version-source"><span class="upgrade-caption">更新源</span><span>官方内置</span></div>
           <a-space wrap
             ><a-link @click="showReleaseNotes(currentVersionText, currentRelease?.release_notes, currentRelease?.published_at)"
               >本版本更新说明</a-link
@@ -113,7 +108,7 @@
         </div>
         <a-space
           ><span v-if="clientRefreshState === 'refreshing'">正在刷新前端入口…</span
-          ><span v-else-if="clientRefreshState === 'blocked'">自动刷新后仍未匹配，请确认发布站点已切换到目标版本。</span
+          ><span v-else-if="clientRefreshState === 'blocked'">自动刷新后仍未匹配，请确认官方更新源已切换到目标版本。</span
           ><a-button v-if="clientRefreshState !== 'refreshing'" size="small" @click="reloadClient"
             >立即刷新前端</a-button
           ></a-space

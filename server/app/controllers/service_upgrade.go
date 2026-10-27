@@ -1430,15 +1430,6 @@ func (c *ServiceUpgradeController) configuredCheck() func(context.Context) (upgr
 		return nil
 	}
 	source := c.releaseSourceValue()
-	if source == "" {
-		source = strings.TrimSpace(app.ConfigYml.GetString("upgrade.release_source"))
-	}
-	if source == "" {
-		source = strings.TrimSpace(app.ConfigYml.GetString("upgrade.releaseSource"))
-	}
-	if source == "" {
-		return nil
-	}
 	trusted := c.trustedKeys()
 	if len(trusted) == 0 {
 		return nil
@@ -1460,10 +1451,17 @@ func (c *ServiceUpgradeController) configuredCheck() func(context.Context) (upgr
 }
 
 func (c *ServiceUpgradeController) trustedKeys() map[string]ed25519.PublicKey {
+	// The embedded trust root always applies. Configured keys are merged on top
+	// so a self-hosted channel can add its own signer without dropping the
+	// official one.
+	keys := upgrade.OfficialPublicKeys()
 	if app.ConfigYml == nil {
-		return nil
+		return keys
 	}
-	return configuredUpgradeKeys(app.ConfigYml.Get("upgrade.trusted_keys"))
+	for id, key := range configuredUpgradeKeys(app.ConfigYml.Get("upgrade.trusted_keys")) {
+		keys[id] = key
+	}
+	return keys
 }
 
 func (c *ServiceUpgradeController) stagingRoot() string {
@@ -1584,10 +1582,17 @@ func (c *ServiceUpgradeController) releaseSourceValue() string {
 	if source := strings.TrimSpace(c.releaseSource); source != "" {
 		return source
 	}
-	if app.ConfigYml == nil {
-		return ""
+	if app.ConfigYml != nil {
+		for _, key := range []string{"upgrade.release_source", "upgrade.releaseSource"} {
+			if source := strings.TrimSpace(app.ConfigYml.GetString(key)); source != "" {
+				return source
+			}
+		}
 	}
-	return strings.TrimSpace(app.ConfigYml.GetString("upgrade.release_source"))
+	// The official channel is built into the binary and is the normal case for
+	// a shipped appliance; configuration above only overrides it for self-hosted
+	// channels.
+	return upgrade.OfficialReleaseSource
 }
 
 func configuredUpgradeKeys(value any) map[string]ed25519.PublicKey {
