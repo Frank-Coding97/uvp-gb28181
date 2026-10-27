@@ -1136,6 +1136,30 @@ check_ports_free() {
   ok "端口预检通过（${_min}-${_max} 无冲突）"
 }
 
+# wait_ports_released 等本包核心端口从「刚被停掉的进程 / 内核回收」里彻底释放。
+#
+# ⛔ 为什么 restart 必须等（2026-10-27 升级 1.1.14 实测）：`stop` 之后立刻 `start`，
+#   ZLM 若是被 KILL 收掉的，监听套接字还要一小会儿才真正消失；而 check_ports_free
+#   是**立即**判定的 ⇒ 报「11 个端口已被占用」并 fail。用户按提示去 `ss -p` 找占用者，
+#   却什么都找不到（占用者刚死）—— 一句假警报，把真正的毛病（stop 没停干净）掩盖掉。
+#   轮询上限 15 秒；**超时也放行**：让随后的预检给出具体占用者，比在这里静默干等有用。
+wait_ports_released() {
+  local i p busy
+  for i in $(seq 1 60); do
+    busy=0
+    for p in "$NGINX_HTTP_PORT" "$NGINX_HTTPS_PORT" "$HTTP_PORT" "$REDIS_PORT" \
+             "$ZLM_HTTP_PORT" "$ZLM_RTSP_PORT" "$ZLM_RTMP_PORT" "$ZLM_SSL_PORT" \
+             "$ZLM_RTC_PORT" "$ZLM_SIGNALING_PORT" "$ZLM_SIGNALING_SSL_PORT" \
+             "$ZLM_ONVIF_PORT"; do
+      [ -n "$p" ] || continue
+      if port_holder "$p" tcp >/dev/null 2>&1; then busy=1; break; fi
+    done
+    if [ "$busy" = 0 ]; then return 0; fi
+    sleep 0.25
+  done
+  return 0
+}
+
 # has_ss 探测本机有没有 ss（由 iproute2 提供）。
 #
 # ⛔⛔ 缺它时**绝不能静默放行**：port_holder 的"查不到"会被调用方解释成"端口空闲"，
@@ -1275,6 +1299,64 @@ proc_alive_by_exe() {
   [ -n "$pids" ]
 }
 
+# proc_pids_under_root_by_name 按「**本安装根之下**的同名程序」列出 pid（每行一个）。
+#
+# ⛔⛔ 为什么在按绝对路径兜底之外还要这一路（2026-10-27 线上升级实测踩到）：
+#   程序的实际位置会随版本切换而变：
+#     首发就地布局   $ROOT/vendor/zlm/MediaServer
+#     切 current 之后 $ROOT/releases/v1.1.14/vendor/zlm/MediaServer
+#   而 proc_pids_by_exe 是按**当前** $ZLM_BIN 的绝对路径去匹配的 ——
+#   「先把 current 切到新版本、再 restart」时，旧路径起的那只 ZLM
+#   **永远匹配不到**：stop 全程报「已停止」，51004-51014 却仍被它占着，
+#   紧接着 start 在端口预检处被拦下，服务停在「半停」状态
+#   （1.1.13 → 1.1.14 那次就是这么中断的）。
+#   ⇒ 兜底再补一路：命令行里出现 `$ROOT/` 且以 `/<程序名>` 结尾的进程。
+#     ⛔ 只认**本安装根之内**，绝不能退化成「按程序名全局匹配」：
+#       生产机上常挂着另一套部署的同名 MediaServer / redis-server，
+#       全局匹配会把别人的服务杀掉（本包红线，见 stop_by_pidfile 注释）。
+#     ⛔ 也不能只看 basename 就动手：nginx / redis 会改写自己的 argv[0]，
+#       它们各自的 stop 函数走别的路（nginx -s quit / redis-cli shutdown），
+#       这里命中不到反而是对的。
+proc_pids_under_root_by_name() {
+  local root="$1" name="$2" d pid p arg
+  local self_a="$$" self_b="${BASHPID:-$$}"
+  local prefix="${root%/}/"
+  _purn_match() {
+    # $1=candidate pid；只有「某个 argv 以 $prefix 开头且以 /$name 结尾」才算本包的。
+    _purn_hit=0
+    [ -r "/proc/$1/cmdline" ] || return 1
+    while IFS= read -r -d '' arg; do
+      case "$arg" in
+        "$prefix"*)
+          case "$arg" in
+            */"$name") _purn_hit=1 ;;
+          esac
+          ;;
+      esac
+      if [ "$_purn_hit" = 1 ]; then break; fi
+    done < "/proc/$1/cmdline" || true
+    [ "$_purn_hit" = 1 ]
+  }
+  # ⛔ 排除自身（含命令替换 fork 出来的子 shell）：本函数的 argv 里就写着
+  #   $ROOT 与程序名，不排会把调用者自己算进去 —— 判活恒为真、stop 自杀。
+  # ⛔ 一律用 if 而不是 `[ ... ] || ... && continue`：后者在 set -e 下
+  #   会以「条件为假」的退出码把整个脚本带走。
+  if has_pgrep; then
+    while IFS= read -r p; do
+      [ -n "$p" ] || continue
+      if [ "$p" = "$self_a" ] || [ "$p" = "$self_b" ]; then continue; fi
+      if _purn_match "$p"; then printf '%s\n' "$p"; fi
+    done < <(pgrep -f "$name" 2>/dev/null || true)
+    return 0
+  fi
+  for d in /proc/[0-9]*; do
+    pid="${d#/proc/}"
+    if [ "$pid" = "$self_a" ] || [ "$pid" = "$self_b" ]; then continue; fi
+    if _purn_match "$pid"; then printf '%s\n' "$pid"; fi
+  done
+  return 0
+}
+
 # note_no_pgrep_once 缺 pgrep 时提示**一次**（轮询里会被反复调用，不能刷屏）。
 # 这是「告知」不是「告警」：功能不受影响，只是走了 /proc 慢路径。
 _no_pgrep_noted=""
@@ -1302,6 +1384,8 @@ note_no_pgrep_once() {
 stop_by_pidfile() {
   local pid_file="$1" exe_path="$2" label="$3"
   local pid=""
+  # 程序名（用于第三路兜底）；用参数展开而不是 basename，精简系统不保证有 coreutils。
+  local exe_name="${exe_path##*/}"
   if [ -f "$pid_file" ]; then
     pid="$(cat "$pid_file")"
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
@@ -1356,6 +1440,43 @@ stop_by_pidfile() {
       if [ -n "$still" ]; then
         # shellcheck disable=SC2086  # 同上，仍是换行分隔的 pid 列表
         kill -KILL $still 2>/dev/null || true
+      fi
+    fi
+  fi
+
+  # ---- 第三路兜底：同名程序，但跑在「切换前的路径」上 ----
+  #
+  # ⛔⛔ 判据是「命令行里出现 $ROOT/ 且以 /<程序名> 结尾」，不是「程序名相同」：
+  #   上面两路都按**当前** $exe_path 匹配，而版本切换会让路径整体搬家
+  #   （$ROOT/vendor/... → $ROOT/releases/v1.1.14/vendor/...）。
+  #   实测症状（2026-10-27 升级 1.1.14）：stop 报「已停止」，ZLM 仍占 51004-51014，
+  #   随后的 start 在端口预检直接失败，服务停在半停状态。
+  #   ⛔ 末尾必须复核，仍然活着就**明说**：这一路的全部价值就在于
+  #     「不能再让 stop 平静地撒谎」，只 kill 不校验等于没修。
+  if [ -n "$exe_name" ]; then
+    local stale
+    stale="$(proc_pids_under_root_by_name "$ROOT" "$exe_name" || true)"
+    if [ -n "${stale//$'\n'/ }" ]; then
+      log "${label} 有进程运行在切换前的路径上（${stale//$'\n'/ }），按安装根兜底停止"
+      # shellcheck disable=SC2086  # stale 是换行分隔的 pid 列表
+      kill -TERM $stale 2>/dev/null || true
+      for _ in $(seq 1 40); do
+        stale="$(proc_pids_under_root_by_name "$ROOT" "$exe_name" || true)"
+        if [ -z "$stale" ]; then break; fi
+        sleep 0.25
+      done
+      if [ -n "$stale" ]; then
+        # shellcheck disable=SC2086  # 同上
+        kill -KILL $stale 2>/dev/null || true
+        sleep 0.2
+      fi
+      local left
+      left="$(proc_pids_under_root_by_name "$ROOT" "$exe_name" || true)"
+      if [ -n "$left" ]; then
+        log "⚠️  ${label} 仍无法停止（${left//$'\n'/ }）—— 下一个 start 很可能因端口被占而失败"
+        det "　　手工确认：ps -o pid,cmd -p ${left//$'\n'/,}"
+      else
+        ok "${label} 已停止（含切换前路径上的进程）"
       fi
     fi
   fi
@@ -2086,7 +2207,14 @@ zlm_healthy() {
   #   用相对路径 -c ../conf/config.ini 启动），按可执行文件**绝对路径**匹配
   #   只会命中本包启动的。缺 pgrep 时 proc_pids_by_exe 自动改走 /proc。
   note_no_pgrep_once
-  proc_alive_by_exe "$ZLM_BIN"
+  if proc_alive_by_exe "$ZLM_BIN"; then return 0; fi
+  # ⛔⛔ 再问一句「跑在本安装根之下的同名进程」：版本切换会把程序整体搬家
+  #   （$ROOT/vendor/zlm → $ROOT/releases/<ver>/vendor/zlm），只按**当前**
+  #   $ZLM_BIN 匹配时，切换前起的那只会被判成「没在跑」⇒ start_zlm 以为可以启，
+  #   结果新进程 bind 失败。（2026-10-27 升级 1.1.14 时同一根因的第二个表现。）
+  local _stale_zlm
+  _stale_zlm="$(proc_pids_under_root_by_name "$ROOT" "${ZLM_BIN##*/}" || true)"
+  [ -n "$_stale_zlm" ]
 }
 
 # ---- ZLM 通道抓拍的 ffmpeg 自检（2026-10-20 客户现场实锤加的）----
@@ -2537,16 +2665,37 @@ case "${1:-start}" in
     stop_redis
     # ⛔ 代理最后停：后端先退，才不会出现"代理没了、后端还在按已生效的规则封人"。
     stop_firewall_agent
+    # ---- 收尾复核：不许再「平静地撒谎」----
+    #
+    # ⛔⛔ 上面每个 stop_* 都可能「以为停了其实没停」（pid 文件失效 / 进程跑在
+    #   版本切换前的路径上）。这里用**判活函数**再问一遍，把「已停止」变成一个
+    #   可验证的结论。2026-10-27 线上就是被这句假话带偏的：stop 报「已停止」，
+    #   ZLM 却仍占着 51004-51014，紧接着 start 在端口预检处全线失败，
+    #   而人还以为「服务已经停了，应该是别的东西占了端口」。
+    # ⛔ 必须用 if，不能写 `x && y`：条件为假时 set -e 会把脚本直接带走。
+    _still=""
+    if redis_healthy;   then _still="${_still} Redis"; fi
+    if zlm_healthy;     then _still="${_still} ZLM"; fi
+    if backend_healthy; then _still="${_still} 后端"; fi
+    if nginx_healthy;   then _still="${_still} nginx"; fi
+    if [ -n "$_still" ]; then
+      log "⚠️  停止不完整，以下服务仍在运行：${_still# }"
+      det "它们的端口仍被占用 —— 直接 start 会因预检失败而整体起不来。"
+      det "排查：$0 status ／ ps -eo pid,cmd | grep -E 'uvp-server|MediaServer'"
+      _stop_suffix="（有残留，见上）"
+    else
+      _stop_suffix=""
+    fi
     # 升级助手独立运行，业务 stop/restart 不得杀掉它（契约见 stop_updater 上方）。
     # ⛔ 但它必须**被说出来**：不说的话现场只看到四行"没在跑"，以为整套停了。
     #   restart 走 `stop --quiet`，避免这行提示夹在重启流程里当噪音。
     if [ "${2:-}" != "--quiet" ] && updater_running; then
       _upid="$(updater_pid 2>/dev/null || true)"
-      log "业务服务已停止"
+      log "业务服务已停止${_stop_suffix}"
       det "升级助手仍在后台运行${_upid:+（PID ${_upid}）} —— 如要一并停止：$0 stop-updater"
       det "（它是升级流程的执行者，stop 不杀它是刻意的；停业务时它会继续待命）"
     else
-      log "已停止"
+      log "已停止${_stop_suffix}"
     fi
     ;;
   stop-all)
@@ -2562,7 +2711,12 @@ case "${1:-start}" in
     migrate_backend
     ;;
   restart)
-    "$0" stop --quiet; "$0" start
+    # ⛔ stop 与 start 之间必须等端口真的释放：ZLM 若是被 KILL 收掉的，监听套接字
+    #   还要一小会儿才消失，而 start 的端口预检是**立即**判定的 ⇒ 会报「11 个端口
+    #   已被占用」并停下所有服务（见 wait_ports_released 的注释）。
+    "$0" stop --quiet
+    wait_ports_released
+    "$0" start
     ;;
   status)
     redis_healthy    && log "Redis:  运行中（端口 ${REDIS_PORT}）"  || log "Redis:  未运行"
