@@ -1023,8 +1023,43 @@ function focusMapDevice(device: MapTreeDevice) {
   mapInstance.fitBounds(bounds, { padding: 80, maxZoom: mapSinglePointFitZoom, essential: true });
 }
 
+/**
+ * 进业务分组之前用户在看什么。**只在我们强制切过的时候有值**，离开该视图时还回去，
+ * 免得多切一圈回来「明明看的是设备，却莫名其妙变成通道列表」。
+ */
+const assetKindBeforeBusinessView = ref<AssetKind | null>(null);
+
+/**
+ * 业务分组视图（国标附录 J 的 215/216 目录）里只有目录和通道，没有设备节点。
+ * 该视图下若仍按「设备」渲染，选中目录会得到一张上级平台的设备卡片（只把标题
+ * 换成目录名、内容还是设备ID/厂商/地址/注册时间），和所点的东西对不上；这里
+ * 统一落到通道视图。
+ *
+ * ⚠️ 反向也要还原：切回行政区划 / 部门目录时把之前的选择还回去，否则「切目录视图
+ * 不改你在看什么」这条既有契约会在逛过一次业务分组之后失效。
+ * ⚠️ 只改 `assetKind`、不调 `setAssetKind()`：后者自带一次完整刷新，而两个调用点
+ * 紧接着自己就会 `changeChannelScope()`，那样会重复发一轮请求。
+ *
+ * @returns 是否真的改动了视图（调用点据此决定要不要额外刷新）
+ */
+function syncAssetKindForDirectoryView(view = directoryState.value.view): boolean {
+  if (view === "business") {
+    if (assetKind.value === "channel") return false;
+    assetKindBeforeBusinessView.value = assetKind.value;
+    assetKind.value = "channel";
+    return true;
+  }
+  const restore = assetKindBeforeBusinessView.value;
+  assetKindBeforeBusinessView.value = null;
+  if (!restore || restore === assetKind.value) return false;
+  assetKind.value = restore;
+  return true;
+}
 function onDirectorySelect(node: DirectoryNode) {
   if (!canViewDevices.value) return;
+  // 业务分组树里只有目录和通道，没有设备节点；若仍按「设备」渲染，点目录会得到
+  // 一张挂着目录名的上级平台设备卡片，和所点的东西对不上。
+  syncAssetKindForDirectoryView();
   navigationMode.value = "directory";
   ++directoryDeviceRequestVersion;
   selectedDevice.value = null;
@@ -1035,6 +1070,7 @@ function onDirectorySelect(node: DirectoryNode) {
 }
 async function onDirectoryViewChange() {
   if (!canViewDevices.value) return;
+  syncAssetKindForDirectoryView();
   ++directoryDeviceRequestVersion;
   navigationMode.value = "directory";
   selectedDevice.value = null;

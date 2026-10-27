@@ -648,7 +648,9 @@ describe("device-mgmt round-2 修复回归", () => {
     await flushPromises();
     const channelCallsBefore = api.listChannels.mock.calls.length;
 
-    for (const view of ["department", "business", "administrative"]) {
+    // 业务分组是唯一的例外（只有目录和通道，没有设备节点），单独用例覆盖；
+    // 行政区划 / 部门目录必须保持"切视图不改你在看什么"。
+    for (const view of ["department", "administrative"]) {
       await wrapper.get(`[data-testid="directory-${view}"]`).trigger("click");
       await flushPromises();
       expect(wrapper.get('[data-asset-kind="device"]').classes()).toContain("active");
@@ -668,6 +670,30 @@ describe("device-mgmt round-2 修复回归", () => {
     await flushPromises();
     expect(wrapper.get('[data-asset-kind="channel"]').classes()).toContain("active");
     expect(api.listChannels.mock.calls.at(-1)?.[0]).toMatchObject({ deviceId: "34020000002000000031" });
+    wrapper.unmount();
+  });
+
+  it("业务分组视图强制按通道渲染，离开时还回原来的设备视图", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    const channelCallsBefore = api.listChannels.mock.calls.length;
+
+    // 业务分组树里只有目录和通道，选目录若仍按「设备」渲染，会得到一张
+    // 挂着目录名的上级平台设备卡片。
+    await wrapper.get('[data-testid="directory-business"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[data-asset-kind="channel"]').classes()).toContain("active");
+    expect(api.listChannels.mock.calls.length).toBeGreaterThan(channelCallsBefore);
+
+    await wrapper.get('[data-testid="select-directory"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[data-asset-kind="channel"]').classes()).toContain("active");
+
+    // 切回部门目录要还原成设备视图，不能被业务分组"带跑偏"。
+    await wrapper.get('[data-testid="directory-department"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[data-asset-kind="device"]').classes()).toContain("active");
+    expect(lastDevicePageRequest()).toMatchObject({ page: 1, pageSize: 9 });
     wrapper.unmount();
   });
 
