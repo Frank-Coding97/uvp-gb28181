@@ -104,3 +104,54 @@ func TestDownloadArtifactRejectsTruncatedAndCrossHostResponses(t *testing.T) {
 		t.Fatal("cross-host artifact redirect was accepted")
 	}
 }
+
+func TestRedirectHostAllowedMatchesOnlyKnownCDNHosts(t *testing.T) {
+	for _, host := range []string{"gitee.com", "foruda.gitee.com", "raw.giteeusercontent.com", "GITEE.COM"} {
+		if !redirectHostAllowed(host, DefaultReleaseRedirectHosts) {
+			t.Errorf("allowlisted host %q was rejected", host)
+		}
+	}
+	for _, host := range []string{"", "evilgitee.com", "gitee.com.evil.test", "evil.test", "localhost:8080"} {
+		if redirectHostAllowed(host, DefaultReleaseRedirectHosts) {
+			t.Errorf("unexpected host %q was accepted", host)
+		}
+	}
+}
+
+// A release source may hand the package itself to a CDN. The artifact URL and
+// digest still come from the signed manifest, so following an allowlisted hop
+// is safe; the digest check below is what keeps a hostile CDN from succeeding.
+func TestDownloadArtifactFollowsAllowlistedCDNRedirect(t *testing.T) {
+	body := []byte("cdn hosted release archive")
+	digest := sha256.Sum256(body)
+	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(body)
+	}))
+	defer target.Close()
+	redirect := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/asset.tar", http.StatusFound)
+	}))
+	defer redirect.Close()
+	client := redirect.Client()
+	client.Transport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // test certificates only
+	artifact := Artifact{URL: redirect.URL + "/release.tar", Size: int64(len(body)), SHA256: hex.EncodeToString(digest[:])}
+
+	var destination bytes.Buffer
+	if _, err := DownloadArtifact(context.Background(), client, artifact, &destination); err == nil {
+		t.Fatal("cross-host artifact redirect was accepted without an allowlist")
+	}
+
+	written, err := DownloadArtifactWithRedirects(context.Background(), client, artifact, &destination, []string{"127.0.0.1"})
+	if err != nil {
+		t.Fatalf("allowlisted CDN redirect: %v", err)
+	}
+	if written != int64(len(body)) || !bytes.Equal(destination.Bytes(), body) {
+		t.Fatalf("unexpected artifact: %d bytes %q", written, destination.Bytes())
+	}
+
+	artifact.SHA256 = strings.Repeat("0", 64)
+	destination.Reset()
+	if _, err := DownloadArtifactWithRedirects(context.Background(), client, artifact, &destination, []string{"127.0.0.1"}); err == nil {
+		t.Fatal("allowlisted CDN redirect bypassed the digest check")
+	}
+}

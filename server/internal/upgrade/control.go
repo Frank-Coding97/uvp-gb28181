@@ -1053,7 +1053,7 @@ func (s *ControlService) downloadArtifact(ctx context.Context, manifest Manifest
 		_ = temporary.Close()
 		_ = os.Remove(temporaryPath)
 	}()
-	if _, err := DownloadArtifact(ctx, s.HTTPClient, artifact, temporary); err != nil {
+	if _, err := DownloadArtifactWithRedirects(ctx, s.HTTPClient, artifact, temporary, DefaultReleaseRedirectHosts); err != nil {
 		return err
 	}
 	if err := temporary.Sync(); err != nil {

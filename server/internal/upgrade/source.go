@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -14,6 +15,45 @@ import (
 )
 
 const maxArtifactDownloadSize = int64(8 << 30)
+
+// DefaultReleaseRedirectHosts lists the CDN origins an official release is
+// allowed to redirect an artifact download to. Gitee serves release assets
+// from foruda.gitee.com (and raw files from raw.giteeusercontent.com), so a
+// self-hosted release source that only stores manifests would otherwise have
+// to carry the whole package itself.
+//
+// Redirects stay restricted on purpose. The artifact URL and its SHA-256 come
+// from a signed manifest, so authenticity never depends on the serving host;
+// what the allowlist preserves is the guarantee that a tampered release source
+// cannot steer an appliance's downloader towards an arbitrary internal host.
+var DefaultReleaseRedirectHosts = []string{
+	"gitee.com",
+	"foruda.gitee.com",
+	"giteeusercontent.com",
+}
+
+// redirectHostAllowed matches an exact host or any subdomain of an allowed
+// host. Matching is suffix-based on a label boundary, so "evilgitee.com" is
+// not accepted for "gitee.com".
+func redirectHostAllowed(host string, allowed []string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" {
+		return false
+	}
+	if namesplit, _, err := net.SplitHostPort(host); err == nil {
+		host = namesplit
+	}
+	for _, pattern := range allowed {
+		pattern = strings.ToLower(strings.TrimSpace(pattern))
+		if pattern == "" {
+			continue
+		}
+		if host == pattern || strings.HasSuffix(host, "."+pattern) {
+			return true
+		}
+	}
+	return false
+}
 
 // FetchSignedManifest downloads a signed manifest from the configured release
 // source. It does not verify the signature; callers must pass the returned
@@ -70,7 +110,18 @@ func FetchSignedManifest(ctx context.Context, client *http.Client, source string
 // DownloadArtifact streams an HTTPS artifact into dst and verifies its exact
 // declared length and SHA-256 digest. Callers should pass a newly-created
 // staging file and discard it whenever this function returns an error.
+//
+// Redirects stay on the manifest's own host. Use
+// DownloadArtifactWithRedirects to follow a CDN hop.
 func DownloadArtifact(ctx context.Context, client *http.Client, artifact Artifact, dst io.Writer) (int64, error) {
+	return DownloadArtifactWithRedirects(ctx, client, artifact, dst, nil)
+}
+
+// DownloadArtifactWithRedirects behaves like DownloadArtifact but additionally
+// follows redirects that land on one of allowedRedirectHosts. Pass
+// DefaultReleaseRedirectHosts to let a release manifest point at assets hosted
+// by the official CDN.
+func DownloadArtifactWithRedirects(ctx context.Context, client *http.Client, artifact Artifact, dst io.Writer, allowedRedirectHosts []string) (int64, error) {
 	if dst == nil {
 		return 0, errors.New("artifact destination is required")
 	}
@@ -94,7 +145,10 @@ func DownloadArtifact(ctx context.Context, client *http.Client, artifact Artifac
 	originalHost := u.Host
 	previousRedirects := client.CheckRedirect
 	requestClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if req.URL.Scheme != "https" || req.URL.Host != originalHost || req.URL.User != nil {
+		if req.URL.Scheme != "https" || req.URL.User != nil {
+			return errors.New("artifact redirect must stay on HTTPS without credentials")
+		}
+		if req.URL.Host != originalHost && !redirectHostAllowed(req.URL.Host, allowedRedirectHosts) {
 			return errors.New("artifact redirect leaves the configured HTTPS host")
 		}
 		if previousRedirects != nil {

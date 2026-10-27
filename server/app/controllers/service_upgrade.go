@@ -1150,7 +1150,7 @@ func (c *ServiceUpgradeController) downloadArtifact(ctx context.Context, manifes
 	}
 	tmpPath := tmp.Name()
 	defer func() { _ = tmp.Close(); _ = os.Remove(tmpPath) }()
-	if _, err := upgrade.DownloadArtifact(ctx, c.httpClient, artifact, tmp); err != nil {
+	if _, err := upgrade.DownloadArtifactWithRedirects(ctx, c.httpClient, artifact, tmp, upgrade.DefaultReleaseRedirectHosts); err != nil {
 		return err
 	}
 	if err := tmp.Sync(); err != nil {
