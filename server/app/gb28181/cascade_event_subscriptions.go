@@ -607,6 +607,19 @@ func (m *cascadeEventSubscriptions) broadcast(ctx context.Context, kind cascadeE
 			continue
 		}
 		if !ok {
+			// ⛔⛔ 这里以前是「纯 continue」：设备/通道没发布给这个上级就静默丢弃，
+			// 不打日志、不入队、不报错。2026-10-27 实测踩到：撞号设备
+			// （device_id 与平台自身 server_id 相同）只有通道投影、没有设备投影，
+			// 现象是「点播/回放/录像全正常，唯独报警永远上送不到上级」，而日志一片安静。
+			// 报警是低频事件，按 kind 只对报警打 warn，不担心刷屏。
+			if kind == cascadeEventAlarm {
+				app.Log(sendCtx).Warn("级联报警的来源未发布给该上级,已跳过",
+					zap.String("event", "cascade.event.source_not_published"),
+					zap.Uint64("platform_id", p.ID),
+					zap.String("kind", string(kind)),
+					zap.String("device_code", deviceCode),
+					zap.String("source_code", sourceCode))
+			}
 			continue
 		}
 		if kind == cascadeEventAlarm {

@@ -665,7 +665,13 @@ func validateBusinessGroupShareIdentityCollisions(tx *gorm.DB, platform model.Gb
 	}
 	for _, input := range devices {
 		if _, exists := used[input.PublishedDeviceID]; exists {
-			return invalidBusinessGroup("共享设备编号与平台身份编号冲突")
+			// ⛔ 带上具体编码：现场只看到一句「冲突」时，根本没法定出是哪台设备。
+			//   典型场景（2026-10-27 实测）：设备自身的国标编码恰好等于本平台的
+			//   server_id（客户现场很常见），此时这一批共享会整体被拒，
+			//   而现象是「点播/回放都能用，唯独报警永远不上送」。
+			return invalidBusinessGroup(fmt.Sprintf(
+				"共享设备编号 %s 与平台身份编号冲突（该编码等于本平台或上级的 server_id）。请先修改这台设备的国标编码（保持 20 位、前 10 位为域、11-13 位为 200）后再共享",
+				input.PublishedDeviceID))
 		}
 		used[input.PublishedDeviceID] = struct{}{}
 	}
