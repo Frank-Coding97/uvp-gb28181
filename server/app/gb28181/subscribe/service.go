@@ -256,10 +256,21 @@ func (s *Service) send(ctx context.Context, device *gbmodels.GbDevice, sub *gbmo
 			retryAt := now.Add(retryDelay(sub.RetryCount + 1))
 			next = &retryAt
 		}
-		_ = s.db.WithContext(ctx).Model(sub).Updates(map[string]any{
+		updates := map[string]any{
 			"status": gbmodels.SubscriptionStatusDegraded, "retry_count": sub.RetryCount + 1,
 			"last_error": err.Error(), "next_action_at": next,
-		}).Error
+			"last_status_code": response.StatusCode,
+		}
+		// 481 = 对端不认识这个对话（最典型：对端进程重启过，它那边的订阅表已经空了）。
+		// 继续拿旧的 Call-ID + 两个 tag 续订，对端每次都回 481，退避会一路涨到 24 小时
+		// —— 表现在页面上就是「目录订阅一直异常，等了半天也不恢复」，只能人工点续订。
+		// 清掉对话凭据并按「首包」重来：只有首包（无 To-tag）对端才会新建订阅。
+		if response.StatusCode == 481 {
+			retryAt := now.Add(retryDelay(1))
+			updates["call_id"], updates["local_tag"], updates["remote_tag"] = "", "", ""
+			updates["cseq"], updates["retry_count"], updates["next_action_at"] = 0, 0, &retryAt
+		}
+		_ = s.db.WithContext(ctx).Model(sub).Updates(updates).Error
 		_ = s.db.WithContext(ctx).First(sub, sub.ID).Error
 		return sub, err
 	}
@@ -286,6 +297,13 @@ func (s *Service) sendRequest(ctx context.Context, device *gbmodels.GbDevice, su
 	body, event, err := manscdp.BuildSubscriptionQuery(sub.Kind, device.DeviceID, int(sub.CSeq+1), sub.IntervalSeconds)
 	if err != nil {
 		return uac.SubscriptionResponse{}, err
+	}
+	// 目录订阅要带 `Event: Catalog;id=N`：不带 id 时对端会回 489 Bad Event
+	// （本平台自己的下级就是这么判的，WVP 一类还要求 200 OK 里回显同一个 id 才能
+	// 在到期时续订）。id 取订阅行主键 —— 同一条订阅每次续订算出来都一样，对端才能
+	// 把续订认成「同一次订阅的刷新」而不是新订阅。
+	if sub.Kind == gbmodels.SubscriptionKindCatalog && sub.ID > 0 {
+		event = fmt.Sprintf("%s;id=%d", event, sub.ID)
 	}
 	return s.sender.SendSubscribe(ctx, uac.SubscriptionRequest{
 		DeviceID: device.DeviceID, Destination: net.JoinHostPort(device.IP, strconv.Itoa(device.Port)),

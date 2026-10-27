@@ -440,7 +440,11 @@ func (u *UAC) buildSubscribeRequest(in SubscriptionRequest) (*sip.Request, error
 	}
 	req := sip.NewRequest(sip.SUBSCRIBE, u.deviceURI(in.DeviceID))
 	req.SetBody(in.Body)
-	if err := u.prepareOutboundRequest(req, in.Destination, in.Transport, false); err != nil {
+	// RFC 3265 §7.1 要求 SUBSCRIBE 必须带 Contact；本平台自己的级联订阅接收侧
+	// 也把它当成对话框合法的必要条件（缺了直接 400 Invalid subscription dialog）。
+	// 以前这里传 false，于是「上一级订阅下一级」四类订阅里除目录外全部被下级
+	// 回 400，设备订阅记录一直停在 degraded。
+	if err := u.prepareOutboundRequest(req, in.Destination, in.Transport, true); err != nil {
 		return nil, err
 	}
 	req.AppendHeader(sip.NewHeader("Content-Type", "Application/MANSCDP+xml"))
