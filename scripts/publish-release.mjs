@@ -272,8 +272,14 @@ async function publishToGitee({ token, owner, repo, tag, notes, assets, dryRun, 
     json: { access_token: token, name: tag, body: notes },
   }).catch(() => { /* 正文更新失败不阻断附件上传 */ });
 
+  // ⛔⛔ releases/tags 返回的 assets 只有 name 与下载地址，**没有 size** ⇒
+  //   `Number(already.size) === asset.bytes` 恒为 false，重跑一次就把同名附件再传一份，
+  //   两份合计直接吃掉 Gitee 的 1GB 附件配额（2026-10-27 实测：1.1.14 的 amd64/arm64
+  //   各存了两份，windows 因此永远传不上去）。附件明细必须走 attach_files 接口。
+  const files = await giteeRequest(`${base}/releases/${release.id}/attach_files?access_token=${token}`).catch(() => null);
   const detail = await giteeRequest(`${base}/releases/tags/${tag}?access_token=${token}`).catch(() => null);
-  const existing = new Map((detail && Array.isArray(detail.assets) ? detail.assets : []).map((item) => [item.name, item]));
+  const listed = Array.isArray(files) ? files : (detail && Array.isArray(detail.assets) ? detail.assets : []);
+  const existing = new Map(listed.map((item) => [item.name, item]));
   const assetUrls = {};
   for (const asset of assets) {
     const already = existing.get(asset.filename);
