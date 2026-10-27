@@ -173,6 +173,11 @@ else
   skip_check "Vitest（前端单测）" "web/node_modules 未安装（先在 web/ 跑 pnpm install）"
 fi
 
+# ---------- 在线升级发布脚本 ----------
+# 清单一旦发出去就是对外承诺：通道序号必须单调、同一版本不可重签、续期只能
+# 动指针不能动清单。这三条都靠这个测试守住。
+run_check "在线升级发布脚本" "$ROOT" 'node --test scripts/publish-upgrade-channel.test.mjs'
+
 # ---------- 完整档额外检查 ----------
 if [ "$MODE" = "full" ]; then
   if [ -x "$WEB_BIN/vue-tsc" ]; then
