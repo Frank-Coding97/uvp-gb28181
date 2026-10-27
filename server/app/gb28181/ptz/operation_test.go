@@ -81,6 +81,27 @@ func TestServiceSNInitializationFailurePreventsAssembly(t *testing.T) {
 	require.Nil(t, service)
 }
 
+// 排队窗口必须"每次指令可定"：后台批量读取（能力刷新）放宽，交互式保持 5 秒。
+//
+// 现场事故：67 通道的设备一次排 68 条 ConfigDownload，SIP 发送槽位只有 16 个、
+// 每条还要等设备回 200 OK，5 秒窗口把还没轮到发的 2/3 判成了"排队超时"。
+func TestOperationQueueWindowOverride(t *testing.T) {
+	require.Equal(t, 5*time.Second, queueWindowOf(Command{}), "交互式默认窗口必须是 5 秒")
+	require.Equal(t, 5*time.Second, queueWindowOf(Command{QueueWindow: -time.Second}), "非法窗口回落到默认")
+	require.Equal(t, DeviceConfigBackgroundQueueWindow, queueWindowOf(Command{QueueWindow: DeviceConfigBackgroundQueueWindow}))
+
+	db := newOperationTestDB(t, false)
+	now := time.Date(2026, 7, 24, 10, 0, 0, 0, time.UTC)
+	service := newOperationService(t, db, &fakeTrackedSender{}, func() time.Time { return now })
+
+	command := responseRequiredCommand("background-config-read")
+	command.QueueWindow = DeviceConfigBackgroundQueueWindow
+	operation, err := service.Execute(context.Background(), testTarget(), command)
+	require.NoError(t, err)
+	require.NotNil(t, operation.QueueDeadlineAt)
+	require.Equal(t, now.Add(DeviceConfigBackgroundQueueWindow), *operation.QueueDeadlineAt)
+}
+
 func TestOperationResponseRequiredCreationIsAtomicAndQueued(t *testing.T) {
 	db := newOperationTestDB(t, false)
 	sender := &fakeTrackedSender{}

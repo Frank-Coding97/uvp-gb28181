@@ -16,6 +16,7 @@ import (
 
 	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.com/uvp-gb28181/app/gb28181/uac"
 	"uvplatform.com/uvp-gb28181/internal/authoritytest"
@@ -252,7 +253,10 @@ func TestSchedulerQueueDeadlineAndLegacyIsolation(t *testing.T) {
 
 	f.clock.Set(f.clock.Now().Add(5 * time.Second))
 	require.NoError(t, f.scheduler.RunDue(f.clock.Now()))
-	require.Equal(t, gbmodels.PTZOperationRejected, loadSchedulerOperation(t, f.db, op.ID).Status)
+	expired := loadSchedulerOperation(t, f.db, op.ID)
+	require.Equal(t, gbmodels.PTZOperationRejected, expired.Status)
+	// ⛔ 排队超时用专属码：混成 HOME_POSITION_UNAVAILABLE 会把现场排查引向"服务/授权不可用"。
+	require.Equal(t, playauth.PTZQueueTimeout, expired.ErrorCode)
 	require.Equal(t, gbmodels.PTZOperationQueued, loadSchedulerOperation(t, f.db, legacy.ID).Status)
 	require.Empty(t, loadSchedulerAttempts(t, f.db, op.ID))
 }

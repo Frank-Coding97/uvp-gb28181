@@ -8,6 +8,14 @@ import (
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
+// PTZQueueTimeout 是"排队窗口内没被调度发出"的稳定错误码。
+//
+// ⛔ 不能复用 HOME_POSITION_UNAVAILABLE：那是"PTZ 服务/设备授权不可用"的码，
+// 现场看到它去查服务状态会被带到沟里；排队超时的真实含义是"指令根本没发出去，
+// 设备侧什么都没收到"，与回家位置能力毫无关系。两处会写这个终态
+// （本文件与 ptz.scheduler.expireQueued），必须共用同一个常量。
+const PTZQueueTimeout = "PTZ_QUEUE_TIMEOUT"
+
 // ExpirePTZReservation can only retire a never-claimed, expired query. It grants
 // no effect permission and is serialized with Claim by the same device lock.
 func (s *DeviceOperationIntentStore) ExpirePTZReservation(ctx context.Context, id DeviceOperationIntentIdentity, operationPK uint, now time.Time) error {
@@ -62,7 +70,7 @@ func (s *DeviceOperationIntentStore) ExpirePTZReservation(ctx context.Context, i
 			}
 		}
 		r := tx.Model(&gbmodels.GbPTZOperation{}).Where("id=? AND status=? AND attempt=0", op.ID, gbmodels.PTZOperationQueued).
-			Updates(map[string]any{"status": gbmodels.PTZOperationRejected, "error_code": "HOME_POSITION_UNAVAILABLE", "error_message": "PTZ operation 排队超时", "completed_at": now, "next_attempt_at": nil})
+			Updates(map[string]any{"status": gbmodels.PTZOperationRejected, "error_code": PTZQueueTimeout, "error_message": "排队超时：指令在排队窗口内未被调度发出", "completed_at": now, "next_attempt_at": nil})
 		if r.Error != nil {
 			return r.Error
 		}

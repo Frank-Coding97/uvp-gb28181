@@ -55,6 +55,12 @@ type Command struct {
 	Profile     protocol.Profile
 	TargetScope string
 	TargetCode  string
+	// QueueWindow 是"从入队到必须被调度发出"的容忍时长，0 表示默认 5 秒。
+	//
+	// ⭐ 只有**后台批量任务**才该放宽：交互式指令用户就在屏幕前等，
+	// 5 秒还发不出去就该明确失败，而不是让用户看着转圈 1 分钟。
+	// 放宽的场景见 [DeviceConfigBackgroundQueueWindow]。
+	QueueWindow time.Duration
 	Build       func(sn int) ([]byte, error)
 }
 

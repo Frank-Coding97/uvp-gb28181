@@ -82,6 +82,25 @@ func isReconcileMismatchCode(code string) bool {
 // 设备收到空 ConfigType 的行为标准没定义，多半是回一个不带任何块的成功应答，
 // 于是平台会把"我们没问"误记成"设备不支持"。
 func (s *Service) ReadDeviceConfigs(ctx context.Context, target Target, configTypes []string, actorID, actorDeptID uint, idempotencyKey string) (gbmodels.GbPTZOperation, error) {
+	return s.readDeviceConfigs(ctx, target, configTypes, actorID, actorDeptID, idempotencyKey, 0)
+}
+
+// DeviceConfigBackgroundQueueWindow 是后台批量配置读取的排队窗口。
+//
+// ⛔ 交互式读取必须保持 5 秒（见 [defaultQueueWindow]），这里只放宽后台任务：
+// 一台 67 通道的设备同步完目录会一次性排 68 条 ConfigDownload，而 SIP 发送槽位
+// 全局只有 16 个、每条还要等设备回 200 OK（实测约 2 秒）—— 5 秒窗口吸收不了，
+// 现场表现就是"34 条成功、96 条排队超时"，看着像设备不配合，其实是平台自己
+// 把还没轮到发的指令判死了。
+const DeviceConfigBackgroundQueueWindow = 60 * time.Second
+
+// ReadDeviceConfigsBackground 与 ReadDeviceConfigs 等价，但使用后台排队窗口。
+// 只给"没有人在等结果"的批量任务用（设备能力刷新等）。
+func (s *Service) ReadDeviceConfigsBackground(ctx context.Context, target Target, configTypes []string, actorID, actorDeptID uint, idempotencyKey string) (gbmodels.GbPTZOperation, error) {
+	return s.readDeviceConfigs(ctx, target, configTypes, actorID, actorDeptID, idempotencyKey, DeviceConfigBackgroundQueueWindow)
+}
+
+func (s *Service) readDeviceConfigs(ctx context.Context, target Target, configTypes []string, actorID, actorDeptID uint, idempotencyKey string, queueWindow time.Duration) (gbmodels.GbPTZOperation, error) {
 	normalized, err := normalizeDeviceConfigTypes(configTypes)
 	if err != nil {
 		return gbmodels.GbPTZOperation{}, err
@@ -99,6 +118,7 @@ func (s *Service) ReadDeviceConfigs(ctx context.Context, target Target, configTy
 		MaxAttempts:      3,
 		ActorID:          actorID,
 		ActorDeptID:      actorDeptID,
+		QueueWindow:      queueWindow,
 		Build: func(sn int) ([]byte, error) {
 			code := target.ChannelCode
 			if len(normalized) == 1 && normalized[0] == manscdp.ConfigTypeBasicParam {
@@ -126,6 +146,38 @@ func (s *Service) ReadDeviceConfigs(ctx context.Context, target Target, configTy
 // VideoParamOpt 是按通道查询的只读能力块；不要与设备级 BasicParam 合并到同一条报文。
 func (s *Service) ReadVideoParamOptions(ctx context.Context, target Target, actorID, actorDeptID uint, idempotencyKey string) (gbmodels.GbPTZOperation, error) {
 	return s.ReadDeviceConfigs(ctx, target, []string{manscdp.ConfigTypeVideoParamOpt}, actorID, actorDeptID, idempotencyKey)
+}
+
+// FreshVideoParamChannels 返回该设备在 since 之后**已经问过** VideoParamOpt 的通道编码集合。
+//
+// 给后台能力刷新做去重：Catalog 是分批下发的，每一批完成都会触发一次"全设备能力刷新"，
+// 同一批通道会被反复读。判据按"我们是否已经把报文发出去/正在发"：
+// queued（还没轮到）、sent（已发、等设备应答）、accepted（设备已应答）都算问过；
+// ⛔ 排队超时 / 传输不确定 / 应用层超时**不算**——那些通道恰恰需要补一次。
+func (s *Service) FreshVideoParamChannels(ctx context.Context, deviceCode string, since time.Time) (map[string]struct{}, error) {
+	fresh := make(map[string]struct{})
+	if s == nil || s.db == nil || strings.TrimSpace(deviceCode) == "" || since.IsZero() {
+		return fresh, nil
+	}
+	var rows []struct {
+		ChannelCode string `gorm:"column:channel_code"`
+	}
+	err := ptzWriter(s.db).WithContext(ctx).Model(&gbmodels.GbPTZOperation{}).
+		Select("channel_code").
+		Where("device_code = ? AND action = ? AND target_scope = ?", deviceCode, actionRefreshDeviceConfigs, gbmodels.ControlTargetScopeChannel).
+		Where("status IN ?", []gbmodels.PTZOperationStatus{gbmodels.PTZOperationQueued, gbmodels.PTZOperationSent, gbmodels.PTZOperationAccepted}).
+		Where("payload_json LIKE ?", `%"`+manscdp.ConfigTypeVideoParamOpt+`"%`).
+		Where("created_at >= ?", gbmodels.PTZTimeComparison(s.db, since)).
+		Find(&rows).Error
+	if err != nil {
+		return fresh, err
+	}
+	for _, row := range rows {
+		if code := strings.TrimSpace(row.ChannelCode); code != "" {
+			fresh[code] = struct{}{}
+		}
+	}
+	return fresh, nil
 }
 
 // ApplyDeviceConfig 下发一组配置（A.2.3.2.5 DeviceConfig）。

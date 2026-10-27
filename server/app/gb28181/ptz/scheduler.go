@@ -387,8 +387,8 @@ func (s *Scheduler) expireQueued(ctx context.Context, now time.Time) error {
 		Where("device_intent_id IS NULL AND device_epoch IS NULL").
 		Where("response_required = ? AND status = ? AND attempt = 0 AND queue_deadline_at IS NOT NULL AND queue_deadline_at <= ?", true, gbmodels.PTZOperationQueued, gbmodels.PTZTimeComparison(s.db, now)).
 		Updates(map[string]interface{}{
-			"status": gbmodels.PTZOperationRejected, "error_code": schedulerErrorHomePositionUnavailable,
-			"error_message": "PTZ operation 排队超时", "completed_at": now, "next_attempt_at": nil,
+			"status": gbmodels.PTZOperationRejected, "error_code": playauth.PTZQueueTimeout,
+			"error_message": "排队超时：指令在排队窗口内未被调度发出", "completed_at": now, "next_attempt_at": nil,
 		}).Error
 }
 

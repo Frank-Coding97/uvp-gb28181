@@ -79,6 +79,19 @@ func normalizeIdempotencyKey(key string) (string, error) {
 	return key, nil
 }
 
+// defaultQueueWindow 是交互式指令的排队容忍时长。超过它还没被调度发出，
+// 说明发送通道已经堵住，此时"明确失败"比让用户在页面上干等更有用。
+const defaultQueueWindow = 5 * time.Second
+
+// queueWindowOf 解析一次指令的排队窗口。零值/负值一律回落到默认窗口，
+// 避免调用方误传 0 制造"入队即过期"的空窗。
+func queueWindowOf(command Command) time.Duration {
+	if command.QueueWindow > 0 {
+		return command.QueueWindow
+	}
+	return defaultQueueWindow
+}
+
 func operationMatches(existing gbmodels.GbPTZOperation, command Command, payloadJSON string) bool {
 	existingPayload, err := canonicalPayloadJSON(existing.PayloadJSON)
 	if err != nil {
@@ -176,7 +189,7 @@ func (s *Service) createOperation(
 		if !command.ResponseRequired {
 			operation.MaxAttempts = 1
 		}
-		deadline := createdAt.Add(5 * time.Second)
+		deadline := createdAt.Add(queueWindowOf(command))
 		operation.QueueDeadlineAt = &deadline
 		return s.intents.ReservePTZOperation(ctx, playauth.DeviceOperationIntentIdentity{
 			OperationID: parentID, DevicePK: int64(target.DeviceID), DeviceCode: target.DeviceCode, DeviceEpoch: target.DeviceEpoch,
@@ -190,7 +203,7 @@ func (s *Service) createOperation(
 	if maxAttempts <= 0 {
 		maxAttempts = 1
 	}
-	queueDeadline := createdAt.Add(5 * time.Second)
+	queueDeadline := createdAt.Add(queueWindowOf(command))
 	values := map[string]interface{}{
 		"operation_id": operation.OperationID, "idempotency_key": operation.IdempotencyKey,
 		"device_id": operation.DeviceID, "device_code": operation.DeviceCode,
