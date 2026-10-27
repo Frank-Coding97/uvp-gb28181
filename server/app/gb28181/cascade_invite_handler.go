@@ -193,13 +193,38 @@ func normalizeCascadeHost(host string) string {
 	return host
 }
 
-// sameSession 用于建立后的 ACK/BYE/INFO 比对。会话建立后仍要求实际
-// 来源地址、端口、传输层和 From 身份全部一致，不能因同端口而放行另一来源。
+// sameSession 是事务级严格口径：来源地址、端口、传输层和 From 身份全部一致。
+// 同一 INVITE 事务内的 CANCEL 必须用它（RFC 3261 要求 CANCEL 与 INVITE 同端点）。
 func (p cascadePeer) sameSession(observed cascadePeer) bool {
 	return p.fromUser == observed.fromUser &&
 		strings.EqualFold(p.host, observed.host) &&
 		p.port == observed.port &&
 		p.transport == observed.transport
+}
+
+// sameEstablishedPeer 用于会话建立后的 ACK/BYE/INFO 比对。
+//
+// 身份维度：来源 IP + 传输层 + From 平台编码，再加 Call-ID/tags（调用方已用它
+// 定位到本会话，别的 Call-ID 根本进不到这里）。
+//
+// UDP 上端口**不作为身份**：UDP 无连接，上级的报文随时可能换源端口 —— NAT
+// 重绑定、多出口线路、上级重启后重新 bind，最常见的是上级把 dialog 内请求
+// （INFO/BYE）交给另一个临时 socket 发出去。实测现场就是这样：62 的 INVITE 从
+// 51064 到达，停播 BYE 和回放控制 INFO 却从 47972 发出，而且 Via sent-by 也跟着
+// 写成 47972 —— 所以「拿 Via 兜底」也区分不出来。按端口比对的结果是下级把
+// 停止和回放控制全部回 403，上级停不掉流、暂停和拖动全失效，只能等超时清理。
+//
+// TCP 仍要求端口一致：可靠连接本身就是会话的一部分，另一实例必然是另一条连接。
+func (p cascadePeer) sameEstablishedPeer(observed cascadePeer) bool {
+	if p.fromUser != observed.fromUser ||
+		!strings.EqualFold(p.host, observed.host) ||
+		p.transport != observed.transport {
+		return false
+	}
+	if p.port == observed.port {
+		return true
+	}
+	return observed.transport == "udp"
 }
 
 // The SIP flow identifies the upper platform. To/Request-URI identifies its
@@ -209,18 +234,15 @@ func matchCascadeInvitePeer(req *sip.Request, p model.GbCascadePlatform) bool {
 	return ok && peer.match(p)
 }
 
-// matchCascadeSessionPeer 判定 ACK/BYE 是否属于本会话。
-func matchCascadeSessionPeer(req *sip.Request, session *cascadeVideoSession) bool {
-	peer, ok := cascadePeerFromRequest(req)
-	return ok && peer.sameSession(session.peer)
-}
-
 type cascadeVideoSession struct {
 	dialog   *sipgo.DialogServerSession
 	platform model.GbCascadePlatform
 	// peer 是 INVITE 到达时看到的实际网络身份，后续 ACK/BYE 拿它比对，
 	// 而不是拿可能已经过期的平台配置里的 Host。
-	peer              cascadePeer
+	peer cascadePeer
+	// peerMu 保护 peer：会话建立后上级可能从新端口发 BYE/INFO，每收到一条
+	// 都会把新端口写回，所以读侧（快照比对）必须与写侧互斥。
+	peerMu            sync.Mutex
 	source            cascadeMediaSourceIdentity
 	inviteKey         cascadeInviteKey
 	ssrc              string
@@ -235,6 +257,28 @@ type cascadeVideoSession struct {
 	acknowledged      atomic.Bool
 	playback          *cascadePlaybackLease
 	controlMu         sync.Mutex
+}
+
+// peerSnapshot 返回当前会话绑定的来源身份副本。
+func (s *cascadeVideoSession) peerSnapshot() cascadePeer {
+	if s == nil {
+		return cascadePeer{}
+	}
+	s.peerMu.Lock()
+	defer s.peerMu.Unlock()
+	return s.peer
+}
+
+// adoptPeerPort 在比对通过后把上级的新源端口写回会话，返回旧端口用于记日志。
+// 只允许改端口：来源 IP 与 From 身份已由 sameEstablishedPeer 卡住。
+func (s *cascadeVideoSession) adoptPeerPort(peer cascadePeer) (previous cascadePeer) {
+	s.peerMu.Lock()
+	defer s.peerMu.Unlock()
+	previous = s.peer
+	if peer.port != 0 {
+		s.peer.port = peer.port
+	}
+	return previous
 }
 
 type cascadeVideoRuntime struct {
@@ -365,9 +409,10 @@ func (h *cascadeVideoRuntime) Handle(req *sip.Request, tx sip.ServerTransaction)
 	if session == nil {
 		return false
 	}
-	if !matchCascadeSessionPeer(req, session) {
+	peer, peerOK := cascadePeerFromRequest(req)
+	if !peerOK || !peer.sameEstablishedPeer(session.peerSnapshot()) {
 		if req.Method != sip.ACK {
-			// 上级换了源地址/端口（NAT 重绑定、上平台重启）时，后续 BYE/INFO 会落到这里。
+			// 上级换了源 IP 或 From 身份（上平台重启后重建、配置被改）时，后续 BYE/INFO 会落到这里。
 			// 不记日志的话，现象是「上级停不掉/控不了」而我方日志一片安静。
 			if app.ZapLog != nil {
 				app.ZapLog.Warn("级联点播会话对端不匹配,拒绝请求",
@@ -376,11 +421,25 @@ func (h *cascadeVideoRuntime) Handle(req *sip.Request, tx sip.ServerTransaction)
 					zap.Uint64("platform_id", session.platform.ID),
 					zap.String("call_id", cascadeCallID(req)),
 					zap.String("peer", cascadePeerLabel(req)),
-					zap.String("session_peer", session.peer.String()))
+					zap.String("session_peer", session.peerSnapshot().String()))
 			}
 			_ = tx.Respond(sip.NewResponseFromRequest(req, 403, "Forbidden", nil))
 		}
 		return true
+	}
+	if previous := session.adoptPeerPort(peer); previous.port != peer.port {
+		// 端口漂移是正常现象（NAT 重绑定、多出口、上级重启后重新 bind），放行但留痕：
+		// 以后若再出现「上级停不掉流」，这条 INFO 就是第一现场。
+		if app.ZapLog != nil {
+			app.ZapLog.Info("级联点播会话源端口漂移,已跟随更新",
+				zap.String("event", "cascade.video.peer_port_drift"),
+				zap.String("method", req.Method.String()),
+				zap.Uint64("platform_id", session.platform.ID),
+				zap.String("call_id", cascadeCallID(req)),
+				zap.String("peer", cascadePeerLabel(req)),
+				zap.Int("previous_port", previous.port),
+				zap.Int("current_port", peer.port))
+		}
 	}
 	switch req.Method {
 	case sip.ACK:

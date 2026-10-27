@@ -419,6 +419,60 @@ func (cascadeInviteTestConfig) GetUintSlice(string) []uint       { return nil }
 func (cascadeInviteTestConfig) Set(string, interface{})          {}
 func (cascadeInviteTestConfig) SaveConfig() error                { return nil }
 
+// 上级后续请求换了源端口（NAT 重绑定、多出口线路、上级重启后重新 bind），
+// 但 Via sent-by 仍是自己的接收地址 —— 那是同一个上级，必须放行。
+// 实测现场：62 的 INVITE 从 51064 到达，停播 BYE 却从 47972 发出，
+// 严格按端口比对会把停止回 403，下级只能等超时清理。
+func TestCascadeVideoAcceptsByeFromDriftedSourcePort(t *testing.T) {
+	h, _, stops := newCascadeVideoTestRuntime(t)
+	req := cascadeTestRequest(15060, "0200000001")
+	tx := &cascadeInviteTestTx{siptest.NewServerTxRecorder(req), make(chan *sip.Response, 10)}
+	defer tx.Terminate()
+	done := make(chan struct{})
+	go func() { h.Handle(req, tx); close(done) }()
+	res := cascadeAwaitResponse(t, tx)
+	require.Equal(t, 200, res.StatusCode)
+	require.True(t, h.Handle(cascadeDialogRequest(req, res, sip.ACK), tx))
+
+	bye := cascadeDialogRequest(req, res, sip.BYE)
+	bye.SetSource("192.168.10.220:47972") // 源端口漂移，Via 仍写 15060
+	byeTx := siptest.NewServerTxRecorder(bye)
+	defer byeTx.Terminate()
+	require.True(t, h.Handle(bye, byeTx))
+	require.Equal(t, 200, byeTx.Result()[0].StatusCode, "同一上级的端口漂移不能被当成陌生人")
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("session not released")
+	}
+	select {
+	case ssrc := <-stops:
+		require.Equal(t, "0200000001", ssrc)
+	case <-time.After(time.Second):
+		t.Fatal("sender not stopped")
+	}
+}
+
+// 端口不是 UDP 会话的身份维度，但 IP / 传输层 / From 仍是：任何一项对不上就 403。
+// TCP 例外 —— 可靠连接本身就是会话的一部分，端口漂移即另一条连接，必须拒绝。
+func TestCascadePeerEstablishedIdentityDimensions(t *testing.T) {
+	session := cascadePeer{host: "10.8.0.1", port: 51064, transport: "udp", fromUser: "37010000002000000001"}
+
+	// UDP：只有端口变，视为同一上级的端口漂移。
+	require.True(t, session.sameEstablishedPeer(cascadePeer{host: "10.8.0.1", port: 47972, transport: "udp", fromUser: "37010000002000000001"}))
+	// 换 IP 就是另一个来源。
+	require.False(t, session.sameEstablishedPeer(cascadePeer{host: "10.8.0.9", port: 51064, transport: "udp", fromUser: "37010000002000000001"}))
+	// From 平台编码不变才算同一上级。
+	require.False(t, session.sameEstablishedPeer(cascadePeer{host: "10.8.0.1", port: 51064, transport: "udp", fromUser: "35020000002000000001"}))
+	// 传输层不同不可混用。
+	require.False(t, session.sameEstablishedPeer(cascadePeer{host: "10.8.0.1", port: 51064, transport: "tcp", fromUser: "37010000002000000001"}))
+	// TCP 上端口是连接身份的一部分。
+	tcpSession := cascadePeer{host: "10.8.0.1", port: 51064, transport: "tcp", fromUser: "37010000002000000001"}
+	require.False(t, tcpSession.sameEstablishedPeer(cascadePeer{host: "10.8.0.1", port: 47972, transport: "tcp", fromUser: "37010000002000000001"}))
+	require.True(t, tcpSession.sameEstablishedPeer(tcpSession))
+}
+
 func TestCascadeVideoTwoUpstreamsSameCallIDAndIndependentBye(t *testing.T) {
 	h, db, stops := newCascadeVideoTestRuntime(t)
 	requests := []*sip.Request{cascadeTestRequest(15060, "0200000001"), cascadeTestRequest(16060, "0200000002")}
@@ -436,8 +490,11 @@ func TestCascadeVideoTwoUpstreamsSameCallIDAndIndependentBye(t *testing.T) {
 	}
 	require.Equal(t, 2, h.sources.LeaseCount("shared-source"))
 	// An ACK/BYE with correct tags from the other upstream must not end this dialog.
+	// 区分维度是来源 IP 与 From 平台编码，不是端口：UDP 上同一上级换端口是常态
+	// （实测 62 的 INVITE 走 51064，BYE/INFO 走临时端口 47972），所以这里换 IP。
 	bad := cascadeDialogRequest(requests[0], responses[0], sip.BYE)
-	bad.SetSource("192.168.10.220:16060")
+	bad.SetSource("192.168.10.221:16060")
+	bad.ReplaceHeader(sip.NewHeader("Via", "SIP/2.0/UDP 192.168.10.221:16060;branch=z9hG4bK-other-upstream"))
 	badTx := siptest.NewServerTxRecorder(bad)
 	defer badTx.Terminate()
 	require.True(t, h.Handle(bad, badTx))
