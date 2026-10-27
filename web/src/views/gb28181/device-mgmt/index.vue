@@ -32,7 +32,8 @@ import {
   Plus,
   Cctv,
   Camera,
-  Bell
+  Bell,
+  CircleQuestionMark
 } from "@lucide/vue";
 import { startPlay, stopPlay, type PlayResult } from "@/api/gb28181";
 import { listZLMNodes, type ZLMNode } from "@/api/gb28181-zlm";
@@ -131,6 +132,8 @@ import {
 import { normalizeProtocolOverride, protocolOverrideAfterSave } from "./protocolOverrideState";
 import { consumeDeviceMgmtReturnSnapshot, saveDeviceMgmtReturnSnapshot } from "../device-record-playback/returnSnapshot";
 import { useDeviceStatusLabel } from "../useDeviceStatusDict";
+import { useGuide } from "@/components/s-guide/useGuide";
+import { DEVICE_GUIDE_STEPS, DEVICE_GUIDE_STORAGE_KEY } from "./deviceGuide";
 import { DICT_CODE_MEDIA_NODE_STATE, MEDIA_NODE_STATE_LABEL_FALLBACK } from "../mediaNodeState";
 import { useDictLabel } from "@/hooks/useDictOptions";
 
@@ -398,6 +401,20 @@ const canEditChannel = computed(() => hasPermission("gb28181:channel:edit"));
 const canEditTransport = computed(() => hasPermission("gb28181:channel:stream-transport:update"));
 const canUpdateRecording = computed(() => hasPermission("gb28181:channel:recording:update"));
 const canStopPlayback = computed(() => hasPermission("gb28181:play:stop"));
+
+/**
+ * 新手引导。
+ *
+ * 只在有设备查看权限时才有意义 —— 没权限时页面连工具栏都不渲染，锚点全取不到，
+ * 弹出来就是几个孤零零的居中气泡（`buildGuideSteps` 会把找不到锚点的步骤丢掉）。
+ *
+ * 存储键见 `deviceGuide.ts`：带上版本号，改引导内容时改版本号即可让老用户重看一遍。
+ */
+const guide = useGuide({ steps: DEVICE_GUIDE_STEPS, storageKey: DEVICE_GUIDE_STORAGE_KEY });
+/** 手动入口。已经在放的时候再点一次不做任何事（避免把浮层关掉）。 */
+function startDeviceGuide() {
+  guide.start();
+}
 /**
  * 「设备状态」「存储卡」两页的读权限。
  * ⛔ 与 ptz 控制分开：这两个接口读的是 `gb28181:ptz:view`（见 routes.go 里
@@ -3359,6 +3376,15 @@ onMounted(async () => {
   await Promise.all([refreshMainData(), refreshStats()]);
   if (canEditChannel.value) await loadPtzTypeDict();
   startAutoRefresh();
+  // 首次访问自动讲一遍。
+  // ⛔ 必须等 `nextTick` —— 卡片/表格是 v-for 渲染出来的，请求回来那一刻 DOM 还没落地，
+  //    此时 `buildGuideSteps` 会把「操作按钮」这类锚点全判成不可见而丢掉整步。
+  //    `autoStart` 内部还会再校验两件事：这台机器是不是第一次来、可用步骤够不够，
+  //    不满足就直接返回 false（不会弹空壳）。
+  if (canViewDevices.value) {
+    await nextTick();
+    guide.autoStart();
+  }
 });
 
 onUnmounted(() => {
@@ -3414,6 +3440,7 @@ onUnmounted(() => {
                 <button
                   type="button"
                   data-asset-kind="device"
+                  data-guide="asset-device"
                   :class="{ active: assetKind === 'device' }"
                   @click="setAssetKind('device')"
                 >
@@ -3423,6 +3450,7 @@ onUnmounted(() => {
                 <button
                   type="button"
                   data-asset-kind="channel"
+                  data-guide="asset-channel"
                   :class="{ active: assetKind === 'channel' }"
                   @click="setAssetKind('channel')"
                 >
@@ -3435,6 +3463,7 @@ onUnmounted(() => {
                   v-for="item in viewOptions"
                   :key="item.value"
                   type="button"
+                  :data-guide="`view-${item.value}`"
                   :class="{ active: viewMode === item.value }"
                   :aria-label="`${item.label}视图`"
                   :aria-pressed="viewMode === item.value"
@@ -3474,6 +3503,19 @@ onUnmounted(() => {
                 <a-option value="online">在线</a-option>
                 <a-option value="offline">离线</a-option>
               </a-select>
+              <!-- 「使用引导」手动入口。放成图标按钮而不是带文字的按钮：工具栏已经 6 个控件，
+                   再加一个 84px 的文字按钮就会在 1366 宽上把搜索框挤到换行。 -->
+              <a-tooltip content="使用引导：把这页的按钮讲一遍" position="bottom">
+                <button
+                  class="btn-ghost guide-trigger"
+                  type="button"
+                  data-guide-trigger
+                  aria-label="使用引导"
+                  @click="startDeviceGuide"
+                >
+                  <CircleQuestionMark :size="15" />
+                </button>
+              </a-tooltip>
               <button
                 :disabled="!canViewDevices"
                 class="btn-ghost refresh-control uvp-page-action-btn uvp-refresh-btn"
@@ -3517,6 +3559,7 @@ onUnmounted(() => {
         <DirectoryPanel
           v-else-if="canViewDevices"
           ref="directoryPanelRef"
+          data-guide="directory"
           :resource-filter="{ assetKind, q: keyword.trim(), status: statusFilter }"
           v-model="directoryState"
           :selected-device-id="selectedDevice?.id || selectedDeviceSummary?.id || null"
@@ -3894,7 +3937,7 @@ onUnmounted(() => {
               <a-table-column title="设备名称" :width="170">
                 <template #cell="{ record }">
                   <a-tooltip :content="deviceNameText(record)">
-                    <div class="device-name">
+                    <div class="device-name" data-guide="dblclick-device">
                       <span class="pri text-ellipsis">{{ deviceNameText(record) }}</span>
                       <button
                         v-if="maintenanceActivity.label(record.id)"
@@ -3976,7 +4019,7 @@ onUnmounted(() => {
               </a-table-column>
               <a-table-column title="操作" :width="420" fixed="right">
                 <template #cell="{ record }">
-                  <div class="uvp-table-actions">
+                  <div class="uvp-table-actions" data-guide="row-actions">
                     <a-link class="uvp-table-action uvp-table-action--preview" @click="showDeviceChannels(record)">
                       <template #icon><Camera :size="13" /></template><span>通道</span>
                     </a-link>
@@ -4047,6 +4090,7 @@ onUnmounted(() => {
                 v-for="item in devices"
                 :key="item.id"
                 class="device-card device-summary-card"
+                data-guide="dblclick-device"
                 @dblclick="onDeviceDblclick(item, $event)"
               >
                 <div class="device-card-head">
@@ -4117,7 +4161,7 @@ onUnmounted(() => {
                 >
                   {{ maintenanceActivity.label(item.id) }} · 查看
                 </button>
-                <div class="card-actions device-card-actions">
+                <div class="card-actions device-card-actions" data-guide="row-actions">
                   <a-tooltip content="查看通道" position="top"
                     ><button class="icon-btn small framed primary" type="button" @click.stop="showDeviceChannels(item)">
                       <Camera :size="13" /></button
@@ -5802,6 +5846,18 @@ onUnmounted(() => {
   min-width: 84px;
   height: 40px;
   border-radius: 8px;
+}
+
+/* 「使用引导」图标按钮：正方形。⛔ 不要去改上面那条 `min-width: 84px` ——
+   刷新按钮还指着它；这里靠多一个 `.guide-trigger` 类提高特异性来收窄。 */
+.toolbar-actions > .btn-ghost.guide-trigger {
+  width: 40px;
+  min-width: 40px;
+  padding: 0;
+  color: var(--uvp-text-tertiary);
+}
+.toolbar-actions > .btn-ghost.guide-trigger:hover {
+  color: var(--uvp-brand);
 }
 .filter-chips {
   display: flex;
