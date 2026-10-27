@@ -185,6 +185,21 @@ var baselineColumnMigrations = map[string]baselineColumnRequirement{
 	"2026-10-13-channel-parent-ids-postgresql.sql":         {table: "gb_channel", column: "parent_id", minLength: 512},
 	"2026-10-13-channel-parent-ids-sqlserver.sql":          {table: "gb_channel", column: "parent_id", minLength: 512},
 	"2026-10-13-channel-parent-ids-sqlite.sql":             {table: "gb_channel", column: "parent_id", minLength: 512},
+	// ⛔ 对讲的三列只在 baseline 里，从来没有迁移 ⇒ 存量库升级后 40 列表格缺这三列，
+	// 写对讲会话直接失败（2026-10-27 在 62 上级实测：前端只看到「语音对讲操作失败」）。
+	// 登记在此，基线库（新装）已有列时 runner 自动跳过，老库才执行 ALTER。
+	"2026-10-27-talk-openapi-client-id.sql":                  {table: "gb_talk_session", column: "openapi_client_id"},
+	"2026-10-27-talk-openapi-client-id-postgresql.sql":       {table: "gb_talk_session", column: "openapi_client_id"},
+	"2026-10-27-talk-openapi-client-id-sqlserver.sql":        {table: "gb_talk_session", column: "openapi_client_id"},
+	"2026-10-27-talk-openapi-client-id-sqlite.sql":           {table: "gb_talk_session", column: "openapi_client_id"},
+	"2026-10-27-talk-openapi-idempotency-key.sql":            {table: "gb_talk_session", column: "openapi_idempotency_key"},
+	"2026-10-27-talk-openapi-idempotency-key-postgresql.sql": {table: "gb_talk_session", column: "openapi_idempotency_key"},
+	"2026-10-27-talk-openapi-idempotency-key-sqlserver.sql":  {table: "gb_talk_session", column: "openapi_idempotency_key"},
+	"2026-10-27-talk-openapi-idempotency-key-sqlite.sql":     {table: "gb_talk_session", column: "openapi_idempotency_key"},
+	"2026-10-27-talk-openapi-request-hash.sql":               {table: "gb_talk_session", column: "openapi_request_hash"},
+	"2026-10-27-talk-openapi-request-hash-postgresql.sql":    {table: "gb_talk_session", column: "openapi_request_hash"},
+	"2026-10-27-talk-openapi-request-hash-sqlserver.sql":     {table: "gb_talk_session", column: "openapi_request_hash"},
+	"2026-10-27-talk-openapi-request-hash-sqlite.sql":        {table: "gb_talk_session", column: "openapi_request_hash"},
 }
 
 // baselineTableMigrations lists additive table migrations that must still run
@@ -267,6 +282,10 @@ var baselineIndexMigrations = map[string]baselineIndexRequirement{
 	"2026-10-23-cascade-media-session-02-kind-state-index-postgresql.sql":    {table: "gb_cascade_media_session", index: "idx_cascade_media_kind_state"},
 	"2026-10-23-cascade-media-session-02-kind-state-index-sqlserver.sql":     {table: "gb_cascade_media_session", index: "idx_cascade_media_kind_state"},
 	"2026-10-23-cascade-media-session-02-kind-state-index-sqlite.sql":        {table: "gb_cascade_media_session", index: "idx_cascade_media_kind_state"},
+	"2026-10-27-talk-openapi-idempotency-index.sql":                          {table: "gb_talk_session", index: "idx_talk_session_openapi_idempotency"},
+	"2026-10-27-talk-openapi-idempotency-index-postgresql.sql":               {table: "gb_talk_session", index: "idx_talk_session_openapi_idempotency"},
+	"2026-10-27-talk-openapi-idempotency-index-sqlserver.sql":                {table: "gb_talk_session", index: "idx_talk_session_openapi_idempotency"},
+	"2026-10-27-talk-openapi-idempotency-index-sqlite.sql":                   {table: "gb_talk_session", index: "idx_talk_session_openapi_idempotency"},
 }
 
 func needsBaselineIndexUpgrade(name string, probe schemaProbe) (bool, error) {
