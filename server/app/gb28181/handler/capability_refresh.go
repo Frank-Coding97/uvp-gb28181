@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -47,10 +46,9 @@ type CapabilityRefresher interface {
 }
 
 type deviceCapabilityRefresher struct {
-	db       *gorm.DB
-	ptz      *ptz.Service
-	workers  chan struct{}
-	sequence atomic.Uint64
+	db      *gorm.DB
+	ptz     *ptz.Service
+	workers chan struct{}
 
 	// mu 保护 running/pending：同一台设备同时只跑一轮，轮内再来的触发只置一个
 	// "待补一轮"标记，等这一轮结束后合并执行一次。⛔ 不能直接丢弃——
@@ -75,11 +73,14 @@ func (r *deviceCapabilityRefresher) Refresh(ctx context.Context, deviceCode stri
 	if r == nil || r.db == nil || r.ptz == nil || deviceCode == "" {
 		return
 	}
-	// A device commonly resets/reuses Catalog SN. The completed Catalog batch
-	// is the refresh boundary, so every invocation must get a fresh idempotency
-	// token; SN remains only the protocol correlation number.
-	batch := r.sequence.Add(1)
-	key := fmt.Sprintf("%s:%d:%d", deviceCode, catalogSN, batch)
+	// ⛔⛔ 幂等键必须**跨进程重启**唯一。
+	//
+	// 设备侧的 Catalog SN 会重复（实测 62 上那台级联设备恒为 1），原来用
+	// "进程内计数器"当批次号：计数器重启即归零 ⇒ 重启后与历史行撞键；撞上的旧行
+	// 若目标身份已变（目录重建导致通道主键变了、access_epoch 变了），Execute 就判
+	// 「幂等键已用于不同 PTZ 请求」，**整批能力读取一条都发不出去**，而且只留一条 WARN。
+	// ⇒ 批次标识用纳秒时间戳（唯一且不依赖内存状态），SN 只作协议关联号。
+	key := fmt.Sprintf("%s:%d:%d", deviceCode, catalogSN, time.Now().UnixNano())
 	if ctx == nil {
 		ctx = context.Background()
 	}
