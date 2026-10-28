@@ -2052,22 +2052,16 @@ func syncTree(root string) error {
 	return syncDirectory(root)
 }
 
-func syncFile(path string) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	return file.Sync()
+func syncDirectory(path string) error {
+	return syncDirectoryPath(path)
 }
 
-func syncDirectory(path string) error {
-	dir, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	return dir.Sync()
+// SyncDirectory flushes a directory entry after a rename so that a crash cannot
+// keep the old name alive without the new one. Callers outside this package use
+// it for the same durability reason; the platform split lives in
+// sync_directory_*.go.
+func SyncDirectory(path string) error {
+	return syncDirectory(path)
 }
 
 func moveTreeContents(source, destination string) error {

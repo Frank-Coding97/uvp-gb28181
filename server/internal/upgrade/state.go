@@ -118,12 +118,7 @@ func SaveTaskState(path string, state TaskState) error {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("replace task state: %w", err)
 	}
-	dir, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return fmt.Errorf("open task state directory: %w", err)
-	}
-	defer dir.Close()
-	if err := dir.Sync(); err != nil {
+	if err := syncDirectory(filepath.Dir(path)); err != nil {
 		return fmt.Errorf("sync task state directory: %w", err)
 	}
 	return nil

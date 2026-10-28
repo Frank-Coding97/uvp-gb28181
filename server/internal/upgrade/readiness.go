@@ -310,19 +310,10 @@ func (s *GateStore) Save(state GateState) error {
 	if err := os.Rename(tmpPath, s.path); err != nil {
 		return err
 	}
-	if err := syncGateDirectory(parent); err != nil {
+	if err := syncDirectory(parent); err != nil {
 		return fmt.Errorf("sync gate directory: %w", err)
 	}
 	return nil
-}
-
-func syncGateDirectory(path string) error {
-	directory, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer directory.Close()
-	return directory.Sync()
 }
 
 type CandidateCheck func(context.Context, TaskRecord) error

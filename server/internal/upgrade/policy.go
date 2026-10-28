@@ -277,12 +277,7 @@ func (s *PolicyStore) save(policy AutoUpgradePolicy) error {
 		_ = os.Remove(tmp)
 		return err
 	}
-	dir, err := os.Open(filepath.Dir(s.path))
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	if err := dir.Sync(); err != nil {
+	if err := syncDirectory(filepath.Dir(s.path)); err != nil {
 		return err
 	}
 	return nil

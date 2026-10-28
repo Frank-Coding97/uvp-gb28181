@@ -289,12 +289,7 @@ func SaveStagedMetadata(path string, staged StagedArtifact) error {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("replace staged metadata: %w", err)
 	}
-	dir, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return fmt.Errorf("open staged metadata directory: %w", err)
-	}
-	defer dir.Close()
-	if err := dir.Sync(); err != nil {
+	if err := syncDirectory(filepath.Dir(path)); err != nil {
 		return fmt.Errorf("sync staged metadata directory: %w", err)
 	}
 	return nil

@@ -285,12 +285,7 @@ func (s *TaskStore) save(records []TaskRecord) error {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("replace task index: %w", err)
 	}
-	dir, err := os.Open(s.root)
-	if err != nil {
-		return fmt.Errorf("open task store directory: %w", err)
-	}
-	defer dir.Close()
-	if err := dir.Sync(); err != nil {
+	if err := syncDirectory(s.root); err != nil {
 		return fmt.Errorf("sync task store directory: %w", err)
 	}
 	return nil

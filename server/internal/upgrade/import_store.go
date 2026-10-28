@@ -223,12 +223,7 @@ func (s *ImportStore) save(records []ImportRecord) error {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("replace import index: %w", err)
 	}
-	directory, err := os.Open(s.root)
-	if err != nil {
-		return fmt.Errorf("open import store directory: %w", err)
-	}
-	defer directory.Close()
-	if err := directory.Sync(); err != nil {
+	if err := syncDirectory(s.root); err != nil {
 		return fmt.Errorf("sync import store directory: %w", err)
 	}
 	return nil

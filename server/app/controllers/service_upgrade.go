@@ -1562,13 +1562,10 @@ func writeUpgradeInboxUpload(ctx context.Context, root string, input io.Reader) 
 	return "", errors.New("unable to allocate upgrade inbox token")
 }
 
+// syncUpgradeDirectory delegates to the upgrade package so that the platform
+// split lives in one place: Windows cannot fsync a directory handle, Unix must.
 func syncUpgradeDirectory(path string) error {
-	directory, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer directory.Close()
-	return directory.Sync()
+	return upgrade.SyncDirectory(path)
 }
 
 func removeUpgradeInboxFile(path string) {
