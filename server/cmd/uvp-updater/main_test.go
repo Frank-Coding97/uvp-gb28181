@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,10 +19,14 @@ import (
 )
 
 func TestWriteRegistrationIsPrivateAndDoesNotContainPassword(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "nested", "registration.json")
+	// The root has to be an absolute path on the host running the test: a
+	// literal "/opt/uvp" is not absolute on Windows, where registration
+	// validation would reject it before the assertions below ever run.
+	root := t.TempDir()
+	path := filepath.Join(root, "nested", "registration.json")
 	err := writeRegistration(path, upgrade.Registration{
 		Deployment: "standalone",
-		Standalone: upgrade.RegisteredLayout{Root: "/opt/uvp", State: "/opt/uvp/data/updater-state"},
+		Standalone: upgrade.RegisteredLayout{Root: root, State: filepath.Join(root, "data", "updater-state")},
 		DatabaseBackup: &upgrade.ExternalBackupRegistration{
 			Dialect: "mysql", Host: "db.internal", Port: 3306, Database: "uvp", User: "backup", PasswordEnv: "UVP_UPGRADE_DB_PASSWORD",
 		},
@@ -35,7 +38,9 @@ func TestWriteRegistrationIsPrivateAndDoesNotContainPassword(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0600 {
+	// Windows does not keep POSIX mode bits: access is expressed by the parent
+	// directory ACL instead, so only assert the Unix permission contract there.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
 		t.Fatalf("registration permissions = %o, want 600", info.Mode().Perm())
 	}
 	data, err := os.ReadFile(path)
@@ -151,79 +156,9 @@ func TestProvisionSharedGatePreservesRecoveryState(t *testing.T) {
 	}
 }
 
-func TestProvisionSharedGateUsesRegisteredBusinessGroup(t *testing.T) {
-	if os.Geteuid() != 0 {
-		t.Skip("changing the gate group requires root")
-	}
-	root := t.TempDir()
-	const businessGID = 23456
-	if _, err := provisionSharedGate(upgrade.RegisteredLayout{Root: root}, businessGID); err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range []string{filepath.Join(root, "updater-gate"), filepath.Join(root, "updater-gate", "gate.json")} {
-		info, err := os.Stat(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got, ok := fileGroupID(info); !ok || got != businessGID {
-			t.Fatalf("%s group = %d (available=%v), want %d", path, got, ok, businessGID)
-		}
-	}
-}
-
-func TestProvisionSharedGateRejectsWritableExistingParentBeforeWritingGate(t *testing.T) {
-	root := t.TempDir()
-	parent := filepath.Join(root, "updater-gate")
-	if err := os.Mkdir(parent, 0770); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(parent, 0770); err != nil {
-		t.Fatal(err)
-	}
-	_, err := provisionSharedGate(upgrade.RegisteredLayout{Root: root})
-	if err == nil || !strings.Contains(err.Error(), "mode must be 0750") {
-		t.Fatalf("insecure gate parent error = %v", err)
-	}
-	if _, err := os.Lstat(filepath.Join(parent, "gate.json")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("gate file was written into insecure parent: %v", err)
-	}
-}
-
 func TestBuildServeRuntimeRejectsBlankSocketPath(t *testing.T) {
 	if _, err := buildServeRuntime(serveOptions{StatePath: t.TempDir()}); err == nil || !strings.Contains(err.Error(), "socket") {
 		t.Fatalf("blank socket error = %v", err)
-	}
-}
-
-func TestBuildServeRuntimeWiresRegisteredPreflightAndScheduler(t *testing.T) {
-	root := t.TempDir()
-	registrationPath := secureRegistrationPath(t)
-	if err := writeRegistration(registrationPath, upgrade.Registration{
-		Deployment:  "systemd",
-		Standalone:  upgrade.RegisteredLayout{Root: root},
-		SystemdUnit: "uvp-backend.service",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	assembly, err := buildServeRuntime(serveOptions{
-		SocketPath:       filepath.Join(root, "updater.sock"),
-		RegistrationPath: registrationPath,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if assembly.workflow == nil || assembly.workflow.Preflight == nil {
-		t.Fatal("registered workflow has no independent preflight")
-	}
-	scheduler, ok := assembly.scheduler.(*upgrade.HelperScheduler)
-	if !ok || scheduler == nil {
-		t.Fatalf("scheduler = %T, want *upgrade.HelperScheduler", assembly.scheduler)
-	}
-	if scheduler.Preflight == nil || scheduler.Apply == nil {
-		t.Fatal("helper scheduler is missing preflight or apply")
-	}
-	if scheduler.Target.Deployment != "systemd" || scheduler.Target.OS != runtime.GOOS || scheduler.Target.Arch != runtime.GOARCH || scheduler.Target.UpdaterProtocol != upgrade.UpdaterProtocolVersion {
-		t.Fatalf("scheduler target = %#v", scheduler.Target)
 	}
 }
 

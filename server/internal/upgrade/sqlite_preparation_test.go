@@ -1,4 +1,10 @@
+//go:build !windows
+
 package upgrade
+
+// 覆盖 Linux 三种部署形态在停机前对 SQLite 快照的判定，构造的是
+// StandaloneAdapter / SystemdAdapter / ComposeAdapter，Windows 上不存在这些
+// 适配器（见 adapters_test.go 顶部的说明）。
 
 import (
 	"context"

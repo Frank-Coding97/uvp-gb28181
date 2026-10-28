@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -134,18 +135,22 @@ func TestGateStateFromEnvUsesExplicitSharedGateAndFailsClosedWhenMissing(t *test
 		t.Fatalf("shared gate = %#v", state)
 	}
 
-	info, err := os.Stat(sharedPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0640 {
-		t.Fatalf("shared gate mode = %o, want 0640", info.Mode().Perm())
-	}
-	if err := os.Chmod(sharedPath, 0660); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := GateStateFromEnv(); err == nil || !strings.Contains(err.Error(), "mode must be 0640") {
-		t.Fatalf("writable shared gate error = %v", err)
+	// Windows 没有 POSIX 权限位：闸门的信任边界靠安装目录 ACL 表达，chmod 也
+	// 改不动它，所以这两段只在 Unix 上成立。
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(sharedPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0640 {
+			t.Fatalf("shared gate mode = %o, want 0640", info.Mode().Perm())
+		}
+		if err := os.Chmod(sharedPath, 0660); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := GateStateFromEnv(); err == nil || !strings.Contains(err.Error(), "mode must be 0640") {
+			t.Fatalf("writable shared gate error = %v", err)
+		}
 	}
 	if err := shared.Save(GateState{Mode: GateCandidate, TaskID: "shared-task"}); err != nil {
 		t.Fatal(err)

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -13,6 +14,9 @@ import (
 func TestRegisteredPreflightUsesFixedCurrentBinaryAndVersion(t *testing.T) {
 	for _, deployment := range []string{"standalone", "systemd", "compose"} {
 		t.Run(deployment, func(t *testing.T) {
+			if deployment == "systemd" && runtime.GOOS == "windows" {
+				t.Skip("systemd deployment does not exist on Windows")
+			}
 			root := t.TempDir()
 			if deployment != "compose" {
 				source := filepath.Join(root, "releases", "source")
@@ -20,7 +24,7 @@ func TestRegisteredPreflightUsesFixedCurrentBinaryAndVersion(t *testing.T) {
 					t.Fatal(err)
 				}
 				if err := os.Symlink(source, filepath.Join(root, "current")); err != nil {
-					t.Fatal(err)
+					t.Skipf("symlink unavailable: %v", err)
 				}
 			}
 			layout := RegisteredLayout{Root: root, ProjectDir: filepath.Join(root, "project"), Project: "uvp-prod", MigrationService: "backend"}
@@ -33,7 +37,7 @@ func TestRegisteredPreflightUsesFixedCurrentBinaryAndVersion(t *testing.T) {
 						t.Fatalf("unexpected compose preflight: %s", command)
 					}
 				} else {
-					wantDir, wantBinary := root, filepath.Join(root, "current", "bin", "uvp-server")
+					wantDir, wantBinary := root, filepath.Join(root, "current", "bin", serverBinaryFile)
 					if deployment == "systemd" {
 						wantDir = filepath.Join(root, "current", "backend")
 						wantBinary = filepath.Join(wantDir, "uvp-gb28181")
@@ -62,7 +66,7 @@ func TestRegisteredPreflightUsesFixedCurrentBinaryAndVersion(t *testing.T) {
 func TestRegisteredPreflightRejectsCurrentOutsideRegisteredReleases(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Symlink(t.TempDir(), filepath.Join(root, "current")); err != nil {
-		t.Fatal(err)
+		t.Skipf("symlink unavailable: %v", err)
 	}
 	called := false
 	probe := registeredPreflight{registration: Registration{Deployment: "standalone", Standalone: RegisteredLayout{Root: root}}, run: func(context.Context, string, []string, string, ...string) ([]byte, error) {
@@ -82,7 +86,7 @@ func TestRegisteredPreflightSupportsInitialFlatStandaloneInstall(t *testing.T) {
 	called := false
 	probe := registeredPreflight{registration: Registration{Deployment: "standalone", Standalone: RegisteredLayout{Root: root}}, run: func(_ context.Context, dir string, env []string, name string, args ...string) ([]byte, error) {
 		called = true
-		if dir != root || name != filepath.Join(root, "bin", "uvp-server") || !strings.Contains(strings.Join(env, "\n"), "UVP_VERSION_PATH="+filepath.Join(root, "version.json")) {
+		if dir != root || name != filepath.Join(root, "bin", serverBinaryFile) || !strings.Contains(strings.Join(env, "\n"), "UVP_VERSION_PATH="+filepath.Join(root, "version.json")) {
 			t.Fatalf("flat install command dir=%s name=%s env=%v", dir, name, env)
 		}
 		return nil, errors.New("test reached current flat source")

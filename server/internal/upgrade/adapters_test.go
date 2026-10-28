@@ -1,4 +1,12 @@
+//go:build !windows
+
 package upgrade
+
+// 这里覆盖的是 Linux 侧的三种部署形态：standalone 软链接切换、systemd 单元、
+// compose 项目。它们都建立在符号链接、POSIX 权限位与外部控制脚本之上，Windows
+// 无法构造同样的前提（建不了软链接、没有 POSIX 位）。Windows 走的是另一套
+// 实现 —— WindowsStandaloneAdapter 的就地换目录，见 adapters_windows_standalone.go，
+// 其行为由 cmd/uvp-updater 的端到端验证与 Windows 上的真实升级任务覆盖。
 
 import (
 	"archive/tar"

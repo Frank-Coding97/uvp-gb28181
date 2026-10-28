@@ -90,7 +90,7 @@ func TestExternalBackupSpecFromConfigSelectsWriteDatabaseAndRejectsMultipleDiale
 		"gormv2.postgresql.write.user":                 "backup",
 		"gormv2.postgresql.write.pass":                 "secret",
 	}
-	spec, enabled, err := ExternalBackupSpecFromConfig(config, "/var/lib/uvp/backup.dump", 8<<20)
+	spec, enabled, err := ExternalBackupSpecFromConfig(config, filepath.Join(t.TempDir(), "backup.dump"), 8<<20)
 	if err != nil || !enabled || spec.Dialect != "postgresql" || spec.Password != "secret" {
 		t.Fatalf("spec=%#v enabled=%v err=%v", spec, enabled, err)
 	}
@@ -160,7 +160,7 @@ func TestExternalBackupSpecInfersTheOnlyEnabledDialectWhenUsedbtypeIsOmitted(t *
 		"gormv2.mysql.write.user":            "backup",
 		"gormv2.mysql.write.pass":            "secret",
 	}
-	spec, enabled, err := ExternalBackupSpecFromConfig(config, "/var/lib/uvp/backup.sql", 8<<20)
+	spec, enabled, err := ExternalBackupSpecFromConfig(config, filepath.Join(t.TempDir(), "backup.sql"), 8<<20)
 	if err != nil || !enabled || spec.Dialect != "mysql" {
 		t.Fatalf("spec=%#v enabled=%v err=%v", spec, enabled, err)
 	}
