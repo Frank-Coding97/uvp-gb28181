@@ -72,7 +72,7 @@ func (p registeredPreflight) read(ctx context.Context) (PreflightSnapshot, error
 				return PreflightSnapshot{}, errors.New("current preflight executable is outside registered releases")
 			}
 		}
-		dir, binary := layout.Root, filepath.Join(sourceRoot, "bin", "uvp-server")
+		dir, binary := layout.Root, filepath.Join(sourceRoot, "bin", serverBinaryFile)
 		if p.registration.Deployment == "systemd" {
 			dir = filepath.Join(layout.Current, "backend")
 			binary = filepath.Join(dir, "uvp-gb28181")

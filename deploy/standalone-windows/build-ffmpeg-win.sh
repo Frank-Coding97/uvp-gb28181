@@ -51,6 +51,14 @@ for c in make tar xz curl; do
   command -v "$c" >/dev/null 2>&1 || fail "构建环境缺 $c"
 done
 
+# zlib：白名单里的 png 编码器依赖它，且必须是 **mingw 交叉编译过的静态库**
+# （宿主机的 libz.so 用不上）。Debian/Ubuntu 一行装好。
+if ! ls /usr/x86_64-w64-mingw32/lib/libz.a >/dev/null 2>&1; then
+  fail "找不到 mingw 版静态 zlib（/usr/x86_64-w64-mingw32/lib/libz.a）。
+      Debian/Ubuntu: apt install libz-mingw-w64-dev
+      没有它 CONFIG_PNG_ENCODER 编不出来，终检 3 会在最后一步才中止（白等一轮）。"
+fi
+
 # ---------------------------------------------------------------- 源码 ----
 mkdir -p "$WORKDIR"
 cd "$WORKDIR"
@@ -87,7 +95,16 @@ CONFIGURE_FLAGS=(
   --cross-prefix="$CROSS-"
   --target-os=mingw32
   --arch=x86_64
-  --extra-ldflags=-static
+  # ⛔ 这里必须显式 --enable-zlib（Linux 线不用写，它自动探测宿主机的 zlib）：
+  #   白名单要 png 编码器，而 png_encoder_deps="zlib"，在 --disable-autodetect 下
+  #   configure 不会自己去找 zlib ⇒ CONFIG_PNG_ENCODER 恒为 0，终检 3 直接中止。
+  #   zlib 用 apt 的 libz-mingw-w64-dev（/usr/x86_64-w64-mingw32/lib/libz.a）。
+  # ⛔ -Wl,-Bstatic 不能省：MinGW 的 ld 优先选 libz.dll.a 而不是 libz.a，
+  #   那样产物会依赖 zlib1.dll —— 客户机上没有，抓拍直接 execv 失败。
+  --enable-zlib
+  # ⛔ 必须整体加引号：数组元素里有空格，不引就是两个 argv，configure 会把
+  #   -Wl,-Bstatic 当成未知选项直接退出（踩过一次）。
+  "--extra-ldflags=-static -Wl,-Bstatic"
 )
 
 if [ "${UVP_FFMPEG_MINIMAL:-1}" = "1" ]; then
@@ -104,6 +121,11 @@ else
 fi
 
 cd "$SRCDIR"
+# ⛔ 这里的 $SRCDIR 是**相对** $WORKDIR 的目录名，cd 进来之后它就不成立了。
+#   configure.h 的终检 3 曾经直接拿 "$SRCDIR/config_components.h" 去 grep，
+#   结果拼成 ffmpeg-7.1.1/ffmpeg-7.1.1/config_components.h（不存在）→
+#   33 个宏**全被判缺失**，明明编对了也中止。凡是要回读文件的检查，一律用绝对路径。
+SRC_ABS="$(pwd)"
 log "configure"
 ./configure "${CONFIGURE_FLAGS[@]}" > "$WORKDIR/configure.log" 2>&1 || {
   tail -30 "$WORKDIR/configure.log" >&2
@@ -147,7 +169,11 @@ log "动态依赖检查通过：只有系统 DLL"
 #   ⚠️ 不能在本机跑 ffmpeg.exe（Windows 二进制）来 `-encoders` 自检，
 #      所以只能查 config_components.h / config.h 里的 CONFIG_* 宏。
 REQUIRED_MACROS=(
-  CONFIG_RTSP_PROTOCOL CONFIG_RTP_PROTOCOL CONFIG_TCP_PROTOCOL
+  # ⚠️ 这里**没有** CONFIG_RTSP_PROTOCOL：ffmpeg 7.1.x 里 rtsp 根本不是独立的
+  #   protocol 组件（libavformat/Makefile 里 rtsp.o 只挂在 CONFIG_RTSP_DEMUXER /
+  #   CONFIG_RTSP_MUXER 下，configure 里也没有 rtsp_protocol_* 任何一行），
+  #   写上去只会让检查恒失败。rtsp 输入能力 = 下面这个 CONFIG_RTSP_DEMUXER。
+  CONFIG_RTP_PROTOCOL CONFIG_TCP_PROTOCOL
   CONFIG_RTSP_DEMUXER CONFIG_RTP_DEMUXER CONFIG_SDP_DEMUXER
   CONFIG_H264_DEMUXER CONFIG_HEVC_DEMUXER CONFIG_FLV_DEMUXER
   CONFIG_MOV_DEMUXER CONFIG_MPEGTS_DEMUXER CONFIG_IMAGE2_DEMUXER
@@ -160,7 +186,7 @@ REQUIRED_MACROS=(
 )
 MISSING=()
 for macro in "${REQUIRED_MACROS[@]}"; do
-  grep -rqE "^#define ${macro} 1" "$SRCDIR/config_components.h" "$SRCDIR/config.h" 2>/dev/null \
+  grep -rqE "^#define ${macro} 1" "$SRC_ABS/config_components.h" "$SRC_ABS/config.h" 2>/dev/null \
     || MISSING+=("$macro")
 done
 if [ ${#MISSING[@]} -gt 0 ]; then

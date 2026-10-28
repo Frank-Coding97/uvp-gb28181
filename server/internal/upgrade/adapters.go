@@ -1,8 +1,6 @@
 package upgrade
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -1041,7 +1039,7 @@ func NewRegisteredAdapter(registration Registration) (DeploymentAdapter, error) 
 	}
 	switch registration.Deployment {
 	case "standalone":
-		return &StandaloneAdapter{Layout: registration.Standalone, Runner: registeredBusinessRunner(registration), ExternalBackup: registration.DatabaseBackup}, nil
+		return newStandaloneAdapter(registration), nil
 	case "systemd":
 		return &SystemdAdapter{StandaloneAdapter: StandaloneAdapter{Layout: registration.Standalone, ExternalBackup: registration.DatabaseBackup}, Unit: registration.SystemdUnit, BusinessRunner: registeredBusinessRunner(registration)}, nil
 	case "compose":
@@ -1788,27 +1786,20 @@ func extractPackage(path, destination string) error {
 	if filepath.IsAbs(destination) == false || strings.TrimSpace(destination) == "" {
 		return errors.New("package destination must be absolute")
 	}
-	file, err := os.Open(path)
+	archive, err := openPackageArchive(path)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-	var reader io.Reader = file
-	if strings.HasSuffix(strings.ToLower(path), ".gz") || strings.HasSuffix(strings.ToLower(path), ".tgz") {
-		gz, err := gzip.NewReader(file)
-		if err != nil {
-			return err
-		}
-		defer gz.Close()
-		reader = gz
-	}
-	tarReader := tar.NewReader(reader)
+	defer archive.Close()
 	seen := make(map[string]struct{})
 	entries := 0
 	var expanded int64
 	for {
-		header, err := tarReader.Next()
+		entry, err := archive.Next()
 		if errors.Is(err, io.EOF) {
+			if closeErr := archive.Close(); closeErr != nil {
+				return fmt.Errorf("verify package archive: %w", closeErr)
+			}
 			if err := syncTree(destination); err != nil {
 				return fmt.Errorf("sync extracted package: %w", err)
 			}
@@ -1821,7 +1812,7 @@ func extractPackage(path, destination string) error {
 		if entries > 10000 {
 			return errors.New("package contains too many entries")
 		}
-		name, err := safeArchiveNameWithDirs(header.Name)
+		name, err := safeArchiveNameWithDirs(entry.Name)
 		if err != nil {
 			return err
 		}
@@ -1833,28 +1824,25 @@ func extractPackage(path, destination string) error {
 			return fmt.Errorf("package contains duplicate entry %q", name)
 		}
 		seen[name] = struct{}{}
-		if header.Size < 0 || header.Size > 8<<30 || expanded > (8<<30)-header.Size {
+		if entry.Size < 0 || entry.Size > 8<<30 || expanded > (8<<30)-entry.Size {
 			return errors.New("package expanded size exceeds limit")
 		}
-		expanded += header.Size
-		switch header.Typeflag {
-		case tar.TypeDir:
+		expanded += entry.Size
+		if entry.Dir {
 			if err := os.MkdirAll(path, 0755); err != nil {
 				return err
 			}
-		case tar.TypeReg, tar.TypeRegA:
-			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-				return err
-			}
-			mode := os.FileMode(0600)
-			if header.Mode&0111 != 0 {
-				mode = 0700
-			}
-			if err := copyFileFromReader(tarReader, path, header.Size, mode); err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("archive entry %q is not a regular file or directory", name)
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			return err
+		}
+		mode := os.FileMode(0600)
+		if entry.Exec {
+			mode = 0700
+		}
+		if err := copyFileFromReader(entry.Body, path, entry.Size, mode); err != nil {
+			return err
 		}
 	}
 }
