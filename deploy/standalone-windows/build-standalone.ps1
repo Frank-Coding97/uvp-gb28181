@@ -312,6 +312,17 @@ if ($SkipBuild) {
     } finally { Pop-Location }
     Ok "uvp-server.exe $(Format-Size (Get-Item $ServerExeOut).Length) · uvp-setup.exe $(Format-Size (Get-Item $SetupExeOut).Length) · uvp-updater.exe $(Format-Size (Get-Item $UpdaterExeOut).Length)"
 
+    # ⛔⛔ -SkipFrontend 原先**只在 param 里声明、没有任何地方判断它**：
+    #   传了等于没传，脚本照样把 web\dist 删掉重建。2026-10-28 在 52 上就是被这坑
+    #   坑过一次 —— 以为跳过能省时间，结果 dist 被 Remove-Item 清空、vite 又因为
+    #   PATH 里是旧版 node 报 `crypto$2.getRandomValues is not a function` 退出，
+    #   包没出成、dist 也没了。这里把它真正接上，并且"跳过"时必须确认 dist 在。
+    if ($SkipFrontend) {
+        if (-not (Test-Path -LiteralPath $DistIndex)) {
+            Fail "-SkipFrontend 要求 web\dist 已存在，当前没有 $DistIndex（先不带该开关出一次包）"
+        }
+        Warn '已跳过前端构建（-SkipFrontend）—— 复用现有 web\dist，靠下面的新鲜度断言兜底'
+    } else {
     Log "阶段 1/4 · 构建前端产物（SIP 默认端口 $SipPort 构建期注入）"
     $viteJs = Join-Path $WebDir 'node_modules\vite\bin\vite.js'
     if (-not (Test-Path -LiteralPath $viteJs)) {
@@ -348,6 +359,7 @@ if ($SkipBuild) {
              "（变量名或 vite 读 env 的方式有变）。"
     }
     Ok "前端产物已生成，SIP 默认端口 $SipPort 读回校验通过"
+    }
 }
 
 # ---- 产物新鲜度断言（无条件执行）----
