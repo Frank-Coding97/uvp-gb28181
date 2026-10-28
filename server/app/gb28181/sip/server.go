@@ -814,12 +814,41 @@ func (s *Server) ByeBroadcast(ctx context.Context, callID string) error {
 		sessionID string
 		dialog    *sipgo.DialogServerSession
 	})
-	err := entry.dialog.Bye(ctx)
+	invite := entry.dialog.InviteRequest
+	bye := siplib.NewRequest(siplib.BYE, invite.Contact().Address)
+	if destination, ok := broadcastByeSourceDestination(invite); ok {
+		bye.SetDestination(destination)
+	}
+	err := entry.dialog.WriteBye(ctx, bye)
 	if err == nil {
 		s.broadcastSessions.Delete(callID)
 		_ = entry.dialog.Close()
 	}
 	return err
+}
+
+func broadcastByeSourceDestination(invite *siplib.Request) (string, bool) {
+	if invite == nil || len(invite.GetHeaders("Record-Route")) != 0 {
+		return "", false
+	}
+	contact := invite.Contact()
+	if contact == nil {
+		return "", false
+	}
+	contactIP := net.ParseIP(strings.Trim(contact.Address.Host, "[]"))
+	if contactIP == nil || !contactIP.IsPrivate() {
+		return "", false
+	}
+	source := invite.Source()
+	sourceHost, _, err := net.SplitHostPort(source)
+	if err != nil {
+		return "", false
+	}
+	sourceIP := net.ParseIP(strings.Trim(sourceHost, "[]"))
+	if sourceIP == nil || sourceIP.IsPrivate() || sourceIP.IsLoopback() || sourceIP.IsLinkLocalUnicast() || sourceIP.IsUnspecified() || sourceIP.IsMulticast() {
+		return "", false
+	}
+	return source, true
 }
 
 func (s *Server) SetRecordInfoSink(sink handler.RecordInfoSink) {

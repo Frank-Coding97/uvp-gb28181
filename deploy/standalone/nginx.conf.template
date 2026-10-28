@@ -146,6 +146,13 @@ http {
             try_files $uri =404;
         }
 
+        # 通道快照由后端写入安装根的 resource/public；升级后的静态资源则位于活动 release。
+        # 快照 URL 必须从持久安装根读取，不能随 current 切换到新 release。
+        location /public/gb-channel-snapshot/ {
+            alias @ROOT@/resource/public/gb-channel-snapshot/;
+            autoindex off;
+        }
+
         # ---------------- 用户上传的资源 ----------------
         # ⛔⛔⛔ 必须有这一条，否则**所有用户上传的文件都取不到**。
         #   为什么：`root` 指向 resource/public，所以磁盘上的 uploads/xxx.png
@@ -297,6 +304,12 @@ http {
             proxy_set_header X-Real-IP         $remote_addr;
             proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
             proxy_set_header Connection        "";
+        }
+
+        # 通道快照位于持久安装根；明文入口与 HTTPS 使用相同映射。
+        location /public/gb-channel-snapshot/ {
+            alias @ROOT@/resource/public/gb-channel-snapshot/;
+            autoindex off;
         }
 
         # 用户上传的资源：明文入口也必须放行。

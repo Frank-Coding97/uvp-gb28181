@@ -115,6 +115,9 @@ func (s *Service) OnPublished(ctx context.Context, nodeID int64, appName, source
 	if !ok || mediaNode == nil || !mediaNode.IsActive() {
 		return s.failActivation(ctx, session, nil, "", false, ErrTalkNodeUnavailable)
 	}
+	if !mediaNode.HasUsableSDPIP() {
+		return s.failActivation(ctx, session, nil, "", false, fmt.Errorf("%w: 媒体节点未配置 SDP 地址", ErrTalkNodeUnavailable))
+	}
 	channel, device, err := s.activation.deps.Targets.LoadTalkTarget(ctx, session.ChannelID, session.DeviceID)
 	if err != nil {
 		return s.failActivation(ctx, session, nil, "", false, err)
@@ -161,7 +164,7 @@ func (s *Service) OnPublished(ctx context.Context, nodeID int64, appName, source
 	}
 
 	talkSDP := sdp.BuildTalkSDP(sdp.TalkParams{
-		ServerID: s.activation.deps.Platform.ServerID, RecvIP: mediaNode.Host,
+		ServerID: s.activation.deps.Platform.ServerID, RecvIP: mediaNode.EffectiveSDPIP(),
 		RecvPort: sender.LocalPort, SSRC: session.SSRC,
 	})
 	metadata, err := s.activation.deps.Inviter.InviteTalk(ctx, uac.TalkInviteRequest{

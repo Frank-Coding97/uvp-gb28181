@@ -123,8 +123,9 @@ type ResultNode struct {
 
 // 常量
 const (
-	zlmApp           = "rtp"
-	defaultPollEvery = 200 * time.Millisecond
+	zlmApp                 = "rtp"
+	defaultPollEvery       = 200 * time.Millisecond
+	stopCleanupStepTimeout = 5 * time.Second
 
 	playEventRecordingEndFailed     = "gb28181.play.recording_end_failed"
 	playEventReuseProbeFailed       = "gb28181.play.reuse_probe_failed"
@@ -145,6 +146,10 @@ func detachedContext(ctx context.Context) context.Context {
 		return context.Background()
 	}
 	return context.WithoutCancel(ctx)
+}
+
+func newStopCleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(detachedContext(ctx), stopCleanupStepTimeout)
 }
 
 // 错误
@@ -1366,8 +1371,13 @@ func (s *Service) stopDirect(ctx context.Context, streamID string) error {
 		}
 	}
 
-	s.endPlaybackRecording(ctx, streamID)
-	byeErr := s.inviter.Bye(ctx, s.sessions, streamID)
+	recordingCtx, cancel := newStopCleanupContext(ctx)
+	s.endPlaybackRecording(recordingCtx, streamID)
+	cancel()
+
+	byeCtx, cancel := newStopCleanupContext(ctx)
+	byeErr := s.inviter.Bye(byeCtx, s.sessions, streamID)
+	cancel()
 
 	client, clientErr := s.clientForStream(streamID)
 	var closeErr error
@@ -1376,7 +1386,9 @@ func (s *Service) stopDirect(ctx context.Context, streamID string) error {
 		// 单节点不会进这里,只 log;失败不阻塞 BYE
 		closeErr = clientErr
 	} else {
-		closeErr = client.CloseRtpServer(ctx, streamID)
+		closeCtx, closeCancel := newStopCleanupContext(ctx)
+		closeErr = client.CloseRtpServer(closeCtx, streamID)
+		closeCancel()
 	}
 
 	// Shared ingress must retain its binding and SSRC lease until device BYE
@@ -1396,12 +1408,14 @@ func (s *Service) stopDirect(ctx context.Context, streamID string) error {
 	}
 	var clearErr error
 	clearedCurrent := false
+	clearCtx, clearCancel := newStopCleanupContext(ctx)
 	if currentSSRCPersisted {
-		clearedCurrent, clearErr = s.channels.ClearIfCurrent(ctx, streamID, currentSSRC)
+		clearedCurrent, clearErr = s.channels.ClearIfCurrent(clearCtx, streamID, currentSSRC)
 	} else {
-		clearErr = s.channels.ClearStream(ctx, streamID)
+		clearErr = s.channels.ClearStream(clearCtx, streamID)
 		clearedCurrent = clearErr == nil
 	}
+	clearCancel()
 	if clearedCurrent && s.ssrcAllocator != nil && currentSSRC != "" {
 		s.ssrcAllocator.Release(currentSSRC)
 	}

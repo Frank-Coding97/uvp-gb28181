@@ -32,6 +32,13 @@ export interface AudioLevelMeter {
 
 export type AudioLevelSnapshot = (level: number, spectrum: number[]) => void;
 
+export const TALK_ACTIVE_POLL_INTERVAL_MS = 100;
+
+/** 无 STUN 时只需给 host candidate 留短暂窗口；有 STUN 时保留公网映射的兜底时间。 */
+export function talkIceGatheringTimeoutMs(iceServers?: { urls: string[] }[]): number {
+  return iceServers?.length ? 1_200 : 250;
+}
+
 /**
  * 采集流的实时电平（0..1），用于「正在说话」的波动指示。
  *

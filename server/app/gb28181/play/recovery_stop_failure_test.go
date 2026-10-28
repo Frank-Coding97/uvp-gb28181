@@ -15,7 +15,19 @@ import (
 
 type orderedStopChannels struct {
 	*fakeChannels
-	events *[]string
+	events   *[]string
+	contexts *[]stopContextObservation
+}
+
+type stopContextObservation struct {
+	err         error
+	deadline    time.Time
+	hasDeadline bool
+}
+
+func observeStopContext(ctx context.Context) stopContextObservation {
+	deadline, hasDeadline := ctx.Deadline()
+	return stopContextObservation{err: ctx.Err(), deadline: deadline, hasDeadline: hasDeadline}
 }
 
 type recoveryNodeRegistry struct {
@@ -47,26 +59,43 @@ func (r recoveryNodeRegistry) ListActive() []*node.Node {
 
 func (c *orderedStopChannels) ClearIfCurrent(ctx context.Context, streamID, ssrc string) (bool, error) {
 	*c.events = append(*c.events, "clear")
+	if c.contexts != nil {
+		*c.contexts = append(*c.contexts, observeStopContext(ctx))
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	return c.fakeChannels.ClearIfCurrent(ctx, streamID, ssrc)
 }
 
 type orderedStopZLM struct {
 	*mockZLM
-	events *[]string
+	events   *[]string
+	contexts *[]stopContextObservation
 }
 
 func (z *orderedStopZLM) CloseRtpServer(ctx context.Context, streamID string) error {
 	*z.events = append(*z.events, "close")
+	if z.contexts != nil {
+		*z.contexts = append(*z.contexts, observeStopContext(ctx))
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return z.mockZLM.CloseRtpServer(ctx, streamID)
 }
 
 type orderedStopInviter struct {
 	*mockInviter
 	events *[]string
+	onBye  func()
 }
 
 func (i *orderedStopInviter) Bye(ctx context.Context, sessions *uac.SessionManager, streamID string) error {
 	*i.events = append(*i.events, "bye")
+	if i.onBye != nil {
+		i.onBye()
+	}
 	return i.mockInviter.Bye(ctx, sessions, streamID)
 }
 
@@ -83,6 +112,22 @@ func newOrderedFixedStopService(t *testing.T, z *orderedStopZLM, inviter *ordere
 	)
 	service.SetReadyTimings(800*time.Millisecond, 20*time.Millisecond)
 	return service, notifier
+}
+
+func requireFreshBoundedStopContexts(t *testing.T, contexts []stopContextObservation) {
+	t.Helper()
+	if len(contexts) != 2 {
+		t.Fatalf("cleanup contexts=%v, want active ZLM and CAS contexts", contexts)
+	}
+	for _, observed := range contexts {
+		if observed.err != nil || !observed.hasDeadline {
+			t.Fatalf("cleanup context=%+v, want active context with a deadline", observed)
+		}
+		remaining := time.Until(observed.deadline)
+		if remaining <= 0 || remaining > 5*time.Second {
+			t.Fatalf("cleanup context deadline window=%v, want (0, 5s]", remaining)
+		}
+	}
 }
 
 func TestServiceStopClearFailureStillClosesMedia(t *testing.T) {
@@ -144,6 +189,60 @@ func TestServiceStopByeFailureClosesBeforeClearingPersistence(t *testing.T) {
 	if _, ok := service.CurrentLiveRef(result.StreamID); ok {
 		t.Fatal("media close succeeded but coordinator retained the generation")
 	}
+}
+
+func TestStopCurrentResultUsesFreshCleanupContextsAfterByeCancellation(t *testing.T) {
+	events := make([]string, 0, 3)
+	contexts := make([]stopContextObservation, 0, 2)
+	channel := aChannel()
+	channel.StreamID = "stream-current"
+	channel.CurrentSSRC = "0100000001"
+	z := &orderedStopZLM{mockZLM: &mockZLM{port: 40000}, events: &events, contexts: &contexts}
+	inviter := &orderedStopInviter{mockInviter: &mockInviter{}, events: &events}
+	channels := &orderedStopChannels{fakeChannels: &fakeChannels{c: channel}, events: &events, contexts: &contexts}
+	service, _ := newOrderedFixedStopService(t, z, inviter, channels)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	inviter.onBye = cancel
+	result := &Result{
+		StreamID:   channel.StreamID,
+		SSRC:       channel.CurrentSSRC,
+		Generation: 1,
+		Node:       &ResultNode{ID: 1},
+	}
+
+	if err := service.stopCurrentResult(ctx, result); err != nil {
+		t.Fatalf("stop after BYE cancellation: %v", err)
+	}
+	if !reflect.DeepEqual(events, []string{"bye", "close", "clear"}) {
+		t.Fatalf("stop order=%v, want BYE then close then persistence cleanup", events)
+	}
+	requireFreshBoundedStopContexts(t, contexts)
+}
+
+func TestStopDirectUsesFreshCleanupContextsAfterByeCancellation(t *testing.T) {
+	events := make([]string, 0, 3)
+	contexts := make([]stopContextObservation, 0, 2)
+	streamID := "stream-direct"
+	channel := aChannel()
+	channel.StreamID = streamID
+	channel.CurrentSSRC = "0100000001"
+	z := &orderedStopZLM{mockZLM: &mockZLM{port: 40000}, events: &events, contexts: &contexts}
+	inviter := &orderedStopInviter{mockInviter: &mockInviter{}, events: &events}
+	channels := &orderedStopChannels{fakeChannels: &fakeChannels{c: channel}, events: &events, contexts: &contexts}
+	service, _, _ := newSvc(t, z, inviter, onlineDevice(), channel)
+	service.channels = channels
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	inviter.onBye = cancel
+
+	if err := service.stopDirect(ctx, streamID); err != nil {
+		t.Fatalf("stop direct after BYE cancellation: %v", err)
+	}
+	if !reflect.DeepEqual(events, []string{"bye", "close", "clear"}) {
+		t.Fatalf("stop order=%v, want BYE then close then persistence cleanup", events)
+	}
+	requireFreshBoundedStopContexts(t, contexts)
 }
 
 func TestServiceStopCloseFailureKeepsGenerationTrackableAndRetryable(t *testing.T) {

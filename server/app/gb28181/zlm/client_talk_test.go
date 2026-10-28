@@ -183,3 +183,58 @@ func TestCloseTalkSourceUsesForcedCloseStreams(t *testing.T) {
 		t.Fatalf("missing source must be idempotent: %v", err)
 	}
 }
+
+func TestCloseTalkSourceConfirmsAbsenceAfterOwnerPollerRace(t *testing.T) {
+	for _, tc := range []struct {
+		name, probe string
+		wantError   bool
+	}{
+		{"already closed", `{"code":0,"data":[]}`, false},
+		{"source remains", `{"code":0,"data":[{"schema":"rtsp","app":"talk","stream":"source-1"}]}`, true},
+		{"probe rejected", `{"code":-100,"msg":"auth failed"}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			probed := false
+			c, server := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/index/api/close_streams":
+					_, _ = w.Write([]byte(`{"code":-400,"msg":"mediakit::TSMediaSource::getOwnerPoller failed: ts://__defaultVhost__/talk/source-1"}`))
+				case "/index/api/getMediaList":
+					probed = true
+					for key, want := range map[string]string{"vhost": "__defaultVhost__", "app": "talk", "stream": "source-1"} {
+						if got := r.URL.Query().Get(key); got != want {
+							t.Errorf("%s=%q, want %q", key, got, want)
+						}
+					}
+					if r.URL.Query().Get("schema") != "" {
+						t.Error("must verify all protocol variants")
+					}
+					_, _ = w.Write([]byte(tc.probe))
+				default:
+					t.Errorf("unexpected path %s", r.URL.Path)
+				}
+			})
+			defer server.Close()
+			err := c.CloseTalkSource(context.Background(), "__defaultVhost__", "talk", "source-1")
+			if (err != nil) != tc.wantError {
+				t.Errorf("err=%v, wantError=%v", err, tc.wantError)
+			}
+			if !probed {
+				t.Error("must confirm source absence after close race")
+			}
+		})
+	}
+}
+
+func TestCloseTalkSourcePreservesUnrelatedException(t *testing.T) {
+	c, server := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/index/api/close_streams" {
+			t.Errorf("unexpected probe %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"code":-400,"msg":"process exception"}`))
+	})
+	defer server.Close()
+	if err := c.CloseTalkSource(context.Background(), "__defaultVhost__", "talk", "source-1"); err == nil {
+		t.Fatal("unrelated exception must remain an error")
+	}
+}

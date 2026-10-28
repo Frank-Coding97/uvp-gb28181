@@ -168,6 +168,13 @@ class StandaloneNginxRelocationTests(unittest.TestCase):
             self.assertIn(f"root {active}/resource/public;", rendered)
             self.assertIn(f"ssl_certificate_key  {root}/vendor/nginx/conf/uvp.key;", rendered)
             self.assertIn(f"alias {root}/resource/public/uploads/;", rendered)
+            snapshot_alias = f"alias {root}/resource/public/gb-channel-snapshot/;"
+            for protocol in ("HTTPS", "HTTP"):
+                protocol_config = rendered.split(f"# UVP_{protocol}_BEGIN", 1)[1].split(
+                    f"# UVP_{protocol}_END", 1
+                )[0]
+                self.assertEqual(protocol_config.count(snapshot_alias), 1,
+                                 f"{protocol} 快照目录必须映射到持久安装根")
             self.assertIn(f"pid  {root}/run/nginx.pid;", rendered)
 
     def test_package_discards_build_time_rendered_nginx_config(self):

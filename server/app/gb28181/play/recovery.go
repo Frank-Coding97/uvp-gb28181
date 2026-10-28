@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"uvplatform.com/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.com/uvp-gb28181/app/gb28181/uac"
@@ -308,32 +307,35 @@ func (s *Service) stopCurrentResult(ctx context.Context, result *Result) error {
 	if result == nil {
 		return nil
 	}
-	cleanupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	ctx = cleanupCtx
 	ref := resultLiveRef(result)
-	s.endPlaybackRecording(ctx, ref.StreamID)
+	recordingCtx, cancel := newStopCleanupContext(ctx)
+	s.endPlaybackRecording(recordingCtx, ref.StreamID)
+	cancel()
 
+	byeCtx, cancel := newStopCleanupContext(ctx)
 	var byeErr error
 	if inviter, ok := s.inviter.(conditionalInviter); ok {
-		_, byeErr = inviter.ByeIfCurrent(ctx, s.sessions, uac.SessionRef{
+		_, byeErr = inviter.ByeIfCurrent(byeCtx, s.sessions, uac.SessionRef{
 			StreamID: ref.StreamID, SSRC: ref.SSRC, Generation: ref.Generation, NodeID: ref.NodeID,
 		})
 	} else {
-		byeErr = s.inviter.Bye(ctx, s.sessions, ref.StreamID)
+		byeErr = s.inviter.Bye(byeCtx, s.sessions, ref.StreamID)
 	}
+	cancel()
 
+	closeCtx, cancel := newStopCleanupContext(ctx)
 	var closeErr error
 	if s.useMultiNode() {
 		mediaNode, ok := s.registry.Get(ref.NodeID)
 		if !ok {
 			closeErr = fmt.Errorf("stream %s owner node %d not found", ref.StreamID, ref.NodeID)
 		} else {
-			closeErr = s.clientForNode(mediaNode).CloseRtpServer(ctx, ref.StreamID)
+			closeErr = s.clientForNode(mediaNode).CloseRtpServer(closeCtx, ref.StreamID)
 		}
 	} else if s.zlm != nil {
-		closeErr = s.zlm.CloseRtpServer(ctx, ref.StreamID)
+		closeErr = s.zlm.CloseRtpServer(closeCtx, ref.StreamID)
 	}
+	cancel()
 	if closeErr != nil {
 		return errors.Join(byeErr, closeErr)
 	}
@@ -344,6 +346,8 @@ func (s *Service) stopCurrentResult(ctx context.Context, result *Result) error {
 	}
 	s.terminateAuthorizationGeneration(result.Generation)
 
-	_, clearErr := s.channels.ClearIfCurrent(ctx, ref.StreamID, ref.SSRC)
+	clearCtx, cancel := newStopCleanupContext(ctx)
+	_, clearErr := s.channels.ClearIfCurrent(clearCtx, ref.StreamID, ref.SSRC)
+	cancel()
 	return CompletedMediaStop(errors.Join(byeErr, clearErr))
 }

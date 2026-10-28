@@ -165,6 +165,15 @@ func (c *Client) CloseTalkSource(ctx context.Context, vhost, appName, stream str
 	if response.Code == zlmAPINotFound {
 		return nil
 	}
+	// A protocol variant may lose its owner while the same close operation
+	// unregisters the source. Only accept this race after a strict query
+	// confirms that every variant of this exact source has disappeared.
+	if response.Code == -400 && strings.Contains(response.Msg, "::getOwnerPoller failed:") {
+		remaining, err := c.GetMediaListFiltered(ctx, MediaFilter{VHost: vhost, App: appName, Stream: stream})
+		if err == nil && len(remaining) == 0 {
+			return nil
+		}
+	}
 	if response.Code != 0 {
 		return fmt.Errorf("close_streams code=%d(%s) msg=%s", response.Code, zlmCodeLabel(response.Code), response.Msg)
 	}

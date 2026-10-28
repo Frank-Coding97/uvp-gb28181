@@ -1,8 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { assertPCMA8000, createAudioLevelMeter, preferPCMA8000, waitForIceGatheringComplete } from "./talkPublisher";
+import {
+  assertPCMA8000,
+  createAudioLevelMeter,
+  preferPCMA8000,
+  talkIceGatheringTimeoutMs,
+  TALK_ACTIVE_POLL_INTERVAL_MS,
+  waitForIceGatheringComplete
+} from "./talkPublisher";
 
 describe("talkPublisher", () => {
+  it("按 ICE 服务器类型选择收集预算，并缩短激活轮询间隔", () => {
+    expect(talkIceGatheringTimeoutMs()).toBe(250);
+    expect(talkIceGatheringTimeoutMs([{ urls: ["stun:media.example.test:3478"] }])).toBe(1200);
+    expect(TALK_ACTIVE_POLL_INTERVAL_MS).toBe(100);
+  });
+
   it("只把 PCMA/8000 设置为首选编码", () => {
     const setCodecPreferences = vi.fn();
     const transceiver = { setCodecPreferences } as unknown as RTCRtpTransceiver;

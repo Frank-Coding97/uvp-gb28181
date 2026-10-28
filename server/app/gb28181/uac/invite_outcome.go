@@ -127,7 +127,11 @@ type sipgoInviteDialog struct {
 }
 
 func (d *sipgoInviteDialog) WaitAnswer(ctx context.Context) error {
-	return d.session.WaitAnswer(ctx, sipgo.AnswerOptions{})
+	if err := d.session.WaitAnswer(ctx, sipgo.AnswerOptions{}); err != nil {
+		return err
+	}
+	useNATResponseRoute(d.session)
+	return nil
 }
 
 func (d *sipgoInviteDialog) Ack(ctx context.Context) error { return d.session.Ack(ctx) }

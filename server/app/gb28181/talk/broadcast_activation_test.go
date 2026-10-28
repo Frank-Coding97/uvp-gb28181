@@ -47,7 +47,7 @@ func newBroadcastActivationService(t *testing.T, media *fakeActivationMedia) (*S
 	t.Helper()
 	db := newTalkRepoTestDB(t)
 	repo := NewGormRepo(db)
-	mediaNode := &node.Node{ID: 1, Host: "192.0.2.10", State: node.StateActive}
+	mediaNode := &node.Node{ID: 1, Host: "192.0.2.10", SDPIP: "192.0.2.10", State: node.StateActive}
 	sender := &fakeBroadcastMessageSender{}
 	dialogs := &fakeBroadcastDialogs{}
 	service := NewService(repo, fakeTalkNodes{items: map[int64]*node.Node{1: mediaNode}}, nil, nil, nil, func() time.Time { return time.Unix(1700000000, 0) })
@@ -100,6 +100,31 @@ func TestBroadcastPublishInviteAckActivatesSession(t *testing.T) {
 	require.Equal(t, models.TalkSessionActive, stored.State)
 	require.Equal(t, models.TalkSignalPhaseActive, stored.SignalPhase)
 	require.Equal(t, 1, media.starts)
+}
+
+func TestBroadcastAnswerUsesEffectiveSDPIPForInitialAndRepeatedInvite(t *testing.T) {
+	media := &fakeActivationMedia{info: pcmaTalkInfo(), localPort: 31000}
+	service, _, session, _, _ := newBroadcastActivationService(t, media)
+	mediaNode := service.nodes.(fakeTalkNodes).items[session.NodeID]
+	mediaNode.Host = "127.0.0.1"
+	mediaNode.SDPIP = ""
+	mediaNode.PlatformSDPIP = "62.234.152.39"
+
+	require.NoError(t, service.OnPublished(context.Background(), session.NodeID, session.App, session.SourceStream))
+	invite := BroadcastInvite{
+		PeerID: "device-1", TargetID: "channel-1", CallID: "broadcast-media-address", CSeq: 9,
+		SDP: "v=0\r\no=device 0 0 IN IP4 192.0.2.20\r\ns=Play\r\nc=IN IP4 192.0.2.20\r\nt=0 0\r\nm=audio 30000 RTP/AVP 8\r\na=recvonly\r\na=rtpmap:8 PCMA/8000\r\ny=0200000001\r\n",
+	}
+	prepared, err := service.PrepareBroadcastInvite(context.Background(), invite)
+	require.NoError(t, err)
+	require.Contains(t, prepared.AnswerSDP, "c=IN IP4 62.234.152.39\r\n")
+	require.NotContains(t, prepared.AnswerSDP, "c=IN IP4 127.0.0.1\r\n")
+
+	repeated, err := service.PrepareBroadcastInvite(context.Background(), invite)
+	require.NoError(t, err)
+	require.Equal(t, prepared, repeated)
+	require.Contains(t, repeated.AnswerSDP, "c=IN IP4 62.234.152.39\r\n")
+	require.NotContains(t, repeated.AnswerSDP, "c=IN IP4 127.0.0.1\r\n")
 }
 
 func TestBroadcastResponseCorrelatesWithoutActivating(t *testing.T) {

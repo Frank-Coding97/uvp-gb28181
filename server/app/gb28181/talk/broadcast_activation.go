@@ -3,6 +3,7 @@ package talk
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"strconv"
 	"strings"
@@ -54,6 +55,9 @@ func (s *Service) onBroadcastPublished(ctx context.Context, session *models.GbTa
 	mediaNode, ok := s.nodes.Get(session.NodeID)
 	if !ok || mediaNode == nil || !mediaNode.IsActive() {
 		return s.failActivation(ctx, session, nil, "", false, ErrTalkNodeUnavailable)
+	}
+	if !mediaNode.HasUsableSDPIP() {
+		return s.failActivation(ctx, session, nil, "", false, fmt.Errorf("%w: 媒体节点未配置 SDP 地址", ErrTalkNodeUnavailable))
 	}
 	channel, device, err := s.activation.deps.Targets.LoadTalkTarget(ctx, session.ChannelID, session.DeviceID)
 	if err != nil || channel == nil || device == nil || channel.Status != models.ChannelStatusOnline || device.Status != models.DeviceStatusOnline {
@@ -251,7 +255,7 @@ func (s *Service) PrepareBroadcastInvite(ctx context.Context, invite BroadcastIn
 		_ = client.StopSendRtp(ctx, defaultTalkVHost, session.App, session.SourceStream, session.SSRC)
 		return PreparedBroadcastInvite{}, &BroadcastSIPError{Status: 480, Reason: "Broadcast 会话状态已变化"}
 	}
-	answer, err := sdp.BuildBroadcastAnswer(sdp.BroadcastAnswerParams{ServerID: s.activation.deps.Platform.ServerID, LocalIP: mediaNode.Host, LocalPort: localPort, SSRC: session.SSRC, SenderMode: media.SenderMode})
+	answer, err := sdp.BuildBroadcastAnswer(sdp.BroadcastAnswerParams{ServerID: s.activation.deps.Platform.ServerID, LocalIP: mediaNode.EffectiveSDPIP(), LocalPort: localPort, SSRC: session.SSRC, SenderMode: media.SenderMode})
 	if err != nil {
 		_ = client.StopSendRtp(ctx, defaultTalkVHost, session.App, session.SourceStream, session.SSRC)
 		return PreparedBroadcastInvite{}, err
@@ -262,7 +266,7 @@ func (s *Service) PrepareBroadcastInvite(ctx context.Context, invite BroadcastIn
 func (s *Service) broadcastLocalIP(nodeID int64) string {
 	if s != nil && s.nodes != nil {
 		if mediaNode, ok := s.nodes.Get(nodeID); ok && mediaNode != nil {
-			return mediaNode.Host
+			return mediaNode.EffectiveSDPIP()
 		}
 	}
 	return ""

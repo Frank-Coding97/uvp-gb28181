@@ -71,10 +71,12 @@ type fakeTalkInviter struct {
 	byeBlocks bool
 	invites   int
 	byes      int
+	request   uac.TalkInviteRequest
 }
 
-func (f *fakeTalkInviter) InviteTalk(context.Context, uac.TalkInviteRequest) (uac.TalkDialogMetadata, error) {
+func (f *fakeTalkInviter) InviteTalk(_ context.Context, request uac.TalkInviteRequest) (uac.TalkDialogMetadata, error) {
 	f.invites++
+	f.request = request
 	if f.started != nil {
 		close(f.started)
 		<-f.release
@@ -105,7 +107,7 @@ func newActivationService(t *testing.T, media *fakeActivationMedia, inviter *fak
 	t.Helper()
 	db := newTalkRepoTestDB(t)
 	repo := NewGormRepo(db)
-	mediaNode := &node.Node{ID: 1, Host: "192.0.2.10", State: node.StateActive}
+	mediaNode := &node.Node{ID: 1, Host: "192.0.2.10", SDPIP: "192.0.2.10", State: node.StateActive}
 	service := NewService(repo, fakeTalkNodes{items: map[int64]*node.Node{1: mediaNode}}, nil, nil, nil, func() time.Time {
 		return time.Unix(1700000000, 0)
 	})
@@ -152,6 +154,38 @@ func TestOnPublishedActivatesTalkAndPersistsTransport(t *testing.T) {
 	require.NoError(t, service.OnPublished(context.Background(), session.NodeID, session.App, session.SourceStream))
 	require.Equal(t, 1, media.starts)
 	require.Equal(t, 1, inviter.invites)
+}
+
+func TestOnPublishedTalkSDPUsesEffectiveSDPIP(t *testing.T) {
+	media := &fakeActivationMedia{info: pcmaTalkInfo(), localPort: 32100}
+	inviter := &fakeTalkInviter{}
+	service, _, session := newActivationService(t, media, inviter)
+	mediaNode := service.nodes.(fakeTalkNodes).items[session.NodeID]
+	mediaNode.Host = "127.0.0.1"
+	mediaNode.SDPIP = ""
+	mediaNode.PlatformSDPIP = "62.234.152.39"
+
+	require.NoError(t, service.OnPublished(context.Background(), session.NodeID, session.App, session.SourceStream))
+	require.Contains(t, inviter.request.SDP, "c=IN IP4 62.234.152.39\r\n")
+	require.NotContains(t, inviter.request.SDP, "c=IN IP4 127.0.0.1\r\n")
+}
+
+func TestOnPublishedFailsWithoutEffectiveSDPIP(t *testing.T) {
+	media := &fakeActivationMedia{info: pcmaTalkInfo(), localPort: 32100}
+	inviter := &fakeTalkInviter{}
+	service, repo, session := newActivationService(t, media, inviter)
+	mediaNode := service.nodes.(fakeTalkNodes).items[session.NodeID]
+	mediaNode.Host = "127.0.0.1"
+	mediaNode.SDPIP = ""
+
+	err := service.OnPublished(context.Background(), session.NodeID, session.App, session.SourceStream)
+	require.ErrorIs(t, err, ErrTalkNodeUnavailable)
+	stored, findErr := repo.FindBySession(context.Background(), session.SessionID)
+	require.NoError(t, findErr)
+	require.Equal(t, models.TalkSessionFailed, stored.State)
+	require.Zero(t, media.starts)
+	require.Zero(t, inviter.invites)
+	require.Zero(t, media.closes)
 }
 
 func TestOnPublishedRejectsNonPCMAWithoutStartingSender(t *testing.T) {

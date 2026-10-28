@@ -45,6 +45,8 @@ import {
   assertPCMA8000,
   createAudioLevelMeter,
   preferPCMA8000,
+  TALK_ACTIVE_POLL_INTERVAL_MS,
+  talkIceGatheringTimeoutMs,
   waitForIceGatheringComplete,
   type AudioLevelSnapshot,
   type AudioLevelMeter
@@ -4852,7 +4854,7 @@ async function waitTalkActive(channelId: number, sessionId: string, token: numbe
     if (state === "active") return true;
     if (["failed", "expired", "ended"].includes(String(state))) throw new Error(response.data?.error || `对讲会话已${state}`);
     if (!hasPermission("gb28181:talk:control") || token !== talkToken) return false;
-    await new Promise(resolve => window.setTimeout(resolve, 300));
+    await new Promise(resolve => window.setTimeout(resolve, TALK_ACTIVE_POLL_INTERVAL_MS));
   }
   throw new Error("等待设备对讲信令超时");
 }
@@ -4920,14 +4922,17 @@ async function startTalk() {
     // 那种场景必须靠 STUN 拿到 NAT 上的映射地址，只产 host candidate 连不上。
     // 同网段部署平台不下发，浏览器只产 host candidate，也就不会去等一个可能不可达的 STUN。
     const uplink = response.data.uplink;
-    talkConnection = new RTCPeerConnection({ iceServers: uplink?.iceServers || [] });
+    talkConnection = new RTCPeerConnection({
+      iceServers: uplink?.iceServers || [],
+      iceCandidatePoolSize: 1
+    });
     const transceiver = talkConnection.addTransceiver(audioTrack, { direction: "sendonly", streams: [talkStream] });
     const audioCodecs = typeof RTCRtpSender === "undefined" ? [] : RTCRtpSender.getCapabilities?.("audio")?.codecs || [];
     preferPCMA8000(transceiver, audioCodecs);
     const offer = await talkConnection.createOffer();
     await talkConnection.setLocalDescription(offer);
     // 收集超时不致命：按已收集到的候选继续发布，同网段靠 host candidate 就能建连。
-    const iceGathered = await waitForIceGatheringComplete(talkConnection);
+    const iceGathered = await waitForIceGatheringComplete(talkConnection, talkIceGatheringTimeoutMs(uplink?.iceServers));
     if (!iceGathered) {
       console.warn("[talk] ICE 收集未在预算内完成，按已有候选发布（STUN 可能不可达）");
     }

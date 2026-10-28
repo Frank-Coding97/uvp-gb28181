@@ -104,3 +104,65 @@ func TestLiveByeEndpointTrustBoundary(t *testing.T) {
 		})
 	}
 }
+
+func TestNATContactKeepsURIAndUsesTrustedResponseRoute(t *testing.T) {
+	for _, kind := range []string{"live", "talk"} {
+		for _, tc := range []struct{ name, contact, source, route, want string }{
+			{"private contact", "192.168.124.5:59396", "192.0.2.20:47081", "", "192.0.2.20:47081"},
+			{"public contact", "198.51.100.10:5060", "192.0.2.20:47081", "", "198.51.100.10:5060"},
+			{"direct LAN", "192.168.124.5:59396", "192.168.124.5:59396", "", "192.168.124.5:59396"},
+			{"untrusted source", "192.168.124.5:59396", "192.0.2.99:47081", "", "192.168.124.5:59396"},
+			{"record route", "192.168.124.5:59396", "192.0.2.20:47081", "<sip:proxy.example.com;lr>", "proxy.example.com:5060"},
+		} {
+			t.Run(kind+"/"+tc.name, func(t *testing.T) {
+				ua, err := sipgo.NewUA()
+				require.NoError(t, err)
+				t.Cleanup(func() { _ = ua.Close() })
+				u, err := New(ua, testPlatformID, "3402000000", "192.0.2.1", 5061, false)
+				require.NoError(t, err)
+				var ack, bye *sip.Request
+				u.client.TxRequester = &siptest.ClientTxRequester{OnRequest: func(req *sip.Request) *sip.Response {
+					res := sip.NewResponseFromRequest(req, sip.StatusOK, "OK", nil)
+					switch req.Method {
+					case sip.INVITE:
+						res.To().Params.Add("tag", "nat-device-tag")
+						res.AppendHeader(sip.NewHeader("Contact", "<sip:channel@"+tc.contact+">"))
+						res.SetSource(tc.source)
+						if tc.route != "" {
+							res.AppendHeader(sip.NewHeader("Record-Route", tc.route))
+						}
+					case sip.ACK:
+						ack = req.Clone()
+					case sip.BYE:
+						bye = req.Clone()
+					}
+					return res
+				}}
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				if kind == "live" {
+					s := validInviteOutcomeSession()
+					s.Dest = "192.0.2.20:47081"
+					s.Transport = "UDP"
+					m := NewSessionManager()
+					_, err = u.InviteTracked(ctx, m, s, "v=0\r\n")
+					require.NoError(t, err)
+					require.NoError(t, u.Bye(ctx, m, s.StreamID))
+				} else {
+					meta, e := u.InviteTalk(ctx, TalkInviteRequest{DeviceID: testDeviceID, ChannelID: testDeviceID, Destination: "192.0.2.20:47081", Transport: "UDP", SSRC: "0100000001", SDP: "v=0\r\n"})
+					require.NoError(t, e)
+					require.NoError(t, u.ByeTalk(ctx, meta.CallID))
+				}
+				require.NotNil(t, ack)
+				require.NotNil(t, bye)
+				for _, req := range []*sip.Request{ack, bye} {
+					require.Equal(t, tc.want, req.Destination())
+					require.Equal(t, "sip:channel@"+tc.contact, req.Recipient.String())
+					tag, _ := req.To().Params.Get("tag")
+					require.Equal(t, "nat-device-tag", tag)
+				}
+				require.Equal(t, ack.CallID().Value(), bye.CallID().Value())
+			})
+		}
+	}
+}
