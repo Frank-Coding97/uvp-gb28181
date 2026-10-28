@@ -1,8 +1,6 @@
 package upgrade
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
@@ -164,22 +162,11 @@ func treeStorageSize(ctx context.Context, root string) (uint64, error) {
 }
 
 func inspectPackage(ctx context.Context, path string) (uint64, error) {
-	file, err := os.Open(path)
+	archive, err := openPackageArchive(path)
 	if err != nil {
 		return 0, err
 	}
-	defer file.Close()
-	var reader io.Reader = file
-	if strings.HasSuffix(strings.ToLower(path), ".gz") || strings.HasSuffix(strings.ToLower(path), ".tgz") {
-		gz, err := gzip.NewReader(file)
-		if err != nil {
-			return 0, err
-		}
-		defer gz.Close()
-		reader = gz
-	}
-	limited := &io.LimitedReader{R: reader, N: (8 << 30) + (32 << 20)}
-	tr := tar.NewReader(limited)
+	defer archive.Close()
 	seen := map[string]bool{}
 	directories := map[string]bool{}
 	var expanded, storage uint64
@@ -187,14 +174,14 @@ func inspectPackage(ctx context.Context, path string) (uint64, error) {
 		if err := ctx.Err(); err != nil {
 			return 0, err
 		}
-		h, err := tr.Next()
+		entry, err := archive.Next()
 		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
 			return 0, err
 		}
-		name, err := safeArchiveNameWithDirs(h.Name)
+		name, err := safeArchiveNameWithDirs(entry.Name)
 		if err != nil {
 			return 0, err
 		}
@@ -210,7 +197,7 @@ func inspectPackage(ctx context.Context, path string) (uint64, error) {
 		if _, exists := seen[name]; exists || len(seen) >= 10000 {
 			return 0, errors.New("duplicate path or too many package entries")
 		}
-		if directories[name] && h.Typeflag != tar.TypeDir {
+		if directories[name] && !entry.Dir {
 			return 0, fmt.Errorf("package file %q replaces a parent directory", name)
 		}
 		for parent := filepath.Dir(name); parent != "."; parent = filepath.Dir(parent) {
@@ -222,40 +209,32 @@ func inspectPackage(ctx context.Context, path string) (uint64, error) {
 				return 0, errors.New("package contains too many implicit directories")
 			}
 		}
-		seen[name] = h.Typeflag == tar.TypeDir
-		if h.Size < 0 || h.Size > 8<<30 || expanded > 8<<30-uint64(h.Size) {
+		seen[name] = entry.Dir
+		if entry.Size < 0 || entry.Size > 8<<30 || expanded > 8<<30-uint64(entry.Size) {
 			return 0, errors.New("package expanded size exceeds limit")
 		}
-		expanded += uint64(h.Size)
-		switch h.Typeflag {
-		case tar.TypeDir:
+		expanded += uint64(entry.Size)
+		if entry.Dir {
 			directories[name] = true
 			if len(directories) > 10000 {
 				return 0, errors.New("package contains too many directories")
 			}
-		case tar.TypeReg, tar.TypeRegA:
-			storage += allocatedStorage(uint64(h.Size)) + capacityBlockSize
-			n, err := copyContext(ctx, tr, io.Discard)
-			if err != nil {
-				return 0, err
-			}
-			if n != h.Size {
-				return 0, io.ErrUnexpectedEOF
-			}
-		default:
-			return 0, fmt.Errorf("unsupported package entry %q", name)
+			continue
+		}
+		storage += allocatedStorage(uint64(entry.Size)) + capacityBlockSize
+		n, err := copyContext(ctx, entry.Body, io.Discard)
+		if err != nil {
+			return 0, err
+		}
+		if n != entry.Size {
+			return 0, io.ErrUnexpectedEOF
 		}
 	}
 	if len(seen) == 0 {
 		return 0, errors.New("empty package")
 	}
-	// Drain through gzip EOF to validate its checksum and reject expansion beyond
-	// the bound even when extra bytes follow the tar end markers.
-	if _, err := copyContext(ctx, limited, io.Discard); err != nil {
-		return 0, err
-	}
-	if limited.N == 0 {
-		return 0, errors.New("package stream exceeds expanded size limit")
+	if err := archive.Close(); err != nil {
+		return 0, fmt.Errorf("verify package archive: %w", err)
 	}
 	return storage + uint64(len(directories))*capacityBlockSize, nil
 }
