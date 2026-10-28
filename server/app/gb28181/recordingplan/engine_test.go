@@ -73,6 +73,48 @@ func TestEngineDisabledDoesNotPullStreams(t *testing.T) {
 	require.Empty(t, operator.started)
 }
 
+func TestEngineRetriesFailedStopUntilItSucceeds(t *testing.T) {
+	db := newRepositoryTestDB(t)
+	require.NoError(t, db.AutoMigrate(&models.GbChannel{}))
+	now := time.Date(2026, 9, 1, 9, 0, 0, 0, schedule.BeijingLocation())
+	plan := models.GbRecordingPlan{Name: "已停用", Status: 0, Version: 1, OwnerDeptID: 1}
+	require.NoError(t, db.Create(&plan).Error)
+	channel := models.GbChannel{DeviceID: "D-stop-retry", ChannelID: "C-stop-retry", OwnerDeptID: 1, Status: models.ChannelStatusOnline, RecordingMode: models.RecordingModeScheduled}
+	require.NoError(t, db.Create(&channel).Error)
+	require.NoError(t, db.Create(&models.GbRecordingPlanBinding{PlanID: plan.ID, ChannelID: channel.ID, OwnerDeptID: 1, AssignedAt: now}).Error)
+	require.NoError(t, db.Create(&models.GbRecordingPlanChannelState{
+		ChannelID: channel.ID, PlanID: &plan.ID, PlanVersion: plan.Version,
+		DesiredState: models.RecordingDesiredIdle, ActualState: models.RecordingStateStopping,
+		ReconcileAt: now.Add(-time.Second),
+	}).Error)
+
+	operator := &stopRetryOperator{errors: []error{errors.New("stop failed 1"), errors.New("stop failed 2")}}
+	engine := NewEngine(db, operator, EngineOptions{InstanceID: "stop-retry", Now: func() time.Time { return now }})
+
+	for attempt := 0; attempt < 2; attempt++ {
+		require.NoError(t, engine.Dispatch(context.Background()))
+		var state models.GbRecordingPlanChannelState
+		require.NoError(t, db.First(&state, "channel_id = ?", channel.ID).Error)
+		require.Equal(t, models.RecordingStateStopping, state.ActualState)
+		require.Equal(t, attempt+1, state.AttemptCount)
+		now = now.Add(2 * time.Minute)
+	}
+
+	require.NoError(t, engine.Dispatch(context.Background()))
+	var state models.GbRecordingPlanChannelState
+	require.NoError(t, db.First(&state, "channel_id = ?", channel.ID).Error)
+	require.Equal(t, models.RecordingStateIdle, state.ActualState)
+	require.Zero(t, state.AttemptCount)
+	require.Equal(t, 3, operator.calls)
+
+	var executions []models.GbRecordingPlanExecution
+	require.NoError(t, db.Where("channel_id = ? AND action = ?", channel.ID, ActionStop).Order("id").Find(&executions).Error)
+	require.Len(t, executions, 3)
+	require.Equal(t, "failed", executions[0].Result)
+	require.Equal(t, "failed", executions[1].Result)
+	require.Equal(t, "success", executions[2].Result)
+}
+
 func TestEngineDeviceEventsAdvanceReconcileAndTrackOfflineGapIdempotently(t *testing.T) {
 	db := newRepositoryTestDB(t)
 	require.NoError(t, db.AutoMigrate(&models.GbChannel{}))
@@ -132,6 +174,25 @@ func TestEngineDebouncesMediaLossAndIgnoresLateOldGenerationEvent(t *testing.T) 
 type fakeChannelOperator struct {
 	mu               sync.Mutex
 	started, stopped []uint
+}
+
+type stopRetryOperator struct {
+	errors []error
+	calls  int
+}
+
+func (o *stopRetryOperator) Start(context.Context, ChannelTarget) (*play.Result, error) {
+	return nil, errors.New("unexpected start while stopping")
+}
+
+func (o *stopRetryOperator) Stop(context.Context, uint) error {
+	o.calls++
+	if len(o.errors) == 0 {
+		return nil
+	}
+	err := o.errors[0]
+	o.errors = o.errors[1:]
+	return err
 }
 
 func (f *fakeChannelOperator) Start(_ context.Context, target ChannelTarget) (*play.Result, error) {

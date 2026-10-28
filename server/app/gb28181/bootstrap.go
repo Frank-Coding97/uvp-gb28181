@@ -1495,7 +1495,8 @@ func setupRecordingRuntime(cfg gbconfig.Config) {
 	gbroutes.SetRecordingService(recordingSvc, zlmRegistry, indexer)
 	recordingPlanLeases = play.NewSourceLeaseRegistry()
 	recordingPlanLive := play.NewSystemLiveEnsurer(playSvc, playauth.NewDeviceSecurityStore(app.DB()))
-	recordingPlanOrchestrator := recordingplan.NewOrchestrator(recordingPlanLive, recordingSvc, recordingPlanLeases, nil)
+	recordingPlanOrchestrator := recordingplan.NewOrchestrator(recordingPlanLive, recordingSvc, recordingPlanLeases, playSvc)
+	recordingPlanOrchestrator.SetCombinedLeaseChecker(gbroutes.OtherConsumerSourceLeaseChecker())
 	planEnabled := cfg.Recording.PlanEnabled
 	recordingPlanEngine = recordingplan.NewEngine(app.DB(), recordingPlanOrchestrator, recordingplan.EngineOptions{
 		InstanceID: uuid.NewString(), BatchSize: 200, Workers: 8, DeviceConcurrency: 2,

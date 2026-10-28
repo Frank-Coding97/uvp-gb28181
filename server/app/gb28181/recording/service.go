@@ -270,7 +270,7 @@ func (s *Service) stopSessionLocked(ctx context.Context, channel *models.GbChann
 	}
 	client := s.client(mediaNode)
 	if err := client.StopRecord(ctx, session.VHost, session.App, session.Stream); err != nil {
-		return s.markDisableFailure(ctx, channelID, session, "停止录像失败: "+err.Error())
+		return s.markDisableFailure(ctx, channelID, session, err)
 	}
 
 	if err := s.repo.MarkSessionStopped(ctx, session.ID, ""); err != nil {
@@ -350,7 +350,7 @@ func (s *Service) finishRecordingLocked(ctx context.Context, channel *models.GbC
 		return s.markNodeUnavailable(ctx, channel, session, "stop")
 	}
 	if err := s.client(mediaNode).StopRecord(ctx, session.VHost, session.App, session.Stream); err != nil {
-		return s.markStopFailure(ctx, channel, session, "停止录像失败: "+err.Error())
+		return s.markStopFailure(ctx, channel, session, err)
 	}
 	if err := s.repo.MarkSessionStopped(ctx, session.ID, ""); err != nil {
 		return nil, err
@@ -434,17 +434,20 @@ func (s *Service) markNodeUnavailable(ctx context.Context, channel *models.GbCha
 	return s.repo.GetChannel(ctx, channel.ID)
 }
 
-func (s *Service) markStopFailure(ctx context.Context, channel *models.GbChannel, session *models.GbRecordingSession, message string) (*models.GbChannel, error) {
+func (s *Service) markStopFailure(ctx context.Context, channel *models.GbChannel, session *models.GbRecordingSession, cause error) (*models.GbChannel, error) {
+	message := "停止录像失败: " + cause.Error()
 	session.State = models.RecordingSessionStateFailed
 	session.LastError = message
+	var persistErr error
 	if err := s.repo.UpsertSession(ctx, session); err != nil {
-		return nil, err
+		persistErr = errors.Join(persistErr, err)
 	}
 	if _, err := s.repo.MarkState(ctx, channel.ID, channel.CloudRecordingEnabled, models.CloudRecordingStateFailed, message); err != nil {
-		return nil, err
+		persistErr = errors.Join(persistErr, err)
 	}
 	logCloudRecordingState(ctx, "recording.cloud.failed", "stop_record_failed", channel.ID, session.NodeID, session.Stream, models.CloudRecordingStateFailed, message)
-	return s.repo.GetChannel(ctx, channel.ID)
+	channel, getErr := s.repo.GetChannel(ctx, channel.ID)
+	return channel, errors.Join(fmt.Errorf("停止录像失败: %w", cause), persistErr, getErr)
 }
 
 func (s *Service) markEnableFailure(ctx context.Context, channelID uint, session *models.GbRecordingSession, message string) (*models.GbChannel, error) {
@@ -465,19 +468,18 @@ func (s *Service) markEnableFailure(ctx context.Context, channelID uint, session
 	return s.repo.GetChannel(ctx, channelID)
 }
 
-func (s *Service) markDisableFailure(ctx context.Context, channelID uint, session *models.GbRecordingSession, message string) (*models.GbChannel, error) {
+func (s *Service) markDisableFailure(ctx context.Context, channelID uint, session *models.GbRecordingSession, cause error) (*models.GbChannel, error) {
+	message := "停止录像失败: " + cause.Error()
 	session.State = models.RecordingSessionStateFailed
 	session.LastError = message
-	var sessionErr error
+	var persistErr error
 	if err := s.repo.UpsertSession(ctx, session); err != nil {
-		sessionErr = fmt.Errorf("会话状态持久化失败: %w", err)
+		persistErr = errors.Join(persistErr, fmt.Errorf("会话状态持久化失败: %w", err))
 	}
 	if _, markErr := s.repo.MarkState(ctx, channelID, false, models.CloudRecordingStateFailed, message); markErr != nil {
-		return nil, errors.Join(markErr, sessionErr)
-	}
-	if sessionErr != nil {
-		return nil, sessionErr
+		persistErr = errors.Join(persistErr, markErr)
 	}
 	logCloudRecordingState(ctx, "recording.cloud.failed", "stop_record_failed_on_disable", channelID, session.NodeID, session.Stream, models.CloudRecordingStateFailed, message)
-	return s.repo.GetChannel(ctx, channelID)
+	channel, getErr := s.repo.GetChannel(ctx, channelID)
+	return channel, errors.Join(fmt.Errorf("停止录像失败: %w", cause), persistErr, getErr)
 }

@@ -19,6 +19,8 @@ func TestStateMachineStopsOrIdlesWhenRecordingIsNotDesired(t *testing.T) {
 	}{
 		{"off idle", ReconcileInput{Mode: models.RecordingModeOff, ActualState: models.RecordingStateIdle}, models.RecordingStateIdle, ActionNone, ReasonModeOff},
 		{"disabled recording", ReconcileInput{Mode: models.RecordingModeScheduled, PlanEnabled: false, ActualState: models.RecordingStateRecording}, models.RecordingStateStopping, ActionStop, ReasonPlanDisabled},
+		{"disabled stopping retries stop", ReconcileInput{Mode: models.RecordingModeScheduled, PlanEnabled: false, ActualState: models.RecordingStateStopping}, models.RecordingStateStopping, ActionStop, ReasonPlanDisabled},
+		{"reenabled stopping finishes stop", ReconcileInput{Mode: models.RecordingModeScheduled, PlanEnabled: true, ScheduleMatched: true, DeviceOnline: true, ActualState: models.RecordingStateStopping}, models.RecordingStateStopping, ActionStop, ""},
 		{"outside schedule", ReconcileInput{Mode: models.RecordingModeScheduled, PlanEnabled: true, ScheduleMatched: false, ActualState: models.RecordingStateIdle}, models.RecordingStateOutsideSchedule, ActionNone, ReasonOutsideSchedule},
 	}
 	for _, tt := range tests {

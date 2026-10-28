@@ -440,6 +440,21 @@ func SetRecordCacheSourceLeaseChecker(checker gbhandler.SourceLeaseChecker) {
 	sourceLeaseMu.Unlock()
 }
 
+// OtherConsumerSourceLeaseChecker reports leases owned outside scheduled recording.
+// The plan orchestrator uses this before releasing its own lease.
+func OtherConsumerSourceLeaseChecker() gbhandler.SourceLeaseChecker {
+	return otherConsumerSourceLeaseChecker{}
+}
+
+type otherConsumerSourceLeaseChecker struct{}
+
+func (otherConsumerSourceLeaseChecker) HasLease(streamID string) bool {
+	sourceLeaseMu.Lock()
+	checkers := gbhandler.CombinedSourceLeaseChecker{cascadeSourceLeaseChecker, recordCacheSourceLeaseChecker}
+	sourceLeaseMu.Unlock()
+	return checkers.HasLease(streamID)
+}
+
 func applySourceLeaseCheckers() {
 	hookController.SetSourceLeaseChecker(gbhandler.CombinedSourceLeaseChecker{
 		cascadeSourceLeaseChecker, recordingPlanSourceLeaseChecker,

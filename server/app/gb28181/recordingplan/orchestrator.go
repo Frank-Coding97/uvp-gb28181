@@ -111,12 +111,41 @@ func (o *Orchestrator) Start(ctx context.Context, target ChannelTarget) (*play.R
 func (o *Orchestrator) Stop(ctx context.Context, channelID uint) error {
 	unlock := o.lockChannel(channelID)
 	defer unlock()
-	if _, err := o.recording.Disable(ctx, channelID); err != nil {
+	channel, err := o.recording.Disable(ctx, channelID)
+	if err != nil {
 		return &OrchestrationError{Stage: FailureRecordStart, Err: err}
 	}
 	current, ok := o.current(channelID)
+	if !ok && channel != nil && channel.StreamID != "" {
+		// Live sessions can survive a restart while the plan's in-memory state does not.
+		if provider, supports := o.stopper.(LiveCurrentProvider); supports {
+			if ref, exists := provider.CurrentLiveRef(channel.StreamID); exists && ref.SSRC == channel.CurrentSSRC {
+				result := &play.Result{StreamID: ref.StreamID, SSRC: ref.SSRC, Generation: ref.Generation}
+				if ref.NodeID != 0 {
+					result.Node = &play.ResultNode{ID: ref.NodeID}
+				}
+				current = activePlanRecording{result: result, lease: o.leases.Acquire(ref.StreamID, ref.Generation, fmt.Sprintf("recording-plan:%d", channelID))}
+				o.activeMu.Lock()
+				o.active[channelID] = current
+				o.activeMu.Unlock()
+				ok = true
+			}
+		}
+	}
 	if !ok {
 		return nil
+	}
+	if o.stopper != nil && (o.allLeases == nil || !o.allLeases.HasLease(current.result.StreamID)) {
+		nodeID := int64(0)
+		if current.result.Node != nil {
+			nodeID = current.result.Node.ID
+		}
+		if _, err := o.stopper.StopOnNoneReader(ctx, stream.LiveRef{
+			StreamID: current.result.StreamID, SSRC: current.result.SSRC,
+			Generation: current.result.Generation, NodeID: nodeID,
+		}); err != nil {
+			return err
+		}
 	}
 	if err := current.lease.Release(); err != nil {
 		return err
@@ -124,18 +153,7 @@ func (o *Orchestrator) Stop(ctx context.Context, channelID uint) error {
 	o.activeMu.Lock()
 	delete(o.active, channelID)
 	o.activeMu.Unlock()
-	if o.stopper == nil || (o.allLeases != nil && o.allLeases.HasLease(current.result.StreamID)) {
-		return nil
-	}
-	nodeID := int64(0)
-	if current.result.Node != nil {
-		nodeID = current.result.Node.ID
-	}
-	_, err := o.stopper.StopOnNoneReader(ctx, stream.LiveRef{
-		StreamID: current.result.StreamID, SSRC: current.result.SSRC,
-		Generation: current.result.Generation, NodeID: nodeID,
-	})
-	return err
+	return nil
 }
 
 func (o *Orchestrator) current(channelID uint) (activePlanRecording, bool) {

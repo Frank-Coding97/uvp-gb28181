@@ -67,6 +67,58 @@ func TestOrchestratorStopReleasesOnlyPlanLeaseAndRequestsConditionalStop(t *test
 	require.Equal(t, 1, stopper.calls)
 }
 
+func TestOrchestratorRetainsLeaseAndRetriesConditionalStopAfterFailure(t *testing.T) {
+	live := &fakePlanLive{result: &play.Result{StreamID: "stream-1", SSRC: "ssrc-1", Generation: 4}}
+	leases := play.NewSourceLeaseRegistry()
+	stopper := &fakePlanStopper{errors: []error{errors.New("reader count unavailable")}}
+	orchestrator := NewOrchestrator(live, &fakePlanRecording{}, leases, stopper)
+	_, err := orchestrator.Start(context.Background(), ChannelTarget{ID: 7, DeviceCode: "D", ChannelCode: "C"})
+	require.NoError(t, err)
+
+	require.Error(t, orchestrator.Stop(context.Background(), 7))
+	require.True(t, leases.HasLease("stream-1"), "keep the source protected while the stop is retried")
+	require.NoError(t, orchestrator.Stop(context.Background(), 7))
+	require.False(t, leases.HasLease("stream-1"))
+	require.Equal(t, 2, stopper.calls)
+}
+
+func TestOrchestratorStopsRecoveredStreamWithoutInMemoryPlanState(t *testing.T) {
+	ref := stream.LiveRef{StreamID: "recovered", SSRC: "ssrc-1", Generation: 8, NodeID: 2}
+	for _, test := range []struct {
+		name      string
+		ssrc      string
+		wantCalls int
+	}{
+		{"matching source", ref.SSRC, 1},
+		{"replaced source", "old-ssrc", 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			stopper := &recoveredPlanStopper{ref: ref}
+			recording := &fakePlanRecording{channel: &models.GbChannel{StreamID: ref.StreamID, CurrentSSRC: test.ssrc}}
+			orchestrator := NewOrchestrator(&fakePlanLive{}, recording, play.NewSourceLeaseRegistry(), stopper)
+			require.NoError(t, orchestrator.Stop(context.Background(), 7))
+			require.Equal(t, test.wantCalls, stopper.calls)
+			if test.wantCalls > 0 {
+				require.Equal(t, ref, stopper.lastRef)
+			}
+			require.Empty(t, orchestrator.active)
+		})
+	}
+}
+
+func TestOrchestratorRetriesRecoveredStreamStopFailure(t *testing.T) {
+	ref := stream.LiveRef{StreamID: "recovered", SSRC: "ssrc-1", Generation: 8, NodeID: 2}
+	stopper := &recoveredPlanStopper{ref: ref, fakePlanStopper: fakePlanStopper{errors: []error{errors.New("zlm unavailable")}}}
+	leases := play.NewSourceLeaseRegistry()
+	recording := &fakePlanRecording{channel: &models.GbChannel{StreamID: ref.StreamID, CurrentSSRC: ref.SSRC}}
+	orchestrator := NewOrchestrator(&fakePlanLive{}, recording, leases, stopper)
+	require.Error(t, orchestrator.Stop(context.Background(), 7))
+	require.True(t, leases.HasLease(ref.StreamID))
+	require.NoError(t, orchestrator.Stop(context.Background(), 7))
+	require.False(t, leases.HasLease(ref.StreamID))
+	require.Equal(t, 2, stopper.calls)
+}
+
 func TestOrchestratorStopKeepsLiveWhenCascadeLeaseRemains(t *testing.T) {
 	live := &fakePlanLive{result: &play.Result{StreamID: "stream-1", SSRC: "ssrc-1", Generation: 4}}
 	leases := play.NewSourceLeaseRegistry()
@@ -121,6 +173,7 @@ type fakePlanRecording struct {
 	recordCalls int
 	disableErr  error
 	beginErr    error
+	channel     *models.GbChannel
 }
 
 func (f *fakePlanRecording) Enable(context.Context, uint) (*models.GbChannel, error) {
@@ -137,14 +190,36 @@ func (f *fakePlanRecording) BeginPlayback(context.Context, string) error {
 	return f.beginErr
 }
 func (f *fakePlanRecording) Disable(context.Context, uint) (*models.GbChannel, error) {
+	if f.channel != nil {
+		return f.channel, f.disableErr
+	}
 	return &models.GbChannel{}, f.disableErr
 }
 
-type fakePlanStopper struct{ calls int }
+type recoveredPlanStopper struct {
+	fakePlanStopper
+	ref stream.LiveRef
+}
 
-func (f *fakePlanStopper) StopOnNoneReader(context.Context, stream.LiveRef) (bool, error) {
+func (f *recoveredPlanStopper) CurrentLiveRef(streamID string) (stream.LiveRef, bool) {
+	return f.ref, f.ref.StreamID == streamID
+}
+
+type fakePlanStopper struct {
+	calls   int
+	errors  []error
+	lastRef stream.LiveRef
+}
+
+func (f *fakePlanStopper) StopOnNoneReader(_ context.Context, ref stream.LiveRef) (bool, error) {
 	f.calls++
-	return true, nil
+	f.lastRef = ref
+	if len(f.errors) == 0 {
+		return true, nil
+	}
+	err := f.errors[0]
+	f.errors = f.errors[1:]
+	return false, err
 }
 
 type alwaysPlanLease bool

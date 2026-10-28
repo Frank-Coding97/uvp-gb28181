@@ -215,12 +215,33 @@ func TestDisableRetainsSessionWhenStopRecordFails(t *testing.T) {
 	service := NewService(repo, fakeLocation{}, fakeRegistry{item: &node.Node{ID: 2}}, func(*node.Node) RecorderClient { return client })
 
 	got, err := service.Disable(context.Background(), channel.ID)
-	require.NoError(t, err)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "停止录像失败")
 	require.False(t, got.CloudRecordingEnabled)
 	require.Equal(t, models.CloudRecordingStateFailed, got.CloudRecordingState)
 	stored, err := repo.FindSessionByMedia(context.Background(), 2, session.VHost, session.App, session.Stream)
 	require.NoError(t, err)
 	require.NotEqual(t, models.RecordingSessionStateStopped, stored.State)
+}
+
+func TestDisableRetriesStopRecordFailureDuringReconcile(t *testing.T) {
+	repo, channel := seedRecordingChannel(t, true)
+	session := seedActiveSession(t, repo, channel)
+	client := &fakeRecorderClient{stopErr: errors.New("zlm unavailable")}
+	service := NewService(repo, fakeLocation{}, fakeRegistry{item: &node.Node{ID: 2}}, func(*node.Node) RecorderClient { return client })
+
+	_, err := service.Disable(context.Background(), channel.ID)
+	require.Error(t, err)
+	client.stopErr = nil
+
+	require.NoError(t, service.ReconcileChannel(context.Background(), channel.ID))
+	require.EqualValues(t, 2, client.stopCalls.Load())
+	stored, err := repo.FindSessionByMedia(context.Background(), 2, session.VHost, session.App, session.Stream)
+	require.NoError(t, err)
+	require.Equal(t, models.RecordingSessionStateStopped, stored.State)
+	got, err := repo.GetChannel(context.Background(), channel.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CloudRecordingStateDisabled, got.CloudRecordingState)
 }
 
 func TestConcurrentEnableDoesNotStartRecorder(t *testing.T) {

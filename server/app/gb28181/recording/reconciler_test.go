@@ -2,6 +2,7 @@ package recording
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -43,6 +44,27 @@ func TestReconcilerRunOnceStopsDisabledResidualSession(t *testing.T) {
 	stored, err := repo.FindSessionByMedia(context.Background(), session.NodeID, session.VHost, session.App, session.Stream)
 	require.NoError(t, err)
 	require.Equal(t, models.RecordingSessionStateStopped, stored.State)
+}
+
+func TestReconcilerRetriesFailedStopUntilMediaServerRecovers(t *testing.T) {
+	repo, channel := seedRecordingChannel(t, true)
+	session := seedActiveSession(t, repo, channel)
+	client := &fakeRecorderClient{stopErr: errors.New("zlm unavailable")}
+	service := newRecordingService(repo, client, fakeLocation{}, fakeRegistry{item: &node.Node{ID: 2}})
+	reconciler := NewReconciler(repo, service, time.Minute, time.Second)
+
+	_, err := service.Disable(context.Background(), channel.ID)
+	require.Error(t, err)
+	require.Error(t, reconciler.RunOnce(context.Background()))
+	require.EqualValues(t, 2, client.stopCalls.Load())
+	client.stopErr = nil
+	require.NoError(t, reconciler.RunOnce(context.Background()))
+	require.EqualValues(t, 3, client.stopCalls.Load())
+	stored, err := repo.FindSessionByID(context.Background(), session.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.RecordingSessionStateStopped, stored.State)
+	require.NoError(t, reconciler.RunOnce(context.Background()))
+	require.EqualValues(t, 3, client.stopCalls.Load())
 }
 
 func TestReconcilerStopDoesNotIntroduceBackgroundPlayback(t *testing.T) {

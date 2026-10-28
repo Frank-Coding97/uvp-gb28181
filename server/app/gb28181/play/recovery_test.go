@@ -184,6 +184,7 @@ func TestServiceStopOnNoneReaderRechecksReadersBeforeConditionalStop(t *testing.
 		}
 	}}
 	s.SetPlaybackRecordingLifecycle(lifecycle)
+	channels.c.OnDemandLive = true
 	if stopped, err := s.StopOnNoneReader(context.Background(), ref); err != nil || stopped {
 		t.Fatalf("reader recovery stopped=%v err=%v", stopped, err)
 	}
@@ -194,6 +195,14 @@ func TestServiceStopOnNoneReaderRechecksReadersBeforeConditionalStop(t *testing.
 		t.Fatalf("读者恢复时不应收尾录像,实际 %d", lifecycle.endCalls.Load())
 	}
 	z.readers = 0
+	channels.c.OnDemandLive = false
+	if stopped, err := s.StopOnNoneReader(context.Background(), ref); err != nil || stopped {
+		t.Fatalf("resident stream stopped=%v err=%v", stopped, err)
+	}
+	if z.closeCalls.Load() != 0 || channels.c.StreamID == "" {
+		t.Fatal("resident stream must remain online after recording stops")
+	}
+	channels.c.OnDemandLive = true
 	if stopped, err := s.StopOnNoneReader(context.Background(), ref); err != nil || !stopped {
 		t.Fatalf("zero readers stopped=%v err=%v", stopped, err)
 	}

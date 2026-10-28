@@ -193,6 +193,10 @@ func (s *Service) StopOnNoneReader(ctx context.Context, captured stream.LiveRef)
 	if !ok || current != captured {
 		return false, nil
 	}
+	shouldClose, err := s.ShouldCloseOnNoneReader(ctx, captured.StreamID)
+	if err != nil || !shouldClose {
+		return false, err
+	}
 	var client ZLM
 	if s.useMultiNode() {
 		mediaNode, exists := s.registry.Get(captured.NodeID)

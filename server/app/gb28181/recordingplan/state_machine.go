@@ -78,6 +78,11 @@ func DecideReconcile(input ReconcileInput) ReconcileDecision {
 	}
 
 	decision.DesiredState = models.RecordingDesiredRecording
+	if input.ActualState == models.RecordingStateStopping {
+		decision.ActualState = models.RecordingStateStopping
+		decision.Action = ActionStop
+		return decision
+	}
 	if !input.DeviceOnline {
 		decision.ActualState = models.RecordingStateWaitingDevice
 		decision.ReasonCode = ReasonDeviceOffline
@@ -132,7 +137,8 @@ func needsStop(actual string) bool {
 	switch actual {
 	case models.RecordingStateStartingStream, models.RecordingStateWaitingMedia,
 		models.RecordingStateStartingRecord, models.RecordingStateRecording,
-		models.RecordingStateRecovering, models.RecordingStateFailed:
+		models.RecordingStateRecovering, models.RecordingStateFailed,
+		models.RecordingStateStopping:
 		return true
 	default:
 		return false

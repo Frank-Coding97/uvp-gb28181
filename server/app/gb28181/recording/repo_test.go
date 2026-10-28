@@ -92,3 +92,23 @@ func TestGormRepoListsEnabledChannelsOnly(t *testing.T) {
 	require.Len(t, got, 1)
 	require.Equal(t, "on", got[0].ChannelID)
 }
+
+func TestGormRepoListsStopFailuresForRetryButSkipsStartFailures(t *testing.T) {
+	db := newRepoTestDB(t)
+	repo := NewGormRepo(db)
+	sessions := []models.GbRecordingSession{
+		{ChannelID: 1, DeviceID: "d", NodeID: 1, VHost: "v", App: "a", Stream: "active", State: models.RecordingSessionStateRecording},
+		{ChannelID: 1, DeviceID: "d", NodeID: 1, VHost: "v", App: "a", Stream: "start-failed", State: models.RecordingSessionStateFailed, LastError: "启动录像失败: zlm unavailable"},
+		{ChannelID: 1, DeviceID: "d", NodeID: 1, VHost: "v", App: "a", Stream: "stop-failed", State: models.RecordingSessionStateFailed, LastError: "停止录像失败: zlm unavailable"},
+		{ChannelID: 1, DeviceID: "d", NodeID: 1, VHost: "v", App: "a", Stream: "stopped", State: models.RecordingSessionStateStopped},
+	}
+	for index := range sessions {
+		require.NoError(t, repo.UpsertSession(context.Background(), &sessions[index]))
+	}
+
+	got, err := repo.ListUnfinishedSessions(context.Background())
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	require.Equal(t, "active", got[0].Stream)
+	require.Equal(t, "stop-failed", got[1].Stream)
+}
