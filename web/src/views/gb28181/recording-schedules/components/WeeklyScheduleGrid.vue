@@ -237,16 +237,18 @@ button.time-slot:hover {
   cursor: default;
 }
 
-/* ⛔⛔ 选中格必须用 --uvp-solid-bg（实心面），**不能**用 --uvp-brand：
- *   --uvp-brand 是**文字/图标色**，暗色下被调成浅蓝 #60a5fa（否则字在深底上看不见），
- *   拿它当整格底色 ⇒ 暗色下是一大片浅蓝发白，和主按钮的深蓝完全不同色（老板要求"和按钮同步"）。
- *   正确口径：实心面走 --uvp-solid-bg（两主题同为 #2563eb，与主按钮一致），
- *   配 --uvp-solid-text 白字，对比度约 5:1。
- *   ⚠️ 渐变两端也必须用 solid 组（hover-bg / active-bg），不能混 brand。
- *   实测：改前 #a3cfff（浅蓝）→ 改后 #2563eb，与「一键清空」按钮同色。 */
+/* 浅色保留主色实心面；暗色大面积选区在下方混入行底色，减弱饱和度与格线亮边。 */
 .time-slot.active {
   background: linear-gradient(180deg, var(--uvp-solid-hover-bg), var(--uvp-solid-bg));
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 18%);
+}
+:global(body[arco-theme="dark"] .week-slot-grid .time-slot.active) {
+  background: color-mix(in srgb, var(--uvp-brand) 32%, var(--uvp-table-row-bg));
+  border-right-color: color-mix(in srgb, var(--uvp-brand) 12%, var(--uvp-table-row-bg));
+  box-shadow: none;
+}
+:global(body[arco-theme="dark"] .week-slot-grid button.time-slot.active:hover) {
+  background: color-mix(in srgb, var(--uvp-brand) 42%, var(--uvp-table-row-bg));
 }
 .day-actions {
   position: sticky;
