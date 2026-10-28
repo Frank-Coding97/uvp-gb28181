@@ -29,14 +29,14 @@
     <div class="schedule-drawer-content">
       <section class="schedule-summary-strip">
         <div>
-          <span>状态</span
+          <span class="schedule-summary-label">状态</span
           ><a-tag :color="schedule.enabled ? 'green' : 'gray'">{{ schedule.enabled ? "已启用" : "已停用" }}</a-tag>
         </div>
         <div>
-          <span>执行周期</span><strong>{{ schedule.cycle }}</strong>
+          <span class="schedule-summary-label">执行周期</span><strong>{{ schedule.cycle }}</strong>
         </div>
         <div>
-          <span>应用通道</span><strong>{{ schedule.channelCount }} 个</strong>
+          <span class="schedule-summary-label">应用通道</span><strong>{{ schedule.channelCount }} 个</strong>
         </div>
       </section>
 
@@ -72,12 +72,6 @@
           >
 
           <section class="schedule-drawer-section assigned-channel-section">
-            <div class="section-title">
-              <div>
-                <h3>已分配通道</h3>
-                <span>以下通道的录像模式为“按计划”</span>
-              </div>
-            </div>
             <a-table
               class="uvp-data-table assigned-channel-table"
               :data="assignedChannels"
@@ -272,9 +266,12 @@ function stateColor(state: string) {
 .schedule-summary-strip > div:last-child {
   border-right: 0;
 }
-.schedule-summary-strip span {
+.schedule-summary-label {
   font-size: 11px;
   color: var(--uvp-text-tertiary);
+}
+.schedule-summary-strip .arco-tag {
+  align-self: flex-start;
 }
 .schedule-summary-strip strong {
   overflow: hidden;

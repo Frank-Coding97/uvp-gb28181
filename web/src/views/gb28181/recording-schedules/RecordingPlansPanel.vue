@@ -133,13 +133,11 @@
                     <a-link class="uvp-table-action uvp-table-action--assign" :disabled="!canAssign" @click="openAssign(record)"
                       ><template #icon><Link2 :size="13" /></template>分配通道</a-link
                     >
-                    <a-popconfirm
-                      content="确认删除该录像计划？已分配通道的计划将拒绝删除。"
-                      :disabled="!canMaintain"
-                      @ok="removePlan(record)"
-                      ><a-link class="uvp-table-action uvp-table-action--delete" :disabled="!canMaintain"
-                        ><template #icon><Trash2 :size="13" /></template>删除</a-link
-                      ></a-popconfirm
+                    <a-link
+                      class="uvp-table-action uvp-table-action--delete"
+                      :disabled="!canMaintain || deletingPlanId !== null"
+                      @click="removePlan(record)"
+                      ><template #icon><Trash2 :size="13" /></template>删除</a-link
                     >
                   </div>
                 </template>
@@ -361,7 +359,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
-import { Message } from "@arco-design/web-vue";
+import { Message, Modal } from "@arco-design/web-vue";
 import dayjs from "dayjs";
 import {
   Activity,
@@ -440,6 +438,7 @@ const executionPlanTotal = ref(0);
 const executionChannelTotal = ref(0);
 const executionStatusCounts = ref<Record<string, number>>({});
 const plansLoading = ref(false);
+const deletingPlanId = ref<string | null>(null);
 const executionPlansLoading = ref(false);
 const executionChannelsLoading = ref(false);
 const detailChannels = ref<ScheduleChannel[]>([]);
@@ -643,10 +642,32 @@ async function confirmAssignment(payload: {
   );
   await Promise.all([loadPlans(), loadExecutionPlans(false)]);
 }
-async function removePlan(plan: RecordingSchedule) {
-  await deleteRecordingPlan(Number(plan.id));
-  Message.success(`录像计划“${plan.name}”已删除`);
-  await Promise.all([loadPlans(), loadEnabledPlanTotal()]);
+function removePlan(plan: RecordingSchedule) {
+  if (!canMaintain.value || deletingPlanId.value !== null) return;
+  Modal.warning({
+    title: "删除录像计划",
+    content: `确定删除录像计划「${plan.name}」吗？已分配通道的计划无法删除，请先解除分配。`,
+    hideCancel: false,
+    okText: "删除",
+    cancelText: "取消",
+    okButtonProps: { status: "danger" },
+    onBeforeOk: async () => {
+      if (!canMaintain.value || deletingPlanId.value !== null) return false;
+      deletingPlanId.value = plan.id;
+      try {
+        await deleteRecordingPlan(Number(plan.id));
+        Message.success(`录像计划“${plan.name}”已删除`);
+        // 删除已成功，刷新失败不应让用户再次提交删除；请求层负责展示接口错误。
+        await Promise.allSettled([loadPlans(), loadEnabledPlanTotal()]);
+        return true;
+      } catch {
+        // 请求层已展示后端错误，保留确认框以便重试。
+        return false;
+      } finally {
+        deletingPlanId.value = null;
+      }
+    }
+  });
 }
 function stateTone(state: ScheduleChannel["state"]) {
   if (state === "录像中") return "success";
@@ -1074,6 +1095,27 @@ defineExpose({ refresh });
 .schedule-actions {
   flex-wrap: nowrap;
   white-space: nowrap;
+}
+.schedule-actions .uvp-table-action--edit:not(.arco-link-disabled) {
+  color: #15803d;
+}
+.schedule-actions .uvp-table-action--edit:not(.arco-link-disabled):hover {
+  color: #15803d;
+  background: rgb(34 197 94 / 10%);
+}
+:global(body[arco-theme="dark"] .recording-schedules-page .schedule-actions .uvp-table-action--edit:not(.arco-link-disabled)) {
+  color: #4ade80;
+}
+.schedule-actions .uvp-table-action--assign:not(.arco-link-disabled):hover {
+  color: #5a3f89;
+}
+:global(
+  body[arco-theme="dark"] .recording-schedules-page .schedule-actions .uvp-table-action--assign:not(.arco-link-disabled):hover
+) {
+  color: #c4b5fd;
+}
+.schedule-actions .uvp-table-action--delete:not(.arco-link-disabled):hover {
+  color: var(--uvp-danger);
 }
 .execution-workspace {
   display: flex;

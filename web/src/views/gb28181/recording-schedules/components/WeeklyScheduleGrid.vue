@@ -243,12 +243,12 @@ button.time-slot:hover {
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 18%);
 }
 :global(body[arco-theme="dark"] .week-slot-grid .time-slot.active) {
-  background: color-mix(in srgb, var(--uvp-brand) 32%, var(--uvp-table-row-bg));
-  border-right-color: color-mix(in srgb, var(--uvp-brand) 12%, var(--uvp-table-row-bg));
+  background: color-mix(in srgb, var(--uvp-brand) 78%, var(--uvp-table-row-bg));
+  border-right-color: color-mix(in srgb, var(--uvp-brand) 40%, var(--uvp-table-row-bg));
   box-shadow: none;
 }
 :global(body[arco-theme="dark"] .week-slot-grid button.time-slot.active:hover) {
-  background: color-mix(in srgb, var(--uvp-brand) 42%, var(--uvp-table-row-bg));
+  background: color-mix(in srgb, var(--uvp-brand) 88%, var(--uvp-table-row-bg));
 }
 .day-actions {
   position: sticky;

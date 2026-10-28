@@ -36,13 +36,13 @@ describe("WeeklyScheduleGrid shared modes", () => {
   it("softens dark selected slots without bright inset outlines in both grid modes", () => {
     const active =
       source.match(/:global\(body\[arco-theme="dark"\] \.week-slot-grid \.time-slot\.active\)\s*\{([^}]*)}/s)?.[1] ?? "";
-    expect(active).toContain("color-mix(in srgb, var(--uvp-brand) 32%, var(--uvp-table-row-bg))");
+    expect(active).toContain("color-mix(in srgb, var(--uvp-brand) 78%, var(--uvp-table-row-bg))");
     expect(active).toContain("box-shadow: none");
     expect(active).toContain("border-right-color:");
     const hover =
       source.match(/:global\(body\[arco-theme="dark"\] \.week-slot-grid button\.time-slot\.active:hover\)\s*\{([^}]*)}/s)?.[1] ??
       "";
-    expect(hover).toContain("color-mix(in srgb, var(--uvp-brand) 42%, var(--uvp-table-row-bg))");
+    expect(hover).toContain("color-mix(in srgb, var(--uvp-brand) 88%, var(--uvp-table-row-bg))");
   });
 
   it("emits immutable slot updates only from edit interactions", () => {

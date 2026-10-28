@@ -116,6 +116,22 @@ describe("recording schedule prototype", () => {
     expect(source).not.toContain("uvp-table-action--danger");
   });
 
+  it("routes plan deletion through the standard warning dialog instead of a popconfirm", () => {
+    expect(source).not.toContain("<a-popconfirm");
+    expect(source).toContain('@click="removePlan(record)"');
+    expect(source).toContain("Modal.warning({");
+  });
+
+  it("gives editing its own green tone while preserving disabled links", () => {
+    expect(source).toMatch(/\.schedule-actions \.uvp-table-action--edit:not\(\.arco-link-disabled\)\s*\{[^}]*color:\s*#15803d;/s);
+    expect(source).toMatch(
+      /:global\(body\[arco-theme="dark"\] \.recording-schedules-page \.schedule-actions \.uvp-table-action--edit:not\(\.arco-link-disabled\)\)\s*\{[^}]*color:\s*#4ade80;/s
+    );
+    expect(source).toMatch(
+      /\.schedule-actions \.uvp-table-action--edit:not\(\.arco-link-disabled\):hover\s*\{[^}]*background:\s*rgb\(34 197 94 \/ 10%\);/s
+    );
+  });
+
   it("splits header and body so the header stays frozen, and never compresses columns", () => {
     // ⛔⛔ 只给 `scroll.x` 不给 `y` 时 Arco 不拆「表头 / 表体」两个滚动容器：表头不冻结，
     // 行数超出时最后几行被 `overflow: hidden` 直接裁掉（2026-10-22 实机：10 行只看到 9 行半，

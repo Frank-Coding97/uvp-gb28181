@@ -49,6 +49,15 @@ describe("RecordingScheduleDrawer high fidelity workflow", () => {
     expect(schedulePane).toContain('<WeeklyScheduleGrid :slots="detailWeekSlots" :editable="false" />');
     expect(schedulePane).not.toContain("assigned-channel-table");
     expect(channelsPane).toContain("assigned-channel-table");
+    expect(channelsPane).not.toContain('class="section-title"');
+    expect(channelsPane).not.toContain("以下通道的录像模式");
+  });
+
+  it("keeps the summary status tag compact and preserves its semantic color", () => {
+    expect(source).toContain('class="schedule-summary-label"');
+    expect(source).toMatch(/\.schedule-summary-label\s*\{/);
+    expect(source).not.toMatch(/\.schedule-summary-strip\s+span\s*\{/);
+    expect(source).toMatch(/\.schedule-summary-strip\s+\.arco-tag\s*\{[^}]*align-self:\s*flex-start;/s);
   });
 
   it("uses the same weekly grid component as the editor in read-only mode", () => {
