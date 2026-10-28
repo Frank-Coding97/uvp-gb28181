@@ -290,6 +290,8 @@ Ok "仓库结构 / 第三方二进制 / 工具链齐备（vendor: $VendorDir）"
 # ------------------------------------------------------------------ 编译 ----
 $ServerExeOut = Join-Path $ServerDir 'bin\uvp-server.exe'
 $SetupExeOut  = Join-Path $ServerDir 'bin\uvp-setup.exe'
+# 升级助手：与 Linux 版同一个 main，Windows 侧另外补了平台实现（AF_UNIX + 就地替换适配器）。
+$UpdaterExeOut = Join-Path $ServerDir 'bin\uvp-updater.exe'
 $DistIndex    = Join-Path $WebDir 'dist\index.html'
 
 if ($SkipBuild) {
@@ -305,8 +307,10 @@ if ($SkipBuild) {
             -Arguments @('build', '-ldflags', '-s -w', '-o', $ServerExeOut, '.')
         Invoke-Native -FilePath $goExe -What '辅助工具编译（uvp-setup）' `
             -Arguments @('build', '-ldflags', '-s -w', '-o', $SetupExeOut, '.\cmd\uvp-setup')
+        Invoke-Native -FilePath $goExe -What '升级助手编译（uvp-updater）' `
+            -Arguments @('build', '-ldflags', '-s -w', '-o', $UpdaterExeOut, '.\cmd\uvp-updater')
     } finally { Pop-Location }
-    Ok "uvp-server.exe $(Format-Size (Get-Item $ServerExeOut).Length) · uvp-setup.exe $(Format-Size (Get-Item $SetupExeOut).Length)"
+    Ok "uvp-server.exe $(Format-Size (Get-Item $ServerExeOut).Length) · uvp-setup.exe $(Format-Size (Get-Item $SetupExeOut).Length) · uvp-updater.exe $(Format-Size (Get-Item $UpdaterExeOut).Length)"
 
     Log "阶段 1/4 · 构建前端产物（SIP 默认端口 $SipPort 构建期注入）"
     $viteJs = Join-Path $WebDir 'node_modules\vite\bin\vite.js'
@@ -395,7 +399,7 @@ $Pkg   = Join-Path $Stage $PkgStem
 #   放在里面会被一起压进包根（`_avatar_check.py` 出现在客户包里）。
 $HelperDir = Join-Path ([System.IO.Path]::GetTempPath()) ("uvp-build-helpers-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $Stage, $HelperDir | Out-Null
-foreach ($d in @('bin', 'config', 'data\redis', 'logs', 'run',
+foreach ($d in @('bin', 'config', 'data\redis', 'logs', 'run', 'updater',
                  'resource\public', 'resource\baseline',
                  'vendor\redis', 'vendor\nginx', 'vendor\zlm')) {
     New-Item -ItemType Directory -Force -Path (Join-Path $Pkg $d) | Out-Null
@@ -405,6 +409,13 @@ foreach ($d in @('bin', 'config', 'data\redis', 'logs', 'run',
 Copy-Item -LiteralPath $ServerExeOut -Destination (Join-Path $Pkg 'bin\uvp-server.exe') -Force
 Copy-Item -LiteralPath $SetupExeOut  -Destination (Join-Path $Pkg 'bin\uvp-setup.exe')  -Force
 Det 'bin\uvp-server.exe · bin\uvp-setup.exe'
+
+# ---- updater\：升级助手固定在安装根，不随版本切换被替换（与 Linux 版布局一致）----
+if (-not (Test-Path -LiteralPath $UpdaterExeOut)) {
+    Fail "缺少升级助手二进制：$UpdaterExeOut（用 -SkipBuild 时请在 server\bin 放好已编译的 uvp-updater.exe）"
+}
+Copy-Item -LiteralPath $UpdaterExeOut -Destination (Join-Path $Pkg 'updater\uvp-updater.exe') -Force
+Det "updater\uvp-updater.exe $(Format-Size (Get-Item $UpdaterExeOut).Length)"
 
 # ---- vendor\redis：包内自带，只连回环 ----
 Copy-Tree -Source $VendorRedis -Destination (Join-Path $Pkg 'vendor\redis')
@@ -693,7 +704,7 @@ Write-Utf8NoBom -Path (Join-Path $Pkg 'config\config.env') -Text $envBody
 Ok 'config.env 已写入（16 个端口 + SIP 报文诊断密钥 + OpenAPI 主密钥）'
 
 # ---- 顶层脚本与说明 ----
-foreach ($f in @('uvp-gb28181-ctl.ps1', 'start.cmd', 'stop.cmd', 'status.cmd', 'reset-password.cmd')) {
+foreach ($f in @('uvp-gb28181-ctl.ps1', 'uvp-gb28181-ctl.cmd', 'start.cmd', 'stop.cmd', 'status.cmd', 'reset-password.cmd')) {
     $src = Join-Path $WinDir $f
     if (-not (Test-Path -LiteralPath $src)) { Fail "缺少 $f（deploy\standalone-windows\ 下应有）" }
     Copy-Item -LiteralPath $src -Destination (Join-Path $Pkg $f) -Force

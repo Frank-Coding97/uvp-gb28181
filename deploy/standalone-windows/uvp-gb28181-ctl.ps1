@@ -26,7 +26,10 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [string]$Action = 'start'
+    [string]$Action = 'start',
+    # 仅供升级助手使用：migrate 要跑**新包**里的后端，而不是本目录的旧程序。
+    [Parameter(Position = 1)]
+    [string]$ServerBinary = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -77,6 +80,21 @@ $BackendPidFile = Join-Path $RunDir 'backend.pid'
 $RedisPidFile   = Join-Path $RunDir 'redis.pid'
 $ZlmPidFile     = Join-Path $RunDir 'zlm.pid'
 $NginxPidFile   = Join-Path $RunDir 'nginx.pid'
+
+# ---------------------------------------------------------------- 升级助手 ----
+# 与 Linux 版布局一致：updater\ 固定在安装根，不随版本切换被替换。
+# ⛔ 助手用 Unix 域套接字（Windows 10 1803+ 的 AF_UNIX），不是命名管道 ——
+#    Go 的 net 包在 Windows 上支持 unix socket，后端 CallUnix 一行都不用改。
+$UpdaterDir     = Join-Path $Root 'updater'
+$UpdaterExe     = Join-Path $UpdaterDir 'uvp-updater.exe'
+$UpdaterCtl     = Join-Path $Root 'uvp-gb28181-ctl.cmd'
+$UpdaterSocket  = Join-Path $RunDir 'updater.sock'
+$UpdaterState   = Join-Path $Root 'updater-state'
+$UpdaterReg     = Join-Path $ConfDir 'updater-registration.json'
+$UpdaterPidFile = Join-Path $RunDir 'updater.pid'
+$UpdaterLog     = Join-Path $LogsDir 'updater.log'
+$UpgradeInbox   = Join-Path $DataDir 'upgrade-inbox'
+$ReadinessPath  = '/internal/updater/readiness'
 
 # ---------------------------------------------------------------- 输出样式 ----
 # 三级缩进：`[uvp-gb28181] 阶段行` / `（14 格）✓ 结果行` / `（14 格）· 明细行`
@@ -1117,6 +1135,8 @@ function Start-Backend {
     #   ⚠️ 为什么不写进 config.yml：出包时不知道客户的解压路径，写不了绝对路径；
     #     而 PrepareStateDir 对**显式值不做绝对化**，塞相对路径会埋雷。⇒ 只能运行时注入。
     $env:UVP_STANDALONE_ROOT = $Root
+    # 升级页把请求转发给助手（生产构建 local=false），socket 位置只能由这里告诉后端。
+    $env:UVP_UPDATER_SOCKET = $UpdaterSocket
     $env:UVP_PROCESS_AUTHORITY_DIR = Join-Path $DataDir 'process-authority'
     Initialize-ProcessAuthorityDir -Path $env:UVP_PROCESS_AUTHORITY_DIR
     $log = Join-Path $LogsDir 'backend.log'
@@ -1218,6 +1238,133 @@ function Start-Nginx {
 }
 
 # ---------------------------------------------------------------- 动作 ----
+function Test-UpdaterRunning {
+    if (-not (Test-Path -LiteralPath $UpdaterPidFile)) { return $false }
+    $raw = (Get-Content -LiteralPath $UpdaterPidFile -ErrorAction SilentlyContinue | Select-Object -First 1)
+    $procId = 0
+    if (-not [int]::TryParse("$raw".Trim(), [ref]$procId)) { return $false }
+    return (Test-PidAlive -ProcessId $procId)
+}
+
+# 升级时新包里的助手镜像只能落成 `uvp-updater.exe.new`：Windows 会锁住正在运行的
+# 映像文件，就地覆盖必然失败。这里在**助手尚未启动**时把它换上去，换不动就留着下次，
+# 绝不因此让启动失败（助手版本落后不影响业务）。
+function Install-UpdaterImage {
+    $staged = "$UpdaterExe.new"
+    if (-not (Test-Path -LiteralPath $staged)) { return }
+    if (Test-UpdaterRunning) { return }
+    try {
+        if (Test-Path -LiteralPath $UpdaterExe) {
+            Remove-Item -LiteralPath $UpdaterExe -Force -ErrorAction Stop
+        }
+        Move-Item -LiteralPath $staged -Destination $UpdaterExe -Force -ErrorAction Stop
+        Write-UvpDet '升级助手已更新到本版本'
+    } catch {
+        Write-UvpWarn "升级助手镜像更新失败（将在下次启动重试）：$($_.Exception.Message)"
+    }
+}
+
+# 注册信息每次启动都重写：端口、安装路径、控制脚本都可能变，而助手只认这份 JSON。
+# 幂等（writeRegistration 是读-改-写），且带 WithOfficialDefaults，所以升级源与可信公钥
+# 不需要客户配置。
+function Sync-UpdaterRegistration {
+    param([hashtable]$Ports)
+    if (-not (Test-Path -LiteralPath $UpdaterDir)) { New-Item -ItemType Directory -Force -Path $UpdaterDir | Out-Null }
+    if (-not (Test-Path -LiteralPath $UpdaterState)) { New-Item -ItemType Directory -Force -Path $UpdaterState | Out-Null }
+    if (-not (Test-Path -LiteralPath $UpgradeInbox)) { New-Item -ItemType Directory -Force -Path $UpgradeInbox | Out-Null }
+    $readiness = "http://127.0.0.1:$($Ports.HTTP)$ReadinessPath"
+    # ⛔ 这里**不要**用 Quote-NativeArg：`&` 调用原生命令时 PowerShell 自己会按需加引号，
+    #   再加一层会变成 `--root "\"D:\uvp\""`，助手收到带引号的路径直接判定非法。
+    #   （Quote-NativeArg 只用于 Start-Process 的 -ArgumentList。）
+    $null = Invoke-NativeText -Exe $UpdaterExe -Arguments @(
+        'register',
+        '--config-dir', $ConfDir,
+        '--registration', $UpdaterReg,
+        '--deployment', 'standalone',
+        '--root', $Root,
+        '--state', $UpdaterState,
+        '--control', $UpdaterCtl,
+        '--staging-root', $UpgradeInbox,
+        '--readiness-url', $readiness)
+    if ($LASTEXITCODE -ne 0) {
+        return $false
+    }
+    return $true
+}
+
+function Start-Updater {
+    param([hashtable]$Ports)
+    if (-not (Test-Path -LiteralPath $UpdaterExe)) {
+        Write-UvpWarn '本包未包含升级助手（updater\uvp-updater.exe），在线升级不可用'
+        return
+    }
+    Install-UpdaterImage
+    # 后端靠这个环境变量找 socket；助手不在时也设上，页面只会显示"助手不可用"，
+    # 不会影响其余功能。
+    $env:UVP_UPDATER_SOCKET = $UpdaterSocket
+    if (Test-UpdaterRunning -and (Test-Path -LiteralPath $UpdaterSocket)) {
+        Write-UvpDet '升级助手已在运行'
+        return
+    }
+    if (-not (Sync-UpdaterRegistration -Ports $Ports)) {
+        Write-UvpWarn "升级助手注册失败，在线升级不可用（详见 $(Join-Path $LogsDir 'updater.log')）"
+        return
+    }
+    # 上次被强杀会留下失效的 socket 文件，不清掉 Listen 会失败。
+    Remove-Item -LiteralPath $UpdaterSocket -Force -ErrorAction SilentlyContinue
+    Start-Child -Name 'updater' -Exe $UpdaterExe -WorkDir $Root -LogPath $UpdaterLog -PidPath $UpdaterPidFile -Arguments @(
+        'serve',
+        '--socket', (Quote-NativeArg $UpdaterSocket),
+        '--state', (Quote-NativeArg $UpdaterState),
+        '--registration', (Quote-NativeArg $UpdaterReg)) | Out-Null
+    for ($i = 0; $i -lt 50; $i++) {
+        if (Test-Path -LiteralPath $UpdaterSocket) {
+            Write-UvpOk '升级助手已启动'
+            return
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    Write-UvpWarn "升级助手未在 5 秒内就绪，在线升级不可用（详见 $UpdaterLog）"
+}
+
+function Stop-Updater {
+    if (-not (Test-Path -LiteralPath $UpdaterPidFile)) {
+        Remove-Item -LiteralPath $UpdaterSocket -Force -ErrorAction SilentlyContinue
+        return
+    }
+    $raw = (Get-Content -LiteralPath $UpdaterPidFile -ErrorAction SilentlyContinue | Select-Object -First 1)
+    $procId = 0
+    if ([int]::TryParse("$raw".Trim(), [ref]$procId)) {
+        if (Test-PidAlive -ProcessId $procId) { Stop-ProcessTree -ProcessId $procId }
+    }
+    Remove-Item -LiteralPath $UpdaterPidFile -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $UpdaterSocket -Force -ErrorAction SilentlyContinue
+}
+
+function Invoke-UpdaterStatus {
+    if (Test-UpdaterRunning) {
+        Write-UvpDet ('升级助手  ' + (Format-Status -Alive $true -Detail 'updater.sock'))
+    } else {
+        Write-UvpDet ('升级助手  ' + (Format-Status -Alive $false -Detail ''))
+    }
+}
+
+# 数据库迁移：由升级助手在「停服之后、替换之前」调用，参数里带的是**新包**的后端。
+# ⛔ 工作目录必须是包根 —— 后端按 cwd 解析 config/config.yml 与 data\uvp.db，
+#   换成暂存目录会把迁移跑在一个空库上（看着成功，实际没动正式库）。
+function Invoke-Migrate {
+    param([string]$Binary)
+    if ([string]::IsNullOrWhiteSpace($Binary)) { $Binary = $ServerExe }
+    if (-not (Test-Path -LiteralPath $Binary)) { Fail "找不到待迁移的后端程序：$Binary" }
+    $envMap = Read-EnvFileMap -Path $EnvFile
+    foreach ($key in @('UVP_SIP_TRACE_ENCRYPTION_KEY', 'UVP_OPENAPI_MASTER_KEY')) {
+        if ($envMap.ContainsKey($key)) { Set-Item -Path "env:$key" -Value $envMap[$key] }
+    }
+    Set-Location -LiteralPath $Root
+    & $Binary '-migrate-up'
+    if ($LASTEXITCODE -ne 0) { Fail "数据库迁移失败（退出码 $LASTEXITCODE）" }
+}
+
 function Invoke-Start {
     Write-Banner
     $config = Get-Config
@@ -1242,6 +1389,8 @@ function Invoke-Start {
     Start-Zlm -Ports $config.Ports
     Start-Nginx -Ports $config.Ports
     Start-Redis -Ports $config.Ports
+    # 助手必须早于后端：后端启动时就会去探 socket 判断"能否在线升级"。
+    Start-Updater -Ports $config.Ports
     Start-Backend -Ports $config.Ports
 
     # 收尾：先给**端口规划**（技术明细，客户要拿去开防火墙），
@@ -1285,6 +1434,9 @@ function Invoke-Stop {
         Start-Sleep -Milliseconds 400
     }
     Stop-Component -Label 'Redis' -PidPath $RedisPidFile -ExePath $RedisExe
+
+    # 助手最后停：升级任务的状态归它管，业务先走完再收它。
+    Stop-Updater
 
     # 兜底：把本包目录下的残留进程再扫一遍（pid 文件丢失场景）
     $leftover = @()
@@ -1369,7 +1521,10 @@ switch ($Action.ToLower()) {
     'stop'           { Invoke-Stop }
     'restart'        { Invoke-Stop; Invoke-Start }
     'restart-zlm'    { $config = Get-Config; Stop-Component -Label 'ZLM' -PidPath $ZlmPidFile -ExePath $ZlmExe; Start-Zlm -Ports $config.Ports }
-    'status'         { Invoke-Status }
+    'status'         { Invoke-Status; Invoke-UpdaterStatus }
     'reset-password' { Invoke-ResetPassword }
+    # 仅供升级助手调用（停服之后、替换程序之前），客户不需要手工执行。
+    'migrate'        { Invoke-Migrate -Binary $ServerBinary }
+    'updater-status' { Invoke-UpdaterStatus }
     default          { Show-Usage; exit 2 }
 }
