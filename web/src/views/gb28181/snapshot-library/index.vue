@@ -45,7 +45,12 @@
                  它是"这次要看多少张"的前置开关，属于查询条件的一部分；
                  放工具条上则要等勾了选才出现，而勾选框本身又只在批量模式显示 ——
                  鸡生蛋，用户根本找不到从哪进入批量模式。 -->
-            <a-button :type="batchMode ? 'primary' : 'secondary'" data-testid="library-batch-toggle" @click="toggleBatchMode">
+            <a-button
+              :type="batchMode ? 'primary' : 'secondary'"
+              class="library-selection-action library-batch-toggle"
+              data-testid="library-batch-toggle"
+              @click="toggleBatchMode"
+            >
               <template #icon><CheckSquare :size="15" /></template>
               {{ batchMode ? "退出批量选择" : "批量选择" }}
             </a-button>
@@ -80,7 +85,13 @@
              勾选一个自己都拉不到的集合等于骗人。范围限定在「本页」。 -->
         <div v-if="batchMode" class="library-batch" data-testid="library-batch-bar">
           <span class="library-batch-count">已选 {{ selectedIds.size }} 张</span>
-          <a-button size="small" data-testid="library-select-all" @click="toggleSelectAll">
+          <a-button
+            size="small"
+            type="secondary"
+            class="library-selection-action"
+            data-testid="library-select-all"
+            @click="toggleSelectAll"
+          >
             {{ allSelected ? "取消本页全选" : "全选本页" }}
           </a-button>
           <a-button size="small" data-testid="library-clear-selection" @click="clearSelection">清空</a-button>
@@ -97,24 +108,19 @@
           <!-- ⛔ 这句说明刻意写短：原句太长会在窄屏把后面的分页器挤到换行，
                而"会不会自动合成压缩包"这种问题用半透明小字反而更难读。 -->
           <span class="library-batch-note">逐张下载，不合成压缩包</span>
-          <!-- ⛔ 删除是**不可恢复**的（后端连磁盘 jpg 一起删），所以必须：
-               ① 用 `a-popconfirm` 而不是 `Modal.confirm`（后者在暗色下样式突兀、
-                  且记忆里已有「弹层 prop 名不统一」的坑，popconfirm 少一层风险）；
-               ② 文案写明**会连磁盘文件一起删**、要**写清张数**（"删 3 张"比"确定吗？"可核对）；
-               ③ 删完必须**退出批量模式并清空选择** —— 否则 selectedIds 里
-                  留着已被删掉的 id，工具条会一直显示"已选 3 张"而列表只剩 2 张。 -->
-          <a-popconfirm
+          <a-button
             v-if="selectedIds.size"
-            :content="`确定删除这 ${selectedIds.size} 张抓拍图？磁盘上的图片文件也会一并删除，无法恢复。`"
-            type="warning"
-            :data-testid="`library-batch-delete-confirm-${selectedIds.size}`"
-            @ok="deleteSelected"
+            size="small"
+            type="primary"
+            status="danger"
+            data-testid="library-batch-delete"
+            :loading="deleting"
+            :disabled="deleting"
+            @click="requestDeleteSelected"
           >
-            <template #icon><Delete :size="15" /></template>
-            <a-button size="small" type="error" data-testid="library-batch-delete" :loading="deleting" :disabled="deleting">
-              {{ deleting ? "正在删除…" : "批量删除" }}
-            </a-button>
-          </a-popconfirm>
+            <template #icon><Delete :size="14" /></template>
+            {{ deleting ? "正在删除…" : "批量删除" }}
+          </a-button>
         </div>
 
         <div class="library-body">
@@ -126,17 +132,20 @@
               :key="item.id"
               class="library-card"
               :class="{
+                'library-card--selectable': batchMode,
                 'library-card--selected': batchMode && selectedIds.has(item.id),
                 'library-card--active': detail?.id === item.id
               }"
               :data-snapshot-id="item.id"
+              @click="batchMode && toggleSelect(item.id)"
             >
               <button
                 type="button"
                 class="library-thumb"
-                :title="`预览大图 · ${item.fileName}`"
-                :aria-label="`预览 ${item.channelName || item.channelCode} 的抓拍图`"
-                @click="openPreview(item)"
+                :title="batchMode ? '点击选择或取消选择' : `预览大图 · ${item.fileName}`"
+                :aria-label="`${batchMode ? '选择或取消选择' : '预览'} ${item.channelName || item.channelCode} 的抓拍图`"
+                :aria-pressed="batchMode ? selectedIds.has(item.id) : undefined"
+                @click.stop="batchMode ? toggleSelect(item.id) : openPreview(item)"
               >
                 <!-- ⛔ 取图接口在鉴权组内，src 必须经 imageUrlFor 补 ?token=，直连会整页 401 破图。 -->
                 <img
@@ -230,6 +239,7 @@
                     class="library-pick"
                     :model-value="selectedIds.has(item.id)"
                     :data-testid="`library-pick-${item.id}`"
+                    @click.stop
                     @change="toggleSelect(item.id)"
                   >
                     选这张
@@ -408,7 +418,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { Message } from "@arco-design/web-vue";
+import { Message, Modal } from "@arco-design/web-vue";
 import { CheckSquare, Delete, Download, Eye, ImageOff, RotateCcw, Search } from "@lucide/vue";
 import { getAccessToken } from "@/utils/auth";
 import { getBaseUrl } from "@/api/utils";
@@ -634,6 +644,20 @@ async function deleteSelected() {
   }
 }
 
+function requestDeleteSelected() {
+  if (deleting.value || !selectedIds.value.size) return;
+  const count = selectedIds.value.size;
+  Modal.confirm({
+    title: "批量删除抓拍图",
+    content: `将永久删除选中的 ${count} 张抓拍图及磁盘文件，删除后不可恢复。`,
+    okText: "删除",
+    cancelText: "取消",
+    okButtonProps: { status: "danger" },
+    escToClose: true,
+    onOk: () => deleteSelected()
+  });
+}
+
 function clearSelection() {
   selectedIds.value = new Set();
 }
@@ -856,6 +880,26 @@ onMounted(() => {
 .library-notice {
   margin: 0;
 }
+.library-selection-action.arco-btn-secondary {
+  color: var(--uvp-brand);
+  background: var(--uvp-brand-soft);
+  border-color: color-mix(in srgb, var(--uvp-brand) 32%, var(--uvp-search-secondary-btn-border));
+  box-shadow: var(--uvp-search-secondary-btn-shadow);
+}
+.library-selection-action.arco-btn-secondary:hover {
+  color: var(--uvp-brand-strong);
+  background: color-mix(in srgb, var(--uvp-brand) 20%, var(--uvp-search-secondary-btn-bg));
+  border-color: color-mix(in srgb, var(--uvp-brand) 48%, var(--uvp-search-secondary-btn-border));
+}
+.library-batch-toggle.arco-btn-primary {
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
+  border-color: var(--uvp-solid-bg);
+}
+.library-batch-toggle.arco-btn-primary:hover {
+  background: var(--uvp-solid-hover-bg);
+  border-color: var(--uvp-solid-hover-bg);
+}
 .library-session {
   display: flex;
   flex-wrap: wrap;
@@ -920,6 +964,9 @@ onMounted(() => {
 }
 .library-card:hover {
   border-color: var(--uvp-primary);
+}
+.library-card--selectable {
+  cursor: pointer;
 }
 
 /* ⛔ 选中态用左侧实心条而不是整块高亮底色：底色会盖住缩略图本身的明暗，

@@ -12,6 +12,7 @@ const pageSource = readFileSync(resolve(process.cwd(), "src/views/gb28181/snapsh
 const accountState = vi.hoisted(() => ({ permissions: ["gb28181:device:snapshot"] as string[] }));
 const account = reactive(accountState);
 const messages = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn() }));
+const modal = vi.hoisted(() => ({ confirm: vi.fn() }));
 const authState = vi.hoisted(() => ({ accessToken: "tok-1" }));
 
 const replace = vi.hoisted(() => vi.fn(() => Promise.resolve()));
@@ -27,7 +28,8 @@ vi.mock("@/utils/auth", () => ({ getAccessToken: () => authState }));
 vi.mock("@/api/utils", () => ({ getBaseUrl: () => "" }));
 vi.mock("@arco-design/web-vue", async importOriginal => ({
   ...(await importOriginal<typeof import("@arco-design/web-vue")>()),
-  Message: messages
+  Message: messages,
+  Modal: modal
 }));
 vi.mock("vue-router", async importOriginal => ({
   ...(await importOriginal<typeof import("vue-router")>()),
@@ -106,7 +108,8 @@ const stubs = {
     template: "<div><slot /><slot name='content' /></div>"
   },
   "a-button": {
-    props: ["type", "size", "disabled", "loading", "long"],
+    name: "a-button",
+    props: ["type", "status", "size", "disabled", "loading", "long"],
     emits: ["click"],
     template:
       "<button :data-testid='$attrs[`data-testid`]' :disabled='disabled' @click='$emit(`click`)'><slot name='icon' /><slot name='suffix' /><slot /></button>"
@@ -129,28 +132,14 @@ const stubs = {
   // 于是 `find('[data-testid="library-pick-1"]')` 找到的是 <label>，
   // 而 setChecked 作用在 <label> 上不产生 change —— 表现是"点了没反应 / 已选 0 张"，
   // 排查时会误以为是组件的选中逻辑坏了。
-  // ⛔ a-popconfirm 桩必须真的渲染触发按钮 + 确认按钮：
-  // 页面把删除按钮放在它的默认插槽里，只渲染 content 的话
-  // `find('[data-testid="library-batch-delete"]')` 找不到，测试会误以为按钮没渲染。
-  // ⛔ 桩必须声明 `name`，否则 `findComponent({ name: "a-popconfirm" })` 找不到
-  // （匿名桩会返回空 wrapper，报 "Cannot call vm on an empty VueWrapper"）。
-  // ⛔ 确认动作走 `vm.$emit("ok")` 而不是模板里 `@click="$emit(...)"`：
-  // 后者在 stub 里能渲染出按钮，但点击后事件未必冒到父组件的 `@ok` 绑定上，
-  // 表现是"点了确定、请求没发出"—— 会误判成组件的删除逻辑坏了。
-  "a-popconfirm": {
-    name: "a-popconfirm",
-    props: ["content", "type", "disabled"],
-    emits: ["ok", "cancel"],
-    template: "<div><slot /></div>"
-  },
   "a-checkbox": {
     inheritAttrs: false,
     props: ["modelValue"],
-    emits: ["change"],
+    emits: ["change", "click"],
     // ⛔ 默认 slot 也要渲染：真实 `a-checkbox` 支持 `<a-checkbox>文字</a-checkbox>`，
     // 桩吞掉 slot 的话"勾选框旁有说明文字"这条就测不出来。
     template:
-      "<label><input type='checkbox' :data-testid='$attrs[`data-testid`]' :checked='modelValue' @change='$emit(`change`, $event.target.checked)' /><slot /></label>"
+      "<label @click='$emit(`click`, $event)'><input type='checkbox' :data-testid='$attrs[`data-testid`]' :checked='modelValue' @change='$emit(`change`, $event.target.checked)' /><slot /></label>"
   },
   "a-pagination": {
     props: ["current", "pageSize", "total"],
@@ -182,6 +171,7 @@ describe("snapshot library page", () => {
     gbApi.listSnapshotLibrary.mockReset();
     replace.mockClear();
     replace.mockResolvedValue(undefined);
+    modal.confirm.mockReset();
     Object.keys(currentRoute.query).forEach(key => delete currentRoute.query[key]);
     // 记录锚点点击的下载，避免测试环境真的发起导航
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function mockClick(this: HTMLAnchorElement) {
@@ -449,6 +439,68 @@ describe("snapshot library page", () => {
     wrapper.unmount();
   });
 
+  it("uses semantic colors for batch actions", async () => {
+    gbApi.listSnapshotLibrary.mockResolvedValue(listResult([row(1)]));
+    const wrapper = mountPage();
+    await flushPromises();
+    const button = (testId: string) =>
+      wrapper.findAllComponents({ name: "a-button" }).find(button => button.attributes("data-testid") === testId);
+
+    expect(button("library-batch-toggle")?.props("type")).toBe("secondary");
+    expect(button("library-batch-toggle")?.classes()).toContain("library-selection-action");
+    await wrapper.find('[data-testid="library-batch-toggle"]').trigger("click");
+    expect(button("library-batch-toggle")?.props("type")).toBe("primary");
+    expect(button("library-select-all")?.props("type")).toBe("secondary");
+    expect(button("library-select-all")?.classes()).toContain("library-selection-action");
+    expect(button("library-batch-download")?.props("type")).toBe("primary");
+    await wrapper.find('[data-testid="library-pick-1"]').setValue(true);
+    expect(button("library-batch-delete")?.props()).toMatchObject({ type: "primary", status: "danger" });
+    wrapper.unmount();
+  });
+
+  it("selects and deselects only the clicked card across its body and image in batch mode", async () => {
+    gbApi.listSnapshotLibrary.mockResolvedValue(listResult([row(1), row(2)]));
+    const wrapper = mountPage();
+    await flushPromises();
+    const card = wrapper.find('[data-snapshot-id="1"]');
+    await card.trigger("click");
+    expect(card.classes()).not.toContain("library-card--selected");
+    await wrapper.find('[data-testid="library-batch-toggle"]').trigger("click");
+
+    await card.find(".library-title").trigger("click");
+    expect(card.classes()).toContain("library-card--selected");
+    expect(wrapper.find('[data-snapshot-id="2"]').classes()).not.toContain("library-card--selected");
+    await card.find(".library-card-info").trigger("click");
+    expect(card.classes()).not.toContain("library-card--selected");
+    await card.find(".library-thumb").trigger("click");
+    expect(card.classes()).toContain("library-card--selected");
+    expect(wrapper.find('[data-testid="library-image-preview"]').exists()).toBe(false);
+    await card.find(".library-thumb").trigger("click");
+    expect(card.classes()).not.toContain("library-card--selected");
+    wrapper.unmount();
+  });
+
+  it("keeps checkbox, download and detail clicks from toggling the card twice", async () => {
+    gbApi.listSnapshotLibrary.mockResolvedValue(listResult([row(1), row(2)]));
+    const wrapper = mount(SnapshotLibrary, { attachTo: document.body, global: { stubs } });
+    await flushPromises();
+    await wrapper.find('[data-testid="library-batch-toggle"]').trigger("click");
+    const card = wrapper.find('[data-snapshot-id="1"]');
+    const checkbox = wrapper.find('[data-testid="library-pick-1"]');
+
+    await checkbox.trigger("click");
+    expect(card.classes()).toContain("library-card--selected");
+    await checkbox.trigger("click");
+    expect(card.classes()).not.toContain("library-card--selected");
+    await wrapper.find('[data-testid="library-download-1"]').trigger("click");
+    expect(downloads).toHaveLength(1);
+    expect(card.classes()).not.toContain("library-card--selected");
+    await wrapper.find('[data-testid="library-detail-1"]').trigger("click");
+    expect(wrapper.find('[data-testid="library-detail-drawer"]').exists()).toBe(true);
+    expect(card.classes()).not.toContain("library-card--selected");
+    wrapper.unmount();
+  });
+
   it("puts the checkbox in the card's bottom row instead of on top of the image", async () => {
     // ⛔ 勾选框压在图片上会盖住画面左上角，而那正是判断"拍到没有"的关键区域。
     gbApi.listSnapshotLibrary.mockResolvedValue(listResult([row(1)]));
@@ -506,9 +558,18 @@ describe("snapshot library page", () => {
     expect(wrapper.find('[data-testid="library-batch-delete"]').exists()).toBe(true);
 
     await wrapper.find('[data-testid="library-batch-delete"]').trigger("click");
-    await flushPromises();
-    const confirm = wrapper.findComponent({ name: "a-popconfirm" });
-    if (confirm.exists()) confirm.vm.$emit("ok");
+    expect(modal.confirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "批量删除抓拍图",
+        content: expect.stringContaining("2 张"),
+        okText: "删除",
+        cancelText: "取消",
+        okButtonProps: { status: "danger" },
+        escToClose: true
+      })
+    );
+    expect(gbApi.deleteSnapshots).not.toHaveBeenCalled();
+    await modal.confirm.mock.calls[0][0].onOk();
     await flushPromises();
 
     expect(gbApi.deleteSnapshots).toHaveBeenCalledWith([1, 2]);
@@ -533,9 +594,8 @@ describe("snapshot library page", () => {
     await flushPromises();
 
     await wrapper.find('[data-testid="library-batch-delete"]').trigger("click");
-    await flushPromises();
-    const confirm = wrapper.findComponent({ name: "a-popconfirm" });
-    if (confirm.exists()) confirm.vm.$emit("ok");
+    expect(modal.confirm).toHaveBeenCalledOnce();
+    await modal.confirm.mock.calls[0][0].onOk();
     await flushPromises();
 
     // 还在批量模式、选择还在 ⇒ 用户可直接重试。

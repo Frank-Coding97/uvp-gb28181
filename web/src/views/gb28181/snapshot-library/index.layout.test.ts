@@ -285,10 +285,27 @@ describe("image library download and batch actions", () => {
     // ⛔ `type="default"` 在 Arco 里**不存在** ⇒ 渲染成浏览器原生 <button>：
     // 实测拿到 `2px outset` 灰白描边 + `rgb(107,107,107)` 底色，
     // 在深色页面上是一块突兀的白边按钮（老板截图反馈「批量选择按钮样式存在问题」）。
-    // ⛔ 判据要钉住**具体值** `secondary` 而不是"不是 default"：
-    // 拼错成 `seconday` 同样会静默回退原生样式。
+    // 批量选择入口闲置时使用淡蓝次级样式，激活后再使用实心品牌主色。
     expect(pageSource).toContain("batchMode ? 'primary' : 'secondary'");
     expect(pageSource).not.toContain('type="default"');
+    expect(pageSource).not.toMatch(/<a-button\b[^>]*\btype="error"/s);
+    expect(pageSource).toContain('status="danger"');
+  });
+
+  it("uses a soft brand tint for the idle batch toggle and a solid color when active", () => {
+    const idle = cssBlock(pageSource, ".library-selection-action.arco-btn-secondary");
+    expect(idle).toContain("color: var(--uvp-brand)");
+    expect(idle).toContain("background: var(--uvp-brand-soft)");
+    expect(idle).toContain("border-color: color-mix(in srgb, var(--uvp-brand) 32%, var(--uvp-search-secondary-btn-border))");
+    const active = cssBlock(pageSource, ".library-batch-toggle.arco-btn-primary");
+    expect(active).toContain("color: var(--uvp-solid-text)");
+    expect(active).toContain("background: var(--uvp-solid-bg)");
+  });
+
+  it("uses the shared modal confirmation pattern for destructive batch deletion", () => {
+    expect(pageSource).toContain("Modal.confirm({");
+    expect(pageSource).toContain('okButtonProps: { status: "danger" }');
+    expect(pageSource).not.toContain("<a-popconfirm");
   });
 
   it("keeps the card image area a fixed height so rows do not stagger", () => {
