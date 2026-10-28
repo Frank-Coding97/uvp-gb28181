@@ -28,6 +28,17 @@ import (
 
 	_ "uvplatform.com/uvp-gb28181/docs/swagger" // swagger docs
 	_ "uvplatform.com/uvp-gb28181/plugins"
+
+	// ⛔⛔ 时区数据库必须**内置进二进制**，不能指望目标机自带：
+	// Go 在 Windows 上的 platformZoneSources 是空的，LoadLocation 只认
+	// ZONEINFO 环境变量 / 编译期嵌入的 tzdata / 编译机 GOROOT 下的
+	// lib/time/zoneinfo.zip（这个路径被写死成打包机的路径）。所以交叉编译或
+	// 换一台没装 Go 的 Windows 机器部署时，time.LoadLocation("Asia/Shanghai")
+	// 直接返回 "unknown time zone"，config.RecordQuery.Location 变成 nil，
+	// 最终表现为「SIP 服务启动失败: 装配设备录像查询 service 失败:
+	// invalid_argument: recordquery: invalid argument」——从报错完全看不出是时区。
+	// 代价约 450KB 二进制体积，换掉一整类"打包机能跑、现场跑不起来"的问题。
+	_ "time/tzdata"
 )
 
 // @title UVP-GB28181 API

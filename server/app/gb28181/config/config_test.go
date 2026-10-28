@@ -629,3 +629,32 @@ func TestLoadFromReadsHookBaseURLAndTLSRequirement(t *testing.T) {
 	require.Equal(t, "https://hook.example.com/index/hook", cfg.Media.HookBaseURL)
 	require.True(t, cfg.Media.HookRequireTLS)
 }
+
+// Bootstrap 装配录像查询前必须用 ValidateRecordRuntime 补一次校验：Load() 会吞掉
+// 校验错误，产物里的 Location 可能是 nil（Windows 目标机没有 Go 时区库时就是这样），
+// 直接交给 recordquery.NewService 只会得到 "invalid_argument: recordquery: invalid argument"。
+func TestValidateRecordRuntimeBackfillsLocationAfterUnvalidatedLoad(t *testing.T) {
+	// 复现 Load() 的产物：Location 一定是 nil（只有校验函数才填它）。
+	cfg := LoadFrom(fakeSource{})
+	cfg.RecordQuery.Location = nil
+
+	require.NoError(t, cfg.ValidateRecordRuntime(0))
+	require.NotNil(t, cfg.RecordQuery.Location, "校验必须把解析出的时区写回 Location，否则装配必然失败")
+	require.Equal(t, DefaultRecordQueryTimezone, cfg.RecordQuery.Timezone)
+}
+
+// 时区库缺失（Windows 目标机无 Go 时区数据库）必须报出**具体键和排查方向**，
+// 不能退化成一句 invalid argument。
+func TestValidateRecordRuntimeExplainsMissingTimezoneDatabase(t *testing.T) {
+	cfg := LoadFrom(fakeSource{
+		values:  map[string]interface{}{"gb28181.record_query.timezone": "Mars/Base"},
+		strings: map[string]string{"gb28181.record_query.timezone": "Mars/Base"},
+	})
+
+	err := cfg.ValidateRecordRuntime(0)
+	require.Error(t, err)
+	var validation *ValidationError
+	require.True(t, errors.As(err, &validation), "期望 ValidationError，实际 %v", err)
+	require.Equal(t, "gb28181.record_query.timezone", validation.Field)
+	require.Contains(t, validation.Error(), "ZONEINFO", "报错必须指向时区库缺失的排查方向")
+}

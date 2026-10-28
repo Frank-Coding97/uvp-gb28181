@@ -1046,7 +1046,11 @@ func validateRecordRuntimeConfig(cfg *Config, handlerTimeoutSec int) error {
 	}
 	location, err := time.LoadLocation(cfg.RecordQuery.Timezone)
 	if err != nil {
-		return invalid(timezoneKey, cfg.RecordQuery.Timezone, "unknown IANA time zone")
+		// 这条几乎只会出现在「本机没有 Go 时区数据库」的场景：Windows 目标机上
+		// LoadLocation 只认 ZONEINFO / 二进制内置的 tzdata / 编译机 GOROOT 里的
+		// zoneinfo.zip。把原因写进报错，否则下游只能看到 invalid argument。
+		return invalid(timezoneKey, cfg.RecordQuery.Timezone,
+			"unknown IANA time zone (本机缺少 Go 时区数据库: 二进制需内置 time/tzdata，或设置 ZONEINFO 指向 zoneinfo.zip)")
 	}
 	cfg.RecordQuery.Location = location
 
@@ -1099,4 +1103,18 @@ func Load() Config {
 // LoadValidated reads global configuration for record query/playback runtime assembly.
 func LoadValidated() (Config, error) {
 	return LoadValidatedFrom(app.ConfigYml)
+}
+
+// ValidateRecordRuntime 对**已加载**的配置补做一次录像查询/回放参数校验，并把解析出的
+// 时区写回 RecordQuery.Location。
+//
+// 存在的理由：Load() 宁可返回半成品也不报错(大量调用方只用 SIP/ZLM 段)，但装配 runtime
+// 的调用方如果直接用它的产物，失败的时区(典型：Windows 目标机没有 Go 时区库，见
+// time.LoadLocation 的实现)或写成 0 的上限，最终只会表现成
+// "invalid_argument: recordquery: invalid argument" —— 看不出该改哪个键。
+func (c *Config) ValidateRecordRuntime(handlerTimeoutSec int) error {
+	if c == nil {
+		return invalid("gb28181", nil, "配置为空")
+	}
+	return validateRecordRuntimeConfig(c, handlerTimeoutSec)
 }

@@ -856,6 +856,18 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 	if deviceDB == nil || srv.UAC() == nil {
 		return fmt.Errorf("装配持久回放恢复缺少数据库或 UAC: %w", uac.ErrPlaybackUnavailable)
 	}
+	// ⛔ 装配前必须再校验一次：gbconfig.Load() 刻意吞掉 record_query/playback 的校验错误
+	// (它服务一大批不关心这些参数的调用方)，不补这一步的话，「时区库缺失」(Windows 目标机
+	// 没装 Go ⇒ LoadLocation 必失败 ⇒ Location 为 nil)和「某个上限被写成 0」会塌成同一句
+	// invalid_argument: recordquery: invalid argument，现场完全无法判断该改什么。
+	var handlerTimeoutSec int
+	if app.ConfigYml != nil {
+		handlerTimeoutSec = app.ConfigYml.GetInt("httpserver.handler_timeout")
+	}
+	if validationErr := cfg.ValidateRecordRuntime(handlerTimeoutSec); validationErr != nil {
+		sipRuntimeStatus.MarkFailed(validationErr.Error())
+		return fmt.Errorf("装配设备录像查询 service 失败: %w", validationErr)
+	}
 	var newPTZService *ptz.Service
 	var newPTZScheduler ptzSchedulerLifecycle
 	var newFirmwareUpgradeService *upgrade.Service
