@@ -103,6 +103,19 @@ const carriesDialogClass = (tag: string) => dialogClassTokens(tag).includes("uvp
 const withoutClass = modals.filter(({ tag }) => !carriesDialogClass(tag));
 
 describe("system dialog skin coverage", () => {
+  it("keeps modal and drawer cancel buttons flat in every interaction state", () => {
+    const styles = readFileSync(resolve(root, "styles/arco-overrides.scss"), "utf8");
+    for (const selector of [".arco-modal-footer .arco-btn-secondary", ".arco-drawer-footer .arco-btn-secondary"]) {
+      expect(hasRuleBlock(styles, selector, "box-shadow: none !important", "transform: none !important")).toBe(true);
+      expect(hasRuleBlock(styles, selector, "background: var(--uvp-search-secondary-btn-bg) !important")).toBe(true);
+      expect(hasRuleBlock(styles, `${selector}:focus-visible`, "outline: 2px solid var(--uvp-brand) !important")).toBe(true);
+    }
+    const simpleStyles = readFileSync(resolve(root, "style/model/uvp-modal-simple.scss"), "utf8");
+    expect(hasRuleBlock(simpleStyles, ".arco-modal-simple .arco-modal-footer .arco-btn-secondary", "box-shadow: none")).toBe(
+      true
+    );
+  });
+
   it("finds the dialogs across the whole app (扫描本身不是空转)", () => {
     expect(modals.length).toBeGreaterThan(50);
     // 点名一颗已知成员：扫描器要是哪天切错段落（比如被注释/字符串带偏），这条立刻红

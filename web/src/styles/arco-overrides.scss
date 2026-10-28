@@ -25,6 +25,30 @@ html body[arco-theme="dark"] {
   color: var(--uvp-brand-strong);
 }
 
+// ========== 弹窗 / 抽屉取消按钮 ==========
+// 次按钮统一为平面样式，覆盖确认框内高光及普通弹窗的悬停上浮。
+.arco-modal-footer .arco-btn-secondary,
+.arco-drawer-footer .arco-btn-secondary {
+  background: var(--uvp-search-secondary-btn-bg) !important;
+  box-shadow: none !important;
+  transform: none !important;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.arco-modal-footer .arco-btn-secondary:not(.arco-btn-disabled):hover,
+.arco-drawer-footer .arco-btn-secondary:not(.arco-btn-disabled):hover {
+  background: var(--uvp-search-secondary-btn-hover-bg) !important;
+}
+
+.arco-modal-footer .arco-btn-secondary:focus-visible,
+.arco-drawer-footer .arco-btn-secondary:focus-visible {
+  outline: 2px solid var(--uvp-brand) !important;
+  outline-offset: 2px;
+}
+
 // ========== Switch 开关 ==========
 .arco-switch {
   background-color: var(--uvp-panel-border) !important;
