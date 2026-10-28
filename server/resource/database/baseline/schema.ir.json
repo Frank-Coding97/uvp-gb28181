@@ -3445,7 +3445,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "created_at",
@@ -3531,7 +3531,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "channel_code",
@@ -3540,7 +3540,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "device_name",
@@ -3549,7 +3549,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "channel_name",
@@ -3558,7 +3558,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "created_at",
@@ -4000,7 +4000,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "depth",
@@ -4018,7 +4018,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "created_by",
@@ -4758,7 +4758,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "config_type",
@@ -4767,7 +4767,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "payload_json",
@@ -4776,7 +4776,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "source_operation_seq",
@@ -4803,7 +4803,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "observed_at",
@@ -4821,7 +4821,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "created_at",
@@ -6237,7 +6237,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "card_id",
@@ -6255,7 +6255,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "status",
@@ -6264,7 +6264,7 @@
           "default": "unknown",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "format_progress",
@@ -6318,7 +6318,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "observed_at",
@@ -6336,7 +6336,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "created_at",
@@ -7213,7 +7213,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "channel_code",
@@ -7222,7 +7222,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "owner_dept_id",
@@ -7711,7 +7711,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "stream_number",
@@ -7729,7 +7729,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "resolution",
@@ -7738,7 +7738,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "frame_rate",
@@ -7747,7 +7747,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "bit_rate_type",
@@ -7756,7 +7756,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "video_bit_rate",
@@ -7765,7 +7765,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "source_operation_seq",
@@ -7792,7 +7792,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "observed_at",
@@ -7810,7 +7810,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "created_at",
@@ -9298,7 +9298,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "lifecycle_id",
@@ -9307,7 +9307,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "sequence",
@@ -9343,7 +9343,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "event_name",
@@ -9352,7 +9352,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "fact_state",
@@ -9361,7 +9361,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "source",
@@ -9370,7 +9370,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "device_code",
@@ -9379,7 +9379,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "channel_code",
@@ -9388,7 +9388,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "stream_id",
@@ -9397,7 +9397,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "node_id",
@@ -9415,7 +9415,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "reused",
@@ -9434,7 +9434,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "cseq",
@@ -9443,7 +9443,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "reason_code",
@@ -9452,7 +9452,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "reason_message",
@@ -9461,7 +9461,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "metadata_json",
@@ -12131,7 +12131,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "description",
@@ -12140,7 +12140,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "status",
@@ -12397,7 +12397,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "actual_state",
@@ -12406,7 +12406,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "reason_code",
@@ -12415,7 +12415,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "reason_message",
@@ -12424,7 +12424,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "next_transition_at",
@@ -12478,7 +12478,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "recording_session_id",
@@ -12496,7 +12496,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "last_media_at",
@@ -12523,7 +12523,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "lease_until",
@@ -12568,7 +12568,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "recorder_owner_id",
@@ -12577,7 +12577,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "recorder_claim_version",
@@ -12679,7 +12679,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "action",
@@ -12688,7 +12688,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "trigger_source",
@@ -12697,7 +12697,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "stage",
@@ -12706,7 +12706,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "attempt",
@@ -12724,7 +12724,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "reason_code",
@@ -12733,7 +12733,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "reason_message",
@@ -12742,7 +12742,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "stream_id",
@@ -12751,7 +12751,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "node_id",
@@ -12760,7 +12760,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "recording_session_id",
@@ -12921,7 +12921,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "reason_message",
@@ -12930,7 +12930,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "recovered",
@@ -13490,7 +13490,7 @@
           "default": null,
           "extra": "",
           "comment": "lan/public",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "listen_ip",
@@ -13499,7 +13499,7 @@
           "default": null,
           "extra": "",
           "comment": "SIP 监听地址",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "advertise_ip",
@@ -13508,7 +13508,7 @@
           "default": null,
           "extra": "",
           "comment": "SIP 对外宣告地址",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "advertise_ip_inferred",
@@ -13536,7 +13536,7 @@
           "default": null,
           "extra": "",
           "comment": "SIP 域",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "server_id",
@@ -13545,7 +13545,7 @@
           "default": null,
           "extra": "",
           "comment": "平台国标编码",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "password",
@@ -13554,7 +13554,7 @@
           "default": null,
           "extra": "",
           "comment": "SIP Digest 原始凭据",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "created_at",
@@ -13581,7 +13581,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "sdp_ip",
@@ -13590,7 +13590,7 @@
           "default": "",
           "extra": "",
           "comment": "平台默认 SDP 地址(设备回推RTP 目标)",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "stream_ip",
@@ -13599,7 +13599,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         }
       ],
       "primary_key": [
@@ -13931,7 +13931,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "match_type",
@@ -13940,7 +13940,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "match_value",
@@ -13949,7 +13949,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "scope",
@@ -13958,7 +13958,7 @@
           "default": "all_sip",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "status",
@@ -13967,7 +13967,7 @@
           "default": "enabled",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "expires_at",
@@ -13985,7 +13985,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "created_by",
@@ -13994,7 +13994,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "created_at",
@@ -14079,7 +14079,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "action",
@@ -14088,7 +14088,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "target",
@@ -14097,7 +14097,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "reason",
@@ -14106,7 +14106,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "decision_id",
@@ -14115,7 +14115,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "created_at",
@@ -14169,7 +14169,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "device_id",
@@ -14178,7 +14178,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "risk_scope",
@@ -14187,7 +14187,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "address_family",
@@ -14196,7 +14196,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "status",
@@ -14205,7 +14205,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "reason",
@@ -14214,7 +14214,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "rule_id",
@@ -14223,7 +14223,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "score",
@@ -14268,7 +14268,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "origin",
@@ -14277,7 +14277,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "agent_state",
@@ -14286,7 +14286,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "decision_id",
@@ -14295,7 +14295,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "last_error",
@@ -14304,7 +14304,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "trigger_method",
@@ -14313,7 +14313,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "trigger_count",
@@ -14349,7 +14349,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "firewall_applied_at",
@@ -14470,7 +14470,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "device_id",
@@ -14479,7 +14479,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "risk_scope",
@@ -14488,7 +14488,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "address_family",
@@ -14497,7 +14497,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "transport",
@@ -14506,7 +14506,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "method",
@@ -14515,7 +14515,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "user_agent",
@@ -14524,7 +14524,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "reason",
@@ -14533,7 +14533,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "action",
@@ -14542,7 +14542,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "count",
@@ -14587,7 +14587,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         }
       ],
       "primary_key": [
@@ -14704,7 +14704,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "mode",
@@ -14713,7 +14713,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "window_seconds",
@@ -14785,7 +14785,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "allowlist_text",
@@ -14794,7 +14794,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "updated_by",
@@ -14848,7 +14848,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "device_id",
@@ -14866,7 +14866,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "created_by",
@@ -14911,7 +14911,7 @@
           "default": "",
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "active_key",
@@ -14920,7 +14920,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "created_at",
@@ -16983,7 +16983,7 @@
           "default": null,
           "extra": "",
           "comment": "文件名",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "path",
@@ -16992,7 +16992,7 @@
           "default": null,
           "extra": "",
           "comment": "路径",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "url",
@@ -17001,7 +17001,7 @@
           "default": null,
           "extra": "",
           "comment": "文件url",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "file_md5",
@@ -17010,7 +17010,7 @@
           "default": "",
           "extra": "",
           "comment": "文件MD5(秒传检测)",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "size",
@@ -17028,7 +17028,7 @@
           "default": null,
           "extra": "",
           "comment": "文件类型",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "created_at",
@@ -17073,7 +17073,7 @@
           "default": null,
           "extra": "",
           "comment": "文件后缀",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "thumbnail_path",
@@ -17082,7 +17082,7 @@
           "default": null,
           "extra": "",
           "comment": "缩略图路径",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "thumbnail_name",
@@ -17091,7 +17091,7 @@
           "default": null,
           "extra": "",
           "comment": "缩略图名称",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "thumbnail_url",
@@ -17100,7 +17100,7 @@
           "default": null,
           "extra": "",
           "comment": "缩略图URL",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         }
       ],
       "primary_key": [
@@ -17145,7 +17145,7 @@
           "default": null,
           "extra": "",
           "comment": "上传会话ID",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "file_md5",
@@ -17154,7 +17154,7 @@
           "default": null,
           "extra": "",
           "comment": "文件MD5",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "file_name",
@@ -17163,7 +17163,7 @@
           "default": null,
           "extra": "",
           "comment": "原始文件名",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "file_size",
@@ -17208,7 +17208,7 @@
           "default": null,
           "extra": "",
           "comment": "分片文件路径",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "status",
@@ -17307,7 +17307,7 @@
           "default": null,
           "extra": "",
           "comment": "权限名称",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "path",
@@ -17316,7 +17316,7 @@
           "default": null,
           "extra": "",
           "comment": "权限路径",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "method",
@@ -17325,7 +17325,7 @@
           "default": null,
           "extra": "",
           "comment": "请求方法",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "api_group",
@@ -17334,7 +17334,7 @@
           "default": null,
           "extra": "",
           "comment": "分组",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "created_at",
@@ -17405,7 +17405,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "v0",
@@ -17414,7 +17414,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "v1",
@@ -17423,7 +17423,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "v2",
@@ -17432,7 +17432,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "v3",
@@ -17441,7 +17441,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "v4",
@@ -17450,7 +17450,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "v5",
@@ -17459,7 +17459,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         }
       ],
       "primary_key": [
@@ -17682,7 +17682,7 @@
           "default": null,
           "extra": "",
           "comment": "部门名称",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "status",
@@ -17702,7 +17702,7 @@
           "default": null,
           "extra": "",
           "comment": "负责人",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "phone",
@@ -17711,7 +17711,7 @@
           "default": null,
           "extra": "",
           "comment": "联系电话",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "email",
@@ -17720,7 +17720,7 @@
           "default": null,
           "extra": "",
           "comment": "邮箱",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "sort",
@@ -17738,7 +17738,7 @@
           "default": null,
           "extra": "",
           "comment": "描述",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "created_at",
@@ -17809,7 +17809,7 @@
           "default": null,
           "extra": "",
           "comment": "字典名称",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "code",
@@ -17818,7 +17818,7 @@
           "default": null,
           "extra": "",
           "comment": "字典编码",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "status",
@@ -17838,7 +17838,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "created_at",
@@ -17909,7 +17909,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "value",
@@ -17918,7 +17918,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "status",
@@ -17973,7 +17973,7 @@
           "default": null,
           "extra": "",
           "comment": "数据库类型",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "database",
@@ -17982,7 +17982,7 @@
           "default": null,
           "extra": "",
           "comment": "数据库",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "name",
@@ -17991,7 +17991,7 @@
           "default": null,
           "extra": "",
           "comment": "数据库表名",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "module_name",
@@ -18000,7 +18000,7 @@
           "default": null,
           "extra": "",
           "comment": "模块名称",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "file_name",
@@ -18009,7 +18009,7 @@
           "default": null,
           "extra": "",
           "comment": "文件名称",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "describe",
@@ -18018,7 +18018,7 @@
           "default": null,
           "extra": "",
           "comment": "描述",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "created_at",
@@ -18152,7 +18152,7 @@
           "default": null,
           "extra": "",
           "comment": "列名",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "data_type",
@@ -18161,7 +18161,7 @@
           "default": null,
           "extra": "",
           "comment": "数据类型",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "data_comment",
@@ -18170,7 +18170,7 @@
           "default": null,
           "extra": "",
           "comment": "列注释",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "data_extra",
@@ -18179,7 +18179,7 @@
           "default": null,
           "extra": "",
           "comment": "额外信息",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "data_column_key",
@@ -18188,7 +18188,7 @@
           "default": null,
           "extra": "",
           "comment": "列键信息",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "data_unsigned",
@@ -18215,7 +18215,7 @@
           "default": null,
           "extra": "",
           "comment": "go类型",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "front_type",
@@ -18224,7 +18224,7 @@
           "default": null,
           "extra": "",
           "comment": "前端类型",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "custom_name",
@@ -18233,7 +18233,7 @@
           "default": "",
           "extra": "",
           "comment": "自定义字段名称",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "require",
@@ -18278,7 +18278,7 @@
           "default": null,
           "extra": "",
           "comment": "查询方式\r\nEQ  等于\r\nNE 不等于\r\nGT 大于\r\nGTE 大于等于\r\nLT 小于\r\nLTE 小于等于\r\nLIKE 包含\r\nBETWEEN 范围",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "form_type",
@@ -18287,7 +18287,7 @@
           "default": null,
           "extra": "",
           "comment": "表单类型\r\ninput 文本框\r\ntextarea 文本域\r\nnumber 数字输入框\r\nselect 下拉框\r\nradio 单选框\r\ncheckbox 复选框\r\ndatetime 日期时间",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "dict_type",
@@ -18296,7 +18296,7 @@
           "default": null,
           "extra": "",
           "comment": "关联的字典",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "gorm_tag",
@@ -18305,7 +18305,7 @@
           "default": null,
           "extra": "",
           "comment": "gorm标签",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         }
       ],
       "primary_key": [
@@ -18340,7 +18340,7 @@
           "default": null,
           "extra": "",
           "comment": "任务ID",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "status",
@@ -18349,7 +18349,7 @@
           "default": null,
           "extra": "",
           "comment": "执行状态: SUCCESS, FAILED, PANIC",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "error",
@@ -18358,7 +18358,7 @@
           "default": null,
           "extra": "",
           "comment": "错误信息",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "start_time",
@@ -18412,7 +18412,7 @@
           "default": null,
           "extra": "",
           "comment": "",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         }
       ],
       "primary_key": [
@@ -18488,7 +18488,7 @@
           "default": null,
           "extra": "",
           "comment": "任务ID",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "group",
@@ -18497,7 +18497,7 @@
           "default": null,
           "extra": "",
           "comment": "任务分组名称",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "name",
@@ -18506,7 +18506,7 @@
           "default": null,
           "extra": "",
           "comment": "任务名称",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "description",
@@ -18515,7 +18515,7 @@
           "default": null,
           "extra": "",
           "comment": "任务描述",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "executor_name",
@@ -18524,7 +18524,7 @@
           "default": null,
           "extra": "",
           "comment": "执行器名称",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "execution_policy",
@@ -18551,7 +18551,7 @@
           "default": null,
           "extra": "",
           "comment": "Cron表达式",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "parameters",
@@ -18920,7 +18920,7 @@
           "default": null,
           "extra": "",
           "comment": "路由路径",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "name",
@@ -18929,7 +18929,7 @@
           "default": null,
           "extra": "",
           "comment": "路由名称",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "redirect",
@@ -18938,7 +18938,7 @@
           "default": null,
           "extra": "",
           "comment": "重定向",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "component",
@@ -18947,7 +18947,7 @@
           "default": null,
           "extra": "",
           "comment": "组件文件路径",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "title",
@@ -18956,7 +18956,7 @@
           "default": null,
           "extra": "",
           "comment": "菜单标题，国际化key",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "is_full",
@@ -19020,7 +19020,7 @@
           "default": "",
           "extra": "",
           "comment": "外链地址",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "iframe",
@@ -19040,7 +19040,7 @@
           "default": "",
           "extra": "",
           "comment": "svg图标名称",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "icon",
@@ -19049,7 +19049,7 @@
           "default": "",
           "extra": "",
           "comment": "普通图标名称",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "sort",
@@ -19088,7 +19088,7 @@
           "default": "",
           "extra": "",
           "comment": "权限标识",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "created_at",
@@ -21499,7 +21499,7 @@
           "default": null,
           "extra": "",
           "comment": "操作用户名",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "module",
@@ -21508,7 +21508,7 @@
           "default": null,
           "extra": "",
           "comment": "操作模块",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "operation",
@@ -21517,7 +21517,7 @@
           "default": null,
           "extra": "",
           "comment": "操作类型",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "method",
@@ -21526,7 +21526,7 @@
           "default": null,
           "extra": "",
           "comment": "请求方法",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "path",
@@ -21535,7 +21535,7 @@
           "default": null,
           "extra": "",
           "comment": "请求路径",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "ip",
@@ -21544,7 +21544,7 @@
           "default": null,
           "extra": "",
           "comment": "客户端IP",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "user_agent",
@@ -21553,7 +21553,7 @@
           "default": null,
           "extra": "",
           "comment": "用户代理",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "request_data",
@@ -21562,7 +21562,7 @@
           "default": null,
           "extra": "",
           "comment": "请求参数",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "response_data",
@@ -21571,7 +21571,7 @@
           "default": null,
           "extra": "",
           "comment": "响应数据",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "status_code",
@@ -21598,7 +21598,7 @@
           "default": null,
           "extra": "",
           "comment": "错误信息",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "location",
@@ -21607,7 +21607,7 @@
           "default": null,
           "extra": "",
           "comment": "操作地点",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         }
       ],
       "primary_key": [
@@ -21670,7 +21670,7 @@
           "default": null,
           "extra": "",
           "comment": "参数名称",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "code",
@@ -21679,7 +21679,7 @@
           "default": null,
           "extra": "",
           "comment": "参数唯一标识",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "value",
@@ -21688,7 +21688,7 @@
           "default": null,
           "extra": "",
           "comment": "参数值",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "status",
@@ -21706,7 +21706,7 @@
           "default": null,
           "extra": "",
           "comment": "描述",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "created_at",
@@ -21797,7 +21797,7 @@
           "default": "",
           "extra": "",
           "comment": "角色名称",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "sort",
@@ -21824,7 +21824,7 @@
           "default": null,
           "extra": "",
           "comment": "描述",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "parent_id",
@@ -21887,7 +21887,7 @@
           "default": null,
           "extra": "",
           "comment": "数据权限关联的部门",
-          "collation": "utf8mb4_unicode_ci"
+          "collation": "utf8mb4_general_ci"
         }
       ],
       "primary_key": [
@@ -22206,7 +22206,7 @@
           "default": "",
           "extra": "",
           "comment": "用户名",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "password",
@@ -22215,7 +22215,7 @@
           "default": "",
           "extra": "",
           "comment": "密码",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "email",
@@ -22224,7 +22224,7 @@
           "default": "",
           "extra": "",
           "comment": "邮箱",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "status",
@@ -22253,7 +22253,7 @@
           "default": "",
           "extra": "",
           "comment": "电话",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "sex",
@@ -22262,7 +22262,7 @@
           "default": "",
           "extra": "",
           "comment": "性别",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "nick_name",
@@ -22271,7 +22271,7 @@
           "default": "",
           "extra": "",
           "comment": "昵称",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "avatar",
@@ -22280,7 +22280,7 @@
           "default": "",
           "extra": "",
           "comment": "头像",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "description",
@@ -22289,7 +22289,7 @@
           "default": null,
           "extra": "",
           "comment": "描述",
-          "collation": "utf8mb4_0900_ai_ci"
+          "collation": "utf8mb4_general_ci"
         },
         {
           "name": "created_at",
