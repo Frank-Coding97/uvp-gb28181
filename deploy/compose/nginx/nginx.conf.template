@@ -42,6 +42,33 @@ http {
         default $http_x_forwarded_proto;
         ""      $scheme;
     }
+    # 设备入口只信任本机或打包默认可信网段的反向代理；公网请求伪造
+    # X-Forwarded-Proto 不得改变二维码和抓拍回传地址。
+    geo $remote_addr $uvp_device_proxy_trusted {
+        default          0;
+        127.0.0.1        1;
+        ::1              1;
+        10.0.0.0/8       1;
+        172.16.0.0/12    1;
+        192.168.0.0/16   1;
+    }
+    map $http_host $uvp_device_host_without_port {
+        ~^\[(?<uvp_device_ipv6>[0-9A-Fa-f:.]+)\](?::[0-9]+)?$ "[$uvp_device_ipv6]";
+        ~^(?<uvp_device_name>[^:]+)(?::[0-9]+)?$                 $uvp_device_name;
+        default "";
+    }
+    map "$uvp_device_proxy_trusted:$http_x_forwarded_proto" $uvp_device_external_base {
+        ~^1:(?<uvp_device_external_scheme>https?)$ "$uvp_device_external_scheme://$http_host";
+        default "";
+    }
+    map $uvp_device_external_base $uvp_device_http_base {
+        ""      "http://$http_host";
+        default $uvp_device_external_base;
+    }
+    map $uvp_device_external_base $uvp_device_https_base {
+        ""      "http://$uvp_device_host_without_port:@PLAIN_HTTP_PORT@";
+        default $uvp_device_external_base;
+    }
     include /opt/uvp-nginx/conf/mime.types;
     default_type  application/octet-stream;
 
@@ -164,6 +191,7 @@ http {
             proxy_set_header X-Real-IP         $remote_addr;
             proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $uvp_forwarded_proto;
+            proxy_set_header X-UVP-Device-Base-URL $uvp_device_https_base;
             proxy_set_header Connection        "";
             proxy_connect_timeout 15s;
             proxy_send_timeout    30m;
@@ -184,6 +212,7 @@ http {
             proxy_set_header X-Real-IP         $remote_addr;
             proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $uvp_forwarded_proto;
+            proxy_set_header X-UVP-Device-Base-URL $uvp_device_https_base;
             proxy_set_header Connection        "";
             proxy_connect_timeout 15s;
             proxy_send_timeout    300s;
@@ -203,11 +232,24 @@ http {
             proxy_set_header X-Real-IP         $remote_addr;
             proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $uvp_forwarded_proto;
+            proxy_set_header X-UVP-Device-Base-URL $uvp_device_https_base;
+            proxy_set_header Connection        "";
+        }
+
+        location ~ ^/openapi(?:/|$) {
+            proxy_pass http://uvp_backend;
+            proxy_http_version 1.1;
+            proxy_set_header Host              $http_host;
+            proxy_set_header X-Forwarded-Host  $http_host;
+            proxy_set_header X-Real-IP         $remote_addr;
+            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $uvp_forwarded_proto;
+            proxy_set_header X-UVP-Device-Base-URL $uvp_device_https_base;
             proxy_set_header Connection        "";
         }
 
         # ⛔ SPA history 路由：未匹配的路径交回 index.html，
-        #   否则刷新 /devices/123 会 404。/api/ 与 /gb28181/ 必须排在前面，
+        #   否则刷新 /devices/123 会 404。/api/、/gb28181/ 与 /openapi/ 必须排在前面，
         #   否则会被这条吞掉返回 HTML ⇒ 前端拿 HTML 当 JSON 解析，报无关错误。
         location / {
             try_files $uri $uri/ /index.html;
@@ -220,8 +262,8 @@ http {
 
     # ============================================================
     # HTTP：跳 HTTPS
-    # ⛔ 保留 /api/ 与 /gb28181/ 的明文转发：二维码里填的就是明文后端地址，
-    #    部分客户端（含模拟器 App）只信任这个来源。
+    # ⛔ /api/、/gb28181/ 与 /openapi/ 保留明文转发：设备回传走 nginx 入口，
+    #    不进入浏览器 HTTPS 跳转，也不直连后端端口。
     # ============================================================
     server {
         listen      @PLAIN_HTTP_PORT@;
@@ -245,6 +287,7 @@ http {
             proxy_set_header X-Forwarded-Host  $http_host;
             proxy_set_header X-Real-IP         $remote_addr;
             proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header X-UVP-Device-Base-URL $uvp_device_http_base;
             proxy_set_header Connection        "";
             proxy_buffering off;
         }
@@ -260,6 +303,18 @@ http {
             proxy_set_header X-Forwarded-Host  $http_host;
             proxy_set_header X-Real-IP         $remote_addr;
             proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header X-UVP-Device-Base-URL $uvp_device_http_base;
+            proxy_set_header Connection        "";
+        }
+
+        location ~ ^/openapi(?:/|$) {
+            proxy_pass http://uvp_backend;
+            proxy_http_version 1.1;
+            proxy_set_header Host              $http_host;
+            proxy_set_header X-Forwarded-Host  $http_host;
+            proxy_set_header X-Real-IP         $remote_addr;
+            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header X-UVP-Device-Base-URL $uvp_device_http_base;
             proxy_set_header Connection        "";
         }
 

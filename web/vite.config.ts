@@ -4,6 +4,7 @@ import path from "path";
 import { resolve } from "path";
 import { include } from "./build/optimize";
 import { easyPlayerAssets } from "./build/easyplayer-assets";
+import { createDeviceAccessProxyRuntime } from "./build/device-access-proxy";
 import { createVitePlugins } from "./build/vite-plugin";
 import postcssPresetEnv from "postcss-preset-env";
 
@@ -40,6 +41,7 @@ export default defineConfig(({ mode }) => {
   const root = process.cwd();
   const env: any = loadEnv(mode, root);
   const apiProxyTarget = env.VITE_APP_BASE_URL || "http://127.0.0.1:8280";
+  const deviceAccessProxy = createDeviceAccessProxyRuntime(apiProxyTarget);
 
   return {
     base: "/",
@@ -48,12 +50,9 @@ export default defineConfig(({ mode }) => {
       open: false,
       port: 5177,
       https: resolveDevHttps(env),
-      proxy: {
-        "/api": { target: apiProxyTarget, changeOrigin: true, xfwd: true },
-        "/public": { target: apiProxyTarget, changeOrigin: true }
-      }
+      proxy: deviceAccessProxy.proxy
     },
-    plugins: [...createVitePlugins(), easyPlayerAssets()],
+    plugins: [...createVitePlugins(), deviceAccessProxy.plugin, easyPlayerAssets()],
     resolve: {
       alias: {
         "@assets": path.join(__dirname, "src/assets"),

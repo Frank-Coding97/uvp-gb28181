@@ -61,6 +61,7 @@ func InitRoutes(engine *gin.Engine) *openapiauth.Gateway {
 	if err := middleware.ConfigureTrustedProxies(engine, app.ConfigYml.GetStringSlice("httpserver.trustedproxies")); err != nil {
 		panic("invalid httpserver.trustedproxies: " + err.Error())
 	}
+	engine.Use(middleware.DeviceAccessIngress(app.ConfigYml.GetStringSlice("httpserver.trustedproxies")))
 	var openAPIGateway *openapiauth.Gateway
 	var openAPIAdmin *openapicontrollers.ClientAdminController
 	if app.ConfigYml.GetBool("openapi.enabled") {

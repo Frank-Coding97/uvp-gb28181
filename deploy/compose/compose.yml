@@ -151,6 +151,9 @@ services:
       #   同一个 auth.ErrUnavailable ⇒ 日志里完全看不出是缺密钥。
       UVP_OPENAPI_MASTER_KEY: ${UVP_OPENAPI_MASTER_KEY:?UVP_OPENAPI_MASTER_KEY 必填（install.sh 会写进 .env）}
       UVP_SIP_TRACE_ENCRYPTION_KEY: ${UVP_SIP_TRACE_ENCRYPTION_KEY:?UVP_SIP_TRACE_ENCRYPTION_KEY 必填（install.sh 会写进 .env）}
+      # 无 HTTP 请求的级联抓拍使用部署实际的明文设备入口端口；外部地址仍由
+      # 后端基于已注册的 SIP 本地接入地址解析，并不向用户暴露可编辑业务 URL。
+      UVP_DEVICE_HTTP_PORT: ${UVP_HTTP_PORT:-51001}
       # 引导页默认 SIP 端口 = 端口段基址 + 64（规划段最后一位）。
       #
       # ⛔⛔ 为什么要在运行时给一遍，而不是靠前端构建期注入就够：

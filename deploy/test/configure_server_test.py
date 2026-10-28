@@ -175,6 +175,26 @@ class ConfigureServerTests(unittest.TestCase):
             ),
         )
 
+    def test_non_request_device_capture_metadata_uses_the_plain_http_listener(self) -> None:
+        control = (REPO_ROOT / "deploy" / "standalone" / "uvp-gb28181-ctl.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('export UVP_DEVICE_HTTP_PORT="$NGINX_HTTP_PORT"', control)
+
+        windows_control = (
+            REPO_ROOT / "deploy" / "standalone-windows" / "uvp-gb28181-ctl.ps1"
+        ).read_text(encoding="utf-8-sig")
+        self.assertIn('$env:UVP_DEVICE_HTTP_PORT = [string]$Ports.NGINX_HTTP', windows_control)
+
+        compose = (REPO_ROOT / "deploy" / "compose" / "compose.yml").read_text(encoding="utf-8")
+        self.assertIn('UVP_DEVICE_HTTP_PORT: ${UVP_HTTP_PORT:-51001}', compose)
+
+        test_compose = Path(__file__).with_name("compose.yml").read_text(encoding="utf-8")
+        self.assertIn("UVP_DEVICE_HTTP_PORT: 56000", test_compose)
+
+        service = Path(__file__).with_name("uvp-backend.service").read_text(encoding="utf-8")
+        self.assertIn("Environment=UVP_DEVICE_HTTP_PORT=56000", service)
+
     def test_compose_bootstraps_the_gate_before_starting_backend(self) -> None:
         compose = (Path(__file__).with_name("compose.yml")).read_text(encoding="utf-8")
 

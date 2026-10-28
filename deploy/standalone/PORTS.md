@@ -156,7 +156,7 @@
 # ---------------- ② 平台内部（防火墙不用开）----------------
 # 同机进程之间通信，走回环；开到外网等于把内部接口暴露
 #
-#  51002      后端 HTTP              （API + 扫码落地页 + 二维码地址）
+#  51002      后端 HTTP              （仅由本机 nginx 转发，不对设备暴露）
 #  51003      Redis                 （仅监听 127.0.0.1，无密码）
 #
 # ---------------- 数据库 ----------------
@@ -217,7 +217,7 @@
 #
 #   UVP_NGINX_HTTP_PORT=51000        管理页明文入口（默认入口）
 #   UVP_HTTPS_PORT=51001             管理页 HTTPS（默认关闭，页面里开启后才监听）
-#   UVP_HTTP_PORT=51002              后端 API（扫码接入地址也用它）
+#   UVP_HTTP_PORT=51002              后端 API（仅由本机 nginx 转发）
 #   UVP_REDIS_PORT=51003             Redis（仅监听回环）
 #   UVP_ZLM_HTTP_PORT=51004          ZLM HTTP API
 #   UVP_ZLM_RTSP_PORT=51005          ZLM RTSP

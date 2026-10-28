@@ -8,7 +8,7 @@ import (
 	"gorm.io/gorm"
 
 	"uvplatform.com/uvp-gb28181/app/controllers"
-	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	"uvplatform.com/uvp-gb28181/app/deviceaccess"
 	gbsetup "uvplatform.com/uvp-gb28181/app/gb28181/setup"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 	"uvplatform.com/uvp-gb28181/app/middleware"
@@ -55,9 +55,6 @@ func NewQRController() *QRController {
 
 // NewConfiguredQRController 装配 QRController.
 // cache 由 bootstrap 传入(app.Cache)而非在此直接读全局变量 —— 便于测试注入内存实现.
-//
-// baseURLFn 返回设备可达的接入基址;为 nil 时回落读全局 gb28181 配置,
-// 避免装配顺序把配置读空。
 func NewConfiguredQRController(db *gorm.DB, cache app.CacheInterf, transport []string, providers ...gbsetup.InterfaceProvider) *QRController {
 	service := gbsetup.NewQRService(
 		cache,
@@ -67,15 +64,7 @@ func NewConfiguredQRController(db *gorm.DB, cache app.CacheInterf, transport []s
 	if len(providers) > 0 {
 		service.SetNetworkProvider(providers[0])
 	}
-	service.SetBaseURLProvider(gbconfig.CurrentQRProvisionBaseURL)
 	return &QRController{svc: service}
-}
-
-// SetBaseURLProvider 覆盖设备可达基址的解析(测试注入用).
-func (qc *QRController) SetBaseURLProvider(fn func() (string, error)) {
-	if qc.svc != nil {
-		qc.svc.SetBaseURLProvider(fn)
-	}
 }
 
 // GenerateToken POST /api/gb28181/sip/qr/token
@@ -85,18 +74,17 @@ func (qc *QRController) GenerateToken(c *gin.Context) {
 		qc.Fail(c, "接入二维码服务尚未装配", nil, http.StatusServiceUnavailable)
 		return
 	}
+	baseURL, err := deviceaccess.FromContext(c.Request.Context())
+	if err != nil {
+		qc.Fail(c, "无法确定设备可访问的扫码地址，请使用平台的局域网 IP 或域名打开平台", err,
+			http.StatusServiceUnavailable)
+		return
+	}
 
 	token, expiresIn, err := qc.svc.GenerateToken(c.Request.Context())
 	if err != nil {
 		if errors.Is(err, gbsetup.ErrSIPNotConfigured) {
 			qc.Fail(c, "平台 SIP 尚未配置,请先完成 SIP 接入配置", err)
-			return
-		}
-		if errors.Is(err, gbsetup.ErrBaseURLUnavailable) {
-			// ⛔ 别退化成一个扫了必失败的码 —— 设备侧只会报「连不上平台」,
-			// 排查成本全落在用户身上。直接把真实原因带出去。
-			qc.Fail(c, "扫码接入地址未配置,请检查平台 gb28181.qr_provision 配置", err,
-				http.StatusServiceUnavailable)
 			return
 		}
 		qc.Fail(c, "生成接入二维码失败", err, http.StatusInternalServerError)
@@ -106,7 +94,7 @@ func (qc *QRController) GenerateToken(c *gin.Context) {
 	qc.Success(c, QRTokenResponse{
 		Token:            token,
 		ExpiresInSeconds: expiresIn,
-		BaseURL:          qc.svc.BaseURL(),
+		BaseURL:          baseURL,
 	})
 }
 

@@ -14,6 +14,10 @@ ZLM_PORTS = {"HTTP_PORT": "52004", "SSL_PORT": "52007", "RTSP_PORT": "52005", "R
 
 
 class StandaloneNginxRelocationTests(unittest.TestCase):
+    def test_standalone_backend_receives_device_http_port(self):
+        source = CONTROL_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('export UVP_DEVICE_HTTP_PORT="$NGINX_HTTP_PORT"', source)
+
     def test_tls_initialization_preserves_existing_zlm_certificate(self):
         source = CONTROL_SCRIPT.read_text(encoding="utf-8")
         function = re.search(r"(?ms)^ensure_tls_material\(\) \{.*?^\}", source).group()

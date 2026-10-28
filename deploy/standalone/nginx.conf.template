@@ -6,15 +6,15 @@
 # ⛔ 为什么前端要放 nginx 而不是让后端托管：
 #   后端自带静态服务时，前端页面和 API 只能共用一个端口，于是「要么全 HTTP、
 #   要么全 HTTPS」，扫码接入拿不到注册信息（App 撞自签名证书）。
-#   拆开后：nginx 独占 HTTPS，后端留在纯 HTTP 的内网端口上，
-#   二维码里填 http://后端地址 即可，App 完全不碰 TLS。
+#   拆开后：nginx 同时提供管理页面和设备入口，后端留在纯 HTTP 的内网端口上。
+#   二维码与抓拍回传地址由设备请求经过的 nginx 入口自动派生，设备不直接访问后端。
 #
 # ⛔ 端口规划（与 uvp-gb28181-ctl.sh 的变量必须一致；完整表见同目录 PORTS.md）：
 #   51000 nginx HTTP         ← **默认入口**；并为 /api/ 与 /gb28181/ 留明文（@PLAIN_HTTP_PORT@）
 #   51001 nginx HTTPS        ← 开启 HTTPS 后浏览器访问（@HTTPS_PORT@，默认关闭）
 #   ⛔ 2026-10-19 起这两个端口**互换过**（旧版 HTTPS 51000 / HTTP 51001）。
 #     存量实例的 data/https/settings.json 由 ctl.sh 在启动时自动迁移，见那段注释。
-#   51002 后端 HTTP          ← API + 二维码地址，**不设 TLS**（@BACKEND_PORT@）
+#   51002 后端 HTTP          ← 仅由本机 nginx 转发，**不设 TLS**（@BACKEND_PORT@）
 #   51003 Redis（仅回环）    51004-51013 ZLM 各协议
 #   51014-51063 ZLM RTP 动态段    51064 SIP（UDP+TCP，引导页预填）
 #
@@ -56,6 +56,34 @@ http {
     map $http_x_forwarded_proto $uvp_forwarded_proto {
         default $http_x_forwarded_proto;
         ""      $scheme;
+    }
+
+    # 设备入口只信任内置 nginx 实际连接的代理地址。公网客户端伪造
+    # X-Forwarded-Proto 不能改变二维码或抓拍回传地址。
+    geo $remote_addr $uvp_device_proxy_trusted {
+        default          0;
+        127.0.0.1        1;
+        ::1              1;
+        10.0.0.0/8       1;
+        172.16.0.0/12    1;
+        192.168.0.0/16   1;
+    }
+    map $http_host $uvp_device_host_without_port {
+        ~^\[(?<uvp_device_ipv6>[0-9A-Fa-f:.]+)\](?::[0-9]+)?$ "[$uvp_device_ipv6]";
+        ~^(?<uvp_device_name>[^:]+)(?::[0-9]+)?$                 $uvp_device_name;
+        default "";
+    }
+    map "$uvp_device_proxy_trusted:$http_x_forwarded_proto" $uvp_device_external_base {
+        ~^1:(?<uvp_device_external_scheme>https?)$ "$uvp_device_external_scheme://$http_host";
+        default "";
+    }
+    map $uvp_device_external_base $uvp_device_http_base {
+        ""      "http://$http_host";
+        default $uvp_device_external_base;
+    }
+    map $uvp_device_external_base $uvp_device_https_base {
+        ""      "http://$uvp_device_host_without_port:@PLAIN_HTTP_PORT@";
+        default $uvp_device_external_base;
     }
     include @ACTIVE_ROOT@/vendor/nginx/conf/mime.types;
     default_type  application/octet-stream;
@@ -186,7 +214,7 @@ http {
 
         # ⛔ SPA 前端路由：任何未匹配的路径都交回 index.html，
         #   否则刷新 /devices/123 会 404（前端是 history 路由）。
-        #   ⚠️ 但 /api/ 与 /gb28181/ 必须列在前面 —— 否则它们会被这条规则
+        #   ⚠️ 但 /api/、/gb28181/ 与 /openapi/ 必须列在前面 —— 否则它们会被这条规则
         #   吞掉、返回 HTML，前端拿到 HTML 当 JSON 解析 ⇒ 报一个和真因无关的错。
         location = /api/system/upgrade/import {
             client_max_body_size 9g;
@@ -202,6 +230,7 @@ http {
             proxy_set_header X-Real-IP         $remote_addr;
             proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $uvp_forwarded_proto;
+            proxy_set_header X-UVP-Device-Base-URL $uvp_device_https_base;
             proxy_set_header Connection        "";
             proxy_connect_timeout 15s;
             proxy_send_timeout    30m;
@@ -222,6 +251,7 @@ http {
             proxy_set_header X-Real-IP         $remote_addr;
             proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $uvp_forwarded_proto;
+            proxy_set_header X-UVP-Device-Base-URL $uvp_device_https_base;
             proxy_set_header Connection        "";
             # 上传/下载超时给足：录像片段可能上百 MB
             proxy_connect_timeout 15s;
@@ -232,9 +262,7 @@ http {
             proxy_buffering       off;
         }
 
-        # GB28181 相关：扫码落地页 + 免鉴权兑换接口。
-        # ⛔ 兑换接口走的是**纯 HTTP 的后端**，这里只是顺带转过去，
-        #   真正的扫码走「http://本机:后端端口」（明文，不经 TLS，见交付说明）。
+        # GB28181 相关：扫码落地页 + 免鉴权兑换接口。设备入口统一经 nginx。
         location /gb28181/ {
             proxy_pass http://uvp_backend;
             proxy_http_version 1.1;
@@ -247,6 +275,19 @@ http {
             proxy_set_header X-Real-IP         $remote_addr;
             proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $uvp_forwarded_proto;
+            proxy_set_header X-UVP-Device-Base-URL $uvp_device_https_base;
+            proxy_set_header Connection        "";
+        }
+
+        location ~ ^/openapi(?:/|$) {
+            proxy_pass http://uvp_backend;
+            proxy_http_version 1.1;
+            proxy_set_header Host              $http_host;
+            proxy_set_header X-Forwarded-Host  $http_host;
+            proxy_set_header X-Real-IP         $remote_addr;
+            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $uvp_forwarded_proto;
+            proxy_set_header X-UVP-Device-Base-URL $uvp_device_https_base;
             proxy_set_header Connection        "";
         }
 
@@ -266,10 +307,8 @@ http {
     # ============================================================
     # HTTP：跳 HTTPS
     #
-    # ⛔ 保留一条例外：/api/ 与 /gb28181/ 走明文转发。
-    #   理由：二维码里填的就是「http://本机:后端端口」，而部分客户端
-    #   （含模拟器 App）只信任这个来源；让它们也能直接打到这里可以少一层依赖。
-    #   若客户不需要这条例外，把下面 location /api/ 与 /gb28181/ 整块删掉即可。
+    # ⛔ /api/、/gb28181/ 与 /openapi/ 保持明文转发。设备回传使用此 nginx 入口，
+    #   不进入浏览器 HTTPS 跳转，也不直连后端端口。
     # ============================================================
     # UVP_HTTP_BEGIN
     server {
@@ -288,6 +327,7 @@ http {
             proxy_set_header X-Forwarded-Host  $http_host;
             proxy_set_header X-Real-IP         $remote_addr;
             proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header X-UVP-Device-Base-URL $uvp_device_http_base;
             proxy_set_header Connection        "";
             proxy_buffering off;
         }
@@ -303,6 +343,18 @@ http {
             proxy_set_header X-Forwarded-Host  $http_host;
             proxy_set_header X-Real-IP         $remote_addr;
             proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header X-UVP-Device-Base-URL $uvp_device_http_base;
+            proxy_set_header Connection        "";
+        }
+
+        location ~ ^/openapi(?:/|$) {
+            proxy_pass http://uvp_backend;
+            proxy_http_version 1.1;
+            proxy_set_header Host              $http_host;
+            proxy_set_header X-Forwarded-Host  $http_host;
+            proxy_set_header X-Real-IP         $remote_addr;
+            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header X-UVP-Device-Base-URL $uvp_device_http_base;
             proxy_set_header Connection        "";
         }
 

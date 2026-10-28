@@ -15,7 +15,6 @@ import (
 	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 	"uvplatform.com/uvp-gb28181/app/gb28181/ptz"
 	"uvplatform.com/uvp-gb28181/app/gb28181/uac"
-	"uvplatform.com/uvp-gb28181/app/global/app"
 	"uvplatform.com/uvp-gb28181/internal/authoritytest"
 )
 
@@ -32,7 +31,7 @@ func TestCascadeSnapshotRequestBinding(t *testing.T) {
 			db, platform, store, _ := cascadeAuthorizedControlFixture(t, "2022", cascadeRecordSenderFunc(func(context.Context, string, string, string, []byte) (uac.TrackedMessageResult, error) {
 				return uac.TrackedMessageResult{}, fmt.Errorf("unexpected network send")
 			}))
-			app.ConfigYml = cascadeSnapshotTestConfig{}
+			configureCascadeSnapshotIngress(t, db)
 			require.NoError(t, db.Model(&platform).Update("config_enabled", true).Error)
 			require.NoError(t, db.Table("gb_device").Where("id=10").Update("effective_version", "2022").Error)
 			require.NoError(t, db.AutoMigrate(&model.GbCascadeSnapshotSession{}))

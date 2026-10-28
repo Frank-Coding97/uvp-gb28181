@@ -87,9 +87,7 @@ func NewDeviceSessionCaptureAdapterRegistrations(service DeviceSessionService) [
 
 // NewDeviceSessionLibraryAdapterRegistrations 只注册图像库的读与删。
 //
-// ⭐ 刻意与抓图分开注册：图像库只要"库行 + 磁盘目录"两样东西，与上传基址、
-// 设备在线、SIP 会话全都无关。绑在一起的话，一个没配置 `snapshot_upload.base_url`
-// 的部署会连"翻历史图、删图"都一起消失 —— 而那两件事恰恰不需要那个配置。
+// 图像库只依赖库行和磁盘目录，设备离线或设备入口不可用时仍可读取历史图片。
 func NewDeviceSessionLibraryAdapterRegistrations(service DeviceSessionService) []catalogruntime.AdapterRegistration {
 	return deviceSessionRegistrations(newDeviceSessionAdapters(service)[3:6])
 }

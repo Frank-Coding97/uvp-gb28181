@@ -3,9 +3,7 @@ package controllers
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -97,21 +95,6 @@ type PTZDefaultSpeedConfig struct {
 	Level int `json:"level"`
 }
 
-// DeviceAccessConfig 是「设备接入地址」：平台下发给**设备**的两个基址。
-//
-// ⛔⛔ 两者都必须是设备能访问到的地址，不是浏览器打开平台的地址。2026-10 两次现场
-// 事故同源：扫码配网用了 window.location.origin（自签 HTTPS ⇒ 设备握手失败），
-// 抓拍回传用了浏览器入口（自签 HTTPS ⇒ 设备传不回来且零报错）。所以这两项必须
-// 允许现场在页面上改成设备真正能到达的地址（内网 IP / 公网明文口）。
-//
-// 留空 = 未配置：扫码回退 host+port（再空则出码时 503 拒绝），抓拍回退请求 Host
-// 派生（仅设备与平台直连时可靠）。清空是合法操作，故不能用零值判断"没传"——
-// presence 标记见 UnmarshalJSON。
-type DeviceAccessConfig struct {
-	QRProvisionBaseURL    string `json:"qrProvisionBaseUrl"`
-	SnapshotUploadBaseURL string `json:"snapshotUploadBaseUrl"`
-}
-
 // SIPLogUpdateResult 是 SIP 原始报文 Trace 开关及运行时应用结果。
 // 保留天数不在这里配置：唯一入口是系统配置的日志清理页签，由它写入
 // gbconfig.SIPTraceRetentionDaysConfigKey 并负责重载 SIP 运行时。
@@ -151,14 +134,7 @@ type ServiceConfig struct {
 	RecordCacheTailToleranceSec      int                                    `json:"recordCacheTailToleranceSec"`
 	SIPLog                           SIPLogUpdateResult                     `json:"sipLog"`
 	Cascade                          *gbconfig.CascadeSettings              `json:"cascade,omitempty"`
-	DeviceAccess                     DeviceAccessConfig                     `json:"deviceAccess"`
 	recordCacheTailTolerancePresent  bool
-	// deviceAccessPresent / deviceAccess*Present 是三级 presence：
-	// 整个 deviceAccess 缺失（老前端整包 PUT）⇒ 两项都保留当前值；
-	// 对象在但某字段缺失 ⇒ 只保留那一项；字段存在且为空 ⇒ 按"清空"执行。
-	deviceAccessPresent               bool
-	deviceAccessQRProvisionPresent    bool
-	deviceAccessSnapshotUploadPresent bool
 }
 
 // UnmarshalJSON remembers whether the optional compatibility field was sent.
@@ -176,15 +152,6 @@ func (s *ServiceConfig) UnmarshalJSON(data []byte) error {
 	}
 	*s = ServiceConfig(decoded)
 	_, s.recordCacheTailTolerancePresent = fields["recordCacheTailToleranceSec"]
-	// ⛔ 只有 deviceAccess 是**对象**才算"传了"：把它写成 null 或省略时清空两项是
-	// 灾难性误伤（老前端/部分客户端会带 null），所以 null 归入"没传"。
-	rawDeviceAccess := fields["deviceAccess"]
-	var accessFields map[string]json.RawMessage
-	if err := json.Unmarshal(rawDeviceAccess, &accessFields); err == nil && accessFields != nil {
-		s.deviceAccessPresent = true
-		_, s.deviceAccessQRProvisionPresent = accessFields["qrProvisionBaseUrl"]
-		_, s.deviceAccessSnapshotUploadPresent = accessFields["snapshotUploadBaseUrl"]
-	}
 	return nil
 }
 
@@ -209,7 +176,6 @@ func (sc *ServiceConfigController) currentServiceConfig() ServiceConfig {
 		}
 	}
 	cascade := gbconfig.CurrentCascadeSettings()
-	deviceAccess := currentDeviceAccessConfig()
 	return ServiceConfig{
 		PositionHistory: position, CloudRecordingRetention: CloudRecordingRetentionConfig{RetentionDays: cloud},
 		SDPExtension:         SDPExtensionConfig{Enabled: gbconfig.SDPExtensionEnabled()},
@@ -220,21 +186,7 @@ func (sc *ServiceConfigController) currentServiceConfig() ServiceConfig {
 		DefaultPlaybackProtocol: DefaultPlaybackProtocolConfig{Protocol: gbconfig.CurrentDefaultPlaybackProtocol()}, GlobalSubscriptions: GlobalSubscriptionConfig{Items: gbconfig.GlobalSubscriptionItems()},
 		DefaultChannelAudio: DefaultChannelAudioConfig{Enabled: gbconfig.DefaultChannelAudioEnabled()}, PlaybackSettings: gbconfig.CurrentPlaybackSettings(), FixedAddressPlayback: gbconfig.CurrentFixedAddressPlaybackSettings(),
 		PlayAuth: gbconfig.CurrentPlayAuthSettings(), RecordCacheTailToleranceSec: gbconfig.CurrentRecordCacheTailToleranceSec(), SIPLog: SIPLogUpdateResult{Enabled: gbconfig.SIPTraceEnabled(), Applied: sc.sipTraceApplied(gbconfig.SIPTraceEnabled())},
-		Cascade:      &cascade,
-		DeviceAccess: deviceAccess,
-	}
-}
-
-// currentDeviceAccessConfig 读原始配置值（不是 EffectiveBaseURL）：
-// 页面要显示"现场实际写的是什么"，好让运维判断它是不是设备可达的地址；
-// 拼装出来的 host+port 形式若被回显并保存，会把两套写法混进配置文件。
-func currentDeviceAccessConfig() DeviceAccessConfig {
-	if app.ConfigYml == nil {
-		return DeviceAccessConfig{}
-	}
-	return DeviceAccessConfig{
-		QRProvisionBaseURL:    strings.TrimSpace(app.ConfigYml.GetString(gbconfig.QRProvisionBaseURLConfigKey)),
-		SnapshotUploadBaseURL: strings.TrimSpace(app.ConfigYml.GetString(gbconfig.SnapshotUploadBaseURLConfigKey)),
+		Cascade: &cascade,
 	}
 }
 
@@ -251,7 +203,6 @@ func (sc *ServiceConfigController) UpdateServiceConfig(c *gin.Context) {
 	if !request.recordCacheTailTolerancePresent {
 		request.RecordCacheTailToleranceSec = gbconfig.CurrentRecordCacheTailToleranceSec()
 	}
-	request.DeviceAccess = mergeDeviceAccess(request)
 	if err := validateServiceConfig(request); err != nil {
 		sc.Fail(c, "保存国标服务配置失败："+err.Error(), err, http.StatusBadRequest)
 		return
@@ -291,94 +242,7 @@ func (sc *ServiceConfigController) UpdateServiceConfig(c *gin.Context) {
 	sc.SuccessWithMessage(c, "国标服务配置已更新", request)
 }
 
-// mergeDeviceAccess 按 presence 决定"采用请求值"还是"保留当前值"。
-//
-// ⛔⛔ 老前端/第三方客户端整包 PUT 时不带 deviceAccess ⇒ 必须保留当前值。否则一次
-// 保存就会把现场配好的公网地址清成空：扫码立刻失效（出码 503），抓拍回传退回
-// 请求 Host 派生（自签 HTTPS / 丢端口，2026-10-20 现场就是这么静默失效的）。
-func mergeDeviceAccess(request ServiceConfig) DeviceAccessConfig {
-	current := currentDeviceAccessConfig()
-	if !request.deviceAccessPresent {
-		return current
-	}
-	merged := current
-	if request.deviceAccessQRProvisionPresent {
-		merged.QRProvisionBaseURL = normalizeQRProvisionBaseURL(request.DeviceAccess.QRProvisionBaseURL)
-	}
-	if request.deviceAccessSnapshotUploadPresent {
-		merged.SnapshotUploadBaseURL = normalizeSnapshotUploadBaseURL(request.DeviceAccess.SnapshotUploadBaseURL)
-	}
-	return merged
-}
-
-// normalizeQRProvisionBaseURL / normalizeSnapshotUploadBaseURL 把页面输入的地址规范成
-// 入库形态（去尾斜杠、scheme 小写），用的是与校验、运行时**同一个** EffectiveBaseURL。
-//
-// ⛔ 非法值原样返回，交给 validateDeviceAccessBaseURLs 报错 —— 这里静默兜底会让用户在
-// 页面上看到「保存成功」而实际地址没被接受。
-func normalizeQRProvisionBaseURL(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
-	}
-	cfg := gbconfig.QRProvisionConfig{BaseURL: raw, RequireTLS: gbconfig.QRProvisionConfigFrom(app.ConfigYml).RequireTLS}
-	if normalized, err := cfg.EffectiveBaseURL(); err == nil {
-		return normalized
-	}
-	return raw
-}
-
-func normalizeSnapshotUploadBaseURL(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
-	}
-	cfg := gbconfig.SnapshotUploadConfig{BaseURL: raw}
-	if normalized, err := cfg.EffectiveBaseURL(); err == nil {
-		return normalized
-	}
-	return raw
-}
-
-// validateDeviceAccessBaseURLs 只校验**请求显式提交**的字段，且只在非空时校验
-// （留空是合法的"未配置"）。
-//
-// ⛔⛔ 为什么按 presence 而不是按合并后的值校验：配置文件里的历史值可能本来就非法
-// （现场手改过）。若把它也纳入校验，操作员改任何一个别的配置项都会被这个历史值
-// 卡住 —— 那是"改 A 被 B 拦住"的经典死锁。
-// ⛔⛔ 校验规则**只复用**两个 EffectiveBaseURL，绝不另写一套：页面放行了后端却拒发
-// （或反之），是这类"设备可达地址"最典型的坑。扫码的 RequireTLS 一并带上，避免
-// 在"已要求 TLS"的部署里从页面塞进一个明文地址。
-func validateDeviceAccessBaseURLs(request ServiceConfig) error {
-	if !request.deviceAccessPresent {
-		return nil
-	}
-	if request.deviceAccessQRProvisionPresent {
-		qr := gbconfig.QRProvisionConfig{
-			BaseURL:    strings.TrimSpace(request.DeviceAccess.QRProvisionBaseURL),
-			RequireTLS: gbconfig.QRProvisionConfigFrom(app.ConfigYml).RequireTLS,
-		}
-		if qr.BaseURL != "" {
-			if _, err := qr.EffectiveBaseURL(); err != nil {
-				return fmt.Errorf("扫码配网地址：%w", err)
-			}
-		}
-	}
-	if request.deviceAccessSnapshotUploadPresent {
-		snapshot := gbconfig.SnapshotUploadConfig{BaseURL: strings.TrimSpace(request.DeviceAccess.SnapshotUploadBaseURL)}
-		if snapshot.BaseURL != "" {
-			if _, err := snapshot.EffectiveBaseURL(); err != nil {
-				return fmt.Errorf("抓拍回传地址：%w", err)
-			}
-		}
-	}
-	return nil
-}
-
 func validateServiceConfig(v ServiceConfig) error {
-	if err := validateDeviceAccessBaseURLs(v); err != nil {
-		return err
-	}
 	if v.Cascade != nil {
 		if err := gbconfig.ValidateCascadeSettings(*v.Cascade); err != nil {
 			return err
@@ -458,8 +322,6 @@ func applyServiceConfig(v ServiceConfig) {
 	app.ConfigYml.Set(gbconfig.PlayAuthTTLSecondsConfigKey, v.PlayAuth.TTLSeconds)
 	app.ConfigYml.Set(gbconfig.RecordCacheTailToleranceSecConfigKey, v.RecordCacheTailToleranceSec)
 	app.ConfigYml.Set(gbconfig.SIPTraceEnabledConfigKey, v.SIPLog.Enabled)
-	app.ConfigYml.Set(gbconfig.QRProvisionBaseURLConfigKey, strings.TrimSpace(v.DeviceAccess.QRProvisionBaseURL))
-	app.ConfigYml.Set(gbconfig.SnapshotUploadBaseURLConfigKey, strings.TrimSpace(v.DeviceAccess.SnapshotUploadBaseURL))
 }
 
 func SetPlayAuthRuntimeReady(ready bool) {

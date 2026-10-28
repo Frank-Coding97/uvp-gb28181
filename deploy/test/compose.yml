@@ -21,6 +21,9 @@ services:
       UVP_UPDATER_SOCKET: /run/uvp-updater/updater.sock
       UVP_UPDATER_STATE: /var/lib/uvp/updater-state
       UVP_UPDATER_GATE_PATH: /var/lib/uvp/updater-gate/gate.json
+      # 该测试拓扑由宿主机 nginx 在 56000 对设备提供入口；级联抓拍没有
+      # HTTP 请求可读 Host，因此显式提供这项运行期部署元数据。
+      UVP_DEVICE_HTTP_PORT: 56000
     ports:
       - "127.0.0.1:56001:18978"
       - "0.0.0.0:56002:56002/tcp"

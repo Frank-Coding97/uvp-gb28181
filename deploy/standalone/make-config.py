@@ -410,8 +410,8 @@ def _assert_sqlite_section_valid(text: str, db_path: str) -> None:
     try:
         parsed = yaml.safe_load(text) or {}
     except Exception as exc:
-        # ⛔ 同 add_qr_provision_section：解析失败要在**这里**变成清晰结论，
-        #   不能把 yaml 的「第 N 行」traceback 直接抛给出包现场（离真因很远）。
+        # 解析失败要在这里转换成明确结论，避免把 YAML 的行号 traceback
+        # 直接暴露给打包现场。
         raise SystemExit(
             f"配置无法解析（{type(exc).__name__}）——多半是某段插入位置或缩进错了"
         ) from None
@@ -467,66 +467,10 @@ def set_log_filepath(target: Path, log_path: str) -> None:
     print(f"   后端业务日志: {log_path}（已写入并通过结构校验）")
 
 
-def add_qr_provision_section(target: Path, host: str, port: str) -> None:
-    """写入「扫码接入基址」段（``gb28181.qr_provision``）。
-
-    ⛔⛔ 默认**留空出包**（host 为空 ⇒ base_url 为空），由客户机首次启动时
-       uvp-gb28181-ctl.sh 用本机实际地址兜底生成。理由是：出包机探到的 IP 是
-       **我们打包机**的地址，写进包里发出去，客户机上那个地址永远指向一台不存在
-       的主机 —— 2026-10-20 客户现场 `http://192.168.10.220:51002` 的残留就是
-       这么来的：页面看起来"地址填好了"，设备扫了却连不上，且平台零报错。
-       传了 ``--qr-provision-host`` 时仍按传入值写（我方预配置场景）。
-
-    ⛔⛔ 为什么这个值必须有一个明确落点，而不能让前端自己推断：
-      二维码是给**设备**扫的,它要访问的是后端地址,而不是「用户打开平台的地址」。
-      绿色包的前端走 nginx 自签 HTTPS（SAN 只有 localhost/127.0.0.1），
-      前端若用 ``window.location.origin`` 当默认值，二维码里就带上了那个自签地址 ⇒
-      设备侧 Ktor CIO 默认校验证书、握手失败 ⇒ 失败又被归类成 NetworkError ⇒
-      UI 骗用户「检查手机与平台是否同网络」。实测就是这样坏的（2026-10-08）。
-
-    形态照 ``sqlite`` 段：**yaml 解析后**断言子键存在且在 ``gb28181`` 下。
-    静默失败的老问题在这里同样成立 —— 配置写错不报错,只表现为「扫码不出码 / 出坏码」。
-
-    ⛔⛔ **已存在就改写，绝不追加第二段**。
-       ``config.example.yml`` 里本来就有样例段（给现场看的），
-       无条件追加会让同一个键在文件里出现两次：YAML 解析时后者静默覆盖前者，
-       行为上凑巧对，但**文件里两份配置**会直接把现场运维绕晕。
-       （变异自证抓到的就是这个：删掉生成段，校验仍然"通过"——
-         因为 example 那份还在，校验根本分不清包内配置到底有没有生效值。）
-    """
-    text = target.read_text(encoding="utf-8")
-    want = f"http://{host}:{port}" if host else ""
-
-    if _has_section(text, "qr_provision"):
-        text = _rewrite_section(text, "qr_provision", {
-            "base_url": f'"{want}"',
-            "host": '""',
-            "port": "0",
-            "require_tls": "false",
-        })
-    else:
-        text = _append_to_gb28181(text, [
-            "",
-            "# ---- 扫码接入基址（绿色安装包；本段由打包脚本生成）----",
-            "# 二维码里带的**设备可达**地址。不要改成浏览器打开平台的地址。",
-            "qr_provision:",
-            f"    base_url: \"{want}\"",
-            "    host: \"\"",
-            "    port: 0",
-            "    require_tls: false",
-        ])
-
-    _assert_qr_provision_valid(text, host, port)
-    _assert_qr_provision_not_duplicated(text)
-    target.write_text(text, encoding="utf-8")
-    print(f"   扫码接入基址: {want or '（留空，首启按本机地址生成）'}（已写入并通过结构校验）")
-
-
 def _section_lines(lines: list[str], name: str) -> tuple[int, int] | None:
     """返回 ``name:`` 段在 lines 中的 [start, end) 区间（含子键，不含段名行）。
 
-    ⛔ 判据必须同时看缩进和行尾：``qr_provision:`` 与 ``  qr_provision:``
-    在gb28181 段内外都可能出现，只认顶格会漏掉嵌套的那个。
+    判据同时看缩进和行尾，因此可识别顶级段和嵌套段，并拒绝同层重复段。
     """
     start = None
     indent = 0
@@ -550,65 +494,6 @@ def _section_lines(lines: list[str], name: str) -> tuple[int, int] | None:
             end = i
             break
     return start, end
-
-
-def add_snapshot_upload_section(target: Path, base_url: str = "") -> None:
-    """写入「图像抓拍回传基址」段（``gb28181.snapshot_upload.base_url``）。
-
-    GB/T 28181-2022 §9.14：平台下发 SnapShotConfig 时把 UploadURL 交给设备，
-    设备把拍好的图 POST 回这个地址。
-
-    ⛔⛔ 默认**留空出包**，首启由 uvp-gb28181-ctl.sh 生成（指向 nginx 明文口）。
-       理由与 qr_provision 完全相同：出包机 IP ≠ 客户机 IP。
-    ⛔⛔ 而且这个地址**必须明文**：自签 HTTPS 的证书设备不认，TLS 握手直接失败，
-       失败发生在握手层、不产生任何访问日志 —— 2026-10-20 客户现场就是
-       「设备回了 OK、平台零报错、一张图都没有」。所以默认端口取 nginx 的
-       明文口（有访问日志可查），而不是浏览器入口。
-    """
-    text = target.read_text(encoding="utf-8")
-    want = base_url.strip()
-
-    if _has_section(text, "snapshot_upload"):
-        text = _rewrite_section(text, "snapshot_upload", {"base_url": f'"{want}"'})
-    else:
-        text = _append_to_gb28181(text, [
-            "",
-            "# ---- 图像抓拍回传基址（绿色安装包；本段由打包脚本生成）----",
-            "# 设备把拍好的图 POST 回来的地址。设备不认自签证书，公网部署请填明文口。",
-            "# 留空 = 未配置：首启由 uvp-gb28181-ctl.sh 按本机地址生成。",
-            "snapshot_upload:",
-            f'    base_url: "{want}"',
-        ])
-
-    _assert_simple_section_value(text, "snapshot_upload", "base_url", want)
-    target.write_text(text, encoding="utf-8")
-    print(f"   抓拍回传基址: {want or '（留空，首启按本机地址生成）'}（已写入并通过结构校验）")
-
-
-def _assert_simple_section_value(text: str, section: str, key: str, want: str) -> None:
-    """解析后断言 ``gb28181.<section>.<key>`` 等于 want，且该段只出现一次。
-
-    ⛔ 断言的是「等于期望值」而不是「非空」：只判非空时，example 里那份占位段
-       就能骗过校验，而包内配置压根没写进去（变异自证抓到的就是这个）。
-    """
-    hits = sum(1 for line in text.split("\n") if line.strip() == f"{section}:")
-    if hits != 1:
-        raise SystemExit(f"{section} 段出现了 {hits} 次（应为 1 次）—— "
-                         "重复段会让现场改错地方：YAML 只认后者。")
-    try:
-        import yaml
-    except ImportError:
-        print("   ⚠️ 未安装 PyYAML，跳过结构校验（pip install pyyaml 可启用）")
-        return
-    try:
-        parsed = yaml.safe_load(text) or {}
-    except Exception as exc:
-        raise SystemExit(
-            f"{section} 写入后配置无法解析（{type(exc).__name__}）—— 多半是插入位置或缩进错了。"
-        ) from None
-    got = str((parsed.get("gb28181") or {}).get(section, {}).get(key, ""))
-    if got != want:
-        raise SystemExit(f"gb28181.{section}.{key}={got!r}（应为 {want!r}）")
 
 
 def _has_section(text: str, name: str) -> bool:
@@ -636,123 +521,6 @@ def _rewrite_section(text: str, name: str, values: dict[str, str]) -> str:
     if missing:
         raise SystemExit(f"段落 {name} 里找不到键 {sorted(missing)}")
     return "\n".join(lines)
-
-
-def _append_to_gb28181(text: str, block: list[str]) -> str:
-    """把 block 追加到 ``gb28181:`` 段末尾（下一个顶级键之前）。
-
-    ⛔⛔ 插入点必须是段末尾，不能按「遇到第一个 N 空格行就插」。
-       踩过一次:gb28181 下**子段**(``trace:``/``media:``)与**直接子键**(``enabled:``)
-       缩进完全相同,光看缩进区分不出来 ⇒ 插进了 ``trace:`` 内部,
-       yaml 直接报 ``expected <block end>``。
-
-    ⛔⛔ block 的缩进**必须按实际段缩进平移**，不能硬编码 2 空格。
-       踩过一次:``config.example.yml`` 用 2 空格而**出包后的 config.yml 是 4 空格**
-       (make-config.py 会先重排缩进),硬编码写进去就与同级段不齐 ⇒ yaml ParserError。
-       这里的做法:探测段内首个直接子键的缩进,子键缩进 = 段缩进 + 2。
-    """
-    lines = text.split("\n")
-    start = None
-    for i, line in enumerate(lines):
-        if line.rstrip() == "gb28181:":
-            start = i
-            break
-    if start is None:
-        raise SystemExit(
-            "配置里找不到 gb28181: 段 —— 无法确定 qr_provision 段的插入位置。"
-            "不要靠猜，请检查 config.example.yml 的结构是否变了。"
-        )
-
-    # 段末尾 = 下一个**顶格**非注释非空行
-    end = len(lines)
-    for i in range(start + 1, len(lines)):
-        stripped = lines[i].strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if not lines[i].startswith((" ", "\t")):
-            end = i
-            break
-
-    # 从段内任意一个已知子段名反推缩进（比硬编码可靠）
-    child_indent = None
-    for line in lines[start + 1:end]:
-        m = re.match(r"^(?P<indent>[ \t]+)(?P<key>[A-Za-z_][\w]*):\s*$", line)
-        if m:
-            child_indent = m.group("indent")
-            break
-    if child_indent is None:
-        raise SystemExit(
-            "gb28181 段里找不到任何子段，无法确定子键缩进 —— 不要靠猜。"
-        )
-    key_indent = child_indent + "  "
-
-    shifted = []
-    for line in block:
-        if line.startswith("    "):
-            shifted.append(key_indent + line[4:])
-        elif line:
-            shifted.append(child_indent + line)
-        else:
-            shifted.append(line)
-
-    return "\n".join(lines[:end] + shifted + lines[end:])
-
-
-def _assert_qr_provision_not_duplicated(text: str) -> None:
-    """断言文件里 ``qr_provision`` 段**只出现一次**。
-
-    ⛔ 重复键在 YAML 里不报错，只是后者静默覆盖前者 —— 配置"能跑"，
-       但两份配置摆在文件里，现场运维改哪一份都说不清 ⇒ 必须拦住。
-    """
-    hits = 0
-    for line in text.split("\n"):
-        if line.strip() == "qr_provision:":
-            hits += 1
-    if hits != 1:
-        raise SystemExit(
-            f"qr_provision 段出现了 {hits} 次（应为 1 次）—— "
-            "YAML 不会报错但后者会静默覆盖前者，现场运维会改错地方。"
-        )
-
-
-def _assert_qr_provision_valid(text: str, host: str, port: str) -> None:
-    """解析后断言 qr_provision 段真的在 gb28181 下且取值正确。
-
-    ⛔ 必须断言「值来自生成段」而不是「值非空」：只判非空的话，
-       example 里那份 ``base_url: ""`` 的样例段就能骗过校验 ——
-       而包内配置其实压根没写进去。
-    """
-    try:
-        import yaml
-    except ImportError:
-        if "qr_provision" not in text:
-            raise SystemExit("qr_provision 段写入失败：结果里找不到该段")
-        print("   ⚠️ 未安装 PyYAML，跳过结构校验（pip install pyyaml 可启用）")
-        return
-
-    try:
-        parsed = yaml.safe_load(text) or {}
-    except Exception as exc:
-        # ⛔ yaml 解析失败也必须**在这里**变成清晰的失败,不能往上抛 traceback:
-        # 出包现场看到的是 yaml 的「第 329 行」,离真正的原因(插错位置)十万八千里。
-        # 变异自证时就是踩这个:护栏确实抓到了,但报的是 ParserError 而不是人话。
-        raise SystemExit(
-            f"qr_provision 写入后配置无法解析（{type(exc).__name__}）—— "
-            "多半是插入位置或缩进错了：gb28181 下既有子段(trace:/media:)"
-            "也有直接子键(enabled:)，缩进相同，光看缩进区分不出来。"
-        ) from None
-    gb = parsed.get("gb28181") or {}
-    qr = gb.get("qr_provision") or {}
-    problems = []
-    # 留空时 want 也是空串：断言「等于 want」同时锁住两种契约 ——
-    #   传了 host ⇒ 必须写成那个地址；没传 ⇒ 必须是空（不许偷偷写死出包机 IP）。
-    want = f"http://{host}:{port}" if host else ""
-    if "qr_provision" not in gb:
-        problems.append("qr_provision 不在 gb28181 段下（缩进错了）")
-    if str(qr.get("base_url", "")) != want:
-        problems.append(f"gb28181.qr_provision.base_url={qr.get('base_url')!r}（应为 {want!r}）")
-    if problems:
-        raise SystemExit("qr_provision 段结构校验失败：\n  - " + "\n  - ".join(problems))
 
 
 def _detect_openapi_audience() -> str:
@@ -841,7 +609,7 @@ def _assert_openapi_valid(text: str, enabled: bool, audience: str,
     # ⛔⛔⛔ 必须查「顶级 openapi 键出现几次」——YAML 里**重复键不报错**，
     #   后者静默覆盖前者，解析结果依然是对的 ⇒ 只看值永远抓不到。
     #   现场含义：配置文件里两份 openapi 段，人改的那份可能被生成的那份盖掉，
-    #   而运维看文件时会以为改生效了。（与 qr_provision 同一个教训。）
+    #   而运维看文件时会以为改生效了。
     if len(re.findall(r"(?m)^openapi:[ \t]*$", text)) != 1:
         problems.append(
             "openapi 顶级键出现了 %d 次（应为 1）—— 重复键 YAML 不报错但会静默覆盖"
@@ -924,10 +692,6 @@ def main() -> None:
         default=os.environ.get("UVP_JWT_SIGN_KEY", ""),
         help="JWT 签名密钥（≥32 位随机串）；留空=占位符时自动生成。默认读 UVP_JWT_SIGN_KEY",
     )
-    parser.add_argument("--qr-provision-host", default="",
-                        help="扫码接入基址里的设备可达地址；留空=出包留空，由客户机首启自动生成")
-    parser.add_argument("--snapshot-upload-base-url", default="",
-                        help="抓拍回传基址；留空=出包留空，由客户机首启自动生成（nginx 明文口）")
     parser.add_argument("--openapi-audience", default="",
                         help="OpenAPI 部署环境标识（不同环境不得共享）")
     parser.add_argument("--openapi-master-key-id", default="uvp-openapi-k1",
@@ -949,8 +713,6 @@ def main() -> None:
           jwt_sign_key=args.jwt_sign_key)
     add_sqlite_section(args.target, args.db_path)
     set_log_filepath(args.target, args.log_path)
-    add_qr_provision_section(args.target, args.qr_provision_host, args.http_port)
-    add_snapshot_upload_section(args.target, args.snapshot_upload_base_url)
     add_openapi_section(args.target, args.openapi_enabled == "true",
                         args.openapi_audience or _detect_openapi_audience(),
                         args.openapi_master_key_id)

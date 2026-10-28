@@ -1889,13 +1889,6 @@ export interface CascadeSettingsConfig {
   address: string;
 }
 
-export interface DeviceAccessConfig {
-  /** 扫码配网基址（设备扫到的地址），空串=未配置 */
-  qrProvisionBaseUrl: string;
-  /** 2022 抓拍回传基址（下发给设备的 UploadURL），空串=未配置 */
-  snapshotUploadBaseUrl: string;
-}
-
 export interface ServiceConfigAggregate {
   positionHistory: { enabled: boolean; retentionDays: number };
   cloudRecordingRetention: { retentionDays: number };
@@ -1917,7 +1910,6 @@ export interface ServiceConfigAggregate {
   recordCacheTailToleranceSec: number;
   sipLog: SIPLogConfig;
   cascade?: CascadeSettingsConfig;
-  deviceAccess: DeviceAccessConfig;
 }
 
 export const fetchServiceConfig = () =>

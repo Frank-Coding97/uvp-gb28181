@@ -47,7 +47,6 @@ ZLM_HTTP_PORT="${UVP_ZLM_HTTP_PORT:-}"
 SIP_PORT="${UVP_SIP_PORT:-}"
 BUSINESS_UID="${UVP_BUSINESS_UID:-10001}"
 BUSINESS_GID="${UVP_BUSINESS_GID:-10001}"
-QR_HOST="${UVP_QR_PROVISION_HOST:-}"
 NO_START=0
 
 while [ $# -gt 0 ]; do
@@ -66,7 +65,6 @@ while [ $# -gt 0 ]; do
     --redis-port) REDIS_PORT="$2"; shift 2 ;;
     --zlm-http-port) ZLM_HTTP_PORT="$2"; shift 2 ;;
     --sip-port) SIP_PORT="$2"; shift 2 ;;
-    --qr-host) QR_HOST="$2"; shift 2 ;;
     --no-start) NO_START=1; shift ;;
     -h|--help) sed -n '2,/^# 前置/p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) printf '未知参数: %s\n' "$1" >&2; exit 2 ;;
@@ -316,17 +314,6 @@ for candidate in "$PKG_DIR/config/config.example.yml" "$PKG_DIR/../../server/con
 done
 [ -n "$CONFIG_SOURCE" ] || fail "找不到 config.example.yml"
 
-if [ -z "$QR_HOST" ]; then
-  # ⛔⛔ 扫码基址**绝不能取浏览器访问的地址**：二维码是给设备扫的，
-  #    设备要访问的是后端，而 nginx 用的是自签证书（SAN 里没有设备信任的名字）
-  #    ⇒ 用前端地址当基址会让设备侧 TLS 校验失败，且报成"连不上平台"。
-  #    这里取本机对外的 IP（后端直连地址），明文 HTTP，设备不碰 TLS。
-  QR_HOST="$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -1 || true)"
-  [ -n "$QR_HOST" ] || QR_HOST="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
-  [ -n "$QR_HOST" ] || QR_HOST="127.0.0.1"
-fi
-log "  设备接入基址（扫码用）：${QR_HOST}"
-
 log "生成 config.yml"
 if [ -n "${UVP_UPGRADE_TRUSTED_KEYS:-}" ]; then
   log "将发行公钥写入 upgrade.trusted_keys"
@@ -344,8 +331,6 @@ fi
   --zlm-media-server-id "uvp-media-server-0001" \
   --zlm-api-port "$ZLM_HTTP_PORT" \
   --hook-port "$BACKEND_PORT" \
-  --qr-provision-host "$QR_HOST" \
-  --snapshot-upload-base-url "http://${QR_HOST}:${HTTP_PORT}" \
   --upgrade-trusted-keys "${UVP_UPGRADE_TRUSTED_KEYS:-}" || fail "config.yml 生成失败"
 chown_biz "${BUSINESS_UID}:${BUSINESS_GID}" "$ROOT/config/config.yml"
 chmod 0640 "$ROOT/config/config.yml"

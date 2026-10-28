@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -13,13 +14,14 @@ import (
 	"github.com/emiago/sipgo/sip"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"uvplatform.com/uvp-gb28181/app/deviceaccess"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/control"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/repository"
-	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
 	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.com/uvp-gb28181/app/gb28181/ptz"
+	gbsetup "uvplatform.com/uvp-gb28181/app/gb28181/setup"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
@@ -113,7 +115,7 @@ func newCascadeConfigWriteHandlerWithExecutor(store *repository.GormRepository, 
 			if cascadeWireProfile(projection.Platform).Version != protocol.Version2022 || boundSource.Profile.Version != protocol.Version2022 || snapshot.SessionID == nil {
 				return reject(403, "Snapshot capture requires GB/T 28181-2022 on both cascade legs")
 			}
-			base, baseErr := gbconfig.CurrentSnapshotUploadBaseURL()
+			base, baseErr := cascadeSnapshotBaseURL(ctx)
 			if baseErr != nil || base == "" || snapshot.UploadURL == nil {
 				return reject(503, "Snapshot upload base unavailable")
 			}
@@ -296,4 +298,24 @@ func writeCascadeConfig(ctx context.Context, target cascadeConfigWriteTarget, co
 		return cascadeConfigQueryResult{}, err
 	}
 	return cascadeConfigQueryResult{body: body, authorize: check}, nil
+}
+
+// SIP-initiated captures have no HTTP ingress request. Reuse the current SIP
+// address and the Nginx port supplied by the launcher, without caching browser Hosts.
+func cascadeSnapshotBaseURL(ctx context.Context) (string, error) {
+	view, err := gbsetup.NewSIPConfigService(app.DB()).Get(ctx)
+	if err != nil {
+		return "", err
+	}
+	if view == nil {
+		return "", fmt.Errorf("SIP configuration unavailable")
+	}
+	addresses, err := gbsetup.ActiveSIPAddresses(*view, nil)
+	if err != nil {
+		return "", err
+	}
+	if len(addresses) != 1 {
+		return "", fmt.Errorf("device ingress requires one unambiguous SIP address")
+	}
+	return deviceaccess.ForHost(addresses[0], os.Getenv("UVP_DEVICE_HTTP_PORT"))
 }

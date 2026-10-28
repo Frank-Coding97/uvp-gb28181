@@ -94,19 +94,6 @@ ctl_port_default() {
 #   ⚠️ 因此 SIP 端口**改不了 config.env**：现场要改就在引导页改（存 DB）。
 SIP_PORT="${UVP_SIP_PORT:-51064}"
 
-# ---- 扫码接入基址里的设备可达地址 ----
-#
-# ⛔⛔ 为什么不能沿用「浏览器打开平台的地址」：
-#   二维码是给**设备**扫的，设备要访问的是后端。
-#   绿色包前端走 nginx 自签 HTTPS（SAN 只有 localhost/127.0.0.1），
-#   之前前端拿 window.location.origin 当默认值 ⇒ 二维码里带自签地址 ⇒
-#   手机侧 Ktor CIO 校验证书失败 ⇒ 失败被报成「连不上平台,请检查 Wi-Fi」。
-#   ⭐ 默认**留空**：出包机的 IP 写进客户配置 = 一个永远连不上的地址
-#      （2026-10-20 客户现场 http://192.168.10.220:51002 的残留就是这么来的）。
-#      留空后由客户机首启 uvp-gb28181-ctl.sh 按本机地址生成，之后可在
-#      页面「国标服务配置 → 国标相关 → 设备接入地址」里改成公网地址。
-QR_PROVISION_HOST="${UVP_QR_PROVISION_HOST:-}"
-
 # ---- ZLM 的两个身份：secret 与节点标识（老板定的：都用固定值）----
 #
 # ⛔⛔ 必须是**固定值**，不能让它们随机 —— 这是本轮最贵的两个教训：
@@ -758,8 +745,6 @@ $PY \
   --log-path "./logs/app/uvp-gb28181.log" \
   --zlm-secret "$ZLM_SECRET" \
   --zlm-media-server-id "$ZLM_MEDIA_SERVER_ID" \
-  --qr-provision-host "$QR_PROVISION_HOST" \
-  --snapshot-upload-base-url "${UVP_SNAPSHOT_UPLOAD_BASE_URL:-}" \
   --openapi-enabled "${UVP_OPENAPI_ENABLED:-true}" \
   --openapi-master-key-id "${UVP_OPENAPI_MASTER_KEY_ID:-uvp-openapi-k1}" \
   --upgrade-trusted-keys "${UVP_UPGRADE_TRUSTED_KEYS:-}"
@@ -792,60 +777,6 @@ if problems:
 print("✅ ZLM 身份配置已固定（secret %d 字符 / 节点标识 %d 字符）"
       % (len(want_secret), len(want_uuid)))
 ZLM_ID_CHECK_PY
-
-# ⛔ 出包前断言「设备接入地址」两段的落点正确。
-#   这一条的价值不在于「值对不对」，而在于**杜绝二维码/抓拍回传指向错误地址**：
-#   地址不对时二维码照样出得来、扫得动，只是设备换不到接入信息或传不回图片，
-#   而失败现场在设备侧，现场根本查不到是包的问题（2026-10-08 / 10-20 都是这样坏的）。
-#
-# ⭐ 默认契约是**留空**：出包机的 IP 写进客户配置 = 一个永远连不上的地址。
-#   留空后由客户机首启 uvp-gb28181-ctl.sh 按本机地址生成，之后可在页面上改。
-log "校验设备接入地址"
-"$PY" - "$PKG/config/config.yml" "$HTTP_PORT" <<'QR_BASE_CHECK_PY'
-import re
-import sys
-
-import yaml
-
-path, http_port = sys.argv[1:3]
-text = open(path, encoding="utf-8").read()
-gb = (yaml.safe_load(text) or {}).get("gb28181", {})
-
-problems = []
-
-def section_hits(name):
-    # 重复键 YAML 不报错，只是后者静默覆盖前者，
-    # 但文件里两份配置会让现场运维改错地方。
-    return sum(1 for line in text.split("\n") if line.strip() == name + ":")
-
-qr = gb.get("qr_provision", {})
-if section_hits("qr_provision") != 1:
-    problems.append("qr_provision 段出现 %d 次（应为 1 次）" % section_hits("qr_provision"))
-base_url = str(qr.get("base_url") or "")
-if base_url:
-    if (":" + http_port) not in base_url:
-        problems.append("qr_provision.base_url=%r 未指向后端端口 %s" % (base_url, http_port))
-    if base_url.startswith("https://"):
-        # 不是必然错，但绿色包默认不该这样 —— nginx 是自签证书，设备侧必然验不过
-        print("   ⚠️ 扫码接入基址用了 https（" + base_url + "）——设备侧必须信任该证书才能扫通")
-else:
-    print("   扫码接入基址: 留空（首启按客户机本机地址生成，页面可改）")
-
-snap = gb.get("snapshot_upload", {})
-if section_hits("snapshot_upload") != 1:
-    problems.append("snapshot_upload 段出现 %d 次（应为 1 次）" % section_hits("snapshot_upload"))
-snap_url = str(snap.get("base_url") or "")
-if snap_url:
-    if not snap_url.startswith("http://"):
-        # ⛔⛔ 自签 HTTPS 是设备回传失败的头号原因，且失败在握手层、零日志。
-        problems.append("snapshot_upload.base_url=%r 必须是明文 http:// ——"
-                        "设备不认自签证书，https 会静默传不回来" % snap_url)
-else:
-    print("   抓拍回传基址: 留空（首启按客户机本机地址生成，页面可改）")
-
-if problems:
-    sys.exit("❌ 设备接入地址未正确写进 config.yml：" + "；".join(problems))
-QR_BASE_CHECK_PY
 
 log "复制启停脚本"
 cp "$DEPLOY_DIR/uvp-gb28181-ctl.sh" "$PKG/uvp-gb28181-ctl.sh"

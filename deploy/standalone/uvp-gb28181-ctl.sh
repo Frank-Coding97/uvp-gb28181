@@ -1078,7 +1078,7 @@ check_ports_free() {
   else
     _check_one 51000 tcp "HTTP（浏览器访问管理页面 + 明文 API）" NGINX_HTTP_PORT
   fi
-  _check_one 51002 tcp "后端 HTTP（API + 扫码接入地址）"  HTTP_PORT
+  _check_one 51002 tcp "后端 HTTP（仅本机 nginx 转发）"   HTTP_PORT
   _check_one 51003 tcp "Redis（仅回环）"                  REDIS_PORT
   _check_one 51004 tcp "ZLM HTTP API（平台开关流）"       ZLM_HTTP_PORT
   _check_one 51005 tcp "ZLM RTSP（设备拉流播放）"         ZLM_RTSP_PORT
@@ -1688,6 +1688,9 @@ start_backend() {
   export UVP_UPDATER_SOCKET="$UPDATER_SOCKET"
   export UVP_UPDATER_STATE="$UPDATER_STATE"
   export UVP_UPDATER_GATE_PATH="$UPDATER_GATE_PATH"
+  # 级联抓拍没有浏览器 HTTP 请求可反推入口；这里仅告知后端设备应使用的
+  # nginx 明文监听端口，具体地址仍由后端按已注册的 SIP 本地接入地址解析。
+  export UVP_DEVICE_HTTP_PORT="$NGINX_HTTP_PORT"
   # ⛔ 必须把**包内**的 socket 路径告诉后端：它默认找 /run/uvp/firewall-agent.sock
   #   （那是 systemd/compose 交付的约定），绿色包把代理放在 run/ 下。
   #   漏了这一行 ⇒ 后端连不上代理 ⇒ 页面永远显示「主机防火墙 降级」，
@@ -1786,8 +1789,8 @@ check_setup_bin() {
 }
 
 # ------------------------------------------------------------ nginx ----
-# nginx 只做两件事：托管前端 + HTTPS 终止，后端仍是纯 HTTP 的
-# @BACKEND_PORT@（二维码里填的就是它，App 因此完全不碰 TLS）。
+# nginx 托管前端并终止 HTTPS；设备通过 nginx 的明文入口访问后端，后端仍是
+# 仅本机可达的纯 HTTP @BACKEND_PORT@。
 NGINX_DIR="$VENDOR/nginx"
 NGINX_BIN="$NGINX_DIR/sbin/nginx"
 NGINX_CONF="$RUN/nginx.conf"
@@ -2459,62 +2462,6 @@ sync_ports_into_config() {
 }
 
 
-# ============================================ 设备接入地址首启兜底 ====
-#
-# 「设备接入地址」有两项（都在 页面 → 国标服务配置 → 国标相关）：
-#   ① 扫码配网地址 qr_provision.base_url —— 二维码里交给设备的地址
-#   ② 抓拍回传地址 snapshot_upload.base_url —— 2022 抓拍时下发给设备的上传地址
-#
-# ⛔⛔ 为什么必须在**客户机上首启**生成，而不是打包时写死：
-#   打包机上探到的 IP 是**出包机**的地址。写进包里发出去，客户机上那个地址
-#   永远指向一台不存在的主机 —— 2026-10-20 客户现场就是
-#   `qr_provision.base_url: http://192.168.10.220:51002` 的残留，
-#   扫码配网必然失败，而现场看起来「配置都填好了」。
-#
-# ⛔⛔ 只填空值（config-set --if-empty）：现场把地址改成公网地址后，
-#   每次重启都不能被内网 IP 覆盖回去。真被覆盖的症状极难查：
-#   抓拍「突然又不行了」、设备连的是旧地址、平台日志零报错。
-#
-# ⛔ 端口各取各的源，不能统一：
-#   · 扫码地址 → 后端 HTTP 端口（设备直连后端拿 token/上传）
-#   · 抓拍回传 → nginx **明文**口（设备不认自签证书，必须明文；且过 nginx
-#     才有访问日志可查）。没有 nginx（源码模式）才退回后端端口。
-ensure_device_access_addresses() {
-  [ -f "$CONF" ] || return 0
-
-  local ip="" plain_port="$NGINX_HTTP_PORT" qr_url snapshot_url out rc
-  ip="$(detect_lan_ip)" || ip=""
-  if [ -z "$ip" ]; then
-    det "! 未识别到本机对外地址，跳过设备接入地址兜底"
-    det "  可在页面「国标服务配置 → 国标相关」里手工填写"
-    return 0
-  fi
-  [ -x "$NGINX_BIN" ] || plain_port="$HTTP_PORT"
-  qr_url="http://${ip}:${HTTP_PORT}"
-  snapshot_url="http://${ip}:${plain_port}"
-
-  rc=0
-  out="$("$SETUP_BIN" config-set --yml "$CONF" --section qr_provision --key base_url \
-        --value "$qr_url" --if-empty 2>&1)" || rc=$?
-  if [ "$rc" -eq 0 ]; then
-    det "扫码配网地址  ${qr_url}"
-  else
-    det "! 扫码配网地址兜底失败（${out}）"
-    det "  可在页面「国标服务配置 → 国标相关」里手工填写"
-  fi
-
-  rc=0
-  out="$("$SETUP_BIN" config-set --yml "$CONF" --section snapshot_upload --key base_url \
-        --value "$snapshot_url" --if-empty 2>&1)" || rc=$?
-  if [ "$rc" -eq 0 ]; then
-    det "抓拍回传地址  ${snapshot_url}"
-  else
-    det "! 抓拍回传地址兜底失败（${out}）"
-    det "  可在页面「国标服务配置 → 国标相关」里手工填写"
-  fi
-}
-
-
 # ============================================ 忘记登录口令 ⇒ 还原出厂口令 ====
 #
 # 场景：客户装完包、首次登录时把 admin 的口令改成了自己的，后来忘了。
@@ -2606,9 +2553,6 @@ case "${1:-start}" in
     # ⛔ 端口必须先同步进 config.yml 再起服务：Redis 读 --port 参数、
     #   后端读 config.yml，两处不同源就是「Redis 起来了但后端连不上」。
     sync_ports_into_config
-    # ⛔ 两个设备接入地址必须在端口同步之后生成：它们要用**最终**端口拼 URL，
-    #   先算再用旧端口就是"地址能打开但不是这台机器在听"的经典静默失效。
-    ensure_device_access_addresses
     # ⛔⛔ ZLM secret 必须对齐，且必须在**后端启动之前**：
     #   不对齐时平台调 ZLM 全被拒（-100 Please login first），
     #   后端启动会「成功」但录像缓存/点播/录像查询/hook 全部装配失败，

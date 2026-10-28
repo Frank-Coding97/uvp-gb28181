@@ -50,9 +50,6 @@ param(
     [string]$ToolchainDir = '',
     # Python 解释器（供 make-config.py 生成 config.yml 用）
     [string]$PythonExe = 'python',
-    # 扫码接入基址里「设备可达的地址」；⭐ 留空=出包留空，由客户机首启按本机地址生成
-    #   （出包机的 IP 写进客户配置 = 一个永远连不上的地址，2026-10-20 现场就是这坑）
-    [string]$QrProvisionHost = '',
     # 跳过后端编译（产物新鲜度断言仍会执行）
     [switch]$SkipBuild,
     # 跳过前端构建（复用 web\dist）
@@ -615,12 +612,11 @@ $mkArgs = @(
     '--openapi-enabled', 'true',
     '--openapi-master-key-id', $OpenApiMasterKeyId
 )
-if ($QrProvisionHost) { $mkArgs += @('--qr-provision-host', $QrProvisionHost) }
 if (-not [string]::IsNullOrWhiteSpace($env:UVP_UPGRADE_TRUSTED_KEYS)) {
     $mkArgs += @('--upgrade-trusted-keys', $env:UVP_UPGRADE_TRUSTED_KEYS)
 }
 Invoke-Native -FilePath $PythonExe -What '生成 config.yml（make-config.py）' -Arguments $mkArgs
-Ok 'config.yml 已生成（SQLite + 本机 Redis + ZLM 身份 + 设备接入地址留空待首启生成）'
+Ok 'config.yml 已生成（SQLite + 本机 Redis + ZLM 身份）'
 
 # ---- config\config.env：两个只走环境变量的密钥（每份包一份随机）----
 #

@@ -982,35 +982,6 @@ function Invoke-NginxConfRender {
 }
 
 # ---------------------------------------------------------------- 阶段 3 ---- ----
-function Invoke-DeviceAccessAddress {
-    # 首启兜底生成「设备接入地址」两项（页面 → 国标服务配置 → 国标相关）：
-    #   ① qr_provision.base_url    —— 二维码里交给设备的地址
-    #   ② snapshot_upload.base_url —— 2022 抓拍时下发给设备的上传地址
-    #
-    # ⛔⛔ 必须在**客户机首启**生成，不能打包时写死：打包机探到的 IP 是出包机的地址，
-    #   写进包里发出去，客户机上那个地址永远指向一台不存在的主机
-    #   （2026-10-20 客户现场 http://192.168.10.220:51002 的残留就是这么来的）。
-    # ⛔⛔ --if-empty：现场改成公网地址后，重启绝不能被本机 IP 覆盖回去。
-    #   真被覆盖的症状极难查：抓拍「突然又不行了」、设备连的是旧地址、平台零报错。
-    # ⛔ 端口取 nginx 明文口而不是后端端口：Windows 版后端只绑 127.0.0.1，
-    #   设备**只能**通过 nginx 进来（Linux 版后端对外监听，故那边用后端端口）。
-    param([hashtable]$Ports)
-
-    if (-not (Test-Path -LiteralPath $ConfFile)) { return }
-    $ip = Get-LanIP
-    if ([string]::IsNullOrWhiteSpace($ip) -or $ip -eq '127.0.0.1') {
-        Write-UvpWarn '未识别到本机对外地址，跳过设备接入地址兜底（可在页面「国标服务配置」里手工填写）'
-        return
-    }
-    $url = 'http://{0}:{1}' -f $ip, $Ports.NGINX_HTTP
-    foreach ($section in @('qr_provision', 'snapshot_upload')) {
-        & $SetupExe config-set --yml $ConfFile --section $section --key base_url --value $url --if-empty
-        if ($LASTEXITCODE -ne 0) {
-            Write-UvpWarn ("设备接入地址兜底失败（{0}，uvp-setup 退出码 {1}）—— 可在页面手工填写" -f $section, $LASTEXITCODE)
-        }
-    }
-}
-
 function Start-Redis {
     param([hashtable]$Ports)
     $redisDataDir = Join-Path $DataDir 'redis'
@@ -1118,6 +1089,9 @@ function Start-Backend {
     if ($envMap.ContainsKey('UVP_OPENAPI_MASTER_KEY')) {
         $env:UVP_OPENAPI_MASTER_KEY = $envMap['UVP_OPENAPI_MASTER_KEY']
     }
+    # 级联抓拍没有浏览器 HTTP 请求可推导入口；运行期只提供 nginx 明文端口，
+    # 具体地址由后端按 SIP 本地接入地址生成。
+    $env:UVP_DEVICE_HTTP_PORT = [string]$Ports.NGINX_HTTP
     # ⛔⛔ 进程权威目录必须**显式指到包内**，绝不能让它走平台默认值。
     #   后端 `processauthority.PrepareStateDir()` 的解析顺序是：
     #     ① config.yml 的 `processauthority.state_dir`（非空则**原样返回**，不创建、不绝对化）
@@ -1380,8 +1354,6 @@ function Invoke-Start {
     }
     Invoke-DatabaseInit
     Invoke-PortsSync -Config $config
-    # ⛔ 两个设备接入地址必须在端口同步之后生成：要用**最终**端口拼 URL。
-    Invoke-DeviceAccessAddress -Ports $config.Ports
     Invoke-NginxConfRender
     Invoke-TlsMaterial
 

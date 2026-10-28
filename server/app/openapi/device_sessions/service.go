@@ -35,7 +35,6 @@ var (
 	ErrConflict               = errors.New("device session request conflicts with an existing idempotency key")
 	ErrDeviceOffline          = errors.New("device session target is offline")
 	ErrCapabilityNotSupported = errors.New("device snapshot capture capability is not supported")
-	ErrInvalidUploadBaseURL   = errors.New("device snapshot upload base URL is invalid")
 	ErrUnavailable            = errors.New("device session service unavailable")
 	ErrStopUnsupported        = errors.New("device snapshot stop is not supported by the domain service")
 )

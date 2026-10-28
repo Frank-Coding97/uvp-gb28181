@@ -15,7 +15,6 @@ import (
 	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.com/uvp-gb28181/app/gb28181/ptz"
 	"uvplatform.com/uvp-gb28181/app/gb28181/uac"
-	"uvplatform.com/uvp-gb28181/app/global/app"
 	"uvplatform.com/uvp-gb28181/internal/authoritytest"
 )
 
@@ -32,7 +31,7 @@ func TestCascadeConfigWriteAuthorizedEndToEnd(t *testing.T) {
 		return uac.TrackedMessageResult{CallID: "config-write-downstream", CSeq: "1", StatusCode: 200, Attempted: true}, nil
 	})
 	db, platform, store, service := cascadeAuthorizedControlFixture(t, "2022", sender)
-	app.ConfigYml = cascadeSnapshotTestConfig{}
+	configureCascadeSnapshotIngress(t, db)
 	require.NoError(t, db.Model(&platform).Updates(map[string]interface{}{"config_enabled": true, "ptz_enabled": false, "transport": "TCP"}).Error)
 	require.NoError(t, db.Table("gb_device").Where("id = ?", 10).Update("effective_version", "2022").Error)
 	require.NoError(t, db.AutoMigrate(&model.GbCascadeSnapshotSession{}))

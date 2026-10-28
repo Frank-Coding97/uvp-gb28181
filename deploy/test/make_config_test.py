@@ -16,6 +16,23 @@ SPEC.loader.exec_module(make_config)
 
 
 class MakeConfigTests(unittest.TestCase):
+    def test_generated_config_does_not_create_legacy_device_access_sections(self) -> None:
+        source = Path(__file__).parents[2] / "server" / "config" / "config.example.yml"
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "config.yml"
+            make_config.build(source, target, "51010", "51011")
+            rendered = target.read_text(encoding="utf-8")
+
+        self.assertNotIn("qr_provision:", rendered)
+        self.assertNotIn("snapshot_upload:", rendered)
+
+    def test_main_parser_no_longer_accepts_legacy_device_access_arguments(self) -> None:
+        source = MODULE_PATH.read_text(encoding="utf-8")
+        self.assertNotIn("--qr-provision-host", source)
+        self.assertNotIn("--snapshot-upload-base-url", source)
+        self.assertNotIn("qr_provision", source)
+        self.assertNotIn("snapshot_upload", source)
+
     def test_build_trusts_only_the_local_proxy_chain(self) -> None:
         source = Path(__file__).parents[2] / "server" / "config" / "config.example.yml"
         with tempfile.TemporaryDirectory() as directory:

@@ -17,10 +17,6 @@ export interface StaticServiceConfigDraft {
   sipTimeoutSec: number;
   preallocationMode: boolean;
   recordCacheTailToleranceSec: number;
-  /** 扫码配网基址：**设备**扫二维码后要访问的地址，留空=未配置（后端回退出码 503）。 */
-  qrProvisionBaseUrl: string;
-  /** 抓拍回传基址：2022 抓拍时下发给设备的 UploadURL，留空=未配置（回退请求 Host 派生）。 */
-  snapshotUploadBaseUrl: string;
   playback: {
     defaultProtocol: "ws-flv" | "http-flv" | "hls" | "webrtc";
     fixedAddressEnabled: boolean;
@@ -51,9 +47,7 @@ export const staticServiceConfigLabels = [
   "是否存储报警消息",
   "SIP 命令超时时间（秒）",
   "预分配模式",
-  "录像缓存尾部容差（秒）",
-  "扫码配网地址",
-  "抓拍回传地址"
+  "录像缓存尾部容差（秒）"
 ] as const;
 
 export const playbackServiceConfigLabels = [
@@ -115,8 +109,6 @@ export function createStaticServiceConfigDraft(): StaticServiceConfigDraft {
     sipTimeoutSec: 10,
     preallocationMode: false,
     recordCacheTailToleranceSec: 2,
-    qrProvisionBaseUrl: "",
-    snapshotUploadBaseUrl: "",
     playback: {
       defaultProtocol: "ws-flv",
       fixedAddressEnabled: true,

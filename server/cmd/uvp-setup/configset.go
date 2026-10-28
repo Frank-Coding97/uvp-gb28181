@@ -9,7 +9,7 @@ import (
 // runConfigSet 把 config.yml 里某个段落下的标量键改成新值，**逐字保留**其余内容
 // （缩进、行尾注释、空行、CRLF）。
 //
-//	uvp-setup config-set --yml config/config.yml --section qr_provision --key base_url \
+//	uvp-setup config-set --yml config/config.yml --section sample_ingress --key base_url \
 //	    --value http://10.0.0.68:51002 --if-empty
 //
 // ⛔⛔ 为什么需要 --if-empty 而不是"脚本先 config-get 再判断空不空"：

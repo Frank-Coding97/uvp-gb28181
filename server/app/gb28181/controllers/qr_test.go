@@ -16,6 +16,7 @@ import (
 	gbcontrollers "uvplatform.com/uvp-gb28181/app/gb28181/controllers"
 	gbsetup "uvplatform.com/uvp-gb28181/app/gb28181/setup"
 	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/middleware"
 	"uvplatform.com/uvp-gb28181/app/utils/cachehelper"
 	"uvplatform.com/uvp-gb28181/app/utils/response"
 )
@@ -72,13 +73,10 @@ func newQRRouter(t *testing.T, seedConfig bool, transport []string) (*gin.Engine
 	t.Cleanup(func() { _ = cache.Close() })
 
 	ctrl := gbcontrollers.NewConfiguredQRController(db, cache, transport, qrInterfaceProvider{})
-	// 注入设备可达基址:生产读 gb28181.qr_provision 配置(此处无配置文件可读)。
-	// ⛔ 这里**必须**显式注入而不是让它回落默认 —— 生成二维码时地址缺失要报错,
-	// 不能出一个扫了必然失败的码(2026-10-08 就是默认取了浏览器 origin 而坏掉)。
-	ctrl.SetBaseURLProvider(func() (string, error) { return "http://192.168.1.10:51010", nil })
 
 	r := gin.New()
 	r.Use(gin.Recovery())
+	r.Use(middleware.DeviceAccessIngress(nil))
 	// 模拟真实注册形状:token 在 protected 组语义下,exchange 在 public 组语义下,
 	// 二者路径同为 /api/gb28181/...
 	r.POST("/api/gb28181/sip/qr/token", ctrl.GenerateToken)
@@ -157,15 +155,47 @@ func TestQRToken_AlwaysCarriesDeviceBaseURL(t *testing.T) {
 		"必须是可直接拼 /gb28181/qr 的基址,不能带路径/查询/片段")
 }
 
+func TestQRToken_UsesTheCurrentRequestIngressWithoutSharedState(t *testing.T) {
+	r, _ := newQRRouter(t, true, []string{"udp"})
+
+	request := func(host string) gbcontrollers.QRTokenResponse {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/gb28181/sip/qr/token", nil)
+		req.Host = host
+		rr := httptest.NewRecorder()
+		r.ServeHTTP(rr, req)
+		require.Equal(t, http.StatusOK, rr.Code)
+		var env envelope
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &env))
+		var data gbcontrollers.QRTokenResponse
+		require.NoError(t, json.Unmarshal(env.Data, &data))
+		return data
+	}
+
+	first := request("192.168.1.10:5177")
+	second := request("192.168.1.11:5177")
+	require.Equal(t, "http://192.168.1.10:5177", first.BaseURL)
+	require.Equal(t, "http://192.168.1.11:5177", second.BaseURL)
+}
+
+func TestQRToken_RefusesLoopbackIngress(t *testing.T) {
+	r, _ := newQRRouter(t, true, []string{"udp"})
+	req := httptest.NewRequest(http.MethodPost, "/api/gb28181/sip/qr/token", nil)
+	req.Host = "localhost:5177"
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusServiceUnavailable, rr.Code)
+	require.NotContains(t, rr.Body.String(), `"token"`)
+}
+
 // ⛔ 基址解析失败时**拒绝出码**(503),而不是出一个扫了必然失败的码:
 // 现场在手机上, 排查成本全落在用户那边。
 func TestQRToken_RefusesWhenBaseURLUnavailable(t *testing.T) {
 	useRealResponseHandler(t)
 	_, cache := newQRRouter(t, true, []string{"udp"})
 
-	// 覆盖掉装配时注入的基址,模拟「配置缺失 / 解析失败」
+	// 直连 controller，模拟全局入口中间件没有装配或无法解析请求入口。
 	ctrl := gbcontrollers.NewConfiguredQRController(nil, cache, []string{"udp"}, qrInterfaceProvider{})
-	ctrl.SetBaseURLProvider(func() (string, error) { return "", assertError{} })
 	r := gin.New()
 	r.POST("/api/gb28181/sip/qr/token", ctrl.GenerateToken)
 
@@ -177,10 +207,6 @@ func TestQRToken_RefusesWhenBaseURLUnavailable(t *testing.T) {
 	require.NotContains(t, got.Body.String(), `"token"`,
 		"拒绝出码时不得同时吐一个 token 出来")
 }
-
-type assertError struct{}
-
-func (assertError) Error() string { return "base url not configured" }
 
 // 2.2 正常兑换
 func TestQRExchange_Success(t *testing.T) {

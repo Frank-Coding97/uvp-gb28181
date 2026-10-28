@@ -45,12 +45,6 @@ const (
 	SIPTraceRetentionDaysConfigKey            = "gb28181.trace.retention_days"
 	RecordCacheTailToleranceSecConfigKey      = "gb28181.record_cache.tail_tolerance_sec"
 
-	// 设备接入地址：两个都必须"设备能访问到"，不是浏览器打开平台的地址。
-	// ⛔ 键名只在这两个常量里出现，读取（QRProvisionConfigFrom/SnapshotUploadConfigFrom）
-	// 与写入（服务配置聚合接口）都走它，免得两处键名写岔后静默失效。
-	QRProvisionBaseURLConfigKey    = "gb28181.qr_provision.base_url"
-	SnapshotUploadBaseURLConfigKey = "gb28181.snapshot_upload.base_url"
-
 	DefaultRecordQueryTimezone           = "Asia/Shanghai"
 	DefaultRecordQueryTimeoutSec         = 15
 	DefaultRecordQueryMaxRangeHours      = 24
@@ -579,27 +573,6 @@ func CurrentDefaultPlaybackProtocol() string {
 	return DefaultPlaybackProtocolFrom(app.ConfigYml)
 }
 
-// QRProvisionConfigFrom 从配置源读扫码接入基址配置.
-func QRProvisionConfigFrom(c valueSource) QRProvisionConfig {
-	if c == nil {
-		return QRProvisionConfig{}
-	}
-	return QRProvisionConfig{
-		BaseURL:    c.GetString(QRProvisionBaseURLConfigKey),
-		Host:       c.GetString("gb28181.qr_provision.host"),
-		Port:       c.GetInt("gb28181.qr_provision.port"),
-		RequireTLS: c.GetBool("gb28181.qr_provision.require_tls"),
-	}
-}
-
-// CurrentQRProvisionBaseURL 读当前生效的设备可达接入基址.
-//
-// 生成二维码时用:二维码是给**设备**用的,地址必须设备能访问,
-// 而不是用户打开平台的那个 origin。
-func CurrentQRProvisionBaseURL() (string, error) {
-	return QRProvisionConfigFrom(app.ConfigYml).EffectiveBaseURL()
-}
-
 // Config GB28181 国标平台配置
 type Config struct {
 	Enabled     bool
@@ -612,124 +585,6 @@ type Config struct {
 	Recording   RecordingConfig
 	RecordQuery RecordQueryConfig
 	Playback    PlaybackConfig
-	QRProvision QRProvisionConfig
-	// ⛔ 用与 CurrentSnapshotUploadBaseURL 同一个读取函数,免得两处键名写岔
-	SnapshotUpload SnapshotUploadConfig
-}
-
-// QRProvisionConfig controls the address handed to devices by the access QR code.
-//
-// 二维码里带的基址**必须是设备能访问到的后端地址**,不能是浏览器打开平台的地址。
-// ⛔⛔ 前端曾用 `window.location.origin` 当默认值(2026-10-08 之前),
-// 于是「用户从 nginx HTTPS 打开平台 → 二维码里就是自签 HTTPS 地址 →
-// 设备侧 Ktor/CIO 校验证书失败 → 被吞成 NetworkError → UI 骗人去查 Wi-Fi」。
-// 绿色包场景下 nginx 是自签证书(SAN 只有 localhost/127.0.0.1),此路必然不通。
-//
-// 形状照 MediaConfig.EffectiveHookBaseURL:完整 URL 优先,为空则由 host+port 拼明文。
-type QRProvisionConfig struct {
-	// BaseURL 完整基址(如 http://192.168.10.220:51010)。非空时优先。
-	BaseURL string
-	// Host 设备可达的本机地址;BaseURL 为空时与 Port 一起拼出 http://<host>:<port>
-	Host string
-	// Port 后端 HTTP 端口(绿色包为 51010)
-	Port int
-	// RequireTLS 公网部署要求 HTTPS(与 media.hookrequiretls 同一口径)
-	RequireTLS bool
-}
-
-// EffectiveBaseURL 返回设备侧应使用的基址,无效时返回错误。
-func (c QRProvisionConfig) EffectiveBaseURL() (string, error) {
-	raw := strings.TrimSpace(c.BaseURL)
-	if raw == "" {
-		host := strings.Trim(strings.TrimSpace(c.Host), "[]")
-		if host == "" || c.Port <= 0 || c.Port > 65535 {
-			return "", errors.New("扫码接入基址未完整配置")
-		}
-		raw = "http://" + net.JoinHostPort(host, strconv.Itoa(c.Port))
-	}
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed == nil || !parsed.IsAbs() || parsed.Host == "" || parsed.Opaque != "" {
-		return "", errors.New("扫码接入基址无效")
-	}
-	parsed.Scheme = strings.ToLower(parsed.Scheme)
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return "", errors.New("扫码接入基址仅支持 HTTP 或 HTTPS")
-	}
-	if parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
-		return "", errors.New("扫码接入基址不得包含用户信息、查询参数或片段")
-	}
-	if c.RequireTLS && parsed.Scheme != "https" {
-		return "", errors.New("扫码接入已要求 TLS")
-	}
-	parsed.Path = strings.TrimRight(parsed.Path, "/")
-	parsed.RawPath = strings.TrimRight(parsed.RawPath, "/")
-	return parsed.String(), nil
-}
-
-// SnapshotUploadConfig controls the upload address handed to devices by the
-// 2022 snapshot capture command (SnapShotConfig.UploadURL, GB/T 28181-2022 §9.14).
-//
-// ⛔⛔ 与 QRProvisionConfig 同一条铁律：这个地址**必须是设备能访问到的**，
-// 不能从「操作员浏览器打开平台的地址」猜。2026-10-20 客户现场实锤（公网 NAT +
-// nginx HTTPS 自签）：请求 Host 派生出的上传地址**丢了端口**（nginx $host 不带
-// 端口）、指向 443 死地址，设备把图拍好后传不回来，平台侧零报错、会话永远
-// waiting —— 又一次「设备没上传」式静默失效。公网/NAT 部署必须显式配置本项。
-type SnapshotUploadConfig struct {
-	// BaseURL 设备可达的平台入口基址（如 https://124.236.76.233:51000
-	// 或 http://10.0.0.68:51002）。留空 = 未配置，回退请求 Host 派生。
-	BaseURL string
-}
-
-// EffectiveBaseURL 返回校验过的基址。
-// ("", nil) 表示未配置（调用方自行回退）；配置非法返回错误，绝不猜。
-func (c SnapshotUploadConfig) EffectiveBaseURL() (string, error) {
-	raw := strings.TrimSpace(c.BaseURL)
-	if raw == "" {
-		return "", nil
-	}
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed == nil || !parsed.IsAbs() || parsed.Host == "" || parsed.Opaque != "" {
-		return "", errors.New("抓拍上传基址无效")
-	}
-	parsed.Scheme = strings.ToLower(parsed.Scheme)
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return "", errors.New("抓拍上传基址仅支持 HTTP 或 HTTPS")
-	}
-	if parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
-		return "", errors.New("抓拍上传基址不得包含用户信息、查询参数或片段")
-	}
-	// ⭐ 回环/localhost/通配对**设备**不可达：配置了等于发一个注定失败的上传
-	//   地址（静默失效），当场报错优于猜。域名一律放行（解析到哪平台判不了）。
-	if h := parsed.Hostname(); h != "" {
-		lower := strings.ToLower(h)
-		if lower == "localhost" || strings.HasSuffix(lower, ".localhost") {
-			return "", errors.New("抓拍上传基址不能是 localhost（设备访问不到）")
-		}
-		if ip := net.ParseIP(h); ip != nil && (ip.IsLoopback() || ip.IsUnspecified()) {
-			return "", errors.New("抓拍上传基址不能是回环或通配地址（设备访问不到）")
-		}
-	}
-	parsed.Path = strings.TrimRight(parsed.Path, "/")
-	parsed.RawPath = strings.TrimRight(parsed.RawPath, "/")
-	return parsed.String(), nil
-}
-
-// SnapshotUploadConfigFrom 从配置源读抓拍上传基址配置.
-func SnapshotUploadConfigFrom(c valueSource) SnapshotUploadConfig {
-	if c == nil {
-		return SnapshotUploadConfig{}
-	}
-	return SnapshotUploadConfig{
-		BaseURL: c.GetString(SnapshotUploadBaseURLConfigKey),
-	}
-}
-
-// CurrentSnapshotUploadBaseURL 读当前生效的抓拍上传基址.
-//
-// ("", nil) = 未配置（调用方回退请求 Host 派生，仅设备与平台同网/直连时可靠）；
-// 非空 = 校验过的设备可达基址；err = 配置了但非法，当场拒发而不是发死地址。
-func CurrentSnapshotUploadBaseURL() (string, error) {
-	return SnapshotUploadConfigFrom(app.ConfigYml).EffectiveBaseURL()
 }
 
 // RecordQueryConfig controls device-local RecordInfo queries.
@@ -1028,10 +883,6 @@ func loadFrom(c valueSource) (Config, error) {
 			IdleTimeoutSec: intValue(c, "gb28181.playback.idle_timeout_sec", DefaultPlaybackIdleTimeoutSec),
 			MaxSessionSec:  intValue(c, "gb28181.playback.max_session_sec", DefaultPlaybackMaxSessionSec),
 		},
-		// ⛔ 用与 CurrentQRProvisionBaseURL 同一个读取函数,免得两处键名写岔
-		QRProvision: QRProvisionConfigFrom(c),
-		// ⛔ 用与 CurrentSnapshotUploadBaseURL 同一个读取函数,免得两处键名写岔
-		SnapshotUpload: SnapshotUploadConfigFrom(c),
 	}
 	if err := validateRecordRuntimeConfig(&cfg, c.GetInt("httpserver.handler_timeout")); err != nil {
 		return cfg, err

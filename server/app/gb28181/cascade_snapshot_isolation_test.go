@@ -16,24 +16,15 @@ import (
 	"github.com/emiago/sipgo/siptest"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
-	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
 	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.com/uvp-gb28181/app/gb28181/ptz"
+	gbsetup "uvplatform.com/uvp-gb28181/app/gb28181/setup"
 	"uvplatform.com/uvp-gb28181/app/gb28181/uac"
-	"uvplatform.com/uvp-gb28181/app/global/app"
 	"uvplatform.com/uvp-gb28181/internal/authoritytest"
 )
-
-type cascadeSnapshotTestConfig struct{ cascadeInviteTestConfig }
-
-func (c cascadeSnapshotTestConfig) GetString(key string) string {
-	if key == gbconfig.SnapshotUploadBaseURLConfigKey {
-		return "https://capture.example.test/uvp"
-	}
-	return c.cascadeInviteTestConfig.GetString(key)
-}
 
 func TestCascadeSnapshotSameUpstreamSessionIDIsIsolated(t *testing.T) {
 	if !authoritytest.InProcess(t) {
@@ -42,7 +33,8 @@ func TestCascadeSnapshotSameUpstreamSessionIDIsIsolated(t *testing.T) {
 	db, first, store, _ := cascadeAuthorizedControlFixture(t, "2022", cascadeRecordSenderFunc(func(context.Context, string, string, string, []byte) (uac.TrackedMessageResult, error) {
 		return uac.TrackedMessageResult{}, fmt.Errorf("unexpected send")
 	}))
-	app.ConfigYml = cascadeSnapshotTestConfig{}
+	configureCascadeSnapshotIngress(t, db)
+
 	require.NoError(t, db.Model(&first).Update("config_enabled", true).Error)
 	first.ConfigEnabled = true
 	require.NoError(t, db.Table("gb_device").Where("id=10").Update("effective_version", "2022").Error)
@@ -93,7 +85,7 @@ func TestCascadeSnapshotSameUpstreamSessionIDIsIsolated(t *testing.T) {
 	require.NotEqual(t, sid, *captures[0].SessionID, "downstream must have an independent SessionID")
 	require.NotEqual(t, *captures[0].SessionID, *captures[1].SessionID, "same device and same upstream ID must still produce separate captures")
 	for _, capture := range captures {
-		require.Contains(t, *capture.UploadURL, "https://capture.example.test/uvp/api/gb28181/cascade-snapshots/uploads/")
+		require.Contains(t, *capture.UploadURL, "http://192.0.2.20:51000/api/gb28181/cascade-snapshots/uploads/")
 		require.NotContains(t, *capture.UploadURL, "auth=secret")
 	}
 	require.NotEqual(t, *captures[0].UploadURL, *captures[1].UploadURL)
@@ -137,4 +129,11 @@ func TestCascadeSnapshotSameUpstreamSessionIDIsIsolated(t *testing.T) {
 		require.Equal(t, []string{"34020000001320000012", "34020000001320000022"}[i], notice.DeviceID)
 		require.Equal(t, []string{first.UpstreamServerID, second.UpstreamServerID}[i], sent.To().Address.User)
 	}
+}
+
+func configureCascadeSnapshotIngress(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	t.Setenv("UVP_DEVICE_HTTP_PORT", "51000")
+	require.NoError(t, db.AutoMigrate(&gbsetup.SIPConfig{}))
+	require.NoError(t, db.Save(&gbsetup.SIPConfig{ID: gbsetup.SingletonID, DeploymentMode: gbsetup.DeploymentLAN, ListenIP: "192.0.2.20", AdvertiseIP: "192.0.2.20", Port: 5060}).Error)
 }

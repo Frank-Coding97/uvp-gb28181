@@ -120,7 +120,6 @@ function installAggregateApiMocks() {
       if (response.code !== 0) return response;
       next[section] = structuredClone(response.data);
     }
-    if (payload.deviceAccess) next.deviceAccess = structuredClone(payload.deviceAccess);
     aggregateSnapshot = next;
     return { code: 0, message: "保存成功", data: structuredClone(next) };
   });
@@ -385,16 +384,14 @@ describe("ServiceConfig edit mode", () => {
     const wrapper = mountPage();
     await flushPromises();
 
-    // 33 = 原 31 项 + 设备接入地址两项（扫码配网 / 抓拍回传，2026-10-20 页面可配）
-    expect(wrapper.findAll("[data-tooltip]")).toHaveLength(33);
+    // 设备接入入口由平台统一管理，不属于用户可配置项。
+    expect(wrapper.findAll("[data-tooltip]")).toHaveLength(31);
     expect(wrapper.find("[data-field='saveMobilePositionHistory']").attributes("data-tooltip")).toBe(
       "关闭后仍更新设备和通道的最新位置，不再新增轨迹点。"
     );
     expect(wrapper.find("[data-field='sipLogEnabled']").attributes("data-tooltip")).toContain("保存后会热重载 SIP 服务");
-    // ⛔ 两个设备接入地址的 tooltip 必须点明「设备能访问到」——这条提示本身就是防再犯：
-    // 现场两次事故都是把「浏览器打开平台的地址」当成了设备地址。
-    expect(wrapper.find("[data-field='qrProvisionBaseUrl']").attributes("data-tooltip")).toContain("设备能访问到");
-    expect(wrapper.find("[data-field='snapshotUploadBaseUrl']").attributes("data-tooltip")).toContain("不认自签证书");
+    expect(wrapper.find("[data-field='qrProvisionBaseUrl']").exists()).toBe(false);
+    expect(wrapper.find("[data-field='snapshotUploadBaseUrl']").exists()).toBe(false);
   });
 
   it("loads and saves the recording cache tail tolerance", async () => {
@@ -411,36 +408,20 @@ describe("ServiceConfig edit mode", () => {
     expect(api.updateServiceConfig).toHaveBeenLastCalledWith(expect.objectContaining({ recordCacheTailToleranceSec: 5 }));
   });
 
-  // 设备接入地址（扫码配网 / 抓拍回传）必须随聚合保存一起提交，且提交前 trim：
-  // 现场就是在「地址末尾多敲了个空格」这种小事上踩过（后端 trim 兜底，前端也不该发脏值）。
-  it("submits the device access base urls with the aggregate save", async () => {
+  it("does not submit removed device access fields with the aggregate save", async () => {
     const wrapper = mountPage();
     await flushPromises();
 
-    await wrapper.find("[data-field='qrProvisionBaseUrl'] input").setValue("  http://10.0.0.68:51010 ");
-    await wrapper.find("[data-field='snapshotUploadBaseUrl'] input").setValue("http://10.0.0.68:51001");
+    await wrapper.find("[data-field='recordCacheTailToleranceSec'] input[type='number']").setValue("5");
     const save = wrapper.findAll("button").find(button => button.text().includes("保存配置"))!;
     await save.trigger("click");
     await flushPromises();
 
-    expect(api.updateServiceConfig).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        deviceAccess: { qrProvisionBaseUrl: "http://10.0.0.68:51010", snapshotUploadBaseUrl: "http://10.0.0.68:51001" }
-      })
-    );
-  });
-
-  // 格式明显不对时前端先拦一下（真正闸门在后端）：不发请求、给出提示。
-  it("blocks obviously malformed device access urls before saving", async () => {
-    const wrapper = mountPage();
-    await flushPromises();
-
-    await wrapper.find("[data-field='snapshotUploadBaseUrl'] input").setValue("10.0.0.68:51001");
-    const save = wrapper.findAll("button").find(button => button.text().includes("保存配置"))!;
-    await save.trigger("click");
-    await flushPromises();
-
-    expect(api.updateServiceConfig).not.toHaveBeenCalled();
+    const payload = api.updateServiceConfig.mock.calls.at(-1)?.[0];
+    expect(payload).toEqual(expect.objectContaining({ recordCacheTailToleranceSec: 5 }));
+    expect(payload).not.toHaveProperty("deviceAccess");
+    expect(payload).not.toHaveProperty("qrProvisionBaseUrl");
+    expect(payload).not.toHaveProperty("snapshotUploadBaseUrl");
   });
 
   it("loads shared cascade metadata and resets or saves it with the page actions", async () => {

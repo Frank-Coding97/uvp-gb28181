@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,9 +15,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"gorm.io/gorm/clause"
+	"uvplatform.com/uvp-gb28181/app/deviceaccess"
 
 	"uvplatform.com/uvp-gb28181/app/gb28181/devicecapture"
-	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
 	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
@@ -807,73 +806,12 @@ func validSnapshotSource(source string) bool {
 	}
 }
 
-// snapshotUploadBaseURLProvider 解析「管理员配置的设备可达上传基址」。
-// 包级变量是为测试注入（save/restore，qr.go 的 SetBaseURLProvider 同款手法）。
-var snapshotUploadBaseURLProvider = gbconfig.CurrentSnapshotUploadBaseURL
-
 func snapshotUploadURL(c *gin.Context, token string) (string, error) {
-	// ① 管理员显式配置的设备可达基址优先（gb28181.snapshot_upload.base_url）。
-	//    ⛔ 公网/NAT 部署里「浏览器打开平台的地址」与「设备可达的地址」不是同一个：
-	//    2026-10-20 现场实锤——nginx HTTPS 段的 $host 不带端口，派生出的上传地址
-	//    指向 443 死地址，设备拍了图传不回来、平台零报错。这类部署必须配置本项。
-	if base, err := snapshotUploadBaseURLProvider(); err != nil {
-		return "", fmt.Errorf("抓拍上传基址配置无效：%w", err)
-	} else if base != "" {
-		return base + "/api/gb28181/device-snapshots/uploads/" + token + "/", nil
+	base, err := deviceaccess.FromContext(c.Request.Context())
+	if err != nil {
+		return "", err
 	}
-	// ② 未配置 → 回退「请求 Host 派生」。只对「设备与平台同网/直连」可靠；
-	//    回环/通配仍由下方门禁当场拒发。
-	scheme := strings.TrimSpace(strings.Split(c.GetHeader("X-Forwarded-Proto"), ",")[0])
-	if scheme == "" {
-		scheme = "http"
-		if c.Request.TLS != nil {
-			scheme = "https"
-		}
-	}
-	host := strings.TrimSpace(strings.Split(c.GetHeader("X-Forwarded-Host"), ",")[0])
-	if host == "" {
-		host = c.Request.Host
-	}
-	if host == "" || scheme != "http" && scheme != "https" {
-		return "", fmt.Errorf("无法生成设备可访问的抓拍上传地址")
-	}
-	if snapshotUploadHostUnreachableForDevice(host) {
-		return "", fmt.Errorf(
-			"抓拍上传地址 %s 不是设备可达的地址（回环/通配地址设备访问不到）；请用平台所在机器的局域网 IP 或域名打开平台后再下发",
-			host)
-	}
-	return (&url.URL{Scheme: scheme, Host: host, Path: "/api/gb28181/device-snapshots/uploads/" + token + "/"}).String(), nil
-}
-
-// snapshotUploadHostUnreachableForDevice 报告 host 是不是**设备在物理上不可能访问**的地址。
-//
-// ⛔ 这个门禁与"报文分派"同等重要，因为 `UploadURL` 是给**另一台机器**（设备）回连用的，
-// 而它现在由**浏览器请求的 Host** 派生 —— 前端 dev server 的 `xfwd: true` 会把原始 Host
-// 放进 `X-Forwarded-Host`（见 `web/vite.config.ts`）。于是"操作员用 localhost 打开平台"
-// 就会下发出 `http://localhost:<port>/…`：设备把它解析成自己，**永远传不上来**。
-//
-// 更糟的是平台侧**没有任何错误**：会话停在 waiting，日志正常，唯一的现象就是
-// "设备没上传" —— 与 2026-09-20 那次"抓拍根本没发出去"属同一类静默失效
-// （见 `ptz.ActionSnapshotConfig` 的注释）。所以宁可当场拒发并说清原因，
-// 也不要发一个注定失败的上传地址。
-//
-// ⭐ 域名一律放行：平台无法判定它解析到哪里，判错了会把正常部署挡在门外。
-func snapshotUploadHostUnreachableForDevice(hostport string) bool {
-	host := strings.TrimSpace(hostport)
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
-	}
-	// IPv6 字面量在 Host 头里带方括号（`[::1]:8280`），解出来要去掉。
-	host = strings.Trim(strings.TrimSpace(host), "[]")
-	if host == "" || strings.EqualFold(host, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return false
-	}
-	// IsUnspecified 覆盖 `0.0.0.0` / `::` —— 那也不是一个目标地址。
-	return ip.IsLoopback() || ip.IsUnspecified()
+	return base + "/api/gb28181/device-snapshots/uploads/" + token + "/", nil
 }
 
 func snapshotSessionView(c *gin.Context, session devicecapture.Session, operationID string) gin.H {

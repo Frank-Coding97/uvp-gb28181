@@ -22,6 +22,7 @@ import (
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 	globalapp "uvplatform.com/uvp-gb28181/app/global/app"
 	"uvplatform.com/uvp-gb28181/app/global/consts"
+	"uvplatform.com/uvp-gb28181/app/middleware"
 	basemodels "uvplatform.com/uvp-gb28181/app/models"
 )
 
@@ -305,7 +306,7 @@ func TestCreateSnapshotSessionDispatchesCapabilityUploadURL(t *testing.T) {
 	require.NoError(t, db.Model(channel).Update("owner_dept_id", 10).Error)
 	controller.SetCaptureRuntime(devicecapture.NewRegistry(t.TempDir()))
 	router := gin.New()
-	router.Use(gin.Recovery())
+	router.Use(gin.Recovery(), middleware.DeviceAccessIngress(nil))
 	router.Use(func(c *gin.Context) {
 		c.Set(consts.BindContextKeyName, &globalapp.Claims{ClaimsUser: globalapp.ClaimsUser{UserID: 12}})
 		c.Next()
@@ -315,7 +316,7 @@ func TestCreateSnapshotSessionDispatchesCapabilityUploadURL(t *testing.T) {
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/channel/"+uintStr(channel.ID)+"/snapshot-sessions", strings.NewReader(`{"snapNum":2,"interval":3}`))
 	// ⛔ Host 必须是**设备可达的局域网地址**：`UploadURL` 由它派生，取回环地址会被
-	// `snapshotUploadHostUnreachableForDevice` 当场拒发（设备是另一台机器）。
+	// `统一设备入口解析` 当场拒发（设备是另一台机器）。
 	// 取值与真机形态一致：前端 vite 在 5177。
 	request.Host = "192.168.10.120:5177"
 	request.Header.Set("Content-Type", "application/json")
