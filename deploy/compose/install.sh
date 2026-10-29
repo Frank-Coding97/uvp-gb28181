@@ -309,7 +309,7 @@ PORTS_PY
 
 # ============================================================ 目录布局 ====
 log "创建安装目录 $ROOT"
-mkdir -p "$ROOT"/{config/tls,data/{database,redis,uploads,zlm-www,process-authority,updater-state},logs/{backend,nginx,zlm},run/nginx,updater-gate}
+mkdir -p "$ROOT"/{config/tls,data/{database,redis,uploads,zlm-www,process-authority,updater-inbox},logs/{backend,nginx,zlm},run/nginx,updater-gate,updater-state}
 
 # ⛔ 业务目录属主必须是业务 UID/GID：容器以该 UID 跑，目录属主不对的话
 #    写入会静默失败（表现为"能起来、但 SQLite 建库失败"，日志里只有 permission denied 一行）。
@@ -329,6 +329,14 @@ chown_biz() {
   chown "$@"
 }
 chown_biz -R "${BUSINESS_UID}:${BUSINESS_GID}" "$ROOT"/data "$ROOT"/logs "$ROOT"/run
+# ⛔⛔ `$ROOT/data` 这一层**必须留在 root 名下**（0750 root:业务GID），只有它**下面**
+#    的目录归业务账号。原因：宿主机的升级助手要求「inbox 的父级」属主是 root 或它自己，
+#    父级被业务账号持有会被判 not trusted ⇒ 助手直接拒绝启动，报
+#      `validate updater inbox parent: /opt/... owner UID 10001 is not trusted`
+#    （root 安装必现；非 root 安装因为 euid 恰好等于业务账号才看不出来）。
+#    业务账号不需要写 data/ 这一层 —— 容器挂的是它下面那几个子目录。
+chown_biz 0:"${BUSINESS_GID}" "$ROOT/data"
+chmod 0750 "$ROOT/data"
 chmod 0750 "$ROOT/config"
 chmod 0755 "$ROOT/data/uploads"
 
@@ -338,7 +346,25 @@ chmod 0755 "$ROOT/data/uploads"
 #      `phase=process_authority reason=state_unavailable`（**不含原因**）。
 #    装到 /opt 下用 umask 027 建出来的目录是 0750 ⇒ 必定卡在这里。
 #    （判据见 server/app/openapi/processauthority/local_lock_unix.go 的 secureLocalFile）
-chmod 0700 "$ROOT/data/process-authority" "$ROOT/data/updater-state"
+chmod 0700 "$ROOT/data/process-authority"
+
+# ------------------------------------------- 升级助手的两个目录（分工别混）----
+# ⛔⛔ 这两个目录**不能是同一个、也不能都放 data/ 里**：
+#   ① $ROOT/updater-state —— 助手私有状态（任务、回滚数据、已验证物料）。
+#      只能在 $ROOT 下、不能放 data/：data/ 内部归业务账号，助手不信任。
+#      0700 只有助手自己能进；容器**不挂它**（容器要的状态全走 socket RPC）。
+#   ② $ROOT/data/updater-inbox —— 业务账号往里写"刚上传的升级包"。
+#      回给助手的是**令牌（文件名）不是路径**，所以两边看到不同绝对路径也没关系。
+#      register 时必须显式 --staging-root 指到这里，否则助手默认用 state/staging
+#      （0700 私有目录），业务账号根本进不去 ⇒ 页面里导入包必然失败。
+mkdir -p "$ROOT/updater-state"
+# ⛔ 收件箱的**属主必须是 root**（不是业务账号），业务账号靠**组**拿写权限：
+#   助手启动时校验 `owner != 0 && owner != euid` 就判 not trusted
+#   （报 `updater inbox owner UID 10001 is not trusted`），随后它自己会校正属组与
+#   0770 —— 但前提是属主已经对。非 root 安装时属主天然是 euid，同样通过。
+chown_biz 0:"${BUSINESS_GID}" "$ROOT/data/updater-inbox"
+chmod 0700 "$ROOT/updater-state"
+chmod 0770 "$ROOT/data/updater-inbox"
 
 # ---------------------------------------------------- 升级闸门（gate）----
 # ⛔⛔ 必须在 compose up 之前把 gate 文件铺好，否则容器起不来：
@@ -364,6 +390,13 @@ if [ ! -e "$GATE_FILE" ]; then
 fi
 chmod 0750 "$GATE_DIR"
 chmod 0640 "$GATE_FILE"
+# ⛔ 属组必须是**业务 GID**，不能留成 root：
+#   助手启动时会把 gate.json 校正成 root:业务GID（initializeSharedGate），但**目录**
+#   只在自己创建时才设属组；我们这里是先建好的 ⇒ 目录会一直是 root:root，
+#   于是安装脚本末尾的一致性校验直接失败：
+#     `updater gate directory was not protected as root:10001 mode 0750`
+#   而容器以业务身份读 gate，组不对同样读不到（fail-closed 起不来）。
+chown_biz 0:"${BUSINESS_GID}" "$GATE_DIR" "$GATE_FILE"
 
 # ============================================================ 配置文件 ====
 # ZLM API secret：**固定值，不随机**。

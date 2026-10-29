@@ -16,6 +16,19 @@ COMPOSE_FILE="${UVP_COMPOSE_FILE:-$PROJECT_DIR/compose.yml}"
 #   config.yml 里写的是 ./data/uvp.db）。留空的话回滚阶段会"没有库可恢复"，
 #   而升级中途失败的恢复恰恰最需要它。
 SQLITE_DATABASE="${UVP_COMPOSE_SQLITE_DATABASE:-$ROOT/data/database/uvp.db}"
+# ⛔⛔ 助手私有状态**必须放在 $ROOT 下、不能放 data/ 里**：
+#   data/ 内部归业务账号（容器要写库/上传/redis），而助手启动时会校验"状态目录的
+#   每一级父目录属主必须是 root 或它自己"，父级属主是业务账号就判 not trusted ⇒
+#   服务直接起不来（root 安装必现，报
+#     `validate updater state parent: ... owner UID 10001 is not trusted`）。
+UPDATER_STATE_DIR="${UVP_COMPOSE_UPDATER_STATE:-$ROOT/updater-state}"
+# ⛔⛔ 上传收件箱是**业务账号可写**的那一个目录，且必须显式注册：
+#   不传 --staging-root 时助手默认用 「state/staging」，而 state 是 0700 私有目录，
+#   容器里的业务账号连进都进不去 ⇒ 页面里"导入升级包"必然失败，且错误信息只说
+#   收件箱不可用，看不出是目录权限问题。
+#   容器那边用的是**同名令牌（文件名）而不是路径**，所以容器内看到
+#   /var/lib/uvp/updater-inbox、宿主这边是 $ROOT/data/updater-inbox 也没关系。
+INBOX_DIR="${UVP_COMPOSE_INBOX:-$ROOT/data/updater-inbox}"
 PROJECT="${UVP_COMPOSE_PROJECT:-uvp-gb28181}"
 MIGRATION_SERVICE="${UVP_COMPOSE_MIGRATION_SERVICE:-backend}"
 # ⛔⛔ readiness 探针必须落在**后端容器对外暴露的那个端口**上（容器用 host 网络，
@@ -72,7 +85,7 @@ esac
 [[ -f "$ROOT/config/config.yml" && ! -L "$ROOT/config/config.yml" ]] \
   || fail "application config is missing: $ROOT/config/config.yml"
 
-UPDATER_STATE="$ROOT/data/updater-state"
+UPDATER_STATE="$UPDATER_STATE_DIR"
 UPDATER_BIN="$ROOT/updater/uvp-updater"
 UPDATER_REGISTRATION="$ROOT/config/updater-registration.json"
 # ⛔⛔ 首次安装时二进制来自**安装包**，不在 $ROOT 里。
@@ -91,6 +104,13 @@ if [[ ! -x "$UPDATER_BIN" ]]; then
 fi
 [[ -f "$UPDATER_BIN" && ! -L "$UPDATER_BIN" ]] || fail "updater binary must be a real file: $UPDATER_BIN"
 install -d -m 0700 "$UPDATER_STATE"
+# 收件箱：属主必须是 root（或非 root 安装时的 euid），业务账号靠**属组**拿写权限。
+# ⛔ 不能把属主设成业务账号：助手会判 `owner != 0 && owner != euid` ⇒ not trusted。
+if [[ "$(id -u)" == "0" ]]; then
+  install -d -m 0770 -o root -g "$BUSINESS_GID" "$INBOX_DIR"
+else
+  install -d -m 0770 "$INBOX_DIR"
+fi
 install -d -m 0750 -o root -g "$BUSINESS_GID" "$SOCKET_DIR"
 
 registration_tmp="$(mktemp "$ROOT/config/.updater-registration.XXXXXX")"
@@ -110,6 +130,7 @@ trap cleanup EXIT
   --migration-service "$MIGRATION_SERVICE" \
   --compose-file "$COMPOSE_FILE" \
   --sqlite-database "$SQLITE_DATABASE" \
+  --staging-root "$INBOX_DIR" \
   --readiness-url "$READINESS_URL" \
   --allow-uid "$ALLOWED_UID" \
   --business-uid "$BUSINESS_UID" \

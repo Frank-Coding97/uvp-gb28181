@@ -139,7 +139,17 @@ services:
       #   挂在宿主机上，inode 才是稳定的。
       UVP_PROCESS_AUTHORITY_DIR: /var/lib/uvp/process-authority
       UVP_UPDATER_SOCKET: /run/uvp-updater/updater.sock
-      UVP_UPDATER_STATE: /var/lib/uvp/updater-state
+      # ⛔⛔ 这里**刻意不再设 UVP_UPDATER_STATE**：
+      #   升级任务、回滚数据、已验证物料都归宿主机的助手私有（$ROOT/updater-state，
+      #   root 0700），容器以业务账号跑，既读不到也不该读；容器要的状态全部走
+      #   socket RPC。以前这里挂着 $ROOT/data/updater-state，助手一启动就报
+      #   `validate updater state parent: ... owner UID 10001 is not trusted` 起不来。
+      #   不设它时后端只在「没有助手」的降级模式下才会去碰本地状态目录
+      #   （容器内 /app/updater-state，不存在即失败关闭），这正是期望的行为。
+      # ⛔ 上传收件箱是**唯一**给业务账号写的升级目录，路径与宿主机的
+      #   $ROOT/data/updater-inbox 是同一个目录（下面的 bind 挂载），
+      #   助手侧登记的 --staging-root 也指向宿主那一边。两边传的是「令牌」不是路径。
+      UVP_UPGRADE_INBOX: /var/lib/uvp/updater-inbox
       # ⛔⛔ gate 是「升级进行到哪一步」的对外闸门：宿主机的 uvp-updater 在停服务、
       #   换编排、重建容器的整个过程中会把它写成 recovery / candidate，
       #   后端启动时读到非 normal 就**拒绝对外提供业务**（fail-closed），
@@ -193,11 +203,14 @@ services:
         bind:
           create_host_path: false
       - ${UVP_UPDATER_SOCKET_DIR:-/run/uvp-updater}:/run/uvp-updater
+      # 升级包上传收件箱：业务账号（容器内）往里写，助手（宿主 root）从同名目录读。
+      # ⛔ create_host_path: false —— 目录不在就直接报错，而不是被 docker 建成
+      #   root:root 0755（那样业务账号写不进去，页面里导入包必然失败）。
       - type: bind
-        source: ${UVP_ROOT:?UVP_ROOT 必填}/data/updater-state
-        target: /var/lib/uvp/updater-state
+        source: ${UVP_ROOT:?UVP_ROOT 必填}/data/updater-inbox
+        target: /var/lib/uvp/updater-inbox
         bind:
-          create_host_path: true
+          create_host_path: false
       # ⛔ gate 目录由宿主 updater 创建为 root:业务GID 0750（见 provision_unix.go），
       #    容器里以业务身份能读、写不了 —— 这正是想要的：闸门只能由宿主的特权
       #    助手拨动，被攻破的后端不能自己把它改回 normal。
