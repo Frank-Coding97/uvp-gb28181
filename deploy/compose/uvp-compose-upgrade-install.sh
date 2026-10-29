@@ -75,14 +75,19 @@ esac
 UPDATER_STATE="$ROOT/data/updater-state"
 UPDATER_BIN="$ROOT/updater/uvp-updater"
 UPDATER_REGISTRATION="$ROOT/config/updater-registration.json"
+# ⛔⛔ 首次安装时二进制来自**安装包**，不在 $ROOT 里。
+#   原来这里回退到 "$PROJECT_DIR/updater/uvp-updater"，而容器版的 PROJECT_DIR
+#   就是 $ROOT ⇒ 源和目标变成同一个路径，首次安装必报
+#   "stable updater is missing"，永远装不上。
+UPDATER_SOURCE="${UVP_UPDATER_SOURCE:-$ROOT/updater/uvp-updater}"
 
 docker compose --project-directory "$PROJECT_DIR" --project-name "$PROJECT" -f "$COMPOSE_FILE" config --quiet
 
 if [[ ! -x "$UPDATER_BIN" ]]; then
-  [[ -x "$PROJECT_DIR/updater/uvp-updater" ]] \
-    || fail "stable updater is missing: $UPDATER_BIN (the first Compose release must contain updater/uvp-updater)"
+  [[ -x "$UPDATER_SOURCE" ]] \
+    || fail "stable updater is missing: $UPDATER_BIN (首次安装请用 UVP_UPDATER_SOURCE 指向包内的 updater/uvp-updater)"
   install -d -m 0755 "$ROOT/updater"
-  install -m 0755 "$PROJECT_DIR/updater/uvp-updater" "$UPDATER_BIN"
+  install -m 0755 "$UPDATER_SOURCE" "$UPDATER_BIN"
 fi
 [[ -f "$UPDATER_BIN" && ! -L "$UPDATER_BIN" ]] || fail "updater binary must be a real file: $UPDATER_BIN"
 install -d -m 0700 "$UPDATER_STATE"

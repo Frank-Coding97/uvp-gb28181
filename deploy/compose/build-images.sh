@@ -71,6 +71,31 @@ if [ -z "$BUILD_ID" ]; then
   BUILD_ID="$(git -C "$REPO_ROOT" rev-parse HEAD)"
 fi
 
+# ⛔⛔ 必须另外生成一份**带 build_id 的 version.json**放进镜像。
+#
+#   后端的升级候选自检（app.RuntimeVersionIdentity）要求三方一致：
+#     ① 二进制里 -X 注入的 BuildID   ② version.json 的 build_id  ③ 二者都存在
+#   任何一条不满足就返回空身份 ⇒ /internal/updater/readiness 一律 503
+#   ⇒ 升级停在 Validate 阶段判"运行时身份校验失败"⇒ 整体回滚。
+#
+#   而仓库里那份 server/version.json **只有 name+version、没有 build_id**
+#   （它是源码清单，不是发布物清单）。绿色包走的是 scripts/version.mjs
+#   release-metadata 生成的那份，容器版原来直接拷了源码里这份 ⇒ 永远对不上。
+#   ⚠️ 这个坑装、用都不报错，只有真升一次级才会炸。
+mkdir -p "$SERVER_DIR/bin"
+python3 - "$SERVER_DIR/version.json" "$SERVER_DIR/bin/version.json" "$BUILD_ID" <<'VERSION_PY' \
+  || fail "生成带 build_id 的 version.json 失败"
+import json, sys
+src, dst, build_id = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(src, encoding="utf-8") as fh:
+    data = json.load(fh)
+data["build_id"] = build_id
+with open(dst, "w", encoding="utf-8") as fh:
+    json.dump(data, fh, ensure_ascii=False, indent=4)
+    fh.write("\n")
+print("version.json build_id =", build_id)
+VERSION_PY
+
 GOARCH="$ARCH"
 case "$ARCH" in
   amd64) GOARCH=amd64 ;;
@@ -136,7 +161,8 @@ mkdir -p "$CTX"/backend/resource/public \
          "$CTX"/zlm/zlm "$CTX"/redis
 
 cp "$SERVER_DIR/bin/uvp-server"        "$CTX/backend/uvp-server"
-cp "$SERVER_DIR/version.json"          "$CTX/backend/version.json"
+# ⛔ 用 bin/ 下那份**带 build_id** 的，不是源码根目录的（见上面 VERSION_PY 的说明）。
+cp "$SERVER_DIR/bin/version.json"      "$CTX/backend/version.json"
 # ⛔ resource/database 必须进镜像：首次启动靠它建库（SQLite 基线 / 迁移脚本）。
 cp -a "$SERVER_DIR/resource/database"  "$CTX/backend/resource/database"
 cp -a "$WEB_DIR/dist/."                "$CTX/frontend/dist/"

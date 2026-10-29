@@ -69,7 +69,14 @@ cp "$STANDALONE_DIR/make-config.py" "$PKG/tools/make-config.py"
 cp "$REPO_ROOT/server/config/config.example.yml" "$PKG/config/config.example.yml"
 cp "$DEPLOY_DIR/docker"/*.Dockerfile "$DEPLOY_DIR/docker"/*.sh "$PKG/docker/"
 cp "$DEPLOY_DIR/nginx/nginx.conf.template" "$PKG/docker/nginx.conf.template"
-cp "$REPO_ROOT/server/version.json" "$PKG/version.json"
+# ⛔ 包内留档的 version.json 必须与镜像里那份**同一份**（带 build_id）。
+#   源码根目录那份只有 name+version，拷它会让"现场版本清单"与
+#   "二进制真实身份"对不上，排查升级问题时看到的 build_id 是空的。
+if [ -f "$REPO_ROOT/server/bin/version.json" ]; then
+  cp "$REPO_ROOT/server/bin/version.json" "$PKG/version.json"
+else
+  cp "$REPO_ROOT/server/version.json" "$PKG/version.json"
+fi
 
 # ⛔⛔ 升级助手（uvp-updater）必须进包，且**不放镜像里**：
 #   页面内升级要把容器 stop/recreate，干这件事的进程不能活在被停的容器里，

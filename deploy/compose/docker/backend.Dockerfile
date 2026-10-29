@@ -17,7 +17,17 @@ ENV TZ=Asia/Shanghai
 
 # ⛔ resource/database 必须进镜像：首次启动要靠它建库（SQLite 基线 / 迁移脚本）。
 #   缺了它的症状是「容器起来了、日志在刷，但页面一登录就报未知表」。
-COPY uvp-server /app/uvp-server
+# ⛔⛔ 二进制在镜像里**必须叫 /app/uvp-gb28181**，不能叫 uvp-server。
+#   升级流程在 Validate 阶段要执行
+#     docker compose exec -T backend /app/uvp-gb28181 -upgrade-readiness
+#   这个路径是 ComposeAdapter 里的硬约定（systemd 版的二进制名同样是
+#   uvp-gb28181，适配器测试里也有断言锁着）。原先这里 COPY 成 uvp-server，
+#   升级装到 Validate 就报 `stat /app/uvp-gb28181: no such file or directory`
+#   ⇒ 判为"运行时身份校验失败" ⇒ 整个升级回滚。
+#   ⛔ 这个坑只有在真跑一次升级时才会暴露：安装、点播、页面全都正常。
+#   构建上下文里那份文件名仍是 uvp-server（build-images.sh 拷的），
+#   COPY 的目标名与源名不同是允许的，别再改回同名。
+COPY uvp-server /app/uvp-gb28181
 COPY version.json /app/version.json
 COPY resource/database /app/resource/database
 COPY resource/public /app/resource/public
@@ -25,7 +35,7 @@ COPY resource/public /app/resource/public
 # 日志与上传目录在容器里也要先建出来：
 # 宿主机卷挂载会覆盖这两个目录，但镜像自带一份能保证"不挂卷也能起来"（排障时很有用）。
 RUN mkdir -p /app/resource/logs /app/resource/public/uploads \
-    && chmod +x /app/uvp-server
+    && chmod +x /app/uvp-gb28181
 
 # 后端在 host 网络下监听 51002（端口规划见 deploy/standalone/PORTS.md）。
 # ⛔ 这里**只声明业务 API 口**：SIP 口(51064)与 RTP 段(51014-51063)是运行时从数据库
@@ -33,4 +43,4 @@ RUN mkdir -p /app/resource/logs /app/resource/public/uploads \
 #   而且 host 网络下 EXPOSE 本来也不做任何实际映射，纯属文档性质。
 EXPOSE 51002/tcp
 
-ENTRYPOINT ["/app/uvp-server"]
+ENTRYPOINT ["/app/uvp-gb28181"]

@@ -138,8 +138,13 @@ ARCHIVE="$OUT_DIR/${STEM}.upgrade.tar"
 log "打包 $ARCHIVE"
 # ⛔ 用固定属主与权限打包：升级包会被签名摘要，同一份内容在别的机器上重打
 #    必须得到同样的字节，否则「重打一次校验值就变了」会让人怀疑文件被篡改。
+# ⛔⛔ mode 里必须用**大写 X**，不能写 u=rw,go=r：
+#   小写 rw/r 会**同样作用在目录上**，打出来的包解压后目录是 drw-r--r--
+#   （没有 x 位）⇒ 连 `cd` 进去都 Permission denied，Go 里 os.ReadFile
+#   也会在路径中间目录上失败。大写 X 只给「目录」和「本来就有执行位的文件」
+#   补 x，文件仍然是 0644、目录是 0755。
 tar --format=ustar --owner=0 --group=0 --numeric-owner \
-    --mode='u=rw,go=r' \
+    --mode='u=rwX,go=rX' \
     -cf "$ARCHIVE" -C "$STAGE" "$STEM"
 ( cd "$OUT_DIR" && sha256sum "$(basename "$ARCHIVE")" > "$(basename "$ARCHIVE").sha256" )
 

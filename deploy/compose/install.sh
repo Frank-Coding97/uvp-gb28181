@@ -309,7 +309,7 @@ PORTS_PY
 
 # ============================================================ 目录布局 ====
 log "创建安装目录 $ROOT"
-mkdir -p "$ROOT"/{config/tls,data/{database,redis,uploads,zlm-www,process-authority,updater-state},logs/{backend,nginx,zlm},run/nginx}
+mkdir -p "$ROOT"/{config/tls,data/{database,redis,uploads,zlm-www,process-authority,updater-state},logs/{backend,nginx,zlm},run/nginx,updater-gate}
 
 # ⛔ 业务目录属主必须是业务 UID/GID：容器以该 UID 跑，目录属主不对的话
 #    写入会静默失败（表现为"能起来、但 SQLite 建库失败"，日志里只有 permission denied 一行）。
@@ -339,6 +339,31 @@ chmod 0755 "$ROOT/data/uploads"
 #    装到 /opt 下用 umask 027 建出来的目录是 0750 ⇒ 必定卡在这里。
 #    （判据见 server/app/openapi/processauthority/local_lock_unix.go 的 secureLocalFile）
 chmod 0700 "$ROOT/data/process-authority" "$ROOT/data/updater-state"
+
+# ---------------------------------------------------- 升级闸门（gate）----
+# ⛔⛔ 必须在 compose up 之前把 gate 文件铺好，否则容器起不来：
+#   compose.yml 给后端设了 UVP_UPDATER_GATE_PATH 且以 create_host_path:false
+#   绑定 gate 目录 —— 目录不存在时 docker 直接报
+#   `bind source path does not exist`，整个 up 失败（实测过）。
+#
+# ⛔ 那为什么不让 docker 自动建（create_host_path:true）：
+#   它建出来是 root:root 0755 的空目录，里面**没有 gate.json**，
+#   后端读到的是"配置了 gate 但文件缺失"⇒ 直接
+#   `startup dependency failed: configured updater gate is missing`。
+#   而自动建个空文件更糟：空文件 JSON 解析失败，报的是另一条更费解的错。
+#
+# ⛔ 这里的属主/权限只是**首次安装的占位**：root 安装时随后调用的
+#   uvp-compose-upgrade-install.sh 会拉起宿主 updater，它启动时用
+#   initializeSharedGate 把这个文件接管成 root:业务GID 0640（已存在则只校正
+#   属主与权限、内容不动）。非 root 安装不装助手，这里就是最终形态 ——
+#   属主天然是当前用户，容器内同 UID 能读，功能不受影响（只是升级不可用）。
+GATE_DIR="$ROOT/updater-gate"
+GATE_FILE="$GATE_DIR/gate.json"
+if [ ! -e "$GATE_FILE" ]; then
+  printf '{"mode":"normal","updated_at":"%s"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$GATE_FILE"
+fi
+chmod 0750 "$GATE_DIR"
+chmod 0640 "$GATE_FILE"
 
 # ============================================================ 配置文件 ====
 # ZLM API secret：**固定值，不随机**。
