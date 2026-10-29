@@ -12,6 +12,7 @@ import {
 } from "../directoryState";
 
 import { mergeDirectorySync, type DirectorySyncResult } from "../directorySync";
+import { sortDevicesOnlineFirst } from "../directorySort";
 
 const props = defineProps<{
   modelValue: DirectoryState;
@@ -67,7 +68,8 @@ watch(
   }
 );
 
-const currentTree = computed(() => trees.value[props.modelValue.view]);
+// ⛔ 排序只发生在这里：`trees` 保持后端顺序（后台增量同步要按它做 diff），展示层才把在线设备提上来。
+const currentTree = computed(() => sortDevicesOnlineFirst(trees.value[props.modelValue.view]));
 const selectedKey = computed(() => props.modelValue.selectedKey[props.modelValue.view]);
 const expandedKeys = computed(() => props.modelValue.expandedKeys[props.modelValue.view]);
 const normalizedKeyword = computed(() => props.modelValue.treeKeyword.trim().toLocaleLowerCase());
