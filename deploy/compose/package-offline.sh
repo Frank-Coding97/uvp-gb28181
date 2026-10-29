@@ -71,6 +71,19 @@ cp "$DEPLOY_DIR/docker"/*.Dockerfile "$DEPLOY_DIR/docker"/*.sh "$PKG/docker/"
 cp "$DEPLOY_DIR/nginx/nginx.conf.template" "$PKG/docker/nginx.conf.template"
 cp "$REPO_ROOT/server/version.json" "$PKG/version.json"
 
+# ⛔⛔ 升级助手（uvp-updater）必须进包，且**不放镜像里**：
+#   页面内升级要把容器 stop/recreate，干这件事的进程不能活在被停的容器里，
+#   所以它由 install.sh 装到宿主机 $ROOT/updater/ 并注册成 systemd 服务。
+#   缺它 ⇒「服务升级」页只会说"升级助手未运行"，任何升级都点不动。
+#   这也是四件补齐工作里的第一件（原先容器版根本没这个二进制）。
+[ -x "$REPO_ROOT/server/bin/uvp-updater" ] \
+  || fail "缺少升级助手二进制：server/bin/uvp-updater
+  先跑：deploy/compose/build-images.sh --version $VERSION --arch $ARCH（它会一并编译 updater）"
+mkdir -p "$PKG/updater"
+cp "$REPO_ROOT/server/bin/uvp-updater" "$PKG/updater/uvp-updater"
+# 注册脚本：装服务、写 registration、校验 gate 权限，install.sh 启动前调用它。
+cp "$DEPLOY_DIR/uvp-compose-upgrade-install.sh" "$PKG/tools/uvp-compose-upgrade-install.sh"
+
 # ⛔⛔ SQLite 建库脚本必须进包，且路径与绿色包**完全一致**（resource/baseline/baseline.sql）：
 #   install.sh 靠它在首次安装时建库，缺了直接 fail「找不到 baseline.sql」。
 #   这条曾经漏过 —— 包能打出来、能解压、能生成配置，一路走到建库才炸，
@@ -85,6 +98,8 @@ log "  复制镜像归档 $(du -h "$IMAGE_ARCHIVE" | cut -f1)"
 cp "$IMAGE_ARCHIVE" "$PKG/images/"
 
 chmod 0755 "$PKG/install.sh"
+chmod 0755 "$PKG/updater/uvp-updater" "$PKG/tools/uvp-compose-upgrade-install.sh"
+chmod 0755 "$PKG"/tools/make-config.py
 chmod 0644 "$PKG"/compose.yml "$PKG"/.env.example "$PKG"/config/config.example.yml
 chmod 0755 "$PKG"/docker/*.sh
 

@@ -621,6 +621,34 @@ chmod 0640 "$ROOT/.env"
 "$DOCKER_BIN" compose --env-file "$ROOT/.env" -f "$ROOT/compose.yml" -p uvp-gb28181 config >/dev/null \
   || fail "compose.yml 校验失败（变量替换或语法有误，见上）"
 
+# =========================================================== 升级助手 ====
+# ⛔⛔ 这一段的位置**不能挪到启动之后**：
+#   compose.yml 给后端设了 UVP_UPDATER_GATE_PATH，而后端启动时要求该文件
+#   已经存在（缺失直接 `startup dependency failed: configured updater gate is missing`）。
+#   gate 是宿主 updater 启动时创建的 ⇒ 必须"先装助手、再 compose up"。
+#
+# ⛔ 为什么助手必须跑在宿主机、而不是容器里：
+#   升级要做的事是「停掉这几个容器 → 换 compose.yml → 重新起」。
+#   干这件事的进程如果本身就在被停的容器里，它会在第一步把自己杀掉，
+#   升级永远停在半路。所以它是 systemd 服务（uvp-updater.service），
+#   容器里的后端只是通过 /run/uvp-updater/updater.sock 发指令。
+UPGRADE_INSTALL="$PKG_DIR/tools/uvp-compose-upgrade-install.sh"
+if [ ! -f "$UPGRADE_INSTALL" ]; then
+  log "⚠️ 包内没有 tools/uvp-compose-upgrade-install.sh：跳过升级助手（页面内升级不可用）"
+elif [ "$(id -u)" != "0" ]; then
+  # 装 systemd 服务必须 root。非 root 安装（只用于本地试用）就不装，
+  # 明确告知，别让人以为装好了。
+  log "⚠️ 非 root 安装：跳过升级助手 ——「服务升级」页会显示助手未运行，只能换镜像手工升级"
+else
+  log "安装升级助手（uvp-updater.service，页面内升级靠它）"
+  UVP_ROOT="$ROOT" \
+  UVP_BUSINESS_UID="$BUSINESS_UID" \
+  UVP_BUSINESS_GID="$BUSINESS_GID" \
+  UVP_BACKEND_PORT="$BACKEND_PORT" \
+  UVP_UPDATER_SOURCE="$PKG_DIR/updater/uvp-updater" \
+    bash "$UPGRADE_INSTALL" || fail "升级助手安装失败（详见上面的报错）"
+fi
+
 if [ "$NO_START" = "1" ]; then
   log "已跳过启动（--no-start）。启动命令："
   log "  "$DOCKER_BIN" compose --env-file $ROOT/.env -f $ROOT/compose.yml -p uvp-gb28181 up -d"

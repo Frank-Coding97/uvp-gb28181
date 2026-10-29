@@ -140,14 +140,16 @@ services:
       UVP_PROCESS_AUTHORITY_DIR: /var/lib/uvp/process-authority
       UVP_UPDATER_SOCKET: /run/uvp-updater/updater.sock
       UVP_UPDATER_STATE: /var/lib/uvp/updater-state
-      # ⛔⛔ 这里**故意不设** UVP_UPDATER_GATE_PATH：
-      #   它是「显式指定 gate 文件」模式 —— 一旦设了，后端启动时就**强制要求
-      #   该文件存在且 0640**（readiness.go GateStateFromEnv → store.load(true,true)），
-      #   缺失直接 `startup dependency failed: configured updater gate is missing`。
-      #   容器版没有独立的 updater daemon 去写这个文件（绿色包有，由 ctl.sh 拉起）。
-      #   不设它 ⇒ 走默认分支，读 UVP_UPDATER_STATE/gate.json，
-      #   文件不存在时按 GateNormal 放行（requireFile=false）。
+      # ⛔⛔ gate 是「升级进行到哪一步」的对外闸门：宿主机的 uvp-updater 在停服务、
+      #   换编排、重建容器的整个过程中会把它写成 recovery / candidate，
+      #   后端启动时读到非 normal 就**拒绝对外提供业务**（fail-closed），
+      #   免得一个只升了一半的实例被当成正常服务用。
+      #   ⛔ 必须在**容器启动之前**就有这个文件：设了这个变量后，文件缺失会让后端
+      #     直接报 `startup dependency failed: configured updater gate is missing`
+      #     （不像不设时那样"缺失就按 normal 放行"）。所以 install.sh 是先装
+      #     升级助手（它会创建 gate）再 `compose up`，顺序不能反。
       #   ⛔ 别"顺手补一个空 gate.json"：空文件 JSON 解析失败，报的是另一条更费解的错。
+      UVP_UPDATER_GATE_PATH: /var/lib/uvp/updater-gate/gate.json
       # ⛔⛔ 这两个密钥**只能从宿主机注入**（绿色包放在 config/config.env，由 ctl.sh 读）：
       #   放进镜像 = 所有客户共用同一把密钥；让后端自己生成 = 每次重启换一把，
       #   已签发的 OpenAPI 客户端凭据全部解不开。所以由 install.sh 首次安装时生成、
@@ -196,9 +198,17 @@ services:
         target: /var/lib/uvp/updater-state
         bind:
           create_host_path: true
-    # ⛔ 不再挂 updater-gate：见上面 UVP_UPDATER_GATE_PATH 的说明 ——
-    #   容器版不参与"宿主 updater daemon 写 gate 文件"那套流程，
-    #   挂了也用不上，反而会让人以为容器版也要配这个目录。
+      # ⛔ gate 目录由宿主 updater 创建为 root:业务GID 0750（见 provision_unix.go），
+      #    容器里以业务身份能读、写不了 —— 这正是想要的：闸门只能由宿主的特权
+      #    助手拨动，被攻破的后端不能自己把它改回 normal。
+      #    create_host_path: false ⇒ 目录不存在就在 up 阶段直接报错，
+      #    而不是被 docker 悄悄建个 root:root 0755 的空目录（那样后端反而读不了）。
+      - type: bind
+        source: ${UVP_ROOT:?UVP_ROOT 必填}/updater-gate
+        target: /var/lib/uvp/updater-gate
+        read_only: true
+        bind:
+          create_host_path: false
     depends_on:
       redis:
         condition: service_healthy

@@ -72,8 +72,46 @@ mkdir -p "$PKG/images"
 cp "$DEPLOY_DIR/compose.yml" "$PKG/compose.yml"
 chmod 0644 "$PKG/compose.yml"
 
+# ⛔⛔ 镜像 tag 必须**在包里写死**，不能留着 ${UVP_VERSION} 模板占位符。
+#
+#   原因：升级时适配器（ComposeAdapter.Activate）**只替换这一个 compose.yml**，
+#   完全不碰现场的 .env。而 compose 解析 ${UVP_VERSION} 是读 .env 的 ——
+#   .env 里还是上次安装时那个版本号 ⇒ `docker compose up -d --pull never`
+#   拉起来的还是**旧镜像**，新 tag 的镜像明明已经 docker load 进来了却没人用。
+#   接着 Validate 阶段容器内跑 `-upgrade-readiness` 比对版本，
+#   旧镜像报的是旧版本 ⇒ "runtime identity mismatch" ⇒ 整个升级回滚。
+#   现象极具误导性：日志显示"升级失败"，但镜像确实导入了、包也确实是对的。
+#
+#   ⇒ 把 `${PREFIX}-<组件>:${VERSION}` 在这里固化成字面量，升级后的编排
+#     自带正确的版本，与 .env 内容彻底解耦。
+#   ⛔ 只固化镜像那两段；${UVP_ROOT}/${UVP_ZLM_SECRET}/端口等**必须继续走 .env** ——
+#     那些是现场部署事实，写死会把客户改过的端口/路径覆盖掉。
+command -v python3 >/dev/null 2>&1 || fail "需要 python3（要把编排模板里的镜像版本固化成字面量）"
+python3 - "$PKG/compose.yml" "$PREFIX" "$VERSION" <<'PIN_PY'
+import re
+import sys
+
+path, prefix, version = sys.argv[1], sys.argv[2], sys.argv[3]
+text = open(path, encoding="utf-8").read()
+
+# image: ${UVP_IMAGE_PREFIX:-uvp-gb28181}-backend:${UVP_VERSION:?...}
+pattern = re.compile(
+    r"\$\{UVP_IMAGE_PREFIX:-[^}]*\}-([A-Za-z0-9._-]+):\$\{UVP_VERSION:[^}]*\}"
+)
+text, count = pattern.subn(lambda m: "%s-%s:%s" % (prefix, m.group(1), version), text)
+if count == 0:
+    sys.exit("编排模板里没有找到 ${UVP_IMAGE_PREFIX}/${UVP_VERSION} 形式的镜像引用，"
+             "模板可能已被改坏（拒绝打一个升级后会跑旧镜像的包）")
+
+leftover = re.findall(r"\$\{UVP_VERSION[^}]*\}", text)
+if leftover:
+    sys.exit("编排模板里还有未固化的版本占位符：%s" % ", ".join(sorted(set(leftover))))
+
+open(path, "w", encoding="utf-8").write(text)
+print("[upgrade-pkg]   固化镜像版本 %d 处 → %s-*:%s" % (count, prefix, version))
+PIN_PY
+
 # ⛔ compose.yml 里不能出现 :latest —— 适配器会直接判非法。
-#    模板本身用的是 ${UVP_VERSION}，这里只是兜底自检，防模板被改坏。
 if grep -E '^[[:space:]]*image:.*(:latest[[:space:]]*$|:[[:space:]]*latest)' "$PKG/compose.yml" >/dev/null 2>&1; then
   fail "compose.yml 里有 :latest 引用，升级包会被拒绝"
 fi
