@@ -434,7 +434,7 @@ function alarmFactText(fact: DeviceAlarmFact) {
 
     <section class="fact-group">
       <header class="fact-group-head">
-        <span class="fact-group-title"><Activity :size="14" />DeviceStatus 事实</span>
+        <span class="fact-group-title"><Activity :size="14" />设备状态</span>
         <span class="fact-group-status" :class="{ pending: pending, error: !!error }">{{ statusText() }}</span>
       </header>
 
@@ -470,7 +470,7 @@ function alarmFactText(fact: DeviceAlarmFact) {
           {{ pending ? "查询中" : "向设备查询" }}
         </a-button>
         <span class="fact-actions-hint">
-          {{ props.channelOptions.length ? "优先读平台缓存；「向设备查询」才会下发 DeviceStatus 报文" : "" }}
+          {{ props.channelOptions.length ? "上面显示的是平台缓存；点「向设备查询」会当场问一次设备" : "" }}
         </span>
       </div>
     </section>

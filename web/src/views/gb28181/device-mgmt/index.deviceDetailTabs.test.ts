@@ -39,11 +39,16 @@ const stripComments = (text: string) => text.replace(/<!--[\s\S]*?-->/g, "");
 const deviceMarkup = stripComments(deviceBranch);
 
 describe("device detail drawer segments", () => {
-  it("设备相关抽屉统一接入主题容器，暗色模式使用项目抽屉色板", () => {
+  it("设备详情抽屉统一接入主题容器；通道配置已改对话框（房规类在 modal-class 上）", () => {
     expect(source).toContain('v-model:visible="drawerVisible"');
     expect(source).toContain('v-model:visible="channelOperationVisible"');
-    expect(source.match(/class="uvp-system-drawer"/g)?.length).toBe(2);
-    expect(source.match(/body-class="uvp-system-dialog__body"/g)?.length).toBe(2);
+    // 通道配置 2026-10-29 从抽屉换成对话框：底部固定操作条 + 两栏宽度 + 草稿关闭拦截，
+    // 三条都是抽屉给不了的（详见 index.channelConfigEntry.test.ts 的说明）。
+    // ⛔ 所以这里只剩**设备详情**一颗抽屉；数量断言跟着改，不要放宽成 `>= 1`——
+    //    放宽以后谁再随手加一颗不挂房规类的抽屉就没人拦。
+    expect(source.match(/class="uvp-system-drawer"/g)?.length).toBe(1);
+    expect(source.match(/body-class="uvp-system-dialog__body"/g)?.length).toBe(1);
+    expect(source).toContain("channel-config-dialog");
   });
 
   it("设备详情使用响应式宽度，通道详情保留更窄的共享抽屉宽度", () => {
@@ -140,27 +145,23 @@ describe("device detail drawer segments", () => {
     expect(drawerSource).toMatch(/\.dcg-window--embedded \.dcg-nav \{[\s\S]{0,200}?flex-direction: row;/);
   });
 
-  it("通道操作抽屉按当前通道复用控制、抓拍、状态和存储面板", () => {
-    expect(source).toContain('import DeviceControlPanel from "./DeviceControlPanel.vue"');
+  it("通道配置对话框按当前通道复用抓拍、状态、存储三个标签", () => {
     expect(source).toContain('import SnapshotConfigPanel from "./SnapshotConfigPanel.vue"');
     expect(source).toContain('import DeviceStatusFactsPanel from "./DeviceStatusFactsPanel.vue"');
     expect(source).toContain('import StorageCardStatusPanel from "./StorageCardStatusPanel.vue"');
+    // ⛔ 云台面板不许搬回来：这个面板没有画面，云台等于闭眼开车（转过去看不见、转坏了也发现不了）。
+    //    云台/变倍/聚焦全归播放控制台。
+    expect(source).not.toContain('import DeviceControlPanel from "./DeviceControlPanel.vue"');
     expect(source).toContain('v-model:channel-id="channelOperationTarget.id"');
     expect(source).toContain(':channel-options="channelOperationOptions"');
-    expect(source).toContain('class="channel-operation-tabs"');
-    expect(source).toContain('value="control"');
-    expect(source).toContain('value="snapshot"');
-    expect(source).toContain('value="status"');
-    expect(source).toContain('value="storage"');
+    expect(source).toContain('class="channel-config-tabs"');
+    expect(source).toContain('title="设备状态"');
+    expect(source).toContain('title="抓拍参数"');
+    expect(source).toContain('title="存储卡"');
     expect(source).toContain("const channelOperationOptions = computed");
     expect(source).toContain("openChannelOperations(record)");
     // 面板组件本身要认这个开关（否则传了不生效，选择器照旧各渲染一份）
-    for (const file of [
-      "DeviceControlPanel.vue",
-      "SnapshotConfigPanel.vue",
-      "DeviceStatusFactsPanel.vue",
-      "StorageCardStatusPanel.vue"
-    ]) {
+    for (const file of ["SnapshotConfigPanel.vue", "DeviceStatusFactsPanel.vue", "StorageCardStatusPanel.vue"]) {
       const panel = readFileSync(resolve(process.cwd(), `src/views/gb28181/device-mgmt/${file}`), "utf8");
       expect(panel, file).toContain("showPicker?: boolean;");
       expect(panel, file).toContain('v-if="props.showPicker !== false"');
@@ -168,9 +169,8 @@ describe("device detail drawer segments", () => {
     expect(source).toContain(':active="channelOperationVisible"');
   });
 
-  it("通道操作由 device:control / device:snapshot 任一权限放行", () => {
+  it("通道操作入口由 device:control / device:snapshot / ptz:view 任一权限放行", () => {
     expect(source).toContain("const canUseDeviceControl = computed(() => canControlDevice.value || canSnapshotDevice.value);");
-    expect(source).toContain(':can-control="canControlDevice"');
     expect(source).toContain(':can-snapshot="canSnapshotDevice"');
     // ⭐ 权限改造（2026-10-11）：三个权限都没有时「操作」入口仍在，但置灰不可点。
     expect(source).toContain(':disabled="!canUseDeviceControl && !canSnapshotDevice && !canViewDeviceFacts"');

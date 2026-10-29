@@ -1133,7 +1133,7 @@ describe("DeviceConfigDrawer 设备配置中心", () => {
  *    播放控制台侧栏被锁成只有视频编码。挂载形态一旦传错 `configOnly` / `groupKeys`，
  *    表现是"页签点得开、里面是空的"或"顺手又长出视频参数"，两种都不会报错。
  */
-describe("DeviceConfigDrawer 挂在通道操作抽屉（configOnly + 四组）", () => {
+describe("DeviceConfigDrawer 挂在通道配置对话框（configOnly + 四组）", () => {
   beforeEach(() => {
     api.getChannelVideoParams.mockReset();
     api.applyChannelVideoParams.mockReset();
@@ -1237,5 +1237,67 @@ describe("DeviceConfigDrawer 挂在通道操作抽屉（configOnly + 四组）",
 
     const apply = wrapper.get("[data-testid='dcg-apply']");
     expect(apply.attributes("disabled")).toBeDefined();
+  });
+});
+
+/**
+ * 同一个组件挂在**对话框**里的形态（`navSide` 侧栏导航）。
+ *
+ * ⛔ 横排导航在窄宿主里是对的（播放控制台侧栏只有 1 组），但 1040px 宽的对话框里，
+ *    4 个等宽按钮会拉成一条没人会点第二遍的色带，而内容区的高度反而空着。
+ * ⛔ `还原 / 读取 / 下发` 必须从参数区头部挪到**固定底栏**：这三个是整组报文的动作，
+ *    周计划时间轴一滚，头部那份就滚出视口了。两处同时渲染更糟 —— 两个"下发"并排，
+ *    用户不知道该点哪个，而它们绑定的是同一个处理器，看起来"有区别"其实没有。
+ */
+describe("DeviceConfigDrawer 挂在通道配置对话框（navSide 侧栏导航）", () => {
+  beforeEach(() => {
+    api.getChannelVideoParams.mockReset();
+    api.applyChannelVideoParams.mockReset();
+    api.getChannelDeviceConfigs.mockReset();
+    api.applyChannelDeviceConfigs.mockReset();
+    api.getChannelVideoParams.mockResolvedValue(readOk());
+    api.getChannelDeviceConfigs.mockResolvedValue(deviceConfigOk());
+  });
+
+  function mountSide(props: Record<string, unknown> = {}) {
+    return mountDrawer({
+      embedded: true,
+      configOnly: true,
+      navSide: true,
+      groupKeys: ["record-plan", "alarm-record", "alarm-report", "basic"],
+      osdCanvasLinked: false,
+      online: true,
+      ...props
+    });
+  }
+
+  it("分组导航改侧栏竖排，宿主容器带 --side 类", async () => {
+    const wrapper = mountSide();
+    await flushPromises();
+
+    expect(wrapper.get(".dcg-nav").classes()).toContain("dcg-nav--side");
+    expect(wrapper.get(".dcg-window").classes()).toContain("dcg-window--side");
+    // 四组都在（竖排不是"只显示第一组"）。
+    expect(wrapper.findAll("[data-testid^='dcg-nav-']")).toHaveLength(4);
+  });
+
+  it("还原 / 读取 / 下发 固定在底部操作条，参数区头部不再重复一份", async () => {
+    const wrapper = mountSide();
+    await flushPromises();
+
+    const footer = wrapper.get("[data-testid='dcg-actions']");
+    expect(footer.find("[data-testid='dcg-reset']").exists()).toBe(true);
+    expect(footer.find("[data-testid='dcg-read']").exists()).toBe(true);
+    expect(footer.find("[data-testid='dcg-apply']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='dcg-embedded-actions']").exists()).toBe(false);
+  });
+
+  it("底栏左侧交代「这份草稿是基于哪次回读改的」，不是一片空白", async () => {
+    const wrapper = mountSide();
+    await flushPromises();
+
+    // 回读到事实时给时间点；没回读时给「尚未从设备回读」——两种都要有话说，
+    // 空着会让人以为"这排按钮跟上面的表单没关系"。
+    expect(wrapper.get("[data-testid='dcg-actions']").text()).toContain("最近回读");
   });
 });

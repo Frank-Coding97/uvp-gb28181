@@ -33,6 +33,8 @@ import {
   Cctv,
   Camera,
   Bell,
+  ChevronLeft,
+  ChevronRight,
   CircleQuestionMark
 } from "@lucide/vue";
 import { startPlay, stopPlay, type PlayResult } from "@/api/gb28181";
@@ -96,7 +98,6 @@ import DeviceMaintenanceRecordsDialog from "./DeviceMaintenanceRecordsDialog.vue
 import DeviceStatusFactsPanel from "./DeviceStatusFactsPanel.vue";
 import StorageCardStatusPanel from "./StorageCardStatusPanel.vue";
 import CatalogRefreshProgressDialog from "./CatalogRefreshProgressDialog.vue";
-import DeviceControlPanel from "./DeviceControlPanel.vue";
 import SnapshotConfigPanel from "./SnapshotConfigPanel.vue";
 import DeviceConfigDrawer from "./DeviceConfigDrawer.vue";
 import { buildFactChannelOptions } from "./deviceFactChannel";
@@ -252,8 +253,15 @@ const drawerLoading = ref(false);
 const drawerWidth = computed(() => (drawerTarget.value?.type === "device" ? "min(760px, 92vw)" : "min(640px, 92vw)"));
 const channelOperationVisible = ref(false);
 const channelOperationTarget = ref<ChannelVO | null>(null);
-type ChannelOperationTab = "control" | "config" | "snapshot" | "status" | "storage";
-const channelOperationTab = ref<ChannelOperationTab>("control");
+/**
+ * 「通道配置」对话框的页签。
+ *
+ * ⛔ 没有「即时控制」这一页：云台 / 变倍 / 聚焦全部归**播放控制台**。
+ *    原来那一页挂在没有画面的抽屉里，等于让人闭眼开云台 —— 转过去看不见、转坏了也发现不了。
+ *    判据就一条：**要画面反馈的动作进控制台，不要画面的动作留在这里**。
+ */
+type ChannelOperationTab = "config" | "snapshot" | "status" | "storage";
+const channelOperationTab = ref<ChannelOperationTab>("config");
 /**
  * 「设备配置」页签挂的分组（`CONFIG_GROUPS` 的 key）。
  *
@@ -531,6 +539,17 @@ const mapMarkers = new Map<number, MapLibreMarker>();
 const mapClusters = new Map<string, MapLibreMarker>();
 
 const channels = ref<ChannelVO[]>([]);
+/**
+ * 「第 N / M 路」里的 N。
+ *
+ * ⛔ 按**当前列表的渲染顺序**算（`channels`），不用后端全量顺序：用户眼前是列表第几行，
+ *    标题栏就该显示第几路；两者不一致时 ‹ › 会"跳着翻"，比不显示更糟。
+ */
+const channelOperationIndex = computed(() => {
+  const current = channelOperationTarget.value;
+  if (!current) return -1;
+  return channels.value.findIndex(item => item.id === current.id);
+});
 const devices = ref<DeviceVO[]>([]);
 const markers = ref<MapMarker[]>([]);
 const clusters = ref<MapCluster[]>([]);
@@ -2467,8 +2486,29 @@ async function openDevice(record: DeviceVO) {
 
 function openChannelOperations(channel: ChannelVO) {
   channelOperationTarget.value = channel;
-  channelOperationTab.value = canControlDevice.value ? "control" : canSnapshotDevice.value ? "snapshot" : "status";
+  // ⛔ 默认停「设备配置」：这个入口的主要任务是给通道配参数（录像计划 / 报警 / 基本参数），
+  //    抓拍和设备状态是顺带看的。原来按权限落到"第一个能点的页签"，结果管理员进来看到的是
+  //    「即时控制」，而他要找的录像计划还得再点一次。
+  channelOperationTab.value = canViewDeviceFacts.value ? "config" : canSnapshotDevice.value ? "snapshot" : "status";
   channelOperationVisible.value = true;
+}
+
+/**
+ * 在对话框里直接翻上一个 / 下一个通道。
+ *
+ * ⛔ 为什么要有：原来配完一路必须关掉对话框、回列表、找到下一行、再点一次 —— 配 12 路就是
+ *    12 个来回。对话框标题栏里的 ‹ › 让这条路径变成一次点击。
+ * ⛔ 顺序取**当前列表的渲染顺序**（`channels`），不另建索引：用户看到的是列表第几行，
+ *    翻页就该按那个顺序翻；用后端全量顺序会和眼前对不上。
+ */
+function stepChannelOperation(offset: number) {
+  const list = channels.value;
+  if (!list.length) return;
+  const current = channelOperationTarget.value;
+  const index = current ? list.findIndex(item => item.id === current.id) : -1;
+  const next = list[(index === -1 ? 0 : index + offset + list.length) % list.length];
+  if (!next || next.id === current?.id) return;
+  channelOperationTarget.value = next;
 }
 
 async function prepareMaintenance(record: DeviceVO) {
@@ -4939,49 +4979,92 @@ onUnmounted(() => {
       </a-spin>
     </a-drawer>
 
-    <a-drawer
+    <!--
+      通道配置对话框。
+      ⛔ 容器从抽屉换成对话框，不是审美偏好，是三条硬约束：
+         ① **底部操作条**：`还原 / 读取 / 下发` 是全局动作，滚到哪儿都得能点。对话框的 footer
+            天然固定；抽屉 `:footer="false"`，按钮只能塞在内容里，周计划一滚就没了。
+         ② **宽度**：这面板是「左导航 + 时间轴」两栏，抽屉 720px 已经顶格，再宽就不像抽屉了。
+         ③ **草稿态**：有「未下发修改」，对话框的关闭拦截是标准套路，抽屉要自己拦、容易漏。
+      ⛔ `:mask-closable="false"` **必须写**：点一下遮罩就把配了一半的录像计划丢掉，且不报错。
+      ⛔ `unmount-on-close`：关掉要整块销毁，否则四个页签的回读轮询在后台空转。
+    -->
+    <a-modal
       v-model:visible="channelOperationVisible"
-      class="uvp-system-drawer"
-      body-class="uvp-system-dialog__body"
-      width="min(720px, 94vw)"
-      title="通道操作"
+      :modal-class="['uvp-system-dialog', 'channel-config-dialog']"
+      :width="'min(1040px, 94vw)'"
       :footer="false"
+      :mask-closable="false"
+      :align-center="true"
+      unmount-on-close
     >
-      <div v-if="channelOperationTarget" class="channel-operation-entry">
-        <div class="channel-operation-context">
-          <strong>{{ displayName(channelOperationTarget) }}</strong>
-          <span>{{ channelOperationTarget.channelId }} · {{ channelOperationTarget.deviceId }}</span>
+      <template #title>
+        <div v-if="channelOperationTarget" class="channel-config-title">
+          <span class="channel-config-title__text">通道配置</span>
+          <span class="channel-config-title__sep" />
+          <span class="channel-config-title__name">{{ displayName(channelOperationTarget) }}</span>
+          <span class="channel-config-online" :class="{ 'is-on': channelOperationTarget.status === 1 }">
+            <i />
+            {{ deviceStatusLabel(channelOperationTarget.status === 1) }}
+          </span>
+          <div class="channel-config-switch">
+            <span class="channel-config-switch__idx"> 第 {{ channelOperationIndex + 1 }} / {{ channels.length }} 路 </span>
+            <a-button-group size="mini" class="channel-config-switch__group">
+              <a-button
+                html-type="button"
+                data-testid="channel-config-prev"
+                :disabled="channels.length < 2"
+                title="上一个通道"
+                @click="stepChannelOperation(-1)"
+              >
+                <ChevronLeft :size="12" />
+              </a-button>
+              <a-button
+                html-type="button"
+                data-testid="channel-config-next"
+                :disabled="channels.length < 2"
+                title="下一个通道"
+                @click="stepChannelOperation(1)"
+              >
+                <ChevronRight :size="12" />
+              </a-button>
+            </a-button-group>
+          </div>
         </div>
-        <a-radio-group v-model="channelOperationTab" type="button" class="channel-operation-tabs">
-          <a-radio :disabled="!canUseDeviceControl" value="control">即时控制</a-radio>
-          <a-radio :disabled="!canViewDeviceFacts" value="config">设备配置</a-radio>
-          <a-radio :disabled="!canSnapshotDevice" value="snapshot">抓拍</a-radio>
-          <a-radio :disabled="!canViewDeviceFacts" value="status">设备状态</a-radio>
-          <a-radio :disabled="!canViewDeviceFacts" value="storage">存储卡</a-radio>
-        </a-radio-group>
-        <DeviceControlPanel
-          v-if="channelOperationTab === 'control' && canUseDeviceControl"
-          v-model:channel-id="channelOperationTarget.id"
-          :channel-options="channelOperationOptions"
-          :active="channelOperationVisible"
-          :show-picker="false"
-          :can-control="canControlDevice"
-        />
-        <!--
-          「设备配置」= GB/T 28181 配置族（A.2.3.2 下发 / A.2.4.7 查询 / A.2.6.9 应答）里
-          **不需要播放上下文**的那四组：录像计划 / 报警录像 / 报警上报 / 基本参数。
-          ⛔ 这里是这四组**唯一**的界面入口：设备详情抽屉已被断言锁成只读概览
-             （`index.deviceDetailTabs.test.ts` 的 `not.toContain("openDeviceRecordPlan(deviceDetail)")`），
-             播放控制台侧栏也被锁成只有视频编码（`PlayConsoleLinked.test.ts`）——
-             往那两处加回来会直接撞反向断言，而且"设备侧配置"本来就不该挂在某一路画面里。
-          ⛔ `embedded` 必带：不带就是一个 `position: fixed` 的全屏遮罩，会盖在抽屉上面。
-          ⛔ 用 `v-if`（`v-else-if` 链）而不是 `v-show`：切走要销毁，否则那四组的回读轮询
-             会在后台空转，还会在下次打开时拿着上一次的通道草稿。
-        -->
-        <div v-else-if="channelOperationTab === 'config' && canViewDeviceFacts" class="channel-config-panel">
+      </template>
+
+      <div v-if="channelOperationTarget" class="channel-config-shell">
+        <a-tabs
+          class="channel-config-tabs"
+          :active-key="channelOperationTab"
+          size="small"
+          :animation="false"
+          lazy-load
+          @update:active-key="channelOperationTab = $event as ChannelOperationTab"
+        >
+          <a-tab-pane key="config" title="设备配置" :disabled="!canViewDeviceFacts" />
+          <a-tab-pane key="status" title="设备状态" :disabled="!canViewDeviceFacts" />
+          <a-tab-pane key="snapshot" title="抓拍参数" :disabled="!canSnapshotDevice" />
+          <a-tab-pane key="storage" title="存储卡" :disabled="!canViewDeviceFacts" />
+        </a-tabs>
+
+        <div class="channel-config-pane">
+          <!--
+            「设备配置」= GB/T 28181 配置族（A.2.3.2 下发 / A.2.4.7 查询 / A.2.6.9 应答）里
+            **不需要播放上下文**的那四组：录像计划 / 报警录像 / 报警上报 / 基本参数。
+            ⛔ 这里是这四组**唯一**的界面入口：设备详情抽屉已被断言锁成只读概览
+               （`index.deviceDetailTabs.test.ts` 的 `not.toContain("openDeviceRecordPlan(deviceDetail)")`），
+               播放控制台侧栏也被锁成只有视频编码（`PlayConsoleLinked.test.ts`）。
+            ⛔ `embedded` 必带：不带就是一个 `position: fixed` 的全屏遮罩，会盖在对话框上面。
+            ⛔ `nav-side` 是侧栏竖排导航：宽对话框里顺着左边排比横排一行更符合"配置页"的形状。
+            ⛔ 用 `v-if`（`v-else-if` 链）而不是 `v-show`：切走要销毁，否则那四组的回读轮询
+               会在后台空转，还会在下次打开时拿着上一次的通道草稿。
+          -->
           <DeviceConfigDrawer
+            v-if="channelOperationTab === 'config' && canViewDeviceFacts"
             embedded
             config-only
+            nav-side
             :visible="channelOperationVisible"
             :group-keys="CHANNEL_CONFIG_GROUPS"
             :device-code="channelOperationTarget.deviceId"
@@ -4991,34 +5074,34 @@ onUnmounted(() => {
             :can-read="canViewDeviceFacts"
             :can-apply="canControlChannelConfig && channelOperationTarget.status === 1"
           />
+          <SnapshotConfigPanel
+            v-else-if="channelOperationTab === 'snapshot' && canSnapshotDevice"
+            v-model:channel-id="channelOperationTarget.id"
+            :channel-options="channelOperationOptions"
+            :show-picker="false"
+            :can-snapshot="canSnapshotDevice"
+          />
+          <DeviceStatusFactsPanel
+            v-else-if="channelOperationTab === 'status' && canViewDeviceFacts"
+            v-model:channel-id="channelOperationTarget.id"
+            :channel-options="channelOperationOptions"
+            :active="channelOperationVisible"
+            :show-picker="false"
+            :can-view="canViewDeviceFacts"
+          />
+          <StorageCardStatusPanel
+            v-else-if="channelOperationTab === 'storage' && canViewDeviceFacts"
+            v-model:channel-id="channelOperationTarget.id"
+            :channel-options="channelOperationOptions"
+            :active="channelOperationVisible"
+            :show-picker="false"
+            :can-view="canViewDeviceFacts"
+            :can-format="canFormatStorageCard"
+            :device-label="channelOperationTarget.deviceId"
+          />
         </div>
-        <SnapshotConfigPanel
-          v-else-if="channelOperationTab === 'snapshot' && canSnapshotDevice"
-          v-model:channel-id="channelOperationTarget.id"
-          :channel-options="channelOperationOptions"
-          :show-picker="false"
-          :can-snapshot="canSnapshotDevice"
-        />
-        <DeviceStatusFactsPanel
-          v-else-if="channelOperationTab === 'status' && canViewDeviceFacts"
-          v-model:channel-id="channelOperationTarget.id"
-          :channel-options="channelOperationOptions"
-          :active="channelOperationVisible"
-          :show-picker="false"
-          :can-view="canViewDeviceFacts"
-        />
-        <StorageCardStatusPanel
-          v-else-if="channelOperationTab === 'storage' && canViewDeviceFacts"
-          v-model:channel-id="channelOperationTarget.id"
-          :channel-options="channelOperationOptions"
-          :active="channelOperationVisible"
-          :show-picker="false"
-          :can-view="canViewDeviceFacts"
-          :can-format="canFormatStorageCard"
-          :device-label="channelOperationTarget.deviceId"
-        />
       </div>
-    </a-drawer>
+    </a-modal>
 
     <DeviceRebootDialog
       v-if="canViewMaintenance"
@@ -7989,56 +8072,112 @@ onUnmounted(() => {
 .device-readonly {
   gap: 18px;
 }
-.channel-operation-entry {
-  display: grid;
-  gap: 14px;
-}
 
-/**
- * 「设备配置」页签的容器：给 `DeviceConfigDrawer` 的嵌入形态一个**确定的高度**。
- *
- * ⛔ 不写高度它只会撑到内容高度（`.dcg-window--embedded` 是 `height: 100%`，父级没有高度
- *    就退化成 auto），表现是状态条贴在半截、参数区被压扁。
- * ⛔ 用 `min(620px, calc(100vh - 210px))` 而不是 `100%`：抽屉 body 自己不约束高度，
- *    `100%` 在这里解析不出值；210px ≈ 抽屉标题 + 上下文条 + 页签，留够不出现双滚动条。
- */
-.channel-config-panel {
+/* ── 通道配置对话框（标题栏 + 骨架） ─────────────────────────────
+ * 面板底色 / 圆角 / 头部页脚间距全部来自 `.uvp-system-dialog`（`style/model/uvp-ui-language.scss`），
+ * 这里只补「标题栏里塞了交互控件」这一层，以及内容区的定高。
+ * ⛔ 点遮罩不许关：配到一半的录像计划没有草稿恢复，点了就没了，而且不会报错。
+ *    （模板侧已写 `:mask-closable="false"`，这里再挡一层是防有人手改模板。） */
+.channel-config-title {
   display: flex;
-  height: min(620px, calc(100vh - 210px));
-  min-height: 380px;
-  overflow: hidden;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding-right: 8px;
 }
-
-/**
- * ⛔ 必须把**嵌入抽屉自己的根节点**撑开：`.dcg-host--embedded` 是 `display:block` 且不设高度，
- *    里面 `.dcg-window--embedded { height: 100% }` 会解析成 auto（父高 auto），
- *    表现是面板塌成内容高度、状态条贴在半截。`flex: 1 1 auto` 让它吃满外层定高。
- */
-.channel-config-panel > :deep(.dcg-host) {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-.channel-operation-context {
-  display: grid;
-  gap: 3px;
-  padding: 10px 12px;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 8px;
-}
-.channel-operation-context strong {
+.channel-config-title__text {
+  flex: none;
+  font-size: 15px;
+  font-weight: 500;
   color: var(--uvp-text-primary);
 }
-.channel-operation-context span {
+.channel-config-title__sep {
+  flex: none;
+  width: 1px;
+  height: 13px;
+  background: var(--uvp-panel-border);
+}
+.channel-config-title__name {
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 12px;
-  color: var(--uvp-text-tertiary);
+  font-size: 13px;
+  color: var(--uvp-text-secondary);
   white-space: nowrap;
 }
-.channel-operation-tabs {
-  width: fit-content;
-  max-width: 100%;
+.channel-config-online {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--uvp-text-tertiary);
+
+  i {
+    width: 6px;
+    height: 6px;
+    background: currentcolor;
+    border-radius: 50%;
+  }
+
+  &.is-on {
+    color: var(--uvp-success);
+  }
+}
+.channel-config-switch {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  align-items: center;
+  margin-left: auto;
+}
+.channel-config-switch__idx {
+  font-size: 11px;
+  color: var(--uvp-text-tertiary);
+}
+.channel-config-switch__group :deep(.arco-btn) {
+  height: 22px;
+  padding: 0 7px;
+  color: var(--uvp-text-secondary);
+  background: var(--uvp-dialog-control-bg);
+  border-color: var(--uvp-panel-border);
+
+  &:not(:disabled):hover {
+    color: var(--uvp-brand);
+    border-color: var(--uvp-brand);
+  }
+}
+
+/**
+ * 内容区定高。
+ *
+ * ⛔ `DeviceConfigDrawer` 的嵌入形态是 `.dcg-host--embedded{display:block}` +
+ *    内层 `.dcg-window--embedded{height:100%}` —— 父级没有确定高度时 `100%` 解析成 auto，
+ *    表现是面板塌成内容高度、状态条贴在半截。所以这里必须给**具体高度**，不能写 `100%`。
+ * ⛔ 用 `calc(100vh - 208px)`：208 ≈ 对话框上下留白 + 标题栏 56 + 页签 40 + 内边距，
+ *    留够之后内容自己滚，不会再套一层外层滚动条。
+ */
+.channel-config-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  height: min(680px, calc(100vh - 208px));
+  min-height: 420px;
+  overflow: hidden;
+}
+.channel-config-tabs {
+  flex: none;
+}
+.channel-config-pane {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+
+  > * {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+  }
 }
 
 /* 概览:分区标题 + 细分隔线,**不画卡片框** —— 原「设备信息」页是 5 个等权重
@@ -8919,5 +9058,34 @@ onUnmounted(() => {
   color: #e2e8f0;
   background: rgb(148 163 184 / 24%);
   border-color: rgb(148 163 184 / 46%);
+}
+</style>
+
+<style lang="scss">
+/*
+ * 「通道配置」对话框的**面板级**覆盖（不带 scoped：`a-modal` 的 DOM 是 teleport 到 body 的，
+ * 组件内的 scoped 选择器挂不到 `.arco-modal` 上）。
+ *
+ * ⛔ 为什么要单独覆盖 body padding：`.uvp-system-dialog .arco-modal-body` 是 `22px 24px
+ *    !important`，那是给"表单塞在弹窗里"用的留白。这个面板是**满铺工作区**（左导航贴边、
+ *    内容区自己管间距、底部还有固定操作条），留着 22/24 会在导航外侧多出一圈白边，
+ *    看起来像"内容没铺开"。这里选择器写两个类名，权重高于房规那条，不依赖打包顺序。
+ */
+.uvp-system-dialog.channel-config-dialog {
+  .arco-modal-body {
+    padding: 0 !important;
+  }
+
+  .arco-modal-header {
+    min-height: 52px;
+    padding: 12px 20px !important;
+  }
+
+  /* title 被撑满整行，通道切换按钮的 `margin-left: auto` 才有地方可推。 */
+  .arco-modal-title {
+    display: block;
+    width: 100%;
+    padding-right: 28px;
+  }
 }
 </style>

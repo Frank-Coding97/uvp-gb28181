@@ -508,7 +508,8 @@ describe("存储卡格式化入口与进度跟踪", () => {
     await wrapper.get("[data-testid='storage-refresh']").trigger("click");
     await flushPromises();
     expect(wrapper.get("[data-testid='storage-freshness']").text()).not.toContain("正在跟踪");
-    expect(wrapper.text()).toContain("优先读平台缓存");
+    // 文案口径（2026-10-29）：不再对用户说"SDCardStatus 报文"，改成"平台缓存 / 当场问一次设备"。
+    expect(wrapper.text()).toContain("上面显示的是平台缓存");
     wrapper.unmount();
   });
 

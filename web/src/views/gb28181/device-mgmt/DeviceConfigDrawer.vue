@@ -108,6 +108,14 @@ const props = withDefaults(
     /** 设备配置标签只展示非视频参数配置族。 */
     configOnly?: boolean;
     groupKeys?: string[];
+    /**
+     * 分组导航走**侧栏竖排**（默认横排）。
+     *
+     * ⛔ 判据不是"好看"：横排在窄宿主里能用（播放控制台侧栏只有 1 组、抽屉里 4 组平铺还能塞下），
+     *    但 1000px 宽的对话框里，横排 4 个等宽按钮会拉成一整条"没人会去点第二遍"的色带，
+     *    而竖排正好把内容区的高度用起来。宿主自己知道自己是宽是窄，所以由宿主传，不在这里猜。
+     */
+    navSide?: boolean;
     /** 嵌入工作台时，把复杂编辑器挂到宿主底部的目标节点。 */
     detailTarget?: string | HTMLElement | null;
     /**
@@ -155,6 +163,7 @@ const props = withDefaults(
     canRead: true,
     canApply: true,
     configOnly: false,
+    navSide: false,
     detailTarget: null,
     osdEditing: false,
     osdCanvasLinked: false
@@ -1877,7 +1886,7 @@ onBeforeUnmount(() => {
   >
     <section
       class="dcg-window"
-      :class="{ 'dcg-window--embedded': embedded }"
+      :class="{ 'dcg-window--embedded': embedded, 'dcg-window--side': navSide }"
       role="dialog"
       :aria-modal="embedded ? undefined : true"
       :aria-label="`设备配置 · ${titleText}`"
@@ -1989,7 +1998,7 @@ onBeforeUnmount(() => {
           </div>
         </aside>
 
-        <nav v-if="configGroups.length > 1" class="dcg-nav" aria-label="配置分组">
+        <nav v-if="configGroups.length > 1" class="dcg-nav" :class="{ 'dcg-nav--side': navSide }" aria-label="配置分组">
           <a-button
             v-for="group in configGroups"
             :key="group.key"
@@ -2034,7 +2043,7 @@ onBeforeUnmount(() => {
               {{ activeGroup.state === "ready" ? "已接入" : "未接入" }}
             </span>
             <div
-              v-if="embedded && !detailTarget && activeIsReady && !activeIsVideo"
+              v-if="embedded && !detailTarget && !navSide && activeIsReady && !activeIsVideo"
               class="dcg-embedded-actions"
               data-testid="dcg-embedded-actions"
             >
@@ -2830,6 +2839,56 @@ onBeforeUnmount(() => {
         </section>
       </div>
 
+      <!--
+        底部操作条（侧栏导航形态专用）。
+
+        ⛔ 这三个按钮原来写在参数区头部（`dcg-embedded-actions`）。在矮抽屉里那样放没问题，
+           换成宽对话框 + 周计划时间轴之后，内容一滚按钮就跟着滚出视口 —— 而它们是**全局动作**
+           （下发的是当前分组整块报文，不是某一个字段），必须随时可点。固定在底部才和它们的作用域对上。
+        ⛔ `testid` 沿用 `dcg-reset / dcg-read / dcg-apply`：同一个分组只会有一种形态渲染，
+           两套 testid 会让所有既有用例都得写两遍。
+      -->
+      <footer v-if="navSide" class="dcg-actions" data-testid="dcg-actions">
+        <span class="dcg-actions__meta">
+          <template v-if="activeObservedAt">最近回读 {{ activeObservedAt }}</template>
+          <template v-else>尚未从设备回读</template>
+          <span v-if="activeDirtyCount > 0" class="dcg-actions__dirty">{{ activeDirtyCount }} 项未下发</span>
+        </span>
+        <div class="dcg-actions__btns">
+          <a-button
+            html-type="button"
+            type="outline"
+            class="dcg-btn"
+            data-testid="dcg-reset"
+            title="还原为最近回读值"
+            :disabled="activeApplying || !activeDirtyCount"
+            @click="resetActiveGroup"
+          >
+            <RotateCcw :size="12" />还原
+          </a-button>
+          <a-button
+            html-type="button"
+            type="outline"
+            class="dcg-btn"
+            data-testid="dcg-read"
+            :disabled="activeLoading || !canRead || !online"
+            @click="readActiveGroup"
+          >
+            <RefreshCcw :size="12" />读取
+          </a-button>
+          <a-button
+            html-type="button"
+            type="primary"
+            class="dcg-btn is-primary"
+            data-testid="dcg-apply"
+            :disabled="activeApplying || !activeDirtyCount || !canApply"
+            @click="applyActiveGroup"
+          >
+            <Send :size="12" />下发到设备
+          </a-button>
+        </div>
+      </footer>
+
       <footer v-if="!embedded" class="dcg-statusbar">
         <span class="dcg-status-item">
           <i class="dcg-status-dot" :class="`is-${activeGroup.state}`" />
@@ -3001,6 +3060,75 @@ onBeforeUnmount(() => {
   flex: 1 1 0;
   height: auto;
   min-height: 0;
+}
+
+/* ═══ 侧栏导航形态（宽对话框宿主） ═══
+ * 判据见 `navSide` 的注释：横排 4 个等宽按钮在 1000px 宽里会拉成一条色带，
+ * 竖排则把内容区的高度用起来，也符合"配置页左导航"的常规形状。
+ * ⛔ 这里要覆盖 `.dcg-window--embedded .dcg-nav` 的 `flex-direction: row` 和
+ *    子项的 `flex: 1 1 0`：不改的话竖排容器里子项会按行等高分配、只剩一条细缝。 */
+.dcg-window--embedded.dcg-window--side .dcg-body {
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: 128px minmax(0, 1fr);
+}
+
+.dcg-window--embedded .dcg-nav.dcg-nav--side {
+  flex-direction: column;
+  gap: 2px;
+  height: 100%;
+  min-height: 0;
+  padding: 8px 7px;
+  overflow-y: auto;
+  background: var(--uvp-dialog-control-bg, #f8fbff);
+  border-right: 1px solid var(--uvp-dialog-border, #e6edf7);
+  border-bottom: 0;
+}
+
+.dcg-window--embedded .dcg-nav--side > .dcg-nav-item.arco-btn[type="button"] {
+  flex: none;
+  justify-content: flex-start;
+  width: 100%;
+  height: 30px;
+  padding: 0 9px;
+}
+
+/* 竖排时没有"横向挤不下"的问题，省略号交给 flex 收缩即可，这里只保证左对齐。 */
+.dcg-window--embedded .dcg-nav--side .dcg-nav-text {
+  align-items: flex-start;
+  text-align: left;
+}
+
+/* 底部操作条：全局动作（下发的是整组报文），固定住，不跟内容滚。 */
+.dcg-actions {
+  display: flex;
+  flex: none;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 14px;
+  background: var(--uvp-dialog-footer-bg, #fbfdff);
+  border-top: 1px solid var(--uvp-dialog-border, #e6edf7);
+}
+.dcg-actions__meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--uvp-text-tertiary);
+}
+.dcg-actions__dirty {
+  flex: none;
+  padding: 1px 7px;
+  color: var(--uvp-brand);
+  background: var(--uvp-brand-soft);
+  border-radius: 9px;
+}
+.dcg-actions__btns {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  align-items: center;
+  margin-left: auto;
 }
 
 .dcg-window--embedded .dcg-params-head {

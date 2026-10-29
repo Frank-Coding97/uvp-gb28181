@@ -548,7 +548,7 @@ function formatCapacity(mb: number | null | undefined) {
           {{
             formatWatching
               ? "正在自动跟踪格式化进度（每轮都是一次真实查询），手动查询会打断它"
-              : "优先读平台缓存；「向设备查询」才会下发 SDCardStatus 报文"
+              : "上面显示的是平台缓存；点「向设备查询」会当场问一次设备"
           }}
         </span>
       </div>
