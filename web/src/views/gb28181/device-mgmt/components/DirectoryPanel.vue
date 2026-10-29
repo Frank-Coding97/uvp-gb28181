@@ -12,7 +12,6 @@ import {
 } from "../directoryState";
 
 import { mergeDirectorySync, type DirectorySyncResult } from "../directorySync";
-import { sortDevicesOnlineFirst } from "../directorySort";
 
 const props = defineProps<{
   modelValue: DirectoryState;
@@ -68,8 +67,10 @@ watch(
   }
 );
 
-// ⛔ 排序只发生在这里：`trees` 保持后端顺序（后台增量同步要按它做 diff），展示层才把在线设备提上来。
-const currentTree = computed(() => sortDevicesOnlineFirst(trees.value[props.modelValue.view]));
+// ⛔ 这里**不再做任何本地排序**：同目录下的设备「在线优先」由接口返回
+// （后端 directory.SortOnlineDevicesFirst）。前端再排一遍会和增量同步（按后端 children 顺序
+// 重建子树）打架，出现"刷新后位置跳回去"。要调排序规则，改后端。
+const currentTree = computed(() => trees.value[props.modelValue.view]);
 const selectedKey = computed(() => props.modelValue.selectedKey[props.modelValue.view]);
 const expandedKeys = computed(() => props.modelValue.expandedKeys[props.modelValue.view]);
 const normalizedKeyword = computed(() => props.modelValue.treeKeyword.trim().toLocaleLowerCase());

@@ -119,6 +119,10 @@ func (dc *DirectoryController) Tree(c *gin.Context) {
 		dc.Fail(c, "筛选目录资源失败", err, http.StatusInternalServerError)
 		return
 	}
+	// 在线设备排最上边（规则见 directory.SortOnlineDevicesFirst）。
+	// ⛔ 必须放在资源过滤之后、增量快照之前：过滤会砍掉节点，快照要按最终顺序算，
+	// 否则前端拿增量时顺序会和上一版对不上，设备上下线后位置不更新。
+	gbdirectory.SortOnlineDevicesFirst(tree)
 	if err = fillDirectoryDeviceChannelCounts(c.Request.Context(), db, tree); err != nil {
 		dc.Fail(c, "统计设备通道数失败", err, http.StatusInternalServerError)
 		return
