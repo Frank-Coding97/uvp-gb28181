@@ -13,6 +13,29 @@ export function formatFullTime(value: string): string {
   return dayjs(value).format("MM-DD HH:mm:ss.SSS");
 }
 
+// 报文时间戳是 RFC3339Nano（小数位数最多 9 位）。浏览器 Date 只有毫秒精度，
+// 用它重排会话报文会把同毫秒内的先后抹平：列表接口按 occurred_at DESC 返回，
+// 稳定排序保留倒序后，「401 应答」就排到了「REGISTER 请求」前面（时长达标但时序反了）。
+// 这里按「整秒 + 小数部分补零到 9 位」比较，才能真正还原到达顺序。
+const OCCURRED_AT_FRACTION_WIDTH = 9;
+
+function occurredAtParts(value: string): [number, string] {
+  // ⛔ 只剥掉小数部分，时区后缀（Z / +08:00）必须留着，
+  // 否则 Date.parse 会按浏览器本地时区解释，跨时区时会整体偏移。
+  const second = Date.parse(value.replace(/\.\d+/, ""));
+  const fraction = (value.match(/\.(\d+)/)?.[1] ?? "").slice(0, OCCURRED_AT_FRACTION_WIDTH);
+  return [Number.isNaN(second) ? 0 : second, fraction.padEnd(OCCURRED_AT_FRACTION_WIDTH, "0")];
+}
+
+/** 按 occurredAt 升序比较，保留到纳秒（同一毫秒内的请求/应答不会被抹平） */
+export function compareOccurredAt(a: string, b: string): number {
+  const [secondA, fractionA] = occurredAtParts(a);
+  const [secondB, fractionB] = occurredAtParts(b);
+  if (secondA !== secondB) return secondA - secondB;
+  if (fractionA === fractionB) return 0;
+  return fractionA < fractionB ? -1 : 1;
+}
+
 export function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms} ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;

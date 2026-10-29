@@ -19,7 +19,7 @@ import DetailPanel from "./components/DetailPanel.vue";
 import SessionDetail from "./components/SessionDetail.vue";
 import TableView from "./components/TableView.vue";
 import TerminalView from "./components/TerminalView.vue";
-import { formatFullTime } from "./helpers";
+import { compareOccurredAt, formatFullTime } from "./helpers";
 import {
   buildTraceStreamUrl,
   fetchTraceHealth,
@@ -333,7 +333,7 @@ async function loadDrillMessages() {
     });
     if (pageMounted && version === detailLoadVersion && drillCallId.value === callId && response.code === 0) {
       const items = response.data.items || [];
-      drillMessages.value = items.slice().sort((a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime());
+      drillMessages.value = items.slice().sort((a, b) => compareOccurredAt(a.occurredAt, b.occurredAt));
       // 进入详情后默认选中第一条报文
       if (drillMessages.value[0]) {
         selectedEventId.value = drillMessages.value[0].eventId;
