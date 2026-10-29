@@ -55,6 +55,11 @@
               />
               <span class="upgrade-caption">{{ autoCheckHint }}</span>
             </div>
+            <!-- 侧边栏徽标被「忽略此版本」藏掉后，这里是唯一的恢复入口。 -->
+            <div v-if="ignoredNoticeVersion" class="version-ignored" data-testid="ignored-update-entry">
+              <span class="upgrade-caption">已忽略 v{{ ignoredNoticeVersion }}</span>
+              <a-link :disabled="!canIgnoreNotice || restoringNotice" @click="restoreIgnoredUpdate">恢复提示</a-link>
+            </div>
           </div>
           <a-space wrap
             ><a-link @click="showReleaseNotes(currentVersionText, currentRelease?.release_notes, currentRelease?.published_at)"
@@ -351,7 +356,17 @@ import UpgradeProgress, { type ProgressDisplay, type UploadTransfer } from "./Up
 
 const canManage = computed(() => hasPermission("system:upgrade:manage"));
 // 定时检查开关与侧边栏徽标读同一份缓存：都只看助手已经写好的结果，不额外打官方源。
-const { autoCheckEnabled, canSetAutoCheck, settingAutoCheck, setAutoCheck, checkedAt: noticeCheckedAt } = useUpgradeNotice();
+const {
+  notice: upgradeNotice,
+  canIgnore: canIgnoreNotice,
+  ignoring: restoringNotice,
+  restoreIgnoredVersion,
+  autoCheckEnabled,
+  canSetAutoCheck,
+  settingAutoCheck,
+  setAutoCheck,
+  checkedAt: noticeCheckedAt
+} = useUpgradeNotice();
 const route = useRoute();
 const router = useRouter();
 
@@ -457,6 +472,19 @@ const toggleAutoCheck = async (enabled: boolean) => {
   }
   Message.success("已开启定时检查");
   if (status.value?.capabilities.onlineCheck && !statusError.value) await check();
+};
+/**
+ * 「忽略此版本」会把侧边栏徽标整个藏起来，所以恢复入口只能放在这里。
+ * 忽略只对当前这一个版本有效：等到下个版本出现，徽标会自己回来。
+ */
+const ignoredNoticeVersion = computed(() => {
+  const notice = upgradeNotice.value;
+  return notice?.hasUpdate && notice?.ignored ? notice.latestVersion || "新版本" : "";
+});
+const restoreIgnoredUpdate = async () => {
+  if (restoringNotice.value) return;
+  await restoreIgnoredVersion();
+  Message.success("已恢复新版本提示");
 };
 // 事件流水覆盖准备、应用、恢复三个阶段，历史日志里也可能出现已下线的自动升级事件名。
 const eventLabels: Record<string, string> = {
@@ -1317,6 +1345,11 @@ onUnmounted(() => {
   gap: 10px;
 }
 .version-auto-check {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+.version-ignored {
   display: inline-flex;
   gap: 8px;
   align-items: center;

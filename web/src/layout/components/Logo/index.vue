@@ -12,8 +12,13 @@
           <span class="logo_badge">GB28181</span>
         </div>
         <div class="logo_meta_row">
+          <!--
+            ⛔ 侧边栏**不常显版本号**：它只在「发现新版本、且没被忽略」时才出现。
+            当前版本在服务升级页首屏，这里只承担「该去看一眼」的提示作用，
+            常态下留白，不跟产品名抢位置。
+          -->
           <a-popover
-            v-if="canRead"
+            v-if="pending"
             v-model:popup-visible="noticeVisible"
             trigger="click"
             position="right"
@@ -21,12 +26,13 @@
           >
             <button
               class="logo_version"
-              :class="{ 'logo_version--pending': pending, 'logo_version--dark': isDark }"
+              :class="{ 'logo_version--dark': isDark }"
               type="button"
               data-testid="logo-version"
-              :aria-label="pending ? `当前版本 v${currentVersion}，有新版本 v${latestVersion}` : `当前版本 v${currentVersion}`"
+              :title="`有新版本 v${latestVersion}，点击查看`"
+              :aria-label="`有新版本 v${latestVersion}，当前版本 v${currentVersion}`"
             >
-              v{{ currentVersion }}<span v-if="pending" class="logo_version_dot" aria-hidden="true" />
+              v{{ latestVersion }}<span class="logo_version_dot" aria-hidden="true" />
             </button>
             <template #content>
               <div class="version-card" data-testid="logo-version-card">
@@ -43,36 +49,18 @@
                   </button>
                 </div>
                 <div class="version-card_current">v{{ currentVersion }}</div>
-                <p v-if="!notice?.checkEnabled" class="version-card_hint">未配置官方更新源，当前只能离线导入升级包。</p>
-                <template v-else-if="pending">
-                  <p class="version-card_latest">最新版本：v{{ latestVersion }}</p>
-                  <div class="version-card_update">
-                    <span class="version-card_update-title">有新版本可用！</span>
-                    <span class="version-card_update-version">v{{ latestVersion }}</span>
-                  </div>
-                  <button class="version-card_action" type="button" @click="goUpgrade">前往升级</button>
-                  <div v-if="canIgnore" class="version-card_links">
-                    <span />
-                    <button type="button" :disabled="ignoring" @click="ignoreCurrentVersion">忽略此版本</button>
-                  </div>
-                </template>
-                <template v-else>
-                  <p class="version-card_latest">
-                    {{ notice?.hasUpdate ? `已忽略 v${latestVersion}` : "已是最新版本" }}
-                  </p>
-                  <div class="version-card_links">
-                    <span>{{ checkedAtText }}</span>
-                    <button v-if="notice?.ignored && canIgnore" type="button" :disabled="ignoring" @click="restoreIgnoredVersion">
-                      取消忽略
-                    </button>
-                  </div>
-                </template>
+                <div class="version-card_update">
+                  <span class="version-card_update-title">有新版本可用！</span>
+                  <span class="version-card_update-version">v{{ latestVersion }}</span>
+                </div>
+                <button class="version-card_action" type="button" @click="goUpgrade">前往升级</button>
+                <div v-if="canIgnore" class="version-card_links">
+                  <span>{{ checkedAtText }}</span>
+                  <button type="button" :disabled="ignoring" @click="ignoreCurrentVersion">忽略此版本</button>
+                </div>
               </div>
             </template>
           </a-popover>
-          <span v-else class="logo_version logo_version--plain" :class="{ 'logo_version--dark': isDark }">
-            v{{ currentVersion }}
-          </span>
           <span class="logo_subtitle">{{ subtitle }}</span>
         </div>
       </div>
@@ -93,23 +81,12 @@ import LogoSvg from "@/components/s-logo/index.vue";
 import { useUpgradeNotice } from "@/hooks/useUpgradeNotice";
 
 /**
- * 版本徽标：后台每 6 小时查一次官方源，这里只读缓存。
- * 有新版本时冒橙点，点开是更新卡片（照 Sub2API 的形态）。
+ * 新版本徽标：后台每 6 小时查一次官方源，这里只读缓存。
+ * 只有「确实有更新且没被忽略」时才渲染（见模板里的 pending 判定），
+ * 点开是更新卡片（照 Sub2API 的形态）。
  */
-const {
-  notice,
-  canRead,
-  canIgnore,
-  currentVersion,
-  latestVersion,
-  checkedAt,
-  pending,
-  refreshing,
-  ignoring,
-  refresh,
-  ignoreCurrentVersion,
-  restoreIgnoredVersion
-} = useUpgradeNotice();
+const { canIgnore, currentVersion, latestVersion, checkedAt, pending, refreshing, ignoring, refresh, ignoreCurrentVersion } =
+  useUpgradeNotice();
 const noticeVisible = ref(false);
 const router = useRouter();
 
@@ -274,7 +251,8 @@ const isTitle = computed(() => {
     min-width: 0;
   }
 
-  // 版本徽标。灵感来自 Sub2API：常显版本号，有新版本才变橙并冒点。
+  // 新版本徽标。它只在有更新时出现，所以底色直接用琥珀色（照 Sub2API），
+  // 不需要再区分「待更新 / 普通」两种形态。
   .logo_version {
     display: inline-flex;
     flex: 0 0 auto;
@@ -286,11 +264,11 @@ const isTitle = computed(() => {
     font-weight: 640;
     font-variant-numeric: tabular-nums;
     line-height: 1;
-    color: var(--uvp-text-secondary);
+    color: #b45309;
     white-space: nowrap;
     cursor: pointer;
-    background: rgb(148 163 184 / 12%);
-    border: 1px solid rgb(148 163 184 / 22%);
+    background: #fef3c7;
+    border: 1px solid #fcd34d;
     border-radius: 999px;
     transition:
       background 0.15s ease,
@@ -298,42 +276,20 @@ const isTitle = computed(() => {
       border-color 0.15s ease;
 
     &:hover {
-      color: var(--uvp-brand);
-      background: var(--uvp-brand-soft);
-      border-color: color-mix(in srgb, var(--uvp-brand) 34%, transparent);
-    }
-
-    &--pending {
-      color: #b45309;
-      background: #fef3c7;
-      border-color: #fcd34d;
-
-      &:hover {
-        color: #92400e;
-        background: #fde68a;
-        border-color: #fbbf24;
-      }
-    }
-
-    &--plain {
-      cursor: default;
-
-      &:hover {
-        color: var(--uvp-text-secondary);
-        background: rgb(148 163 184 / 12%);
-        border-color: rgb(148 163 184 / 22%);
-      }
+      color: #92400e;
+      background: #fde68a;
+      border-color: #fbbf24;
     }
 
     &--dark {
-      color: rgb(203 213 225 / 88%);
-      background: rgb(148 163 184 / 16%);
-      border-color: rgb(148 163 184 / 28%);
+      color: #fcd34d;
+      background: rgb(245 158 11 / 18%);
+      border-color: rgb(245 158 11 / 42%);
 
-      &.logo_version--plain:hover {
-        color: rgb(203 213 225 / 88%);
-        background: rgb(148 163 184 / 16%);
-        border-color: rgb(148 163 184 / 28%);
+      &:hover {
+        color: #fde68a;
+        background: rgb(245 158 11 / 26%);
+        border-color: rgb(245 158 11 / 56%);
       }
     }
   }
@@ -428,20 +384,6 @@ const isTitle = computed(() => {
   color: var(--uvp-text-primary);
   text-align: center;
   letter-spacing: -0.01em;
-}
-
-.version-card_latest {
-  margin: 0 0 10px;
-  font-size: 12px;
-  color: var(--uvp-text-tertiary);
-  text-align: center;
-}
-
-.version-card_hint {
-  margin: 8px 0 2px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--uvp-text-tertiary);
 }
 
 // 有新版本：橙色提示块 + 主按钮（照 Sub2API 的层次）

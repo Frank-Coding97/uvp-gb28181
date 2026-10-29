@@ -13,7 +13,8 @@ const api = vi.hoisted(() => ({
   cancelTask: vi.fn(),
   rollbackTask: vi.fn(),
   getNotice: vi.fn(),
-  setAutoCheck: vi.fn()
+  setAutoCheck: vi.fn(),
+  clearIgnore: vi.fn()
 }));
 const modal = vi.hoisted(() => ({ confirm: vi.fn() }));
 const permissions = vi.hoisted(() => ({ value: ["system:upgrade:read", "system:upgrade:manage"] as string[] }));
@@ -42,7 +43,7 @@ vi.mock("@/api/service-upgrade", () => ({
   rollbackServiceUpgradeTask: api.rollbackTask,
   getServiceUpgradeNotice: api.getNotice,
   ignoreServiceUpgradeNotice: vi.fn(),
-  clearIgnoredServiceUpgradeNotice: vi.fn(),
+  clearIgnoredServiceUpgradeNotice: api.clearIgnore,
   setServiceUpgradeAutoCheck: api.setAutoCheck
 }));
 
@@ -150,6 +151,7 @@ describe("service upgrade page", () => {
       data: { hasUpdate: false, ignored: false, checkEnabled: true, autoCheck: true, checkedAt: "2026-10-29T02:00:00Z" }
     });
     api.setAutoCheck.mockReset().mockResolvedValue({ code: 0, data: { enabled: false } });
+    api.clearIgnore.mockReset().mockResolvedValue({ code: 0, data: {} });
   });
 
   afterEach(() => {
@@ -1368,6 +1370,43 @@ describe("service upgrade page", () => {
     const toggle = wrapper.get('[data-testid="auto-check-switch"] input');
     expect((toggle.element as HTMLInputElement).disabled).toBe(true);
     expect(wrapper.text()).toContain("升级助手未就绪，暂不可设置");
+    wrapper.unmount();
+  });
+
+  // 侧边栏徽标被「忽略此版本」藏掉后，页面必须留一条恢复路径，否则只能去清服务器文件。
+  it("忽略过版本时页脚给出恢复入口，点击后清掉忽略", async () => {
+    api.getNotice.mockResolvedValue({
+      code: 0,
+      data: {
+        hasUpdate: true,
+        ignored: true,
+        latestVersion: "1.1.16",
+        checkEnabled: true,
+        autoCheck: true,
+        checkedAt: "2026-10-29T02:00:00Z"
+      }
+    });
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const entry = wrapper.get('[data-testid="ignored-update-entry"]');
+    expect(entry.text()).toContain("已忽略 v1.1.16");
+
+    await entry
+      .findAll("a")
+      .find(node => node.text() === "恢复提示")!
+      .trigger("click");
+    await flushPromises();
+    expect(api.clearIgnore).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+  });
+
+  // 没被忽略时不该出现这条入口，否则页脚永远多一行噪音。
+  it("没有忽略记录时不显示恢复入口", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="ignored-update-entry"]').exists()).toBe(false);
     wrapper.unmount();
   });
 });

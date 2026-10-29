@@ -10,14 +10,14 @@ import { APP_VERSION } from "@/config/version";
 import { hasPermission } from "@/hooks/usePermission";
 
 /**
- * 侧边栏版本徽标的数据源。
+ * 侧边栏「发现新版本」徽标的数据源。
  *
  * ⛔ 这里**只读缓存**：真正查官方源的是升级助手的后台任务（每 6 小时一次）。
  *    在布局层发检查请求会让每个用户每次开页都打一次官方源，也会让离线部署
  *    每次开页都报一次错。
  *
- * 页面开着很久时靠 30 分钟轮询把后台的新结果取回来；徽标本身不阻塞渲染，
- * 拿不到数据就退回「只显示本地版本号」。
+ * 页面开着很久时靠 30 分钟轮询把后台的新结果取回来；拿不到数据就当作
+ * 「没有新版本」，侧边栏什么都不画（版本号在服务升级页首屏）。
  */
 const NOTICE_REFRESH_INTERVAL = 30 * 60 * 1000;
 
@@ -39,7 +39,7 @@ export function useUpgradeNotice() {
   const currentVersion = computed(() => notice.value?.currentVersion || APP_VERSION);
   const latestVersion = computed(() => notice.value?.latestVersion || "");
   /**
-   * 橙点只在「确实有更新、且没被忽略、且这台机器能连官方源」三者同时成立时出现。
+   * 徽标只在「确实有更新、没被忽略、这台机器能连官方源、且有查看权限」四条同时成立时出现。
    * 忽略只作用于当前这一个版本：出现更新版本时后端返回的 ignored 会自动变 false。
    */
   const pending = computed(
