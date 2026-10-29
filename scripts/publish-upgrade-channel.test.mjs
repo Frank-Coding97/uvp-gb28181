@@ -74,14 +74,33 @@ test("发布时同时写出签名清单与通道指针", async () => {
     );
     assert.equal(releasePayload.version, "9.9.9");
     assert.equal(releasePayload.build_id, "9.9.9-abc1234");
+    // ⛔ 默认只有 standalone/systemd：Linux 绿色包不含 compose.yml 与镜像，
+    //   标成 compose 只会在准备阶段报「缺编排文件」。容器版要单独打 compose 包。
     assert.deepEqual(
       releasePayload.artifacts.map(item => `${item.deployment}/${item.os}/${item.arch}`).sort(),
-      ["compose/linux/amd64", "standalone/linux/amd64", "systemd/linux/amd64"]
+      ["standalone/linux/amd64", "systemd/linux/amd64"]
     );
     for (const artifact of releasePayload.artifacts) {
       assert.equal(artifact.url, "https://dl.example.test/v9.9.9/uvp-gb28181-linux-amd64-9.9.9.tar.gz");
       assert.match(artifact.sha256, /^[a-f0-9]{64}$/);
     }
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("显式 --deployments 仍可为容器版单独出 compose 制品", async () => {
+  const f = await fixture();
+  try {
+    await runCli([...f.args, "--deployments", "compose"], silent);
+    const payload = verifyEnvelope(
+      await readFile(path.join(f.siteDir, "releases", "9.9.9", "manifest.json")),
+      f.publicKey
+    );
+    assert.deepEqual(
+      payload.artifacts.map(item => `${item.deployment}/${item.os}/${item.arch}`),
+      ["compose/linux/amd64"]
+    );
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }

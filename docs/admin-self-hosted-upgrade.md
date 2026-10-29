@@ -125,6 +125,17 @@ sudo UVP_UPGRADE_TRUSTED_KEYS='{"release-2026":"<Ed25519 public key>"}' ./instal
 
 ### Docker Compose 首次接入
 
+> **现状（2026-10-29）：容器版部署方式尚未对外发布，官方升级通道里也没有 `compose` 制品。**
+> 发布脚本默认只给 Linux 绿色包标 `standalone` 与 `systemd`；`manifest.ArtifactFor` 按
+> `deployment/os/arch` 精确匹配，所以容器实例「检查更新」会直接报
+> `manifest has no artifact for compose/<os>/<arch>`，这是**预期行为**，不是故障。
+>
+> 要让容器实例真正可升级，两件事缺一不可：
+> 1. 产出**容器版升级包**（包内需有注册的 `compose.yml` 与 `images/*.tar`，并在制品里写 `images` 元数据）。
+>    拿 Linux 绿色包冒充 compose 制品会在准备阶段报
+>    `upgrade package is missing registered compose file`——虽然此时还没停服务，但升级必然失败。
+> 2. 按下面步骤完成宿主机助手接入；默认安装脚本只建目录，**不会**自动装 `uvp-updater.service`。
+
 Compose 实例的升级助手运行在宿主机 systemd 中，不运行在业务容器内。这样升级期间停止或重建后端容器时，任务记录、回退和 gate 仍然存在。首次安装包应包含 `updater/uvp-updater`；接入脚本只在安装根缺少稳定助手时复制它，之后的应用升级不会替换正在执行的助手。
 
 先在 `config/config.yml` 将 `upgrade.deployment` 设为 `compose`，并配置本实例的 `release_source` 和 `trusted_keys`。然后以 root 执行接入脚本；已有项目通过环境变量登记其真实 project 目录、名称和 Compose 文件：

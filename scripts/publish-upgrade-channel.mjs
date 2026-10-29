@@ -40,7 +40,14 @@ import {
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_BASE_URL = "https://uvplatform.com/upgrades";
 const DEFAULT_DOWNLOAD_BASE = "https://gitee.com/Frank-Coding/uvp-gb28181/releases/download";
-const DEFAULT_LINUX_DEPLOYMENTS = ["standalone", "systemd", "compose"];
+// ⛔⛔ 这里**不要**加 compose。Linux 绿色包只对 standalone / systemd 成立：
+//   ComposeAdapter.PreparePackage 要求包内解出注册的 compose.yml，并按 images 逐个
+//   docker load；绿色包里两样都没有（顶层只有 bin/ config/ data/ logs/ resource/ run/
+//   updater/ vendor/），硬标成 compose 会在**准备阶段**报
+//   `upgrade package is missing registered compose file`，而且现场会先看到
+//   "有新版本"再失败，比直接说"没有可用制品"更难查。
+//   ⇒ 容器版要单独出 compose 升级包（compose.yml + images/*.tar），用 --deployments compose 显式指定。
+const DEFAULT_LINUX_DEPLOYMENTS = ["standalone", "systemd"];
 const VERSION_PATTERN = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-rc\.(0|[1-9][0-9]*))?$/;
 const PACKAGE_PATTERN = /^uvp-gb28181-(linux|windows)-(amd64|arm64)-.+\.(tar\.gz|zip)$/;
 
