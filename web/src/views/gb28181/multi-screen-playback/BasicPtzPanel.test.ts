@@ -1,0 +1,204 @@
+import { flushPromises, mount } from "@vue/test-utils";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const api = vi.hoisted(() => ({
+  controlPtz: vi.fn(),
+  getControlCapabilities: vi.fn(),
+  fetchServiceConfig: vi.fn()
+}));
+const account = vi.hoisted(() => ({ permissions: ["*:*:*"] as string[] }));
+
+vi.mock("@/api/gb28181", () => api);
+vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => ({ account }) }));
+
+import { Message } from "@arco-design/web-vue";
+
+import BasicPtzPanel from "./BasicPtzPanel.vue";
+
+const onlineChannel = {
+  id: 1,
+  channelId: "channel-1",
+  deviceId: "device-1",
+  name: "东门",
+  status: 1
+} as any;
+
+describe("BasicPtzPanel", () => {
+  beforeEach(() => {
+    account.permissions = ["*:*:*"];
+    api.getControlCapabilities.mockResolvedValue({
+      code: 0,
+      data: { basicPtz: { state: "supported", reason: "" } }
+    });
+    api.controlPtz.mockResolvedValue({ code: 0, data: { action: "accepted" } });
+    api.fetchServiceConfig.mockResolvedValue({ code: 0, data: { ptzDefaultSpeed: { level: 6 } } });
+  });
+
+  it("does not mount or initialize for a guest without PTZ permissions", async () => {
+    account.permissions = ["gb28181:device:view", "gb28181:play:start"];
+    const wrapper = mount(BasicPtzPanel, { props: { channel: onlineChannel } });
+    await flushPromises();
+
+    expect(wrapper.find(".basic-ptz").exists()).toBe(false);
+    expect(api.getControlCapabilities).not.toHaveBeenCalled();
+    expect(api.fetchServiceConfig).not.toHaveBeenCalled();
+    expect(api.controlPtz).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("collapses the controls while keeping the panel header available", async () => {
+    const wrapper = mount(BasicPtzPanel, { props: { channel: null } });
+
+    expect(wrapper.get(".ptz-content").isVisible()).toBe(true);
+    await wrapper.get("[aria-label='收起云台控制']").trigger("click");
+
+    expect(wrapper.get(".basic-ptz").classes()).toContain("collapsed");
+    expect(wrapper.get("[aria-label='展开云台控制']").attributes("aria-expanded")).toBe("false");
+    expect(wrapper.get(".ptz-content").attributes("style")).toContain("display: none");
+
+    await wrapper.get("[aria-label='展开云台控制']").trigger("click");
+    expect(wrapper.get(".ptz-content").attributes("style") || "").not.toContain("display: none");
+  });
+
+  it("disables controls without a focused online channel or when PTZ is explicitly unsupported", async () => {
+    const wrapper = mount(BasicPtzPanel, { props: { channel: null } });
+    expect(wrapper.get("[data-test=ptz-up]").attributes()).toHaveProperty("disabled");
+
+    await wrapper.setProps({ channel: { ...onlineChannel, status: 0 } });
+    await flushPromises();
+    expect(wrapper.get("[data-test=ptz-up]").attributes()).toHaveProperty("disabled");
+
+    api.getControlCapabilities.mockResolvedValueOnce({
+      code: 0,
+      data: { basicPtz: { state: "unsupported", reason: "not supported" } }
+    });
+    await wrapper.setProps({ channel: onlineChannel });
+    await flushPromises();
+
+    expect(wrapper.get("[data-test=ptz-up]").attributes()).toHaveProperty("disabled");
+  });
+
+  it("sends movement while held and stop when released", async () => {
+    const wrapper = mount(BasicPtzPanel, { props: { channel: onlineChannel } });
+    await flushPromises();
+
+    await wrapper.get("[data-test=ptz-up]").trigger("pointerdown");
+    expect(wrapper.emitted("actionChange")?.[0]).toEqual([{ channelId: onlineChannel.id, action: "up" }]);
+
+    await wrapper.get("[data-test=ptz-up]").trigger("pointerup");
+
+    expect(api.controlPtz).toHaveBeenNthCalledWith(1, onlineChannel.id, expect.objectContaining({ action: "up", speed: 153 }));
+    expect(api.controlPtz).toHaveBeenNthCalledWith(2, onlineChannel.id, expect.objectContaining({ action: "stop" }));
+    expect(wrapper.emitted("actionChange")?.[1]).toEqual([null]);
+  });
+
+  it("loads level ten and sends the full GB28181 speed byte", async () => {
+    api.fetchServiceConfig.mockResolvedValueOnce({ code: 0, data: { ptzDefaultSpeed: { level: 10 } } });
+    const wrapper = mount(BasicPtzPanel, { props: { channel: onlineChannel } });
+    await flushPromises();
+
+    expect(wrapper.get("input[type='range']").element).toHaveProperty("value", "10");
+    await wrapper.get("[data-test=ptz-up]").trigger("pointerdown");
+
+    expect(api.controlPtz).toHaveBeenCalledWith(onlineChannel.id, expect.objectContaining({ action: "up", speed: 255 }));
+  });
+
+  it("falls back to level six when the default speed cannot be loaded", async () => {
+    api.fetchServiceConfig.mockRejectedValueOnce(new Error("network error"));
+    const wrapper = mount(BasicPtzPanel, { props: { channel: onlineChannel } });
+    await flushPromises();
+
+    expect(wrapper.get("input[type='range']").element).toHaveProperty("value", "6");
+    await wrapper.get("[data-test=ptz-up]").trigger("pointerdown");
+    expect(api.controlPtz).toHaveBeenCalledWith(onlineChannel.id, expect.objectContaining({ action: "up", speed: 153 }));
+  });
+
+  it("releases a lens action with the FI stop byte instead of the directional one", async () => {
+    // FI 族(聚焦/光圈)停 0x40、方向族停 0x00(GB/T 28181 表 A.6)。设备只认本族的
+    // 停止指令 —— 给 FI 发 0x00 镜头会一直走下去。
+    const wrapper = mount(BasicPtzPanel, { props: { channel: onlineChannel } });
+    await flushPromises();
+
+    await wrapper.get("[title='光圈开大']").trigger("pointerdown");
+    expect(api.controlPtz).toHaveBeenNthCalledWith(1, onlineChannel.id, expect.objectContaining({ action: "iris_open" }));
+    await wrapper.get("[title='光圈开大']").trigger("pointerup");
+    expect(api.controlPtz).toHaveBeenNthCalledWith(2, onlineChannel.id, expect.objectContaining({ action: "lens_stop" }));
+
+    await wrapper.get("[title='远焦']").trigger("pointerdown");
+    expect(api.controlPtz).toHaveBeenNthCalledWith(3, onlineChannel.id, expect.objectContaining({ action: "focus_far" }));
+    await wrapper.get("[title='远焦']").trigger("pointerup");
+    expect(api.controlPtz).toHaveBeenNthCalledWith(4, onlineChannel.id, expect.objectContaining({ action: "lens_stop" }));
+  });
+
+  it("still releases zoom and movement with the directional stop byte", async () => {
+    // 反向守卫:变倍/方向属于方向族,不能被上面那条改动一并带成 lens_stop。
+    const wrapper = mount(BasicPtzPanel, { props: { channel: onlineChannel } });
+    await flushPromises();
+
+    await wrapper.get("[title='放大']").trigger("pointerdown");
+    await wrapper.get("[title='放大']").trigger("pointerup");
+    await wrapper.get("[data-test=ptz-up]").trigger("pointerdown");
+    await wrapper.get("[data-test=ptz-up]").trigger("pointerup");
+
+    expect(api.controlPtz).toHaveBeenNthCalledWith(2, onlineChannel.id, expect.objectContaining({ action: "stop" }));
+    expect(api.controlPtz).toHaveBeenNthCalledWith(4, onlineChannel.id, expect.objectContaining({ action: "stop" }));
+    expect(api.controlPtz).not.toHaveBeenCalledWith(onlineChannel.id, expect.objectContaining({ action: "lens_stop" }));
+  });
+
+  it("stops an active action on channel change and window blur", async () => {
+    const wrapper = mount(BasicPtzPanel, { props: { channel: onlineChannel } });
+    await flushPromises();
+
+    await wrapper.get("[data-test=ptz-up]").trigger("pointerdown");
+    await wrapper.setProps({ channel: { ...onlineChannel, id: 2, channelId: "channel-2", name: "西门" } });
+    await flushPromises();
+    expect(api.controlPtz).toHaveBeenCalledWith(onlineChannel.id, expect.objectContaining({ action: "stop" }));
+
+    await wrapper.get("[data-test=ptz-right]").trigger("pointerdown");
+    window.dispatchEvent(new Event("blur"));
+    await flushPromises();
+    expect(api.controlPtz).toHaveBeenCalledWith(2, expect.objectContaining({ action: "stop" }));
+
+    await wrapper.get("[data-test=ptz-right]").trigger("pointerdown");
+    wrapper.unmount();
+    await flushPromises();
+    expect(api.controlPtz).toHaveBeenCalledWith(2, expect.objectContaining({ action: "stop" }));
+  });
+
+  // ⛔ HTTP 层失败（离线通道实测是 400）已经由 `utils/http` 统一弹后端 message，
+  //    组件再弹一次就会多出一条 axios 技术串「Request failed with status code 400」。
+  it("keeps the axios technical message out of the toast when the HTTP layer fails", async () => {
+    const errorSpy = vi.spyOn(Message, "error").mockImplementation((() => undefined) as any);
+    api.controlPtz.mockRejectedValueOnce(
+      Object.assign(new Error("Request failed with status code 400"), {
+        isAxiosError: true,
+        response: { status: 400, data: { message: "通道离线,无法下发云台控制" } }
+      })
+    );
+
+    const wrapper = mount(BasicPtzPanel, { props: { channel: onlineChannel } });
+    await flushPromises();
+    await wrapper.get("[data-test=ptz-up]").trigger("pointerdown");
+    await flushPromises();
+
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+    wrapper.unmount();
+  });
+
+  // 业务失败（HTTP 200 + code!=0）拦截器不管，必须由组件自己提示。
+  it("still reports a business failure returned with HTTP 200", async () => {
+    const errorSpy = vi.spyOn(Message, "error").mockImplementation((() => undefined) as any);
+    api.controlPtz.mockResolvedValueOnce({ code: 1, message: "通道离线,无法下发云台控制" });
+
+    const wrapper = mount(BasicPtzPanel, { props: { channel: onlineChannel } });
+    await flushPromises();
+    await wrapper.get("[data-test=ptz-up]").trigger("pointerdown");
+    await flushPromises();
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith("通道离线,无法下发云台控制");
+    errorSpy.mockRestore();
+    wrapper.unmount();
+  });
+});

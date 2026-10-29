@@ -1,0 +1,22 @@
+server:
+  port: 8088
+
+uvp:
+  openapi:
+    # Platform address. Note: if you use https with the bundled self-signed certificate,
+    # Java will reject it (PKIX path building failed) because the certificate's SAN does not
+    # cover the server IP. Use http on a trusted network, or install a proper certificate.
+    base-url: ${UVP_BASE_URL:http://127.0.0.1:8280}
+    access-key: ${UVP_ACCESS_KEY:}
+    secret-key: ${UVP_SECRET_KEY:}
+    # Must equal openapi.audience in the platform's config.yml. A mismatch shows up only as a 401.
+    audience: ${UVP_AUDIENCE:uvp-dev-local}
+    connect-timeout: 3s
+    read-timeout: 15s
+    slow-read-timeout: 60s
+    max-retries: 2
+
+logging:
+  level:
+    root: INFO
+    com.uvp.openapi: INFO

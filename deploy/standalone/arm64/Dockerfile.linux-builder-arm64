@@ -1,0 +1,231 @@
+# UVP Linux 交付线 —— aarch64 原生构建镜像（openEuler 20.03 LTS 底座）
+#
+# ⛔⛔ 为什么不是 CentOS 7（对比 x86_64 线）：
+#   CentOS 7 AltArch 的 SCL 仓库**不提供 aarch64 的 gcc** ——
+#   `dnf install devtoolset-11-gcc` 会"成功"，但 /opt/rh/devtoolset-11/root/usr/bin/
+#   里只有 binutils（as/ld/objdump），**没有任何 gcc/g++**，
+#   而系统 gcc 是 4.8.5（撑不起 ZLM 需要的 C++11/14）。
+#   实测报错形如：`/opt/rh/devtoolset-11/root/usr/bin/gcc: No such file or directory`
+#   ⇒ 见 2026-10-10 的构建日志。aarch64 上直接换一个"自带现代 gcc"的底座更省事。
+#
+# 为什么是 openEuler 20.03 LTS（glibc 2.28）：
+#   · 交付目标就是 openEuler（老板 2026-10-10 明确"我去欧拉系统装"）；
+#   · 20.03 是 openEuler aarch64 里 glibc 最低的一档（2.28），
+#     **向下覆盖 22.03(2.34) / 24.03(2.38)**，同时 2.28 也正是
+#     银河麒麟 V10 SP2 / 统信 UOS 20 的 glibc 档位 ⇒ 国产 ARM 系统通吃；
+#   · 自带 gcc 7.3（完全支持 C++11/14），不用再折腾 SCL。
+#   ⚠️ 相对 x86_64 线的 glibc 2.17 基线是**有意抬高**的：2.17 的 aarch64 底座
+#     （CentOS 7 AltArch）没有可用编译器，硬凑的代价远大于收益。
+#
+# 依赖取舍与 x86_64 线完全一致：
+#   · OpenSSL / x264 / libsrtp → 静态（-fPIC），产物即无 OpenSSL 动态依赖；
+#   · ffmpeg 的 libav* → 动态（随包分发，见 build-zlm.sh 的 collect-runtime-libs.sh）。
+#
+# 用法：
+#   docker build --platform linux/arm64 \
+#     -f deploy/standalone/arm64/Dockerfile.linux-builder-arm64 \
+#     -t uvp/linux-builder:openeuler2003-arm64 deploy/standalone/arm64/
+#
+# ⛔ 必须在能跑 arm64 的机器上构建：aarch64 主机原生最快；
+#   在 x86_64 上要先注册 binfmt（qemu 模拟，慢 5~10 倍）：
+#     docker run --privileged --rm tonistiigi/binfmt --install arm64
+
+FROM openeuler/openeuler:20.03-lts
+
+ARG OPENSSL_VERSION=3.0.16
+ARG X264_REF=stable
+ARG LIBSRTP_VERSION=2.8.0
+ARG FFMPEG_VERSION=6.1.2
+
+# GitHub 加速前缀列表（逗号分隔，**必须带结尾斜杠**）。
+# ⛔ 为什么是"列表"而不是单个前缀：国内拉 github.com 直连实测只有 ~10 B/s（2026-10-10），
+#   而任何单一加速站都会**中途掐连接** —— 第一次构建就是这么废的：
+#       curl: (18) transfer closed with 7440633 bytes remaining to read
+#   36 分钟的镜像构建（含重编工具链）因此全部作废并且没有断点。
+#   所以这里默认给三个实测可达的加速站，配合 fetch-src.sh 轮询 + 断点续传 + 归档校验。
+#   ⛔ 只影响源码下载，不影响产物内容/依赖闭包。ffmpeg 不在 GitHub，不走这里。
+ARG GH_PROXIES=https://gh-proxy.com/,https://ghproxy.net/,https://gh.llkk.cc/
+
+# 编译工具 + 下载/解包工具。⛔ 故意不装 openssl-devel / pcre2-devel / zlib-devel 之外
+# 的系统 SSL 开发包 —— nginx 那边要的是"从源码静态编"，链上系统 OpenSSL 1.1.1
+# 会让产物退回 `libssl.so.1.1` 依赖（国产系统之间大版本不一致，等于没修）。
+# ⛔⛔ 必须自己写 /etc/yum.repos.d —— openEuler 官方 **docker 版镜像把源全剥掉了**
+#   `/etc/yum.repos.d/openEuler_aarch64.repo` 里只剩 9 行版权注释、**一条 [section] 都没有**
+#   ⇒ dnf 直接报 `There are no enabled repositories`（实测 2026-10-10）。
+#   这里指向阿里云 openEuler 镜像（国内直连快，且 OS/update/EPOL 三个 aarch64 仓库实测均 200）。
+#   ⛔ gpgcheck=0 的理由见下：20.03 镜像时代有若干 RPM 本身没签名（不是钥匙没导入），
+#   开着 gpgcheck 会直接 `GPG check FAILED`。源仍是官方镜像站，只是不校验包签名。
+ARG UVP_OS_MIRROR=https://mirrors.aliyun.com/openeuler
+ARG UVP_OS_RELEASE=openEuler-20.03-LTS
+
+RUN set -eux; \
+    M="${UVP_OS_MIRROR}/${UVP_OS_RELEASE}"; \
+    { \
+        printf '[uvp-os]\nname=openEuler %s OS\nbaseurl=%s/OS/aarch64/\nenabled=1\ngpgcheck=0\n\n' "$UVP_OS_RELEASE" "$M"; \
+        printf '[uvp-update]\nname=openEuler %s update\nbaseurl=%s/update/aarch64/\nenabled=1\ngpgcheck=0\n\n' "$UVP_OS_RELEASE" "$M"; \
+        printf '[uvp-epol]\nname=openEuler %s EPOL\nbaseurl=%s/EPOL/aarch64/\nenabled=1\ngpgcheck=0\n\n' "$UVP_OS_RELEASE" "$M"; \
+    } > /etc/yum.repos.d/uvp.repo; \
+    dnf -y install \
+        gcc gcc-c++ make cmake \
+        perl \
+        zlib-devel \
+        which tar gzip bzip2 xz unzip zip file \
+        curl wget ca-certificates \
+        diffutils patch pkgconfig findutils sed grep coreutils binutils \
+ && dnf clean all && rm -rf /var/cache/dnf
+
+ENV UVP_DEPS=/opt/uvp/deps
+ENV CMAKE_PREFIX_PATH=/opt/uvp/deps
+ENV PKG_CONFIG_PATH=/opt/uvp/deps/lib/pkgconfig
+
+# 源码下载器（多源轮询 + 断点续传 + 归档完整性校验），见 fetch-src.sh 顶部注释。
+COPY fetch-src.sh /usr/local/bin/fetch-src
+RUN chmod +x /usr/local/bin/fetch-src
+ENV UVP_GH_PROXIES="${GH_PROXIES}"
+
+# --- OpenSSL（静态；no-asm 是 arm64 的硬要求）---
+# armv8 汇编不是位置无关代码，会被静态链进动态库 libav*.so 时链接失败
+# （ZLM 二开仓的 package/build_linux_arm64.sh 里也是 no-asm，结论一致）。
+RUN set -eux; \
+    gh() { for p in $(printf '%s' "$UVP_GH_PROXIES" | tr ',' ' '); do printf '%s ' "${p}$1"; done; }; \
+    fetch-src /tmp/openssl.tar.gz \
+        $(gh "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz"); \
+    mkdir -p /tmp/openssl; tar -xzf /tmp/openssl.tar.gz -C /tmp/openssl --strip-components=1; \
+    cd /tmp/openssl; \
+    ./Configure linux-aarch64 no-asm no-shared no-tests \
+        -fPIC \
+        --prefix="$UVP_DEPS" --openssldir="$UVP_DEPS/ssl" --libdir=lib; \
+    make -j"$(nproc)"; \
+    make install_sw; \
+    cd /; rm -rf /tmp/openssl /tmp/openssl.tar.gz; \
+    "$UVP_DEPS/bin/openssl" version; \
+    ver=$("$UVP_DEPS/bin/openssl" version | awk '{print $2}'); \
+    mkdir -p "$UVP_DEPS/lib/pkgconfig"; \
+    { \
+        printf 'prefix=%s\n' "$UVP_DEPS"; \
+        printf 'exec_prefix=${prefix}\n'; \
+        printf 'libdir=${exec_prefix}/lib\n'; \
+        printf 'includedir=${prefix}/include\n\n'; \
+        printf 'Name: OpenSSL\n'; \
+        printf 'Description: Secure Sockets Layer and cryptography libraries (static build for the openEuler arm64 delivery line)\n'; \
+        printf 'Version: %s\n' "$ver"; \
+        printf 'Libs: -L${libdir} -lssl -lcrypto -ldl -lpthread\n'; \
+        printf 'Libs.private: -ldl -lpthread\n'; \
+        printf 'Cflags: -I${includedir}\n'; \
+    } > "$UVP_DEPS/lib/pkgconfig/openssl.pc"; \
+    PKG_CONFIG_PATH="$UVP_DEPS/lib/pkgconfig" pkg-config --modversion --libs --cflags openssl
+
+# --- x264（静态；会被链进 libavcodec.so，--enable-pic 必须）---
+RUN set -eux; \
+    gh() { for p in $(printf '%s' "$UVP_GH_PROXIES" | tr ',' ' '); do printf '%s ' "${p}$1"; done; }; \
+    fetch-src /tmp/x264.tar.gz \
+        $(gh "https://github.com/mirror/x264/archive/refs/heads/${X264_REF}.tar.gz"); \
+    mkdir -p /tmp/x264; tar -xzf /tmp/x264.tar.gz -C /tmp/x264 --strip-components=1; \
+    cd /tmp/x264; \
+    ./configure --prefix="$UVP_DEPS" --enable-static --disable-cli --enable-pic --disable-opencl; \
+    make -j"$(nproc)"; make install; \
+    cd /; rm -rf /tmp/x264 /tmp/x264.tar.gz; \
+    ls -l "$UVP_DEPS/lib/libx264.a"
+
+# --- libsrtp（静态；WebRTC 的 DTLS-SRTP。装完删掉 .so 强制静态链入）---
+RUN set -eux; \
+    gh() { for p in $(printf '%s' "$UVP_GH_PROXIES" | tr ',' ' '); do printf '%s ' "${p}$1"; done; }; \
+    fetch-src /tmp/libsrtp.tar.gz \
+        $(gh "https://github.com/cisco/libsrtp/archive/refs/tags/v${LIBSRTP_VERSION}.tar.gz"); \
+    mkdir -p /tmp/libsrtp; tar -xzf /tmp/libsrtp.tar.gz -C /tmp/libsrtp --strip-components=1; \
+    cd /tmp/libsrtp; \
+    CFLAGS="-fcommon -fPIC" CPPFLAGS="-I$UVP_DEPS/include" LDFLAGS="-L$UVP_DEPS/lib" \
+        ./configure --prefix="$UVP_DEPS" --enable-openssl --disable-debug; \
+    make -j"$(nproc)"; make install; \
+    cd /; rm -rf /tmp/libsrtp /tmp/libsrtp.tar.gz; \
+    rm -f "$UVP_DEPS"/lib/libsrtp2.so*; \
+    cat "$UVP_DEPS/lib/pkgconfig/libsrtp2.pc" | head -8; \
+    ls -l "$UVP_DEPS/lib/libsrtp2.a"
+
+# --- ffmpeg（libav* 动态 + CLI；x264/openssl 静态内嵌）---
+# 平台侧 FFmpeg 拉流走 ZLM 配置模板里的 `-c:v libx264`，所以 --enable-gpl
+# --enable-libx264 不能省；--enable-version3 的理由见 x86_64 线 Dockerfile。
+RUN set -eux; \
+    fetch-src /tmp/ffmpeg.tar.xz \
+        "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz"; \
+    mkdir -p /tmp/ffmpeg; tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg --strip-components=1; \
+    cd /tmp/ffmpeg; \
+    ./configure \
+        --prefix="$UVP_DEPS" \
+        --enable-shared --disable-static \
+        --enable-gpl --enable-version3 --enable-libx264 \
+        --enable-openssl \
+        --disable-doc --disable-debug \
+        --disable-avdevice --disable-ffplay --disable-sdl2 \
+        --extra-cflags="-I$UVP_DEPS/include" \
+        --extra-ldflags="-L$UVP_DEPS/lib -Wl,-rpath,$UVP_DEPS/lib -ldl -lpthread" \
+        || { echo "=== configure 失败，ffbuild/config.log 摘要 ===" >&2; \
+             grep -iE "openssl|x264|error" ffbuild/config.log | tail -40 >&2; exit 1; }; \
+    make -j"$(nproc)"; make install; \
+    cd /; rm -rf /tmp/ffmpeg /tmp/ffmpeg.tar.xz; \
+    "$UVP_DEPS/bin/ffmpeg" -hide_banner -version | head -3; \
+    "$UVP_DEPS/bin/ffmpeg" -hide_banner -encoders 2>/dev/null | grep -E "libx264|aac " | head -5; \
+    ls -l "$UVP_DEPS"/lib/libav*.so.* "$UVP_DEPS"/lib/libsw*.so.*
+
+# --- 静态 libstdc++（`-static-libstdc++` 的硬依赖）---
+# ⛔⛔ 少了这个包，链接会报 `ld: cannot find -lstdc++` —— 而 ZLM 的构建**正是**
+#   用 `-e LDFLAGS=-static-libstdc++ -static-libgcc`（见 zlm/build-zlm.sh），
+#   所以这不是"自检的洁癖"，不装就没法编 ZLM。
+# ⛔ 为什么单独一条 RUN、而不并进上面那个主 dnf：
+#   Docker 按指令文本缓存，往主 dnf 里加一个包名会让**后面四层源码编译
+#   （openssl/x264/libsrtp/ffmpeg，本机实测约 3 小时）全部缓存失效**。
+#   功能上等价（都是从同一个阿里云源装的 rpm），只是拆成两步。
+#   ⛔ 下次从零构建时不要再"顺手合并"回去，除非你愿意再等 3 小时。
+RUN dnf -y install libstdc++-static \
+ && dnf clean all && rm -rf /var/cache/dnf \
+ && find /usr/lib/gcc -name 'libstdc++.a' -o -name 'libgcc.a' | sort
+
+# --- 关掉 libstdc++ 的 pthread_cond_clockwait 开关（openEuler 自家的 gcc/glibc 对不上）---
+# ⛔⛔ 症状（2026-10-11 编 ZLM 时踩到，报错长得完全不像版本问题）：
+#     /usr/include/c++/7.3.0/condition_variable:193:2: error:
+#       there are no arguments to 'pthread_cond_clockwait' that depend on a template
+#       parameter, so a declaration of 'pthread_cond_clockwait' must be available
+#     凡是用到 std::condition_variable 的 C++ 源码（ZLToolKit 的 Network/*.cpp 全中）都编不过。
+# ⛔ 根因：该 gcc 的 `bits/c++config.h` 里 **打开了** `_GLIBCXX_USE_PTHREAD_COND_CLOCKWAIT 1`，
+#   于是 libstdc++ 头文件直接调用 `pthread_cond_clockwait`。但这个函数是 **glibc 2.30** 才有的：
+#     ① 底座 glibc 2.28 的 `pthread.h` **没有声明**它（所以编译期就报错）；
+#     ② `libpthread.so.0` / `libc.so.6` 里也**没有这个符号**（实测 `nm -D` 为空）。
+#   ⇒ 这是 openEuler 20.03 的 gcc 7.3 与其 glibc 2.28 之间的包装问题，不是我们代码的问题。
+# ⛔⛔ **绝不能靠"升级 glibc"绕过去**：那样产物会开始依赖 `pthread_cond_clockwait`
+#   （GLIBC_2.30 符号），而交付目标银河麒麟 V10 SP2 / UOS 20 的 glibc 是 2.28
+#   ⇒ 在那类机器上直接 `symbol lookup error`，等于把整条兼容性线毁掉。
+# ⛔ 关掉它之后 libstdc++ 走的是上游在 glibc < 2.30 上的**标准老路径**
+#   （pthread_cond_timedwait），正是"该开关本来的设计用法"，不是我们自己造的行为。
+# ★ 断言写成"探针产物里不许出现该符号"，因为"编译过了"不等于"运行时不依赖它"。
+RUN set -eux; \
+    find /usr/include/c++ -name c++config.h -exec sed -i -E \
+        's@^#define[[:space:]]+_GLIBCXX_USE_PTHREAD_COND_CLOCKWAIT[[:space:]]+1@/* disarmed by UVP: base glibc 2.28 has no pthread_cond_clockwait */@' {} +; \
+    if grep -rqE '^#define[[:space:]]+_GLIBCXX_USE_PTHREAD_COND_CLOCKWAIT[[:space:]]+1' /usr/include/c++; then \
+        echo '补丁没打上：c++config.h 里仍开着 _GLIBCXX_USE_PTHREAD_COND_CLOCKWAIT' >&2; exit 1; \
+    fi; \
+    printf '#include <condition_variable>\n#include <mutex>\n#include <chrono>\nint main(){std::condition_variable cv;std::mutex m;std::unique_lock<std::mutex> lk(m);cv.wait_for(lk,std::chrono::milliseconds(1));return 0;}\n' > /tmp/probe_cv.cpp; \
+    g++ -std=c++11 -O2 -pthread -static-libstdc++ -static-libgcc /tmp/probe_cv.cpp -o /tmp/probe_cv; \
+    if nm -u /tmp/probe_cv | grep -q pthread_cond_clockwait; then \
+        echo '补丁无效：探针仍引用 pthread_cond_clockwait（产物在麒麟/UOS 上会跑不起来）' >&2; exit 1; \
+    fi; \
+    /tmp/probe_cv; \
+    rm -f /tmp/probe_cv /tmp/probe_cv.cpp; \
+    echo 'OK: condition_variable 探针可编译、可运行、不依赖 pthread_cond_clockwait'
+
+# 镜像自检：glibc 上限 = openEuler 20.03 的 2.28（不是 x86 线的 2.17）。
+# ⛔ 这里必须把编译/链接配方**显式传进去**，不能只写 `UVP_GLIBC_BASELINE=2.28`：
+#   自检脚本的「模式 A」是按 $CXX/$CXXFLAGS/$LDFLAGS 编译再断言"glibc 不越界
+#   **且** libstdc++/libgcc_s 是静态链的"。变量不传，模式 A 就退化成一个空配方
+#   —— 那它断言的东西跟模式 B 重复，等于白测（第一次构建还因为变量未设置直接崩）。
+#   配方与 ZLM 的构建一致（zlm/build-zlm.sh 里 `-e LDFLAGS=-static-libstdc++ -static-libgcc`）。
+# ⛔ 刻意**不用** `ENV` 声明到镜像里：这个镜像同时用来编 nginx/redis（纯 C），
+#   把 C++ 的链接开关设成全局默认会平白改掉它们的链接姿势。谁用谁传。
+COPY verify-glibc-baseline.sh /usr/local/bin/verify-glibc-baseline
+RUN chmod +x /usr/local/bin/verify-glibc-baseline \
+ && CXX=g++ \
+    CXXFLAGS="-fPIC -O2" \
+    LDFLAGS="-static-libstdc++ -static-libgcc" \
+    UVP_GLIBC_BASELINE=2.28 \
+    /usr/local/bin/verify-glibc-baseline
+
+WORKDIR /build

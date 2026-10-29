@@ -10,7 +10,7 @@ set GOOS=windows
 set GOARCH=amd64
 
 set OUTPUT_DIR=dist
-set OUTPUT_NAME=gin-fast-windows.exe
+set OUTPUT_NAME=uvp-gb28181-windows.exe
 
 if not exist "%OUTPUT_DIR%" (
     mkdir "%OUTPUT_DIR%"

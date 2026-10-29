@@ -39,9 +39,11 @@
 // 横向
 .arco-scrollbar-thumb-direction-horizontal .arco-scrollbar-thumb-bar {
   height: 4px !important;
+  margin: 5.5px 0 !important;
 }
 
 // 纵向
 .arco-scrollbar-thumb-direction-vertical .arco-scrollbar-thumb-bar {
   width: 4px !important;
+  margin: 0 5.5px !important;
 }

@@ -1,0 +1,386 @@
+<script setup lang="ts">
+import { computed } from "vue";
+import { RefreshCcw, RotateCcw, Send } from "@lucide/vue";
+import DeviceConfigSlider from "../../device-mgmt/DeviceConfigSlider.vue";
+import type { VideoParamCodecItem } from "../../videoParamCodec";
+import { useBitRateTypeOptions, useVideoFormatOptions, useVideoResolutionOptions } from "../../useVideoParamDict";
+import { useStreamNumberLabel } from "../../device-mgmt/useDeviceConfigDict";
+
+const props = defineProps<{
+  rows: VideoParamCodecItem[];
+  selectedStream: number;
+  reconcileText: string;
+  reconcileTone: string;
+  error: string;
+  canRead: boolean;
+  canApply: boolean;
+  dirtyCount: number;
+  applying: boolean;
+}>();
+
+const emit = defineEmits<{
+  (e: "update:selectedStream", value: number): void;
+  (e: "reset"): void;
+  (e: "read"): void;
+  (e: "apply"): void;
+}>();
+
+/**
+ * 三个下拉走字典（`video_format` / `video_resolution` / `bit_rate_type`），
+ * 兜底在 `videoParamCodec` 的 `*_LABEL_FALLBACK`。
+ * ⛔ 2026-10-05 收敛：此前本文件的 `VIDEO_FORMAT_OPTIONS` 与设备配置抽屉各写了一份
+ *    （且抽屉那份漏 SVAC），现在三处共用同一份字典值域。
+ * ⛔ 控件绑定的必须是**码值**（`"2"` 而不是 `"H.264"`）—— 人读串只出现在选项文案上。
+ */
+const VIDEO_FORMAT_OPTIONS = useVideoFormatOptions();
+const RESOLUTION_OPTIONS = useVideoResolutionOptions();
+const BIT_RATE_TYPE_OPTIONS = useBitRateTypeOptions();
+
+/**
+ * 码流编号 → 名字：0–3 走 `stream_number` 字典，**超出部分**回落过程式「子码流 N」。
+ *
+ * ⛔ 本卡按设备**实际上报**的码流数逐行渲染，编号可能 > 3（配置表单只列 0–3，
+ *    因为协议里"录像码流"就这几档）—— 所以这里不能只用字典表，得有过程式兜底。
+ * ⛔ 与「画面镜像」同批字典化：此前这里是"主码流 / 子码流 N"的**第三处**独立实现。
+ */
+const streamLabel = useStreamNumberLabel();
+const videoBitRateDisabled = (row: VideoParamCodecItem) => row.bitRateType === "2";
+
+const currentRow = computed(() => props.rows.find(r => r.streamNumber === props.selectedStream));
+const isEmpty = computed(() => !props.rows.length);
+</script>
+
+<template>
+  <section class="video-param-card" data-testid="video-param-card">
+    <!-- 顶部：对账状态 + 码流选择 + 操作按钮 -->
+    <div class="vpc-header">
+      <div class="vpc-reconcile" :class="`is-${reconcileTone}`">
+        <span class="vpc-reconcile-dot" />
+        <span>{{ reconcileText }}</span>
+      </div>
+      <div class="vpc-actions">
+        <a-select
+          :model-value="selectedStream"
+          size="small"
+          class="vpc-stream-select"
+          aria-label="码流选择"
+          @change="emit('update:selectedStream', Number($event))"
+        >
+          <a-option v-for="row in rows" :key="row.streamNumber" :value="row.streamNumber">
+            {{ streamLabel(row.streamNumber) }}
+          </a-option>
+        </a-select>
+        <a-button
+          type="text"
+          size="mini"
+          shape="square"
+          html-type="button"
+          aria-label="还原码流改动"
+          class="vpc-btn"
+          data-testid="vpc-reset"
+          :disabled="!dirtyCount"
+          :title="dirtyCount ? `还原 ${dirtyCount} 项改动` : '无改动'"
+          @click="emit('reset')"
+        >
+          <RotateCcw :size="11" />
+        </a-button>
+        <a-button
+          type="text"
+          size="mini"
+          shape="square"
+          html-type="button"
+          aria-label="读取编码参数"
+          class="vpc-btn"
+          data-testid="vpc-read"
+          :disabled="!canRead || applying"
+          @click="emit('read')"
+        >
+          <RefreshCcw :size="11" />
+        </a-button>
+        <a-button
+          type="primary"
+          size="mini"
+          shape="square"
+          html-type="button"
+          aria-label="应用编码参数"
+          class="vpc-btn is-primary"
+          data-testid="vpc-apply"
+          :disabled="applying || !dirtyCount || !canApply"
+          @click="emit('apply')"
+        >
+          <Send :size="11" />
+        </a-button>
+      </div>
+    </div>
+
+    <p v-if="error" class="vpc-error" data-testid="vpc-error">{{ error }}</p>
+
+    <div v-if="isEmpty" class="vpc-empty" data-testid="vpc-empty">
+      <p>还没有回读值</p>
+      <em>点击「读取」获取当前编码参数</em>
+    </div>
+
+    <!-- 参数表单：所有字段紧凑排列，无分组分割线 -->
+    <div v-else-if="currentRow" class="vpc-form">
+      <div class="vpc-fields">
+        <!-- 编码格式 -->
+        <div class="vpc-field">
+          <label>编码格式</label>
+          <a-select v-model="currentRow.videoFormat" size="small">
+            <a-option v-for="opt in VIDEO_FORMAT_OPTIONS" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </a-option>
+          </a-select>
+        </div>
+
+        <!-- 分辨率 -->
+        <div class="vpc-field">
+          <label>分辨率</label>
+          <a-select v-model="currentRow.resolution" size="small">
+            <a-option v-for="opt in RESOLUTION_OPTIONS" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </a-option>
+          </a-select>
+        </div>
+
+        <!-- 帧率 -->
+        <div class="vpc-field vpc-field-slider">
+          <label>帧率</label>
+          <DeviceConfigSlider v-model="currentRow.frameRate" :min="0" :max="99" label="帧率" />
+        </div>
+
+        <!-- 码率类型 -->
+        <div class="vpc-field">
+          <label>码率类型</label>
+          <div class="vpc-segment" role="group">
+            <a-button
+              v-for="opt in BIT_RATE_TYPE_OPTIONS"
+              :key="opt.value"
+              type="text"
+              size="mini"
+              html-type="button"
+              :class="{ 'is-on': currentRow.bitRateType === opt.value }"
+              @click="currentRow.bitRateType = opt.value"
+            >
+              {{ opt.label }}
+            </a-button>
+          </div>
+        </div>
+
+        <!-- 码率值 -->
+        <div class="vpc-field vpc-field-slider">
+          <label>码率</label>
+          <DeviceConfigSlider
+            v-model="currentRow.videoBitRate"
+            :min="0"
+            :max="100000"
+            :step="100"
+            unit="kb/s"
+            label="码率"
+            :disabled="videoBitRateDisabled(currentRow)"
+          />
+        </div>
+      </div>
+    </div>
+  </section>
+</template>
+
+<style scoped>
+.video-param-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  background: var(--uvp-list-toolbar-bg);
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 10px;
+}
+
+/* 顶部：对账状态 + 操作栏 */
+.vpc-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.vpc-reconcile {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  padding: 4px 8px;
+  font-size: 10px;
+  color: var(--uvp-text-secondary);
+  background: var(--uvp-list-toolbar-bg);
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 999px;
+}
+
+.vpc-reconcile-dot {
+  width: 5px;
+  height: 5px;
+  background: currentcolor;
+  border-radius: 50%;
+}
+
+.vpc-reconcile.is-ready {
+  color: var(--uvp-success);
+  border-color: var(--uvp-success-border);
+}
+
+.vpc-reconcile.is-stale {
+  color: var(--uvp-warning);
+  border-color: var(--uvp-warning-border);
+}
+
+.vpc-reconcile.is-mismatch {
+  color: var(--uvp-danger);
+  border-color: var(--uvp-danger-border);
+}
+
+.vpc-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.vpc-stream-select {
+  width: 90px;
+}
+
+.vpc-btn.arco-btn[type="button"] {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  color: var(--uvp-text-secondary);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 5px;
+  transition: all 0.15s ease;
+}
+
+.vpc-btn.arco-btn[type="button"]:hover:not(:disabled) {
+  color: var(--uvp-brand);
+  border-color: var(--uvp-brand);
+}
+
+.vpc-btn.arco-btn[type="button"].is-primary {
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
+  border-color: var(--uvp-solid-border);
+}
+
+.vpc-btn.arco-btn[type="button"].is-primary:hover:not(:disabled) {
+  background: var(--uvp-brand-strong);
+}
+
+.vpc-btn.arco-btn[type="button"]:disabled {
+  color: var(--uvp-text-disabled);
+  cursor: not-allowed;
+  background: var(--uvp-dialog-control-bg);
+  border-color: var(--uvp-panel-border);
+  opacity: 1;
+}
+
+.vpc-error {
+  padding: 6px 8px;
+  margin: 0;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--uvp-danger);
+  background: var(--uvp-danger-soft);
+  border: 1px solid var(--uvp-danger-border);
+  border-radius: 6px;
+}
+
+.vpc-empty {
+  padding: 12px;
+  text-align: center;
+}
+
+.vpc-empty p {
+  margin: 0 0 4px;
+  font-size: 11px;
+  color: var(--uvp-text-secondary);
+}
+
+.vpc-empty em {
+  font-size: 10px;
+  font-style: normal;
+  color: var(--uvp-text-secondary);
+}
+
+/* 表单：紧凑排列，无分组标题 */
+.vpc-form {
+  display: grid;
+  gap: 0;
+}
+
+.vpc-fields {
+  display: grid;
+  gap: 6px;
+}
+
+.vpc-field {
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.vpc-field label {
+  font-size: 10.5px;
+  color: var(--uvp-text-secondary);
+}
+
+.vpc-field-slider {
+  grid-template-columns: 70px minmax(0, 1fr);
+}
+
+/* 分段控件（CBR/VBR） */
+.vpc-segment {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+}
+
+.vpc-segment button.arco-btn[type="button"] {
+  height: 26px;
+  padding: 0 8px;
+  font-size: 10.5px;
+  color: var(--uvp-text-secondary);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 5px;
+  transition: all 0.15s ease;
+}
+
+.vpc-segment button.arco-btn[type="button"]:hover:not(:disabled) {
+  color: var(--uvp-brand);
+  border-color: var(--uvp-brand);
+}
+
+.vpc-segment button.arco-btn[type="button"].is-on {
+  font-weight: 600;
+  color: var(--uvp-brand);
+  background: var(--uvp-brand-soft);
+  border-color: var(--uvp-brand);
+}
+
+body[arco-theme="dark"] .vpc-segment button.arco-btn[type="button"].is-on:not(:disabled) {
+  color: #ffffff;
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+.vpc-segment button.arco-btn[type="button"]:disabled {
+  color: var(--uvp-text-disabled);
+  cursor: not-allowed;
+  background: var(--uvp-dialog-control-bg);
+  border-color: var(--uvp-panel-border);
+  opacity: 1;
+}
+</style>

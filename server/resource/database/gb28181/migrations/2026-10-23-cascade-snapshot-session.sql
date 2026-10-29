@@ -1,0 +1,23 @@
+CREATE TABLE IF NOT EXISTS `gb_cascade_snapshot_session` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `platform_id` bigint unsigned NOT NULL,
+  `upstream_session_id` varchar(128) NOT NULL,
+  `request_key` varchar(64) NOT NULL,
+  `request_fingerprint` varchar(64) NOT NULL,
+  `request_result` varchar(8) NOT NULL DEFAULT '',
+  `published_channel_id` varchar(20) NOT NULL,
+  `source_device_id` bigint unsigned NOT NULL,
+  `source_channel_id` bigint unsigned NOT NULL,
+  `source_device_epoch` bigint NOT NULL DEFAULT 0,
+  `config_revision` bigint unsigned NOT NULL,
+  `projection_revision` bigint unsigned NOT NULL,
+  `state` varchar(16) NOT NULL DEFAULT 'pending',
+  `expires_at` datetime(3) NOT NULL,
+  `completed_at` datetime(3) NULL,
+  `created_at` datetime(3) NOT NULL,
+  `updated_at` datetime(3) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_cascade_snapshot_session` (`platform_id`,`upstream_session_id`),
+  UNIQUE KEY `uk_cascade_snapshot_request` (`platform_id`,`request_key`),
+  KEY `idx_cascade_snapshot_expiry` (`platform_id`,`expires_at`)
+);

@@ -17,7 +17,7 @@ type ListRequest struct {
 
 // Validate 验证请求参数
 func (r *ListRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }
 
 // GetQuery 获取查询条件
@@ -44,7 +44,7 @@ type UploadRequest struct {
 
 // Validate 验证请求参数
 func (r *UploadRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }
 
 // AffixDeleteRequest 删除文件请求参数
@@ -55,7 +55,7 @@ type AffixDeleteRequest struct {
 
 // Validate 验证请求参数
 func (r *AffixDeleteRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }
 
 // UpdateNameRequest 修改文件名请求参数
@@ -67,7 +67,7 @@ type UpdateNameRequest struct {
 
 // Validate 验证请求参数
 func (r *UpdateNameRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }
 
 // ===== 分片上传请求参数 =====
@@ -84,7 +84,7 @@ type ChunkInitRequest struct {
 
 // Validate 验证请求参数
 func (r *ChunkInitRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }
 
 // ChunkUploadRequest 分片上传请求（multipart/form-data）
@@ -100,7 +100,7 @@ type ChunkUploadRequest struct {
 
 // Validate 验证请求参数
 func (r *ChunkUploadRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }
 
 // ChunkMergeRequest 合并分片请求
@@ -115,7 +115,7 @@ type ChunkMergeRequest struct {
 
 // Validate 验证请求参数
 func (r *ChunkMergeRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }
 
 // ChunkCancelRequest 取消上传请求
@@ -126,7 +126,7 @@ type ChunkCancelRequest struct {
 
 // Validate 验证请求参数
 func (r *ChunkCancelRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }
 
 // ChunkInitResult 分片上传初始化结果

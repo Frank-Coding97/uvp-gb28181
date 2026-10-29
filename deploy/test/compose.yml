@@ -1,0 +1,119 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: "uvp-gb28181-backend:${IMAGE_TAG:-test}"
+    container_name: wvp-backend
+    user: "${UVP_BUSINESS_UID:-10001}:${UVP_BUSINESS_GID:-10001}"
+    restart: unless-stopped
+    stop_grace_period: 45s
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "8"
+    env_file:
+      - ${UVP_ROOT:-/opt/uvp-gb28181}/config/sip-trace-backend.env
+    environment:
+      TZ: Asia/Shanghai
+      UVP_PROCESS_AUTHORITY_DIR: /var/lib/uvp/process-authority
+      UVP_UPDATER_SOCKET: /run/uvp-updater/updater.sock
+      UVP_UPDATER_STATE: /var/lib/uvp/updater-state
+      UVP_UPDATER_GATE_PATH: /var/lib/uvp/updater-gate/gate.json
+      # 该测试拓扑由宿主机 nginx 在 56000 对设备提供入口；级联抓拍没有
+      # HTTP 请求可读 Host，因此显式提供这项运行期部署元数据。
+      UVP_DEVICE_HTTP_PORT: 56000
+    ports:
+      - "127.0.0.1:56001:18978"
+      - "0.0.0.0:56002:56002/tcp"
+      - "0.0.0.0:56002:56002/udp"
+    volumes:
+      - ${UVP_ROOT:-/opt/uvp-gb28181}/config/config.yml:/app/config/config.yml:ro
+      - ${UVP_ROOT:-/opt/uvp-gb28181}/data/logs:/app/resource/logs
+      - ${UVP_ROOT:-/opt/uvp-gb28181}/data/uploads:/app/resource/public/uploads
+      - type: bind
+        source: ${UVP_ROOT:-/opt/uvp-gb28181}/data/process-authority
+        target: /var/lib/uvp/process-authority
+        bind:
+          create_host_path: false
+      - ${UVP_UPDATER_SOCKET_DIR:-/run/uvp-updater}:/run/uvp-updater
+      - type: bind
+        source: ${UVP_ROOT:-/opt/uvp-gb28181}/data/updater-state
+        target: /var/lib/uvp/updater-state
+        bind:
+          create_host_path: true
+      - type: bind
+        source: ${UVP_ROOT:-/opt/uvp-gb28181}/updater-gate
+        target: /var/lib/uvp/updater-gate
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      updater-gate-init:
+        condition: service_completed_successfully
+    networks:
+      wvp-network:
+        aliases:
+          - uvp-backend
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 18978"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+
+  # The host updater owns this gate after the Compose instance is registered.
+  # This one-shot initializer exists only so a first `docker compose up` can
+  # create the read-only bind source before the backend is started.
+  updater-gate-init:
+    image: "uvp-gb28181-backend:${IMAGE_TAG:-test}"
+    entrypoint: ["/bin/sh", "-ec"]
+    command: |
+      gate_dir=/var/lib/uvp/updater-gate
+      gate="$gate_dir/gate.json"
+      [ ! -L "$gate_dir" ]
+      mkdir -p "$gate_dir"
+      chmod 0750 "$gate_dir"
+      if [ ! -e "$gate" ]; then
+        temporary="$(mktemp "$gate_dir/.gate.json.XXXXXX")"
+        printf '%s\n' '{"mode":"normal","updated_at":"compose-bootstrap"}' > "$temporary"
+        chmod 0640 "$temporary"
+        ln "$temporary" "$gate" 2>/dev/null || true
+        rm -f "$temporary"
+      fi
+      [ -f "$gate" ] && [ ! -L "$gate" ]
+      chmod 0640 "$gate"
+    restart: "no"
+    volumes:
+      - type: bind
+        source: ${UVP_ROOT:-/opt/uvp-gb28181}/updater-gate
+        target: /var/lib/uvp/updater-gate
+        bind:
+          create_host_path: true
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: "uvp-gb28181-frontend:${IMAGE_TAG:-test}"
+    container_name: uvp-frontend
+    restart: unless-stopped
+    ports:
+      - "56000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - wvp-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+networks:
+  wvp-network:
+    external: true
+    name: wvp_docker_compose_wvp-network

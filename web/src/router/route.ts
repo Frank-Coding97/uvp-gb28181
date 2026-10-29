@@ -1,5 +1,6 @@
 import { HOME_PATH } from "@/config/index";
 //import Layout from "@/layout/index.vue";
+
 /**
  * 路由path路径与文件夹名称相同，找文件可以浏览器地址快速查找，方便定位文件
  *
@@ -43,7 +44,38 @@ export const staticRoutes = [
     name: "layout",
     redirect: HOME_PATH,
     component: () => import(/* webpackChunkName: "layout" */ "@/layout/index.vue"),
-    children: []
+    children: [
+      {
+        path: "/gb28181/cascade/:id/resources",
+        name: "gb28181-cascade-resources",
+        component: () => import("@/views/gb28181/cascade/resources.vue"),
+        meta: { title: "共享与目录", hide: true }
+      },
+      {
+        path: "/gb28181/openapi-client/:id",
+        name: "gb28181-openapi-client-detail",
+        component: () => import(/* webpackChunkName: "openapi-client-detail" */ "@/views/gb28181/openapi-client/detail.vue"),
+        meta: {
+          title: "OpenAPI 客户端详情",
+          hide: true
+        }
+      },
+      {
+        path: "/media/:pathMatch(.*)*",
+        name: "media-access-fallback",
+        component: () => import(/* webpackChunkName: "media-workbench" */ "@/views/gb28181/zlm/workbench/MediaEntry.vue"),
+        meta: {
+          title: "流媒体管理",
+          hide: true
+        }
+      },
+      {
+        path: "/system/service-upgrade",
+        name: "system-service-upgrade",
+        component: () => import("@/views/system/service-upgrade/index.vue"),
+        meta: { title: "服务在线升级", hide: true, permission: "system:upgrade:read" }
+      }
+    ]
   }
   /**
    * 提示：写在这里的为全屏界面，不建议写在这里非全屏界面，请写在 layout.children 路由数组中

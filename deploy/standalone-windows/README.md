@@ -1,0 +1,266 @@
+# UVP-GB28181 统一视频接入平台 · Windows 绿色安装包
+
+解压即用。**不需要预先安装任何东西** —— 数据库（SQLite）、缓存（Redis）、
+流媒体（ZLMediaKit）、Web 服务器（nginx）全部随包自带。
+
+---
+
+## 一、启动
+
+1. 把整个压缩包解压到一个**路径不含中文、不含空格**的目录，例如 `D:\uvp`。
+2. 双击 **`start.cmd`**。
+
+首次启动会自动完成三件事（大约 1 分钟）：
+
+- 建库：创建 SQLite 数据库 `data\uvp.db`（111 张表 + 初始数据 + 管理员账号）
+- 装证书：把包内自带的自签证书（`resource\cert\`）拷给 nginx 与流媒体，**不现场生成**
+- 写配置：把端口、ZLM 密钥等同步进 `config\` 下的配置文件
+
+启动完成后，按提示在浏览器打开：
+
+```
+http://<本机IP>:15500
+```
+
+> **默认是明文 HTTP**（免证书、免浏览器安全提示）。要用 HTTPS，登录后到
+> **系统设置 → 系统配置 → HTTPS** 打开开关、指定端口即可（**证书已随包内置**，不传也能用；
+> 只有想换成客户自己的证书时才需要上传）；
+> 改完平台会自动重载并给出新地址，重启后也保持你的选择。
+> 开 HTTPS 时若继续用自签名证书，浏览器会提示「不安全 / 证书不受信任」，选择**继续访问**即可。
+
+**初始账号：`admin` / `123456`** —— 登录后系统会**强制要求修改密码**。
+
+> 口令来自 `config\config.yml` 的 `server.demoaccount.defaultpassword`，`start.cmd` 的输出里
+> 也会把它打出来；如果你改过配置，以配置为准。**把自己设的新口令忘了**见第六节。
+
+---
+
+## 二、停止 / 查看状态
+
+| 操作 | 方式 |
+|---|---|
+| 停止全部服务 | 双击 `stop.cmd`（或 `.\uvp-gb28181-ctl.ps1 stop`） |
+| 查看运行状态 | 双击 `status.cmd`（或 `.\uvp-gb28181-ctl.ps1 status`） |
+| 重启 | `.\uvp-gb28181-ctl.ps1 restart` |
+
+也可以用管理员 PowerShell 手工执行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\uvp-gb28181-ctl.ps1 start
+```
+
+> 提示：如果双击 `.cmd` 一闪而过，说明脚本内部报错了。请在**当前目录**打开
+> PowerShell（地址栏输入 `powershell` 回车）再手工跑一次上面那条命令，就能看到完整报错。
+
+---
+
+## 三、端口规划（局域网访问需要放行）
+
+| 端口 | 用途 |
+|---|---|
+| 15500 | 管理页面与设备明文入口（HTTP，**默认入口**）；开启 HTTPS 后自动跳转到 15501 |
+| 15501 | 管理页面（HTTPS，**默认关闭**，在系统配置里开启后才监听） |
+| 15502 | 后端 API（仅由本机 Nginx 转发） |
+| 15503 | Redis（仅本机） |
+| 15504-15513 | 流媒体（ZLMediaKit）各协议 |
+| 15514-15563 | 流媒体 RTP 动态端口段 |
+| 15564 | SIP 信令（**由平台引导页录入**，不在启动预检范围内） |
+
+端口是**连续无空洞**的 15500-15564，一条防火墙规则即可覆盖。以管理员 PowerShell 执行一次：
+
+```powershell
+New-NetFirewallRule -DisplayName 'UVP'     -Direction Inbound -Action Allow -Protocol TCP -LocalPort 15500-15564
+New-NetFirewallRule -DisplayName 'UVP-UDP' -Direction Inbound -Action Allow -Protocol UDP -LocalPort 15511,15513,15514-15564
+```
+
+> 启动脚本会把上面两条命令**按本机实际端口**打印出来，直接照抄即可，不用手改。
+
+### 为什么 Windows 版是 15500 段，Linux 版却是 51000 段？
+
+**不是笔误，是 Windows 逼出来的。** 两个原因：
+
+1. **系统保留**：Windows 有一段「动态端口范围」（默认 `49152-65535`，本机实测被改成了
+   `50000-55000`）。落在这段里的端口会被系统**保留**，任何程序去绑定都直接返回
+   「拒绝访问」——而且**没有任何报错提示**：
+   - 流媒体服务（ZLM）的 TCP 端口绑得上，一到 RTP 的 **UDP** 端口就失败 ⇒ 进程起来 1 秒后自己退出；
+   - SIP 的 UDP 端口同样绑不上 ⇒ 客户的国标设备**永远注册不上**，而平台侧看不出任何异常。
+
+2. **避开常见软件**：一开始选的段是 `15000-15064`，但实测发现 **`15000` 被深信服终端软件
+   占用**（`SangforPromoteService`，政企内网机很常见）。绿色包默认端口撞上它就**开箱即挂**，
+   所以整段上移到 `15500`，避开这一带。
+
+所以 Windows 版整段用 **15500-15564**（在系统保留区之外，也避开常见软件）。
+代价是**与 Linux 版端口不一致**，对照如下：
+
+| 用途 | Windows 版 | Linux 版 |
+|---|---|---|
+| nginx HTTPS | 15501 | 51001 |
+| nginx HTTP | 15500 | 51000 |
+| 后端 API | 15502 | 51002 |
+| Redis | 15503 | 51003 |
+| 流媒体各协议 | 15504-15513 | 51004-51013 |
+| 流媒体 RTP 段 | 15514-15563 | 51014-51063 |
+| SIP 信令 | 15564 | 51064 |
+
+**跨平台迁移（Linux → Windows 或反向）时**，把 `config\config.env` 端口区里的
+**16 个端口**都改成目标平台那一列（两列一一对应），再 `stop` → `start` 即可；
+SIP 端口在**引导页**里改（不走 config.env）。
+
+> 如果你想确认当前机器上哪些端口段被系统占着，管理员 CMD 执行：
+> `netsh int ipv4 show excludedportrange protocol=udp`（`tcp` 同理）。
+> 启动脚本的端口预检会**逐个真实绑定一次**，一旦发现被保留就直接报错并给出这条命令。
+
+---
+
+## 四、改端口（可选，**全部 16 个都能改**）
+
+打开 `config\config.env`，**最上面就是「端口区」**（`# [uvp-ports]` 开头那一段）——
+出包时已把 16 个端口连同当前默认值写好，直接改数字即可：
+
+```ini
+UVP_NGINX_HTTP_PORT=15500
+UVP_HTTPS_PORT=15501
+UVP_HTTP_PORT=15502
+UVP_REDIS_PORT=15503
+UVP_ZLM_HTTP_PORT=15504
+UVP_ZLM_SSL_PORT=15507
+UVP_ZLM_RTSP_PORT=15505
+UVP_ZLM_RTMP_PORT=15506
+UVP_ZLM_RTC_PORT=15508
+UVP_ZLM_RTP_PROXY_PORT=15514
+UVP_ZLM_RTP_RANGE=15514-15563
+UVP_ZLM_SIGNALING_PORT=15509
+UVP_ZLM_SIGNALING_SSL_PORT=15510
+UVP_ZLM_SRT_PORT=15511
+UVP_ZLM_ONVIF_PORT=15512
+UVP_ZLM_ICE_PORT=15513
+```
+
+改完执行 `stop.cmd` → `start.cmd`，就这些。
+
+> ⭐ **不用**再手写 `UVP_USER_SET_…=1` 标记。程序每次启动把生效值记在
+> `config\.port-baseline`，下次发现文件里的值跟它不一样，就认定是你改的，
+> 自动采纳并补上标记。老包留下的标记仍然有效。
+>
+> ⛔ `UVP_ZLM_RTP_RANGE` 与 `UVP_ZLM_RTP_PROXY_PORT` 必须同一个起点：
+> 只改一个时程序会按你改的那个自动拉齐另一个；两个都改且互相矛盾 ⇒ **拒绝启动**并说明原因。
+>
+> ⛔ **不要**把端口放进 Windows 的保留/排除段（默认 49152-65535，可能被改）：
+> 那里 bind 会直接返回"拒绝访问"。查法见第三节末尾的 `netsh` 命令。
+>
+> ⛔ **SIP 端口不在这个文件里**：登录后在引导页里设置（存数据库），
+> 默认值 = RTP 段尾 + 1。改了它，存量设备必须逐台改成同一端口。
+>
+> ⛔ 改了端口后，`start` 会重新打印「访问地址」和防火墙命令 —— 按新打印的来，
+> `New-NetFirewallRule` 建过的旧规则请一并删除。
+
+`config.env` 里**其他内容请勿删除** —— 里面有 SIP 报文诊断密钥和 OpenAPI 主密钥，
+缺了对应功能会静默不可用（页面能打开，但相关菜单永远是空的）。
+
+---
+
+## 五、目录说明
+
+```
+uvp-gb28181-ctl.ps1     唯一入口（PowerShell 控制脚本）
+start.cmd / stop.cmd / status.cmd / reset-password.cmd    供双击的包装
+bin\                    本平台自己的程序（uvp-server.exe / uvp-setup.exe）
+vendor\redis\           自带 Redis
+vendor\zlm\             自带流媒体服务 ZLMediaKit（MediaServer.exe）
+vendor\nginx\           自带 Web 服务器（前端 + HTTPS 终止）
+config\                 config.yml（后端配置）+ config.env（环境变量/密钥）
+data\                   uvp.db（数据库）+ redis AOF + process-authority\（运行期状态）
+logs\                   全部日志（后端、nginx、流媒体、Redis）
+run\                    运行期文件（pid 文件、临时目录）
+resource\               前端页面产物 + 建库脚本
+```
+
+**备份**只需拷贝 `data\` 和 `config\` 两个目录。
+
+---
+
+## 六、忘记了登录口令
+
+平台上**没有**「忘记密码」自助入口（登录页那个链接是预留的），口令忘了只能把它
+**还原成出厂口令**：
+
+```
+双击 reset-password.cmd
+```
+
+（等同 `.\uvp-gb28181-ctl.ps1 reset-password`，也可以去 `bin\` 里直接跑
+`uvp-setup.exe reset-admin --root .`。）
+
+它会：
+
+1. 把 `admin` 的口令还原成出厂口令（同上：`config\config.yml` 的
+   `server.demoaccount.defaultpassword`）；
+2. 标记该账号「首次登录必须改密」—— 所以下次登录后会**强制**让你设一个新口令；
+3. 顺手清掉 Redis 里的登录失败/锁定记录（连错 3 次会锁 10 分钟，这一步省得等）。
+
+> ⚠️ 这是「重置」不是「找回」：旧口令**不会被恢复**，改成新口令后请记好。
+> ⚠️ 提示「找不到数据库」= 这台机器还没启动过（库里还没有账号），先双击 `start.cmd`。
+> ⚠️ 命令只动一个账号，**不碰**设备、通道、录像等任何业务数据，也不删库不重建库。
+> ⚠️ 改完即可直接登录（无需重启）；仍登不上就 `.\uvp-gb28181-ctl.ps1 restart` 再试。
+> 需要重置别的账号（正常情况下用不到）：加 `--username <账号名>`。
+
+**换机器**：数据库就是 `data\uvp.db` 一个文件，连同 `config\` 一起拷走即可
+（端口段跨平台不同，Linux 是 51000 段，见第三节的对照表）。
+
+---
+
+## 七、常见问题
+
+**浏览器打不开页面**
+
+1. 先执行 `status.cmd`，看四项是否都「运行中」。
+2. 四项都正常却打不开 → 以 `start.cmd` 打印的地址为准：**默认**是 **http://**、端口 **15500**；
+   只有在系统配置里开过 HTTPS 才是 **https://** + **15501**。写成后端端口（15502）也不对。
+3. 只有「管理页面」未运行 → 看 `logs\nginx-error.log`。
+
+**启动时提示「以下端口已被占用」**
+
+说明端口被别的程序占了。按提示先执行 `stop.cmd`；如果仍被占用，就是别的软件在用，
+需要改端口（见第四节）或先关掉那个软件。
+
+**启动时提示「以下端口被 Windows 系统保留」**
+
+这**不是**被别的软件占用，而是这些端口落在系统的「动态端口范围」里，
+任何程序都绑不上（原因与查法见第三节）。处理办法：把 `config\config.env` 的端口段
+整体挪到保留区之外（保持连续即可），再 `stop.cmd` → `start.cmd`。
+
+**`status.cmd` 里「流媒体」显示未运行，而启动时明明打了「已启动」**
+
+ZLM 是**先绑 TCP、再绑 UDP**：它可能在 TCP 那一步成功、UDP 那一步失败后立刻退出。
+启动脚本现在会在启动后再等一拍复查（进程是否还在、端口是否还在听、日志里有没有
+绑定失败的记录），发现问题**当场报错**而不是留到 `status` 才暴露。
+
+**端口被占着而强行启动会怎样**
+
+nginx 会连到别的服务上，而 `status.cmd` 仍报「运行中」——
+浏览器里看到的会是**另一个系统的页面**，且全程没有任何报错。
+
+**换了台机器，二维码扫不出接入信息**
+
+二维码和抓拍回传地址由设备发起请求时的管理入口自动确定，无需在
+`config\config.yml` 填写地址。换机或变更网络后，请从设备实际可访问的 Nginx
+管理入口重新扫码或触发抓拍；确认防火墙已放行设备入口端口 15500。
+
+**解压到 D:\ / E:\ / F:\ 这类数据盘，需要额外做什么吗**
+
+不需要 —— 启动脚本会自动把 `data\process-authority` 的权限收紧成
+「当前用户 + SYSTEM + 管理员」并断开继承。
+
+这一步是必需的：Windows 给**数据盘根目录**的默认权限里包含
+`Authenticated Users: 修改`，子目录会继承它；而后端出于防篡改考虑，
+**拒绝**在「其他账户可写」的目录上启动（它要保证进程互斥记录不被篡改）。
+
+如果这一步没成功（例如包是从**别的账户**拷贝过来的，当前用户不是该目录的所有者），
+表现为：`logs\app\` 里出现 `phase=process_authority reason=state_unavailable`，
+且后端进程起来几秒就退出。用**管理员**身份执行一次下面的命令即可：
+
+```
+icacls "本包路径\data\process-authority" /inheritance:r ^
+       /grant:r "%USERDOMAIN%\%USERNAME%:(OI)(CI)F" ^
+       /grant:r "SYSTEM:(OI)(CI)F" /grant:r "Administrators:(OI)(CI)F" /T
+```

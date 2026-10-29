@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <CmdType>Catalog</CmdType><SN>1</SN><DeviceID>37010301022000000007</DeviceID><SumNum>6</SumNum>
+  <DeviceList Num="6">
+    <Item><DeviceID>37010301022000000007</DeviceID><Name>下级平台</Name><Manufacturer>UVP</Manufacturer><Model>Mobile-Sim</Model><CivilCode>370103</CivilCode><Address>测试位置</Address><RegisterWay>1</RegisterWay><Secrecy>0</Secrecy><Status>ON</Status></Item>
+    <Item><DeviceID>37010301022150000007</DeviceID><Name>校园安防</Name><CivilCode>370103</CivilCode><ParentID>37010301022000000007</ParentID></Item>
+    <Item><DeviceID>37010301022160000007</DeviceID><Name>出入口</Name><BusinessGroupID>37010301022150000007</BusinessGroupID></Item>
+    <Item><DeviceID>37010301022160000008</DeviceID><Name>东门</Name><ParentID>37010301022160000007</ParentID><BusinessGroupID>37010301022150000007</BusinessGroupID></Item>
+    <Item><DeviceID>34020000001320000010</DeviceID><Name>后置摄像头</Name><Manufacturer>UVP</Manufacturer><Model>Mobile-Sim</Model><CivilCode>370103</CivilCode><Address>测试位置</Address><Parental>0</Parental><ParentID>37010301022000000007/37010301022160000008</ParentID><RegisterWay>1</RegisterWay><Secrecy>0</Secrecy><Status>ON</Status></Item>
+    <Item><DeviceID>34020000001320000020</DeviceID><Name>前置摄像头</Name><Manufacturer>UVP</Manufacturer><Model>Mobile-Sim</Model><CivilCode>370103</CivilCode><Address>测试位置</Address><Parental>0</Parental><ParentID>37010301022000000007/37010301022160000007</ParentID><RegisterWay>1</RegisterWay><Secrecy>0</Secrecy><Status>ON</Status></Item>
+  </DeviceList>
+</Response>

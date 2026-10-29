@@ -1,0 +1,292 @@
+# UVP-GB28181 正式 Compose 模板
+#
+# ⛔⛔ 为什么全部用 network_mode: host（这是本文件最重要的一个决定）
+#
+#   这是**国标视频平台**，不是普通 Web 应用：
+#   ① ZLM 要占 RTP 端口段 51014-51063（UDP+TCP 各 50 个），走 bridge 就得映射
+#      100 个端口，docker-proxy 一个端口一个进程，性能和端口耗尽都是隐患；
+#   ② 更致命的是 **SDP 里的地址**：平台把「自己的 IP」写进 SDP 发给摄像头，
+#      走 bridge 时这个 IP 是容器内网地址（172.x），设备按它推流根本连不进来
+#      ⇒ 表现为「信令全成功、就是没画面」，与真因完全对不上。
+#   ⇒ host 网络下容器直接用宿主机的网络栈，上面两个问题一起消失，
+#      端口规划也能与绿色包完全一致（防火墙文档、PORTS.md 全部复用）。
+#
+#   代价：容器之间不再有网络隔离，互相访问走 127.0.0.1；
+#        端口冲突要靠 install.sh 的预检挡住（见该脚本的端口检查段）。
+#
+# 端口规划（整段 51000-51064 连续无空洞，与 deploy/standalone/PORTS.md **同一段**）：
+#   51000 管理页面 HTTPS   51001 明文 HTTP（跳 HTTPS + 扫码/API）
+#   51002 后端 API         51003 Redis（仅回环）
+#   51004-51013 ZLM 各协议  51014-51063 ZLM RTP 段   51064 SIP（UDP+TCP）
+#
+# ⛔⛔ nginx 那两个端口的**顺序与单机包不同**，别再写"完全一致"：
+#   单机包 2026-10-19 起改为 **明文 51000 / HTTPS 51001**（HTTP 作为默认入口）；
+#   compose 本轮**未跟随**（仍是 HTTPS 51000 / 明文 51001），因为它已经过 220 验收，
+#   且这里的端口由 install.sh 的 PORT_BASE 推导（SIP = HTTPS_PORT+64），改顺序要动推导。
+#   ⇒ 跨形态迁移（容器 ↔ 绿色包）时必须改 .env / config.env 里这两个值，
+#     否则"照旧文档填 51000 当 HTTPS"会落到明文口上。
+#
+# ⛔ 不写死 container_name：容器名由 compose 按项目名自动生成（uvp-gb28181-zlm-1 等）。
+#    写死后同一台机器上跑第二套实例（或残留一个旧容器）就会
+#    `Conflict. The container name "/uvp-zlm" is already in use` 直接起不来，
+#    而这个报错完全指不到"为什么会有个同名容器"。项目名由 -p uvp-gb28181 决定。
+#
+# ⛔ 不要直接改这个文件：它是**受管模板**，升级时会被新版替换。
+#    现场要改端口/挂载，请改同目录的 .env 或走安装脚本的参数。
+
+services:
+
+  # ---------------------------------------------------------------- 缓存 ----
+  redis:
+    image: ${UVP_IMAGE_PREFIX:-uvp-gb28181}-redis:${UVP_VERSION:?UVP_VERSION 必填}
+    network_mode: host
+    restart: unless-stopped
+    stop_grace_period: 30s
+    # ⛔ 以业务身份运行，不用 root：缓存里存的是会话与在线状态，
+    #    容器被攻破时不该拿到宿主机 root 的等价权限。
+    user: "${UVP_BUSINESS_UID:-10001}:${UVP_BUSINESS_GID:-10001}"
+    environment:
+      TZ: Asia/Shanghai
+      UVP_REDIS_PORT: ${UVP_REDIS_PORT:-51003}
+      UVP_REDIS_MAXMEMORY: ${UVP_REDIS_MAXMEMORY:-512mb}
+    volumes:
+      - ${UVP_ROOT:?UVP_ROOT 必填}/data/redis:/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "5"
+    healthcheck:
+      # redis-cli ping 在 host 网络下直连本机端口
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-p", "${UVP_REDIS_PORT:-51003}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  # ------------------------------------------------------------ 流媒体 ----
+  zlm:
+    image: ${UVP_IMAGE_PREFIX:-uvp-gb28181}-zlm:${UVP_VERSION:?UVP_VERSION 必填}
+    network_mode: host
+    restart: unless-stopped
+    # ⛔ 45s：RTP 会话收尾需要时间，秒杀会让正在写的录像文件损坏
+    stop_grace_period: 45s
+    # ⛔ 也用业务身份跑（不用 root）：它写出来的录像/截图落在 data/zlm-www 卷上，
+    #    属主是 root 的话后端（业务 UID）读不了，管理员也没法用普通账号清理。
+    #    它绑的端口都在 1024 以上（51004 起），非 root 完全够用。
+    user: "${UVP_BUSINESS_UID:-10001}:${UVP_BUSINESS_GID:-10001}"
+    environment:
+      TZ: Asia/Shanghai
+      # ⛔⛔ ZLM 的端口写在 config.ini 里，只能由 entrypoint 启动时改写。
+      #   这三个值必须与「后端 config.yml 里 seed 的节点」严格一致：
+      #     · 基址     → config.yml 的 gb28181.zlm.httpport（后端靠它访问 ZLM API）
+      #     · 后端端口 → hook 回调地址里的端口（不一致 = 回调全打到没人听的端口）
+      #     · 节点标识 → hook URL 的 node 参数 + cap 的派生输入（不一致 = 回调认不出节点）
+      #   任何一项对不上，表现都是"容器都 healthy、但平台里节点离线/操作没反应"。
+      UVP_ZLM_PORT_BASE: ${UVP_ZLM_HTTP_PORT:-51004}
+      UVP_BACKEND_PORT: ${UVP_BACKEND_PORT:-51002}
+      UVP_ZLM_MEDIA_SERVER_ID: ${UVP_ZLM_MEDIA_SERVER_ID:-uvp-media-server-0001}
+      # ⛔⛔ 必须与后端 config.yml 的 gb28181.zlm.secret 完全一致（即使都在 127.0.0.1 上）：
+      #   不一致时后端调 ZLM API 一律 401，表现是「节点在线但点播/回放全失败」。
+      #   不给默认值 —— 缺了就让 compose 解析阶段直接报错，别让它悄悄跑起来。
+      UVP_ZLM_SECRET: ${UVP_ZLM_SECRET:?UVP_ZLM_SECRET 必填（须与后端 config.yml 的 zlm.secret 一致）}
+    volumes:
+      # ⛔ 录像/截图/HLS 都落在 ZLM 的 www 下（config.ini 里是相对路径 ./www），
+      #    必须挂出来，否则容器一重建录像全没。
+      - ${UVP_ROOT:?UVP_ROOT 必填}/data/zlm-www:/opt/zlm/www
+      # ⛔ 日志目录也要挂出来并保证可写：ZLM 默认往 ./log 写，
+      #    目录不存在且不可写时它**不退出**，而是每秒重试一次
+      #    （`mkdir /opt/zlm/log/ failed: permission denied` 刷屏、容器反复重启）。
+      - ${UVP_ROOT:?UVP_ROOT 必填}/logs/zlm:/opt/zlm/log
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "8"
+    healthcheck:
+      # ⛔⛔ 不能探根路径 `/`：entrypoint 把 http.dirMenu 强制设成 0（不关的话 ZLM 会把
+      #     录像/截图/HLS 的落盘目录整个列成网页给同网段任何人下载），
+      #     关掉之后 `/` 返回 **404** ⇒ `curl -sf` 失败 ⇒ 容器永远 unhealthy
+      #     ⇒ 依赖它的 backend 起不来，报 "dependency failed to start"。
+      #     这个坑只在真跑起来时暴露：进程本身完全正常，端口全在监听。
+      # ⇒ 探测一个真正返回 200 的 API，顺便把 secret 也验证进去（错 secret 会返回 401）。
+      test: ["CMD-SHELL", "curl -sf -o /dev/null 'http://127.0.0.1:${UVP_ZLM_HTTP_PORT:-51004}/index/api/getServerConfig?secret=${UVP_ZLM_SECRET}'"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+
+  # -------------------------------------------------------------- 后端 ----
+  backend:
+    image: ${UVP_IMAGE_PREFIX:-uvp-gb28181}-backend:${UVP_VERSION:?UVP_VERSION 必填}
+    network_mode: host
+    restart: unless-stopped
+    stop_grace_period: 45s
+    user: "${UVP_BUSINESS_UID:-10001}:${UVP_BUSINESS_GID:-10001}"
+    environment:
+      TZ: Asia/Shanghai
+      # ⛔⛔ HOME 必须显式指向一个**可写**目录：
+      #   以非 root 身份跑时容器里的 HOME 是 `/`，后端启动要建缓存目录就会
+      #   `mkdir /.cache: permission denied` ⇒ OpenAPI 初始化失败 ⇒ 直接 panic。
+      #   而报的是 "OpenAPI initialization failed"，完全指不到"HOME 不可写"。
+      #   /tmp 在容器里是 1777，任何用户都能写。
+      HOME: /tmp
+      XDG_CACHE_HOME: /tmp/.cache
+      # ⛔⛔ 进程授权锁目录必须落在**宿主机**的持久目录上：
+      #   锁的"文件指纹"里记了文件的 inode（这是 macOS 卷设备号漂移那次事故后
+      #   定下的判据）。镜像层一重建 inode 全变 ⇒ 每次升级都会被判成
+      #   「文件被换过」而拒绝启动（phase=process_authority reason=state_unavailable）。
+      #   挂在宿主机上，inode 才是稳定的。
+      UVP_PROCESS_AUTHORITY_DIR: /var/lib/uvp/process-authority
+      UVP_UPDATER_SOCKET: /run/uvp-updater/updater.sock
+      # ⛔⛔ 这里**刻意不再设 UVP_UPDATER_STATE**：
+      #   升级任务、回滚数据、已验证物料都归宿主机的助手私有（$ROOT/updater-state，
+      #   root 0700），容器以业务账号跑，既读不到也不该读；容器要的状态全部走
+      #   socket RPC。以前这里挂着 $ROOT/data/updater-state，助手一启动就报
+      #   `validate updater state parent: ... owner UID 10001 is not trusted` 起不来。
+      #   不设它时后端只在「没有助手」的降级模式下才会去碰本地状态目录
+      #   （容器内 /app/updater-state，不存在即失败关闭），这正是期望的行为。
+      # ⛔ 上传收件箱是**唯一**给业务账号写的升级目录，路径与宿主机的
+      #   $ROOT/data/updater-inbox 是同一个目录（下面的 bind 挂载），
+      #   助手侧登记的 --staging-root 也指向宿主那一边。两边传的是「令牌」不是路径。
+      UVP_UPGRADE_INBOX: /var/lib/uvp/updater-inbox
+      # ⛔⛔ gate 是「升级进行到哪一步」的对外闸门：宿主机的 uvp-updater 在停服务、
+      #   换编排、重建容器的整个过程中会把它写成 recovery / candidate，
+      #   后端启动时读到非 normal 就**拒绝对外提供业务**（fail-closed），
+      #   免得一个只升了一半的实例被当成正常服务用。
+      #   ⛔ 必须在**容器启动之前**就有这个文件：设了这个变量后，文件缺失会让后端
+      #     直接报 `startup dependency failed: configured updater gate is missing`
+      #     （不像不设时那样"缺失就按 normal 放行"）。所以 install.sh 是先装
+      #     升级助手（它会创建 gate）再 `compose up`，顺序不能反。
+      #   ⛔ 别"顺手补一个空 gate.json"：空文件 JSON 解析失败，报的是另一条更费解的错。
+      UVP_UPDATER_GATE_PATH: /var/lib/uvp/updater-gate/gate.json
+      # ⛔⛔ 这两个密钥**只能从宿主机注入**（绿色包放在 config/config.env，由 ctl.sh 读）：
+      #   放进镜像 = 所有客户共用同一把密钥；让后端自己生成 = 每次重启换一把，
+      #   已签发的 OpenAPI 客户端凭据全部解不开。所以由 install.sh 首次安装时生成、
+      #   写进 .env 并随数据目录一起备份。
+      #
+      # ⛔⛔ 用 `${VAR:?}` 而不是 `${VAR:-}`：缺了就**在 compose 解析阶段**报
+      #   "UVP_OPENAPI_MASTER_KEY 必填"，而不是等后端起来后
+      #   panic 一句 "OpenAPI initialization failed; ingress remains closed"。
+      #   踩过：容器版第一次搭起来时这两个变量全漏了，后端无限重启，
+      #   而 InitializeRuntimeWithBindings() 会把**所有**失败原因都压成
+      #   同一个 auth.ErrUnavailable ⇒ 日志里完全看不出是缺密钥。
+      UVP_OPENAPI_MASTER_KEY: ${UVP_OPENAPI_MASTER_KEY:?UVP_OPENAPI_MASTER_KEY 必填（install.sh 会写进 .env）}
+      UVP_SIP_TRACE_ENCRYPTION_KEY: ${UVP_SIP_TRACE_ENCRYPTION_KEY:?UVP_SIP_TRACE_ENCRYPTION_KEY 必填（install.sh 会写进 .env）}
+      # 无 HTTP 请求的级联抓拍使用部署实际的明文设备入口端口；外部地址仍由
+      # 后端基于已注册的 SIP 本地接入地址解析，并不向用户暴露可编辑业务 URL。
+      UVP_DEVICE_HTTP_PORT: ${UVP_HTTP_PORT:-51001}
+      # 引导页默认 SIP 端口 = 端口段基址 + 64（规划段最后一位）。
+      #
+      # ⛔⛔ 为什么要在运行时给一遍，而不是靠前端构建期注入就够：
+      #   SIP 端口不经过 config.yml、也不经过容器端口映射 —— 它是管理员首次登录时
+      #   在引导页里**手工录入**、存进 gb_sip_config 表的。前端为了"预填一个段内端口"，
+      #   把默认值烤进了产物（VITE_DEFAULT_SIP_PORT），那是**打镜像那一刻**的常量。
+      #   而本脚本允许整段平移（`--https-port 53000` ⇒ 段 53000-53064）：
+      #   段一变，烤进去的 51064 就落在段外，防火墙一条规则覆盖不到 ⇒ 设备注册不通。
+      #   踩过：220 上用 53000 段部署，引导页默认值仍是 51064。
+      #   ⇒ 端口的"正确答案"属于部署事实，由安装脚本算出来注入，后端原样下发给前端。
+      #   ⛔ 用 `${VAR:-}` 不用 `:?`：这个变量缺失是**合法**的（老 .env 升级上来就没有），
+      #      后端拿到空值就不下发，前端退回自己的构建期默认值。
+      UVP_DEFAULT_SIP_PORT: ${UVP_SIP_PORT:-}
+    volumes:
+      # 配置由安装脚本生成，**只读**挂入：容器不该改写部署自己的配置。
+      - ${UVP_ROOT:?UVP_ROOT 必填}/config/config.yml:/app/config/config.yml:ro
+      # ⛔ SQLite 库文件：config.yml 里写的是 ./data/uvp.db（相对工作目录 /app），
+      #    不挂卷的话容器一删数据就没了 —— 这是最容易被忽略的一个卷。
+      - ${UVP_ROOT:?UVP_ROOT 必填}/data/database:/app/data
+      - ${UVP_ROOT:?UVP_ROOT 必填}/data/uploads:/app/resource/public/uploads
+      - ${UVP_ROOT:?UVP_ROOT 必填}/logs/backend:/app/resource/logs
+      - type: bind
+        source: ${UVP_ROOT:?UVP_ROOT 必填}/data/process-authority
+        target: /var/lib/uvp/process-authority
+        bind:
+          create_host_path: false
+      - ${UVP_UPDATER_SOCKET_DIR:-/run/uvp-updater}:/run/uvp-updater
+      # 升级包上传收件箱：业务账号（容器内）往里写，助手（宿主 root）从同名目录读。
+      # ⛔ create_host_path: false —— 目录不在就直接报错，而不是被 docker 建成
+      #   root:root 0755（那样业务账号写不进去，页面里导入包必然失败）。
+      - type: bind
+        source: ${UVP_ROOT:?UVP_ROOT 必填}/data/updater-inbox
+        target: /var/lib/uvp/updater-inbox
+        bind:
+          create_host_path: false
+      # ⛔ gate 目录由宿主 updater 创建为 root:业务GID 0750（见 provision_unix.go），
+      #    容器里以业务身份能读、写不了 —— 这正是想要的：闸门只能由宿主的特权
+      #    助手拨动，被攻破的后端不能自己把它改回 normal。
+      #    create_host_path: false ⇒ 目录不存在就在 up 阶段直接报错，
+      #    而不是被 docker 悄悄建个 root:root 0755 的空目录（那样后端反而读不了）。
+      - type: bind
+        source: ${UVP_ROOT:?UVP_ROOT 必填}/updater-gate
+        target: /var/lib/uvp/updater-gate
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      redis:
+        condition: service_healthy
+      # ⛔⛔ 必须等 ZLM 的 API 真的能应答，不能只等它"启动"：
+      #   后端首次启动会 seed 默认节点，并且会**探测 ZLM 的 RTP 收流段**
+      #   （bootstrap.go resolveSeedRTPRangeWith，超时只有 **2 秒**）。
+      #   探测失败就回退到 ZLM 出厂默认 30000-35000 —— 而容器版的实际段是
+      #   53014-53063 ⇒ 节点登记后调度器按 30000 段分配端口，
+      #   设备把流发到那边没人听，表现为"点播转圈、抓包有 RTP 但没有画面"。
+      #   理论上后面还有一次探活对账（SetRangeReconciler）会纠正，
+      #   但实测首次部署时它并没有触发（无 rtp_range_reconciled 日志），
+      #   所以不能指望兜底 —— 直接让 ZLM 先就绪。
+      zlm:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "8"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 ${UVP_BACKEND_PORT:-51002}"]
+      interval: 10s
+      timeout: 3s
+      retries: 15
+      start_period: 40s
+
+  # -------------------------------------------------------------- 前端 ----
+  frontend:
+    image: ${UVP_IMAGE_PREFIX:-uvp-gb28181}-frontend:${UVP_VERSION:?UVP_VERSION 必填}
+    network_mode: host
+    restart: unless-stopped
+    stop_grace_period: 20s
+    # ⛔ 这里**故意用 root**：nginx 的 master 要 setuid 到 www-data 才能降权跑 worker，
+    #    非 root 启动时那条 user 指令会被忽略（entrypoint 里已按 uid 判断处理）。
+    #    风险可接受：它只做静态托管与转发，且对外只有 51000/51001 两个口。
+    environment:
+      TZ: Asia/Shanghai
+      UVP_HTTPS_PORT: ${UVP_HTTPS_PORT:-51000}
+      UVP_PLAIN_HTTP_PORT: ${UVP_HTTP_PORT:-51001}
+      UVP_BACKEND_HOST: 127.0.0.1
+      UVP_BACKEND_PORT: ${UVP_BACKEND_PORT:-51002}
+      UVP_WEB_ROOT: /opt/uvp/web
+      UVP_UPLOADS_ROOT: /opt/uvp/uploads
+      UVP_RUN_ROOT: /opt/uvp/run
+      UVP_LOG_ROOT: /opt/uvp/logs
+      UVP_TLS_DIR: /opt/uvp/tls
+    volumes:
+      # 上传目录：后端写、nginx 读（只读挂载，避免 nginx 侧能改业务数据）
+      - ${UVP_ROOT:?UVP_ROOT 必填}/data/uploads:/opt/uvp/uploads:ro
+      # ⛔ 证书挂卷而不是随镜像：否则重建容器就换一张新证书，
+      #    浏览器又要重新信任一次（表现为"升级完所有人都报证书告警"）。
+      - ${UVP_ROOT:?UVP_ROOT 必填}/config/tls:/opt/uvp/tls:ro
+      - ${UVP_ROOT:?UVP_ROOT 必填}/logs/nginx:/opt/uvp/logs
+      - ${UVP_ROOT:?UVP_ROOT 必填}/run/nginx:/opt/uvp/run
+    depends_on:
+      backend:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -ksf -o /dev/null https://127.0.0.1:${UVP_HTTPS_PORT:-51000}/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s

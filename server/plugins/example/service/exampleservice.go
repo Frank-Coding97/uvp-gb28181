@@ -1,7 +1,7 @@
 package service
 
 import (
-	"uvplatform.cn/uvp-gb28181/plugins/example/models"
+	"uvplatform.com/uvp-gb28181/plugins/example/models"
 
 	"github.com/gin-gonic/gin"
 )

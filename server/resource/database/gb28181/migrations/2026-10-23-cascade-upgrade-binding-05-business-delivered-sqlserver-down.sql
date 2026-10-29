@@ -1,0 +1,1 @@
+IF COL_LENGTH(N'dbo.gb_device_firmware_upgrade', N'cascade_business_delivered') IS NOT NULL EXEC(N'ALTER TABLE [dbo].[gb_device_firmware_upgrade] DROP CONSTRAINT [df_fw_upgrade_cascade_business_delivered]; ALTER TABLE [dbo].[gb_device_firmware_upgrade] DROP COLUMN [cascade_business_delivered]');
