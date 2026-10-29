@@ -142,6 +142,19 @@ describe("Logo", () => {
     wrapper.unmount();
   });
 
+  // 位置是明确要求：徽标挂在「统一视频接入平台」下面单独一行，不能并排。
+  // 并排会跟平台名抢宽度，256px 的侧边栏里平台名会被挤成省略号。
+  it("新版本提示单独占一行，排在平台名下面", async () => {
+    upgrade.state.pending = true;
+    const wrapper = mountLogo();
+    await nextTick();
+
+    const rows = wrapper.findAll(".logo_text > *");
+    expect(rows.at(-1)!.classes()).toContain("logo_version_row");
+    expect(wrapper.get(".logo_meta_row").find('[data-testid="logo-version"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   // 被忽略、离线部署、没有查看权限：三种情况都由 pending 兜住，一律不显示。
   it("被忽略或被隐藏时徽标同样不出现", async () => {
     upgrade.state.pending = false;

@@ -12,18 +12,15 @@
           <span class="logo_badge">GB28181</span>
         </div>
         <div class="logo_meta_row">
-          <!--
-            ⛔ 侧边栏**不常显版本号**：它只在「发现新版本、且没被忽略」时才出现。
-            当前版本在服务升级页首屏，这里只承担「该去看一眼」的提示作用，
-            常态下留白，不跟产品名抢位置。
-          -->
-          <a-popover
-            v-if="pending"
-            v-model:popup-visible="noticeVisible"
-            trigger="click"
-            position="right"
-            :content-style="{ padding: 0 }"
-          >
+          <span class="logo_subtitle">{{ subtitle }}</span>
+        </div>
+        <!--
+          ⛔ 侧边栏**不常显版本号**：它只在「发现新版本、且没被忽略」时才出现。
+          当前版本在服务升级页首屏，这里只承担「该去看一眼」的提示作用。
+          位置在平台名**下面单独一行**（不是并排）：并排会把「统一视频接入平台」顶得没地方。
+        -->
+        <div v-if="pending" class="logo_version_row">
+          <a-popover v-model:popup-visible="noticeVisible" trigger="click" position="right" :content-style="{ padding: 0 }">
             <button
               class="logo_version"
               :class="{ 'logo_version--dark': isDark }"
@@ -61,7 +58,6 @@
               </div>
             </template>
           </a-popover>
-          <span class="logo_subtitle">{{ subtitle }}</span>
         </div>
       </div>
     </div>
@@ -201,7 +197,7 @@ const isTitle = computed(() => {
   .logo_text {
     display: flex;
     flex-direction: column;
-    row-gap: 4px;
+    row-gap: 3px;
     min-width: 0;
   }
 
@@ -249,6 +245,14 @@ const isTitle = computed(() => {
     column-gap: 6px;
     align-items: center;
     min-width: 0;
+  }
+
+  // 新版本提示单独占一行，挂在「统一视频接入平台」下面。
+  // ⛔ 不要挪回 logo_meta_row 里并排：256px 宽的侧边栏放不下，会把平台名挤成省略号。
+  .logo_version_row {
+    display: flex;
+    align-items: center;
+    height: 19px;
   }
 
   // 新版本徽标。它只在有更新时出现，所以底色直接用琥珀色（照 Sub2API），
