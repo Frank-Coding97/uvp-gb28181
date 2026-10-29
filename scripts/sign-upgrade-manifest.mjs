@@ -7,6 +7,10 @@
  *   --artifact 'standalone/linux/amd64|dist/uvp.tar.gz|https://updates.example/uvp.tar.gz' \
  *   --out manifest.json [--offline-out uvp-offline.tar]
  *
+ * selector 的 deployment 可以写 `*`，表示"这个文件适用于该平台的全部部署方式"。
+ * Linux 展开成 standalone/systemd/compose 三条记录（同一个文件、同一份摘要），
+ * 导入器按当前注册的部署方式精确匹配，所以用户不需要按部署方式挑包。
+ *
  * 私钥只从本地 PEM 文件读取；脚本不会上传文件，也不会访问 GitHub。
  */
 import { createHash, createPrivateKey, randomUUID, sign } from "node:crypto";
@@ -18,6 +22,14 @@ import { finished } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 
 const DEPLOYMENTS = new Set(["standalone", "systemd", "compose"]);
+// 一个制品文件能被哪些部署方式使用。这里只列**包内容确实兼容**的形态：
+// systemd 与 standalone 用同一套目录布局，绿色包直接可用；
+// ⛔ compose 不能用绿色包（它的适配器要求包内有 compose.yml 且镜像已 load），
+// 所以不在这里展开，必须单独出容器版升级包。
+const DEPLOYMENTS_BY_OS = {
+  linux: ["standalone", "systemd"],
+  windows: ["standalone"]
+};
 const TOKEN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const KEY_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-rc\.(0|[1-9][0-9]*))?$/;
@@ -397,7 +409,24 @@ export function parseArtifactSpec(value) {
   if (parts.length !== 3) throw new Error(`制品参数无效: ${value}`);
   const [selector, filePath, url] = parts;
   if (!filePath) throw new Error(`制品参数无效: ${value}`);
-  return { ...parseSelector(selector), filePath, url: assertHttpsURL(url) };
+  const selectorParts = selector.split("/");
+  if (selectorParts.length !== 3) throw new Error("制品 selector 必须是 deployment/os/arch");
+  const [deployment, os, arch] = selectorParts;
+  const normalized = {
+    os: assertToken(os, "制品 selector OS"),
+    arch: assertToken(arch, "制品 selector 架构"),
+    filePath,
+    url: assertHttpsURL(url)
+  };
+  if (deployment === "*") {
+    const deployments = DEPLOYMENTS_BY_OS[normalized.os];
+    if (!deployments) {
+      throw new Error(`制品 selector 通配只支持 ${Object.keys(DEPLOYMENTS_BY_OS).join("/")}，当前是 ${normalized.os}`);
+    }
+    return { ...normalized, deployments: [...deployments] };
+  }
+  parseSelector(selector);
+  return { ...normalized, deployments: [deployment] };
 }
 
 export function assertEd25519PrivateKey(key) {
@@ -441,25 +470,28 @@ export async function buildSignedManifest({ payload, artifactSpecs, privateKey, 
   const artifacts = [];
   for (const value of artifactSpecs) {
     const source = parseArtifactSpec(value);
-    const key = selectorKey(source);
-    if (artifactSelectors.has(key)) {
-      throw new Error(`重复制品 selector: ${source.deployment}/${source.os}/${source.arch}`);
-    }
-    artifactSelectors.add(key);
     const filename = assertSafeFilename(basename(source.filePath));
+    // 通配展开后同一份文件会生成多条记录，摘要只算一次。
     const { size, sha256 } = await hashFile(source.filePath);
-    const metadata = existing.get(key);
-    const artifact = {
-      deployment: source.deployment,
-      os: source.os,
-      arch: source.arch,
-      filename,
-      url: source.url,
-      size,
-      sha256
-    };
-    if (metadata?.images !== undefined) artifact.images = metadata.images;
-    artifacts.push({ ...artifact, filePath: source.filePath });
+    for (const deployment of source.deployments) {
+      const key = selectorKey({ deployment, os: source.os, arch: source.arch });
+      if (artifactSelectors.has(key)) {
+        throw new Error(`重复制品 selector: ${deployment}/${source.os}/${source.arch}`);
+      }
+      artifactSelectors.add(key);
+      const metadata = existing.get(key);
+      const artifact = {
+        deployment,
+        os: source.os,
+        arch: source.arch,
+        filename,
+        url: source.url,
+        size,
+        sha256
+      };
+      if (metadata?.images !== undefined) artifact.images = metadata.images;
+      artifacts.push({ ...artifact, filePath: source.filePath });
+    }
   }
 
   const signedPayload = {
@@ -643,8 +675,14 @@ export async function runCli(argv, { log = console.log } = {}) {
     privateKey,
     keyId: options.keyId
   });
-  if (options.offlineOutPath && result.artifacts.length !== 1) {
-    throw new Error("--offline-out 仅支持一个 --artifact；导入器一次只接受一个目标制品");
+  // 离线包只有一个制品文件，但清单里可以有多条记录（不同部署方式、同一份文件）。
+  // ⛔ 判据必须是"所有记录指向同一个文件"，不能退化成"只能有一条记录"，
+  //    否则一个包没法同时覆盖 standalone 与 systemd。
+  if (options.offlineOutPath) {
+    const distinct = new Set(result.artifacts.map(a => `${a.filename}\0${a.size}\0${a.sha256}`));
+    if (distinct.size !== 1) {
+      throw new Error("--offline-out 只能打包同一个制品文件；离线导入器一个包只接受一个制品");
+    }
   }
   await writeFile(options.outPath, result.envelopeBytes, {
     mode: 0o644

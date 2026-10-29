@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -192,6 +193,34 @@ func TestManifestArtifactForChecksTargetAndDuplicates(t *testing.T) {
 	manifest.Artifacts = append(manifest.Artifacts, manifest.Artifacts[0])
 	if _, err := manifest.ArtifactFor(Target{Deployment: "compose", OS: "linux", Arch: "arm64", UpdaterProtocol: 2}); err == nil {
 		t.Fatal("duplicate target artifact was accepted")
+	}
+}
+
+// 离线升级包里只有一个制品文件，靠清单里的多条记录覆盖 standalone 与 systemd。
+// ⛔ 别给 validateManifest 加「filename 在整个清单里唯一」这类校验：那会让这种包
+// 在导入时被判成重复，而现场看到的只是「离线升级包校验失败」，完全指不到真因。
+func TestManifestArtifactForAcceptsOneFileAcrossDeployments(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const artifact = `{"deployment":"%s","os":"linux","arch":"amd64","filename":"uvp.tar.gz","url":"https://updates.example.test/r-9/uvp.tar.gz","size":1,"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}`
+	payload := `{"schema_version":1,"channel":"stable","sequence":9,"release_id":"r-9","version":"1.2.5","build_id":"build-9","min_updater_protocol":1,"artifacts":[` +
+		fmt.Sprintf(artifact, "standalone") + `,` + fmt.Sprintf(artifact, "systemd") + `]}`
+	envelope := signedEnvelopeForTest(t, payload, "release-key-1", ed25519.Sign(privateKey, []byte(payload)))
+	manifest, err := VerifySignedManifest(envelope, map[string]ed25519.PublicKey{"release-key-1": publicKey})
+	if err != nil {
+		t.Fatalf("one file shared by two deployments was rejected: %v", err)
+	}
+	for _, deployment := range []string{"standalone", "systemd"} {
+		selected, lookupErr := manifest.ArtifactFor(Target{Deployment: deployment, OS: "linux", Arch: "amd64", UpdaterProtocol: 1})
+		if lookupErr != nil || selected.Filename != "uvp.tar.gz" || selected.Deployment != deployment {
+			t.Fatalf("%s artifact lookup: %#v, %v", deployment, selected, lookupErr)
+		}
+	}
+	// compose 要的是含 compose.yml 与镜像的包，绿色包不能冒充它。
+	if _, err := manifest.ArtifactFor(Target{Deployment: "compose", OS: "linux", Arch: "amd64", UpdaterProtocol: 1}); err == nil {
+		t.Fatal("standalone package was accepted for a compose deployment")
 	}
 }
 

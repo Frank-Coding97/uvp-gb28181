@@ -419,6 +419,139 @@ test("离线输出遵守 ImportArchive 的 manifest 加单制品 tar 契约", as
   }
 });
 
+test("通配 selector 让同一份文件覆盖该平台的全部部署方式", async () => {
+  const { root, artifact } = await fixture();
+  const { privateKey } = releaseKey();
+  try {
+    const linux = await buildSignedManifest({
+      payload: payload(),
+      artifactSpecs: [artifactSpec({ selector: "*/linux/amd64", filePath: artifact })],
+      privateKey,
+      keyId: "release-2026"
+    });
+    // systemd 与 standalone 共用同一套目录布局，一个包必须同时认这两种；
+    // ⛔ compose 不在此列（它要 compose.yml 和镜像，绿色包满足不了）。
+    assert.deepEqual(
+      linux.payload.artifacts.map(item => item.deployment),
+      ["standalone", "systemd"]
+    );
+    for (const item of linux.payload.artifacts) {
+      assert.equal(item.os, "linux");
+      assert.equal(item.arch, "amd64");
+      assert.equal(item.filename, "uvp.tar.gz");
+      assert.equal(item.sha256, linux.payload.artifacts[0].sha256);
+      assert.equal(item.size, linux.payload.artifacts[0].size);
+    }
+
+    const windows = await buildSignedManifest({
+      payload: payload(),
+      artifactSpecs: [artifactSpec({ selector: "*/windows/amd64", filePath: artifact })],
+      privateKey,
+      keyId: "release-2026"
+    });
+    assert.deepEqual(
+      windows.payload.artifacts.map(item => item.deployment),
+      ["standalone"]
+    );
+
+    await assert.rejects(
+      () =>
+        buildSignedManifest({
+          payload: payload(),
+          artifactSpecs: [artifactSpec({ selector: "*/darwin/arm64", filePath: artifact })],
+          privateKey,
+          keyId: "release-2026"
+        }),
+      /通配/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI 用通配 selector 打出覆盖全部署方式的单制品离线包", async () => {
+  const { root, artifact } = await fixture();
+  const { privateKey } = releaseKey();
+  const payloadPath = path.join(root, "release.json");
+  const privateKeyPath = path.join(root, "release.pem");
+  const manifestPath = path.join(root, "manifest.json");
+  const offlinePath = path.join(root, "offline.tar");
+  try {
+    await writeFile(payloadPath, JSON.stringify(payload()));
+    await writeFile(privateKeyPath, privateKey.export({ format: "pem", type: "pkcs8" }));
+    await runCli(
+      [
+        "--payload",
+        payloadPath,
+        "--key-id",
+        "release-2026",
+        "--private-key",
+        privateKeyPath,
+        "--artifact",
+        artifactSpec({ selector: "*/linux/amd64", filePath: artifact }),
+        "--out",
+        manifestPath,
+        "--offline-out",
+        offlinePath
+      ],
+      { log: () => {} }
+    );
+
+    // 离线包里仍然只有一个制品文件，靠清单里的多条记录覆盖两种部署方式。
+    const entries = tarEntries(await readFile(offlinePath));
+    assert.deepEqual(
+      entries.map(entry => entry.name),
+      ["manifest.json", "uvp.tar.gz"]
+    );
+    const envelope = JSON.parse(entries[0].data.toString("utf8"));
+    const signed = JSON.parse(Buffer.from(envelope.payload, "base64").toString("utf8"));
+    assert.deepEqual(
+      signed.artifacts.map(item => item.deployment),
+      ["standalone", "systemd"]
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("--offline-out 拒绝清单里出现两个不同的制品文件", async () => {
+  const { root, artifact } = await fixture();
+  const { privateKey } = releaseKey();
+  const other = path.join(root, "other.tar.gz");
+  const payloadPath = path.join(root, "release.json");
+  const privateKeyPath = path.join(root, "release.pem");
+  try {
+    await writeFile(other, "another artifact");
+    await writeFile(payloadPath, JSON.stringify(payload()));
+    await writeFile(privateKeyPath, privateKey.export({ format: "pem", type: "pkcs8" }));
+    await assert.rejects(
+      () =>
+        runCli(
+          [
+            "--payload",
+            payloadPath,
+            "--key-id",
+            "release-2026",
+            "--private-key",
+            privateKeyPath,
+            "--artifact",
+            artifactSpec({ selector: "*/linux/amd64", filePath: artifact }),
+            "--artifact",
+            artifactSpec({ selector: "*/linux/arm64", filePath: other }),
+            "--out",
+            path.join(root, "manifest.json"),
+            "--offline-out",
+            path.join(root, "offline.tar")
+          ],
+          { log: () => {} }
+        ),
+      /同一个制品文件/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("离线打包期间制品被替换时拒绝写出不匹配的签名包", async () => {
   const { root, artifact } = await fixture();
   const { privateKey } = releaseKey();
