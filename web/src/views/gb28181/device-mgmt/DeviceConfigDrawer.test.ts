@@ -1124,3 +1124,118 @@ describe("DeviceConfigDrawer 设备配置中心", () => {
     expect(wrapper.emitted("update:visible")?.[0]).toEqual([false]);
   });
 });
+
+/**
+ * 「设备管理 → 通道操作 → 设备配置」的挂载形态。
+ *
+ * ⛔ 为什么要单独钉：这四组（录像计划 / 报警录像 / 报警上报 / 基本参数）在 2026-09-20 的
+ *    UI 收敛里被搬来搬去，最后**一处入口都没有** —— 设备详情抽屉被锁成只读概览、
+ *    播放控制台侧栏被锁成只有视频编码。挂载形态一旦传错 `configOnly` / `groupKeys`，
+ *    表现是"页签点得开、里面是空的"或"顺手又长出视频参数"，两种都不会报错。
+ */
+describe("DeviceConfigDrawer 挂在通道操作抽屉（configOnly + 四组）", () => {
+  beforeEach(() => {
+    api.getChannelVideoParams.mockReset();
+    api.applyChannelVideoParams.mockReset();
+    api.getChannelDeviceConfigs.mockReset();
+    api.applyChannelDeviceConfigs.mockReset();
+    api.getChannelVideoParams.mockResolvedValue(readOk());
+    api.getChannelDeviceConfigs.mockResolvedValue(deviceConfigOk());
+  });
+
+  function mountChannelConfig(props: Record<string, unknown> = {}) {
+    return mountDrawer({
+      embedded: true,
+      configOnly: true,
+      groupKeys: ["record-plan", "alarm-record", "alarm-report", "basic"],
+      // 抽屉里没有画面：OSD 画布编辑模式不该长出来（这个形态本来也不挂 OSD 组）。
+      osdCanvasLinked: false,
+      online: true,
+      ...props
+    });
+  }
+
+  it("导航只出这四组，且顺带把视频参数挡在外面", async () => {
+    const wrapper = mountChannelConfig();
+    await flushPromises();
+
+    const nav = wrapper.findAll("[data-testid^='dcg-nav-']").map(node => node.attributes("data-testid"));
+    // 顺序跟 `CONFIG_GROUPS` 的声明顺序，不是宿主的数组顺序。
+    expect(nav).toEqual(["dcg-nav-record-plan", "dcg-nav-alarm-record", "dcg-nav-basic", "dcg-nav-alarm-report"]);
+    expect(nav).not.toContain("dcg-nav-video-param");
+    expect(nav).not.toContain("dcg-nav-picture");
+  });
+
+  it("默认停在「录像计划」：没读到事实时只给提示，读到之后才出周计划编辑器", async () => {
+    const wrapper = mountChannelConfig();
+    await flushPromises();
+
+    // configOnly 的初始 key 是 "osd"（不在本实例挂的组里）⇒ 回落到第一组。
+    // ⛔ 回落必须命中 record-plan：否则用户点开页签看到的是"基本参数"这种最少改的东西。
+    const active = wrapper.findAll("[data-testid^='dcg-nav-']").filter(node => node.classes().includes("is-active"));
+    expect(active.map(node => node.attributes("data-testid"))).toEqual(["dcg-nav-record-plan"]);
+
+    // ⛔ 没拿到设备事实时**不给控件**（`activeGroupFactsMissing` 的既有口径）——
+    //    这是"别让人在空白模板上盲写设备"，不是入口坏了。所以这里断言"没有编辑器"，
+    //    有事实之后才长出 7 天（下一条用例钉的就是那个形态）。
+    expect(wrapper.find("[data-testid^='dcw-day-']").exists()).toBe(false);
+  });
+
+  it("读到事实后，录像计划组直接出 7 天周计划编辑器", async () => {
+    api.getChannelDeviceConfigs.mockResolvedValue(
+      deviceConfigOk([
+        {
+          configType: "VideoRecordPlan",
+          observedAt: "2026-10-29T02:10:00Z",
+          sourceOperationId: "1501",
+          payload: { recordEnable: 1, streamNumber: 0, schedules: [] }
+        }
+      ])
+    );
+
+    const wrapper = mountChannelConfig();
+    await flushPromises();
+
+    // 设备回了个"启用但一天都没排"的计划 ⇒ 界面上仍然要能看到 7 行（否则用户加不了计划）。
+    expect(wrapper.findAll("[data-testid^='dcw-day-']")).toHaveLength(7);
+  });
+
+  it("回读到设备计划后，周计划编辑器显示的是设备事实", async () => {
+    api.getChannelDeviceConfigs.mockResolvedValue(
+      deviceConfigOk([
+        {
+          configType: "VideoRecordPlan",
+          observedAt: "2026-10-29T02:10:00Z",
+          sourceOperationId: "1501",
+          payload: {
+            recordEnable: 1,
+            streamNumber: 0,
+            schedules: [
+              {
+                weekDayNum: 2,
+                segments: [{ startHour: 8, startMin: 30, startSec: 0, stopHour: 18, stopMin: 0, stopSec: 0 }]
+              }
+            ]
+          }
+        }
+      ])
+    );
+
+    const wrapper = mountChannelConfig();
+    await flushPromises();
+
+    // 回读到的那一天才有时间段；其余 6 天必须是"无录像计划"，不是"00:00-00:00 空段"。
+    expect((wrapper.get("[data-testid='dcw-start-2-0']").element as HTMLInputElement).value).toBe("08:30:00");
+    expect((wrapper.get("[data-testid='dcw-stop-2-0']").element as HTMLInputElement).value).toBe("18:00:00");
+    expect(wrapper.find("[data-testid='dcw-start-1-0']").exists()).toBe(false);
+    expect(wrapper.get("[data-testid='dcw-summary']").text()).toBe("1 天 · 1 个时段");
+  });
+
+  it("离线通道上不给下发（发出去只会等超时）", async () => {
+    const wrapper = mountChannelConfig({ online: false, canApply: false });
+    await flushPromises();
+
+    const apply = wrapper.get("[data-testid='dcg-apply']");
+    expect(apply.attributes("disabled")).toBeDefined();
+  });
+});

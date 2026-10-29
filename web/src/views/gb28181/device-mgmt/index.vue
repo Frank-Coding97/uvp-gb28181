@@ -98,6 +98,7 @@ import StorageCardStatusPanel from "./StorageCardStatusPanel.vue";
 import CatalogRefreshProgressDialog from "./CatalogRefreshProgressDialog.vue";
 import DeviceControlPanel from "./DeviceControlPanel.vue";
 import SnapshotConfigPanel from "./SnapshotConfigPanel.vue";
+import DeviceConfigDrawer from "./DeviceConfigDrawer.vue";
 import { buildFactChannelOptions } from "./deviceFactChannel";
 import { createMaintenanceActivity, isRebootPending, isUpgradeUnresolved } from "./maintenanceActivity";
 import DirectoryPanel from "./components/DirectoryPanel.vue";
@@ -251,8 +252,24 @@ const drawerLoading = ref(false);
 const drawerWidth = computed(() => (drawerTarget.value?.type === "device" ? "min(760px, 92vw)" : "min(640px, 92vw)"));
 const channelOperationVisible = ref(false);
 const channelOperationTarget = ref<ChannelVO | null>(null);
-type ChannelOperationTab = "control" | "snapshot" | "status" | "storage";
+type ChannelOperationTab = "control" | "config" | "snapshot" | "status" | "storage";
 const channelOperationTab = ref<ChannelOperationTab>("control");
+/**
+ * 「设备配置」页签挂的分组（`CONFIG_GROUPS` 的 key）。
+ *
+ * ⛔ 为什么落在这里：2026-09-20 把「录像存储 / 报警控制 / 设备维护」三个整页签从播放控制台
+ *    搬进**设备详情抽屉**，同日稍后设备详情抽屉又被改成**纯只读概览**（并加了反向断言
+ *    `index.deviceDetailTabs.test.ts` 的 `not.toContain("openDeviceRecordPlan(deviceDetail)")`）
+ *    ⇒ 这四组从此**一处入口都没有**：代码在、接口在、报文在，界面上点不到。
+ *    控制台侧栏也被 `PlayConsoleLinked.test.ts` 钉死"不许出现录像计划"，所以只能回本抽屉。
+ * ⛔ 只收**通道级设备配置**这四组：
+ *    - `video-param` 在播放控制台「画面设置」（按码流分行，宿主必须给播放上下文）；
+ *    - `picture`（镜像 + 遮挡）在控制台底栏卡片（要画布框选，这里没有画面）。
+ *    把这两组并进来就是同一份配置的第二个编辑面，改这边那边不动。
+ * ⛔ 数组顺序**不决定**导航顺序：`configGroups` 按 `CONFIG_GROUPS` 的声明顺序过滤，
+ *    这里的顺序只影响阅读。
+ */
+const CHANNEL_CONFIG_GROUPS = ["record-plan", "alarm-record", "alarm-report", "basic"];
 const channelOperationOptions = computed(() =>
   channelOperationTarget.value ? buildFactChannelOptions([channelOperationTarget.value]) : []
 );
@@ -432,6 +449,14 @@ const canViewDeviceFacts = computed(() => hasPermission("gb28181:ptz:view"));
 const canControlDevice = computed(() => hasPermission("gb28181:device:control"));
 const canSnapshotDevice = computed(() => hasPermission("gb28181:device:snapshot"));
 const canUseDeviceControl = computed(() => canControlDevice.value || canSnapshotDevice.value);
+/**
+ * 「设备配置」页签的读写门禁 = `/channel/:id/device-configs` 的**路由门禁本身**
+ * （见 `routes.go`：读 `gb28181:ptz:view`、写 `gb28181:ptz:control`）。
+ *
+ * ⛔ 不能套用相邻页签的 `gb28181:device:control`：那是 `/device-control` 的码，
+ *    与配置族不是同一条链路。用错的后果是"看得见页签、点读取就 403"。
+ */
+const canControlChannelConfig = computed(() => hasPermission("gb28181:ptz:control"));
 const defaultLightMapStyleUrl = `${import.meta.env.BASE_URL}map-styles/uvp-light.json`;
 const mapStyleUrls = {
   light: (import.meta.env.VITE_MAP_STYLE_LIGHT_URL as string | undefined) || defaultLightMapStyleUrl,
@@ -4929,6 +4954,7 @@ onUnmounted(() => {
         </div>
         <a-radio-group v-model="channelOperationTab" type="button" class="channel-operation-tabs">
           <a-radio :disabled="!canUseDeviceControl" value="control">即时控制</a-radio>
+          <a-radio :disabled="!canViewDeviceFacts" value="config">设备配置</a-radio>
           <a-radio :disabled="!canSnapshotDevice" value="snapshot">抓拍</a-radio>
           <a-radio :disabled="!canViewDeviceFacts" value="status">设备状态</a-radio>
           <a-radio :disabled="!canViewDeviceFacts" value="storage">存储卡</a-radio>
@@ -4941,6 +4967,31 @@ onUnmounted(() => {
           :show-picker="false"
           :can-control="canControlDevice"
         />
+        <!--
+          「设备配置」= GB/T 28181 配置族（A.2.3.2 下发 / A.2.4.7 查询 / A.2.6.9 应答）里
+          **不需要播放上下文**的那四组：录像计划 / 报警录像 / 报警上报 / 基本参数。
+          ⛔ 这里是这四组**唯一**的界面入口：设备详情抽屉已被断言锁成只读概览
+             （`index.deviceDetailTabs.test.ts` 的 `not.toContain("openDeviceRecordPlan(deviceDetail)")`），
+             播放控制台侧栏也被锁成只有视频编码（`PlayConsoleLinked.test.ts`）——
+             往那两处加回来会直接撞反向断言，而且"设备侧配置"本来就不该挂在某一路画面里。
+          ⛔ `embedded` 必带：不带就是一个 `position: fixed` 的全屏遮罩，会盖在抽屉上面。
+          ⛔ 用 `v-if`（`v-else-if` 链）而不是 `v-show`：切走要销毁，否则那四组的回读轮询
+             会在后台空转，还会在下次打开时拿着上一次的通道草稿。
+        -->
+        <div v-else-if="channelOperationTab === 'config' && canViewDeviceFacts" class="channel-config-panel">
+          <DeviceConfigDrawer
+            embedded
+            config-only
+            :visible="channelOperationVisible"
+            :group-keys="CHANNEL_CONFIG_GROUPS"
+            :device-code="channelOperationTarget.deviceId"
+            :online="channelOperationTarget.status === 1"
+            :channel-id="channelOperationTarget.id"
+            :channel-name="displayName(channelOperationTarget)"
+            :can-read="canViewDeviceFacts"
+            :can-apply="canControlChannelConfig && channelOperationTarget.status === 1"
+          />
+        </div>
         <SnapshotConfigPanel
           v-else-if="channelOperationTab === 'snapshot' && canSnapshotDevice"
           v-model:channel-id="channelOperationTarget.id"
@@ -7941,6 +7992,31 @@ onUnmounted(() => {
 .channel-operation-entry {
   display: grid;
   gap: 14px;
+}
+
+/**
+ * 「设备配置」页签的容器：给 `DeviceConfigDrawer` 的嵌入形态一个**确定的高度**。
+ *
+ * ⛔ 不写高度它只会撑到内容高度（`.dcg-window--embedded` 是 `height: 100%`，父级没有高度
+ *    就退化成 auto），表现是状态条贴在半截、参数区被压扁。
+ * ⛔ 用 `min(620px, calc(100vh - 210px))` 而不是 `100%`：抽屉 body 自己不约束高度，
+ *    `100%` 在这里解析不出值；210px ≈ 抽屉标题 + 上下文条 + 页签，留够不出现双滚动条。
+ */
+.channel-config-panel {
+  display: flex;
+  height: min(620px, calc(100vh - 210px));
+  min-height: 380px;
+  overflow: hidden;
+}
+
+/**
+ * ⛔ 必须把**嵌入抽屉自己的根节点**撑开：`.dcg-host--embedded` 是 `display:block` 且不设高度，
+ *    里面 `.dcg-window--embedded { height: 100% }` 会解析成 auto（父高 auto），
+ *    表现是面板塌成内容高度、状态条贴在半截。`flex: 1 1 auto` 让它吃满外层定高。
+ */
+.channel-config-panel > :deep(.dcg-host) {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .channel-operation-context {
   display: grid;

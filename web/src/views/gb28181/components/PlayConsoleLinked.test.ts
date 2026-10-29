@@ -5821,7 +5821,9 @@ describe("PlayConsoleLinked 双区联动", () => {
     // ⛔ 「画面处理」（镜像 + 隐私遮挡）仍不建在侧栏：它只有底栏卡片这一个编辑入口，
     //    侧栏再挂一份就是同一份 `familyValues.picture` 的两个入口。
     expect(sidePanel.find("[data-testid='dcg-nav-picture']").exists()).toBe(false);
-    // ⛔ record-plan / alarm-record / alarm-report 三组的入口**只在**设备详情抽屉里。
+    // ⛔ record-plan / alarm-record / alarm-report 三组的入口在
+    //    **设备管理 → 通道操作抽屉 → 设备配置页签**（2026-10-29 补的，见
+    //    `device-mgmt/index.channelConfigEntry.test.ts`），**不在**控制台侧栏。
     //    页签删了但组还留在 configWorkspaceGroups 里的话，这两串组名会以"永远看不到的
     //    配置组"形式复活（读取照发、界面无入口），所以这里按渲染文本钉一次。
     expect(sidePanel.text()).not.toContain("录像计划");
