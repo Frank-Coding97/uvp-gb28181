@@ -260,7 +260,9 @@ const rowsLoading = ref(false);
 const mapLoading = ref(false);
 const page = ref(1);
 const listPageSize = ref(10);
-const cardPageSize = ref(9);
+// 卡片视图默认 12 条：4 列屏（1920）排 3 行、3 列屏（1440）排 4 行，都能整除不发空白尾行。
+// 9 条只在 3 列屏刚好排满，4 列屏会剩 1 张孤卡。
+const cardPageSize = ref(12);
 if (returnSnapshot) {
   viewMode.value = returnSnapshot.viewMode;
   navigationMode.value = returnSnapshot.navigationMode || (returnSnapshot.deviceIdFilter ? "device" : "directory");

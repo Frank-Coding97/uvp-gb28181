@@ -637,7 +637,7 @@ describe("device-mgmt round-2 修复回归", () => {
     const cardButton = wrapper.get('[aria-label="卡片视图"]');
     expect(cardButton.attributes("aria-pressed")).toBe("true");
     expect(wrapper.find(".card-view").exists()).toBe(true);
-    expect(lastDevicePageRequest()).toMatchObject({ page: 1, pageSize: 9 });
+    expect(lastDevicePageRequest()).toMatchObject({ page: 1, pageSize: 12 });
     expect(lastDevicePageRequest()).not.toHaveProperty("sort");
     expect(wrapper.get(".card-pagination").attributes("data-page-size-options")).toContain("9");
     wrapper.unmount();
@@ -654,7 +654,7 @@ describe("device-mgmt round-2 修复回归", () => {
       await wrapper.get(`[data-testid="directory-${view}"]`).trigger("click");
       await flushPromises();
       expect(wrapper.get('[data-asset-kind="device"]').classes()).toContain("active");
-      expect(lastDevicePageRequest()).toMatchObject({ page: 1, pageSize: 9 });
+      expect(lastDevicePageRequest()).toMatchObject({ page: 1, pageSize: 12 });
     }
 
     await wrapper.get('[data-testid="select-directory"]').trigger("click");
@@ -693,13 +693,13 @@ describe("device-mgmt round-2 修复回归", () => {
     await wrapper.get('[data-testid="directory-department"]').trigger("click");
     await flushPromises();
     expect(wrapper.get('[data-asset-kind="device"]').classes()).toContain("active");
-    expect(lastDevicePageRequest()).toMatchObject({ page: 1, pageSize: 9 });
+    expect(lastDevicePageRequest()).toMatchObject({ page: 1, pageSize: 12 });
     wrapper.unmount();
   });
 
   it("returns from a device card to the exact device-list page and filters", async () => {
     api.listDevices.mockResolvedValue(
-      okList(100, [
+      okList(150, [
         {
           id: 31,
           deviceId: "34020000002000000031",
@@ -731,7 +731,7 @@ describe("device-mgmt round-2 修复回归", () => {
       directoryView: "department",
       directoryKey: "department:test-root",
       page: 10,
-      pageSize: 9
+      pageSize: 12
     });
     await wrapper.get("article.device-summary-card").trigger("dblclick");
     await flushPromises();
@@ -753,7 +753,7 @@ describe("device-mgmt round-2 修复回归", () => {
       directoryView: "department",
       directoryKey: "department:test-root",
       page: 10,
-      pageSize: 9
+      pageSize: 12
     });
     expect(wrapper.get('[data-testid="directory-department"]')).toBeTruthy();
     wrapper.unmount();
@@ -761,7 +761,7 @@ describe("device-mgmt round-2 修复回归", () => {
 
   it("clearing channel filters after device drilldown returns to the original device page", async () => {
     api.listDevices.mockResolvedValue(
-      okList(100, [{ id: 31, deviceId: "34020000002000000031", name: "园区 NVR", online: true }])
+      okList(150, [{ id: 31, deviceId: "34020000002000000031", name: "园区 NVR", online: true }])
     );
     const wrapper = mountPage();
     await flushPromises();
@@ -774,7 +774,7 @@ describe("device-mgmt round-2 修复回归", () => {
     await wrapper.get(".clear-all").trigger("click");
     await flushPromises();
     expect(wrapper.get('[data-asset-kind="device"]').classes()).toContain("active");
-    expect(lastDevicePageRequest()).toMatchObject({ page: 10, pageSize: 9 });
+    expect(lastDevicePageRequest()).toMatchObject({ page: 10, pageSize: 12 });
     wrapper.unmount();
   });
 
