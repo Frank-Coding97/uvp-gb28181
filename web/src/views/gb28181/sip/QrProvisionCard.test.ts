@@ -266,7 +266,8 @@ describe("QrProvisionCard 模拟器下载入口", () => {
   });
 
   it("opens the public download site in a new tab", () => {
-    expect(source).toContain('href="https://download.uvplatform.com/"');
+    // 下载页随官网域名走:uvplatform.com/downloads/<产品 id>
+    expect(source).toContain('href="https://uvplatform.com/downloads/uvp-28181-sim"');
     expect(source).toContain('target="_blank"');
     expect(source).toContain('rel="noopener noreferrer"');
   });

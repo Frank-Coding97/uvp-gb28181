@@ -152,7 +152,9 @@ onMounted(() => {
       <span class="qr-card__header-hint">设备扫码后自动填入接入信息</span>
     </header>
 
-    <a class="qr-download" href="https://download.uvplatform.com/" target="_blank" rel="noopener noreferrer">
+    <!-- 跳官网「模拟器下载」页(带版本号/更新说明/校验值),不用直链 APK:
+         直链一换版本就死,页面永远指向当前发布版。 -->
+    <a class="qr-download" href="https://uvplatform.com/downloads/uvp-28181-sim" target="_blank" rel="noopener noreferrer">
       <span class="qr-download__icon"><Download :size="15" /></span>
       <span class="qr-download__body">
         <strong>移动端国标模拟器下载</strong>
