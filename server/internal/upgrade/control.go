@@ -27,8 +27,10 @@ var errControlStagedArtifactNotFound = errors.New("verified staged artifact was 
 type ControlService struct {
 	Store       *TaskStore
 	ImportStore *ImportStore
-	PolicyStore *PolicyStore
 	EventLog    *FileEventLog
+	// UpdateWatch holds the durable outcome of the background version probe.
+	// It is a cache only: check-for-updates still goes through Check.
+	UpdateWatch *UpdateWatchStore
 
 	// InboxRoot is a narrow handoff directory for a multipart upload. It is
 	// distinct from StagingRoot: Import reopens the token with no symlink
@@ -85,6 +87,9 @@ type ControlStatus struct {
 	ActiveTask              *TaskRecord    `json:"active_task,omitempty"`
 	Tasks                   []TaskRecord   `json:"tasks"`
 	Events                  []UpgradeEvent `json:"events"`
+	// UpdateCheck is the last background probe result. It is absent when the
+	// helper has never completed a check, which is not an error.
+	UpdateCheck *UpdateWatchState `json:"update_check,omitempty"`
 }
 
 // Start starts the helper-owned preparation worker. Preparation never crosses
@@ -178,60 +183,6 @@ func (s *ControlService) Events(ctx context.Context, limit int) ([]UpgradeEvent,
 	return s.RecentEvents(ctx, limit)
 }
 
-func (s *ControlService) LoadPolicy(ctx context.Context) (AutoUpgradePolicy, error) {
-	if err := controlContext(ctx); err != nil {
-		return AutoUpgradePolicy{}, err
-	}
-	if s == nil || s.PolicyStore == nil {
-		return AutoUpgradePolicy{}, errors.New("automatic upgrade policy store is not configured")
-	}
-	return s.PolicyStore.Load()
-}
-
-// SavePolicy allocates the version inside the helper and invalidates stale
-// policy tasks before a maintenance window can use their old approval.
-func (s *ControlService) SavePolicy(ctx context.Context, policy AutoUpgradePolicy, actor string) (AutoUpgradePolicy, error) {
-	if err := controlContext(ctx); err != nil {
-		return AutoUpgradePolicy{}, err
-	}
-	if s == nil || s.PolicyStore == nil || s.Store == nil {
-		return AutoUpgradePolicy{}, errors.New("automatic upgrade control is not configured")
-	}
-	if !validProtocolText(actor, 128) {
-		return AutoUpgradePolicy{}, errors.New("policy actor is invalid")
-	}
-	current, err := s.PolicyStore.Load()
-	if err != nil {
-		return AutoUpgradePolicy{}, err
-	}
-	target := s.target()
-	// Deployment, OS, and architecture are properties of the registered
-	// helper instance. Never let a socket caller submit a policy that can be
-	// replayed against another target after registration changes.
-	policy.Deployment = target.Deployment
-	policy.OS = target.OS
-	policy.Arch = target.Arch
-	if policy.RetainVersions == 0 {
-		policy.RetainVersions = current.RetainVersions
-		if policy.RetainVersions == 0 {
-			policy.RetainVersions = 2
-		}
-	}
-	policy.CreatedBy = actor
-	updated, err := s.PolicyStore.SaveNext(policy)
-	if err != nil {
-		return AutoUpgradePolicy{}, err
-	}
-	if err := s.cancelStalePolicyTasks(ctx, updated.PolicyVersion); err != nil {
-		return AutoUpgradePolicy{}, err
-	}
-	return updated, nil
-}
-
-func (s *ControlService) UpdatePolicy(ctx context.Context, policy AutoUpgradePolicy, actor string) (AutoUpgradePolicy, error) {
-	return s.SavePolicy(ctx, policy, actor)
-}
-
 func (s *ControlService) Status(ctx context.Context) (ControlStatus, error) {
 	records, err := s.ListTasks(ctx)
 	if err != nil {
@@ -244,11 +195,16 @@ func (s *ControlService) Status(ctx context.Context) (ControlStatus, error) {
 	status := ControlStatus{
 		Deployment:              s.target().Deployment,
 		ReleaseSourceConfigured: s != nil && strings.HasPrefix(strings.TrimSpace(s.ReleaseSource), "https://"),
-		OnlineCheck:             s != nil && strings.HasPrefix(strings.TrimSpace(s.ReleaseSource), "https://") && len(s.TrustedKeys) > 0,
+		OnlineCheck:             s.OnlineCheckEnabled(),
 		OfflineImport:           s != nil && len(s.TrustedKeys) > 0,
 		Tasks:                   records,
 		Events:                  events,
 		ActiveTask:              activeTaskRecord(records),
+	}
+	if s != nil && s.UpdateWatch != nil {
+		if snapshot := s.UpdateWatch.Snapshot(); !snapshot.CheckedAt.IsZero() {
+			status.UpdateCheck = &snapshot
+		}
 	}
 	if s != nil && s.Preflight != nil {
 		if snapshot, preflightErr := s.Preflight(ctx); preflightErr == nil {
@@ -257,6 +213,17 @@ func (s *ControlService) Status(ctx context.Context) (ControlStatus, error) {
 	}
 	return status, nil
 }
+
+// OnlineCheckEnabled reports whether this helper has a usable release source
+// and a trusted signing key. The background probe stays silent when either is
+// missing, because offline deployments would otherwise log a permanent error.
+func (s *ControlService) OnlineCheckEnabled() bool {
+	return s != nil && strings.HasPrefix(strings.TrimSpace(s.ReleaseSource), "https://") && len(s.TrustedKeys) > 0
+}
+
+// IgnoreUpdate is handled by the business process, which owns the "hide this
+// release" preference. The helper state stays a pure record of what the
+// release source offered.
 
 // Check verifies the registered channel and selects only the artifact matching
 // the registered deployment target. It does not download or modify a task.
@@ -1096,37 +1063,6 @@ func (s *ControlService) collectPreflight(ctx context.Context) (PreflightSnapsho
 		return PreflightSnapshot{}, errors.New("independent upgrade preflight returned incomplete installation evidence")
 	}
 	return snapshot, nil
-}
-
-func (s *ControlService) cancelStalePolicyTasks(ctx context.Context, policyVersion uint64) error {
-	records, err := s.Store.List()
-	if err != nil {
-		return err
-	}
-	var failures []error
-	for _, record := range records {
-		if record.Actor != "policy" || record.PolicyVersion == policyVersion || !isControlPendingPhase(record.Phase) {
-			continue
-		}
-		if err := s.Store.Cancel(record.TaskID); err != nil {
-			failures = append(failures, err)
-			continue
-		}
-		const reason = "automatic upgrade policy changed before maintenance"
-		if err := s.Store.UpdateMetadata(record.TaskID, func(task *TaskRecord) error {
-			task.Error = reason
-			return nil
-		}); err != nil {
-			failures = append(failures, err)
-			continue
-		}
-		if s.EventLog != nil {
-			if err := s.EventLog.Append(ctx, UpgradeEvent{Event: "blocked", TaskID: record.TaskID, PolicyVersion: policyVersion, Reason: reason, At: s.now()}); err != nil {
-				failures = append(failures, err)
-			}
-		}
-	}
-	return errors.Join(failures...)
 }
 
 func (s *ControlService) failPendingTask(taskID string, cause error) {

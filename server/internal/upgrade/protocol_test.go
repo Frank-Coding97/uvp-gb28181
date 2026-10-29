@@ -38,6 +38,17 @@ func TestProtocolApplyRequiresExplicitConfirmation(t *testing.T) {
 	}
 }
 
+// Automatic upgrades were removed end to end; the wire protocol must not keep
+// accepting their actions, otherwise an old business process could still hand
+// the helper a policy after the feature is gone.
+func TestProtocolRejectsRemovedAutomaticUpgradeActions(t *testing.T) {
+	for _, action := range []string{"policy_get", "policy_set"} {
+		if _, err := DecodeProtocolRequest([]byte(`{"protocol":1,"action":"` + action + `"}`)); err == nil {
+			t.Fatalf("removed action %q accepted", action)
+		}
+	}
+}
+
 func TestProtocolControlRequestsAllowOnlyBoundedFields(t *testing.T) {
 	digest := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	taskID := "0123456789abcdef0123456789abcdef"
@@ -46,8 +57,6 @@ func TestProtocolControlRequestsAllowOnlyBoundedFields(t *testing.T) {
 		`{"protocol":1,"action":"check"}`,
 		`{"protocol":1,"action":"task_list"}`,
 		`{"protocol":1,"action":"events","event_limit":100}`,
-		`{"protocol":1,"action":"policy_get"}`,
-		`{"protocol":1,"action":"policy_set","actor":"admin","policy":{}}`,
 		`{"protocol":1,"action":"import","inbox_token":"0123456789abcdef0123456789abcdef"}`,
 		`{"protocol":1,"action":"get_import","import_id":"0123456789abcdef0123456789abcdef"}`,
 		`{"protocol":1,"action":"create_task","create":{"idempotency_key":"request-1","actor":"admin","target_digest":"` + digest + `"}}`,
@@ -61,7 +70,6 @@ func TestProtocolControlRequestsAllowOnlyBoundedFields(t *testing.T) {
 	}
 	invalid := []string{
 		`{"protocol":1,"action":"events","event_limit":101}`,
-		`{"protocol":1,"action":"policy_set","policy":{}}`,
 		`{"protocol":1,"action":"import","inbox_token":"/var/lib/uvp/staging/release.tar"}`,
 		`{"protocol":1,"action":"import","inbox_token":"0123456789abcdef0123456789abcdef","import_id":"0123456789abcdef0123456789abcdef"}`,
 		`{"protocol":1,"action":"get_import"}`,

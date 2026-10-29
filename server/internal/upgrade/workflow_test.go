@@ -3,7 +3,6 @@ package upgrade
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +10,13 @@ import (
 	"testing"
 	"time"
 )
+
+type schedulerEvents struct{ events []UpgradeEvent }
+
+func (s *schedulerEvents) Append(_ context.Context, event UpgradeEvent) error {
+	s.events = append(s.events, event)
+	return nil
+}
 
 type fakeWorkflowAdapter struct {
 	steps       []string
@@ -223,51 +229,6 @@ func TestWorkflowSerializesConcurrentApplyCalls(t *testing.T) {
 	}
 }
 
-func TestWorkflowAutomaticApprovalRecheckedBeforeStop(t *testing.T) {
-	for _, change := range []string{"disabled", "revision", "window-ended", "rollback-disabled"} {
-		t.Run(change, func(t *testing.T) {
-			store, record := prepareWorkflowTask(t)
-			policies, err := OpenPolicyStore(filepath.Join(t.TempDir(), "policy.json"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			policy := AutoUpgradePolicy{Enabled: true, PolicyVersion: 1, Timezone: "UTC", WindowStart: "02:00", WindowEnd: "04:00", Channel: "stable", AllowRestart: true, AutoRollback: true}
-			if err := policies.Save(policy); err != nil {
-				t.Fatal(err)
-			}
-			if err := store.UpdateMetadata(record.TaskID, func(task *TaskRecord) error {
-				task.Actor, task.PolicyVersion, task.PolicySnapshot = "policy", 1, &policy
-				return nil
-			}); err != nil {
-				t.Fatal(err)
-			}
-			now := time.Date(2026, 10, 16, 3, 0, 0, 0, time.UTC)
-			changed := policy
-			switch change {
-			case "disabled":
-				changed.Enabled = false
-			case "revision":
-				changed.PolicyVersion++
-			case "window-ended":
-				now = now.Add(time.Hour)
-			case "rollback-disabled":
-				changed.AutoRollback = false
-			}
-			if err := policies.Save(changed); err != nil {
-				t.Fatal(err)
-			}
-			adapter := &fakeWorkflowAdapter{}
-			workflow := &WorkflowExecutor{Store: store, Adapter: adapter, PolicyStore: policies, Now: func() time.Time { return now }}
-			if err := workflow.Apply(context.Background(), record); err == nil {
-				t.Fatal("stale automatic approval accepted")
-			}
-			if len(adapter.steps) != 0 {
-				t.Fatalf("service disrupted: %v", adapter.steps)
-			}
-		})
-	}
-}
-
 func TestWorkflowRecoveryWritesDurableTerminalEvent(t *testing.T) {
 	store, record := prepareWorkflowTask(t)
 	events := &schedulerEvents{}
@@ -286,84 +247,29 @@ func TestWorkflowRecoveryWritesDurableTerminalEvent(t *testing.T) {
 	}
 }
 
-func TestWorkflowHonorsAutomaticRollbackAndCommitBoundary(t *testing.T) {
-	for _, scenario := range []string{"rollback-disabled", "committed"} {
-		t.Run(scenario, func(t *testing.T) {
-			store, record := prepareWorkflowTask(t)
-			for _, phase := range []TaskPhase{PhaseBackingUp, PhaseMigrating, PhaseActivating, PhaseValidating} {
-				if err := store.MarkPhase(record.TaskID, phase); err != nil {
-					t.Fatal(err)
-				}
-			}
-			adapter := &fakeWorkflowAdapter{failAt: "validate"}
-			if scenario == "committed" {
-				if err := store.MarkPhase(record.TaskID, PhaseCommitting); err != nil {
-					t.Fatal(err)
-				}
-				adapter.failAt = "commit"
-			} else {
-				if err := store.UpdateMetadata(record.TaskID, func(task *TaskRecord) error {
-					task.Actor, task.PolicySnapshot = "policy", &AutoUpgradePolicy{AutoRollback: false}
-					return nil
-				}); err != nil {
-					t.Fatal(err)
-				}
-			}
-			workflow := &WorkflowExecutor{Store: store, Adapter: adapter}
-			if err := workflow.Apply(context.Background(), record); err == nil {
-				t.Fatal("failure missing")
-			}
-			updated, err := store.Get(record.TaskID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if updated.Phase != PhaseRecoveryRequired {
-				t.Fatalf("phase: %s", updated.Phase)
-			}
-			for _, step := range adapter.steps {
-				if step == "rollback" {
-					t.Fatalf("unauthorized rollback: %v", adapter.steps)
-				}
-			}
-		})
-	}
-}
-
-func TestWorkflowAutomaticApprovalAllowsUnchangedPolicyInWindow(t *testing.T) {
+func TestWorkflowCommitBoundaryRequiresOperatorRecovery(t *testing.T) {
 	store, record := prepareWorkflowTask(t)
-	policies, err := OpenPolicyStore(filepath.Join(t.TempDir(), "policy.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	policy := AutoUpgradePolicy{Enabled: true, PolicyVersion: 1, Timezone: "UTC", WindowStart: "02:00", WindowEnd: "04:00", Channel: "stable", AllowRestart: true, AutoRollback: true}
-	if err := policies.Save(policy); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.UpdateMetadata(record.TaskID, func(task *TaskRecord) error {
-		task.Actor, task.Version, task.PolicyVersion, task.PolicySnapshot = "policy", "1.2.0", 1, &policy
-		task.Preflight = &PreflightSnapshot{CurrentVersion: "1.1.0", CurrentBuildID: "source-build", DatabaseDialect: "sqlite", MigrationDigest: strings.Repeat("b", 64)}
-		task.Compatibility = &CompatibilityDeclaration{SchemaVersion: 1, AutomaticAllowed: true, SourceBuilds: []ReleaseIdentity{{Version: "1.1.0", BuildID: "source-build"}}, Database: DatabaseCompatibility{Dialect: "sqlite", AllowedSourceMigrationDigests: []string{strings.Repeat("b", 64)}, TargetMigrationDigest: strings.Repeat("c", 64)}}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	workflow := &WorkflowExecutor{Store: store, Adapter: &fakeWorkflowAdapter{}, PolicyStore: policies, Now: func() time.Time { return time.Date(2026, 10, 16, 3, 0, 0, 0, time.UTC) }}
-	workflow.Preflight = func(context.Context) (PreflightSnapshot, error) {
-		task, err := store.Get(record.TaskID)
-		if err != nil {
-			return PreflightSnapshot{}, err
+	for _, phase := range []TaskPhase{PhaseBackingUp, PhaseMigrating, PhaseActivating, PhaseValidating, PhaseCommitting} {
+		if err := store.MarkPhase(record.TaskID, phase); err != nil {
+			t.Fatal(err)
 		}
-		return *task.Preflight, nil
 	}
-	if err := workflow.Apply(context.Background(), record); err != nil {
-		t.Fatal(err)
+	adapter := &fakeWorkflowAdapter{failAt: "commit"}
+	workflow := &WorkflowExecutor{Store: store, Adapter: adapter}
+	if err := workflow.Apply(context.Background(), record); err == nil {
+		t.Fatal("failure missing")
 	}
 	updated, err := store.Get(record.TaskID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Phase != PhaseSucceeded {
-		t.Fatalf("phase %s", updated.Phase)
+	if updated.Phase != PhaseRecoveryRequired {
+		t.Fatalf("phase: %s", updated.Phase)
+	}
+	for _, step := range adapter.steps {
+		if step == "rollback" {
+			t.Fatalf("committed task was rolled back: %v", adapter.steps)
+		}
 	}
 }
 
@@ -405,17 +311,24 @@ func TestWorkflowManualRollbackRejectsPreparationFailureWithoutExecutionBoundary
 }
 
 func TestWorkflowRechecksIndependentPreflightImmediatelyBeforeStop(t *testing.T) {
-	fixture := newHelperSchedulerFixture(t)
-	if err := fixture.store.MarkPhase(fixture.record.TaskID, PhaseStopping); err != nil {
+	store, record := prepareWorkflowTask(t)
+	approved := PreflightSnapshot{
+		CurrentVersion: "1.1.0", CurrentBuildID: "build-1", ConfigDigest: strings.Repeat("a", 64),
+		DatabaseDialect: "sqlite", MigrationDigest: strings.Repeat("b", 64),
+	}
+	record.Preflight = &approved
+	if err := store.UpdateMetadata(record.TaskID, func(task *TaskRecord) error {
+		task.Preflight = &approved
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
-	fixture.record.Phase = PhaseStopping
 	adapter := &fakeWorkflowAdapter{}
-	workflow := &WorkflowExecutor{Store: fixture.store, Adapter: adapter, PolicyStore: fixture.policies, Now: fixture.scheduler.Now}
+	workflow := &WorkflowExecutor{Store: store, Adapter: adapter}
 	// With no independent evidence, even a valid stored approval cannot stop
 	// the business service. The helper must fail closed after a restart.
-	if err := workflow.Apply(context.Background(), fixture.record); err == nil {
-		t.Fatal("accepted automatic stop without independent preflight")
+	if err := workflow.Apply(context.Background(), record); err == nil {
+		t.Fatal("accepted stop without independent preflight")
 	}
 	if len(adapter.steps) != 0 {
 		t.Fatalf("service disturbed: %v", adapter.steps)
@@ -423,21 +336,25 @@ func TestWorkflowRechecksIndependentPreflightImmediatelyBeforeStop(t *testing.T)
 }
 
 func TestWorkflowRejectsChangedIndependentPreflightBeforeManualStop(t *testing.T) {
-	fixture := newHelperSchedulerFixture(t)
-	if err := fixture.store.UpdateMetadata(fixture.record.TaskID, func(task *TaskRecord) error { task.Actor = "admin"; return nil }); err != nil {
+	store, record := prepareWorkflowTask(t)
+	approved := PreflightSnapshot{
+		CurrentVersion: "1.1.0", CurrentBuildID: "build-1", ConfigDigest: strings.Repeat("a", 64),
+		DatabaseDialect: "sqlite", MigrationDigest: strings.Repeat("b", 64),
+	}
+	record.Preflight = &approved
+	if err := store.UpdateMetadata(record.TaskID, func(task *TaskRecord) error {
+		task.Preflight = &approved
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := fixture.store.MarkPhase(fixture.record.TaskID, PhaseStopping); err != nil {
-		t.Fatal(err)
-	}
-	fixture.record.Phase = PhaseStopping
 	adapter := &fakeWorkflowAdapter{}
-	workflow := &WorkflowExecutor{Store: fixture.store, Adapter: adapter, Preflight: func(context.Context) (PreflightSnapshot, error) {
-		changed := *fixture.preflight
+	workflow := &WorkflowExecutor{Store: store, Adapter: adapter, Preflight: func(context.Context) (PreflightSnapshot, error) {
+		changed := approved
 		changed.ConfigDigest = "changed"
 		return changed, nil
 	}}
-	if err := workflow.Apply(context.Background(), fixture.record); err == nil {
+	if err := workflow.Apply(context.Background(), record); err == nil {
 		t.Fatal("manual stop accepted stale approval")
 	}
 	if len(adapter.steps) != 0 {
@@ -556,38 +473,32 @@ func TestWorkflowRejectsUntrustedPackageWithoutDisruptingNormalService(t *testin
 	}
 }
 
-func TestWorkflowAutomaticRollbackRequiresSignedCompatibility(t *testing.T) {
-	for _, allowed := range []bool{false, true} {
-		t.Run(fmt.Sprint(allowed), func(t *testing.T) {
-			store, record := prepareWorkflowTask(t)
-			for _, phase := range []TaskPhase{PhaseBackingUp, PhaseMigrating, PhaseActivating, PhaseValidating} {
-				if err := store.MarkPhase(record.TaskID, phase); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if err := store.UpdateMetadata(record.TaskID, func(task *TaskRecord) error {
-				task.Actor, task.PolicySnapshot = "policy", &AutoUpgradePolicy{AutoRollback: true}
-				task.Compatibility = &CompatibilityDeclaration{AutomaticAllowed: true, Rollback: &RollbackCompatibility{AutomaticAllowed: allowed, DatabaseCompatible: allowed, DependenciesCompatible: allowed}}
-				return nil
-			}); err != nil {
-				t.Fatal(err)
-			}
-			adapter := &fakeWorkflowAdapter{failAt: "validate"}
-			workflow := &WorkflowExecutor{Store: store, Adapter: adapter}
-			if err := workflow.Apply(context.Background(), record); err == nil {
-				t.Fatal("validation failure ignored")
-			}
-			updated, err := store.Get(record.TaskID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			expected := PhaseRecoveryRequired
-			if allowed {
-				expected = PhaseRolledBack
-			}
-			if updated.Phase != expected {
-				t.Fatalf("phase: %s, want %s", updated.Phase, expected)
-			}
-		})
+func TestWorkflowValidationFailureRollsBack(t *testing.T) {
+	store, record := prepareWorkflowTask(t)
+	for _, phase := range []TaskPhase{PhaseBackingUp, PhaseMigrating, PhaseActivating, PhaseValidating} {
+		if err := store.MarkPhase(record.TaskID, phase); err != nil {
+			t.Fatal(err)
+		}
+	}
+	adapter := &fakeWorkflowAdapter{failAt: "validate"}
+	workflow := &WorkflowExecutor{Store: store, Adapter: adapter}
+	if err := workflow.Apply(context.Background(), record); err == nil {
+		t.Fatal("validation failure ignored")
+	}
+	updated, err := store.Get(record.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Phase != PhaseRolledBack {
+		t.Fatalf("phase: %s, want %s", updated.Phase, PhaseRolledBack)
+	}
+	rolledBack := false
+	for _, step := range adapter.steps {
+		if step == "rollback" {
+			rolledBack = true
+		}
+	}
+	if !rolledBack {
+		t.Fatalf("failed activation was not rolled back: %v", adapter.steps)
 	}
 }

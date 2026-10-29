@@ -446,19 +446,19 @@ func TestSchedulerPreflightChangesWhenInstalledConfigurationChanges(t *testing.T
 			return "1.1.0", "build-a"
 		},
 	})
-	first, err := controller.schedulerPreflight(context.Background())
+	first, err := controller.installationPreflight(context.Background())
 	require.NoError(t, err)
 	require.NotEmpty(t, first.ConfigDigest)
 	require.Equal(t, "build-a", first.CurrentBuildID)
 	require.Equal(t, "sqlite", first.DatabaseDialect)
 	require.NoError(t, os.WriteFile(configPath, []byte("server:\n  port: 8081\n"), 0600))
-	second, err := controller.schedulerPreflight(context.Background())
+	second, err := controller.installationPreflight(context.Background())
 	require.NoError(t, err)
 	require.NotEqual(t, first.ConfigDigest, second.ConfigDigest)
 	require.Equal(t, first.MigrationDigest, second.MigrationDigest)
 
 	require.NoError(t, db.Exec("INSERT INTO gb_schema_migrations (version, applied_at) VALUES (?, ?)", "2026-10-16-extra.sql", "2026-10-16T00:00:00Z").Error)
-	third, err := controller.schedulerPreflight(context.Background())
+	third, err := controller.installationPreflight(context.Background())
 	require.NoError(t, err)
 	require.NotEqual(t, second.MigrationDigest, third.MigrationDigest)
 
@@ -482,10 +482,10 @@ func TestSchedulerPreflightReadsSymlinkedConfiguration(t *testing.T) {
 			return "1.1.0", "build-a"
 		},
 	})
-	first, err := controller.schedulerPreflight(context.Background())
+	first, err := controller.installationPreflight(context.Background())
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(configPath, []byte("server:\n  port: 8081\n"), 0600))
-	second, err := controller.schedulerPreflight(context.Background())
+	second, err := controller.installationPreflight(context.Background())
 	require.NoError(t, err)
 	require.NotEqual(t, first.ConfigDigest, second.ConfigDigest)
 }
@@ -502,7 +502,7 @@ func TestSchedulerPreflightFailsClosedWithoutConfiguration(t *testing.T) {
 			return "1.1.0", "build-a"
 		},
 	})
-	_, err := controller.schedulerPreflight(context.Background())
+	_, err := controller.installationPreflight(context.Background())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "configuration")
 }
@@ -527,7 +527,7 @@ func TestSchedulerPreflightFailsClosedWithoutDatabase(t *testing.T) {
 			return "1.1.0", "build-a"
 		},
 	})
-	_, err := controller.schedulerPreflight(context.Background())
+	_, err := controller.installationPreflight(context.Background())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "database")
 }

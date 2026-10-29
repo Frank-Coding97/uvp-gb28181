@@ -37,17 +37,20 @@ type updaterServer interface {
 	Serve(context.Context) error
 }
 
-type updaterScheduler interface {
+// backgroundRunner is a long-lived loop that must start and stop with the
+// helper. Today only the version probe uses it.
+type backgroundRunner interface {
 	Run(context.Context) error
 }
 
 type serveRuntime struct {
-	state      string
-	server     updaterServer
-	scheduler  updaterScheduler
-	background []updaterScheduler
-	workflow   *upgrade.WorkflowExecutor
-	control    *upgrade.ControlService
+	state    string
+	server   updaterServer
+	workflow *upgrade.WorkflowExecutor
+	control  *upgrade.ControlService
+	// watcher performs the periodic release check. It only reads the release
+	// source: it never downloads, stages, or applies anything.
+	watcher backgroundRunner
 }
 
 func main() {
@@ -77,7 +80,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string) er
 		return err
 	}
 	// Recover a task that had already crossed the durable stop boundary before
-	// allowing the scheduler to consider a prepared policy task.
+	// before the local control socket starts accepting requests.
 	if assembly.workflow != nil {
 		if err := assembly.workflow.Recover(ctx); err != nil {
 			fmt.Fprintln(os.Stderr, "upgrade recovery:", err)
@@ -89,47 +92,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string) er
 		}
 		defer assembly.control.Close()
 	}
-	scheduler := assembly.scheduler
-	if len(assembly.background) > 0 {
-		all := append([]updaterScheduler{}, assembly.background...)
-		if scheduler != nil {
-			all = append(all, scheduler)
-		}
-		scheduler = &schedulerGroup{items: all}
-	}
-	return runServeLifecycle(ctx, assembly.server, scheduler)
-}
-
-// schedulerGroup keeps online checking/downloading and maintenance-window
-// application independent. Both remain helper-owned, so the business process
-// may stop or disappear while a release is being fetched or applied.
-type schedulerGroup struct {
-	items []updaterScheduler
-}
-
-func (g *schedulerGroup) Run(ctx context.Context) error {
-	if g == nil || len(g.items) == 0 {
-		return nil
-	}
-	groupCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	results := make(chan error, len(g.items))
-	for _, item := range g.items {
-		if item == nil {
-			results <- nil
-			continue
-		}
-		go func(scheduler updaterScheduler) { results <- scheduler.Run(groupCtx) }(item)
-	}
-	var firstErr error
-	for range g.items {
-		err := <-results
-		if firstErr == nil && err != nil && !errors.Is(err, context.Canceled) {
-			firstErr = err
-		}
-		cancel()
-	}
-	return firstErr
+	return runServeLifecycle(ctx, assembly.server, assembly.watcher)
 }
 
 func parseServeOptions(args []string, getenv func(string) string) (serveOptions, error) {
@@ -212,10 +175,6 @@ func buildServeRuntime(options serveOptions) (*serveRuntime, error) {
 		if err != nil {
 			return nil, err
 		}
-		policies, err := upgrade.OpenPolicyStore(filepath.Join(state, "policy.json"))
-		if err != nil {
-			return nil, err
-		}
 		events, err := upgrade.OpenFileEventLog(filepath.Join(state, "events.jsonl"))
 		if err != nil {
 			return nil, err
@@ -226,20 +185,15 @@ func buildServeRuntime(options serveOptions) (*serveRuntime, error) {
 		}
 		preflight := upgrade.NewRegisteredPreflight(*registration)
 		workflow := &upgrade.WorkflowExecutor{
-			Store:       store,
-			Adapter:     adapter,
-			Gate:        gate,
-			PolicyStore: policies,
-			Events:      events,
-			Verify:      verify,
-			Preflight:   preflight,
-			Prepare:     upgrade.RegisteredCapacityPreflight(layout, registration.Deployment, upgrade.OSCommandRunner{}, registration.DatabaseBackup),
+			Store:     store,
+			Adapter:   adapter,
+			Gate:      gate,
+			Events:    events,
+			Verify:    verify,
+			Preflight: preflight,
+			Prepare:   upgrade.RegisteredCapacityPreflight(layout, registration.Deployment, upgrade.OSCommandRunner{}, registration.DatabaseBackup),
 			Cleanup: func(ctx context.Context, _ upgrade.TaskRecord) error {
-				policy, err := policies.Load()
-				if err != nil {
-					return fmt.Errorf("load retention policy: %w", err)
-				}
-				return upgrade.PruneCompletedArtifacts(ctx, store, layout, policy.RetainVersions)
+				return upgrade.PruneCompletedArtifacts(ctx, store, layout, upgrade.RetainedReleaseVersions)
 			},
 		}
 		target, err := registeredTarget(adapter)
@@ -262,11 +216,15 @@ func buildServeRuntime(options serveOptions) (*serveRuntime, error) {
 		if err := ensurePrivateDirectory(verifiedRoot, "verified updater staging", []uint32{uint32(os.Geteuid()), 0}); err != nil {
 			return nil, err
 		}
+		watchStore, err := upgrade.OpenUpdateWatchStore(filepath.Join(state, "update-check.json"))
+		if err != nil {
+			return nil, err
+		}
 		assembly.control = &upgrade.ControlService{
 			Store:         store,
 			ImportStore:   imports,
-			PolicyStore:   policies,
 			EventLog:      events,
+			UpdateWatch:   watchStore,
 			InboxRoot:     inbox,
 			StagingRoot:   verifiedRoot,
 			SequencePath:  filepath.Join(state, "sequences.json"),
@@ -275,34 +233,15 @@ func buildServeRuntime(options serveOptions) (*serveRuntime, error) {
 			ReleaseSource: registration.ReleaseSource,
 			Preflight:     preflight,
 		}
+		assembly.watcher = &upgrade.UpdateWatcher{
+			Service: assembly.control,
+			Store:   watchStore,
+			// The business process writes this switch when an administrator
+			// turns scheduled checks off; the helper only reads it.
+			PreferencePath: filepath.Join(state, upgrade.AutoCheckPreferenceFilename),
+		}
 		executor = workflow
 		assembly.workflow = workflow
-		assembly.scheduler = &upgrade.HelperScheduler{
-			Store:       store,
-			PolicyStore: policies,
-			Target:      target,
-			Preflight:   preflight,
-			Apply:       workflow.Apply,
-			Events:      events,
-		}
-		assembly.background = []updaterScheduler{&upgrade.AutoScheduler{
-			Store:       store,
-			PolicyStore: policies,
-			Target:      target,
-			Check:       assembly.control.CheckManifest,
-			CurrentVersionWithContext: func(ctx context.Context) (string, error) {
-				snapshot, err := preflight(ctx)
-				if err != nil {
-					return "", err
-				}
-				return snapshot.CurrentVersion, nil
-			},
-			Prepare: func(ctx context.Context, manifest upgrade.Manifest, artifact upgrade.Artifact) (upgrade.StagedArtifact, error) {
-				return assembly.control.PrepareOnlineRelease(ctx, manifest, artifact)
-			},
-			Preflight: preflight,
-			Events:    events,
-		}}
 	}
 	server := &upgrade.UnixServer{SocketPath: filepath.Clean(socketPath), Store: store, Executor: executor, Control: assembly.control, SocketGroupID: socketGroupID, SocketGroupSet: socketGroupID >= 0}
 	if registration != nil {
@@ -315,7 +254,6 @@ func buildServeRuntime(options serveOptions) (*serveRuntime, error) {
 	return assembly, nil
 }
 
-
 func containsUID(allowed []uint32, owner uint32) bool {
 	for _, candidate := range allowed {
 		if candidate == owner {
@@ -324,7 +262,6 @@ func containsUID(allowed []uint32, owner uint32) bool {
 	}
 	return false
 }
-
 
 func resolveServeState(statePath string, adapter upgrade.DeploymentAdapter) (string, error) {
 	configured := strings.TrimSpace(statePath)
@@ -392,24 +329,24 @@ func registeredTarget(adapter upgrade.DeploymentAdapter) (upgrade.Target, error)
 	return upgrade.Target{Deployment: deployment, OS: runtime.GOOS, Arch: runtime.GOARCH, UpdaterProtocol: upgrade.UpdaterProtocolVersion}, nil
 }
 
-func runServeLifecycle(ctx context.Context, server updaterServer, scheduler updaterScheduler) error {
+func runServeLifecycle(ctx context.Context, server updaterServer, watcher backgroundRunner) error {
 	if server == nil {
 		return errors.New("updater server is required")
 	}
-	if scheduler == nil {
+	if watcher == nil {
 		return server.Serve(ctx)
 	}
-	schedulerCtx, cancelScheduler := context.WithCancel(ctx)
-	schedulerDone := make(chan error, 1)
-	go func() { schedulerDone <- scheduler.Run(schedulerCtx) }()
+	watchCtx, cancelWatch := context.WithCancel(ctx)
+	watchDone := make(chan error, 1)
+	go func() { watchDone <- watcher.Run(watchCtx) }()
 	serveErr := server.Serve(ctx)
-	cancelScheduler()
-	schedulerErr := <-schedulerDone
+	cancelWatch()
+	watchErr := <-watchDone
 	if serveErr != nil {
 		return serveErr
 	}
-	if schedulerErr != nil && !errors.Is(schedulerErr, context.Canceled) {
-		return fmt.Errorf("automatic upgrade scheduler stopped: %w", schedulerErr)
+	if watchErr != nil && !errors.Is(watchErr, context.Canceled) {
+		return fmt.Errorf("periodic update check stopped: %w", watchErr)
 	}
 	return nil
 }

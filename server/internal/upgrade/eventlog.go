@@ -8,9 +8,29 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"uvplatform.com/uvp-gb28181/app/utils/logging"
 )
+
+// UpgradeEvent is one durable line of the upgrade event log.
+//
+// PolicyVersion only exists so that event logs written before automatic
+// upgrades were removed keep decoding. Nothing sets it today; do not repurpose
+// it, and do not delete it while historical log files may still be read.
+type UpgradeEvent struct {
+	Event         string    `json:"event"`
+	TaskID        string    `json:"task_id,omitempty"`
+	PolicyVersion uint64    `json:"policy_version,omitempty"`
+	ReleaseID     string    `json:"release_id,omitempty"`
+	BuildID       string    `json:"build_id,omitempty"`
+	Reason        string    `json:"reason,omitempty"`
+	At            time.Time `json:"at"`
+}
+
+type UpgradeEventSink interface {
+	Append(context.Context, UpgradeEvent) error
+}
 
 type FileEventLog struct {
 	path string

@@ -123,7 +123,6 @@ func WaitForNormalGate(ctx context.Context, interval time.Duration, start func()
 func NewBusinessRuntimeStarter(
 	ctx context.Context,
 	initializeJobs func() error,
-	startUpgrade func(context.Context),
 	startJobs func(),
 	runMaintenance func(context.Context),
 	startGB func(),
@@ -135,9 +134,6 @@ func NewBusinessRuntimeStarter(
 				if err := initializeJobs(); err != nil {
 					panic(fmt.Errorf("initialize business jobs: %w", err))
 				}
-			}
-			if startUpgrade != nil {
-				startUpgrade(ctx)
 			}
 			if startJobs != nil {
 				startJobs()

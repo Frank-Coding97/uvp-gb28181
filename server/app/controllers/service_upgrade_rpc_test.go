@@ -30,6 +30,11 @@ type recordingUpgradeRPC struct {
 	imported     *upgrade.ImportRecord
 	importErr    error
 	getImportErr error
+	// watch is returned by the status action so the notice handler can be
+	// exercised without a real helper.
+	watch       *upgrade.UpdateWatchState
+	onlineCheck bool
+	statusErr   error
 }
 
 func (f *recordingUpgradeRPC) Call(_ context.Context, _ string, request upgrade.ProtocolRequest) (upgrade.ProtocolResponse, error) {
@@ -37,9 +42,13 @@ func (f *recordingUpgradeRPC) Call(_ context.Context, _ string, request upgrade.
 	response := upgrade.ProtocolResponse{Protocol: upgrade.UpdaterProtocolVersion, OK: true}
 	switch request.Action {
 	case upgrade.ActionStatus:
-		response.Status = &upgrade.ControlStatus{Deployment: "standalone", Tasks: []upgrade.TaskRecord{f.task}, ActiveTask: &f.task}
-	case upgrade.ActionPolicyGet, upgrade.ActionPolicySet:
-		response.Policy = &upgrade.AutoUpgradePolicy{PolicyVersion: 2, Timezone: "Asia/Shanghai", WindowStart: "02:00", WindowEnd: "04:00", Channel: "stable"}
+		if f.statusErr != nil {
+			return upgrade.ProtocolResponse{}, f.statusErr
+		}
+		response.Status = &upgrade.ControlStatus{
+			Deployment: "standalone", Tasks: []upgrade.TaskRecord{f.task}, ActiveTask: &f.task,
+			OnlineCheck: f.onlineCheck, UpdateCheck: f.watch,
+		}
 	case upgrade.ActionCheck:
 		response.Check = &upgrade.ControlCheckResult{CurrentVersion: "1.1.0", HasUpdate: true, Artifact: upgrade.Artifact{Filename: "uvp.tar.gz"}}
 	case upgrade.ActionCreateTask, upgrade.ActionGetTask, upgrade.ActionCancel, upgrade.ActionApply, upgrade.ActionRollback:
@@ -293,7 +302,6 @@ func TestProductionUpgradeControllerRoutesStateOperationsToHelperRPC(t *testing.
 	controller := newServiceUpgradeController(serviceUpgradeOptions{VersionPath: versionPath, RPC: fixture})
 	require.False(t, controller.local)
 	require.Nil(t, controller.store)
-	require.Nil(t, controller.policyStore)
 	_, err := os.Stat(state)
 	require.ErrorIs(t, err, os.ErrNotExist)
 
@@ -322,11 +330,6 @@ func TestProductionUpgradeControllerRoutesStateOperationsToHelperRPC(t *testing.
 
 	ctx, _ := newContext(http.MethodGet, "/api/system/upgrade", nil, "")
 	controller.Status(ctx)
-	ctx, _ = newContext(http.MethodGet, "/api/system/upgrade/policy", nil, "")
-	controller.Policy(ctx)
-	policy := upgrade.AutoUpgradePolicy{Enabled: true, Timezone: "Asia/Shanghai", WindowStart: "02:00", WindowEnd: "04:00", Channel: "stable", AllowRestart: true}
-	ctx, _ = newContext(http.MethodPut, "/api/system/upgrade/policy", policy, "")
-	controller.UpdatePolicy(ctx)
 	ctx, _ = newContext(http.MethodPost, "/api/system/upgrade/check", nil, "")
 	controller.Check(ctx)
 	ctx, _ = newContext(http.MethodPost, "/api/system/upgrade/tasks", map[string]string{"idempotencyKey": "rpc-test", "targetDigest": strings.Repeat("c", 64)}, "")
@@ -346,8 +349,6 @@ func TestProductionUpgradeControllerRoutesStateOperationsToHelperRPC(t *testing.
 	}
 	require.Equal(t, []upgrade.Action{
 		upgrade.ActionStatus,
-		upgrade.ActionPolicyGet,
-		upgrade.ActionPolicySet,
 		upgrade.ActionCheck,
 		upgrade.ActionCreateTask,
 		upgrade.ActionGetTask,

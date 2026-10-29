@@ -11,7 +11,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -75,15 +74,5 @@ func TestBuildServeRuntimeWiresRegisteredPreflightAndScheduler(t *testing.T) {
 	}
 	if assembly.workflow == nil || assembly.workflow.Preflight == nil {
 		t.Fatal("registered workflow has no independent preflight")
-	}
-	scheduler, ok := assembly.scheduler.(*upgrade.HelperScheduler)
-	if !ok || scheduler == nil {
-		t.Fatalf("scheduler = %T, want *upgrade.HelperScheduler", assembly.scheduler)
-	}
-	if scheduler.Preflight == nil || scheduler.Apply == nil {
-		t.Fatal("helper scheduler is missing preflight or apply")
-	}
-	if scheduler.Target.Deployment != "systemd" || scheduler.Target.OS != runtime.GOOS || scheduler.Target.Arch != runtime.GOARCH || scheduler.Target.UpdaterProtocol != upgrade.UpdaterProtocolVersion {
-		t.Fatalf("scheduler target = %#v", scheduler.Target)
 	}
 }

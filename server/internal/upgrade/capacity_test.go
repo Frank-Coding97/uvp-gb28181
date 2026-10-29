@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func capacityArchive(t *testing.T, headers []*tar.Header) string {
@@ -131,40 +130,6 @@ func TestWorkflowCapacityFailureDoesNotStopOrChangeGate(t *testing.T) {
 	}
 }
 
-func TestWorkflowRechecksWindowAfterSlowPackageAndDatabasePreflight(t *testing.T) {
-	for _, slowStep := range []string{"package", "database"} {
-		t.Run(slowStep, func(t *testing.T) {
-			f := newHelperSchedulerFixture(t)
-			if err := f.store.MarkPhase(f.record.TaskID, PhaseStopping); err != nil {
-				t.Fatal(err)
-			}
-			f.record.Phase = PhaseStopping
-			now := f.scheduler.Now()
-			outside := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.UTC)
-			adapter := &fakeWorkflowAdapter{}
-			w := WorkflowExecutor{Store: f.store, Adapter: adapter, PolicyStore: f.policies, Now: func() time.Time { return now }}
-			w.Prepare = func(context.Context, TaskRecord) error {
-				if slowStep == "package" {
-					now = outside
-				}
-				return nil
-			}
-			w.Preflight = func(context.Context) (PreflightSnapshot, error) {
-				if slowStep == "database" {
-					now = outside
-				}
-				return *f.record.Preflight, nil
-			}
-			if err := w.Apply(context.Background(), f.record); err == nil {
-				t.Fatal("started outside maintenance window")
-			}
-			if len(adapter.steps) != 0 {
-				t.Fatalf("disrupted service: %v", adapter.steps)
-			}
-		})
-	}
-}
-
 func TestPackagePreflightBudgetsImplicitDirectories(t *testing.T) {
 	path := capacityArchive(t, []*tar.Header{{Name: "one/two/three/backend", Typeflag: tar.TypeReg, Size: 1}})
 	size, err := inspectPackage(context.Background(), path)
@@ -173,49 +138,6 @@ func TestPackagePreflightBudgetsImplicitDirectories(t *testing.T) {
 	}
 	if size < 5*capacityBlockSize {
 		t.Fatalf("implicit directories were not budgeted: %d", size)
-	}
-}
-
-func TestWorkflowWindowExpiryAfterGateRestoresNormalWithoutStopping(t *testing.T) {
-	f := newHelperSchedulerFixture(t)
-	if err := f.store.MarkPhase(f.record.TaskID, PhaseStopping); err != nil {
-		t.Fatal(err)
-	}
-	f.record.Phase = PhaseStopping
-	gate, err := OpenGateStore(filepath.Join(t.TempDir(), "gate.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	adapter := &fakeWorkflowAdapter{}
-	inside := f.scheduler.Now()
-	calls := 0
-	w := WorkflowExecutor{Store: f.store, Adapter: adapter, Gate: gate, PolicyStore: f.policies, Preflight: func(context.Context) (PreflightSnapshot, error) { return *f.record.Preflight, nil }}
-	w.Now = func() time.Time {
-		calls++
-		if calls > 1 {
-			return time.Date(inside.Year(), inside.Month(), inside.Day(), 12, 0, 0, 0, time.UTC)
-		}
-		return inside
-	}
-	if err := w.Apply(context.Background(), f.record); err == nil {
-		t.Fatal("started after gate crossed window")
-	}
-	if len(adapter.steps) > 0 {
-		t.Fatalf("service changed: %v", adapter.steps)
-	}
-	state, err := gate.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if state.Mode != GateNormal {
-		t.Fatalf("gate left closed: %#v", state)
-	}
-	r, err := f.store.Get(f.record.TaskID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.Phase != PhaseFailed {
-		t.Fatalf("unexpected failure phase %s", r.Phase)
 	}
 }
 

@@ -177,53 +177,19 @@ func TestControlCheckRejectsUnchangedAndDowngradeRelease(t *testing.T) {
 	}
 }
 
-func TestControlUpdatePolicyInvalidatesWaitingAutomaticTask(t *testing.T) {
-	fixture := newControlFixture(t)
-	policy := AutoUpgradePolicy{
-		Enabled: true, PolicyVersion: 1, Timezone: "UTC", WindowStart: "02:00", WindowEnd: "04:00",
-		Channel: "stable", AllowRestart: true, RetainVersions: 2,
-	}
-	require.NoError(t, fixture.policies.Save(policy))
-	task, err := fixture.store.Submit(TaskRequest{IdempotencyKey: "policy-request-1", Actor: "policy", TargetDigest: strings.Repeat("c", 64)})
-	require.NoError(t, err)
-	require.NoError(t, fixture.store.UpdateMetadata(task.TaskID, func(record *TaskRecord) error {
-		record.PolicyVersion = policy.PolicyVersion
-		return nil
-	}))
-	for _, phase := range []TaskPhase{PhaseVerifying, PhasePreparing, PhaseAwaitingConfirmation} {
-		require.NoError(t, fixture.store.MarkPhase(task.TaskID, phase))
-	}
-
-	policy.WindowStart = "03:00"
-	updated, err := fixture.service.UpdatePolicy(context.Background(), policy, "admin")
-
-	require.NoError(t, err)
-	require.Equal(t, uint64(2), updated.PolicyVersion)
-	cancelled, err := fixture.store.Get(task.TaskID)
-	require.NoError(t, err)
-	require.Equal(t, PhaseFailed, cancelled.Phase)
-	events, err := fixture.service.Events(context.Background(), 10)
-	require.NoError(t, err)
-	require.Len(t, events, 1)
-	require.Equal(t, "blocked", events[0].Event)
-}
-
 type controlFixture struct {
-	service  *ControlService
-	store    *TaskStore
-	policies *PolicyStore
-	private  ed25519.PrivateKey
-	inbox    string
-	staging  string
-	target   Target
+	service *ControlService
+	store   *TaskStore
+	private ed25519.PrivateKey
+	inbox   string
+	staging string
+	target  Target
 }
 
 func newControlFixture(t *testing.T) controlFixture {
 	t.Helper()
 	root := t.TempDir()
 	store, err := OpenTaskStore(filepath.Join(root, "state"))
-	require.NoError(t, err)
-	policies, err := OpenPolicyStore(filepath.Join(root, "state", "policy.json"))
 	require.NoError(t, err)
 	events, err := OpenFileEventLog(filepath.Join(root, "state", "events.jsonl"))
 	require.NoError(t, err)
@@ -239,7 +205,6 @@ func newControlFixture(t *testing.T) controlFixture {
 	require.NoError(t, os.MkdirAll(inbox, 0700))
 	service := &ControlService{
 		Store:       store,
-		PolicyStore: policies,
 		EventLog:    events,
 		InboxRoot:   inbox,
 		StagingRoot: staging,
@@ -249,13 +214,12 @@ func newControlFixture(t *testing.T) controlFixture {
 			return preflight, nil
 		},
 	}
-	return controlFixture{service: service, store: store, policies: policies, private: private, inbox: inbox, staging: staging, target: target}
+	return controlFixture{service: service, store: store, private: private, inbox: inbox, staging: staging, target: target}
 }
 
 func newControlServiceForFixture(fixture controlFixture) *ControlService {
 	return &ControlService{
 		Store:       fixture.store,
-		PolicyStore: fixture.policies,
 		EventLog:    fixture.service.EventLog,
 		InboxRoot:   fixture.inbox,
 		StagingRoot: fixture.staging,

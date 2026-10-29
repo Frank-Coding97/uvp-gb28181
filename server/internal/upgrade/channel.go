@@ -89,3 +89,14 @@ func FetchChannelRelease(ctx context.Context, client *http.Client, source string
 	}
 	return manifest, channel, nil
 }
+
+// safePolicyToken restricts channel identity fields to a conservative token
+// alphabet. It is shared by the signed channel pointer validation.
+func safePolicyToken(value string) bool {
+	for _, r := range value {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '.' && r != '-' && r != '_' {
+			return false
+		}
+	}
+	return value != ""
+}

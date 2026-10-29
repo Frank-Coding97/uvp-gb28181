@@ -235,12 +235,6 @@ func TestBusinessRuntimeStarterRunsEffectsOnlyOnce(t *testing.T) {
 	start := NewBusinessRuntimeStarter(
 		ctx,
 		func() error { mark("business-jobs"); return nil },
-		func(got context.Context) {
-			if got != ctx {
-				t.Error("upgrade scheduler received a different runtime context")
-			}
-			mark("upgrade-scheduler")
-		},
 		func() { mark("job-scheduler") },
 		func(got context.Context) {
 			if got != ctx {
@@ -261,10 +255,10 @@ func TestBusinessRuntimeStarterRunsEffectsOnlyOnce(t *testing.T) {
 	start()
 	mu.Lock()
 	defer mu.Unlock()
-	if len(events) != 5 {
+	if len(events) != 4 {
 		t.Fatalf("events = %#v", events)
 	}
-	if events[0] != "business-jobs" || events[1] != "upgrade-scheduler" || events[2] != "job-scheduler" {
+	if events[0] != "business-jobs" || events[1] != "job-scheduler" {
 		t.Fatalf("startup order = %#v", events)
 	}
 }

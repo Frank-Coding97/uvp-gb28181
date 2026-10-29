@@ -33,18 +33,17 @@ type packagePreparer interface {
 // WorkflowExecutor persists every boundary before moving to the next one.
 // It is safe to restart the helper and inspect the last durable phase.
 type WorkflowExecutor struct {
-	Store       *TaskStore
-	Adapter     DeploymentAdapter
-	Ready       func(context.Context, TaskRecord) error
-	Gate        *GateStore
-	PolicyStore *PolicyStore
-	Events      UpgradeEventSink
-	Now         func() time.Time
-	Verify      func(context.Context, TaskRecord) (TaskRecord, error)
-	Preflight   func(context.Context) (PreflightSnapshot, error)
-	Prepare     func(context.Context, TaskRecord) error
-	Cleanup     func(context.Context, TaskRecord) error
-	mu          sync.Mutex
+	Store     *TaskStore
+	Adapter   DeploymentAdapter
+	Ready     func(context.Context, TaskRecord) error
+	Gate      *GateStore
+	Events    UpgradeEventSink
+	Now       func() time.Time
+	Verify    func(context.Context, TaskRecord) (TaskRecord, error)
+	Preflight func(context.Context) (PreflightSnapshot, error)
+	Prepare   func(context.Context, TaskRecord) error
+	Cleanup   func(context.Context, TaskRecord) error
+	mu        sync.Mutex
 }
 
 func (w *WorkflowExecutor) Apply(ctx context.Context, record TaskRecord) error {
@@ -163,12 +162,7 @@ func (w *WorkflowExecutor) Apply(ctx context.Context, record TaskRecord) error {
 				}
 			}
 		}
-		if index == 0 && record.Actor == "policy" {
-			if err := w.authorizeAutomatic(ctx, record); err != nil {
-				return w.fail(ctx, record, disrupted, err)
-			}
-		}
-		if index == 0 && record.Actor != "policy" && (w.Verify != nil || w.Preflight != nil || record.Preflight != nil) {
+		if index == 0 && (w.Verify != nil || w.Preflight != nil || record.Preflight != nil) {
 			if err := w.recheckInstallation(ctx, record); err != nil {
 				return w.fail(ctx, record, disrupted, err)
 			}
@@ -176,16 +170,6 @@ func (w *WorkflowExecutor) Apply(ctx context.Context, record TaskRecord) error {
 		if index == 0 {
 			if err := w.saveGate(GateState{Mode: GateBlocked, TaskID: record.TaskID, BuildID: record.BuildID}); err != nil {
 				return w.fail(ctx, record, disrupted, fmt.Errorf("persist maintenance gate: %w", err))
-			}
-			if record.Actor == "policy" {
-				if err := w.authorizePolicy(record); err != nil {
-					if !disrupted {
-						if gateErr := w.saveGate(GateState{Mode: GateNormal}); gateErr != nil {
-							return w.requireRecovery(context.WithoutCancel(ctx), record, errors.Join(err, gateErr))
-						}
-					}
-					return w.fail(ctx, record, disrupted, err)
-				}
 			}
 			// Stop can partially succeed before returning an error or crashing.
 			disrupted = true
@@ -333,10 +317,7 @@ func (w *WorkflowExecutor) fail(ctx context.Context, record TaskRecord, disrupte
 	if !disrupted {
 		return errors.Join(cause, w.finish(ctx, record, PhaseFailed))
 	}
-	if record.Committed || (record.Actor == "policy" && (record.PolicySnapshot == nil || !record.PolicySnapshot.AutoRollback)) {
-		return w.requireRecovery(ctx, record, cause)
-	}
-	if record.Actor == "policy" && !record.Compatibility.AllowsAutomaticRollback() {
+	if record.Committed {
 		return w.requireRecovery(ctx, record, cause)
 	}
 	if err := w.prepareRollbackGate(record); err != nil {
@@ -388,37 +369,6 @@ func (w *WorkflowExecutor) finish(ctx context.Context, record TaskRecord, phase 
 	return w.emitOutcome(ctx, record)
 }
 
-func (w *WorkflowExecutor) authorizeAutomatic(ctx context.Context, record TaskRecord) error {
-	if w.PolicyStore == nil || record.PolicySnapshot == nil {
-		return errors.New("automatic approval is missing its persisted policy")
-	}
-	if err := w.recheckInstallation(ctx, record); err != nil {
-		return err
-	}
-	return w.authorizePolicy(record)
-}
-
-func (w *WorkflowExecutor) authorizePolicy(record TaskRecord) error {
-	policy, err := w.PolicyStore.Load()
-	if err != nil {
-		return fmt.Errorf("recheck automatic policy: %w", err)
-	}
-	now := time.Now()
-	if w.Now != nil {
-		now = w.Now()
-	}
-	if policy != *record.PolicySnapshot || record.PolicyVersion != policy.PolicyVersion || !policy.Enabled || !policy.AllowRestart || !policy.InWindow(now) {
-		return errors.New("automatic policy or maintenance authorization expired before stop")
-	}
-	if record.Preflight == nil || !policy.AllowsRelease(Manifest{Version: record.Version, Channel: policy.Channel}, record.Preflight.CurrentVersion) {
-		return errors.New("automatic task has no valid release preflight")
-	}
-	if err := record.Compatibility.AllowsAutomatic(*record.Preflight); err != nil {
-		return err
-	}
-	return nil
-}
-
 func (w *WorkflowExecutor) recheckInstallation(ctx context.Context, record TaskRecord) error {
 	if w.Preflight == nil || record.Preflight == nil {
 		return errors.New("stop requires independent installation preflight and approval snapshot")
@@ -429,9 +379,6 @@ func (w *WorkflowExecutor) recheckInstallation(ctx context.Context, record TaskR
 	}
 	if current != *record.Preflight {
 		return errors.New("installation state changed immediately before stop; new approval is required")
-	}
-	if record.Actor == "policy" {
-		return record.Compatibility.AllowsAutomatic(current)
 	}
 	return nil
 }
@@ -444,7 +391,7 @@ func (w *WorkflowExecutor) emitOutcome(ctx context.Context, record TaskRecord) e
 	if w.Now != nil {
 		now = w.Now()
 	}
-	if err := w.Events.Append(ctx, UpgradeEvent{Event: string(record.Phase), TaskID: record.TaskID, PolicyVersion: record.PolicyVersion, BuildID: record.BuildID, Reason: record.Error, At: now.UTC()}); err != nil {
+	if err := w.Events.Append(ctx, UpgradeEvent{Event: string(record.Phase), TaskID: record.TaskID, BuildID: record.BuildID, Reason: record.Error, At: now.UTC()}); err != nil {
 		return err
 	}
 	return w.Store.UpdateMetadata(record.TaskID, func(task *TaskRecord) error { task.OutcomeReported = record.Phase; return nil })

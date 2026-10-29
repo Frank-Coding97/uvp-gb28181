@@ -237,54 +237,59 @@ func (s *lifecycleServer) Serve(context.Context) error {
 	return nil
 }
 
-type lifecycleScheduler struct {
-	started  chan struct{}
-	canceled chan struct{}
-	release  chan struct{}
+type lifecycleWatcher struct {
+	started chan struct{}
+	stopped chan struct{}
 }
 
-func (s *lifecycleScheduler) Run(ctx context.Context) error {
-	close(s.started)
+func (w *lifecycleWatcher) Run(ctx context.Context) error {
+	close(w.started)
 	<-ctx.Done()
-	close(s.canceled)
-	<-s.release
+	close(w.stopped)
 	return ctx.Err()
 }
 
-func TestRunServeLifecycleCancelsAndWaitsForScheduler(t *testing.T) {
+func TestRunServeLifecycleStopsPeriodicCheckWithTheServer(t *testing.T) {
 	server := &lifecycleServer{started: make(chan struct{}), release: make(chan struct{})}
-	scheduler := &lifecycleScheduler{started: make(chan struct{}), canceled: make(chan struct{}), release: make(chan struct{})}
+	watcher := &lifecycleWatcher{started: make(chan struct{}), stopped: make(chan struct{})}
 	done := make(chan error, 1)
-	go func() { done <- runServeLifecycle(context.Background(), server, scheduler) }()
+	go func() { done <- runServeLifecycle(context.Background(), server, watcher) }()
 	select {
 	case <-server.started:
 	case <-time.After(time.Second):
 		t.Fatal("server did not start")
 	}
 	select {
-	case <-scheduler.started:
+	case <-watcher.started:
 	case <-time.After(time.Second):
-		t.Fatal("scheduler did not start")
+		t.Fatal("periodic update check did not start")
+	}
+	if err := runServeLifecycle(context.Background(), nil, nil); err == nil {
+		t.Fatal("nil server accepted")
 	}
 	close(server.release)
+	// The periodic check must be cancelled with the server: leaving it running
+	// would keep probing the release source after the helper exits.
 	select {
-	case <-scheduler.canceled:
+	case <-watcher.stopped:
 	case <-time.After(time.Second):
-		t.Fatal("scheduler was not canceled after server exit")
+		t.Fatal("periodic update check outlived the server")
 	}
-	select {
-	case err := <-done:
-		t.Fatalf("lifecycle returned before scheduler completed: %v", err)
-	case <-time.After(20 * time.Millisecond):
-	}
-	close(scheduler.release)
 	select {
 	case err := <-done:
 		if err != nil {
 			t.Fatal(err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("lifecycle did not wait for scheduler")
+		t.Fatal("lifecycle did not return after server exit")
+	}
+}
+
+func TestRunServeLifecycleServesWithoutPeriodicCheck(t *testing.T) {
+	server := &lifecycleServer{started: make(chan struct{}), release: make(chan struct{})}
+	close(server.release)
+	if err := runServeLifecycle(context.Background(), server, nil); err != nil {
+		t.Fatal(err)
 	}
 }
 

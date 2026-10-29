@@ -40,8 +40,6 @@ type ServiceUpgradeController struct {
 	runtimeIdentity func() (string, string)
 	sequencePath    string
 	sequenceMu      sync.Mutex
-	policyStore     *upgrade.PolicyStore
-	schedulerOnce   sync.Once
 	rpc             serviceUpgradeRPC
 	httpClient      *http.Client
 	local           bool
@@ -62,12 +60,12 @@ func NewServiceUpgradeController() *ServiceUpgradeController {
 	return newServiceUpgradeController(serviceUpgradeOptions{})
 }
 
-// CollectUpgradePreflight reads the current installation state using the same
-// path and database rules as the automatic scheduler. Privileged updater
-// helpers use it after the business process has stopped instead of trusting a
-// snapshot supplied with the task.
+// CollectUpgradePreflight reads the current installation state with the same
+// path and database rules the business process uses for manual approvals.
+// Privileged updater helpers use it after the business process has stopped
+// instead of trusting a snapshot supplied with the task.
 func CollectUpgradePreflight(ctx context.Context) (upgrade.PreflightSnapshot, error) {
-	return NewServiceUpgradeController().schedulerPreflight(ctx)
+	return NewServiceUpgradeController().installationPreflight(ctx)
 }
 
 func newServiceUpgradeController(options serviceUpgradeOptions) *ServiceUpgradeController {
@@ -88,17 +86,9 @@ func newServiceUpgradeController(options serviceUpgradeOptions) *ServiceUpgradeC
 	if rpc == nil {
 		rpc = serviceUpgradeRPCCall(defaultServiceUpgradeRPC)
 	}
-	var policyStore *upgrade.PolicyStore
-	if local {
-		// Tests and explicitly embedded callers may still use the old local
-		// implementation. The production constructor leaves helper-owned
-		// policy state entirely outside the business process.
-		policyStore = policyStoreForRoot(stateRoot)
-	}
 	return &ServiceUpgradeController{
 		store: options.Store, releaseSource: options.ReleaseSource, versionPath: versionPath, check: options.Check, preflight: options.Preflight, runtimeIdentity: runtimeIdentity,
 		sequencePath: filepath.Join(stateRoot, "sequences.json"),
-		policyStore:  policyStore,
 		rpc:          rpc,
 		httpClient:   options.HTTPClient,
 		local:        local,
@@ -126,15 +116,6 @@ func upgradeStateRoot(versionPath string) string {
 	return filepath.Join(os.TempDir(), "uvp-gb28181-updater-state")
 }
 
-func policyStoreForRoot(root string) *upgrade.PolicyStore {
-	path := filepath.Join(root, "policy.json")
-	store, err := upgrade.OpenPolicyStore(path)
-	if err != nil {
-		return nil
-	}
-	return store
-}
-
 func (c *ServiceUpgradeController) ensureStore() (*upgrade.TaskStore, error) {
 	c.storeMu.Lock()
 	defer c.storeMu.Unlock()
@@ -150,47 +131,7 @@ func (c *ServiceUpgradeController) ensureStore() (*upgrade.TaskStore, error) {
 	return store, nil
 }
 
-// StartAutoScheduler is retained for embedded test callers. Production
-// controllers leave policy polling to the privileged helper's
-// HelperScheduler, so the business process never opens helper-owned state.
-func (c *ServiceUpgradeController) StartAutoScheduler(ctx context.Context) {
-	if c == nil || !c.local {
-		return
-	}
-	if ctx == nil {
-		return
-	}
-	c.schedulerOnce.Do(func() {
-		store, err := c.ensureStore()
-		if err != nil {
-			return
-		}
-		checker := c.check
-		if checker == nil {
-			checker = c.configuredCheck()
-		}
-		if checker == nil || c.policyStore == nil {
-			return
-		}
-		events, eventErr := upgrade.OpenFileEventLog(filepath.Join(upgradeStateRoot(c.versionPath), "events.jsonl"))
-		if eventErr != nil {
-			return
-		}
-		scheduler := &upgrade.AutoScheduler{
-			Store:          store,
-			PolicyStore:    c.policyStore,
-			Target:         upgrade.Target{Deployment: c.deployment(), OS: runtime.GOOS, Arch: runtime.GOARCH, UpdaterProtocol: upgrade.UpdaterProtocolVersion},
-			Check:          checker,
-			CurrentVersion: c.currentVersion,
-			Prepare:        c.prepareSchedulerArtifact,
-			Preflight:      c.schedulerPreflight,
-			Events:         events,
-		}
-		go func() { _ = scheduler.Run(ctx) }()
-	})
-}
-
-func (c *ServiceUpgradeController) schedulerPreflight(ctx context.Context) (upgrade.PreflightSnapshot, error) {
+func (c *ServiceUpgradeController) installationPreflight(ctx context.Context) (upgrade.PreflightSnapshot, error) {
 	if ctx == nil {
 		return upgrade.PreflightSnapshot{}, errors.New("preflight context is required")
 	}
@@ -220,7 +161,7 @@ func (c *ServiceUpgradeController) collectPreflight(ctx context.Context) (upgrad
 	if c.preflight != nil {
 		return c.preflight(ctx)
 	}
-	return c.schedulerPreflight(ctx)
+	return c.installationPreflight(ctx)
 }
 
 func (c *ServiceUpgradeController) configurationDigest() (string, error) {
@@ -345,22 +286,6 @@ func (c *ServiceUpgradeController) migrationStateDigest(ctx context.Context) (st
 	return digest, err
 }
 
-func (c *ServiceUpgradeController) prepareSchedulerArtifact(ctx context.Context, manifest upgrade.Manifest, artifact upgrade.Artifact) (upgrade.StagedArtifact, error) {
-	if staged, err := c.findStagedArtifact(artifact.SHA256); err == nil && staged.Path != "" {
-		if verified, verifyErr := c.verifyTrustedStagedArtifact(staged, artifact.SHA256); verifyErr == nil && verified.ReleaseID == manifest.ReleaseID && verified.Version == manifest.Version && verified.BuildID == manifest.BuildID && verified.Deployment == artifact.Deployment && verified.OS == artifact.OS && verified.Arch == artifact.Arch && upgrade.CompatibilityEqual(verified.Compatibility, manifest.Compatibility) && bytes.Equal(verified.ManifestEnvelope, manifest.Envelope) {
-			return verified, nil
-		}
-	}
-	if err := c.downloadArtifact(ctx, manifest, artifact); err != nil {
-		return upgrade.StagedArtifact{}, err
-	}
-	staged, err := c.findStagedArtifact(artifact.SHA256)
-	if err != nil {
-		return upgrade.StagedArtifact{}, err
-	}
-	return c.verifyTrustedStagedArtifact(staged, artifact.SHA256)
-}
-
 func (c *ServiceUpgradeController) Status(ctx *gin.Context) {
 	if !c.local {
 		response, err := c.callUpgradeRPC(ctx.Request.Context(), upgrade.ProtocolRequest{Protocol: upgrade.UpdaterProtocolVersion, Action: upgrade.ActionStatus})
@@ -436,32 +361,6 @@ func (c *ServiceUpgradeController) currentVersionPayload() map[string]any {
 	return version
 }
 
-func (c *ServiceUpgradeController) Policy(ctx *gin.Context) {
-	if !c.local {
-		response, err := c.callUpgradeRPC(ctx.Request.Context(), upgrade.ProtocolRequest{Protocol: upgrade.UpdaterProtocolVersion, Action: upgrade.ActionPolicyGet})
-		if err != nil {
-			c.FailAndAbort(ctx, "升级助手不可用", err, http.StatusServiceUnavailable)
-			return
-		}
-		if !response.OK || response.Policy == nil {
-			c.FailAndAbort(ctx, "读取无人值守策略失败", upgradeRPCResponseError(response), http.StatusServiceUnavailable)
-			return
-		}
-		c.Success(ctx, response.Policy)
-		return
-	}
-	if c.policyStore == nil {
-		c.FailAndAbort(ctx, "无人值守策略不可用", errors.New("policy store is not configured"), http.StatusServiceUnavailable)
-		return
-	}
-	policy, err := c.policyStore.Load()
-	if err != nil {
-		c.FailAndAbort(ctx, "读取无人值守策略失败", err, http.StatusServiceUnavailable)
-		return
-	}
-	c.Success(ctx, policy)
-}
-
 // MigrationPlan is deliberately read-only: it reports the migration ledger
 // and embedded target set without running SQL or repairing unknown records.
 func (c *ServiceUpgradeController) MigrationPlan(ctx *gin.Context) {
@@ -497,101 +396,6 @@ func (c *ServiceUpgradeController) MigrationPlan(ctx *gin.Context) {
 	destructive := app.ConfigYml.GetStringSlice("upgrade.destructive_migrations")
 	plan := upgrade.BuildMigrationPlan(dialect, applied, available, destructive)
 	c.Success(ctx, plan)
-}
-
-func (c *ServiceUpgradeController) UpdatePolicy(ctx *gin.Context) {
-	var policy upgrade.AutoUpgradePolicy
-	if err := ctx.ShouldBindJSON(&policy); err != nil {
-		c.FailAndAbort(ctx, "无人值守策略参数无效", err, http.StatusBadRequest)
-		return
-	}
-	actor := "unknown"
-	if claims := c.GetClaims(ctx); claims != nil {
-		actor = claims.Username
-		if actor == "" {
-			actor = "user:" + fmtUint(claims.UserID)
-		}
-	}
-	if !c.local {
-		response, err := c.callUpgradeRPC(ctx.Request.Context(), upgrade.ProtocolRequest{Protocol: upgrade.UpdaterProtocolVersion, Action: upgrade.ActionPolicySet, Policy: &policy, Actor: actor})
-		if err != nil {
-			c.FailAndAbort(ctx, "升级助手不可用", err, http.StatusServiceUnavailable)
-			return
-		}
-		if !response.OK || response.Policy == nil {
-			c.FailAndAbort(ctx, "保存无人值守策略失败", upgradeRPCResponseError(response), http.StatusBadRequest)
-			return
-		}
-		c.SuccessWithMessage(ctx, "无人值守策略已更新", response.Policy)
-		return
-	}
-	if c.policyStore == nil {
-		c.FailAndAbort(ctx, "无人值守策略不可用", errors.New("policy store is not configured"), http.StatusServiceUnavailable)
-		return
-	}
-	current, err := c.policyStore.Load()
-	if err != nil {
-		c.FailAndAbort(ctx, "读取当前无人值守策略失败", err, http.StatusServiceUnavailable)
-		return
-	}
-	if policy.Deployment == "" {
-		policy.Deployment = c.deployment()
-	}
-	if policy.OS == "" {
-		policy.OS = runtime.GOOS
-	}
-	if policy.Arch == "" {
-		policy.Arch = runtime.GOARCH
-	}
-	if policy.RetainVersions == 0 {
-		policy.RetainVersions = current.RetainVersions
-		if policy.RetainVersions == 0 {
-			policy.RetainVersions = 2
-		}
-	}
-	policy.CreatedBy = actor
-	policy, err = c.policyStore.SaveNext(policy)
-	if err != nil {
-		c.FailAndAbort(ctx, "保存无人值守策略失败", err, http.StatusBadRequest)
-		return
-	}
-	c.cancelPendingAutomaticTasks(context.WithoutCancel(ctx.Request.Context()), policy.PolicyVersion)
-	c.SuccessWithMessage(ctx, "无人值守策略已更新", policy)
-}
-
-func (c *ServiceUpgradeController) cancelPendingAutomaticTasks(ctx context.Context, policyVersion uint64) {
-	store, err := c.ensureStore()
-	if err != nil {
-		return
-	}
-	records, err := store.List()
-	if err != nil {
-		return
-	}
-	events, err := upgrade.OpenFileEventLog(filepath.Join(upgradeStateRoot(c.versionPath), "events.jsonl"))
-	if err != nil {
-		events = nil
-	}
-	for _, record := range records {
-		if record.Actor != "policy" || record.PolicyVersion == policyVersion || !isPendingUpgradePhase(record.Phase) {
-			continue
-		}
-		if err := store.Cancel(record.TaskID); err != nil {
-			continue
-		}
-		if events != nil {
-			_ = events.Append(ctx, upgrade.UpgradeEvent{Event: "blocked", TaskID: record.TaskID, PolicyVersion: policyVersion, Reason: "policy changed before maintenance", At: time.Now().UTC()})
-		}
-	}
-}
-
-func isPendingUpgradePhase(phase upgrade.TaskPhase) bool {
-	switch phase {
-	case upgrade.PhaseFetching, upgrade.PhaseVerifying, upgrade.PhasePreparing, upgrade.PhaseAwaitingConfirmation:
-		return true
-	default:
-		return false
-	}
 }
 
 // Import receives an offline signed upgrade container. Production requests only

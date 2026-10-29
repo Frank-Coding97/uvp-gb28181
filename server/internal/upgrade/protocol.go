@@ -27,8 +27,6 @@ const (
 	ActionTaskList    Action = "task_list"
 	ActionEvents      Action = "events"
 	ActionPrepareTask Action = "prepare_task"
-	ActionPolicyGet   Action = "policy_get"
-	ActionPolicySet   Action = "policy_set"
 )
 
 const maxProtocolEventLimit = 100
@@ -66,7 +64,6 @@ type ProtocolRequest struct {
 	Confirmation bool                `json:"confirmation,omitempty"`
 	Prepare      *PrepareTaskRequest `json:"prepare,omitempty"`
 	Create       *CreateTaskRequest  `json:"create,omitempty"`
-	Policy       *AutoUpgradePolicy  `json:"policy,omitempty"`
 	Actor        string              `json:"actor,omitempty"`
 	EventLimit   int                 `json:"event_limit,omitempty"`
 	InboxToken   string              `json:"inbox_token,omitempty"`
@@ -79,7 +76,6 @@ type ProtocolResponse struct {
 	Task     *TaskRecord         `json:"task,omitempty"`
 	Tasks    []TaskRecord        `json:"tasks,omitempty"`
 	Events   []UpgradeEvent      `json:"events,omitempty"`
-	Policy   *AutoUpgradePolicy  `json:"policy,omitempty"`
 	Status   *ControlStatus      `json:"status,omitempty"`
 	Check    *ControlCheckResult `json:"check,omitempty"`
 	Staged   *StagedArtifact     `json:"staged,omitempty"`
@@ -91,12 +87,12 @@ func (r ProtocolRequest) Validate() error {
 		return fmt.Errorf("unsupported updater protocol %d", r.Protocol)
 	}
 	switch r.Action {
-	case ActionStatus, ActionCheck, ActionTaskList, ActionPolicyGet:
+	case ActionStatus, ActionCheck, ActionTaskList:
 		if !r.hasOnlyZeroOptionalFields() {
 			return errors.New("read request contains unexpected fields")
 		}
 	case ActionPrepare:
-		if !validTaskID(r.TaskID) || r.ImportID != "" || !validDigest(r.TargetDigest) || r.Confirmation || r.Prepare != nil || r.Create != nil || r.Policy != nil || r.Actor != "" || r.EventLimit != 0 || r.InboxToken != "" {
+		if !validTaskID(r.TaskID) || r.ImportID != "" || !validDigest(r.TargetDigest) || r.Confirmation || r.Prepare != nil || r.Create != nil || r.Actor != "" || r.EventLimit != 0 || r.InboxToken != "" {
 			return errors.New("prepare request is incomplete")
 		}
 	case ActionApply:
@@ -104,43 +100,39 @@ func (r ProtocolRequest) Validate() error {
 		// clients can still confirm a persisted task by ID. When supplied it
 		// must be a complete SHA-256 digest; the daemon compares it with the
 		// durable task before crossing the stopping boundary.
-		if !validTaskID(r.TaskID) || r.ImportID != "" || !r.Confirmation || (r.TargetDigest != "" && !validDigest(r.TargetDigest)) || r.Prepare != nil || r.Create != nil || r.Policy != nil || r.Actor != "" || r.EventLimit != 0 || r.InboxToken != "" {
+		if !validTaskID(r.TaskID) || r.ImportID != "" || !r.Confirmation || (r.TargetDigest != "" && !validDigest(r.TargetDigest)) || r.Prepare != nil || r.Create != nil || r.Actor != "" || r.EventLimit != 0 || r.InboxToken != "" {
 			return errors.New("apply request requires confirmation, task ID and a valid optional target digest")
 		}
 	case ActionCancel, ActionRollback:
-		if !validTaskID(r.TaskID) || r.ImportID != "" || r.TargetDigest != "" || r.Confirmation || r.Prepare != nil || r.Create != nil || r.Policy != nil || r.Actor != "" || r.EventLimit != 0 || r.InboxToken != "" {
+		if !validTaskID(r.TaskID) || r.ImportID != "" || r.TargetDigest != "" || r.Confirmation || r.Prepare != nil || r.Create != nil || r.Actor != "" || r.EventLimit != 0 || r.InboxToken != "" {
 			return errors.New("task action contains invalid fields")
 		}
 	case ActionEvents:
-		if r.TaskID != "" || r.ImportID != "" || r.TargetDigest != "" || r.Confirmation || r.Prepare != nil || r.Create != nil || r.Policy != nil || r.Actor != "" || r.EventLimit < 0 || r.EventLimit > maxProtocolEventLimit || r.InboxToken != "" {
+		if r.TaskID != "" || r.ImportID != "" || r.TargetDigest != "" || r.Confirmation || r.Prepare != nil || r.Create != nil || r.Actor != "" || r.EventLimit < 0 || r.EventLimit > maxProtocolEventLimit || r.InboxToken != "" {
 			return errors.New("events request contains invalid fields")
 		}
 	case ActionImport:
-		if r.TaskID != "" || r.ImportID != "" || r.TargetDigest != "" || r.Confirmation || r.Prepare != nil || r.Create != nil || r.Policy != nil || r.Actor != "" || r.EventLimit != 0 || !validInboxToken(r.InboxToken) {
+		if r.TaskID != "" || r.ImportID != "" || r.TargetDigest != "" || r.Confirmation || r.Prepare != nil || r.Create != nil || r.Actor != "" || r.EventLimit != 0 || !validInboxToken(r.InboxToken) {
 			return errors.New("import request is incomplete")
 		}
 	case ActionGetImport:
-		if !validImportID(r.ImportID) || r.TaskID != "" || r.TargetDigest != "" || r.Confirmation || r.Prepare != nil || r.Create != nil || r.Policy != nil || r.Actor != "" || r.EventLimit != 0 || r.InboxToken != "" {
+		if !validImportID(r.ImportID) || r.TaskID != "" || r.TargetDigest != "" || r.Confirmation || r.Prepare != nil || r.Create != nil || r.Actor != "" || r.EventLimit != 0 || r.InboxToken != "" {
 			return errors.New("get_import request is incomplete")
 		}
 	case ActionCreateTask:
-		if r.TaskID != "" || r.ImportID != "" || r.TargetDigest != "" || r.Confirmation || r.Prepare != nil || r.Policy != nil || r.Actor != "" || r.EventLimit != 0 || r.InboxToken != "" || r.Create == nil || r.Create.validate() != nil {
+		if r.TaskID != "" || r.ImportID != "" || r.TargetDigest != "" || r.Confirmation || r.Prepare != nil || r.Actor != "" || r.EventLimit != 0 || r.InboxToken != "" || r.Create == nil || r.Create.validate() != nil {
 			return errors.New("create_task request is incomplete")
 		}
 	case ActionGetTask:
-		if !validTaskID(r.TaskID) || r.ImportID != "" || r.TargetDigest != "" || r.Confirmation || r.Prepare != nil || r.Create != nil || r.Policy != nil || r.Actor != "" || r.EventLimit != 0 || r.InboxToken != "" {
+		if !validTaskID(r.TaskID) || r.ImportID != "" || r.TargetDigest != "" || r.Confirmation || r.Prepare != nil || r.Create != nil || r.Actor != "" || r.EventLimit != 0 || r.InboxToken != "" {
 			return errors.New("get_task request is incomplete")
 		}
 	case ActionPrepareTask:
-		if r.TaskID != "" || r.ImportID != "" || r.TargetDigest != "" || r.Confirmation || r.Create != nil || r.Policy != nil || r.Actor != "" || r.EventLimit != 0 || r.InboxToken != "" {
+		if r.TaskID != "" || r.ImportID != "" || r.TargetDigest != "" || r.Confirmation || r.Create != nil || r.Actor != "" || r.EventLimit != 0 || r.InboxToken != "" {
 			return errors.New("prepare_task request is incomplete")
 		}
 		if err := r.Prepare.validateWire(); err != nil {
 			return errors.New("prepare_task request is incomplete")
-		}
-	case ActionPolicySet:
-		if r.TaskID != "" || r.ImportID != "" || r.TargetDigest != "" || r.Confirmation || r.Prepare != nil || r.Create != nil || r.EventLimit != 0 || r.Policy == nil || !validProtocolText(r.Actor, 128) || r.InboxToken != "" {
-			return errors.New("policy_set request is incomplete")
 		}
 	default:
 		return fmt.Errorf("unsupported updater action %q", r.Action)
@@ -149,7 +141,7 @@ func (r ProtocolRequest) Validate() error {
 }
 
 func (r ProtocolRequest) hasOnlyZeroOptionalFields() bool {
-	return r.TaskID == "" && r.ImportID == "" && r.TargetDigest == "" && !r.Confirmation && r.Prepare == nil && r.Create == nil && r.Policy == nil && r.Actor == "" && r.EventLimit == 0 && r.InboxToken == ""
+	return r.TaskID == "" && r.ImportID == "" && r.TargetDigest == "" && !r.Confirmation && r.Prepare == nil && r.Create == nil && r.Actor == "" && r.EventLimit == 0 && r.InboxToken == ""
 }
 
 func (r *PrepareTaskRequest) validate() error {

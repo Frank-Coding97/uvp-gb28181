@@ -34,8 +34,6 @@ type UpdaterControl interface {
 	ListTasks(context.Context) ([]TaskRecord, error)
 	RecentEvents(context.Context, int) ([]UpgradeEvent, error)
 	PrepareTask(context.Context, PrepareTaskRequest) (TaskRecord, error)
-	LoadPolicy(context.Context) (AutoUpgradePolicy, error)
-	SavePolicy(context.Context, AutoUpgradePolicy, string) (AutoUpgradePolicy, error)
 	Status(context.Context) (ControlStatus, error)
 	Check(context.Context) (ControlCheckResult, error)
 	Import(context.Context, string) (StagedArtifact, error)
@@ -395,32 +393,6 @@ func (s *UnixServer) dispatch(ctx context.Context, request ProtocolRequest) Prot
 		}
 		response.OK, response.Task = true, &record
 		return response
-	case ActionPolicyGet:
-		control, err := s.control()
-		if err != nil {
-			response.Error = err.Error()
-			return response
-		}
-		policy, err := control.LoadPolicy(ctx)
-		if err != nil {
-			response.Error = err.Error()
-			return response
-		}
-		response.OK, response.Policy = true, &policy
-		return response
-	case ActionPolicySet:
-		control, err := s.control()
-		if err != nil {
-			response.Error = err.Error()
-			return response
-		}
-		policy, err := control.SavePolicy(ctx, *request.Policy, request.Actor)
-		if err != nil {
-			response.Error = err.Error()
-			return response
-		}
-		response.OK, response.Policy = true, &policy
-		return response
 	case ActionApply:
 		if !request.Confirmation {
 			response.Error = "apply request requires confirmation"
@@ -740,7 +712,7 @@ func (s *UnixServer) emitRecoveryOutcome(record TaskRecord, reason string) {
 	if s.Events == nil || record.OutcomeReported == PhaseRecoveryRequired {
 		return
 	}
-	if err := s.Events.Append(context.Background(), UpgradeEvent{Event: "recovery_required", TaskID: record.TaskID, PolicyVersion: record.PolicyVersion, BuildID: record.BuildID, Reason: reason, At: time.Now().UTC()}); err != nil {
+	if err := s.Events.Append(context.Background(), UpgradeEvent{Event: "recovery_required", TaskID: record.TaskID, BuildID: record.BuildID, Reason: reason, At: time.Now().UTC()}); err != nil {
 		_ = s.Store.UpdateMetadata(record.TaskID, func(task *TaskRecord) error {
 			if !strings.Contains(task.Error, err.Error()) {
 				task.Error += "; recovery event: " + err.Error()

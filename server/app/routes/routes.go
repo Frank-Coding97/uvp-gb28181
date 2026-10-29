@@ -43,18 +43,6 @@ var serviceUpgradeControllers = controllers.NewServiceUpgradeController()   // �
 
 var httpsManagementControllers = controllers.NewHTTPSManagementController()
 
-var startAutoScheduler = func(ctx context.Context) {
-	serviceUpgradeControllers.StartAutoScheduler(ctx)
-}
-
-// StartAutoScheduler starts the policy-driven upgrade checker after the
-// business runtime has been admitted. Route construction is intentionally
-// side-effect free because candidate validation builds routes before the
-// updater clears its gate.
-func StartAutoScheduler(ctx context.Context) {
-	startAutoScheduler(ctx)
-}
-
 // InitRoutes 初始化路由
 func InitRoutes(engine *gin.Engine) *openapiauth.Gateway {
 	engine.GET(upgrade.RuntimeIdentityPath, serviceUpgradeControllers.UpgradeReadiness)
@@ -150,9 +138,11 @@ func InitRoutes(engine *gin.Engine) *openapiauth.Gateway {
 			serviceUpgrade := protected.Group("/system/upgrade")
 			{
 				serviceUpgrade.GET("/status", serviceUpgradeControllers.Status)
-				serviceUpgrade.GET("/policy", serviceUpgradeControllers.Policy)
+				serviceUpgrade.GET("/notice", serviceUpgradeControllers.Notice)
+				serviceUpgrade.POST("/notice/ignore", serviceUpgradeControllers.IgnoreNotice)
+				serviceUpgrade.DELETE("/notice/ignore", serviceUpgradeControllers.ClearIgnoredNotice)
+				serviceUpgrade.POST("/notice/auto-check", serviceUpgradeControllers.SetAutoCheck)
 				serviceUpgrade.GET("/migration-plan", serviceUpgradeControllers.MigrationPlan)
-				serviceUpgrade.PUT("/policy", serviceUpgradeControllers.UpdatePolicy)
 				serviceUpgrade.POST("/check", serviceUpgradeControllers.Check)
 				serviceUpgrade.POST("/import", serviceUpgradeControllers.Import)
 				serviceUpgrade.GET("/import/:upload_id", serviceUpgradeControllers.GetImport)

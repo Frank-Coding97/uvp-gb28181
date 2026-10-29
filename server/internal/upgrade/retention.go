@@ -11,6 +11,11 @@ import (
 	"time"
 )
 
+// RetainedReleaseVersions is how many completed releases stay on disk after an
+// upgrade commits. It used to come from the automatic upgrade policy; with that
+// feature removed the value is fixed at the previous policy default.
+const RetainedReleaseVersions = 2
+
 // PruneCompletedArtifacts removes only helper-generated files belonging to
 // completed tasks. Callers serialize it with the workflow lock. Current,
 // retained rollback, failed and recovery-required tasks are always protected.

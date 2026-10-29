@@ -194,7 +194,6 @@ func runApplication() (err error) {
 		return bootstrap.InitializeBusinessJobs()
 	}
 	startBusinessRuntime := upgrade.NewBusinessRuntimeStarter(maintenanceContext, initializeBusinessJobs,
-		routes.StartAutoScheduler,
 		app.JobScheduler.Start,
 		func(ctx context.Context) {
 			defer finishMaintenance()
