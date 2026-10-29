@@ -71,6 +71,13 @@ cp "$DEPLOY_DIR/docker"/*.Dockerfile "$DEPLOY_DIR/docker"/*.sh "$PKG/docker/"
 cp "$DEPLOY_DIR/nginx/nginx.conf.template" "$PKG/docker/nginx.conf.template"
 cp "$REPO_ROOT/server/version.json" "$PKG/version.json"
 
+# ⛔⛔ SQLite 建库脚本必须进包，且路径与绿色包**完全一致**（resource/baseline/baseline.sql）：
+#   install.sh 靠它在首次安装时建库，缺了直接 fail「找不到 baseline.sql」。
+#   这条曾经漏过 —— 包能打出来、能解压、能生成配置，一路走到建库才炸，
+#   而报错只提"找不到"，看不出是打包脚本根本没拷。
+mkdir -p "$PKG/resource/baseline"
+cp "$REPO_ROOT/server/resource/database/sqlitebaseline/baseline.sql" "$PKG/resource/baseline/baseline.sql"
+
 # 镜像身份：升级时要用它比对 config id（离线 load 后没有 RepoDigest 可比对）
 [ -f "$IMAGES_DIR/image-identity.json" ] && cp "$IMAGES_DIR/image-identity.json" "$PKG/image-identity.json"
 

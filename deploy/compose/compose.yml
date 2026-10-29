@@ -86,6 +86,10 @@ services:
       UVP_ZLM_PORT_BASE: ${UVP_ZLM_HTTP_PORT:-51004}
       UVP_BACKEND_PORT: ${UVP_BACKEND_PORT:-51002}
       UVP_ZLM_MEDIA_SERVER_ID: ${UVP_ZLM_MEDIA_SERVER_ID:-uvp-media-server-0001}
+      # ⛔⛔ 必须与后端 config.yml 的 gb28181.zlm.secret 完全一致（即使都在 127.0.0.1 上）：
+      #   不一致时后端调 ZLM API 一律 401，表现是「节点在线但点播/回放全失败」。
+      #   不给默认值 —— 缺了就让 compose 解析阶段直接报错，别让它悄悄跑起来。
+      UVP_ZLM_SECRET: ${UVP_ZLM_SECRET:?UVP_ZLM_SECRET 必填（须与后端 config.yml 的 zlm.secret 一致）}
     volumes:
       # ⛔ 录像/截图/HLS 都落在 ZLM 的 www 下（config.ini 里是相对路径 ./www），
       #    必须挂出来，否则容器一重建录像全没。
@@ -100,7 +104,13 @@ services:
         max-size: "10m"
         max-file: "8"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf -o /dev/null http://127.0.0.1:${UVP_ZLM_HTTP_PORT:-51004}/"]
+      # ⛔⛔ 不能探根路径 `/`：entrypoint 把 http.dirMenu 强制设成 0（不关的话 ZLM 会把
+      #     录像/截图/HLS 的落盘目录整个列成网页给同网段任何人下载），
+      #     关掉之后 `/` 返回 **404** ⇒ `curl -sf` 失败 ⇒ 容器永远 unhealthy
+      #     ⇒ 依赖它的 backend 起不来，报 "dependency failed to start"。
+      #     这个坑只在真跑起来时暴露：进程本身完全正常，端口全在监听。
+      # ⇒ 探测一个真正返回 200 的 API，顺便把 secret 也验证进去（错 secret 会返回 401）。
+      test: ["CMD-SHELL", "curl -sf -o /dev/null 'http://127.0.0.1:${UVP_ZLM_HTTP_PORT:-51004}/index/api/getServerConfig?secret=${UVP_ZLM_SECRET}'"]
       interval: 10s
       timeout: 3s
       retries: 12

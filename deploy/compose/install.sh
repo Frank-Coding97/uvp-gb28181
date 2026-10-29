@@ -116,6 +116,47 @@ find_tool() {
   return 1
 }
 
+# detect_lan_ip 取本机**对外物理网卡**的 IPv4。
+# 这个地址有三个用途：证书 SAN、安装完成时打印的访问地址、扫码配网基址，
+# 取错了就是「浏览器说证书不匹配」或「照给的地址打不开」。
+#
+# ⛔⛔ 不要用 `hostname -I | awk '{print $1}'`：它把 docker0(172.17.x) / virbr0
+#   排在**最前面**，而容器版宿主机**必定装了 Docker** ⇒ 几乎必然踩到这个坑。
+# ⭐ 首选 `ip route get 1.1.1.1`：内核回答「去这个地址走哪张网卡」，
+#   虚拟网桥没有默认路由，天然被排除。
+#   ⚠️ 但装了 VPN/隧道时默认路由会落到 tun/wg 上，所以还要再看一眼接口名，
+#      是虚拟的就丢弃、改走枚举。
+# 兜底：枚举 scope global 地址并按接口名排除虚拟设备；再不行用 hostname -I 挑内网段。
+# 全都取不到返回空串，调用方据此降级成 127.0.0.1，不编地址。
+# ⛔ 这段与 deploy/standalone/uvp-gb28181-ctl.sh 的 detect_lan_ip 是同一套判据，
+#    改一边要同步另一边，否则两种形态在同一台机器上会给出不同的访问地址。
+detect_lan_ip() {
+  local ip="" dev="" line
+  if command -v ip >/dev/null 2>&1; then
+    line="$(ip route get 1.1.1.1 2>/dev/null | head -1 || true)"
+    dev="$(printf '%s' "$line" | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
+    ip="$(printf '%s' "$line"  | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')"
+    case "$dev" in
+      docker*|br-*|virbr*|veth*|tun*|tap*|zt*|wg*|kube*|flannel*|dummy*) ip="" ;;
+    esac
+    if [ -z "$ip" ]; then
+      ip="$(ip -4 -o addr show scope global 2>/dev/null \
+            | awk '{print $2, $4}' \
+            | awk '$1 !~ /^(docker|br-|virbr|veth|tun|tap|zt|wg|kube|flannel|dummy|lo)/ {print $2; exit}' \
+            | cut -d/ -f1 || true)"
+    fi
+  fi
+  if [ -z "$ip" ] && command -v hostname >/dev/null 2>&1; then
+    ip="$(hostname -I 2>/dev/null | tr ' ' '\n' \
+          | awk '/^192\.168\./ || /^10\./ {print; exit}' || true)"
+    if [ -z "$ip" ]; then
+      ip="$(hostname -I 2>/dev/null | tr ' ' '\n' \
+            | awk '/^[0-9]+\.[0-9]/ && !/^127\./ {print; exit}' || true)"
+    fi
+  fi
+  printf '%s' "$ip"
+}
+
 # ================================================================ 预检 ====
 log "预检运行环境"
 
@@ -300,6 +341,13 @@ chmod 0755 "$ROOT/data/uploads"
 chmod 0700 "$ROOT/data/process-authority" "$ROOT/data/updater-state"
 
 # ============================================================ 配置文件 ====
+# ZLM API secret：**固定值，不随机**。
+# ⛔ 它会被 ZLM 持久化进容器里的 config.ini，随机生成后再改就得两边同时改，
+#    漏一边就是「节点在线但点播全失败」。这里与绿色包用同一个值，
+#    跨形态迁移时不必再动 ZLM 侧配置。
+# ⚠️ 它同时是 hook 回调 URL 里 cap 参数的派生输入（zlm.secret + mediaServerId），
+#    所以 change 它等于让所有既有 hook 失效 —— 除非有明确理由，不要改。
+ZLM_SECRET="${UVP_ZLM_SECRET:-uvp-9f3c7a1e5d84b206c1a9e4f7b2d6c805}"
 # ⛔ config.yml 由**仓库里那份 make-config.py**生成，不在本脚本里手搓：
 #    绿色包与容器版共用同一个生成器 ⇒ 两边的配置项永远不会分叉。
 MAKE_CONFIG=""
@@ -327,7 +375,7 @@ fi
   --redis-port "$REDIS_PORT" \
   --db-path "./data/uvp.db" \
   --log-path "./resource/logs/uvp-gb28181.log" \
-  --zlm-secret "uvp-9f3c7a1e5d84b206c1a9e4f7b2d6c805" \
+  --zlm-secret "$ZLM_SECRET" \
   --zlm-media-server-id "uvp-media-server-0001" \
   --zlm-api-port "$ZLM_HTTP_PORT" \
   --hook-port "$BACKEND_PORT" \
@@ -340,6 +388,20 @@ chmod 0640 "$ROOT/config/config.yml"
 #    只写 CN=<IP> 的话用 IP 访问照样 ERR_CERT_COMMON_NAME_INVALID。
 log "生成自签证书（含本机 IP 的 SAN）"
 TLS_DIR="$ROOT/config/tls"
+# ⛔⛔ QR_HOST 必须在这里落地。它有三个下游用途：证书 CN/SAN、安装完成提示里的
+#   访问地址、以及扫码配网的基址。原先这个变量**从来没被赋值**，
+#   在 set -u 下装到这一步直接 `QR_HOST: unbound variable` 中断 ——
+#   而报错位置指向 openssl 调用行，现场完全看不出「是变量没定义」。
+#   取不到 IP 时降级成 127.0.0.1：证书只对本机有效，但安装能走完，
+#   总比装到一半失败强（提示里也会如实显示 127.0.0.1，不编造地址）。
+QR_HOST="$(detect_lan_ip)"
+if [ -z "$QR_HOST" ]; then
+  QR_HOST="127.0.0.1"
+  printf '[uvp-install][WARN] 探测不到本机对外 IP，证书与访问地址按 127.0.0.1 生成。\n' >&2
+  printf '  局域网的其它电脑要访问时，请手工用 --port-base 之外的证书配置（见手册「正式证书」一节）。\n' >&2
+else
+  log "  本机 IP ${QR_HOST}（证书 SAN 与访问地址都用它）"
+fi
 "$OPENSSL_BIN" req -x509 -newkey rsa:2048 -nodes -days 3650 \
   -subj "/CN=${QR_HOST}" \
   -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:${QR_HOST}" \
@@ -540,6 +602,10 @@ UVP_SIP_PORT=${SIP_PORT}
 # ⛔ 节点标识必须与 config.yml 的 gb28181.zlm.mediaserverid 一致：
 #    它同时是 hook URL 的 node 参数和 cap 的派生输入（见 zlm-entrypoint.sh）。
 UVP_ZLM_MEDIA_SERVER_ID=uvp-media-server-0001
+# ⛔⛔ 必须与 config.yml 里 gb28181.zlm.secret 逐字一致 —— 上面 make-config.py
+#    那行传的就是这个值，两处是同一份契约。不一致时后端调 ZLM API 全部 401，
+#    平台里表现为「媒体节点在线、点播回放全失败」，而容器状态看起来完全正常。
+UVP_ZLM_SECRET=${ZLM_SECRET}
 UVP_UPDATER_SOCKET_DIR=/run/uvp-updater
 UVP_REDIS_MAXMEMORY=512mb
 # ⛔ 密钥写进 .env：升级时不要覆盖这个文件里的这两行，换了就等于把所有

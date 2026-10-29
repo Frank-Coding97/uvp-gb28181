@@ -93,6 +93,31 @@ sec=="rtp_proxy" && /^port=/             { print "port=" p(10);          next }
 ' "$RUN_DIR/config.ini" > "$RUN_DIR/config.ini.tmp"
 mv "$RUN_DIR/config.ini.tmp" "$RUN_DIR/config.ini"
 
+# ---- API secret ----
+# ⛔⛔ 必须与后端 config.yml 的 gb28181.zlm.secret **逐字一致**，而且必须在 ZLM 启动**之前**写死。
+#
+#   不写会怎样：模板 config.ini 里是 ZLM 的出厂默认值
+#   035c73f7-bb6b-4889-a715-d9eb2d1925cc，ZLM 一启动就认出"这是默认值"，于是
+#   **自己随机生成一个新的**并写回文件（日志里只有一行
+#   `The api.secret is invalid, modified it to: xxx`，语气还很轻）。
+#   后果是后端拿着 config.yml 里的 secret 调 ZLM API 全部 401，
+#   平台里表现为「媒体节点显示在线、但点播/回放/云台全失败」，
+#   而容器状态、健康检查、日志看起来都正常 —— 极难归因。
+#   ⚠️ 而且它是**幂等**的：一旦 ZLM 把随机值落了盘，改环境变量重启也不会恢复，
+#      必须同时改 config.ini。所以每次启动都无条件改写。
+if [ -n "${UVP_ZLM_SECRET:-}" ]; then
+  awk -v want="$UVP_ZLM_SECRET" '
+    /^\[/ { sec=$0; gsub(/[][ \t]/, "", sec); print; next }
+    sec=="api" && /^secret=/ { print "secret=" want; next }
+    { print }
+  ' "$RUN_DIR/config.ini" > "$RUN_DIR/config.ini.tmp"
+  mv "$RUN_DIR/config.ini.tmp" "$RUN_DIR/config.ini"
+  echo "[uvp-zlm] api.secret 已对齐后端配置" >&2
+else
+  # 不静默放过：缺了就是上面那一整串故障，宁可打一条明显的警告
+  echo "[uvp-zlm][WARN] 未提供 UVP_ZLM_SECRET，ZLM 会用出厂 secret 或随机生成，平台将无法调用其 API" >&2
+fi
+
 # ---- hook 回调地址里的后端端口 ----
 # ⛔ 只改「本平台的 managed hook 端点」（/index/hook/ 这个路径前缀）：
 #   cap 与 node 参数**一个都不能动** —— cap 是由 zlm.secret + mediaServerId
