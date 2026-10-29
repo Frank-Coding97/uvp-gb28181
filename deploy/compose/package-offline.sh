@@ -122,10 +122,13 @@ log "打包 $ARCHIVE"
 # ⛔ macOS 自带的是 bsdtar，默认会把每个文件的 `com.apple.provenance` 等 xattr
 #   写成 LIBARCHIVE 扩展头；Linux 的 GNU tar 解包时会对每个条目刷一行
 #      `tar: Ignoring unknown extended header keyword 'LIBARCHIVE.xattr...'`
-#    客户看到一屏警告会以为包坏了。加 --no-mac-metadata 后两个平台产物一致。
+#    客户看到一屏警告会以为包坏了。两个平台产物要一致必须**同时**给两个开关：
+#    ⛔ --no-mac-metadata 只管 AppleDouble（`._*` 与 mac_metadata pax 属性），
+#       管不到 xattr —— `LIBARCHIVE.xattr.*` 必须靠 --no-xattrs 才不写。
+#       只加前者时包里仍有 26 条 provenance 扩展头，Linux 解包照样刷屏（实测）。
 TAR_FLAGS=()
 if tar --version 2>/dev/null | grep -qi bsdtar; then
-  TAR_FLAGS+=(--no-mac-metadata)
+  TAR_FLAGS+=(--no-mac-metadata --no-xattrs)
 fi
 # ⚠️ 必须写成 ${TAR_FLAGS[@]+"${TAR_FLAGS[@]}"}：macOS 自带 bash 3.2 在 set -u 下
 #   展开空数组会直接 "unbound variable" 退出。
