@@ -91,6 +91,12 @@ else
     # 产物就不再是静态链接 ⇒ alpine 镜像里跑不起来。
     CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH" GOFLAGS=-mod=mod \
       "$GO_BIN" build -ldflags="-s -w -X uvplatform.com/uvp-gb28181/app/global/app.BuildID=$BUILD_ID" -o bin/uvp-server .
+    # ⛔⛔ 升级助手必须随包出，而且它**不进镜像**：容器版做页面内升级时，
+    #   升级流程要把这些容器 stop/recreate，干这件事的进程不能活在被停掉的容器里。
+    #   ⇒ 它跑在宿主机 systemd（uvp-updater.service），由 install.sh 装进 $ROOT/updater/。
+    #   缺了它，「服务升级」页只会显示"升级助手未运行"，任何升级都点不动。
+    CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH" GOFLAGS=-mod=mod \
+      "$GO_BIN" build -ldflags="-s -w" -o bin/uvp-updater ./cmd/uvp-updater
   ) || fail "后端构建失败"
 
   log "构建前端产物"

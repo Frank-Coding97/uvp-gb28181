@@ -6,15 +6,30 @@ umask 027
 # outside application containers so it remains available while a release stops
 # and recreates those containers.
 ROOT="${UVP_ROOT:-/opt/uvp-gb28181}"
-PROJECT_DIR="${UVP_COMPOSE_PROJECT_DIR:-$ROOT/current}"
+# ⛔⛔ 容器版的编排文件就放在 $ROOT 根下，**没有 current/ 目录**：
+#   current/ 是绿色包/systemd 那套「多版本并存 + 软链切换」的布局，
+#   compose 版是 compose.yml + .env 平铺。原来这里默认为 $ROOT/current，
+#   在容器版上必然报 "UVP_COMPOSE_PROJECT_DIR must be a real directory"。
+PROJECT_DIR="${UVP_COMPOSE_PROJECT_DIR:-$ROOT}"
 COMPOSE_FILE="${UVP_COMPOSE_FILE:-$PROJECT_DIR/compose.yml}"
-SQLITE_DATABASE="${UVP_COMPOSE_SQLITE_DATABASE:-}"
+# ⛔ 容器版的库固定在 $ROOT/data/database/uvp.db（compose 把该目录挂到 /app/data，
+#   config.yml 里写的是 ./data/uvp.db）。留空的话回滚阶段会"没有库可恢复"，
+#   而升级中途失败的恢复恰恰最需要它。
+SQLITE_DATABASE="${UVP_COMPOSE_SQLITE_DATABASE:-$ROOT/data/database/uvp.db}"
 PROJECT="${UVP_COMPOSE_PROJECT:-uvp-gb28181}"
 MIGRATION_SERVICE="${UVP_COMPOSE_MIGRATION_SERVICE:-backend}"
-READINESS_URL="${UVP_COMPOSE_READINESS_URL:-http://127.0.0.1:56001/internal/updater/readiness}"
-ALLOWED_UID="${UVP_UPDATER_ALLOWED_UID:-0}"
+# ⛔⛔ readiness 探针必须落在**后端容器对外暴露的那个端口**上（容器用 host 网络，
+#   所以宿主 127.0.0.1:后端端口 就是它）。原来写死 56001 是另一套内部拓扑的端口，
+#   在容器版上探针永远连不通 ⇒ 升级做完 Validate 阶段超时 ⇒ 回滚。
+BACKEND_PORT="${UVP_BACKEND_PORT:-51002}"
+READINESS_URL="${UVP_COMPOSE_READINESS_URL:-http://127.0.0.1:${BACKEND_PORT}/internal/updater/readiness}"
 BUSINESS_UID="${UVP_BUSINESS_UID:-10001}"
 BUSINESS_GID="${UVP_BUSINESS_GID:-10001}"
+# ⛔⛔ socket 对端校验的是「连上来的进程 UID」，而容器里的后端是用 BUSINESS_UID
+#   跑的（不是 root）。原来默认 0 ⇒ 容器发来的每个请求都会被判
+#   "peer uid not allowed"，表现是页面里「检查更新/导入」全部失败，
+#   而 service 状态是 active、socket 也在，看不出是被授权规则挡了。
+ALLOWED_UID="${UVP_UPDATER_ALLOWED_UID:-$BUSINESS_UID}"
 SOCKET_DIR="${UVP_UPDATER_SOCKET_DIR:-/run/uvp-updater}"
 UPDATER_UNIT="${UVP_UPDATER_UNIT:-uvp-updater.service}"
 UPDATER_STATE=""
