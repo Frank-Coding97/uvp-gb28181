@@ -7,14 +7,16 @@ vi.mock("./utils", () => ({ baseUrlApi: (path: string) => `/api/${path}` }));
 
 import {
   applyServiceUpgradeTask,
+  clearIgnoredServiceUpgradeNotice,
   createServiceUpgradeTask,
   getServiceUpgradeMigrationPlan,
   getServiceUpgradeImport,
+  getServiceUpgradeNotice,
+  ignoreServiceUpgradeNotice,
   importServiceUpgrade,
   rollbackServiceUpgradeTask,
-  updateServiceUpgradePolicy
+  setServiceUpgradeAutoCheck
 } from "./service-upgrade";
-
 describe("服务升级 API", () => {
   beforeEach(() => {
     request.mockReset();
@@ -34,12 +36,9 @@ describe("服务升级 API", () => {
     expect(request).toHaveBeenLastCalledWith("post", "/api/system/upgrade/tasks/task%2F1/rollback");
   });
 
-  it("策略和迁移计划走独立 API，离线包通过 multipart 上传并查询异步任务", async () => {
-    await updateServiceUpgradePolicy({ enabled: false } as any);
-    expect(request).toHaveBeenLastCalledWith("put", "/api/system/upgrade/policy", { data: { enabled: false } });
-
+  it("迁移计划走独立 API，离线包通过 multipart 上传并查询异步任务", async () => {
     await getServiceUpgradeMigrationPlan();
-    expect(request).toHaveBeenLastCalledWith("get", "/api/system/upgrade/migration-plan");
+    expect(request).toHaveBeenCalledWith("get", "/api/system/upgrade/migration-plan", undefined, { showErrorMessage: false });
 
     const file = new File(["archive"], "upgrade.tar", { type: "application/x-tar" });
     await importServiceUpgrade(file);
@@ -62,5 +61,36 @@ describe("服务升级 API", () => {
     const event = { loaded: 4, total: 10, lengthComputable: true };
     options.onUploadProgress(event);
     expect(onProgress).toHaveBeenCalledWith(event);
+  });
+
+  // 徽标读的是助手缓存：GET 必须静默失败（普通账号没有权限时不该弹错），
+  // 忽略与取消忽略分别对应 POST / DELETE 同一路由。
+  it("更新提示读取静默，忽略与取消忽略走同一路由", async () => {
+    await getServiceUpgradeNotice();
+    expect(request).toHaveBeenLastCalledWith("get", "/api/system/upgrade/notice", undefined, {
+      showErrorMessage: false
+    });
+
+    await ignoreServiceUpgradeNotice("1.2.0");
+    expect(request).toHaveBeenLastCalledWith("post", "/api/system/upgrade/notice/ignore", {
+      data: { version: "1.2.0" }
+    });
+
+    await clearIgnoredServiceUpgradeNotice();
+    expect(request).toHaveBeenLastCalledWith("delete", "/api/system/upgrade/notice/ignore");
+  });
+
+  // 定时检查开关与「忽略版本」是两个独立设置：一个控制整台机器的探测节奏，
+  // 一个只藏一个版本，所以各走各的路由，不能合并。
+  it("定时检查开关单独一条路由，只发 enabled", async () => {
+    await setServiceUpgradeAutoCheck(false);
+    expect(request).toHaveBeenLastCalledWith("post", "/api/system/upgrade/notice/auto-check", {
+      data: { enabled: false }
+    });
+
+    await setServiceUpgradeAutoCheck(true);
+    expect(request).toHaveBeenLastCalledWith("post", "/api/system/upgrade/notice/auto-check", {
+      data: { enabled: true }
+    });
   });
 });

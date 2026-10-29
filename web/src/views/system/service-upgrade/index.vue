@@ -10,14 +10,14 @@
                 >v{{ currentVersionText }}</strong
               ><a-tag color="arcoblue">{{ deploymentLabel }}</a-tag>
             </div>
-            <div class="version-meta">
-              <span>升级通道：{{ policyBaseline?.channel === "beta" ? "预发布版" : "稳定版" }}</span
-              ><span>自动升级：{{ policyBaseline?.enabled ? "已启用" : "已关闭" }}</span>
-            </div>
           </div>
           <a-space wrap class="version-actions">
-            <a-button :loading="loading" @click="loadStatus">刷新状态</a-button>
-            <a-button :loading="checking" :disabled="!status?.capabilities.onlineCheck || Boolean(statusError)" @click="check"
+            <a-button class="uvp-page-action-btn uvp-refresh-btn" :loading="loading" @click="loadStatus">刷新状态</a-button>
+            <a-button
+              class="uvp-page-action-btn"
+              :loading="checking"
+              :disabled="!status?.capabilities.onlineCheck || Boolean(statusError)"
+              @click="check"
               >检查在线更新</a-button
             >
             <a-upload
@@ -31,6 +31,7 @@
             >
               <template #upload-button
                 ><a-button
+                  class="uvp-page-action-btn"
                   type="primary"
                   :loading="importing"
                   :disabled="!status?.capabilities.offlineImport || Boolean(statusError)"
@@ -41,7 +42,20 @@
           </a-space>
         </div>
         <div class="version-footer">
-          <div class="version-source"><span class="upgrade-caption">更新源</span><span>官方内置</span></div>
+          <div class="version-meta">
+            <div class="version-source"><span class="upgrade-caption">更新源</span><span>官方内置</span></div>
+            <div class="version-auto-check" data-testid="auto-check-switch">
+              <span class="upgrade-caption">定时检查</span>
+              <a-switch
+                size="small"
+                :model-value="autoCheckEnabled"
+                :loading="settingAutoCheck"
+                :disabled="!canSetAutoCheck"
+                @change="(value: string | number | boolean) => toggleAutoCheck(Boolean(value))"
+              />
+              <span class="upgrade-caption">{{ autoCheckHint }}</span>
+            </div>
+          </div>
           <a-space wrap
             ><a-link @click="showReleaseNotes(currentVersionText, currentRelease?.release_notes, currentRelease?.published_at)"
               >本版本更新说明</a-link
@@ -53,7 +67,7 @@
         <a-descriptions v-if="environmentExpanded" class="environment-details" :column="{ xs: 1, sm: 1, md: 2 }">
           <a-descriptions-item label="前端构建身份">{{ clientIdentityText }}</a-descriptions-item
           ><a-descriptions-item label="服务端构建身份">{{ serverIdentityText }}</a-descriptions-item>
-          <a-descriptions-item label="系统/架构">{{ policy.os || "未知" }} / {{ policy.arch || "未知" }}</a-descriptions-item
+          <a-descriptions-item label="部署方式">{{ deploymentLabel }}</a-descriptions-item
           ><a-descriptions-item label="数据库"
             >{{ migrationPlan?.dialect || "未知"
             }}<span v-if="migrationPlan?.can_apply"> · 待迁移 {{ migrationPlan.pending.length }} 项</span></a-descriptions-item
@@ -97,7 +111,6 @@
       <a-alert v-if="statusError" class="upgrade-alert" type="warning"
         >服务状态暂不可用，正在重连。保留的任务信息为上次结果，不代表升级成功；{{ statusError }}</a-alert
       >
-      <a-alert v-if="policyError" class="upgrade-alert" type="warning">无人值守策略暂不可用：{{ policyError }}</a-alert>
       <a-alert v-if="migrationError" class="upgrade-alert" type="warning"
         >迁移信息暂不可用，应用升级前需重新检查：{{ migrationError }}</a-alert
       >
@@ -151,27 +164,7 @@
           <div>SHA-256：{{ update.artifact.sha256 }}</div>
         </details>
       </a-card>
-      <nav class="upgrade-tabs" aria-label="升级管理">
-        <button
-          type="button"
-          :class="{ active: activeTab === 'history' }"
-          :aria-pressed="activeTab === 'history'"
-          @click="activeTab = 'history'"
-        >
-          升级记录
-        </button>
-        <button
-          type="button"
-          data-testid="settings-tab"
-          :class="{ active: activeTab === 'settings' }"
-          :aria-pressed="activeTab === 'settings'"
-          @click="activeTab = 'settings'"
-        >
-          自动升级设置
-          <span class="tab-state">{{ policyBaseline?.enabled ? "已启用" : "已关闭" }}{{ policyDirty ? " · 未保存" : "" }}</span>
-        </button>
-      </nav>
-      <section v-show="activeTab === 'history'" data-testid="upgrade-history">
+      <section data-testid="upgrade-history">
         <a-card class="uvp-system-panel history-panel" :bordered="false">
           <template #title
             ><div>
@@ -203,9 +196,6 @@
                   ><template #cell="{ record }"
                     ><a-tag :color="phaseColor(record.phase)">{{ phaseLabel(record.phase) }}</a-tag></template
                   ></a-table-column
-                >
-                <a-table-column title="升级方式" :width="120"
-                  ><template #cell="{ record }">{{ record.policy_version ? "自动升级" : "手动升级" }}</template></a-table-column
                 >
                 <a-table-column title="操作人" :width="100"
                   ><template #cell="{ record }">{{ record.actor || "未提供" }}</template></a-table-column
@@ -258,133 +248,15 @@
         </a-card>
         <details class="upgrade-events">
           <summary>
-            升级事件 <span>含手动与自动升级 · 共 {{ status?.events?.length || 0 }} 条</span>
+            升级事件 <span>共 {{ status?.events?.length || 0 }} 条</span>
           </summary>
           <p v-if="!status?.events?.length" class="upgrade-caption">暂无升级事件</p>
           <div v-for="(event, index) in status?.events || []" :key="index" class="event-row">
             <a-tag :color="eventColor(event)">{{ eventLabel(event) }}</a-tag
-            ><span class="event-scope">{{ event.policy_version ? "自动" : "手动" }}</span
             ><span>{{ event.reason || event.build_id || event.release_id || "" }}</span
             ><time>{{ formatTime(event.at) }}</time>
           </div>
         </details>
-      </section>
-      <section v-show="activeTab === 'settings'" data-testid="upgrade-settings">
-        <a-card class="uvp-system-panel settings-panel" :bordered="false"
-          ><template #title
-            ><div>
-              自动升级
-              <p class="section-subtitle">自动下载更新，在维护窗口内按保存的策略应用</p>
-            </div></template
-          >
-          <template #extra
-            ><a-space
-              ><span>{{ policy.enabled ? "启用自动升级" : "自动升级已关闭" }}</span
-              ><a-switch
-                v-model="policy.enabled"
-                :loading="policyLoading"
-                :disabled="policyUnavailable"
-                aria-label="启用自动升级" /></a-space
-          ></template>
-          <a-alert v-if="policyDirty" type="warning" class="policy-dirty-alert"
-            >策略有未保存修改，自动刷新不会覆盖当前编辑。</a-alert
-          >
-          <a-form :model="policy" layout="vertical" class="upgrade-policy-form">
-            <a-form-item label="通道">
-              <a-select v-model="policy.channel" :disabled="policyUnavailable" :style="{ width: '120px' }">
-                <a-option value="stable">稳定版</a-option>
-                <a-option value="beta">预发布版</a-option>
-              </a-select>
-            </a-form-item>
-            <a-form-item
-              label="时区"
-              required
-              :validate-status="policyTouched && policyErrors.timezone ? 'error' : undefined"
-              :help="policyTouched ? policyErrors.timezone : ''"
-            >
-              <a-input
-                v-model="policy.timezone"
-                allow-clear
-                :disabled="policyUnavailable"
-                placeholder="Asia/Shanghai"
-                :style="{ width: '150px' }"
-                @blur="policyTouched = true"
-              />
-            </a-form-item>
-            <a-form-item
-              label="维护窗口"
-              required
-              :validate-status="policyTouched && policyErrors.window ? 'error' : undefined"
-              :help="policyTouched ? policyErrors.window : ''"
-            >
-              <a-space>
-                <a-input
-                  v-model="policy.window_start"
-                  allow-clear
-                  :disabled="policyUnavailable"
-                  placeholder="02:00"
-                  :style="{ width: '80px' }"
-                  @blur="policyTouched = true"
-                />
-                <span>-</span>
-                <a-input
-                  v-model="policy.window_end"
-                  allow-clear
-                  :disabled="policyUnavailable"
-                  placeholder="04:00"
-                  :style="{ width: '80px' }"
-                  @blur="policyTouched = true"
-                />
-              </a-space>
-            </a-form-item>
-            <a-form-item label="升级范围" class="policy-rules">
-              <a-space>
-                <a-switch v-model="policy.patch_only" :disabled="policyUnavailable" />
-                <span>同主版本（补丁/小版本）</span>
-              </a-space>
-            </a-form-item>
-            <a-form-item label="允许自动重启服务">
-              <a-space
-                ><a-switch v-model="policy.allow_restart" :disabled="policyUnavailable" /><span class="upgrade-detail"
-                  >应用升级可能短暂中断服务</span
-                ></a-space
-              >
-            </a-form-item>
-            <a-form-item label="自动回退">
-              <a-switch v-model="policy.auto_rollback" :disabled="policyUnavailable" />
-            </a-form-item>
-            <a-form-item
-              label="保留版本"
-              required
-              :validate-status="policyTouched && policyErrors.retention ? 'error' : undefined"
-              :help="policyTouched ? policyErrors.retention : ''"
-            >
-              <a-input
-                v-model="policy.retain_versions"
-                allow-clear
-                :disabled="policyUnavailable"
-                @blur="policyTouched = true"
-                :style="{ width: '90px' }"
-              />
-            </a-form-item>
-            <a-form-item label="通知记录">
-              <a-space>
-                <span>页面和本地日志</span>
-                <span>外部通知渠道暂未接入</span>
-              </a-space>
-            </a-form-item>
-            <a-form-item class="policy-save">
-              <a-button
-                v-if="canManage"
-                type="primary"
-                :loading="policyLoading"
-                :disabled="Boolean(policyError) || Boolean(statusError) || !policyBaseline"
-                @click="savePolicy"
-                >保存策略</a-button
-              ><span v-if="policyDirty" class="upgrade-detail">有未保存修改</span>
-            </a-form-item>
-          </a-form>
-        </a-card>
       </section>
       <footer class="upgrade-footnote"><span>签名校验 · SHA-256 完整性校验</span><span>时间按浏览器本地时区显示</span></footer>
     </div>
@@ -405,9 +277,7 @@
         <p class="task-hint">{{ taskHint(selectedTask) }}</p>
         <a-descriptions :column="1" bordered class="uvp-system-description uvp-system-description--compact task-descriptions"
           ><a-descriptions-item label="目标版本">{{ selectedTask.version || "待校验" }}</a-descriptions-item
-          ><a-descriptions-item label="升级方式">{{
-            selectedTask.policy_version ? `自动升级 · 策略 v${selectedTask.policy_version}` : "管理员手动操作"
-          }}</a-descriptions-item
+          ><a-descriptions-item label="发起人">{{ selectedTask.actor || "管理员" }}</a-descriptions-item
           ><a-descriptions-item label="操作人">{{ selectedTask.actor || "未提供" }}</a-descriptions-item
           ><a-descriptions-item label="更新时间">{{ formatTime(selectedTask.updated_at) }}</a-descriptions-item
           ><a-descriptions-item label="Build ID">{{ selectedTask.build_id || "待校验" }}</a-descriptions-item
@@ -456,6 +326,7 @@
 import { Message, Modal } from "@arco-design/web-vue";
 import type { FileItem } from "@arco-design/web-vue/es/upload/interfaces";
 import { computed, onMounted, onUnmounted, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import {
   applyServiceUpgradeTask,
   cancelServiceUpgradeTask,
@@ -464,27 +335,28 @@ import {
   getServiceUpgradeImport,
   getServiceUpgradeStatus,
   importServiceUpgrade,
-  getServiceUpgradePolicy,
   getServiceUpgradeMigrationPlan,
   rollbackServiceUpgradeTask,
   type UpgradeEvent,
   type UpgradeImportArtifact,
   type UpgradeMigrationPlan,
   type UpgradeImportJob,
-  type UpgradePolicy,
   type UpgradeStatus,
-  type UpgradeTask,
-  updateServiceUpgradePolicy
+  type UpgradeTask
 } from "@/api/service-upgrade";
 import { hasPermission } from "@/hooks/usePermission";
+import { useUpgradeNotice } from "@/hooks/useUpgradeNotice";
 import { APP_BUILD_ID, APP_VERSION, checkRuntimeBuildIdentity } from "@/config/version";
 import UpgradeProgress, { type ProgressDisplay, type UploadTransfer } from "./UpgradeProgress.vue";
 
 const canManage = computed(() => hasPermission("system:upgrade:manage"));
+// 定时检查开关与侧边栏徽标读同一份缓存：都只看助手已经写好的结果，不额外打官方源。
+const { autoCheckEnabled, canSetAutoCheck, settingAutoCheck, setAutoCheck, checkedAt: noticeCheckedAt } = useUpgradeNotice();
+const route = useRoute();
+const router = useRouter();
 
 const loading = ref(false);
 const statusError = ref("");
-const policyError = ref("");
 const migrationError = ref("");
 
 /**
@@ -514,7 +386,6 @@ const progressTask = computed(
     status.value?.activeTask ||
     (lastActiveTaskID.value ? status.value?.tasks.find(task => task.task_id === lastActiveTaskID.value) : sortedTasks.value[0])
 );
-const activeTab = ref("history");
 const environmentExpanded = ref(false);
 const migrationDetailsVisible = ref(false);
 const selectedTaskID = ref("");
@@ -560,7 +431,34 @@ const formatTime = (value?: string) => {
         hourCycle: "h23"
       }).format(date);
 };
-// 事件流水同时记录手动升级与自动升级（同一个任务管道），文案必须两种都能读通。
+/**
+ * 开关旁的一句话说明。三种状态必须能区分开：可设置、已关闭、压根不可设置
+ * （离线部署或助手没起来时，开关点了也不会有任何效果）。
+ */
+const autoCheckHint = computed(() => {
+  if (!canManage.value) return "需要升级管理权限才能修改";
+  if (!canSetAutoCheck.value) return "升级助手未就绪，暂不可设置";
+  if (!autoCheckEnabled.value) return "已关闭自动检查，仍可手动检查";
+  return noticeCheckedAt.value ? `上次检查 ${formatTime(noticeCheckedAt.value)}` : "等待首次检查";
+});
+/**
+ * 打开开关后立刻查一次：否则用户要等最多 6 小时才能看到结果，会以为没生效。
+ * 关闭是纯本地设置，不需要再打一次官方源。
+ */
+const toggleAutoCheck = async (enabled: boolean) => {
+  const saved = await setAutoCheck(enabled);
+  if (!saved) {
+    Message.error("保存定时检查设置失败，请稍后重试");
+    return;
+  }
+  if (!enabled) {
+    Message.success("已关闭定时检查");
+    return;
+  }
+  Message.success("已开启定时检查");
+  if (status.value?.capabilities.onlineCheck && !statusError.value) await check();
+};
+// 事件流水覆盖准备、应用、恢复三个阶段，历史日志里也可能出现已下线的自动升级事件名。
 const eventLabels: Record<string, string> = {
   blocked: "已阻断",
   succeeded: "升级成功",
@@ -575,9 +473,9 @@ const eventLabels: Record<string, string> = {
   auto_started: "自动开始升级"
 };
 const eventLabel = (event: UpgradeEvent) => {
-  // 离线导入与自动下载共用同一条准备管道，都写 downloaded；
-  // 手动升级是本地选包，语义应为「包已就绪」而不是「下载完成」。
-  if (event.event === "downloaded" && !event.policy_version) return "离线包就绪";
+  // 离线导入与在线检查共用同一条准备管道，都写 downloaded；
+  // 自动升级已移除，这里的语义统一为「包已就绪」而不是「下载完成」。
+  if (event.event === "downloaded") return "升级包就绪";
   return eventLabels[event.event] || `未知事件（${event.event}）`;
 };
 const eventColor = (event: UpgradeEvent) => {
@@ -590,9 +488,6 @@ const migrationBlockLabel = computed(() =>
   migrationPlan.value?.unknown?.length
     ? "数据库中存在无法识别的迁移记录，请先排查后再应用升级。"
     : "数据库迁移预检未通过，请查看原因后再应用升级。"
-);
-const policyUnavailable = computed(
-  () => !canManage.value || Boolean(policyError.value || statusError.value) || !policyBaseline.value || policyLoading.value
 );
 const phaseLabels: Record<string, string> = {
   fetching: "下载中",
@@ -663,11 +558,9 @@ const taskHint = (task: UpgradeTask) => {
   if (task.phase === "awaiting_confirmation")
     return Boolean(task.task_id) && pendingUpgrade.value?.taskID === task.task_id
       ? "已确认升级，准备完成后自动开始应用。"
-      : task.policy_version
-        ? "制品已准备，由已保存策略在维护窗口内再次预检并授权应用。"
-        : canManage.value && status.value?.capabilities.apply
-          ? "升级包已就绪，点击「立即升级」并确认后开始；升级期间服务可能短暂中断。"
-          : "升级包已就绪，等待管理员确认应用。";
+      : canManage.value && status.value?.capabilities.apply
+        ? "升级包已就绪，点击「立即升级」并确认后开始；升级期间服务可能短暂中断。"
+        : "升级包已就绪，等待管理员确认应用。";
   if (["fetching", "verifying", "preparing"].includes(task.phase)) return "正在获取或检查制品，当前服务继续运行。";
   if (!(task.phase in taskStepIndex)) return "当前阶段无法识别，请查看任务详情并刷新状态。";
   return "助手正在执行升级，业务可能中断；刷新或关闭页面不会取消任务。";
@@ -796,43 +689,7 @@ const storeImportJobID = (id: string) => {
     // Browser storage can be unavailable in privacy-restricted contexts.
   }
 };
-const policyLoading = ref(false);
-const policy = ref<Omit<UpgradePolicy, "retain_versions"> & { retain_versions: number | string }>({
-  enabled: false,
-  policy_version: 1,
-  timezone: "Asia/Shanghai",
-  window_start: "02:00",
-  window_end: "04:00",
-  channel: "stable",
-  deployment: "",
-  os: "",
-  arch: "",
-  patch_only: true,
-  allow_restart: false,
-  auto_rollback: false,
-  retain_versions: 2
-});
 const migrationPlan = ref<UpgradeMigrationPlan>();
-const policyTouched = ref(false);
-const policyErrors = computed(() => {
-  let timezone = "";
-  try {
-    if (!policy.value.timezone) throw new Error("missing timezone");
-    new Intl.DateTimeFormat("zh-CN", { timeZone: policy.value.timezone });
-  } catch {
-    timezone = "请输入有效的 IANA 时区，例如 Asia/Shanghai";
-  }
-  const hhmm = /^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/;
-  const windowError =
-    hhmm.test(policy.value.window_start) && hhmm.test(policy.value.window_end) ? "" : "维护窗口必须使用 HH:MM（00:00–23:59）";
-  const retention = String(policy.value.retain_versions);
-  return {
-    timezone,
-    window: windowError,
-    retention: /^\d+$/.test(retention) && Number(retention) <= 50 ? "" : "保留版本数必须是 0–50 的整数"
-  };
-});
-const policyBaseline = ref<UpgradePolicy>();
 const clientRefreshState = ref<"idle" | "refreshing" | "blocked">("idle");
 const clientRefreshTarget = ref("");
 const clientRefreshAttempt = ref("");
@@ -1065,24 +922,6 @@ const maybeRefreshClient = () => {
   writeSessionValue(clientRefreshAttemptStorageKey, targetBuildID);
   reloadClient();
 };
-const editablePolicyKeys = [
-  "enabled",
-  "timezone",
-  "window_start",
-  "window_end",
-  "channel",
-  "deployment",
-  "os",
-  "arch",
-  "patch_only",
-  "allow_restart",
-  "auto_rollback",
-  "retain_versions"
-] as const satisfies readonly (keyof UpgradePolicy)[];
-const policyDirty = computed(() => {
-  if (!policyBaseline.value) return false;
-  return editablePolicyKeys.some(key => policy.value[key] !== policyBaseline.value?.[key]);
-});
 let refreshTimer: ReturnType<typeof setInterval> | undefined;
 let importRefreshTimer: ReturnType<typeof setInterval> | undefined;
 let pollingImport = false;
@@ -1091,9 +930,8 @@ const loadStatus = async () => {
   if (loading.value) return;
   loading.value = true;
   try {
-    const [statusResult, policyResult, migrationResult] = await Promise.allSettled([
+    const [statusResult, migrationResult] = await Promise.allSettled([
       getServiceUpgradeStatus(),
-      getServiceUpgradePolicy(),
       getServiceUpgradeMigrationPlan()
     ]);
     if (statusResult.status === "fulfilled") {
@@ -1106,15 +944,6 @@ const loadStatus = async () => {
     } else {
       statusError.value = describeUpgradeError(statusResult.reason, "读取升级状态失败，正在等待服务恢复");
     }
-    if (policyResult.status === "fulfilled") {
-      if (!policyBaseline.value || !policyDirty.value) {
-        policy.value = { ...policyResult.value.data };
-        policyBaseline.value = { ...policyResult.value.data };
-      }
-      policyError.value = "";
-    } else {
-      policyError.value = describeUpgradeError(policyResult.reason, "读取无人值守策略失败");
-    }
     if (migrationResult.status === "fulfilled") {
       migrationPlan.value = migrationResult.value.data;
       migrationError.value = "";
@@ -1126,36 +955,6 @@ const loadStatus = async () => {
     loading.value = false;
   }
   await continueConfirmedUpgrade();
-};
-
-const savePolicy = async () => {
-  if (!canManage.value || policyLoading.value || policyError.value || statusError.value) return;
-  policyTouched.value = true;
-  const errors = Object.values(policyErrors.value).filter(Boolean);
-  if (errors.length) {
-    errorMessage.value = errors.join("；");
-    return;
-  }
-  errorMessage.value = "";
-  policyLoading.value = true;
-  try {
-    const saved = (
-      await updateServiceUpgradePolicy({
-        ...policy.value,
-        retain_versions: Number(policy.value.retain_versions),
-        // The first release only records upgrade events in the page and local log.
-        // Do not preserve a legacy or manually injected external target.
-        notification_target: ""
-      })
-    ).data;
-    policy.value = { ...saved };
-    policyBaseline.value = { ...saved };
-    Message.success("无人值守策略已保存");
-  } catch (error: any) {
-    errorMessage.value = error?.message || "保存无人值守策略失败";
-  } finally {
-    policyLoading.value = false;
-  }
 };
 
 const check = async () => {
@@ -1338,7 +1137,7 @@ const continueConfirmedUpgrade = async () => {
   if (!pending || statusError.value || taskAction.value) return;
   const task = taskByID(pending.taskID);
   if (!task) return;
-  if (!canManage.value || !status.value?.capabilities.apply || task.policy_version || !canCancel(task.phase)) {
+  if (!canManage.value || !status.value?.capabilities.apply || !canCancel(task.phase)) {
     clearPendingUpgrade();
     return;
   }
@@ -1436,6 +1235,14 @@ onMounted(async () => {
   importRefreshTimer = setInterval(() => {
     if (importJob.value && !importJobFinished.value) void refreshImportJob();
   }, 2500);
+  // 从侧边栏版本徽标点「前往升级」过来时自动查一次，省掉「再点一次检查」。
+  // 查完就把参数抹掉，刷新页面不会重复打官方源。
+  if (route.query.check === "1") {
+    void router.replace({ query: { ...route.query, check: undefined } });
+    if (canManage.value && status.value?.capabilities.onlineCheck && !statusError.value) {
+      void check();
+    }
+  }
 });
 onUnmounted(() => {
   importGeneration += 1;
@@ -1485,13 +1292,6 @@ onUnmounted(() => {
     color: var(--color-text-1);
   }
 }
-.version-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 20px;
-  font-size: 13px;
-  color: var(--color-text-3);
-}
 .version-actions {
   flex-shrink: 0;
 }
@@ -1505,10 +1305,21 @@ onUnmounted(() => {
   font-size: 13px;
   border-top: 1px solid var(--color-border-2);
 }
+.version-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  align-items: center;
+}
 .version-source {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+.version-auto-check {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
 }
 .upgrade-caption {
   font-size: 13px;
@@ -1527,54 +1338,6 @@ onUnmounted(() => {
     overflow-wrap: anywhere;
   }
 }
-.upgrade-tabs {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  padding: 4px;
-  margin: 20px 0 16px;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 8px;
-  button {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    justify-content: center;
-    min-width: 104px;
-    padding: 7px 14px;
-    font: inherit;
-    font-size: 14px;
-    color: var(--uvp-text-secondary);
-    cursor: pointer;
-    background: transparent;
-    border: 0;
-    border-radius: 6px;
-    transition:
-      color 0.2s ease,
-      background-color 0.2s ease,
-      box-shadow 0.2s ease;
-  }
-  button.active {
-    color: var(--uvp-brand-strong);
-    background: var(--uvp-brand-soft);
-  }
-  button:hover:not(.active) {
-    color: var(--uvp-text-primary);
-    background: var(--uvp-secondary-action-bg);
-  }
-  button:focus-visible {
-    outline: 2px solid rgb(var(--primary-6));
-    outline-offset: 3px;
-  }
-}
-.tab-state {
-  padding: 1px 5px;
-  font-size: 12px;
-  color: var(--uvp-text-tertiary);
-  background: var(--uvp-secondary-action-bg);
-  border-radius: 4px;
-}
 .section-subtitle {
   margin: 4px 0 0;
   font-size: 12px;
@@ -1582,8 +1345,7 @@ onUnmounted(() => {
   line-height: 1.5;
   color: var(--color-text-3);
 }
-.history-panel,
-.settings-panel {
+.history-panel {
   :deep(.arco-card-header) {
     flex-wrap: wrap;
     gap: 12px;
@@ -1656,49 +1418,10 @@ onUnmounted(() => {
     min-width: 0;
     overflow-wrap: anywhere;
   }
-  .event-scope {
-    flex: none;
-    padding: 0 6px;
-    font-size: 12px;
-    line-height: 20px;
-    color: var(--color-text-3);
-    border: 1px solid var(--color-border-2);
-    border-radius: 6px;
-  }
   time {
     margin-left: auto;
     color: var(--color-text-3);
   }
-}
-.settings-panel :deep(.arco-card-body) {
-  padding: 24px;
-}
-.upgrade-policy-form {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 6px 40px;
-  max-width: 940px;
-  :deep(.arco-form-item) {
-    min-width: 0;
-    margin-bottom: 18px;
-  }
-  :deep(.arco-form-item-label-col) {
-    padding-bottom: 8px;
-  }
-  :deep(.arco-form-item-wrapper-col) {
-    min-width: 0;
-  }
-}
-.policy-save {
-  grid-column: 1 / -1;
-  padding-top: 20px;
-  border-top: 1px solid var(--color-border-2);
-  :deep(.arco-form-item-content-flex) {
-    gap: 12px;
-  }
-}
-.policy-dirty-alert {
-  margin-bottom: 20px;
 }
 .available-update {
   margin: 18px 0;
@@ -1807,29 +1530,10 @@ onUnmounted(() => {
   .version-title strong {
     font-size: 30px;
   }
-  .upgrade-tabs {
-    display: flex;
-    gap: 4px;
-    button {
-      flex: 1;
-      flex-wrap: wrap;
-      min-width: 0;
-      padding: 8px;
-      font-size: 13px;
-    }
-  }
-  .upgrade-policy-form {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0;
-  }
-  .history-panel,
-  .settings-panel {
+  .history-panel {
     :deep(.arco-card-header) {
       padding: 16px;
     }
-  }
-  .settings-panel :deep(.arco-card-body) {
-    padding: 16px;
   }
   .update-summary {
     flex-direction: column;

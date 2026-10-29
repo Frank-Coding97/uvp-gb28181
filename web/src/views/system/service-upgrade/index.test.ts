@@ -4,16 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
   getStatus: vi.fn(),
-  getPolicy: vi.fn(),
   getMigrationPlan: vi.fn(),
-  updatePolicy: vi.fn(),
   check: vi.fn(),
   importPackage: vi.fn(),
   importStatus: vi.fn(),
   createTask: vi.fn(),
   applyTask: vi.fn(),
   cancelTask: vi.fn(),
-  rollbackTask: vi.fn()
+  rollbackTask: vi.fn(),
+  getNotice: vi.fn(),
+  setAutoCheck: vi.fn()
 }));
 const modal = vi.hoisted(() => ({ confirm: vi.fn() }));
 const permissions = vi.hoisted(() => ({ value: ["system:upgrade:read", "system:upgrade:manage"] as string[] }));
@@ -23,40 +23,32 @@ vi.mock("@arco-design/web-vue", () => ({ Message: { success: vi.fn(), error: vi.
 vi.mock("@/hooks/usePermission", () => ({
   hasPermission: (permission: string) => permissions.value.includes("*:*:*") || permissions.value.includes(permission)
 }));
+// 页面会读 `?check=1` 决定是否落地即自动检查；测试里给个空 query。
+const routeState = vi.hoisted(() => ({ query: {} as Record<string, string> }));
+vi.mock("vue-router", () => ({
+  useRoute: () => routeState,
+  useRouter: () => ({ replace: vi.fn(), push: vi.fn() })
+}));
+
 vi.mock("@/api/service-upgrade", () => ({
   getServiceUpgradeStatus: api.getStatus,
-  getServiceUpgradePolicy: api.getPolicy,
   getServiceUpgradeMigrationPlan: api.getMigrationPlan,
-  updateServiceUpgradePolicy: api.updatePolicy,
   checkServiceUpgrade: api.check,
   importServiceUpgrade: api.importPackage,
   getServiceUpgradeImport: api.importStatus,
   createServiceUpgradeTask: api.createTask,
   applyServiceUpgradeTask: api.applyTask,
   cancelServiceUpgradeTask: api.cancelTask,
-  rollbackServiceUpgradeTask: api.rollbackTask
+  rollbackServiceUpgradeTask: api.rollbackTask,
+  getServiceUpgradeNotice: api.getNotice,
+  ignoreServiceUpgradeNotice: vi.fn(),
+  clearIgnoredServiceUpgradeNotice: vi.fn(),
+  setServiceUpgradeAutoCheck: api.setAutoCheck
 }));
 
 import { APP_VERSION } from "@/config/version";
 import ServiceUpgradePage from "./index.vue";
 import Upload from "@arco-design/web-vue/es/upload/upload";
-
-const policy = () => ({
-  enabled: true,
-  policy_version: 1,
-  timezone: "Asia/Shanghai",
-  window_start: "02:00",
-  window_end: "04:00",
-  channel: "stable",
-  deployment: "systemd",
-  os: "linux",
-  arch: "amd64",
-  patch_only: true,
-  allow_restart: false,
-  auto_rollback: false,
-  notification_target: "本地日志",
-  retain_versions: 2
-});
 
 const status = () => ({
   current: { version: "1.0.0", build_id: "old" },
@@ -98,10 +90,10 @@ function mountPage(realUpload = false, renderRows = false) {
         "a-space": { template: "<span><slot /></span>" },
         "a-upload": realUpload ? false : { template: "<div><slot name='upload-button' /></div>" },
         "a-switch": {
-          props: { modelValue: Boolean, disabled: Boolean },
-          emits: ["update:modelValue"],
+          props: { modelValue: Boolean, disabled: Boolean, loading: Boolean },
+          emits: ["update:modelValue", "change"],
           template:
-            "<input type='checkbox' :checked='modelValue' :disabled='disabled' @change='$emit(\"update:modelValue\", $event.target.checked)' />"
+            "<input type='checkbox' :checked='modelValue' :disabled='disabled' @change='$emit(\"change\", $event.target.checked)' />"
         },
         "a-form": { template: "<form><slot /></form>" },
         "a-form-item": { template: "<label><slot /></label>" },
@@ -142,12 +134,10 @@ describe("service upgrade page", () => {
     });
     permissions.value = ["system:upgrade:read", "system:upgrade:manage"];
     api.getStatus.mockReset().mockResolvedValue({ code: 0, data: status() });
-    api.getPolicy.mockReset().mockResolvedValue({ code: 0, data: policy() });
     api.getMigrationPlan.mockReset().mockResolvedValue({
       code: 0,
       data: { can_apply: true, pending: [], applied: [], unknown: [], destructive: [], dialect: "sqlite" }
     });
-    api.updatePolicy.mockReset();
     api.check.mockReset();
     api.importPackage.mockReset();
     api.importStatus.mockReset();
@@ -155,6 +145,11 @@ describe("service upgrade page", () => {
     api.applyTask.mockReset();
     api.cancelTask.mockReset();
     api.rollbackTask.mockReset();
+    api.getNotice.mockReset().mockResolvedValue({
+      code: 0,
+      data: { hasUpdate: false, ignored: false, checkEnabled: true, autoCheck: true, checkedAt: "2026-10-29T02:00:00Z" }
+    });
+    api.setAutoCheck.mockReset().mockResolvedValue({ code: 0, data: { enabled: false } });
   });
 
   afterEach(() => {
@@ -551,33 +546,29 @@ describe("service upgrade page", () => {
     wrapper.unmount();
   });
 
-  it.each(["wrong-digest", "wrong-build", "failed", "cancelled", "policy", "preflight"])(
-    "已确认意图遇到 %s 不自动应用",
-    async scenario => {
-      const task: any = {
-        task_id: "restore",
-        phase: "awaiting_confirmation",
-        target_digest: "a".repeat(64),
-        build_id: "build-ready"
-      };
-      window.sessionStorage.setItem(
-        "uvp.service-upgrade.auto-apply",
-        JSON.stringify({ taskID: task.task_id, digest: task.target_digest, buildID: task.build_id })
-      );
-      if (scenario === "wrong-digest") task.target_digest = "b".repeat(64);
-      if (scenario === "wrong-build") task.build_id = "other";
-      if (scenario === "failed") task.phase = "failed";
-      if (scenario === "cancelled") task.phase = "rolled_back";
-      if (scenario === "policy") task.policy_version = 2;
-      if (scenario === "preflight") api.getMigrationPlan.mockResolvedValue({ data: { can_apply: false } });
-      api.getStatus.mockResolvedValue({ data: { ...status(), activeTask: task, tasks: [task] } });
-      const wrapper = mountPage();
-      await flushPromises();
-      expect(api.applyTask).not.toHaveBeenCalled();
-      expect(window.sessionStorage.getItem("uvp.service-upgrade.auto-apply")).toBeNull();
-      wrapper.unmount();
-    }
-  );
+  it.each(["wrong-digest", "wrong-build", "failed", "cancelled", "preflight"])("已确认意图遇到 %s 不自动应用", async scenario => {
+    const task: any = {
+      task_id: "restore",
+      phase: "awaiting_confirmation",
+      target_digest: "a".repeat(64),
+      build_id: "build-ready"
+    };
+    window.sessionStorage.setItem(
+      "uvp.service-upgrade.auto-apply",
+      JSON.stringify({ taskID: task.task_id, digest: task.target_digest, buildID: task.build_id })
+    );
+    if (scenario === "wrong-digest") task.target_digest = "b".repeat(64);
+    if (scenario === "wrong-build") task.build_id = "other";
+    if (scenario === "failed") task.phase = "failed";
+    if (scenario === "cancelled") task.phase = "rolled_back";
+    if (scenario === "preflight") api.getMigrationPlan.mockResolvedValue({ data: { can_apply: false } });
+    api.getStatus.mockResolvedValue({ data: { ...status(), activeTask: task, tasks: [task] } });
+    const wrapper = mountPage();
+    await flushPromises();
+    expect(api.applyTask).not.toHaveBeenCalled();
+    expect(window.sessionStorage.getItem("uvp.service-upgrade.auto-apply")).toBeNull();
+    wrapper.unmount();
+  });
 
   it("应用响应失败后不自动重复提交，并保留手动重试入口", async () => {
     const task = { task_id: "restore", phase: "awaiting_confirmation", target_digest: "a".repeat(64), build_id: "build-ready" };
@@ -624,6 +615,29 @@ describe("service upgrade page", () => {
     readonly.unmount();
   });
 
+  // 侧边栏版本徽标点「前往升级」会带 check=1：落地即自动查一次，
+  // 否则用户点完还得再点一次「检查在线更新」。
+  it("从版本徽标带 check=1 进入时自动检查一次", async () => {
+    routeState.query = { check: "1" };
+    api.check.mockResolvedValue({
+      data: { manifest: { version: "1.2.0" }, artifact: { sha256: "a".repeat(64) }, hasUpdate: true }
+    });
+    const wrapper = mountPage();
+    await flushPromises();
+    expect(api.check).toHaveBeenCalledTimes(1);
+    expect(wrapper.text()).toContain("1.2.0");
+    wrapper.unmount();
+    routeState.query = {};
+  });
+
+  it("没有 check=1 时进入页面不自动检查，避免每次开页都打官方源", async () => {
+    routeState.query = {};
+    const wrapper = mountPage();
+    await flushPromises();
+    expect(api.check).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
   it("活动任务断线后保留进度，同任务恢复后显示终态，详情独立显示历史任务", async () => {
     const old = { task_id: "old", version: "1.0.0", phase: "succeeded", committed: true };
     const current = { task_id: "current", version: "1.2.0", phase: "backing_up", committed: false };
@@ -668,13 +682,15 @@ describe("service upgrade page", () => {
     wrapper.unmount();
   });
 
-  it("默认展示升级记录，自动升级配置按需进入", async () => {
+  // 自动升级已整体移除：页面不得再暴露任何策略入口或状态文案。
+  it("页面只保留升级记录，不再提供自动升级设置", async () => {
     const wrapper = mountPage();
     await flushPromises();
     expect(wrapper.find('[data-testid="upgrade-history"]').isVisible()).toBe(true);
-    expect(wrapper.find('[data-testid="upgrade-settings"]').attributes("style")).toContain("display: none");
-    await wrapper.get('[data-testid="settings-tab"]').trigger("click");
-    expect(wrapper.find('[data-testid="upgrade-settings"]').isVisible()).toBe(true);
+    expect(wrapper.find('[data-testid="upgrade-settings"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="settings-tab"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("自动升级");
+    expect(wrapper.text()).not.toContain("维护窗口");
     wrapper.unmount();
   });
 
@@ -757,26 +773,12 @@ describe("service upgrade page", () => {
     wrapper.unmount();
   });
 
-  it("保存策略失败时保留用户当前策略值", async () => {
-    api.updatePolicy.mockRejectedValueOnce(new Error("发布站点不可用"));
-    const wrapper = mountPage();
-    await flushPromises();
-    const vm = wrapper.vm as any;
-    vm.policy.enabled = true;
-    await vm.savePolicy();
-    expect(vm.policy.enabled).toBe(true);
-    expect(vm.errorMessage).toContain("发布站点不可用");
-    wrapper.unmount();
-  });
-
-  it("只读账号隐藏管理操作并禁用策略编辑", async () => {
+  it("只读账号隐藏管理操作", async () => {
     permissions.value = ["system:upgrade:read"];
     const wrapper = mountPage();
     await flushPromises();
     expect(wrapper.text()).not.toContain("导入离线包");
-    expect(wrapper.text()).not.toContain("保存策略");
     expect((wrapper.vm as any).canManage).toBe(false);
-    expect(wrapper.findAll("input:disabled").length).toBeGreaterThan(0);
     wrapper.unmount();
   });
 
@@ -799,61 +801,6 @@ describe("service upgrade page", () => {
     expect(api.getStatus).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(5000);
     expect(api.getStatus).toHaveBeenCalledTimes(2);
-    wrapper.unmount();
-  });
-
-  it("轮询刷新时保留未保存的策略编辑", async () => {
-    vi.useFakeTimers();
-    const wrapper = mountPage();
-    await flushPromises();
-
-    const vm = wrapper.vm as any;
-    vm.policy.channel = "beta";
-    vm.policy.window_start = "03:00";
-    api.getPolicy.mockResolvedValueOnce({
-      code: 0,
-      data: { ...policy(), channel: "stable", window_start: "04:00" }
-    });
-
-    await vi.advanceTimersByTimeAsync(5000);
-    await flushPromises();
-
-    expect(vm.policy.channel).toBe("beta");
-    expect(vm.policy.window_start).toBe("03:00");
-    expect(vm.policyDirty).toBe(true);
-    expect(wrapper.text()).toContain("有未保存修改");
-    wrapper.unmount();
-  });
-
-  it("默认关闭自动回退并准确说明补丁和小版本范围", async () => {
-    const wrapper = mountPage();
-    await flushPromises();
-
-    const vm = wrapper.vm as any;
-    expect(vm.policy.auto_rollback).toBe(false);
-    expect(wrapper.text()).toContain("补丁/小版本");
-    expect(wrapper.text()).not.toContain("仅补丁");
-    wrapper.unmount();
-  });
-
-  it("通知设置只展示首版页面和本地日志事件能力", async () => {
-    const wrapper = mountPage();
-    await flushPromises();
-
-    expect(wrapper.text()).toContain("页面和本地日志");
-    expect(wrapper.text()).toContain("外部通知渠道暂未接入");
-    expect(wrapper.find('input[placeholder="本地日志/页面"]').exists()).toBe(false);
-    wrapper.unmount();
-  });
-
-  it("保存策略时清除未提供界面的外部通知目标", async () => {
-    api.updatePolicy.mockResolvedValueOnce({ code: 0, data: policy() });
-    const wrapper = mountPage();
-    await flushPromises();
-
-    await (wrapper.vm as any).savePolicy();
-
-    expect(api.updatePolicy).toHaveBeenCalledWith(expect.objectContaining({ notification_target: "" }));
     wrapper.unmount();
   });
 
@@ -1255,31 +1202,6 @@ describe("service upgrade page", () => {
     wrapper.unmount();
   });
 
-  it("保留版本输入超限时显示原值和错误，不静默改成边界或提交", async () => {
-    const wrapper = mountPage();
-    await flushPromises();
-    const vm = wrapper.vm as any;
-    vm.policy.retain_versions = "51";
-    await vm.savePolicy();
-    expect(vm.policy.retain_versions).toBe("51");
-    expect(wrapper.text()).toContain("保留版本数必须是 0–50 的整数");
-    expect(api.updatePolicy).not.toHaveBeenCalled();
-    wrapper.unmount();
-  });
-
-  it("策略输入在提交时验证时区与维护窗口", async () => {
-    const wrapper = mountPage();
-    await flushPromises();
-    const vm = wrapper.vm as any;
-    vm.policy.timezone = "Mars/Base";
-    vm.policy.window_start = "25:00";
-    await vm.savePolicy();
-    expect(wrapper.text()).toContain("有效的 IANA 时区");
-    expect(wrapper.text()).toContain("HH:MM");
-    expect(api.updatePolicy).not.toHaveBeenCalled();
-    wrapper.unmount();
-  });
-
   it("操作错误不会被无关的状态轮询清除", async () => {
     const wrapper = mountPage();
     await flushPromises();
@@ -1297,20 +1219,18 @@ describe("service upgrade page", () => {
     expect(vm.phaseLabel("validating")).toBe("验证启动");
     expect(vm.taskHint({ phase: "rolled_back" })).toContain("升级未成功");
     expect(vm.taskHint({ phase: "recovery_required" })).toContain("不可视为已回退");
-    expect(vm.taskHint({ phase: "awaiting_confirmation", policy_version: 3 })).toContain("维护窗口");
+    expect(vm.taskHint({ phase: "awaiting_confirmation" })).toContain("升级包已就绪");
     wrapper.unmount();
   });
 
-  // 事件流水手动与自动共用一条管道（手动导入也写 downloaded / import_succeeded），
-  // 旧实现把面板叫「自动升级事件」并直出 import_succeeded 英文 key，语义误导。
-  it("升级事件区分手动与自动来源，并为离线导入使用正确文案", async () => {
+  // 自动升级已移除，事件流水只剩一种来源；旧实现把面板叫「自动升级事件」并直出英文 key。
+  it("升级事件不再区分来源，并为离线导入使用正确文案", async () => {
     const manual = { ...status() };
     manual.events = [
       { event: "import_succeeded", task_id: "manual-task", build_id: "b1", at: "2026-10-20T06:00:00Z" },
       { event: "downloaded", task_id: "manual-task", build_id: "b1", at: "2026-10-20T06:01:00Z" },
       { event: "succeeded", task_id: "manual-task", build_id: "b1", at: "2026-10-20T06:02:00Z" },
-      { event: "downloaded", task_id: "auto-task", policy_version: 7, build_id: "b2", at: "2026-10-20T07:00:00Z" },
-      { event: "blocked", task_id: "auto-task", policy_version: 7, reason: "维护窗口未到", at: "2026-10-20T07:01:00Z" },
+      { event: "blocked", task_id: "manual-task", reason: "升级包校验失败", at: "2026-10-20T07:01:00Z" },
       { event: "recovery_required", task_id: "manual-task", build_id: "b1", at: "2026-10-20T07:02:00Z" }
     ] as any;
     api.getStatus.mockResolvedValue({ code: 0, data: manual });
@@ -1318,18 +1238,14 @@ describe("service upgrade page", () => {
     await flushPromises();
     const text = wrapper.text();
     expect(text).toContain("升级事件");
-    expect(text).toContain("含手动与自动升级");
     expect(text).not.toContain("自动升级事件");
     // 英文事件名不能直接暴露给用户
     ["import_succeeded", "downloaded", "recovery_required"].forEach(key => expect(text).not.toContain(key));
     expect(text).toContain("导入校验通过");
-    expect(text).toContain("离线包就绪"); // 手动导入：不是"下载"
-    expect(text).toContain("下载完成"); // 自动下载
+    expect(text).toContain("升级包就绪");
     expect(text).toContain("已阻断");
     expect(text).toContain("需要恢复处理");
-    // 来源标记按 policy_version 判
-    const scopes = wrapper.findAll(".event-scope").map(node => node.text());
-    expect(scopes).toEqual(["手动", "手动", "手动", "自动", "自动", "手动"]);
+    expect(wrapper.findAll(".event-scope")).toHaveLength(0);
     wrapper.unmount();
   });
 
@@ -1350,8 +1266,7 @@ describe("service upgrade page", () => {
       ["auto_started", "自动开始升级"]
     ];
     cases.forEach(([event, label]) => expect(vm.eventLabel({ event })).toBe(label));
-    expect(vm.eventLabel({ event: "downloaded", policy_version: 3 })).toBe("下载完成");
-    expect(vm.eventLabel({ event: "downloaded" })).toBe("离线包就绪");
+    expect(vm.eventLabel({ event: "downloaded" })).toBe("升级包就绪");
     expect(vm.eventLabel({ event: "brand_new_event" })).toBe("未知事件（brand_new_event）");
     expect(vm.eventColor({ event: "succeeded" })).toBe("green");
     ["failed", "import_failed", "cleanup_failed", "recovery_required"].forEach(event =>
@@ -1368,7 +1283,6 @@ describe("service upgrade page", () => {
         response: { status: 503, data: { message: "service unavailable" } }
       });
     api.getStatus.mockReset().mockRejectedValue(unavailable());
-    api.getPolicy.mockReset().mockRejectedValue(unavailable());
     api.getMigrationPlan.mockReset().mockRejectedValue(unavailable());
     const wrapper = mountPage();
     await flushPromises();
@@ -1381,6 +1295,79 @@ describe("service upgrade page", () => {
     // ② 英文 axios 串不能出现在用户界面上
     expect(text).not.toContain("Request failed with status code");
     expect(text).toContain("升级助手未运行或暂未就绪（HTTP 503）");
+    wrapper.unmount();
+  });
+
+  it("关闭定时检查会把选择写回服务端", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    const toggle = wrapper.get('[data-testid="auto-check-switch"] input');
+    expect((toggle.element as HTMLInputElement).checked).toBe(true);
+
+    await toggle.setValue(false);
+    await flushPromises();
+
+    expect(api.setAutoCheck).toHaveBeenCalledWith(false);
+    expect(api.check).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("打开定时检查后立刻查一次，避免用户等下一轮", async () => {
+    api.getNotice.mockResolvedValue({
+      code: 0,
+      data: { hasUpdate: false, ignored: false, checkEnabled: true, autoCheck: false, checkedAt: "" }
+    });
+    api.check.mockResolvedValue({
+      code: 0,
+      data: {
+        manifest: {
+          schema_version: 1,
+          channel: "stable",
+          sequence: 1,
+          release_id: "r",
+          version: "1.1.0",
+          build_id: "b",
+          min_updater_protocol: 1,
+          artifacts: []
+        },
+        artifact: {
+          deployment: "systemd",
+          os: "linux",
+          arch: "amd64",
+          filename: "uvp.tar.gz",
+          url: "",
+          size: 1,
+          sha256: "a".repeat(64)
+        },
+        currentVersion: "1.0.0",
+        hasUpdate: true
+      }
+    });
+    const wrapper = mountPage();
+    await flushPromises();
+    const toggle = wrapper.get('[data-testid="auto-check-switch"] input');
+    expect((toggle.element as HTMLInputElement).checked).toBe(false);
+
+    await toggle.setValue(true);
+    await flushPromises();
+
+    expect(api.setAutoCheck).toHaveBeenCalledWith(true);
+    expect(api.check).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+  });
+
+  // 没有官方源（离线部署 / 助手没起来）时点开关不会有任何效果，必须置灰。
+  it("定时检查不可用时开关禁用并说明原因", async () => {
+    api.getNotice.mockResolvedValue({
+      code: 0,
+      data: { hasUpdate: false, ignored: false, checkEnabled: false, autoCheck: true }
+    });
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const toggle = wrapper.get('[data-testid="auto-check-switch"] input');
+    expect((toggle.element as HTMLInputElement).disabled).toBe(true);
+    expect(wrapper.text()).toContain("升级助手未就绪，暂不可设置");
     wrapper.unmount();
   });
 });
