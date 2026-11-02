@@ -44,6 +44,7 @@ import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol"
 import {
   assertPCMA8000,
   createAudioLevelMeter,
+  describeMicError,
   preferPCMA8000,
   TALK_ACTIVE_POLL_INTERVAL_MS,
   talkIceGatheringTimeoutMs,
@@ -4787,6 +4788,10 @@ let talkStream: MediaStream | null = null;
 let talkSessionChannelId: number | null = null;
 let talkPollTimer: number | null = null;
 let talkToken = 0;
+/** 音轨事件监听（`ended` / `mute`）的解绑函数，换流/收尾时必须调用。 */
+let talkTrackWatchCleanup: (() => void) | null = null;
+/** `mute` 的宽限计时器：设备初始化时的瞬时抖动不该弹提示。 */
+let talkMicMuteTimer: number | null = null;
 
 /**
  * 「正在说话」的实时电平（0..1），由采集流的 AnalyserNode 驱动，用于按钮上的波形反馈。
@@ -4811,6 +4816,53 @@ function startTalkMeter() {
     talkSpectrum.value = spectrum;
   };
   talkMeter = createAudioLevelMeter(talkStream, onAudioLevel);
+}
+
+function stopWatchingMicTrack() {
+  talkTrackWatchCleanup?.();
+  talkTrackWatchCleanup = null;
+  if (talkMicMuteTimer !== null) window.clearTimeout(talkMicMuteTimer);
+  talkMicMuteTimer = null;
+}
+
+/**
+ * 采集成功 ≠ 一直可用，必须盯住音轨的两种"哑掉"状态。
+ *
+ * ⛔ USB 麦克风被拔、系统里换了默认输入设备、别的程序把设备抢走，会让轨道进
+ * `ended`（彻底没了）或 `muted`（暂时没有数据）。这两种情况下 WebRTC **不报错**：
+ * 推上去的就是静音包，按钮还写着「停止广播」，操作员对着一个已经哑了的麦克风喊话，
+ * 界面上却一切正常 —— 这是最难发现的一类故障，只能靠事件兜住。
+ * ⛔ `mute` 给 1.5s 宽限：有些设备刚打开采集时会先抖一下，立刻弹提示就是误报。
+ */
+function watchMicTrack(track: MediaStreamTrack) {
+  stopWatchingMicTrack();
+  if (typeof track.addEventListener !== "function") return;
+  const onEnded = () => {
+    // 建会话/等激活阶段也要处理：麦都没了，继续建立只会得到一个"看着在播、实际无声"的会话。
+    if (talkState.value === "idle" || talkState.value === "stopping") return;
+    Message.error("麦克风已断开（设备被拔出或被其它程序占用），广播已停止");
+    void stopTalk();
+  };
+  const onMute = () => {
+    if (talkState.value !== "talking" || talkMicMuteTimer !== null) return;
+    talkMicMuteTimer = window.setTimeout(() => {
+      talkMicMuteTimer = null;
+      if (talkState.value === "talking") Message.warning("麦克风暂时没有声音，请检查是否被系统静音或被其它程序占用");
+    }, 1500);
+  };
+  const onUnmute = () => {
+    if (talkMicMuteTimer === null) return;
+    window.clearTimeout(talkMicMuteTimer);
+    talkMicMuteTimer = null;
+  };
+  track.addEventListener("ended", onEnded);
+  track.addEventListener("mute", onMute);
+  track.addEventListener("unmute", onUnmute);
+  talkTrackWatchCleanup = () => {
+    track.removeEventListener("ended", onEnded);
+    track.removeEventListener("mute", onMute);
+    track.removeEventListener("unmute", onUnmute);
+  };
 }
 
 const talkButtonText = computed(() => {
@@ -4915,16 +4967,21 @@ async function startTalk() {
   talkState.value = "permission";
   let acquiredStream: MediaStream | null = null;
   try {
-    if (!navigator.mediaDevices?.getUserMedia) throw new Error("当前浏览器不支持麦克风采集");
+    if (!navigator.mediaDevices?.getUserMedia) {
+      // ⛔ http + 局域网 IP 下这个 API 根本不存在，说成"浏览器不支持"会把部署问题甩给用户。
+      throw new Error(describeMicError(null, window.isSecureContext !== false));
+    }
     acquiredStream = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
     });
     const audioTrack = acquiredStream.getAudioTracks()[0];
     if (!audioTrack) throw new Error("没有可用的麦克风音轨");
+    watchMicTrack(audioTrack);
     acquiredStream.getTracks().forEach(track => {
       track.enabled = false;
     });
     if (token !== talkToken) {
+      stopWatchingMicTrack();
       acquiredStream.getTracks().forEach(track => track.stop());
       return;
     }
@@ -4934,6 +4991,7 @@ async function startTalk() {
     const response = await createTalkSession(channelId, talkMode.value);
     if (response.code !== 0 || !response.data) throw new Error(response.message || "对讲会话创建失败");
     if (token !== talkToken) {
+      stopWatchingMicTrack();
       acquiredStream.getTracks().forEach(track => track.stop());
       await deleteTalkSession(channelId, response.data.sessionId).catch(() => undefined);
       return;
@@ -4990,7 +5048,8 @@ async function startTalk() {
       return;
     }
     await stopTalk();
-    Message.error(error?.message || "对讲启动失败");
+    // 采集失败要给出"能照着做"的原因：浏览器原文是英文，权限/设备缺失/被占用三类的处理方式完全不同。
+    Message.error(describeMicError(error, window.isSecureContext !== false));
   }
 }
 
@@ -4998,6 +5057,7 @@ function cleanupTalkLocally() {
   talkToken++;
   clearTalkPoll();
   stopTalkMeter();
+  stopWatchingMicTrack();
   if (talkStream)
     talkStream.getTracks().forEach(track => {
       track.enabled = false;

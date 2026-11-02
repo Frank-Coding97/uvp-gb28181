@@ -130,6 +130,44 @@ export function createAudioLevelMeter(stream: MediaStream, onLevel: AudioLevelSn
 }
 
 /**
+ * 把麦克风采集失败翻译成「现场人员照着能做」的中文。
+ *
+ * ⛔ 别把 `error.message` 直接弹出去：浏览器给的是英文（`Permission denied`、
+ * `Requested device not found`、`Could not start audio source`），现场人员看到等于没提示，
+ * 有些浏览器还会把 message 留空，最后只剩一句"启动失败"。
+ * ⛔ 也**不能**把所有失败都说成"浏览器不支持麦克风"：http 局域网地址下
+ * `navigator.mediaDevices` 根本不存在（`isSecureContext === false`），
+ * 换成 HTTPS / localhost 立刻就好 —— 那是部署方式问题，不是设备问题。
+ *
+ * @param error getUserMedia 抛出的 DOMException（或用 `null` 表示"浏览器根本没有这个 API"）
+ * @param secureContext 当前页面是否安全上下文，调用方传 `window.isSecureContext !== false`
+ */
+export function describeMicError(error: unknown, secureContext = true): string {
+  if (!secureContext) {
+    return "当前页面不是安全上下文（非 HTTPS 的局域网地址），浏览器禁止采集麦克风；请改用 HTTPS 或 localhost 访问";
+  }
+  const name = (error as { name?: string } | null)?.name || "";
+  switch (name) {
+    case "NotAllowedError":
+    case "PermissionDeniedError":
+    case "SecurityError":
+      return "麦克风权限被拒绝，请在浏览器地址栏的站点权限里允许麦克风后重试";
+    case "NotFoundError":
+    case "DevicesNotFoundError":
+      return "没有检测到麦克风设备，请检查麦克风是否已连接并被系统识别";
+    case "NotReadableError":
+    case "TrackStartError":
+      return "麦克风被其它程序占用或硬件异常，请关闭占用麦克风的程序后重试";
+    case "OverconstrainedError":
+      return "当前麦克风不支持所需的采集参数，请更换设备后重试";
+    case "AbortError":
+      return "麦克风启动被中断，请重试";
+    default:
+      return (error as { message?: string } | null)?.message || "麦克风采集失败";
+  }
+}
+
+/**
  * 等 ICE 收集结束。上游（ZLM 的 WHIP 端点）不支持 PATCH，候选必须在 POST 的 offer 里
  * 一次带齐，所以不能按标准 WHIP 的 trickle 模式发空候选。
  *

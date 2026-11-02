@@ -286,7 +286,9 @@ const channel = {
  */
 async function bootActiveBroadcast() {
   const stopTrack = vi.fn();
-  const track = { enabled: true, stop: stopTrack };
+  // 用 EventTarget 当音轨基类：采集成功后的 `ended` / `mute` 监听要靠它才能触发
+  // （"麦克风被拔掉"这类故障的唯一信号就是轨道事件，普通对象测不出来）。
+  const track = Object.assign(new EventTarget(), { enabled: true, stop: stopTrack });
   const stream = { getTracks: () => [track], getAudioTracks: () => [track] };
   const offerSdp = "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 8\r\na=rtpmap:8 PCMA/8000\r\n";
   class FakePeerConnection {
@@ -2561,6 +2563,60 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(api.getTalkSession.mock.calls.length).toBe(before + 1);
 
     hidden.mockRestore();
+    wrapper.unmount();
+  });
+
+  it("麦克风权限被拒绝时提示可操作的中文原因，而不是浏览器英文原文", async () => {
+    // `Permission denied` 这类原文现场人员看不懂，也分不清是"没授权"还是"设备坏了"。
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      mediaDevices: {
+        getUserMedia: vi.fn().mockRejectedValue(new DOMException("Permission denied", "NotAllowedError"))
+      }
+    });
+    const error = vi.spyOn(Message, "error");
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    wrapper.get("[data-testid='talk-button']").element.dispatchEvent(new Event("click"));
+    await flushPromises();
+
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("麦克风权限被拒绝"));
+    expect(api.createTalkSession).not.toHaveBeenCalled();
+    expect(wrapper.get("[data-testid='talk-button']").text()).toContain("开始广播");
+    wrapper.unmount();
+  });
+
+  it("没有可用的麦克风设备时指出是设备问题", async () => {
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      mediaDevices: {
+        getUserMedia: vi.fn().mockRejectedValue(new DOMException("Requested device not found", "NotFoundError"))
+      }
+    });
+    const error = vi.spyOn(Message, "error");
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    wrapper.get("[data-testid='talk-button']").element.dispatchEvent(new Event("click"));
+    await flushPromises();
+
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("没有检测到麦克风设备"));
+    wrapper.unmount();
+  });
+
+  it("广播中麦克风被拔掉会提示并停掉会话，而不是继续推静音", async () => {
+    // ⛔ 最难发现的故障：轨道 ended 之后 WebRTC 不报错，推的就是静音包，
+    //    界面上按钮还写着「停止广播」，操作员对着哑掉的麦克风喊话。
+    const { wrapper, track } = await bootActiveBroadcast();
+    expect(wrapper.get("[data-testid='talk-button']").text()).toContain("停止广播");
+    const error = vi.spyOn(Message, "error");
+
+    track.dispatchEvent(new Event("ended"));
+    await flushPromises();
+
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("麦克风已断开"));
+    expect(api.deleteTalkSession).toHaveBeenCalledWith(channel.id, "talk-1");
     wrapper.unmount();
   });
 

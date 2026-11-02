@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   assertPCMA8000,
   createAudioLevelMeter,
+  describeMicError,
   preferPCMA8000,
   talkIceGatheringTimeoutMs,
   TALK_ACTIVE_POLL_INTERVAL_MS,
@@ -201,5 +202,28 @@ describe("createAudioLevelMeter", () => {
     createAudioLevelMeter(stream, (_level, spectrum) => snapshots.push(spectrum))!;
     fake.tick();
     expect(snapshots.at(-1)!.every(value => value === 0)).toBe(true);
+  });
+});
+
+describe("describeMicError", () => {
+  it("把浏览器的采集错误码翻译成可操作的中文", () => {
+    // ⛔ 原文是英文（Permission denied / Requested device not found），
+    // 现场人员既看不懂，也分不清该去改权限还是换设备。
+    expect(describeMicError(new DOMException("Permission denied", "NotAllowedError"))).toContain("麦克风权限被拒绝");
+    expect(describeMicError(new DOMException("", "NotFoundError"))).toContain("没有检测到麦克风设备");
+    expect(describeMicError(new DOMException("", "NotReadableError"))).toContain("被其它程序占用");
+    expect(describeMicError(new DOMException("", "AbortError"))).toContain("被中断");
+  });
+
+  it("非安全上下文优先于错误码：那是打开方式的问题，不是设备坏了", () => {
+    // http + 局域网 IP 时 `navigator.mediaDevices` 根本不存在，
+    // 说成"浏览器不支持麦克风"会把人往换浏览器的方向带。
+    expect(describeMicError(new DOMException("", "NotAllowedError"), false)).toContain("不是安全上下文");
+    expect(describeMicError(null, false)).toContain("HTTPS");
+  });
+
+  it("未知错误保留原文，兜底不吞掉信息", () => {
+    expect(describeMicError(new Error("boom"))).toBe("boom");
+    expect(describeMicError(null)).toBe("麦克风采集失败");
   });
 });
