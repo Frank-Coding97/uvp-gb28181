@@ -2369,7 +2369,10 @@ function reconnect() {
 }
 
 function handleMinimize() {
-  releaseContinuousControls();
+  // 最小化是**显式**收起播放器（缩成小窗后广播/对讲入口不再显眼，用户没地方停），
+  // 所以这里仍主动收掉；「切标签页 / 窗口失焦」那种被动离开不停，见 `releaseHoldControls`。
+  releaseHoldControls();
+  void stopTalk();
   exitDragZoomMode();
   savePresetDialogVisible.value = false;
   saveCruiseDialogVisible.value = false;
@@ -4849,6 +4852,32 @@ function clearTalkPoll() {
   talkPollTimer = null;
 }
 
+/**
+ * 心跳兼续租：`GET /talk-sessions/:id` 在后端 `TalkController.Get` 里对 active 会话
+ * 直接续租（`Service.Renew`），所以这一条请求同时承担"探状态"和"保命"。
+ *
+ * ⛔ 间隔不能大于后端租约的一半：浏览器把隐藏标签页的定时器节流到最快 1 分钟一次，
+ * 租约 120s ⇒ 15s 的常规间隔在后台最多拖成 60s，仍留两轮余量（见后端 `defaultTalkLease`）。
+ */
+const TALK_LEASE_POLL_INTERVAL_MS = 15000;
+
+async function refreshTalkSession(channelId: number, sessionId: string) {
+  if (!hasPermission("gb28181:talk:control")) {
+    await stopTalk();
+    return;
+  }
+  try {
+    const response = await getTalkSession(channelId, sessionId);
+    if (!hasPermission("gb28181:talk:control")) {
+      await stopTalk();
+      return;
+    }
+    if (["failed", "expired", "ended"].includes(String(response.data?.state))) await stopTalk();
+  } catch {
+    // 短暂轮询失败不打断正在说话，租约超时由后端最终收敛。
+  }
+}
+
 async function waitTalkActive(channelId: number, sessionId: string, token: number) {
   if (!hasPermission("gb28181:talk:control")) return false;
   talkState.value = "signaling";
@@ -4868,22 +4897,9 @@ async function waitTalkActive(channelId: number, sessionId: string, token: numbe
 function beginTalkPoll(channelId: number, sessionId: string) {
   if (!hasPermission("gb28181:talk:control")) return;
   clearTalkPoll();
-  talkPollTimer = window.setInterval(async () => {
-    if (!hasPermission("gb28181:talk:control")) {
-      await stopTalk();
-      return;
-    }
-    try {
-      const response = await getTalkSession(channelId, sessionId);
-      if (!hasPermission("gb28181:talk:control")) {
-        await stopTalk();
-        return;
-      }
-      if (["failed", "expired", "ended"].includes(String(response.data?.state))) await stopTalk();
-    } catch {
-      // 短暂轮询失败不打断正在说话，租约超时由后端最终收敛。
-    }
-  }, 10000);
+  talkPollTimer = window.setInterval(() => {
+    void refreshTalkSession(channelId, sessionId);
+  }, TALK_LEASE_POLL_INTERVAL_MS);
 }
 
 async function startTalk() {
@@ -5056,13 +5072,27 @@ async function copyProtocolUrl(proto: StreamProtocol) {
   await copyTextToClipboard(url);
 }
 
-function releaseContinuousControls() {
+/**
+ * 离开窗口/页面时**只**释放"按住式"控制（云台方向、变倍、镜头）。
+ *
+ * ⛔ 广播/对讲不在这里停：它是**点击开关**（见 `toggleTalk` 注释），操作员按了「开始广播」
+ * 之后去看别的标签页、切到别的窗口都是正常用法，一失焦就掐断等于功能不可用
+ * （实测用户的第一反应就是"广播只能盯着这一个标签页"）。
+ * 会话的生命周期只由这几件事决定：再点一次、设备主动 BYE、会话转终态、通道切换/组件卸载；
+ * 真把页面关掉了，靠后端租约到期收敛（`SweepExpired`）。
+ */
+function releaseHoldControls() {
   releasePtzControl();
-  void stopTalk();
 }
 
 function handleVisibilityChange() {
-  if (document.hidden) releaseContinuousControls();
+  if (document.hidden) {
+    releaseHoldControls();
+    return;
+  }
+  // 回到前台立刻补一次心跳：后台期间定时器被节流，先把这个租约续上再恢复常规节奏。
+  const session = talkSession.value;
+  if (session?.sessionId && talkSessionChannelId) void refreshTalkSession(talkSessionChannelId, session.sessionId);
 }
 
 /* ────────────────────────── 生命周期 ────────────────────────── */
@@ -5086,7 +5116,7 @@ watch(
   () => props.displayMode,
   mode => {
     if (mode === "minimized") {
-      releaseContinuousControls();
+      releaseHoldControls();
       exitDragZoomMode();
       void nextTick(keepMiniPlayerInViewport);
     } else {
@@ -5096,13 +5126,13 @@ watch(
 );
 
 onMounted(() => {
-  window.addEventListener("blur", releaseContinuousControls);
+  window.addEventListener("blur", releaseHoldControls);
   window.addEventListener("resize", keepMiniPlayerInViewport);
   document.addEventListener("visibilitychange", handleVisibilityChange);
 });
 
 onBeforeUnmount(() => {
-  window.removeEventListener("blur", releaseContinuousControls);
+  window.removeEventListener("blur", releaseHoldControls);
   window.removeEventListener("resize", keepMiniPlayerInViewport);
   document.removeEventListener("visibilitychange", handleVisibilityChange);
   finishMiniPlayerDrag();

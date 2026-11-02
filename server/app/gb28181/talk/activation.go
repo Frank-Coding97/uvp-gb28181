@@ -20,7 +20,13 @@ import (
 const (
 	defaultTalkVHost      = "__defaultVhost__"
 	defaultTalkCloseDelay = 12000
-	defaultTalkLease      = 30 * time.Second
+	// ⛔ 广播/对讲的存活靠前端 GET 会话时顺带续租（`TalkController.Get` → `Service.Renew`），
+	// 浏览器一旦切到后台标签页，主线程定时器会被节流到**最快 1 分钟一次**
+	// （Chrome 隐藏页面 5 分钟后进入 intensive throttling）。租约原来只有 30s，
+	// 后台节流后的心跳必然跨过一次到期 ⇒ 正在播的广播被 `SweepExpired` 当成僵尸会话拆掉。
+	// 120s 让"最慢 60s 一次心跳"即使丢掉一轮也还有余量：后台仍在播的广播不会断，
+	// 真关掉页面也能在 2 分钟内收敛（否则设备端会一直响）。
+	defaultTalkLease = 120 * time.Second
 )
 
 var (

@@ -278,6 +278,45 @@ const channel = {
 };
 
 /**
+ * 起一个「正在广播」的控制台：麦克风 → 建会话 → WHIP 发布 → 会话 active。
+ *
+ * ⛔ 广播/对讲是点击开关（见 `toggleTalk`）：「离开页面是否还继续播」这类断言必须从
+ * **已激活**状态出发，否则只是在验证"没开始过就不会停"。
+ * 依赖 `beforeEach` 里的默认 mock：`createTalkSession` 返回 reserved、`getTalkSession` 返回 active。
+ */
+async function bootActiveBroadcast() {
+  const stopTrack = vi.fn();
+  const track = { enabled: true, stop: stopTrack };
+  const stream = { getTracks: () => [track], getAudioTracks: () => [track] };
+  const offerSdp = "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 8\r\na=rtpmap:8 PCMA/8000\r\n";
+  class FakePeerConnection {
+    iceGatheringState = "complete";
+    localDescription: RTCSessionDescriptionInit | null = null;
+    addTransceiver = vi.fn(() => ({ setCodecPreferences: vi.fn() }));
+    createOffer = vi.fn().mockResolvedValue({ type: "offer", sdp: offerSdp });
+    setLocalDescription = vi.fn(async (description: RTCSessionDescriptionInit) => {
+      this.localDescription = description;
+    });
+    setRemoteDescription = vi.fn().mockResolvedValue(undefined);
+    addEventListener = vi.fn();
+    removeEventListener = vi.fn();
+    close = vi.fn();
+  }
+  vi.stubGlobal("navigator", { ...navigator, mediaDevices: { getUserMedia: vi.fn().mockResolvedValue(stream) } });
+  vi.stubGlobal("RTCRtpSender", {
+    getCapabilities: () => ({ codecs: [{ mimeType: "audio/PCMA", clockRate: 8000, channels: 1 }] })
+  });
+  vi.stubGlobal("RTCPeerConnection", FakePeerConnection);
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 201, text: async () => offerSdp }));
+
+  const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+  await flushPromises();
+  wrapper.get("[data-testid='talk-button']").element.dispatchEvent(new Event("click"));
+  await flushPromises();
+  return { wrapper, track, stopTrack };
+}
+
+/**
  * 画面设置（镜像 + 隐私遮挡）的设备回读应答。
  *
  * ⛔ `payload` 是**那一块本身**，不是包在 `pictureMask` 键下的容器。
@@ -2487,6 +2526,41 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(track.enabled).toBe(false);
     expect(stop).toHaveBeenCalledTimes(1);
     expect(api.deleteTalkSession).toHaveBeenCalledWith(channel.id, "talk-1");
+    wrapper.unmount();
+  });
+
+  it("切标签页或窗口失焦不会掐断正在进行的广播", async () => {
+    // ⛔ 曾经的缺陷：`window.blur` 与 `visibilitychange` 一起调了 `releaseContinuousControls`，
+    //    那个函数顺手 `stopTalk()`。于是"一边广播一边看别的标签页"直接断流 ——
+    //    广播是点击开关，被动离开页面不是它的停止条件（只有云台那种按住式动作才该松手即停）。
+    const { wrapper, track } = await bootActiveBroadcast();
+    expect(wrapper.get("[data-testid='talk-button']").text()).toContain("停止广播");
+
+    const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+    window.dispatchEvent(new Event("blur"));
+    document.dispatchEvent(new Event("visibilitychange"));
+    await flushPromises();
+
+    expect(api.deleteTalkSession).not.toHaveBeenCalled();
+    expect(track.enabled).toBe(true);
+    expect(wrapper.get("[data-testid='talk-button']").text()).toContain("停止广播");
+
+    hidden.mockRestore();
+    wrapper.unmount();
+  });
+
+  it("回到前台立刻补一次会话心跳，不等后台被节流的定时器", async () => {
+    // 后台标签页的 setInterval 会被节流到最快 1 分钟一次，而会话靠 GET 顺带续租。
+    // 回到前台的第一件事必须是补心跳，否则用户切回来看到的可能已经是"租约过期"。
+    const { wrapper } = await bootActiveBroadcast();
+    const before = api.getTalkSession.mock.calls.length;
+
+    const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+    document.dispatchEvent(new Event("visibilitychange"));
+    await flushPromises();
+    expect(api.getTalkSession.mock.calls.length).toBe(before + 1);
+
+    hidden.mockRestore();
     wrapper.unmount();
   });
 
