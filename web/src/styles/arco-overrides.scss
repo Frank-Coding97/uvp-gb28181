@@ -189,6 +189,35 @@ body[arco-theme="dark"] .arco-switch[disabled].arco-switch-checked {
   }
 }
 
+// 折叠侧栏的菜单弹层会 Teleport 到 body，不能继承 .aside 内的菜单主题。
+// 复用系统弹层色板，避免暗色主题落回 Arco 的中性灰卡片。
+.arco-trigger-menu {
+  color: var(--uvp-text-secondary) !important;
+  background: var(--uvp-popconfirm-bg) !important;
+  border: 1px solid var(--uvp-popconfirm-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-popconfirm-shadow) !important;
+}
+
+.arco-trigger-menu .arco-trigger-menu-item,
+.arco-trigger-menu .arco-trigger-menu-pop-header {
+  color: var(--uvp-text-secondary) !important;
+  background: transparent !important;
+}
+
+.arco-trigger-menu .arco-trigger-menu-item:hover,
+.arco-trigger-menu .arco-trigger-menu-pop-header:hover,
+.arco-trigger-menu .arco-trigger-menu-item.arco-trigger-menu-selected:hover,
+.arco-trigger-menu .arco-trigger-menu-pop-header.arco-trigger-menu-selected:hover {
+  color: var(--uvp-brand) !important;
+  background: var(--uvp-brand-soft) !important;
+}
+
+.arco-trigger-menu .arco-trigger-menu-item .arco-trigger-menu-icon,
+.arco-trigger-menu .arco-trigger-menu-pop-header .arco-trigger-menu-icon {
+  color: var(--uvp-text-tertiary) !important;
+}
+
 // ========== DatePicker / RangePicker 日期弹层 ==========
 .arco-picker-container,
 .arco-picker-range-container {
