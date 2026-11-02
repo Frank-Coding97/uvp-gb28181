@@ -290,6 +290,25 @@ body {
   margin-inline: 6px;
 }
 
+.aside .arco-menu.arco-menu-collapsed > .arco-menu-inner {
+  padding: 2px 4px 20px;
+}
+
+.aside .arco-menu.arco-menu-collapsed > .arco-menu-inner > .arco-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
+  margin: 0 auto 4px;
+}
+
+.aside .arco-menu.arco-menu-collapsed > .arco-menu-inner > .arco-menu-item.arco-menu-selected .arco-menu-icon {
+  background: transparent;
+}
+
 .aside .arco-menu-item-group-title,
 .aside .arco-menu-pop .arco-menu-pop-header,
 .aside .arco-menu-light .arco-menu-inline-header .arco-menu-title {
@@ -1995,6 +2014,15 @@ body[arco-theme="dark"]
   .arco-menu-icon,
 body[arco-theme="dark"] .aside .arco-menu > .arco-menu-inner > .arco-menu-item.arco-menu-selected .arco-menu-icon {
   background: rgb(96 165 250 / 12%);
+}
+
+body[arco-theme="dark"]
+  .aside
+  .arco-menu.arco-menu-collapsed
+  > .arco-menu-inner
+  > .arco-menu-item.arco-menu-selected
+  .arco-menu-icon {
+  background: transparent;
 }
 
 body[arco-theme="dark"] .uvp-split-list-page #s-fold-page .packup-btn,

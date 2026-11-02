@@ -70,6 +70,37 @@ describe("media workbench theme tokens", () => {
   });
 });
 
+describe("collapsed sidebar selection", () => {
+  it("keeps the menu item square and uses only one selected surface", () => {
+    expect(hasRuleBlock(source, ".aside .arco-menu.arco-menu-collapsed > .arco-menu-inner", "padding: 2px 4px 20px")).toBe(true);
+    expect(
+      hasRuleBlock(
+        source,
+        ".aside .arco-menu.arco-menu-collapsed > .arco-menu-inner > .arco-menu-item",
+        "width: 40px",
+        "height: 40px",
+        "min-height: 40px",
+        "padding: 0",
+        "margin: 0 auto 4px"
+      )
+    ).toBe(true);
+    expect(
+      hasRuleBlock(
+        source,
+        ".aside .arco-menu.arco-menu-collapsed > .arco-menu-inner > .arco-menu-item.arco-menu-selected .arco-menu-icon",
+        "background: transparent"
+      )
+    ).toBe(true);
+    expect(
+      hasRuleBlock(
+        source.replace(/\s+/g, " "),
+        'body[arco-theme="dark"] .aside .arco-menu.arco-menu-collapsed > .arco-menu-inner > .arco-menu-item.arco-menu-selected .arco-menu-icon',
+        "background: transparent"
+      )
+    ).toBe(true);
+  });
+});
+
 describe("table fixed-right column alignment", () => {
   it("never lets the native table-body scrollbar take layout width", () => {
     // 表头与表体是两个独立滚动的容器,`fixed="right"` 的列在两侧各自贴**自己**滚动区的右边缘;
