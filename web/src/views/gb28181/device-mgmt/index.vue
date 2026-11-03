@@ -1391,7 +1391,7 @@ function createClusterElement(cluster: MapCluster) {
  */
 type MarkerPoint = Pick<MapMarker, "id" | "channelId" | "deviceId" | "name" | "status">;
 
-function createMarkerElement(marker: MarkerPoint, offset?: [number, number]) {
+function createMarkerElement(marker: MarkerPoint, offset?: [number, number], position?: MapLngLat) {
   const element = document.createElement("button");
   element.type = "button";
   element.className = `map-channel-marker${marker.status === 1 ? " online" : ""}`;
@@ -1406,9 +1406,47 @@ function createMarkerElement(marker: MarkerPoint, offset?: [number, number]) {
   //    必须由用户在卡片上选，否则想查轨迹的人会先被拉起一路实时流。
   element.addEventListener("click", event => {
     event.stopPropagation();
-    openMarkerCard(marker, undefined, offset);
+    focusMarkerThenCard(marker, position, offset);
   });
   return element;
+}
+
+/** 地图上的经纬度。抽出来只是为了让"点位点击 → 顶到最大层级"这条链路签名短一点。 */
+type MapLngLat = { longitude: number; latitude: number };
+
+/**
+ * 点地图上的通道标记点：**先**把地图顶到最大层级，飞行动画结束后**再**弹选项卡片。
+ *
+ * ⛔ 顺序不能反。先弹卡片再平移，卡片虽然跟着坐标走，但用户视线正跟着镜头跑，
+ *    观感就是"卡片闪一下又不知道跑哪去了"；而且低层级下点位挤在一起，
+ *    卡片旁边那一片全是重叠的点，根本看不出自己点中了哪一个。
+ * ⛔ 坐标优先用点位自带的：低层级下的"落单通道"来自服务端聚合，只有在 markers 列表里
+ *    才带经纬度，而 markers 是按视野查的 —— 只靠回查会拿到 undefined ⇒ 卡片弹不出来。
+ */
+let markerFocusSeq = 0;
+function focusMarkerThenCard(marker: MarkerPoint, position?: MapLngLat, offset?: [number, number]) {
+  if (!mapInstance) return;
+  const detail = markerCardDetail(marker);
+  const longitude = position?.longitude ?? detail?.longitude;
+  const latitude = position?.latitude ?? detail?.latitude;
+  // 没坐标就没法缩放：交给 openMarkerCard 自己的兜底（它会直接 return，不会留下半张卡）
+  if (longitude === undefined || latitude === undefined) {
+    openMarkerCard(marker, position, offset);
+    return;
+  }
+  const target: MapLngLat = { longitude, latitude };
+  // 已经在最大层级：不必再飞一趟，直接弹卡片
+  if (mapInstance.getZoom() >= mapMaxZoom - 0.01) {
+    openMarkerCard(marker, target, offset);
+    return;
+  }
+  // 飞行途中用户又点了别的点：只让最新那一次说话，避免两张卡片抢同一个 popup
+  const seq = ++markerFocusSeq;
+  mapInstance.once("moveend", () => {
+    if (seq !== markerFocusSeq) return;
+    openMarkerCard(marker, target, offset);
+  });
+  mapInstance.flyTo({ center: [longitude, latitude], zoom: mapMaxZoom, essential: true });
 }
 
 /** 卡片上展示的完整信息。聚合里落单的点只带身份，来源/新鲜度要从 markers 列表补。 */
@@ -1527,7 +1565,14 @@ function renderMapOverlays() {
       if (cluster.count === 1 && cluster.single) {
         mapMarkers.set(
           cluster.single.id,
-          new MapLibreMarker({ element: createMarkerElement(cluster.single), anchor: "center" })
+          new MapLibreMarker({
+            // 聚合里落单的通道只带身份，坐标得用聚合自己的中心点补上
+            element: createMarkerElement(cluster.single, undefined, {
+              longitude: cluster.centerLng,
+              latitude: cluster.centerLat
+            }),
+            anchor: "center"
+          })
             .setLngLat([cluster.centerLng, cluster.centerLat])
             .addTo(mapInstance!)
         );
@@ -1565,7 +1610,11 @@ function renderMapOverlays() {
         mapMarkers.set(
           channel.id,
           new MapLibreMarker({
-            element: createMarkerElement(channel, members.length > 1 ? offset : undefined),
+            // 坐标由通道自带，点击时不必再回查（点击后还要缩放，midway 回查可能拿到空）
+            element: createMarkerElement(channel, members.length > 1 ? offset : undefined, {
+              longitude: channel.longitude,
+              latitude: channel.latitude
+            }),
             anchor: "center",
             offset
           })

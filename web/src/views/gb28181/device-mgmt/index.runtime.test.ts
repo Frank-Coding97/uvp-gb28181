@@ -150,8 +150,11 @@ vi.mock("maplibre-gl", () => {
     }
     // 只同步触发 load:让兜底定时器在挂载后立即存在;idle 不触发,
     // 保持 mapFirstRender=false 以便验证 12s 兜底路径
+    /** 一次性监听队列:真实 MapLibre 的 once 允许挂多个,镜头落位时一起发作并清空 */
+    private onceQueue: Record<string, Array<() => void>> = {};
     once(evt: string, cb: () => void) {
       this.onceCbs[evt] = cb;
+      (this.onceQueue[evt] ??= []).push(cb);
       if (evt === "load") cb();
     }
     on(evt: string, cb: () => void) {
@@ -174,7 +177,7 @@ vi.mock("maplibre-gl", () => {
     easeTo(options: { center: [number, number] }) {
       this.easeToCalls.push(options);
       this.centerValue = { lng: options.center[0], lat: options.center[1] };
-      this.onCbs.moveend?.();
+      this.finishFlight();
     }
     project([longitude, latitude]: [number, number]) {
       return { x: longitude * 100000, y: latitude * 100000 };
@@ -200,7 +203,18 @@ vi.mock("maplibre-gl", () => {
     flyTo(options: { center: [number, number]; zoom: number }) {
       this.flyToCalls.push(options);
       this.zoomValue = options.zoom;
+      this.finishFlight();
+    }
+    /**
+     * 镜头落位。真实 MapLibre 在动画结束后发 moveend —— 常驻监听和 `once` 监听都收到,
+     * 后者收完即摘。用例里也可以直接调它来模拟"飞行结束"(例如先让 flyTo 不落位,
+     * 验证"卡片要等动画结束才弹"这条顺序契约)。
+     */
+    finishFlight() {
       this.onCbs.moveend?.();
+      const queue = this.onceQueue.moveend ?? [];
+      this.onceQueue.moveend = [];
+      queue.forEach(cb => cb());
     }
     resize() {}
   }
@@ -1416,6 +1430,53 @@ describe("device-mgmt round-2 修复回归", () => {
     map.onCbs.moveend?.();
     await flushPromises();
     expect(markerInstances.map(instance => instance.element.className)).toEqual(["map-channel-marker online"]);
+
+    wrapper.unmount();
+  });
+
+  it("点击地图上的通道标记点：先顶到最大层级，动画落位后才弹卡片", async () => {
+    window.localStorage.setItem("uvp.gb28181.device-mgmt.view-mode", "map");
+    api.listMapMarkers.mockReset().mockResolvedValue(okList(1, [coordinatedChannel]));
+    api.listMapClusters.mockReset().mockResolvedValue({ code: 0, message: "", data: { clusters: [] } });
+
+    const wrapper = mountPage();
+    await flushPromises();
+    const map = mapInstances[0];
+
+    map.zoomValue = 16;
+    map.onCbs.moveend?.();
+    await flushPromises();
+    expect(markerInstances).toHaveLength(1);
+
+    // 飞行中不落位：验证"卡片不许抢在缩放前面弹出来"这条顺序契约
+    popupInstances.length = 0;
+    const flights: Array<{ center: [number, number]; zoom: number }> = [];
+    map.flyTo = (options: { center: [number, number]; zoom: number }) => flights.push(options);
+    (markerInstances[0].element as HTMLElement).click();
+    await flushPromises();
+
+    expect(flights).toHaveLength(1);
+    // 顶到最大层级(22)，并把镜头对到点位上
+    expect(flights[0]).toMatchObject({ center: [116.995036, 36.662311], zoom: 22 });
+    expect(popupInstances).toHaveLength(0);
+
+    // 动画结束(真实 MapLibre 发 moveend) → 卡片才出现
+    map.finishFlight();
+    await flushPromises();
+    expect(popupInstances).toHaveLength(1);
+    expect((popupInstances[0].content as HTMLElement).textContent).toContain("后置摄像头");
+
+    // 已经在最大层级时不再飞一趟，直接弹卡片
+    popupInstances.length = 0;
+    map.zoomValue = 22;
+    map.onCbs.moveend?.();
+    await flushPromises();
+    expect(markerInstances).toHaveLength(1);
+    flights.length = 0;
+    (markerInstances[0].element as HTMLElement).click();
+    await flushPromises();
+    expect(flights).toHaveLength(0);
+    expect(popupInstances).toHaveLength(1);
 
     wrapper.unmount();
   });
