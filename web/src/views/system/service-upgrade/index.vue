@@ -88,8 +88,9 @@
         :show-upload-bar="Boolean(showImportProgress && uploadTransfer && !importJob)"
         :reconnecting="showImportProgress ? Boolean(importJobError && !importJobFinished) : Boolean(statusError)"
       >
-        <template v-if="!showImportProgress && progressTask" #action
-          ><a-space wrap>
+        <template v-if="(showImportProgress && importFailed) || (!showImportProgress && progressTask)" #action
+          ><a-link v-if="showImportProgress && importFailed" data-testid="dismiss-import" @click="dismissImport">关闭</a-link
+          ><a-space v-else-if="progressTask" wrap>
             <a-button
               v-if="
                 canManage &&
@@ -644,6 +645,22 @@ const showImportProgress = computed(() => {
   );
 });
 const importJobFailed = computed(() => ["failed", "rejected", "cancelled", "canceled", "abandoned"].includes(importPhase.value));
+// 失败有两种来源：后台校验回传 failed，和上传本身就没成功。页面必须用同一口径
+// 决定「要不要给关闭入口」，否则上传失败那种情况会永远关不掉。
+const importFailed = computed(
+  () =>
+    importJobFailed.value ||
+    uploadTransfer.value?.state === "failed" ||
+    (importJobFinished.value && Boolean(importJobError.value))
+);
+const dismissImport = () => {
+  importGeneration += 1;
+  importing.value = false;
+  importJob.value = undefined;
+  uploadTransfer.value = undefined;
+  importJobError.value = "";
+  storeImportJobID("");
+};
 const importPhaseLabel = (phase: string) =>
   (
     ({
@@ -680,7 +697,7 @@ const importProgress = computed<ProgressDisplay>(() => {
       error: uploadTransfer.value?.error
     };
   }
-  const failed = importJobFailed.value || (importJobFinished.value && Boolean(importJobError.value));
+  const failed = importFailed.value;
   const ready = importJobFinished.value && !failed;
   const phase = importPhase.value;
   const known = ["queued", "pending", "received", "verifying", "validating"].includes(phase) || importJobFinished.value;

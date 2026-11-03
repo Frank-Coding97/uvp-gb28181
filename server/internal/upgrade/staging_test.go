@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,6 +81,44 @@ func TestImportArchiveRejectsUnsafeAndMismatchedEntries(t *testing.T) {
 				t.Fatal("unsafe archive entry was accepted")
 			}
 		})
+	}
+}
+
+// 上传安装包是最常见的用户错误：原来只报 "unsafe upgrade archive path"，
+// 用户完全看不出自己在哪一步错了。这里钉住两点——必须拒绝，且必须说清原因。
+func TestImportArchiveExplainsInstallationPackageInsteadOfBundle(t *testing.T) {
+	cases := map[string][]tarEntry{
+		"顶层目录条目":  {{name: "uvp-gb28181-linux-amd64-1.1.14/", typeFlag: tar.TypeDir}},
+		"带子目录的文件": {{name: "uvp-gb28181-linux-amd64-1.1.14/bin/uvp-server", body: []byte("x")}},
+	}
+	for label, entries := range cases {
+		t.Run(label, func(t *testing.T) {
+			archive := buildTarEntries(t, entries)
+			_, err := ImportArchive(context.Background(), bytes.NewReader(archive), t.TempDir(), map[string]ed25519.PublicKey{"key": make(ed25519.PublicKey, ed25519.PublicKeySize)}, Target{Deployment: "standalone", OS: "linux", Arch: "amd64", UpdaterProtocol: 1})
+			if err == nil {
+				t.Fatal("安装包被当成离线升级包接受了")
+			}
+			if !errors.Is(err, errArchiveNotFlat) {
+				t.Fatalf("错误没有标记成结构问题: %v", err)
+			}
+			if !strings.Contains(err.Error(), "安装包") || !strings.Contains(err.Error(), ".upgrade.tar") {
+				t.Fatalf("错误没有告诉用户拿错文件: %v", err)
+			}
+		})
+	}
+}
+
+// 攻击性路径不能套用「你传错文件」的说法：那是另一类问题，排查方向不同。
+func TestImportArchiveDoesNotBlameUserForAttackPaths(t *testing.T) {
+	for _, name := range []string{"../evil", "/absolute"} {
+		archive := buildTarEntries(t, []tarEntry{{name: "manifest.json", body: []byte("{}")}, {name: name, body: []byte("x")}})
+		_, err := ImportArchive(context.Background(), bytes.NewReader(archive), t.TempDir(), map[string]ed25519.PublicKey{"key": make(ed25519.PublicKey, ed25519.PublicKeySize)}, Target{Deployment: "standalone", OS: "linux", Arch: "amd64", UpdaterProtocol: 1})
+		if err == nil {
+			t.Fatalf("%s 被接受了", name)
+		}
+		if errors.Is(err, errArchiveNotFlat) {
+			t.Fatalf("%s 被误判成安装包: %v", name, err)
+		}
 	}
 }
 

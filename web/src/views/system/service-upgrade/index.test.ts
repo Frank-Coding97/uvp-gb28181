@@ -182,6 +182,11 @@ describe("service upgrade page", () => {
     (reason.element as HTMLDetailsElement).open = true;
     await reason.trigger("toggle");
     expect(wrapper.text()).toContain("升级包签名无效");
+    // 校验失败后必须能关掉这块红：否则它会一直留在页面上（任务 ID 存在
+    // localStorage 里，刷新也会被重新查回来），用户只能靠再传一次碰运气。
+    await wrapper.get('[data-testid="dismiss-import"]').trigger("click");
+    expect(wrapper.find('[data-testid="import-progress"]').exists()).toBe(false);
+    expect(window.localStorage.getItem("uvp.service-upgrade.import-job")).toBeNull();
     await input.trigger("change");
     await flushPromises();
     expect(api.importPackage).toHaveBeenCalledTimes(2);

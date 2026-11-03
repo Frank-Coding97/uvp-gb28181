@@ -26,6 +26,11 @@ const (
 	maxArchiveExpanded  int64 = 8 << 30
 )
 
+// errArchiveNotFlat 是把「上传了安装包」这个最常见的用户错误从内部的
+// "unsafe upgrade archive path" 里区分出来的哨兵错误：两者都拒绝，但只有这个
+// 需要告诉用户「你拿错文件了」。
+var errArchiveNotFlat = errors.New("离线升级包格式不对")
+
 // StagedArtifact is a verified artifact owned by the updater staging root.
 // The path is never accepted from a caller; it is derived from the digest and
 // sanitized filename after the archive has been fully verified.
@@ -114,8 +119,17 @@ func ImportArchive(ctx context.Context, input io.Reader, root string, trustedKey
 		if entries > maxArchiveEntries {
 			return StagedArtifact{}, errors.New("upgrade archive contains too many entries")
 		}
+		// 目录条目本身不构成安全问题，但它说明这个包不是「信封」结构：离线升级包
+		// 必须是扁平的（manifest.json + 一个产物），带顶层目录的通常是安装包。
+		// 直接报 "unsafe upgrade archive path" 用户完全看不懂自己在哪一步错了。
+		if header.Typeflag == tar.TypeDir {
+			return StagedArtifact{}, fmt.Errorf("%w：压缩包里是一个目录 %q。离线升级包是扁平的（只含 manifest.json 和一个升级产物文件），这个文件看起来是安装包，请改用 .upgrade.tar", errArchiveNotFlat, header.Name)
+		}
 		name, err := safeArchiveName(header.Name)
 		if err != nil {
+			if strings.ContainsAny(header.Name, `/\`) && !strings.HasPrefix(header.Name, "..") && !filepath.IsAbs(header.Name) {
+				return StagedArtifact{}, fmt.Errorf("%w：条目 %q 带子目录。离线升级包是扁平的（只含 manifest.json 和一个升级产物文件），这个文件看起来是安装包，请改用 .upgrade.tar", errArchiveNotFlat, header.Name)
+			}
 			return StagedArtifact{}, err
 		}
 		if _, exists := seen[name]; exists {
