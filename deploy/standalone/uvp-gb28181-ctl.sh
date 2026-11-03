@@ -479,24 +479,51 @@ ensure_updater_registration() {
     || fail "无法生成升级助手注册文件"
 }
 
-# 升级时新包里的助手只会落成 `updater/uvp-updater.new`：正在运行的程序不能就地
-# 覆盖（覆盖掉的是 inode，旧进程会继续跑旧代码，看着"换了却没生效"）。
-# 这里在**助手尚未运行时**把它换上；换不动就留到下次，绝不因此让启动失败 ——
-# 助手版本落后不影响业务，只是拿不到助手侧的新能力（例如后台定时探测）。
-install_staged_updater() {
-  local staged="$UPDATER_BIN.new"
-  [ -f "$staged" ] || return 0
+# 助手镜像只认安装根那一份（UPDATER_BIN），不随 current 切换。每个升级包都自带
+# 助手，所以启动前对齐一次：
+#   ① 优先用升级时落下的旁挂镜像 `updater/uvp-updater.new`（运行中的程序不能就地
+#      覆盖：覆盖掉的是 inode，旧进程继续跑旧代码，看着"换了却没生效"）；
+#   ② 没有旁挂镜像就直接和当前版本的 `updater/` 比，内容不同才同步。
+# ⛔ 换不动只提示、绝不 fail：助手版本落后不影响业务，只是拿不到助手侧的新能力
+#   （例如后台定时探测）。启动一个服务不该因为"升级助手"而失败。
+install_helper_image() {
   if updater_running; then
-    det "升级助手正在运行，新镜像留到下次启动替换"
     return 0
   fi
+  local staged="$UPDATER_BIN.new" from_release=0
+  if [ ! -f "$staged" ]; then
+    staged="$ACTIVE_ROOT/updater/$(basename "$UPDATER_BIN")"
+    [ -f "$staged" ] || return 0
+    from_release=1
+  fi
+  # 内容一致就别动：助手有 20MB+，每次启动都重拷既慢又没必要。
+  if [ "$from_release" -eq 1 ] && [ -f "$UPDATER_BIN" ] && cmp -s "$staged" "$UPDATER_BIN"; then
+    return 0
+  fi
+  mkdir -p "$(dirname "$UPDATER_BIN")" 2>/dev/null || true
   if [ -f "$UPDATER_BIN" ]; then
     cp -p "$UPDATER_BIN" "$UPDATER_BIN.bak-$(date -u +%Y%m%d%H%M%S)" 2>/dev/null || true
+    local keep=0 old
+    for old in $(ls -1t "$UPDATER_BIN".bak-* 2>/dev/null); do
+      keep=$((keep + 1))
+      if [ "$keep" -gt 3 ]; then rm -f "$old"; fi
+    done
   fi
-  if mv -f "$staged" "$UPDATER_BIN" 2>/dev/null; then
+  local replaced=1
+  if [ "$from_release" -eq 1 ]; then
+    # 释放目录里那份要留着（回滚还要用），只能拷，不能 mv。
+    if ! { cp -f "$staged" "$UPDATER_BIN.tmp" && chmod 0755 "$UPDATER_BIN.tmp" \
+      && mv -f "$UPDATER_BIN.tmp" "$UPDATER_BIN"; }; then
+      replaced=0
+    fi
+  else
+    if ! mv -f "$staged" "$UPDATER_BIN"; then replaced=0; fi
+  fi
+  if [ "$replaced" -eq 1 ]; then
     chmod 0755 "$UPDATER_BIN" 2>/dev/null || true
     ok "升级助手已更新到本版本"
   else
+    rm -f "$UPDATER_BIN.tmp" 2>/dev/null || true
     det "升级助手镜像更新失败（将在下次启动重试）"
   fi
 }
@@ -506,7 +533,7 @@ prepare_updater() {
   #   目录不可信时 `serve` 起不来（详见 check_updater_trusted_paths 的注释）。
   check_updater_trusted_paths
   # 注册文件由助手自己写 `register`，所以换镜像必须排在它前面。
-  install_staged_updater
+  install_helper_image
   ensure_updater_registration
   # 外置数据库备份口令只通过环境变量交给独立助手；默认不从
   # config.yml 读取并导出，避免升级助手启动时把配置口令带入进程环境。

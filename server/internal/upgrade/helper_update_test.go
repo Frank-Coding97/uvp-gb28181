@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -205,8 +206,13 @@ func TestControlScriptAgreesOnHelperImagePath(t *testing.T) {
 	if !containsLine(string(script), want) {
 		t.Fatalf("control script must resolve the helper as %s", want)
 	}
-	if !containsLine(string(script), `install_staged_updater`) {
-		t.Fatal("control script must install a staged helper before starting it")
+	if !containsLine(string(script), `install_helper_image`) {
+		t.Fatal("control script must align the helper image before starting it")
+	}
+	// 存量机器的旧助手不会自己同步（同步代码在新助手里），控制脚本必须能从
+	// current 直接对齐，否则助手永远是升级前那一个。
+	if !strings.Contains(string(script), `$ACTIVE_ROOT/updater/`) {
+		t.Fatal("control script must be able to fall back to the active release helper")
 	}
 }
 
