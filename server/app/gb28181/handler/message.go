@@ -338,6 +338,18 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	}
 
 	if head.DeviceID != "" {
+		// 设备上报字符集事实（设备详情「字符集」一栏的数据源）：
+		// 每条带 XML 体的 MESSAGE 嗅探一次声明/实际字符集，幂等落库（值不变不写）。
+		// ⛔ 失败只记日志：这是展示性字段，绝不能因为它失败丢掉整条报文的处理。
+		// 全空（纯 ASCII 且无声明）时跳过，避免用"未声明"覆盖设备之前上报过的事实。
+		if charsetReport := manscdp.SniffIncomingCharset(req.Body()); charsetReport.Declared != "" || charsetReport.Effective != "" {
+			if err := gbmodels.UpdateReportedCharset(ctx, head.DeviceID, charsetReport.Declared, charsetReport.Effective); err != nil {
+				logger.Warn("GB28181 设备上报字符集记录失败",
+					zap.String("event", "gb28181.message.reported_charset_failed"),
+					zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+					logging.Error(err))
+			}
+		}
 		if head.CmdType == manscdp.CmdBroadcast {
 			_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
 			h.broadcastMu.RLock()

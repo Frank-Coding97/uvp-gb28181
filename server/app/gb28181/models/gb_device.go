@@ -82,6 +82,13 @@ type GbDevice struct {
 	EffectiveVersionSource string     `gorm:"column:effective_version_source;size:16;not null;default:default;comment:生效版本来源" json:"effectiveVersionSource"`
 	EffectiveVersionAt     *time.Time `gorm:"column:effective_version_at;comment:生效版本更新时间" json:"effectiveVersionAt"`
 	ZLMNodeID              int64      `gorm:"column:zlm_node_id;not null;default:0;index:idx_gb_device_zlm_node;comment:首选 ZLM 节点,0 表示自动调度" json:"zlmNodeId"`
+	// 设备上报字符集事实：由 MESSAGE 入口从报文 XML 声明 + 内容嗅探得出（manscdp.SniffIncomingCharset）。
+	// ReportedCharset 是设备声明的字符集（空 = 未声明）；WireCharset 是平台实际判定的解码字符集。
+	// 两者不一致 = 设备声明不可信（乱码类工单的关键线索，见 manscdp/charset_sniff.go 文件头）。
+	// 空串同时表示「设备还没上报过任何带 XML 体的报文」。
+	ReportedCharset   string     `gorm:"column:reported_charset;size:32;not null;default:'';comment:最近一次上报报文声明的字符集" json:"reportedCharset"`
+	WireCharset       string     `gorm:"column:wire_charset;size:32;not null;default:'';comment:最近一次上报报文实际判定字符集" json:"wireCharset"`
+	ReportedCharsetAt *time.Time `gorm:"column:reported_charset_at;comment:当前字符集事实的确认时间" json:"reportedCharsetAt"`
 }
 
 // IsOnlineByFact 从事实(keepalive_time)派生在线状态,不依赖 status 缓存字段
@@ -152,6 +159,29 @@ func UpdateStatus(c context.Context, deviceID string, status int8) error {
 	return app.DB().WithContext(c).Model(&GbDevice{}).
 		Where("device_id = ?", deviceID).
 		Update("status", status).Error
+}
+
+// UpdateReportedCharset 记录设备最近一次上报报文的字符集事实（声明值 + 平台实际判定值）。
+//
+// ⭐ 幂等且零写放大：字符集没变化时不写库（WHERE 里带旧值比较，RowsAffected=0），
+// 于是 reported_charset_at 表示「当前这组字符集是何时确认的」，而不是被每次心跳推着走。
+// 设备不存在（如级联平台、未注册设备）时同样 RowsAffected=0，静默无操作。
+// 失败只记不致命：调用方（MESSAGE 入口）不应因展示性字段失败而丢弃整条报文。
+func UpdateReportedCharset(c context.Context, deviceID, declared, effective string) error {
+	// ⛔ app.DB() 直接解引用 ConfigYml，测试环境 / 极早期为 nil 时会 SIGSEGV
+	// （先例见 gorm-masked-notfound 与 trace/runtime.go 的教训）。展示性字段，
+	// 没库就直接跳过。
+	if app.ConfigYml == nil {
+		return nil
+	}
+	now := time.Now()
+	return app.DB().WithContext(c).Model(&GbDevice{}).
+		Where("device_id = ? AND (reported_charset <> ? OR wire_charset <> ?)", deviceID, declared, effective).
+		Updates(map[string]interface{}{
+			"reported_charset":   declared,
+			"wire_charset":      effective,
+			"reported_charset_at": &now,
+		}).Error
 }
 
 // TouchKeepalive 记录一次心跳；onlineOnHeartbeat 控制是否同步刷新 status 为在线。

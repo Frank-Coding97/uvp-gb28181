@@ -208,6 +208,12 @@ var baselineColumnMigrations = map[string]baselineColumnRequirement{
 	"2026-10-27-talk-openapi-request-hash-postgresql.sql":    {table: "gb_talk_session", column: "openapi_request_hash"},
 	"2026-10-27-talk-openapi-request-hash-sqlserver.sql":     {table: "gb_talk_session", column: "openapi_request_hash"},
 	"2026-10-27-talk-openapi-request-hash-sqlite.sql":        {table: "gb_talk_session", column: "openapi_request_hash"},
+	// reported_charset / wire_charset / reported_charset_at 同一条迁移成组出现，
+	// 登记一列即可（同 rtp_receive_mode 先例）。
+	"2026-11-03-device-reported-charset.sql":            {table: "gb_device", column: "reported_charset"},
+	"2026-11-03-device-reported-charset-postgresql.sql":  {table: "gb_device", column: "reported_charset"},
+	"2026-11-03-device-reported-charset-sqlserver.sql":   {table: "gb_device", column: "reported_charset"},
+	"2026-11-03-device-reported-charset-sqlite.sql":      {table: "gb_device", column: "reported_charset"},
 }
 
 // baselineTableMigrations lists additive table migrations that must still run

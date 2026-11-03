@@ -126,3 +126,67 @@ func TestDecodeToUTF8RetagsUTF8ContentDeclaredAsGB(t *testing.T) {
 	require.Contains(t, string(out), "飞视国标摄像头")
 	require.NotContains(t, string(out), "椋炶")
 }
+
+// ---- SniffIncomingCharset：设备详情「上报字符集」的展示口径 ----
+
+func TestSniffIncomingCharsetDeclaredMatchesContent(t *testing.T) {
+	payload, err := simplifiedchinese.GBK.NewEncoder().Bytes([]byte(`<Response><DeviceName>视频动检</DeviceName></Response>`))
+	require.NoError(t, err)
+	body := append([]byte(`<?xml version="1.0" encoding="GB2312"?>`), payload...)
+
+	report := SniffIncomingCharset(body)
+	require.Equal(t, "GB2312", report.Declared)
+	require.Equal(t, "GB2312", report.Effective, "声明与字节一致时按声明解")
+	require.False(t, report.Converted)
+}
+
+func TestSniffIncomingCharsetReportedLies(t *testing.T) {
+	// 线上报障设备的真实形态：声明 GB18030、内容 UTF-8。
+	report := SniffIncomingCharset([]byte(flyvideoCatalogResponse))
+	require.Equal(t, "GB18030", report.Declared)
+	require.Equal(t, "UTF-8", report.Effective, "内容优先改判")
+	require.True(t, report.Converted)
+}
+
+func TestSniffIncomingCharsetDeclaredUTF8ButGBContent(t *testing.T) {
+	payload, err := simplifiedchinese.GBK.NewEncoder().Bytes([]byte(`<Response><DeviceName>视频动检</DeviceName></Response>`))
+	require.NoError(t, err)
+	body := append([]byte(`<?xml version="1.0" encoding="UTF-8"?>`), payload...)
+
+	report := SniffIncomingCharset(body)
+	require.Equal(t, "UTF-8", report.Declared)
+	require.Equal(t, "GB18030", report.Effective)
+	require.True(t, report.Converted)
+}
+
+func TestSniffIncomingCharsetUndeclaredUTF8(t *testing.T) {
+	report := SniffIncomingCharset([]byte(`<Response><DeviceName>飞视国标摄像头</DeviceName></Response>`))
+	require.Empty(t, report.Declared, "无声明")
+	// 无声明且内容是合法 UTF-8：resolveWireCharset 不改判，此时实际按 profile 默认解。
+	require.Empty(t, report.Effective)
+	require.False(t, report.Converted)
+}
+
+func TestSniffIncomingCharsetUndeclaredGBContent(t *testing.T) {
+	payload, err := simplifiedchinese.GBK.NewEncoder().Bytes([]byte(`<Response><DeviceName>视频动检</DeviceName></Response>`))
+	require.NoError(t, err)
+
+	report := SniffIncomingCharset(payload)
+	require.Empty(t, report.Declared)
+	require.Equal(t, "GB18030", report.Effective, "无声明但字节是 GB 家族")
+	require.True(t, report.Converted, "converted = 以内容为准（无论声明是否在场）")
+}
+
+func TestSniffIncomingCharsetEmptyAndPureASCII(t *testing.T) {
+	require.Equal(t, CharsetReport{}, SniffIncomingCharset(nil))
+	report := SniffIncomingCharset([]byte(`<?xml version="1.0" encoding="UTF-8"?><Notify><CmdType>Keepalive</CmdType></Notify>`))
+	require.Equal(t, "UTF-8", report.Declared)
+	require.Equal(t, "UTF-8", report.Effective)
+	require.False(t, report.Converted)
+}
+
+func TestSniffIncomingCharsetUnknownDeclarationKeptVerbatim(t *testing.T) {
+	body := []byte(`<?xml version="1.0" encoding="ISO-8859-1"?><Response><DeviceName>x</DeviceName></Response>`)
+	report := SniffIncomingCharset(body)
+	require.Equal(t, "iso-8859-1", report.Declared, "不认识的声明原样保留小写")
+}

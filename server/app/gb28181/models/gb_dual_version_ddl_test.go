@@ -163,6 +163,7 @@ func TestDualVersionFullSchemasCreateDeviceBaseline(t *testing.T) {
 			for _, column := range []string{
 				"device_id", "reported_version", "reported_version_at", "protocol_override",
 				"effective_version", "effective_version_source", "effective_version_at",
+				"reported_charset", "wire_charset", "reported_charset_at",
 			} {
 				require.Contains(t, deviceTable, column, "设备基线表必须包含 "+column)
 			}

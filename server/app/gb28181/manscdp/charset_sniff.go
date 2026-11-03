@@ -1,6 +1,7 @@
 package manscdp
 
 import (
+	"strings"
 	"unicode/utf8"
 
 	"uvplatform.com/uvp-gb28181/app/gb28181/protocol"
@@ -77,6 +78,47 @@ func resolveWireCharset(declared protocol.Charset, body []byte) (protocol.Charse
 		}
 	}
 	return declared, false
+}
+
+// CharsetReport 描述一条入站报文的字符集事实，供设备详情展示「设备上报的字符集」。
+type CharsetReport struct {
+	// Declared 是 XML 声明里的字符集（已按 canonicalCharset 规范化，
+	// 如 GB2312 / GB18030 / UTF-8）；报文未声明时为空串。
+	// ⛔ 认识的声明才会规范化；厂商塞的怪名字（如 iso-8859-1）原样保留小写形态。
+	Declared string
+	// Effective 是平台按「内容优先」实际判定的解码字符集。
+	// 与 Declared 不一致（Converted=true）意味着设备声明不可信——
+	// 这正是乱码类工单最需要暴露的事实（见文件头 flyvideo 案例）。
+	// 无声明且内容无法判出 GB 时为空串（此时实际按 profile 默认解）。
+	Effective string
+	// Converted 报告声明与实际是否冲突。
+	Converted bool
+}
+
+// SniffIncomingCharset 只读地嗅探一条入站报文的字符集事实，不改动、不解码报文。
+//
+// 判据与 NormalizeIncomingXML / DecodeProfiledXML 完全同源
+// （xmlEncodingLabel + canonicalCharset + resolveWireCharset），保证
+// 展示给用户看的字符集与平台真实解码行为一致，而不是第二套口径。
+// 空报文返回零值 CharsetReport。
+func SniffIncomingCharset(body []byte) CharsetReport {
+	if len(body) == 0 {
+		return CharsetReport{}
+	}
+	report := CharsetReport{}
+	label, declared := xmlEncodingLabel(body)
+	if declared {
+		if canonical := canonicalCharset(label); canonical != "" {
+			report.Declared = string(canonical)
+		} else {
+			// 不认识的声明：原样小写保留，交给上层展示「设备声明了一个平台不认识的字符集」。
+			report.Declared = strings.ToLower(strings.TrimSpace(label))
+		}
+	}
+	effective, converted := resolveWireCharset(protocol.Charset(report.Declared), body)
+	report.Effective = string(effective)
+	report.Converted = converted
+	return report
 }
 
 // NormalizeIncomingXML 在交给 XML 解析器之前，把「声明与字节冲突」的报文
