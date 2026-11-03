@@ -380,6 +380,9 @@ func TestTransportEventsWithoutCallIDRemainSeparateAndFilterable(t *testing.T) {
 	require.EqualValues(t, 1, filtered[0].MessageCount)
 }
 
+// TestSessionStatsHandlesThousandMixedCandidates 锁定「统计不再按 1000 候选截断」。
+// ⚠️ 旧契约是 total 封顶 1000 + Truncated=true（前端又没读 truncated，数字静静停在 1000）；
+// 2026-11-03 起口径改为全量精确计数：超 1000 也照实数给，失控交给 MaxTraceQueryRows 保险丝报错。
 func TestSessionStatsHandlesThousandMixedCandidates(t *testing.T) {
 	db := newRelationalStoreTestDB(t)
 	store, err := NewRelationalStore(db)
@@ -399,6 +402,6 @@ func TestSessionStatsHandlesThousandMixedCandidates(t *testing.T) {
 	}
 	stats, err := store.GetSessionStats(t.Context(), SessionFilter{From: at.Add(-time.Minute), To: at.Add(time.Minute)})
 	require.NoError(t, err)
-	require.EqualValues(t, 1000, stats.Total)
-	require.True(t, stats.Truncated)
+	require.EqualValues(t, 1100, stats.Total, "统计必须给全量精确数，不能再封顶 1000")
+	require.False(t, stats.Truncated)
 }

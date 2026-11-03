@@ -10,17 +10,24 @@ import (
 )
 
 const (
-	DefaultMessagePageSize        = 100
-	MaxMessagePageSize            = 500
-	MaxTraceQueryRange            = 8 * 24 * time.Hour
-	SIPStatusMin           uint16 = 100
-	SIPStatusMax           uint16 = 699
+	DefaultMessagePageSize = 100
+	MaxMessagePageSize     = 500
+	MaxTraceQueryRange     = 8 * 24 * time.Hour
+	// MaxTraceQueryRows 是「不传 limit ⇒ 按时间窗全量返回」时的保险丝。
+	// ⛔ 它不是页大小上限：命中行数一旦超过它，必须显式报 ErrTraceQueryTooBroad
+	// 让调用方缩小时间窗，**不能静默截断** —— 静默截断会让用户以为看到的就是全部。
+	// 取值依据：单行摘要态约 300B（payload 列在会话聚合时已被 Omit 掉），
+	// 20 万行 ≈ 60MB，是单次查询还能扛住的量级。
+	MaxTraceQueryRows        = 200000
+	SIPStatusMin      uint16 = 100
+	SIPStatusMax      uint16 = 699
 )
 
 var (
 	ErrTraceTimeRangeRequired = errors.New("SIP trace time range is required")
 	ErrInvalidMessageCursor   = errors.New("invalid SIP trace message cursor")
 	ErrTraceMessageNotFound   = errors.New("SIP trace message not found")
+	ErrTraceQueryTooBroad     = errors.New("SIP trace query returns too many rows")
 )
 
 type MessageFilter struct {

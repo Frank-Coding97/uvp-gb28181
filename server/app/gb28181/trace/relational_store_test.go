@@ -393,3 +393,56 @@ func testRelationalEvent(id string, at time.Time, deviceID, callID, method strin
 		Payload: EncryptedPayload{Nonce: []byte{1}, Ciphertext: []byte(id), Algorithm: EncryptionAES256GCM, KeyVersion: "v1", DigestSHA256: strings.Repeat("c", 64)},
 	}
 }
+
+// TestListSessionsWithoutLimitReturnsAll 锁「不传 limit ⇒ 按时间窗全量」。
+// ⛔ 这是 2026-11-03 的口径变更护栏：旧实现 limit=0 会默认回 50、再封顶 200，
+// 而前端恰恰不传 limit，结果页面上只能看到 200 个会话、往下滚也没有第 201 个。
+func TestListSessionsWithoutLimitReturnsAll(t *testing.T) {
+	db := newRelationalStoreTestDB(t)
+	store, err := NewRelationalStore(db)
+	require.NoError(t, err)
+	at := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)
+	const total = 260
+	events := make([]StoredEvent, 0, total)
+	for i := 0; i < total; i++ {
+		events = append(events, testRelationalEvent(
+			fmt.Sprintf("event-%04d", i), at.Add(time.Duration(i)*time.Millisecond),
+			"device-a", fmt.Sprintf("call-%04d", i), "MESSAGE", 0))
+	}
+	for start := 0; start < len(events); start += 100 {
+		end := start + 100
+		if end > len(events) {
+			end = len(events)
+		}
+		require.NoError(t, store.InsertBatch(t.Context(), events[start:end]))
+	}
+	sessions, err := store.ListSessions(t.Context(), SessionFilter{From: at.Add(-time.Minute), To: at.Add(time.Minute)})
+	require.NoError(t, err)
+	require.Len(t, sessions, total, "不传 limit 必须全量返回，不能被 200 封顶")
+}
+
+// TestListMessagesWithoutLimitReturnsAll 同上，报文侧护栏：不传 limit 不能被 500 截断。
+func TestListMessagesWithoutLimitReturnsAll(t *testing.T) {
+	db := newRelationalStoreTestDB(t)
+	store, err := NewRelationalStore(db)
+	require.NoError(t, err)
+	at := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)
+	const total = 520
+	events := make([]StoredEvent, 0, total)
+	for i := 0; i < total; i++ {
+		events = append(events, testRelationalEvent(
+			fmt.Sprintf("event-%04d", i), at.Add(time.Duration(i)*time.Millisecond),
+			"device-a", "call-shared", "INVITE", 0))
+	}
+	for start := 0; start < len(events); start += 100 {
+		end := start + 100
+		if end > len(events) {
+			end = len(events)
+		}
+		require.NoError(t, store.InsertBatch(t.Context(), events[start:end]))
+	}
+	page, err := store.ListMessages(t.Context(), MessageFilter{From: at.Add(-time.Minute), To: at.Add(time.Minute)})
+	require.NoError(t, err)
+	require.Len(t, page.Items, total, "不传 limit 必须全量返回，不能被 500 封顶")
+	require.Empty(t, page.NextCursor, "全量返回不带游标")
+}

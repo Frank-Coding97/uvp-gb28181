@@ -100,7 +100,10 @@ describe("SIP log workbench storage replacement regression", () => {
     expect(wrapper.findComponent({ name: "TableView" }).props("sessions")).toEqual([]);
     expect(wrapper.text()).toContain("全部会话");
     expect(wrapper.text()).toContain("异常会话");
-    expect(traceApi.listTraceSessions).toHaveBeenCalledWith(expect.objectContaining({ limit: 200 }));
+    // ⛔ 必须断言「不传 limit」：后端不传 limit 才是按时间窗全量返回；
+    // 一旦传了就会被页大小语义截断（旧值 200），而页面没有分页控件 ⇒ 静默丢数据。
+    const firstQuery = traceApi.listTraceSessions.mock.calls[0][0] as Record<string, unknown>;
+    expect(firstQuery.limit).toBeUndefined();
     expect(FakeEventSource.instances).toHaveLength(1);
   });
 

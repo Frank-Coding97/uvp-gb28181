@@ -158,8 +158,9 @@ function buildBaseSessionQuery(): TraceSessionQuery {
     from: dayjs(from).toISOString(),
     to: dayjs(to).toISOString(),
     keyword: filters.value.keyword.trim() || undefined,
-    businessCode: filters.value.businessCode || undefined,
-    limit: 200
+    businessCode: filters.value.businessCode || undefined
+    // ⛔ 这里不要再传 limit：不传 = 后端按时间窗全量返回。
+    // 传了反而会被页大小语义截断(200)，页面上又没有分页控件 ⇒ 静默丢数据。
   };
 }
 
@@ -328,8 +329,8 @@ async function loadDrillMessages() {
       : filters.value.range;
     const response = await listTraceSessionMessages(callId, {
       from: dayjs(from).toISOString(),
-      to: dayjs(to).toISOString(),
-      limit: 500
+      to: dayjs(to).toISOString()
+      // 同上：不传 limit，按时间窗取该 Call-ID 的全部报文。
     });
     if (pageMounted && version === detailLoadVersion && drillCallId.value === callId && response.code === 0) {
       const items = response.data.items || [];

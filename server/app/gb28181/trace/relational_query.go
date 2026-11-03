@@ -161,20 +161,34 @@ func (s *RelationalStore) ListMessages(ctx context.Context, filter MessageFilter
 		}
 		query = query.Where("occurred_at < ? OR (occurred_at = ? AND event_id < ?)", cursor.OccurredAt, cursor.OccurredAt, cursor.EventID)
 	}
+	// ⭐ 口径：limit 不传(<=0) ⇒ 按时间窗全量返回，不设页大小天花板；
+	// 只有显式传 limit 才走分页语义(游标 + 页大小上限)。
 	limit := filter.Limit
-	if limit <= 0 {
-		limit = DefaultMessagePageSize
-	}
-	if limit > MaxMessagePageSize {
+	unlimited := limit <= 0
+	if !unlimited && limit > MaxMessagePageSize {
 		limit = MaxMessagePageSize
 	}
+	query = query.Order("occurred_at DESC").Order("event_id DESC")
+	if unlimited {
+		query = query.Limit(MaxTraceQueryRows + 1)
+	} else {
+		query = query.Limit(limit + 1)
+	}
 	var rows []gbmodels.GbSipTraceMessage
-	if err := query.Order("occurred_at DESC").Order("event_id DESC").Limit(limit + 1).Find(&rows).Error; err != nil {
+	// omit 报文体两列：列表只用摘要字段，把几 MB 级的密文读出来纯属浪费内存。
+	if err := query.Omit("payload_nonce", "payload_ciphertext").Find(&rows).Error; err != nil {
 		return MessagePage{}, fmt.Errorf("query relational SIP trace messages: %w", err)
 	}
-	items := make([]MessageSummary, len(rows))
-	for i, row := range rows {
-		items[i] = messageSummary(row)
+	items := make([]MessageSummary, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, messageSummary(row))
+	}
+	if unlimited {
+		// ⛔ 超保险丝必须报错，不能静默截断。
+		if len(items) > MaxTraceQueryRows {
+			return MessagePage{}, ErrTraceQueryTooBroad
+		}
+		return MessagePage{Items: items}, nil
 	}
 	page := MessagePage{Items: items}
 	if len(items) > limit {
@@ -480,11 +494,22 @@ func reconstructedRegisterDiagnosis(session SessionSummary) *SessionDiagnosis {
 	}
 }
 
-// loadSessionRows 执行报文查询并返回按时间排序的原始行
+// loadSessionRows 执行报文查询并返回按时间排序的原始行。
+// ⛔ 这里是「按时间窗全量查询」唯一的内存入口，保险丝必须打在这儿：
+// 命中行数超过 MaxTraceQueryRows 就报 ErrTraceQueryTooBroad，绝不静默截断
+// （截断会让聚合出来的会话缺报文，表现成"会话不完整/状态不对"，比报错更难查）。
+// payload 两列在会话聚合里用不到，一并 omit 掉，省掉密文带来的成倍内存。
 func (s *RelationalStore) loadSessionRows(query *gorm.DB) ([]gbmodels.GbSipTraceMessage, error) {
 	var rows []gbmodels.GbSipTraceMessage
-	if err := query.Order("occurred_at ASC").Order("event_id ASC").Find(&rows).Error; err != nil {
+	if err := query.
+		Omit("payload_nonce", "payload_ciphertext").
+		Order("occurred_at ASC").Order("event_id ASC").
+		Limit(MaxTraceQueryRows + 1).
+		Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("query relational SIP trace sessions: %w", err)
+	}
+	if len(rows) > MaxTraceQueryRows {
+		return nil, ErrTraceQueryTooBroad
 	}
 	return rows, nil
 }
@@ -734,22 +759,21 @@ func (s *RelationalStore) reduceBusinessSessions(
 }
 
 func (s *RelationalStore) ListSessions(ctx context.Context, filter SessionFilter) ([]SessionSummary, error) {
+	// ⭐ 口径与 ListMessages 一致：limit 不传(<=0) ⇒ 按时间窗全量返回，
+	// 不再默认 50、也不再封顶 200；只有显式传 limit 才按页大小截断。
 	limit := filter.Limit
-	if limit <= 0 {
-		limit = DefaultSessionPageSize
-	}
 	if limit > MaxSessionPageSize {
 		limit = MaxSessionPageSize
 	}
 	candidateLimit := limit
-	if filter.Anomaly || filter.DiagnosisCategory != "" || filter.DiagnosisCode != "" {
+	if limit <= 0 || filter.Anomaly || filter.DiagnosisCategory != "" || filter.DiagnosisCode != "" {
 		candidateLimit = 0
 	}
 	sessions, err := s.reduceSessions(ctx, filter, candidateLimit)
 	if err != nil {
 		return nil, err
 	}
-	if len(sessions) > limit {
+	if limit > 0 && len(sessions) > limit {
 		sessions = sessions[:limit]
 	}
 	return sessions, nil
@@ -758,15 +782,15 @@ func (s *RelationalStore) ListSessions(ctx context.Context, filter SessionFilter
 func (s *RelationalStore) GetSessionStats(ctx context.Context, filter SessionFilter) (SessionStats, error) {
 	filter.Limit = 0
 	filter.Anomaly = false
-	// 统计给候选上限:会话窗口允许 31 天,无 LIMIT 的全窗报文载入会
-	// 让慢查询和内存激增拖垮诊断页。上限内统计精确,超出按候选截断
-	const maxStatsCandidates = 1000
-	sessions, err := s.reduceSessions(ctx, filter, maxStatsCandidates)
+	// ⭐ 统计口径与列表一致：全量精确计数，不再拿 1000 个候选样本冒充总数
+	// （旧行为会让「总计」静默停在 1000）。真正失控的是行数，由 loadSessionRows
+	// 的 MaxTraceQueryRows 保险丝兜底 —— 超了直接报错，不给出半截数字。
+	sessions, err := s.reduceSessions(ctx, filter, 0)
 	if err != nil {
 		return SessionStats{}, err
 	}
 	var stats SessionStats
-	stats.Truncated = len(sessions) >= maxStatsCandidates
+	stats.Truncated = false
 	stats.Total = uint64(len(sessions))
 	for _, session := range sessions {
 		if session.Anomaly {

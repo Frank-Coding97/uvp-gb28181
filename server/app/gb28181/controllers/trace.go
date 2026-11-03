@@ -428,7 +428,12 @@ func (tc *TraceController) queryFailure(c *gin.Context, err error) {
 	// unavailable 类错误也走这里但降级到 503 + 结构化提示
 	msg := "SIP 日志存储查询失败"
 	status := http.StatusInternalServerError
-	if errors.Is(err, gbtrace.ErrTraceStoreUnavailable) || errors.Is(err, gbtrace.ErrTraceQueryUnavailable) || health.State == gbtrace.HealthDegraded {
+	if errors.Is(err, gbtrace.ErrTraceQueryTooBroad) {
+		// 不设条数天花板的代价就是必须有人喊停：这里明确告诉用户缩小范围，
+		// ⛔ 不能改成"只返回一部分"——静默截断等于骗人。
+		msg = fmt.Sprintf("时间范围内 SIP 报文超过 %d 条，请缩小时间范围或增加设备/业务筛选", gbtrace.MaxTraceQueryRows)
+		status = http.StatusBadRequest
+	} else if errors.Is(err, gbtrace.ErrTraceStoreUnavailable) || errors.Is(err, gbtrace.ErrTraceQueryUnavailable) || health.State == gbtrace.HealthDegraded {
 		msg = "SIP 日志采集尚未启动或存储暂未就绪"
 		status = http.StatusServiceUnavailable
 	} else if err != nil {
