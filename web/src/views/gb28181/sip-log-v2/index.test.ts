@@ -100,10 +100,11 @@ describe("SIP log workbench storage replacement regression", () => {
     expect(wrapper.findComponent({ name: "TableView" }).props("sessions")).toEqual([]);
     expect(wrapper.text()).toContain("全部会话");
     expect(wrapper.text()).toContain("异常会话");
-    // ⛔ 必须断言「不传 limit」：后端不传 limit 才是按时间窗全量返回；
-    // 一旦传了就会被页大小语义截断（旧值 200），而页面没有分页控件 ⇒ 静默丢数据。
+    // ⛔ 分页口径：首屏只取一页（100 条），滚动到底再要下一页；
+    // 不要传超大 limit 或去掉 limit —— 后端不传会回默认 50，且响应体会失控。
     const firstQuery = traceApi.listTraceSessions.mock.calls[0][0] as Record<string, unknown>;
-    expect(firstQuery.limit).toBeUndefined();
+    expect(firstQuery.limit).toBe(100);
+    expect(firstQuery.offset).toBeUndefined();
     expect(FakeEventSource.instances).toHaveLength(1);
   });
 
@@ -595,5 +596,74 @@ describe("SIP session diagnosis labels", () => {
         }
       }).label
     ).toBe("信令成功，媒体未就绪");
+  });
+});
+
+// ⭐ 滚动分页：滚到底向后端要下一页，按 rowKey 去重后追加。
+// ⛔ 这段护栏存在的前提是「列表必须分页」——别改回一次全量返回。
+describe("SIP log scroll pagination", () => {
+  const makeSession = (callId: string) => ({
+    day: "2026-11-03T00:00:00Z",
+    deviceId: "device-a",
+    callId,
+    eventId: `event-${callId}`,
+    firstAt: "2026-11-03T10:00:00Z",
+    lastAt: "2026-11-03T10:00:01Z",
+    messageCount: 1,
+    inboundCount: 1,
+    outboundCount: 0,
+    methods: ["REGISTER"],
+    finalStatus: 200,
+    firstMethod: "REGISTER",
+    businessCode: "register",
+    businessType: "注册"
+  });
+
+  beforeEach(() => {
+    FakeEventSource.instances = [];
+    vi.stubGlobal("EventSource", FakeEventSource);
+    traceApi.fetchTraceHealth.mockReset().mockResolvedValue({
+      code: 0,
+      data: { state: "ready", queueDepth: 0, queueCapacity: 1024, dropped: 0 }
+    });
+    traceApi.fetchTraceSessionStats.mockReset().mockResolvedValue({
+      code: 0,
+      data: { total: 3, anomaly: 0, registerFail: 0, playStuck: 0, invitePending: 0 }
+    });
+    traceApi.listTraceSessionMessages.mockReset();
+    traceApi.getTraceMessage.mockReset();
+    traceApi.buildTraceStreamUrl.mockClear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("requests the next page with offset and appends without duplicates", async () => {
+    const pageOne = Array.from({ length: 100 }, (_, i) => makeSession(`call-${i}`));
+    // 第二页故意夹一条与第一页重复的（实时写入会让 offset 分页漂移）
+    const pageTwo = [makeSession("call-99"), makeSession("call-100"), makeSession("call-101")];
+    traceApi.listTraceSessions
+      .mockReset()
+      .mockResolvedValueOnce({ code: 0, data: { items: pageOne } })
+      .mockResolvedValueOnce({ code: 0, data: { items: pageTwo } });
+
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const table = wrapper.findComponent({ name: "TableView" });
+    expect(table.props("hasMore")).toBe(true);
+
+    table.vm.$emit("loadMore");
+    await flushPromises();
+
+    expect(traceApi.listTraceSessions).toHaveBeenCalledTimes(2);
+    expect(traceApi.listTraceSessions.mock.calls[1][0]).toMatchObject({ limit: 100, offset: 100 });
+
+    const sessions = table.props("sessions") as Array<{ callId: string }>;
+    expect(sessions).toHaveLength(102);
+    expect(sessions.filter(s => s.callId === "call-99")).toHaveLength(1);
+    // 不足一页 ⇒ 到底了，不该再触发下一页
+    expect(table.props("hasMore")).toBe(false);
   });
 });

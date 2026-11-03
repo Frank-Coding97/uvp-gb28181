@@ -394,10 +394,11 @@ func testRelationalEvent(id string, at time.Time, deviceID, callID, method strin
 	}
 }
 
-// TestListSessionsWithoutLimitReturnsAll 锁「不传 limit ⇒ 按时间窗全量」。
-// ⛔ 这是 2026-11-03 的口径变更护栏：旧实现 limit=0 会默认回 50、再封顶 200，
-// 而前端恰恰不传 limit，结果页面上只能看到 200 个会话、往下滚也没有第 201 个。
-func TestListSessionsWithoutLimitReturnsAll(t *testing.T) {
+// TestListSessionsOffsetPagination 锁「滚动分页」口径：
+// 每页按 limit 切片、offset 逐页推进，越过末尾返回空集而不是报错。
+// ⛔ 别再改回「一次全量返回」——响应体按条数线性膨胀（约 500B/会话），
+// 几千条就是 MB 级 JSON，传输和解析都不划算，页面上也没处安放。
+func TestListSessionsOffsetPagination(t *testing.T) {
 	db := newRelationalStoreTestDB(t)
 	store, err := NewRelationalStore(db)
 	require.NoError(t, err)
@@ -416,33 +417,36 @@ func TestListSessionsWithoutLimitReturnsAll(t *testing.T) {
 		}
 		require.NoError(t, store.InsertBatch(t.Context(), events[start:end]))
 	}
-	sessions, err := store.ListSessions(t.Context(), SessionFilter{From: at.Add(-time.Minute), To: at.Add(time.Minute)})
-	require.NoError(t, err)
-	require.Len(t, sessions, total, "不传 limit 必须全量返回，不能被 200 封顶")
-}
+	base := SessionFilter{From: at.Add(-time.Minute), To: at.Add(time.Minute), Limit: 100}
 
-// TestListMessagesWithoutLimitReturnsAll 同上，报文侧护栏：不传 limit 不能被 500 截断。
-func TestListMessagesWithoutLimitReturnsAll(t *testing.T) {
-	db := newRelationalStoreTestDB(t)
-	store, err := NewRelationalStore(db)
+	first, err := store.ListSessions(t.Context(), base)
 	require.NoError(t, err)
-	at := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)
-	const total = 520
-	events := make([]StoredEvent, 0, total)
-	for i := 0; i < total; i++ {
-		events = append(events, testRelationalEvent(
-			fmt.Sprintf("event-%04d", i), at.Add(time.Duration(i)*time.Millisecond),
-			"device-a", "call-shared", "INVITE", 0))
-	}
-	for start := 0; start < len(events); start += 100 {
-		end := start + 100
-		if end > len(events) {
-			end = len(events)
+	require.Len(t, first, 100)
+
+	base.Offset = 100
+	second, err := store.ListSessions(t.Context(), base)
+	require.NoError(t, err)
+	require.Len(t, second, 100)
+
+	base.Offset = 200
+	third, err := store.ListSessions(t.Context(), base)
+	require.NoError(t, err)
+	require.Len(t, third, 60, "最后一页只给剩余条数")
+
+	base.Offset = 300
+	beyond, err := store.ListSessions(t.Context(), base)
+	require.NoError(t, err)
+	require.Empty(t, beyond, "越过末尾返回空集，不报错")
+
+	// 三页必须互不重叠，拼起来正好是全集
+	seen := make(map[string]struct{}, total)
+	for _, batch := range [][]SessionSummary{first, second, third} {
+		for _, item := range batch {
+			key := item.CallID + "|" + item.EventID
+			_, dup := seen[key]
+			require.False(t, dup, "分页之间不能有重复会话")
+			seen[key] = struct{}{}
 		}
-		require.NoError(t, store.InsertBatch(t.Context(), events[start:end]))
 	}
-	page, err := store.ListMessages(t.Context(), MessageFilter{From: at.Add(-time.Minute), To: at.Add(time.Minute)})
-	require.NoError(t, err)
-	require.Len(t, page.Items, total, "不传 limit 必须全量返回，不能被 500 封顶")
-	require.Empty(t, page.NextCursor, "全量返回不带游标")
+	require.Len(t, seen, total)
 }

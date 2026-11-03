@@ -191,6 +191,8 @@ export interface TraceSessionQuery {
   diagnosisCategory?: TraceDiagnosisCategory;
   diagnosisCode?: TraceDiagnosisCode;
   limit?: number;
+  /** 滚动分页的偏移量：从第 offset 条会话之后继续取 */
+  offset?: number;
 }
 
 export type TraceCaptureStatus = "disabled" | "active" | "ended";

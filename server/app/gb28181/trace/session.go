@@ -25,6 +25,10 @@ type SessionFilter struct {
 	DiagnosisCode     diagnosis.Code
 	BusinessCode      BusinessCode
 	Limit             int
+	// Offset 是与 Limit 配套的偏移量，供列表"滚动加载下一页"使用。
+	// ⚠️ 会话是内存聚合结果，offset 越大要聚合的候选越多（O(offset)），
+	// 只适合几千条量级的窗口；上万条应换 (lastAt, callId) 游标分页。
+	Offset int
 }
 
 type SessionDiagnosis struct {

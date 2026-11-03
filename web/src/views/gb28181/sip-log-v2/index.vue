@@ -121,6 +121,12 @@ const autoTraceRange = computed(() => traceWindowPreset.value !== "custom");
 
 const sessions = ref<TraceSessionSummary[]>([]);
 const sessionLoading = ref(false);
+// 滚动分页：一次只取一页，滚到底再取下一页。
+// ⛔ 不要改回"一次全量返回"——响应体会随条数线性膨胀（约 500B/会话），
+// 几千条就是 MB 级 JSON，传输和解析都不划算。
+const SESSION_PAGE_SIZE = 100;
+const sessionHasMore = ref(false);
+const sessionLoadingMore = ref(false);
 const stats = ref<TraceSessionStats | null>(null);
 const statsLoading = ref(false);
 const statsError = ref(false);
@@ -159,14 +165,15 @@ function buildBaseSessionQuery(): TraceSessionQuery {
     to: dayjs(to).toISOString(),
     keyword: filters.value.keyword.trim() || undefined,
     businessCode: filters.value.businessCode || undefined
-    // ⛔ 这里不要再传 limit：不传 = 后端按时间窗全量返回。
-    // 传了反而会被页大小语义截断(200)，页面上又没有分页控件 ⇒ 静默丢数据。
+    // 统计接口用这个基础条件（不分页），列表页在 buildSessionQuery 里补 limit/offset
   };
 }
 
-function buildSessionQuery(): TraceSessionQuery {
+function buildSessionQuery(offset = 0): TraceSessionQuery {
   return {
     ...buildBaseSessionQuery(),
+    limit: SESSION_PAGE_SIZE,
+    offset: offset > 0 ? offset : undefined,
     anomaly: filters.value.scope === "anomaly" ? true : undefined,
     diagnosisCategory:
       filters.value.scope === "register_failure" || filters.value.scope === "play_stuck" ? filters.value.scope : undefined,
@@ -260,7 +267,10 @@ async function drainRefreshQueue() {
 
       if (current()) {
         if (sessionsResult.status === "fulfilled" && sessionsResult.value.code === 0) {
-          sessions.value = sessionsResult.value.data.items || [];
+          const items = sessionsResult.value.data.items || [];
+          sessions.value = items;
+          // 满一页就认为后面可能还有；不足一页即到底
+          sessionHasMore.value = items.length >= SESSION_PAGE_SIZE;
         } else if (batch.foreground) {
           const response = sessionsResult.status === "fulfilled" ? sessionsResult.value : null;
           const error = sessionsResult.status === "rejected" ? sessionsResult.reason : null;
@@ -300,6 +310,33 @@ function statValue(field: keyof Pick<TraceSessionStats, "total" | "anomaly" | "r
   return stats.value[field];
 }
 
+// 滚动到底触发下一页。⚠️ 会话是后端内存聚合的 offset 分页，
+// 期间若有新会话插入，末尾会重复几条 —— 这里按 rowKey 去重兜住。
+async function loadMoreSessions() {
+  if (!sessionHasMore.value || sessionLoadingMore.value || sessionLoading.value) return;
+  const version = filterVersion;
+  sessionLoadingMore.value = true;
+  try {
+    const response = await listTraceSessions(buildSessionQuery(sessions.value.length));
+    // 期间用户改了筛选/点了刷新 ⇒ 这一页已经不属于当前条件，直接丢弃
+    if (!pageMounted || version !== filterVersion) return;
+    if (response.code !== 0) {
+      Message.warning(response.message || "加载更多 SIP 会话失败");
+      return;
+    }
+    const items = response.data.items || [];
+    const seen = new Set(sessions.value.map(row => row.callId || row.eventId));
+    sessions.value = sessions.value.concat(items.filter(row => !seen.has(row.callId || row.eventId)));
+    sessionHasMore.value = items.length >= SESSION_PAGE_SIZE;
+  } catch (error) {
+    if (pageMounted && version === filterVersion) {
+      Message.error((error as Error)?.message || "加载更多 SIP 会话失败");
+    }
+  } finally {
+    sessionLoadingMore.value = false;
+  }
+}
+
 const diagnosisIncomplete = computed(
   () =>
     health.value.state === "degraded" ||
@@ -329,8 +366,10 @@ async function loadDrillMessages() {
       : filters.value.range;
     const response = await listTraceSessionMessages(callId, {
       from: dayjs(from).toISOString(),
-      to: dayjs(to).toISOString()
-      // 同上：不传 limit，按时间窗取该 Call-ID 的全部报文。
+      to: dayjs(to).toISOString(),
+      // 单个 Call-ID 的报文一般几十条；显式取 500 是后端上限，
+      // ⛔ 不传会回落到默认 100，长会话（带 ACK/重传）会被截断。
+      limit: 500
     });
     if (pageMounted && version === detailLoadVersion && drillCallId.value === callId && response.code === 0) {
       const items = response.data.items || [];
@@ -735,7 +774,10 @@ onBeforeUnmount(() => {
             :sessions="sessions"
             :selected-call-id="drillCallId"
             :loading="sessionLoading"
+            :has-more="sessionHasMore"
+            :loading-more="sessionLoadingMore"
             @select-session="onSelectSession"
+            @load-more="loadMoreSessions"
           />
           <TerminalView v-else />
         </div>

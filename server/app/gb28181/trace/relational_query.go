@@ -161,34 +161,26 @@ func (s *RelationalStore) ListMessages(ctx context.Context, filter MessageFilter
 		}
 		query = query.Where("occurred_at < ? OR (occurred_at = ? AND event_id < ?)", cursor.OccurredAt, cursor.OccurredAt, cursor.EventID)
 	}
-	// ⭐ 口径：limit 不传(<=0) ⇒ 按时间窗全量返回，不设页大小天花板；
-	// 只有显式传 limit 才走分页语义(游标 + 页大小上限)。
+	// 报文侧维持分页语义（默认 100、封顶 500、带游标）。
+	// ⚠️ 2026-11-03 一度改成「不传 limit ⇒ 全量」，当天又收回：
+	// 全量响应体随条数线性膨胀（500B/条），10MB 级 JSON 传输+解析都不划算，
+	// 页面上也无处安放。真正需要"看得更多"的是会话列表，走滚动分页。
 	limit := filter.Limit
-	unlimited := limit <= 0
-	if !unlimited && limit > MaxMessagePageSize {
-		limit = MaxMessagePageSize
+	if limit <= 0 {
+		limit = DefaultMessagePageSize
 	}
-	query = query.Order("occurred_at DESC").Order("event_id DESC")
-	if unlimited {
-		query = query.Limit(MaxTraceQueryRows + 1)
-	} else {
-		query = query.Limit(limit + 1)
+	if limit > MaxMessagePageSize {
+		limit = MaxMessagePageSize
 	}
 	var rows []gbmodels.GbSipTraceMessage
 	// omit 报文体两列：列表只用摘要字段，把几 MB 级的密文读出来纯属浪费内存。
-	if err := query.Omit("payload_nonce", "payload_ciphertext").Find(&rows).Error; err != nil {
+	if err := query.Omit("payload_nonce", "payload_ciphertext").
+		Order("occurred_at DESC").Order("event_id DESC").Limit(limit + 1).Find(&rows).Error; err != nil {
 		return MessagePage{}, fmt.Errorf("query relational SIP trace messages: %w", err)
 	}
 	items := make([]MessageSummary, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, messageSummary(row))
-	}
-	if unlimited {
-		// ⛔ 超保险丝必须报错，不能静默截断。
-		if len(items) > MaxTraceQueryRows {
-			return MessagePage{}, ErrTraceQueryTooBroad
-		}
-		return MessagePage{Items: items}, nil
 	}
 	page := MessagePage{Items: items}
 	if len(items) > limit {
@@ -759,28 +751,46 @@ func (s *RelationalStore) reduceBusinessSessions(
 }
 
 func (s *RelationalStore) ListSessions(ctx context.Context, filter SessionFilter) ([]SessionSummary, error) {
-	// ⭐ 口径与 ListMessages 一致：limit 不传(<=0) ⇒ 按时间窗全量返回，
-	// 不再默认 50、也不再封顶 200；只有显式传 limit 才按页大小截断。
 	limit := filter.Limit
+	if limit <= 0 {
+		limit = DefaultSessionPageSize
+	}
 	if limit > MaxSessionPageSize {
 		limit = MaxSessionPageSize
 	}
-	candidateLimit := limit
-	if limit <= 0 || filter.Anomaly || filter.DiagnosisCategory != "" || filter.DiagnosisCode != "" {
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	// ⚠️ 会话是内存聚合出来的，没有"直接跳到第 N 页"的办法：要拿到第 N 页，
+	// 必须先把前 offset+limit 个候选会话聚合出来再切片 ⇒ 成本随 offset 线性增长。
+	// 几千条量级够用；真到上万条应改成 (lastAt, callId) 游标分页。
+	candidateLimit := offset + limit
+	if candidateLimit > MaxTraceQueryRows {
+		return nil, ErrTraceQueryTooBroad
+	}
+	// 异常/诊断过滤必须看全会话才能判定命中，这两种情况只能全量聚合，
+	// 由 loadSessionRows 的 MaxTraceQueryRows 保险丝兜底。
+	if filter.Anomaly || filter.DiagnosisCategory != "" || filter.DiagnosisCode != "" {
 		candidateLimit = 0
 	}
 	sessions, err := s.reduceSessions(ctx, filter, candidateLimit)
 	if err != nil {
 		return nil, err
 	}
-	if limit > 0 && len(sessions) > limit {
-		sessions = sessions[:limit]
+	if offset >= len(sessions) {
+		return []SessionSummary{}, nil
 	}
-	return sessions, nil
+	end := offset + limit
+	if end > len(sessions) {
+		end = len(sessions)
+	}
+	return sessions[offset:end], nil
 }
 
 func (s *RelationalStore) GetSessionStats(ctx context.Context, filter SessionFilter) (SessionStats, error) {
 	filter.Limit = 0
+	filter.Offset = 0
 	filter.Anomaly = false
 	// ⭐ 统计口径与列表一致：全量精确计数，不再拿 1000 个候选样本冒充总数
 	// （旧行为会让「总计」静默停在 1000）。真正失控的是行数，由 loadSessionRows

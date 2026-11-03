@@ -7,36 +7,30 @@ const props = defineProps<{
   sessions: TraceSession[];
   selectedCallId: string;
   loading?: boolean;
+  /** 后端还有下一页（上一页返回满了一页） */
+  hasMore?: boolean;
+  /** 正在向后端要下一页 */
+  loadingMore?: boolean;
 }>();
 
 const rows = computed(() => props.sessions.map(session => ({ ...session, rowKey: session.callId || session.eventId })));
 
-// ⭐ 后端已改成「不传 limit ⇒ 按时间窗全量返回」，一次可能到手几千上万条。
-// 直接全丢给 a-table 会长时间卡死主线程（Arco 表格是非虚拟渲染，每个单元格都是 slot），
-// 所以这里只做**渲染分批**：数据是全量的，滚到底就把下一批放进 DOM。
-// ⛔ 这不是分页，不会重新请求后端，也不会改变统计/搜索口径。
-const RENDER_STEP = 200;
-const renderLimit = ref(RENDER_STEP);
+// 滚动分页：滚到接近底部就通知父组件去拉下一页。
+// ⛔ 数据本身是按页取回来的，这里不再做本地切片——两套分批叠在一起会很难排查。
 const wrapperRef = ref<HTMLElement | null>(null);
 let scroller: HTMLElement | null = null;
 
-const visibleRows = computed(() => rows.value.slice(0, renderLimit.value));
-const hiddenCount = computed(() => Math.max(0, rows.value.length - visibleRows.value.length));
-
-// 换筛选条件/刷新后回到第一批，否则会保留上一轮滚出来的超长列表
-watch(
-  () => props.sessions,
-  () => {
-    renderLimit.value = RENDER_STEP;
-  },
-  { flush: "post" }
-);
+const emit = defineEmits<{
+  (e: "selectSession", session: TraceSession): void;
+  (e: "loadMore"): void;
+}>();
 
 function onScroll() {
-  if (!scroller || hiddenCount.value === 0) return;
-  // 距底部 160px 内就追加，滚动手感上等同于"一直往下翻"
-  if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 160) {
-    renderLimit.value += RENDER_STEP;
+  if (!scroller) return;
+  if (!props.hasMore || props.loadingMore || props.loading) return;
+  // 距底部 200px 内就预取，滚动手感上等同于"一直往下翻"
+  if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 200) {
+    emit("loadMore");
   }
 }
 
@@ -49,6 +43,22 @@ async function bindScroller() {
   scroller.addEventListener("scroll", onScroll, { passive: true });
 }
 
+// 表格结构可能随数据/列宽变化重建，重新挂一次监听（幂等）
+watch(
+  () => props.sessions.length,
+  async () => {
+    await nextTick();
+    const host = wrapperRef.value;
+    if (!host) return;
+    const next = (host.querySelector(".arco-table-body") as HTMLElement | null) ?? host;
+    if (next === scroller) return;
+    scroller?.removeEventListener("scroll", onScroll);
+    scroller = next;
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+  },
+  { flush: "post" }
+);
+
 onMounted(() => {
   void bindScroller();
 });
@@ -57,10 +67,6 @@ onBeforeUnmount(() => {
   scroller?.removeEventListener("scroll", onScroll);
   scroller = null;
 });
-
-const emit = defineEmits<{
-  (e: "selectSession", session: TraceSession): void;
-}>();
 
 const columns = [
   { title: "#", slotName: "idx", width: 52, align: "center" as const },
@@ -119,7 +125,7 @@ function methodTone(method: string): string {
     <a-table
       class="uvp-data-table sip-log-table"
       row-key="rowKey"
-      :data="visibleRows"
+      :data="rows"
       :columns="columns"
       :loading="loading"
       :bordered="false"
@@ -169,10 +175,9 @@ function methodTone(method: string): string {
         </span>
       </template>
     </a-table>
-    <!-- 渲染分批的进度提示：数据已经全在内存里，只是还没塞进 DOM，滚动即出 -->
-    <div v-if="hiddenCount > 0" class="table-render-hint">
-      已显示 {{ visibleRows.length }} / 共 {{ rows.length }} 条，继续向下滚动加载
-    </div>
+    <!-- 滚动分页的进度提示：数据按页从后端取，滚到底自动接下一页 -->
+    <div v-if="loadingMore" class="table-render-hint">正在加载更多…</div>
+    <div v-else-if="hasMore" class="table-render-hint">已加载 {{ rows.length }} 条，继续向下滚动加载更多</div>
   </div>
 </template>
 

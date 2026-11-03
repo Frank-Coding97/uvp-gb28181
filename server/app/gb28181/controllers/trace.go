@@ -586,6 +586,14 @@ func parseSessionFilter(c *gin.Context) (gbtrace.SessionFilter, error) {
 		}
 		filter.Limit = limit
 	}
+	// offset 只给「滚动加载下一页」用；上限按保险丝卡住，避免有人拿超大 offset 拖垮聚合
+	if value := c.Query("offset"); value != "" {
+		offset, parseErr := strconv.Atoi(value)
+		if parseErr != nil || offset < 0 || offset > gbtrace.MaxTraceQueryRows {
+			return gbtrace.SessionFilter{}, errors.New("offset 参数非法")
+		}
+		filter.Offset = offset
+	}
 	return filter, nil
 }
 
