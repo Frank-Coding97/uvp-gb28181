@@ -1,6 +1,7 @@
 package manscdp
 
 import (
+	"bytes"
 	"regexp"
 
 	"golang.org/x/net/html/charset"
@@ -17,6 +18,11 @@ var xmlEncodingRe = regexp.MustCompile(`(?i)<\?xml[^>]*\bencoding\s*=\s*["']([^"
 func DecodeToUTF8(body []byte) []byte {
 	if len(body) == 0 {
 		return body
+	}
+	// ⭐ 内容优先：声明与字节冲突时先按字节实际编码统一（详见 charset_sniff.go）。
+	// 例：设备声明 GB2312 却发 UTF-8，若照声明转码，会把中文读成乱码再落库。
+	if normalized := NormalizeIncomingXML(body); !bytes.Equal(normalized, body) {
+		return normalized
 	}
 	head := body
 	if len(head) > 128 {

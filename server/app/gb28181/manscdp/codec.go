@@ -147,6 +147,16 @@ func DecodeProfiledXML(profile protocol.Profile, body []byte, value any) error {
 	if err != nil {
 		return err
 	}
+	// ⭐ 内容优先：声明与字节冲突时按字节实际编码解（详见 charset_sniff.go）。
+	// 典型场景：设备声明 GB18030、实际发 UTF-8，照声明解会把中文整串读成乱码。
+	converted := false
+	if effective, ok := resolveWireCharset(charset, body); ok {
+		charset, encoder, err = encodingForLabel(string(effective))
+		if err != nil {
+			return err
+		}
+		converted = true
+	}
 	normalized := body
 	if encoder != nil {
 		normalized, err = encoder.NewDecoder().Bytes(body)
@@ -154,7 +164,7 @@ func DecodeProfiledXML(profile protocol.Profile, body []byte, value any) error {
 			return &CodecError{Kind: CodecErrorDecode, Charset: charset, Err: err}
 		}
 	}
-	if declared && charset != protocol.Charset(protocol.CharsetUTF8) {
+	if declared && (charset != protocol.Charset(protocol.CharsetUTF8) || converted) {
 		normalized = normalizeXMLDeclarationEncoding(normalized)
 	}
 	if err := xml.Unmarshal(normalized, value); err != nil {
@@ -184,6 +194,15 @@ func DecodeProfiledXMLBytes(profile protocol.Profile, body []byte) ([]byte, erro
 	if err != nil {
 		return nil, err
 	}
+	// ⭐ 内容优先：与 DecodeProfiledXML 同一套判据（详见 charset_sniff.go）。
+	converted := false
+	if effective, ok := resolveWireCharset(charset, body); ok {
+		charset, encoder, err = encodingForLabel(string(effective))
+		if err != nil {
+			return nil, err
+		}
+		converted = true
+	}
 	normalized := body
 	if encoder != nil {
 		normalized, err = encoder.NewDecoder().Bytes(body)
@@ -191,7 +210,7 @@ func DecodeProfiledXMLBytes(profile protocol.Profile, body []byte) ([]byte, erro
 			return nil, &CodecError{Kind: CodecErrorDecode, Charset: charset, Err: err}
 		}
 	}
-	if declared && charset != protocol.Charset(protocol.CharsetUTF8) {
+	if declared && (charset != protocol.Charset(protocol.CharsetUTF8) || converted) {
 		normalized = normalizeXMLDeclarationEncoding(normalized)
 	}
 	return normalized, nil
