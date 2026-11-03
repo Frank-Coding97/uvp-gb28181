@@ -74,20 +74,22 @@ type GbChannel struct {
 	Latitude  float64 `gorm:"column:latitude;comment:纬度" json:"latitude"`
 	// PositionSource 见文件头的常量组:回答"这对坐标是谁写的"。
 	// ⛔ 它不是"设备能力上报",而是平台自己的**写入归属** —— 前端据此说明坐标的可信来源。
-	PositionSource          string     `gorm:"column:position_source;size:16;not null;default:'';comment:通道坐标来源 catalog/mobile/manual,空=无坐标" json:"positionSource"`
-	PositionUpdatedAt       *time.Time `gorm:"column:position_updated_at;comment:通道坐标最近更新时间" json:"positionUpdatedAt"`
-	Status                  int8       `gorm:"column:status;default:0;comment:通道在线" json:"status"`
-	StatusEvent             string     `gorm:"column:status_event;size:8;not null;default:'';comment:目录故障事件 VLOST/DEFECT 空表示无故障事件" json:"statusEvent"`
-	StreamID                string     `gorm:"column:stream_id;size:64;comment:当前播放流ID" json:"streamId"`
-	CurrentSSRC             string     `gorm:"column:current_ssrc;size:10;not null;default:'';comment:当前实时媒体会话SSRC" json:"currentSsrc"`
-	OnDemandLive            bool       `gorm:"column:on_demand_live;default:true;comment:按需直播,无人观看自动关闭" json:"onDemandLive"`
-	StreamTransport         string     `gorm:"column:stream_transport;size:16;default:TCP-Passive;comment:流传输模式 UDP/TCP-Active/TCP-Passive" json:"streamTransport"`
-	AudioEnabled            bool       `gorm:"column:audio_enabled;default:true;comment:点播是否接收音频" json:"audioEnabled"`
-	RecordingMode           string     `gorm:"column:recording_mode;size:16;default:off;comment:录像模式 off/continuous/scheduled" json:"recordingMode"`
-	CloudRecordingEnabled   bool       `gorm:"column:cloud_recording_enabled;default:false;comment:云端录像期望开关" json:"cloudRecordingEnabled"`
-	CloudRecordingState     string     `gorm:"column:cloud_recording_state;size:20;default:disabled;comment:云端录像运行状态" json:"cloudRecordingState"`
-	CloudRecordingError     string     `gorm:"column:cloud_recording_error;size:500;default:'';comment:云端录像最近错误" json:"cloudRecordingError"`
-	CloudRecordingUpdatedAt *time.Time `gorm:"column:cloud_recording_updated_at;comment:云端录像状态更新时间" json:"cloudRecordingUpdatedAt"`
+	PositionSource              string     `gorm:"column:position_source;size:16;not null;default:'';comment:通道坐标来源 catalog/mobile/manual,空=无坐标" json:"positionSource"`
+	PositionUpdatedAt           *time.Time `gorm:"column:position_updated_at;comment:通道坐标最近更新时间" json:"positionUpdatedAt"`
+	Status                      int8       `gorm:"column:status;default:0;comment:通道在线" json:"status"`
+	StatusEvent                 string     `gorm:"column:status_event;size:8;not null;default:'';comment:目录故障事件 VLOST/DEFECT 空表示无故障事件" json:"statusEvent"`
+	StreamID                    string     `gorm:"column:stream_id;size:64;comment:当前播放流ID" json:"streamId"`
+	CurrentSSRC                 string     `gorm:"column:current_ssrc;size:10;not null;default:'';comment:当前实时媒体会话SSRC" json:"currentSsrc"`
+	OnDemandLive                bool       `gorm:"column:on_demand_live;default:true;comment:按需直播,无人观看自动关闭" json:"onDemandLive"`
+	StreamTransport             string     `gorm:"column:stream_transport;size:16;default:TCP-Passive;comment:流传输模式 UDP/TCP-Active/TCP-Passive" json:"streamTransport"`
+	StreamIdentification        string     `gorm:"column:stream_identification;size:32;not null;default:''" json:"streamIdentification"`
+	CurrentStreamIdentification *string    `gorm:"column:current_stream_identification;size:32" json:"currentStreamIdentification"`
+	AudioEnabled                bool       `gorm:"column:audio_enabled;default:true;comment:点播是否接收音频" json:"audioEnabled"`
+	RecordingMode               string     `gorm:"column:recording_mode;size:16;default:off;comment:录像模式 off/continuous/scheduled" json:"recordingMode"`
+	CloudRecordingEnabled       bool       `gorm:"column:cloud_recording_enabled;default:false;comment:云端录像期望开关" json:"cloudRecordingEnabled"`
+	CloudRecordingState         string     `gorm:"column:cloud_recording_state;size:20;default:disabled;comment:云端录像运行状态" json:"cloudRecordingState"`
+	CloudRecordingError         string     `gorm:"column:cloud_recording_error;size:500;default:'';comment:云端录像最近错误" json:"cloudRecordingError"`
+	CloudRecordingUpdatedAt     *time.Time `gorm:"column:cloud_recording_updated_at;comment:云端录像状态更新时间" json:"cloudRecordingUpdatedAt"`
 	// Capabilities A1 新增:通道能力 JSON {audio, h265, night_vision, alarm_io, recording}
 	// 用 *string + 默认 NULL — MySQL JSON 列不接受空字符串("The document is empty"),
 	// nil 写入 NULL,前端拿到 null 即按"无能力上报"渲染
@@ -180,23 +182,27 @@ func FindChannel(c context.Context, deviceID, channelID string) (*GbChannel, err
 func UpdateChannelStream(c context.Context, deviceID, channelID, streamID string) error {
 	return app.DB().WithContext(c).Model(&GbChannel{}).
 		Where("device_id = ? AND channel_id = ?", deviceID, channelID).
-		Update("stream_id", streamID).Error
+		Updates(map[string]any{"stream_id": streamID, "current_stream_identification": nil}).Error
 }
 
 // SetChannelCurrent atomically records the current stream identity and its
 // independent GB28181 media SSRC. Both values describe one live generation
 // and must never be persisted by separate updates.
-func SetChannelCurrent(c context.Context, deviceID, channelID, streamID, ssrc string) error {
+func SetChannelCurrent(c context.Context, deviceID, channelID, streamID, ssrc string, identification ...string) error {
+	var requested *string
+	if len(identification) > 0 {
+		requested = &identification[0]
+	}
 	return app.DB().WithContext(c).Model(&GbChannel{}).
 		Where("device_id = ? AND channel_id = ?", deviceID, channelID).
-		Updates(map[string]any{"stream_id": streamID, "current_ssrc": ssrc}).Error
+		Updates(map[string]any{"stream_id": streamID, "current_ssrc": ssrc, "current_stream_identification": requested}).Error
 }
 
 // ClearChannelStream 按当前流 ID 清空通道播放状态
 func ClearChannelStream(c context.Context, streamID string) error {
 	return app.DB().WithContext(c).Model(&GbChannel{}).
 		Where("stream_id = ?", streamID).
-		Update("stream_id", "").Error
+		Updates(map[string]any{"stream_id": "", "current_stream_identification": nil}).Error
 }
 
 // ClearChannelCurrentIfCurrent clears both current identity fields only when
@@ -205,7 +211,7 @@ func ClearChannelStream(c context.Context, streamID string) error {
 func ClearChannelCurrentIfCurrent(c context.Context, streamID, ssrc string) (bool, error) {
 	result := app.DB().WithContext(c).Model(&GbChannel{}).
 		Where("stream_id = ? AND current_ssrc = ?", streamID, ssrc).
-		Updates(map[string]any{"stream_id": "", "current_ssrc": ""})
+		Updates(map[string]any{"stream_id": "", "current_ssrc": "", "current_stream_identification": nil})
 	return result.RowsAffected == 1, result.Error
 }
 

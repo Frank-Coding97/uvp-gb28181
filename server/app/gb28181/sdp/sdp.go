@@ -38,12 +38,22 @@ func FormatRealtimeSSRC(domain string, sequence uint16) (string, error) {
 
 // PlayParams 实时点播 SDP 构造参数
 type PlayParams struct {
-	ServerID string // 平台国标编码(o= 行)
-	RecvIP   string // 收流 IP(ZLM 地址)
-	RecvPort int    // 收流端口(ZLM RTP 端口)
-	SSRC     string // 媒体流 SSRC
-	TCPMode  bool   // true=TCP被动收流, false=UDP
-	Extended bool   // true=为兼容部分设备声明额外视频负载类型
+	ServerID             string // 平台国标编码(o= 行)
+	RecvIP               string // 收流 IP(ZLM 地址)
+	RecvPort             int    // 收流端口(ZLM RTP 端口)
+	SSRC                 string // 媒体流 SSRC
+	TCPMode              bool   // true=TCP被动收流, false=UDP
+	Extended             bool   // true=为兼容部分设备声明额外视频负载类型
+	StreamIdentification string
+}
+
+func ValidStreamIdentification(value string) bool {
+	switch value {
+	case "", "stream:0", "stream:1", "streamnumber:0", "streamnumber:1", "streamprofile:0", "streamprofile:1", "streamMode:MAIN", "streamMode:SUB":
+		return true
+	default:
+		return false
+	}
 }
 
 // BuildPlaySDP 构造实时点播 SDP(平台作主叫,s=Play)
@@ -63,6 +73,9 @@ func BuildPlaySDP(p PlayParams) string {
 	if p.TCPMode {
 		b.WriteString("a=setup:passive\r\n")
 		b.WriteString("a=connection:new\r\n")
+	}
+	if p.StreamIdentification != "" && ValidStreamIdentification(p.StreamIdentification) {
+		fmt.Fprintf(&b, "a=%s\r\n", p.StreamIdentification)
 	}
 	// y= 行:国标扩展,声明 SSRC(10位)
 	fmt.Fprintf(&b, "y=%s\r\n", p.SSRC)

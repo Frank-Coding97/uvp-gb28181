@@ -261,13 +261,17 @@ func (f *fakeChannels) ClearStream(ctx context.Context, streamID string) error {
 	return nil
 }
 
-func (f *fakeChannels) SetCurrent(ctx context.Context, deviceID, channelID, streamID, ssrc string) error {
+func (f *fakeChannels) SetCurrent(ctx context.Context, deviceID, channelID, streamID, ssrc string, identification ...string) error {
 	if f.updateErr != nil {
 		return f.updateErr
 	}
 	if f.c != nil {
 		f.c.StreamID = streamID
 		f.c.CurrentSSRC = ssrc
+		if len(identification) > 0 {
+			value := identification[0]
+			f.c.CurrentStreamIdentification = &value
+		}
 	}
 	return nil
 }
@@ -510,6 +514,42 @@ func TestStartUsesChannelStreamTransport(t *testing.T) {
 				t.Fatalf("SDP setup passive=%v, want %v:\n%s", got, tt.wantSetup, inv.lastBody)
 			}
 		})
+	}
+}
+
+func TestStartStreamIdentificationAndReuse(t *testing.T) {
+	z := &mockZLM{}
+	z.online.Store(true)
+	inv := &mockInviter{}
+	ch := aChannel()
+	ch.StreamIdentification = "streamMode:SUB"
+	s, _, _ := newSvc(t, z, inv, onlineDevice(), ch)
+	if _, err := s.Start(context.Background(), ch.DeviceID, ch.ChannelID); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(inv.lastBody, "a=streamMode:SUB\r\n") || ch.CurrentStreamIdentification == nil || *ch.CurrentStreamIdentification != "streamMode:SUB" {
+		t.Fatalf("request or snapshot incorrect: SDP=%s, channel=%+v", inv.lastBody, ch)
+	}
+	ch.StreamIdentification = "stream:0"
+	if _, err := s.Start(context.Background(), ch.DeviceID, ch.ChannelID); err != nil {
+		t.Fatal(err)
+	}
+	if inv.inviteCalls.Load() != 1 || *ch.CurrentStreamIdentification != "streamMode:SUB" {
+		t.Fatal("reuse must retain the existing request without another INVITE")
+	}
+}
+
+func TestStartRejectsInvalidStreamIdentification(t *testing.T) {
+	z := &mockZLM{}
+	inv := &mockInviter{}
+	ch := aChannel()
+	ch.StreamIdentification = "stream:0\r\na=sendonly"
+	s, _, _ := newSvc(t, z, inv, onlineDevice(), ch)
+	if _, err := s.Start(context.Background(), ch.DeviceID, ch.ChannelID); err == nil {
+		t.Fatal("invalid configuration accepted")
+	}
+	if z.openCalls.Load() != 0 || inv.inviteCalls.Load() != 0 {
+		t.Fatal("invalid configuration caused media side effects")
 	}
 }
 

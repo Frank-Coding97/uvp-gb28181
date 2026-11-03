@@ -25,6 +25,7 @@ import (
 	gbplayback "uvplatform.com/uvp-gb28181/app/gb28181/playback"
 	"uvplatform.com/uvp-gb28181/app/gb28181/ptz"
 	"uvplatform.com/uvp-gb28181/app/gb28181/recordquery"
+	"uvplatform.com/uvp-gb28181/app/gb28181/sdp"
 	"uvplatform.com/uvp-gb28181/app/gb28181/upgrade"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 )
@@ -706,8 +707,7 @@ func (dc *DeviceMgmtController) GetChannel(c *gin.Context) {
 	}{GbChannel: &ch, Transport: device.Transport})
 }
 
-// UpdateChannelStreamTransport 更新通道流传输模式
-// PATCH /channel/:id/stream-transport  body: {streamTransport: "UDP" | "TCP-Active" | "TCP-Passive"}
+// UpdateChannelStreamTransport 更新通道流传输模式或播放码流配置。
 func (dc *DeviceMgmtController) UpdateChannelStreamTransport(c *gin.Context) {
 	db := dc.db()
 	if db == nil {
@@ -720,31 +720,56 @@ func (dc *DeviceMgmtController) UpdateChannelStreamTransport(c *gin.Context) {
 		return
 	}
 	var body struct {
-		StreamTransport string `json:"streamTransport"`
+		StreamTransport      *string `json:"streamTransport"`
+		StreamIdentification *string `json:"streamIdentification"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		dc.FailAndAbort(c, "请求体不合法", err)
 		return
 	}
-	// 校验流传输模式合法性
-	allowed := map[string]bool{"UDP": true, "TCP-Active": true, "TCP-Passive": true}
-	if !allowed[body.StreamTransport] {
-		dc.FailAndAbort(c, "流传输模式非法,仅支持 UDP/TCP-Active/TCP-Passive", nil)
+	if (body.StreamTransport == nil) == (body.StreamIdentification == nil) {
+		dc.FailAndAbort(c, "必须指定一项通道配置", nil)
 		return
+	}
+	column, value := "stream_transport", ""
+	if body.StreamTransport != nil {
+		value = *body.StreamTransport
+		if !gbconfig.IsSupportedChannelStreamTransport(value) {
+			dc.FailAndAbort(c, "流传输模式非法,仅支持 UDP/TCP-Active/TCP-Passive", nil)
+			return
+		}
+	} else {
+		column, value = "stream_identification", *body.StreamIdentification
+		if !sdp.ValidStreamIdentification(value) {
+			dc.FailAndAbort(c, "播放码流配置非法", nil)
+			return
+		}
 	}
 	res := db.WithContext(c.Request.Context()).Model(&gbmodels.GbChannel{}).
 		Scopes(visibleScope(c)).
 		Where("id = ?", id).
-		Update("stream_transport", body.StreamTransport)
+		Update(column, value)
 	if res.Error != nil {
 		dc.FailAndAbort(c, "更新失败", res.Error)
 		return
 	}
 	if res.RowsAffected == 0 {
-		dc.FailAndAbort(c, "通道不存在", nil)
-		return
+		var count int64
+		check := db.WithContext(c.Request.Context()).Model(&gbmodels.GbChannel{}).Scopes(visibleScope(c)).Where("id = ?", id).Count(&count)
+		if check.Error != nil {
+			dc.FailAndAbort(c, "查询通道失败", check.Error)
+			return
+		}
+		if count == 0 {
+			dc.FailAndAbort(c, "通道不存在", nil)
+			return
+		}
 	}
-	dc.Success(c, gin.H{"id": id, "streamTransport": body.StreamTransport})
+	if body.StreamTransport != nil {
+		dc.Success(c, gin.H{"id": id, "streamTransport": value})
+	} else {
+		dc.Success(c, gin.H{"id": id, "streamIdentification": value})
+	}
 }
 
 // UpdateChannel 更新通道可维护信息(别名、摄像头类型等)

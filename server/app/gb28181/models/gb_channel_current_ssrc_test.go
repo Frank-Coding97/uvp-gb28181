@@ -62,11 +62,13 @@ func TestChannelCurrentSSRCAtomicCAS(t *testing.T) {
 	const streamID = "34020000001320000001_34020000001310000001"
 	require.NoError(t, db.Create(&GbChannel{DeviceID: deviceID, ChannelID: channelID}).Error)
 
-	require.NoError(t, SetChannelCurrent(ctx, deviceID, channelID, streamID, "0200000001"))
+	require.NoError(t, SetChannelCurrent(ctx, deviceID, channelID, streamID, "0200000001", "stream:1"))
 	got, err := FindChannel(ctx, deviceID, channelID)
 	require.NoError(t, err)
 	require.Equal(t, streamID, got.StreamID)
 	require.Equal(t, "0200000001", got.CurrentSSRC)
+	require.NotNil(t, got.CurrentStreamIdentification)
+	require.Equal(t, "stream:1", *got.CurrentStreamIdentification)
 
 	affected, err := ClearChannelCurrentIfCurrent(ctx, streamID, "0200000000")
 	require.NoError(t, err)
@@ -75,6 +77,7 @@ func TestChannelCurrentSSRCAtomicCAS(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, streamID, got.StreamID)
 	require.Equal(t, "0200000001", got.CurrentSSRC)
+	require.NotNil(t, got.CurrentStreamIdentification)
 
 	affected, err = ClearChannelCurrentIfCurrent(ctx, streamID, "0200000001")
 	require.NoError(t, err)
@@ -83,6 +86,7 @@ func TestChannelCurrentSSRCAtomicCAS(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, got.StreamID)
 	require.Empty(t, got.CurrentSSRC)
+	require.Nil(t, got.CurrentStreamIdentification)
 }
 
 func TestCurrentSSRCMigrationContracts(t *testing.T) {

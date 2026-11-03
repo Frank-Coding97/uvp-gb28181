@@ -76,7 +76,7 @@ type ChannelRepo interface {
 	FindChannelByStream(ctx context.Context, streamID string) (*gbmodels.GbChannel, error)
 	UpdateStream(ctx context.Context, deviceID, channelID, streamID string) error
 	ClearStream(ctx context.Context, streamID string) error
-	SetCurrent(ctx context.Context, deviceID, channelID, streamID, ssrc string) error
+	SetCurrent(ctx context.Context, deviceID, channelID, streamID, ssrc string, identification ...string) error
 	ClearIfCurrent(ctx context.Context, streamID, ssrc string) (bool, error)
 	ListPlayingChannels(ctx context.Context) (gbmodels.GbChannelList, error)
 }
@@ -662,6 +662,9 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 	if ch == nil {
 		return nil, ErrChannelNotFound
 	}
+	if !sdp.ValidStreamIdentification(ch.StreamIdentification) {
+		return nil, fmt.Errorf("通道播放码流配置非法")
+	}
 	s.recordLifecycle(playCtx, req, LifecycleEvent{Stage: StageValidation, EventName: EventValidationSucceeded, FactState: FactConfirmed, Source: SourcePlayService})
 	// DEBUG 而非 INFO:校验通过紧跟在 requested 之后,只表示"请求参数合法",
 	// 运维看到它无动作可做(C04 判据②)。校验失败走 failed 事件,信息不会丢。
@@ -920,12 +923,13 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 
 	// 6. 构造 SDP + 发 INVITE(任何失败要回滚 RTP 端口 + Unbind)
 	body := sdp.BuildPlaySDP(sdp.PlayParams{
-		ServerID: s.cfg.SIP.ServerID,
-		RecvIP:   recvHost,
-		RecvPort: recvPort,
-		SSRC:     ssrc,
-		TCPMode:  tcpPassive,
-		Extended: gbconfig.SDPExtensionEnabled(),
+		ServerID:             s.cfg.SIP.ServerID,
+		RecvIP:               recvHost,
+		RecvPort:             recvPort,
+		SSRC:                 ssrc,
+		TCPMode:              tcpPassive,
+		Extended:             gbconfig.SDPExtensionEnabled(),
+		StreamIdentification: ch.StreamIdentification,
 	})
 
 	sess := &uac.Session{
@@ -1045,7 +1049,7 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 	}
 	app.Log(playCtx).Named("play").Info("点播媒体流已就绪", zap.String("event", "gb28181.play.media_ready"), zap.String("stage", "media_ready"), zap.String("outcome", "succeeded"), zap.String("device_id", deviceID), zap.String("channel_id", channelID), zap.Int64("node_id", pickedNodeID), zap.String("stream_id", streamID), zap.String("correlation_id", sess.RequestID), zap.String("call_id", outcome.CallID), zap.String("cseq", outcome.CSeq))
 	s.recordLifecycle(playCtx, req, LifecycleEvent{Stage: StageMedia, EventName: EventMediaReady, FactState: FactConfirmed, Source: SourcePlayService, StreamID: streamID, NodeID: pickedNodeID, SSRC: ssrc, CallID: outcome.CallID, CSeq: outcome.CSeq})
-	if err := s.channels.SetCurrent(playCtx, deviceID, channelID, streamID, ssrc); err != nil {
+	if err := s.channels.SetCurrent(playCtx, deviceID, channelID, streamID, ssrc, ch.StreamIdentification); err != nil {
 		return s.rollbackFailedStart(playCtx, req, result, liveRef, client, fmt.Errorf("记录通道播放流失败: %w", err), true, &releaseSSRC)
 	}
 	if s.liveReady != nil {

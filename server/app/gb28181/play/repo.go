@@ -35,8 +35,8 @@ func (gormChannelRepo) ClearStream(ctx context.Context, streamID string) error {
 	return gbmodels.ClearChannelStream(ctx, streamID)
 }
 
-func (gormChannelRepo) SetCurrent(ctx context.Context, deviceID, channelID, streamID, ssrc string) error {
-	return gbmodels.SetChannelCurrent(ctx, deviceID, channelID, streamID, ssrc)
+func (gormChannelRepo) SetCurrent(ctx context.Context, deviceID, channelID, streamID, ssrc string, identification ...string) error {
+	return gbmodels.SetChannelCurrent(ctx, deviceID, channelID, streamID, ssrc, identification...)
 }
 
 func (gormChannelRepo) ClearIfCurrent(ctx context.Context, streamID, ssrc string) (bool, error) {

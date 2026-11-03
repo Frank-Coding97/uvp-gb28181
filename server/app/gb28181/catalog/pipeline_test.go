@@ -179,6 +179,7 @@ func TestPipeline_IngestUsesConfiguredTransportOnlyForNewChannels(t *testing.T) 
 	var first gbmodels.GbChannel
 	require.NoError(t, db.Where("channel_id = ?", "37011200001310000001").First(&first).Error)
 	require.Equal(t, "UDP", first.StreamTransport)
+	require.NoError(t, db.Model(&first).Update("stream_identification", "stream:1").Error)
 
 	testConfig.values[gbconfig.DefaultChannelStreamTransportConfigKey] = "TCP-Active"
 	require.NoError(t, p.Ingest(context.Background(), sender, []catalog.CatalogItem{
@@ -190,6 +191,7 @@ func TestPipeline_IngestUsesConfiguredTransportOnlyForNewChannels(t *testing.T) 
 	require.NoError(t, db.Order("channel_id").Find(&channels).Error)
 	require.Len(t, channels, 2)
 	require.Equal(t, "UDP", channels[0].StreamTransport, "已有通道不能被新默认值覆盖")
+	require.Equal(t, "stream:1", channels[0].StreamIdentification, "目录刷新不能覆盖播放码流配置")
 	require.Equal(t, "TCP-Active", channels[1].StreamTransport)
 }
 

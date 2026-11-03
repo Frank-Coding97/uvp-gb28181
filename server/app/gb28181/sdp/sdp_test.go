@@ -5,6 +5,31 @@ import (
 	"testing"
 )
 
+func TestBuildPlaySDPStreamIdentification(t *testing.T) {
+	for _, value := range []string{"", "stream:0", "stream:1", "streamnumber:0", "streamnumber:1", "streamprofile:0", "streamprofile:1", "streamMode:MAIN", "streamMode:SUB"} {
+		t.Run(value, func(t *testing.T) {
+			got := BuildPlaySDP(PlayParams{SSRC: "0200000001", StreamIdentification: value})
+			if value != "" && !strings.Contains(got, "a="+value+"\r\ny=0200000001\r\n") {
+				t.Fatalf("missing stream attribute: %s", got)
+			}
+			if value == "" && strings.Contains(got, "a=stream") {
+				t.Fatalf("default must not specify stream: %s", got)
+			}
+		})
+	}
+}
+
+func TestStreamIdentificationRejectsInvalidValues(t *testing.T) {
+	for _, value := range []string{"stream:2", "streammode:MAIN", "stream:0\r\na=sendonly", " stream:0"} {
+		if ValidStreamIdentification(value) {
+			t.Fatalf("accepted invalid value %q", value)
+		}
+		if strings.Contains(BuildPlaySDP(PlayParams{StreamIdentification: value}), "a="+value) {
+			t.Fatalf("invalid attribute emitted: %q", value)
+		}
+	}
+}
+
 // TestGenRealtimeSSRC T4-测1: SSRC 符合国标(10位,实时0开头,唯一)
 func TestGenRealtimeSSRC(t *testing.T) {
 	domain := "3402000000"
