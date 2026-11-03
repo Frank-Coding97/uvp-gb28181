@@ -457,6 +457,36 @@ describe("PlaybackSourceTree", () => {
     expect(api.listDevices).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps the expanded branch mounted while the automatic refresh is still in flight", async () => {
+    vi.useFakeTimers();
+    const wrapper = mountTree();
+    await flushPromises();
+    await wrapper.get('[data-node-key="root:device:1"] .twist-button').trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[data-node-key="root:device:1:channel:11"]').exists()).toBe(true);
+
+    // 刷新时把通道请求挂住，模拟网络还没回来。
+    let release: ((value: any) => void) | undefined;
+    api.listChannels.mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          release = resolve;
+        })
+    );
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await flushPromises();
+
+    // 关键断言：请求还没回来这一拍，子项不能先消失（否则看起来就是折叠又展开）。
+    expect(wrapper.get('[data-node-key="root:device:1"]').attributes("aria-expanded")).toBe("true");
+    expect(wrapper.find('[data-node-key="root:device:1:channel:11"]').exists()).toBe(true);
+
+    release?.({ code: 0, data: { list: [channel] } });
+    await flushPromises();
+    expect(wrapper.find('[data-node-key="root:device:1:channel:11"]').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
   it("refreshes every ten seconds without collapsing an expanded favorite group", async () => {
     vi.useFakeTimers();
     favoritesApi.listChannelFavoriteGroups.mockResolvedValue({

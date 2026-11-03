@@ -441,14 +441,23 @@ async function updateDeviceTotals(response: any) {
   }
 }
 
-function preserveNodeState(nextNodes: SourceTreeNode[], previousNodes: SourceTreeNode[]) {
+function preserveNodeState(nextNodes: SourceTreeNode[], previousNodes: SourceTreeNode[], keepChildren = false) {
   const previousByKey = new Map(previousNodes.map(node => [node.key, node]));
   return nextNodes.map(node => {
     const previous = previousByKey.get(node.key);
-    if (!previous || !node.hasChildren) return node;
-    node.expanded = previous.expanded;
+    if (!previous) return node;
+    node.expanded = node.hasChildren && previous.expanded;
+    if (keepChildren) {
+      // 定时静默刷新：先把旧的子节点原样带着，等新数据回来再整块替换。
+      // 原来的做法是当场清空子节点、再异步拉回来，中间那一下子项不在 DOM 里，
+      // 看起来就像「先折叠再展开」。
+      node.children = previous.children;
+      node.loaded = previous.loaded;
+      return node;
+    }
+    if (!node.hasChildren) return node;
     node.loaded = false;
-    if (node.kind === "device" && previous.loaded) {
+    if (node.kind === "device") {
       node.children = [];
     } else if (node.kind === "directory") {
       node.staticChildren = preserveNodeState(node.staticChildren, previous.children);
@@ -482,11 +491,11 @@ async function loadRoot(nextView: SourceView = view.value, force = false, silent
         return;
       }
       const nextNodes = devices.map(device => deviceNode(device, "root", 0));
-      trees.value.devices = preserveNodeState(nextNodes, trees.value.devices);
+      trees.value.devices = preserveNodeState(nextNodes, trees.value.devices, silent);
     } else {
       const directories = responseList<DirectoryNode>(await listDirectoryTree(nextView, resourceFilter()));
       const nextNodes = directories.map(node => directoryNode(node));
-      trees.value[nextView] = preserveNodeState(nextNodes, trees.value[nextView]);
+      trees.value[nextView] = preserveNodeState(nextNodes, trees.value[nextView], silent);
     }
     loaded.value[nextView] = true;
   } catch (reason: any) {
@@ -497,33 +506,45 @@ async function loadRoot(nextView: SourceView = view.value, force = false, silent
   }
 }
 
+/**
+ * 只负责把某个节点的子节点查回来，不写回节点本身。
+ * `loadNodeChildren`（用户点开）和 `reloadExpandedNodes`（定时刷新）都复用它，
+ * 后者靠「先拿数据、再一次性替换」来避免展开分支中途空一拍。
+ */
+async function fetchNodeChildren(node: SourceTreeNode): Promise<SourceTreeNode[] | null> {
+  if (!canViewDevices.value || !node.hasChildren) return null;
+  if (node.kind === "device" && node.deviceId) {
+    const channels = responseList<ChannelVO>(
+      await listChannels({ deviceId: node.deviceId, ...resourceFilter(), page: 1, pageSize: 200 })
+    );
+    return channels.map(channel => channelNode(channel, node.key, node.depth + 1));
+  }
+  if (node.kind === "directory") {
+    if (view.value !== "business") {
+      // New directory projections already contain their directly assigned devices.
+      return node.staticChildren;
+    }
+    const channels = responseList<ChannelVO>(
+      await listChannels({
+        directoryView: "business",
+        directoryKey: node.key,
+        ...resourceFilter(),
+        page: 1,
+        pageSize: 200
+      })
+    );
+    return [...node.staticChildren, ...channels.map(channel => channelNode(channel, node.key, node.depth + 1))];
+  }
+  return null;
+}
+
 async function loadNodeChildren(node: SourceTreeNode) {
   if (!canViewDevices.value || node.loaded || node.loading || !node.hasChildren) return;
   node.loading = true;
   error.value = "";
   try {
-    if (node.kind === "device" && node.deviceId) {
-      const channels = responseList<ChannelVO>(
-        await listChannels({ deviceId: node.deviceId, ...resourceFilter(), page: 1, pageSize: 200 })
-      );
-      node.children = channels.map(channel => channelNode(channel, node.key, node.depth + 1));
-    } else if (node.kind === "directory") {
-      if (view.value === "business") {
-        const channels = responseList<ChannelVO>(
-          await listChannels({
-            directoryView: "business",
-            directoryKey: node.key,
-            ...resourceFilter(),
-            page: 1,
-            pageSize: 200
-          })
-        );
-        node.children = [...node.staticChildren, ...channels.map(channel => channelNode(channel, node.key, node.depth + 1))];
-      } else {
-        // New directory projections already contain their directly assigned devices.
-        node.children = node.staticChildren;
-      }
-    }
+    const children = await fetchNodeChildren(node);
+    if (children) node.children = children;
     node.loaded = true;
   } catch (reason: any) {
     error.value = reason?.message || "设备树节点加载失败";
@@ -619,20 +640,36 @@ function invalidateResourceViews() {
   }
 }
 
+/**
+ * 逐个把已经展开的节点重新拉一遍。
+ * 顺序是「先拉数据，再整体替换 children」，所以展开的分支在整轮刷新过程中一直有内容，
+ * 不会出现「子项先消失、再冒出来」的闪动。
+ */
+async function reloadExpandedNodes(nodes: SourceTreeNode[]) {
+  for (const node of nodes) {
+    if (!node.expanded || !node.hasChildren) continue;
+    try {
+      const children = await fetchNodeChildren(node);
+      if (children) {
+        node.children = preserveNodeState(children, node.children);
+        node.loaded = true;
+      }
+    } catch {
+      // 静默刷新失败就留着上一批子节点，别把用户正在看的树清掉。
+      continue;
+    }
+    await reloadExpandedNodes(node.children);
+  }
+}
+
 async function refresh(silent = false) {
   if (view.value === "favorites" ? !canManageFavorites.value : !canViewDevices.value) return;
   if (refreshInFlight) return;
   refreshInFlight = true;
   try {
     await loadRoot(view.value, true, silent);
-    const reloadExpanded = async (nodes: SourceTreeNode[]) => {
-      for (const node of nodes) {
-        if (!node.expanded) continue;
-        await loadNodeChildren(node);
-        await reloadExpanded(node.children);
-      }
-    };
-    await reloadExpanded(currentTree.value);
+    if (error.value) return;
+    await reloadExpandedNodes(currentTree.value);
   } finally {
     refreshInFlight = false;
   }
