@@ -18,6 +18,8 @@
   --uvp-main-padding: 24px;
   --uvp-panel-bg: #ffffff;
   --uvp-panel-border: #e8edf5;
+  --uvp-scrollbar-thumb: #c3cfdd;
+  --uvp-scrollbar-thumb-hover: #94a3b8;
 
   /* 仪表类「底轨」色（进度条里代表"剩余/未占用"的那一段）。
      ⛔ 必须两套主题都定义：底轨是**大面积**色块，亮色下 #e8edf5 够用，
@@ -149,6 +151,8 @@ body[arco-theme="dark"] {
   --uvp-workspace-shadow: 16px 16px 38px -24px rgb(0 0 0 / 62%);
   --uvp-panel-bg: #162231;
   --uvp-panel-border: #263648;
+  --uvp-scrollbar-thumb: #3b5068;
+  --uvp-scrollbar-thumb-hover: #5b7490;
   --uvp-meter-track: #33475c;
   --uvp-panel-shadow: 0 10px 24px rgb(0 0 0 / 18%);
   --uvp-list-panel-bg: #121d2a;
