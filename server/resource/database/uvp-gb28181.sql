@@ -1,8 +1,7 @@
 -- UVP-GB28181 MySQL 8.0 release initialization script
--- Model-derived additions: gb_cascade_alarm_delivery, gb_cascade_business_binding, gb_cascade_business_node, gb_cascade_snapshot_session.
 -- Generated from the development schema (8.0.46) by
 -- server/resource/database/baseline/generate_sql.py. Do not edit by hand.
--- Schema fingerprint: 8ad4da483ae4adfb0f65353c2910c2587789e8eac718949ead65ff1905e70e06
+-- Schema fingerprint: b21f30f17802ccda435c1a7b352543ada61d3a020221b7488af0b25913b7f01d
 -- Contains production table structures and release baseline data only.
 -- Excludes demo content and all environment-specific device, media-node,
 -- SIP, cascade, alarm, trace, and operation data.
@@ -119,6 +118,34 @@ CREATE TABLE `gb_anomaly_record` (
   KEY `idx_owner_dept_resolved` (`owner_dept_id`,`resolved`,`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='目录异常审计:Q1 决议';
 
+-- Table structure for `gb_cascade_alarm_delivery`
+DROP TABLE IF EXISTS `gb_cascade_alarm_delivery`;
+CREATE TABLE `gb_cascade_alarm_delivery` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `delivery_key` varchar(64) NOT NULL,
+  `platform_id` bigint unsigned NOT NULL,
+  `source_device_code` varchar(20) NOT NULL,
+  `source_resource_code` varchar(20) NOT NULL,
+  `published_code` varchar(20) NOT NULL,
+  `profile_version` varchar(16) NOT NULL,
+  `binding_fingerprint` varchar(64) NOT NULL,
+  `payload` longblob NOT NULL,
+  `notify_targets` text NULL,
+  `state` varchar(16) NOT NULL DEFAULT 'pending',
+  `attempts` int NOT NULL DEFAULT 0,
+  `next_attempt_at` datetime(3) NOT NULL,
+  `lease_owner` varchar(64) NOT NULL DEFAULT '',
+  `lease_until` datetime(3) NULL,
+  `last_error` text NULL,
+  `sent_at` datetime(3) NULL,
+  `created_at` datetime(3) NOT NULL,
+  `updated_at` datetime(3) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_cascade_alarm_delivery_key` (`delivery_key`),
+  KEY `idx_cascade_alarm_delivery_due` (`platform_id`,`state`,`next_attempt_at`),
+  KEY `idx_cascade_alarm_delivery_lease` (`lease_until`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 -- Table structure for `gb_cascade_business_binding`
 DROP TABLE IF EXISTS `gb_cascade_business_binding`;
 CREATE TABLE `gb_cascade_business_binding` (
@@ -199,7 +226,6 @@ CREATE TABLE `gb_cascade_device_projection` (
 DROP TABLE IF EXISTS `gb_cascade_media_session`;
 CREATE TABLE `gb_cascade_media_session` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `session_kind` varchar(16) NOT NULL DEFAULT 'video',
   `platform_id` bigint unsigned NOT NULL,
   `dialog_key` varchar(512) NOT NULL,
   `call_id` varchar(255) NOT NULL,
@@ -229,42 +255,12 @@ CREATE TABLE `gb_cascade_media_session` (
   `closed_at` datetime(3) NULL,
   `created_at` datetime(3) NOT NULL,
   `updated_at` datetime(3) NOT NULL,
+  `session_kind` varchar(16) NOT NULL DEFAULT 'video',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_cascade_media_dialog` (`dialog_key`),
   KEY `idx_cascade_media_call_id` (`call_id`),
-  KEY `idx_cascade_media_platform_state` (`platform_id`,`state`),
-  KEY `idx_cascade_media_kind_state` (`session_kind`,`state`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
--- Table structure for `gb_cascade_snapshot_session`
-DROP TABLE IF EXISTS `gb_cascade_snapshot_session`;
-CREATE TABLE `gb_cascade_snapshot_session` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `platform_id` bigint unsigned NOT NULL,
-  `upstream_session_id` varchar(128) NOT NULL,
-  `downstream_session_id` varchar(128) NULL,
-  `upload_token` varchar(64) NULL,
-  `upstream_upload_url` text NULL,
-  `request_key` varchar(64) NOT NULL,
-  `request_fingerprint` varchar(64) NOT NULL,
-  `request_result` varchar(8) NOT NULL DEFAULT '',
-  `published_channel_id` varchar(20) NOT NULL,
-  `source_device_id` bigint unsigned NOT NULL,
-  `source_channel_id` bigint unsigned NOT NULL,
-  `source_device_epoch` bigint NOT NULL DEFAULT 0,
-  `config_revision` bigint unsigned NOT NULL,
-  `projection_revision` bigint unsigned NOT NULL,
-  `state` varchar(16) NOT NULL DEFAULT 'pending',
-  `expires_at` datetime(3) NOT NULL,
-  `completed_at` datetime(3) NULL,
-  `created_at` datetime(3) NOT NULL,
-  `updated_at` datetime(3) NOT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_cascade_snapshot_session` (`platform_id`,`upstream_session_id`),
-  UNIQUE KEY `uk_cascade_snapshot_request` (`platform_id`,`request_key`),
-  UNIQUE KEY `uk_cascade_snapshot_downstream` (`downstream_session_id`),
-  UNIQUE KEY `uk_cascade_snapshot_upload` (`upload_token`),
-  KEY `idx_cascade_snapshot_expiry` (`platform_id`,`expires_at`)
+  KEY `idx_cascade_media_kind_state` (`session_kind`,`state`),
+  KEY `idx_cascade_media_platform_state` (`platform_id`,`state`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- Table structure for `gb_cascade_platform`
@@ -297,16 +293,12 @@ CREATE TABLE `gb_cascade_platform` (
   `keepalive_interval` int NOT NULL DEFAULT 60,
   `retry_policy` text NULL,
   `transport` varchar(16) NOT NULL DEFAULT 'UDP',
-  `catalog_batch_size` int NOT NULL DEFAULT 1,
-  `auto_push_catalog` tinyint(1) NOT NULL DEFAULT 0,
+  `catalog_batch_size` int NOT NULL DEFAULT 100,
   `publish_platform` tinyint(1) NOT NULL DEFAULT 0,
   `publish_civil` tinyint(1) NOT NULL DEFAULT 0,
   `publish_group` tinyint(1) NOT NULL DEFAULT 0,
-  `max_streams` int NOT NULL DEFAULT 0,
+  `max_streams` int NOT NULL DEFAULT 1,
   `ptz_enabled` tinyint(1) NOT NULL DEFAULT 0,
-  `upgrade_enabled` tinyint(1) NOT NULL DEFAULT 0,
-  `recording_enabled` tinyint(1) NOT NULL DEFAULT 0,
-  `rtcp_keepalive` tinyint(1) NOT NULL DEFAULT 0,
   `register_at` datetime(3) NULL,
   `register_expires_at` datetime(3) NULL,
   `heartbeat_at` datetime(3) NULL,
@@ -319,11 +311,49 @@ CREATE TABLE `gb_cascade_platform` (
   `created_at` datetime(3) NOT NULL,
   `updated_at` datetime(3) NOT NULL,
   `deleted_at` datetime(3) NULL,
+  `auto_push_catalog` tinyint(1) NOT NULL DEFAULT 0,
+  `recording_enabled` tinyint(1) NOT NULL DEFAULT 0,
+  `rtcp_keepalive` tinyint(1) NOT NULL DEFAULT 0,
+  `config_enabled` tinyint(1) NOT NULL DEFAULT 0,
+  `device_control_enabled` tinyint(1) NOT NULL DEFAULT 0,
+  `maintenance_enabled` tinyint(1) NOT NULL DEFAULT 0,
+  `upgrade_enabled` tinyint(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_cascade_platform_connection` (`local_device_id`,`local_domain`,`upstream_server_id`,`host`,`port`,`transport`),
   UNIQUE KEY `uk_cascade_platform_name` (`name`),
   KEY `idx_cascade_platform_deleted_at` (`deleted_at`),
   KEY `idx_cascade_platform_enabled` (`enabled`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table structure for `gb_cascade_snapshot_session`
+DROP TABLE IF EXISTS `gb_cascade_snapshot_session`;
+CREATE TABLE `gb_cascade_snapshot_session` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `platform_id` bigint unsigned NOT NULL,
+  `upstream_session_id` varchar(128) NOT NULL,
+  `request_key` varchar(64) NOT NULL,
+  `request_fingerprint` varchar(64) NOT NULL,
+  `request_result` varchar(8) NOT NULL DEFAULT '',
+  `published_channel_id` varchar(20) NOT NULL,
+  `source_device_id` bigint unsigned NOT NULL,
+  `source_channel_id` bigint unsigned NOT NULL,
+  `source_device_epoch` bigint NOT NULL DEFAULT 0,
+  `config_revision` bigint unsigned NOT NULL,
+  `projection_revision` bigint unsigned NOT NULL,
+  `state` varchar(16) NOT NULL DEFAULT 'pending',
+  `expires_at` datetime(3) NOT NULL,
+  `completed_at` datetime(3) NULL,
+  `created_at` datetime(3) NOT NULL,
+  `updated_at` datetime(3) NOT NULL,
+  `downstream_session_id` varchar(128) NULL,
+  `upload_token` varchar(64) NULL,
+  `upstream_upload_url` text NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_cascade_snapshot_downstream` (`downstream_session_id`),
+  UNIQUE KEY `uk_cascade_snapshot_request` (`platform_id`,`request_key`),
+  UNIQUE KEY `uk_cascade_snapshot_session` (`platform_id`,`upstream_session_id`),
+  UNIQUE KEY `uk_cascade_snapshot_upload` (`upload_token`),
+  KEY `idx_cascade_snapshot_expiry` (`platform_id`,`expires_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- Table structure for `gb_catalog_node`
@@ -392,7 +422,6 @@ CREATE TABLE `gb_channel` (
   `position_source` varchar(16) NOT NULL DEFAULT '' COMMENT 'é€šé“åæ ‡æ¥æº catalog/mobile/manual,ç©º=æ— åæ ‡',
   `position_updated_at` datetime(3) NULL COMMENT 'é€šé“åæ ‡æœ€è¿‘æ›´æ–°æ—¶é—´',
   `status` tinyint(1) NULL DEFAULT 0 COMMENT '通道在线 0离线 1在线',
-  `status_event` varchar(8) NOT NULL DEFAULT '' COMMENT '目录故障事件 VLOST/DEFECT 空表示无故障事件',
   `stream_id` varchar(64) NOT NULL DEFAULT '' COMMENT '当前播放流ID(ZLM app/stream),空=未点播',
   `current_ssrc` varchar(10) NOT NULL DEFAULT '' COMMENT '当前实时媒体会话SSRC',
   `on_demand_live` tinyint(1) NOT NULL DEFAULT 1 COMMENT '按需直播 1=无人观看自动关闭',
@@ -410,6 +439,9 @@ CREATE TABLE `gb_channel` (
   `updated_at` datetime NULL,
   `deleted_at` datetime NULL,
   `owner_dept_id` int unsigned NOT NULL DEFAULT 0 COMMENT '所属部门ID',
+  `status_event` varchar(8) NOT NULL DEFAULT '',
+  `stream_identification` varchar(32) NOT NULL DEFAULT '',
+  `current_stream_identification` varchar(32) NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_device_channel` (`device_id`,`channel_id`),
   KEY `idx_deleted_at` (`deleted_at`),
@@ -579,6 +611,9 @@ CREATE TABLE `gb_device` (
   `access_epoch` bigint NOT NULL DEFAULT 1,
   `legacy_revoked_before` datetime NULL,
   `cleanup_completed_epoch` bigint NOT NULL DEFAULT 1,
+  `reported_charset` varchar(32) NOT NULL DEFAULT '' COMMENT '最近一次上报报文声明的字符集',
+  `wire_charset` varchar(32) NOT NULL DEFAULT '' COMMENT '最近一次上报报文实际判定字符集',
+  `reported_charset_at` datetime(3) NULL COMMENT '当前字符集事实的确认时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_device_id` (`device_id`),
   KEY `idx_deleted_at` (`deleted_at`),
@@ -677,19 +712,19 @@ CREATE TABLE `gb_device_firmware_upgrade` (
   `response_at` datetime(6) NULL,
   `response_call_id` varchar(255) COLLATE utf8mb4_bin NULL,
   `response_cseq` varchar(64) COLLATE utf8mb4_bin NULL,
-  `cascade_binding` text NULL,
+  `cascade_binding` text COLLATE utf8mb4_bin NULL,
   `cascade_request_key` varchar(64) COLLATE utf8mb4_bin NULL,
   `cascade_session_key` varchar(64) COLLATE utf8mb4_bin NULL,
   `cascade_business_result` varchar(16) COLLATE utf8mb4_bin NULL,
   `cascade_business_delivered` tinyint(1) NOT NULL DEFAULT 0,
   `cascade_final_delivered` tinyint(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_firmware_upgrade_cascade_request` (`cascade_request_key`),
+  UNIQUE KEY `uk_firmware_upgrade_cascade_session` (`cascade_session_key`),
   UNIQUE KEY `uk_firmware_upgrade_device_idempotency` (`device_id`,`idempotency_key`),
   UNIQUE KEY `uk_firmware_upgrade_device_session` (`device_id`,`session_id`),
   UNIQUE KEY `uk_firmware_upgrade_operation` (`operation_id`),
   UNIQUE KEY `uk_firmware_upgrade_sn` (`sn`),
-  UNIQUE KEY `uk_firmware_upgrade_cascade_request` (`cascade_request_key`),
-  UNIQUE KEY `uk_firmware_upgrade_cascade_session` (`cascade_session_key`),
   KEY `idx_firmware_upgrade_deadline` (`deadline_at`),
   KEY `idx_firmware_upgrade_device_session` (`device_code`,`session_id`),
   KEY `idx_firmware_upgrade_device_sn` (`device_code`,`sn`),
@@ -2055,6 +2090,7 @@ CREATE TABLE `meta_node` (
   `runtime_confirmed_at` datetime(6) NULL,
   `runtime_identity_status` varchar(16) NOT NULL DEFAULT 'unknown',
   `hook_ip` varchar(45) NOT NULL DEFAULT '',
+  `receive_host` varchar(255) NOT NULL DEFAULT '',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_media_server_uuid` (`media_server_uuid`),
   KEY `idx_enabled` (`enabled`),
@@ -2479,11 +2515,11 @@ DROP TABLE IF EXISTS `sys_openapi_device_capture_session`;
 CREATE TABLE `sys_openapi_device_capture_session` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `client_id` bigint NOT NULL,
-  `idempotency_digest` varchar(64) COLLATE utf8mb4_bin NOT NULL,
-  `request_digest` varchar(64) COLLATE utf8mb4_bin NOT NULL,
-  `session_id` varchar(36) COLLATE utf8mb4_bin NOT NULL,
-  `registry_session_id` varchar(36) COLLATE utf8mb4_bin NOT NULL DEFAULT '',
-  `operation_id` varchar(64) COLLATE utf8mb4_bin NOT NULL DEFAULT '',
+  `idempotency_digest` varchar(64) NOT NULL,
+  `request_digest` varchar(64) NOT NULL,
+  `session_id` varchar(36) NOT NULL,
+  `registry_session_id` varchar(36) NOT NULL DEFAULT '',
+  `operation_id` varchar(64) NOT NULL DEFAULT '',
   `device_id` varchar(20) NOT NULL,
   `channel_id` varchar(20) NOT NULL,
   `internal_device_id` bigint unsigned NOT NULL,
@@ -2491,7 +2527,7 @@ CREATE TABLE `sys_openapi_device_capture_session` (
   `department_id` bigint unsigned NOT NULL,
   `snap_num` int NOT NULL,
   `interval_seconds` int NOT NULL,
-  `state` varchar(24) COLLATE utf8mb4_bin NOT NULL,
+  `state` varchar(24) NOT NULL,
   `created_at` datetime(3) NOT NULL,
   `updated_at` datetime(3) NOT NULL,
   PRIMARY KEY (`id`),
@@ -2500,6 +2536,25 @@ CREATE TABLE `sys_openapi_device_capture_session` (
   KEY `idx_openapi_capture_registry_session` (`registry_session_id`),
   KEY `idx_openapi_capture_session_client` (`client_id`,`device_id`,`channel_id`),
   KEY `idx_openapi_capture_state_updated` (`state`,`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Table structure for `sys_openapi_device_subscription`
+DROP TABLE IF EXISTS `sys_openapi_device_subscription`;
+CREATE TABLE `sys_openapi_device_subscription` (
+  `id` varchar(36) NOT NULL,
+  `client_id` bigint NOT NULL,
+  `device_id` bigint unsigned NOT NULL,
+  `kind` varchar(32) NOT NULL,
+  `enabled` tinyint(1) NOT NULL DEFAULT 1,
+  `expires_seconds` int NOT NULL DEFAULT 3600,
+  `expires_at` datetime(3) NOT NULL,
+  `created_at` datetime(3) NOT NULL,
+  `updated_at` datetime(3) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_openapi_device_subscription` (`client_id`,`device_id`,`kind`),
+  KEY `idx_openapi_device_sub_client` (`client_id`),
+  KEY `idx_openapi_device_sub_enabled` (`enabled`),
+  KEY `idx_openapi_device_sub_expires` (`expires_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- Table structure for `sys_openapi_nonce`
@@ -2674,34 +2729,6 @@ CREATE TABLE `sys_users` (
   `must_change_password` tinyint(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (`id`),
   UNIQUE KEY `username` (`username`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
--- Table structure for `gb_cascade_alarm_delivery`
-DROP TABLE IF EXISTS `gb_cascade_alarm_delivery`;
-CREATE TABLE `gb_cascade_alarm_delivery` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `delivery_key` varchar(64) NOT NULL,
-  `platform_id` bigint unsigned NOT NULL,
-  `source_device_code` varchar(20) NOT NULL,
-  `source_resource_code` varchar(20) NOT NULL,
-  `published_code` varchar(20) NOT NULL,
-  `profile_version` varchar(16) NOT NULL,
-  `binding_fingerprint` varchar(64) NOT NULL,
-  `payload` longblob NOT NULL,
-  `notify_targets` text NULL,
-  `state` varchar(16) NOT NULL DEFAULT 'pending',
-  `attempts` int NOT NULL DEFAULT 0,
-  `next_attempt_at` datetime(3) NOT NULL,
-  `lease_owner` varchar(64) NOT NULL DEFAULT '',
-  `lease_until` datetime(3) NULL,
-  `last_error` text NULL,
-  `sent_at` datetime(3) NULL,
-  `created_at` datetime(3) NOT NULL,
-  `updated_at` datetime(3) NOT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_cascade_alarm_delivery_key` (`delivery_key`),
-  KEY `idx_cascade_alarm_delivery_due` (`platform_id`,`state`,`next_attempt_at`),
-  KEY `idx_cascade_alarm_delivery_lease` (`lease_until`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- openapi-capability-catalog:begin
@@ -3329,13 +3356,31 @@ INSERT INTO `sys_api` (`id`, `title`, `path`, `method`, `api_group`, `created_at
 (648, '获取固件下载链接', '/api/gb28181/device-mgmt/firmware-repository/:id/download-link', 'POST', '设备管理', NULL, NULL, NULL, 1),
 (649, '查询国标服务配置', '/api/gb28181/sip/service-config', 'GET', '国标平台', NULL, NULL, NULL, 1),
 (650, '保存国标服务配置', '/api/gb28181/sip/service-config', 'PUT', '国标平台', NULL, NULL, NULL, 1),
-(651, '查看级联业务分组', '/api/gb28181/cascade/platforms/:id/business-group', 'GET', '国标级联', NULL, NULL, NULL, 1),
-(652, '保存级联业务分组', '/api/gb28181/cascade/platforms/:id/business-group', 'PUT', '国标级联', NULL, NULL, NULL, 1),
-(653, '设置级联业务分组发布', '/api/gb28181/cascade/platforms/:id/publish-group', 'PUT', '国标级联', NULL, NULL, NULL, 1),
+(651, '查看级联业务分组', '/api/gb28181/cascade/platforms/:id/business-group', 'GET', '国标级联', '2026-10-13 18:52:42.000000', '2026-10-13 18:52:42.000000', NULL, 1),
+(652, '保存级联业务分组', '/api/gb28181/cascade/platforms/:id/business-group', 'PUT', '国标级联', '2026-10-13 18:52:42.000000', '2026-10-13 18:52:42.000000', NULL, 1),
+(653, '设置级联业务分组发布', '/api/gb28181/cascade/platforms/:id/publish-group', 'PUT', '国标级联', '2026-10-14 06:45:24.000000', '2026-10-14 06:45:24.000000', NULL, 1),
+(654, '查看迁移计划', '/api/system/upgrade/migration-plan', 'GET', '服务升级', '2026-10-16 14:52:28.000000', '2026-10-16 14:52:28.000000', NULL, 1),
+(656, '查看升级任务', '/api/system/upgrade/tasks/:id', 'GET', '服务升级', '2026-10-16 14:52:29.000000', '2026-10-16 14:52:29.000000', NULL, 1),
+(657, '导入离线升级包', '/api/system/upgrade/import', 'POST', '服务升级', '2026-10-16 14:52:29.000000', '2026-10-16 14:52:29.000000', NULL, 1),
+(658, '回退升级任务', '/api/system/upgrade/tasks/:id/rollback', 'POST', '服务升级', '2026-10-16 14:52:29.000000', '2026-10-16 14:52:29.000000', NULL, 1),
+(659, '查看升级状态', '/api/system/upgrade/status', 'GET', '服务升级', '2026-10-16 14:52:29.000000', '2026-10-16 14:52:29.000000', NULL, 1),
+(660, '检查在线升级', '/api/system/upgrade/check', 'POST', '服务升级', '2026-10-16 14:52:29.000000', '2026-10-16 14:52:29.000000', NULL, 1),
+(661, '创建升级任务', '/api/system/upgrade/tasks', 'POST', '服务升级', '2026-10-16 14:52:29.000000', '2026-10-16 14:52:29.000000', NULL, 1),
+(663, '取消升级任务', '/api/system/upgrade/tasks/:id/cancel', 'POST', '服务升级', '2026-10-16 14:52:29.000000', '2026-10-16 14:52:29.000000', NULL, 1),
+(664, '应用升级任务', '/api/system/upgrade/tasks/:id/apply', 'POST', '服务升级', '2026-10-16 14:52:29.000000', '2026-10-16 14:52:29.000000', NULL, 1),
+(670, '查看 HTTPS 状态', '/api/system/https/status', 'GET', 'HTTPS 管理', '2026-10-20 17:06:50.000000', '2026-10-20 17:06:50.000000', NULL, 1),
+(671, '检测 HTTPS 端口', '/api/system/https/check-port', 'POST', 'HTTPS 管理', '2026-10-20 17:06:50.000000', '2026-10-20 17:06:50.000000', NULL, 1),
+(672, '应用 HTTPS 配置', '/api/system/https/apply', 'POST', 'HTTPS 管理', '2026-10-20 17:06:50.000000', '2026-10-20 17:06:50.000000', NULL, 1),
+(673, '校验证书', '/api/system/https/certificate', 'POST', 'HTTPS 管理', '2026-10-20 17:06:50.000000', '2026-10-20 17:06:50.000000', NULL, 1),
+(677, '查询离线升级导入任务', '/api/system/upgrade/import/:upload_id', 'GET', '服务升级', '2026-10-20 17:13:47.000000', '2026-10-20 17:13:47.000000', NULL, 1),
 (678, '查询通道移动轨迹', '/api/gb28181/device-mgmt/map/trajectory', 'GET', '设备管理', '2026-10-21 21:30:00.000000', '2026-10-21 21:30:00.000000', NULL, 1),
 (679, '读取地图默认中心点', '/api/gb28181/device-mgmt/map/center', 'GET', '设备管理', '2026-10-21 21:30:00.000000', '2026-10-21 21:30:00.000000', NULL, 1),
 (680, '保存地图默认中心点', '/api/gb28181/device-mgmt/map/center', 'PUT', '设备管理', '2026-10-21 21:30:00.000000', '2026-10-21 21:30:00.000000', NULL, 1),
-(681, '查询可定位通道树', '/api/gb28181/device-mgmt/map/channel-tree', 'GET', '设备管理', '2026-10-21 22:40:00.000000', '2026-10-21 22:40:00.000000', NULL, 1);
+(681, '查询可定位通道树', '/api/gb28181/device-mgmt/map/channel-tree', 'GET', '设备管理', '2026-10-21 22:40:00.000000', '2026-10-21 22:40:00.000000', NULL, 1),
+(682, '查看更新提示', '/api/system/upgrade/notice', 'GET', '服务升级', '2026-10-29 11:26:25.000000', '2026-10-29 11:26:25.000000', NULL, 1),
+(683, '忽略更新版本', '/api/system/upgrade/notice/ignore', 'POST', '服务升级', '2026-10-29 11:26:25.000000', '2026-10-29 11:26:25.000000', NULL, 1),
+(684, '取消忽略更新版本', '/api/system/upgrade/notice/ignore', 'DELETE', '服务升级', '2026-10-29 11:26:25.000000', '2026-10-29 11:26:25.000000', NULL, 1),
+(685, '设置定时检查更新', '/api/system/upgrade/notice/auto-check', 'POST', '服务升级', '2026-10-29 12:18:23.000000', '2026-10-29 12:18:23.000000', NULL, 1);
 INSERT INTO `sys_casbin_rule` (`id`, `ptype`, `v0`, `v1`, `v2`, `v3`, `v4`, `v5`) VALUES
 (6266, 'g', 'user_1', 'role_1', '*', '', '', ''),
 (8166, 'p', 'role_3', '/api/users/logout', 'POST', '*', '', ''),
@@ -3847,13 +3892,31 @@ INSERT INTO `sys_casbin_rule` (`id`, `ptype`, `v0`, `v1`, `v2`, `v3`, `v4`, `v5`
 (10297, 'p', 'role_1', '/api/gb28181/cascade/platforms/:id/business-group', 'GET', '*', '', ''),
 (10298, 'p', 'role_1', '/api/gb28181/cascade/platforms/:id/business-group', 'PUT', '*', '', ''),
 (10299, 'p', 'role_1', '/api/gb28181/cascade/platforms/:id/publish-group', 'PUT', '*', '', ''),
+(10300, 'p', 'role_1', '/api/system/upgrade/migration-plan', 'GET', '*', '', ''),
+(10302, 'p', 'role_1', '/api/system/upgrade/tasks/:id', 'GET', '*', '', ''),
+(10303, 'p', 'role_1', '/api/system/upgrade/import', 'POST', '*', '', ''),
+(10304, 'p', 'role_1', '/api/system/upgrade/tasks/:id/rollback', 'POST', '*', '', ''),
+(10305, 'p', 'role_1', '/api/system/upgrade/status', 'GET', '*', '', ''),
+(10306, 'p', 'role_1', '/api/system/upgrade/check', 'POST', '*', '', ''),
+(10307, 'p', 'role_1', '/api/system/upgrade/tasks', 'POST', '*', '', ''),
+(10309, 'p', 'role_1', '/api/system/upgrade/tasks/:id/cancel', 'POST', '*', '', ''),
+(10310, 'p', 'role_1', '/api/system/upgrade/tasks/:id/apply', 'POST', '*', '', ''),
+(10331, 'p', 'role_1', '/api/system/https/certificate', 'POST', '*', '', ''),
+(10332, 'p', 'role_1', '/api/system/https/apply', 'POST', '*', '', ''),
+(10333, 'p', 'role_1', '/api/system/https/check-port', 'POST', '*', '', ''),
+(10334, 'p', 'role_1', '/api/system/https/status', 'GET', '*', '', ''),
+(10346, 'p', 'role_1', '/api/system/upgrade/import/:upload_id', 'GET', '*', '', ''),
 (10347, 'p', 'role_1', '/api/gb28181/device-mgmt/map/trajectory', 'GET', '*', '', ''),
 (10348, 'p', 'role_3', '/api/gb28181/device-mgmt/map/trajectory', 'GET', '*', '', ''),
 (10349, 'p', 'role_1', '/api/gb28181/device-mgmt/map/center', 'GET', '*', '', ''),
 (10350, 'p', 'role_3', '/api/gb28181/device-mgmt/map/center', 'GET', '*', '', ''),
 (10351, 'p', 'role_1', '/api/gb28181/device-mgmt/map/center', 'PUT', '*', '', ''),
 (10352, 'p', 'role_1', '/api/gb28181/device-mgmt/map/channel-tree', 'GET', '*', '', ''),
-(10353, 'p', 'role_3', '/api/gb28181/device-mgmt/map/channel-tree', 'GET', '*', '', '');
+(10353, 'p', 'role_3', '/api/gb28181/device-mgmt/map/channel-tree', 'GET', '*', '', ''),
+(10354, 'p', 'role_1', '/api/system/upgrade/notice', 'GET', '*', '', ''),
+(10355, 'p', 'role_1', '/api/system/upgrade/notice/ignore', 'POST', '*', '', ''),
+(10356, 'p', 'role_1', '/api/system/upgrade/notice/ignore', 'DELETE', '*', '', ''),
+(10357, 'p', 'role_1', '/api/system/upgrade/notice/auto-check', 'POST', '*', '', '');
 INSERT INTO `sys_civil_code` (`code`, `name`, `short_name`, `parent_code`, `level`, `pinyin`, `created_at`, `updated_at`) VALUES
 ('110000', '北京市', '北京市', '', 1, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),
 ('110100', '北京市市辖区', '市辖区', '110000', 2, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),
@@ -7692,7 +7755,10 @@ INSERT INTO `sys_menu` (`id`, `parent_id`, `path`, `name`, `redirect`, `componen
 (140612, 140610, '', '', NULL, '', '取消缓存', 0, 0, 0, 1, 0, '', 0, '', '', 2, 3, 0, 'gb28181:record-cache:cancel', '2026-10-03 16:06:05.000000', '2026-10-03 16:06:05.000000', NULL, 1),
 (140613, 140610, '', '', NULL, '', '下载录像', 0, 0, 0, 1, 0, '', 0, '', '', 3, 3, 0, 'gb28181:record-cache:download', '2026-10-03 16:06:05.000000', '2026-10-03 16:06:05.000000', NULL, 1),
 (140614, 140610, '', '', NULL, '', '删除缓存', 0, 0, 0, 1, 0, '', 0, '', '', 4, 3, 0, 'gb28181:record-cache:delete', '2026-10-03 16:06:05.000000', '2026-10-03 16:06:05.000000', NULL, 1),
-(140615, 140610, '', '', NULL, '', '收藏缓存', 0, 0, 0, 1, 0, '', 0, '', '', 5, 3, 0, 'gb28181:record-cache:favorite', '2026-10-05 11:52:03.000000', '2026-10-05 11:52:03.000000', NULL, 1);
+(140615, 140610, '', '', NULL, '', '收藏缓存', 0, 0, 0, 1, 0, '', 0, '', '', 5, 3, 0, 'gb28181:record-cache:favorite', '2026-10-05 11:52:03.000000', '2026-10-05 11:52:03.000000', NULL, 1),
+(140616, 10, '/system/service-upgrade/index', 'service-upgrade', NULL, 'system/service-upgrade/index', '服务升级', 0, 0, 0, 0, 0, '', 0, '', 'lucide:CloudDownload', 100, 2, 0, '', '2026-10-16 14:52:29.000000', '2026-10-16 14:52:29.000000', NULL, 1),
+(140617, 140616, '', 'ServiceUpgradeRead', NULL, '', '查看服务升级', 0, 0, 0, 0, 0, '', 0, '', '', 0, 3, 0, 'system:upgrade:read', '2026-10-16 14:52:29.000000', '2026-10-16 14:52:29.000000', NULL, 1),
+(140618, 140616, '', 'ServiceUpgradeManage', NULL, '', '管理服务升级', 0, 0, 0, 0, 0, '', 0, '', '', 0, 3, 0, 'system:upgrade:manage', '2026-10-16 14:52:29.000000', '2026-10-16 14:52:29.000000', NULL, 1);
 INSERT INTO `sys_menu_api` (`menu_id`, `api_id`) VALUES
 (1, 5),
 (1, 6),
@@ -7760,6 +7826,10 @@ INSERT INTO `sys_menu_api` (`menu_id`, `api_id`) VALUES
 (140244, 61),
 (140245, 62),
 (140246, 63),
+(140246, 670),
+(140246, 671),
+(140246, 672),
+(140246, 673),
 (140248, 65),
 (140248, 69),
 (140249, 66),
@@ -7889,13 +7959,13 @@ INSERT INTO `sys_menu_api` (`menu_id`, `api_id`) VALUES
 (140373, 313),
 (140373, 314),
 (140373, 394),
-(140373, 412),
+(140373, 412);
+
+INSERT INTO `sys_menu_api` (`menu_id`, `api_id`) VALUES
 (140374, 315),
 (140374, 316),
 (140376, 317),
-(140376, 319);
-
-INSERT INTO `sys_menu_api` (`menu_id`, `api_id`) VALUES
+(140376, 319),
 (140376, 326),
 (140376, 607),
 (140376, 651),
@@ -7904,6 +7974,7 @@ INSERT INTO `sys_menu_api` (`menu_id`, `api_id`) VALUES
 (140377, 320),
 (140377, 321),
 (140377, 605),
+(140377, 653),
 (140378, 322),
 (140378, 324),
 (140379, 326),
@@ -7911,7 +7982,6 @@ INSERT INTO `sys_menu_api` (`menu_id`, `api_id`) VALUES
 (140379, 617),
 (140379, 618),
 (140379, 652),
-(140377, 653),
 (140381, 306),
 (140381, 308),
 (140381, 335),
@@ -8080,6 +8150,10 @@ INSERT INTO `sys_menu_api` (`menu_id`, `api_id`) VALUES
 (140452, 608),
 (140452, 609),
 (140452, 611),
+(140452, 678),
+(140452, 679),
+(140452, 680),
+(140452, 681),
 (140453, 465),
 (140454, 529),
 (140455, 393),
@@ -8087,7 +8161,9 @@ INSERT INTO `sys_menu_api` (`menu_id`, `api_id`) VALUES
 (140455, 495),
 (140455, 496),
 (140455, 497),
-(140455, 498),
+(140455, 498);
+
+INSERT INTO `sys_menu_api` (`menu_id`, `api_id`) VALUES
 (140455, 535),
 (140456, 534),
 (140456, 579),
@@ -8095,9 +8171,7 @@ INSERT INTO `sys_menu_api` (`menu_id`, `api_id`) VALUES
 (140458, 466),
 (140459, 511),
 (140459, 514),
-(140459, 515);
-
-INSERT INTO `sys_menu_api` (`menu_id`, `api_id`) VALUES
+(140459, 515),
 (140459, 581),
 (140459, 586),
 (140459, 591),
@@ -8173,10 +8247,20 @@ INSERT INTO `sys_menu_api` (`menu_id`, `api_id`) VALUES
 (140610, 636),
 (140610, 637),
 (140610, 638),
-(140452, 678),
-(140452, 679),
-(140452, 680),
-(140452, 681);
+(140617, 654),
+(140617, 656),
+(140617, 659),
+(140617, 660),
+(140617, 677),
+(140617, 682),
+(140618, 657),
+(140618, 658),
+(140618, 661),
+(140618, 663),
+(140618, 664),
+(140618, 683),
+(140618, 684),
+(140618, 685);
 INSERT INTO `sys_role` (`id`, `name`, `sort`, `status`, `description`, `parent_id`, `created_at`, `updated_at`, `deleted_at`, `created_by`, `data_scope`, `checked_depts`) VALUES
 (1, '系统管理员', 0, 1, '最高权限管理员角色', 0, '2025-09-01 17:32:12.000000', '2025-09-30 15:53:24.000000', NULL, 1, 1, ''),
 (3, '游客', 0, 1, '只读游客：允许业务查看、实时观看和录像回放；禁止下载、控制与修改', 0, '2026-08-24 20:29:31.000000', '2026-09-05 18:46:37.000000', NULL, 1, 4, '');
@@ -8378,14 +8462,22 @@ INSERT INTO `sys_role_menu` (`role_id`, `menu_id`) VALUES
 (1, 140508),
 (1, 140509),
 (1, 140510),
-(1, 140610),
-(1, 140611),
-(1, 140612);
+(1, 140511),
+(1, 140600),
+(1, 140601);
 
 INSERT INTO `sys_role_menu` (`role_id`, `menu_id`) VALUES
+(1, 140602),
+(1, 140603),
+(1, 140610),
+(1, 140611),
+(1, 140612),
 (1, 140613),
 (1, 140614),
 (1, 140615),
+(1, 140616),
+(1, 140617),
+(1, 140618),
 (3, 1),
 (3, 140358),
 (3, 140365),
@@ -8402,4 +8494,4 @@ INSERT INTO `sys_role_menu` (`role_id`, `menu_id`) VALUES
 INSERT INTO `sys_user_role` (`user_id`, `role_id`) VALUES
 (1, 1);
 INSERT INTO `sys_users` (`id`, `username`, `password`, `email`, `status`, `dept_id`, `phone`, `sex`, `nick_name`, `avatar`, `description`, `created_at`, `updated_at`, `deleted_at`, `created_by`, `must_change_password`) VALUES
-(1, 'admin', '$2a$10$bQef.b.0CL9rFokdAdTMIe0J.z1Ub0avdu7lyr3mnrh9FQacYQTuW', '', 1, 1, '', '', '系统管理员', '/public/uploads/seed/admin.png', '初始系统管理员', '2025-08-18 14:55:05.000000', '2026-10-09 20:03:48.000000', NULL, 0, 1);
+(1, 'admin', '$2a$10$bQef.b.0CL9rFokdAdTMIe0J.z1Ub0avdu7lyr3mnrh9FQacYQTuW', '', 1, 1, '', '', '系统管理员', '/public/uploads/seed/admin.png', '初始系统管理员', '2025-08-18 14:55:05.000000', '2026-10-12 09:29:03.000000', NULL, 0, 1);

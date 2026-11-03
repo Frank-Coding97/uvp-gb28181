@@ -119,8 +119,11 @@ func TestSQLiteCascadeFreshBaselineUsesSafeDefaults(t *testing.T) {
 		RTCPKeepalive    bool
 	}
 	require.NoError(t, db.Table("gb_cascade_platform").First(&row).Error)
-	require.Equal(t, 1, row.CatalogBatchSize)
-	require.Zero(t, row.MaxStreams)
+	// ⚠️ 2026-11-03 追平：活库列默认值已从 1 调到 100（上面存量迁移用例同为 100），
+	// 基线从活库派生 ⇒ 新装基线库的默认值跟着是 100。
+	require.Equal(t, 100, row.CatalogBatchSize)
+	// ⚠️ 2026-11-03 同批追平：max_streams 默认已从 0（不限流）调到 1。
+	require.Equal(t, 1, row.MaxStreams)
 	require.False(t, row.AutoPushCatalog)
 	require.False(t, row.RecordingEnabled)
 	require.False(t, row.RTCPKeepalive)

@@ -55,6 +55,9 @@ func loadStatements(t *testing.T) []string {
 //	本用例仍停在 114/315 ⇒ 又是红的。同日 gb_talk_session 补了 3 个 openapi 列
 //	和 idx_talk_session_openapi_idempotency，索引 326 → 327。
 //	**这次的教训**：改了 schema 就要顺手跑本用例，否则 golden 数字会一直落后。
+// ⚠️ 2026-11-03 再次对齐：基线追平活库 —— gb_cascade_alarm_delivery 入基线
+//	（117 表），gb_device 补上报字符集三列（reported_charset / wire_charset /
+//	reported_charset_at）。索引 327 → 331。
 func TestBaselineGoldenCounts(t *testing.T) {
 	stmts := loadStatements(t)
 	phases, counted, dupes, total := planStatements(stmts)
@@ -65,11 +68,11 @@ func TestBaselineGoldenCounts(t *testing.T) {
 			counts[phases[i]]++
 		}
 	}
-	if got := counts[phaseTable]; got != 116 {
-		t.Errorf("建表语句数 = %d，期望 116", got)
+	if got := counts[phaseTable]; got != 117 {
+		t.Errorf("建表语句数 = %d，期望 117", got)
 	}
-	if got := counts[phaseIndex]; got != 327 {
-		t.Errorf("能真正建出的索引数 = %d，期望 327", got)
+	if got := counts[phaseIndex]; got != 331 {
+		t.Errorf("能真正建出的索引数 = %d，期望 331", got)
 	}
 	if got := counts[phaseSeed]; got != 38 {
 		t.Errorf("种子数据语句数 = %d，期望 38", got)

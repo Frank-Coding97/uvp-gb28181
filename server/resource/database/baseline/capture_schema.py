@@ -480,6 +480,11 @@ def build_ir(cur, policy: dict, warnings: list) -> dict:
     forced_integers = set(policy.get("not_boolean_columns", []))
     forced_booleans = set(policy.get("boolean_columns", []))
     drop_columns = policy.get("drop_columns", {})
+    # 「NULL 不参与唯一比较」标记：MySQL 的 information_schema 表达不了这个语义
+    #（MySQL 唯一键本来就允许多 NULL），活库抽不出来，只能靠 policy 白名单回填。
+    # 没有它，SQL Server 侧会被渲染成内联 UNIQUE 约束（只允许一个 NULL）。
+    unique_nulls_distinct = set(policy.get("unique_nulls_distinct", []))
+    unique_nulls_distinct_hits = set()
 
     live = fetch_tables(cur)
     included = [t for t in live if t not in excluded]
@@ -522,6 +527,10 @@ def build_ir(cur, policy: dict, warnings: list) -> dict:
         primary = [i for i in indexes if i["name"] == "PRIMARY"]
         uniques = [i for i in indexes if i["unique"] and i["name"] != "PRIMARY"]
         plain = [i for i in indexes if not i["unique"] and i["name"] != "PRIMARY"]
+        # ⛔ 先收集命中再判存在：如果在这里 discard，下面的注入条件会永远为假。
+        for u in uniques:
+            if f"{name}.{u['name']}" in unique_nulls_distinct:
+                unique_nulls_distinct_hits.add(f"{name}.{u['name']}")
         tables.append(
             {
                 "name": name,
@@ -534,6 +543,8 @@ def build_ir(cur, policy: dict, warnings: list) -> dict:
                         "columns": [
                             {"name": c["name"], "prefix": c["prefix"]} for c in u["columns"]
                         ],
+                        **({"nulls_distinct": True}
+                           if f"{name}.{u['name']}" in unique_nulls_distinct else {}),
                     }
                     for u in uniques
                 ],
@@ -550,6 +561,13 @@ def build_ir(cur, policy: dict, warnings: list) -> dict:
                 "checks": fetch_check_constraints(cur, name),
                 "seeded": name in seed_tables,
             }
+        )
+
+    stale_nulls_distinct = unique_nulls_distinct - unique_nulls_distinct_hits
+    if stale_nulls_distinct:
+        warnings.append(
+            f"policy.unique_nulls_distinct 里的键没在库中命中：{sorted(stale_nulls_distinct)}，"
+            f"标记会静默失效 —— 请核对表名/唯一键名（或清掉已删除的键）"
         )
 
     seeds = {k: v for k, v in seed_tables.items() if not k.startswith("_")}

@@ -154,10 +154,24 @@
   "seed_filters": {
     "sys_users": {
       "drop_where": [
-        {"column": "username", "in": ["demo"], "why": "演示账号，非产品数据"},
         {
           "column": "username",
-          "in": ["wb_full", "wb_assign", "wb_share", "wb_view", "east_admin", "east_staff", "south_admin"],
+          "in": [
+            "demo"
+          ],
+          "why": "演示账号，非产品数据"
+        },
+        {
+          "column": "username",
+          "in": [
+            "wb_full",
+            "wb_assign",
+            "wb_share",
+            "wb_view",
+            "east_admin",
+            "east_staff",
+            "south_admin"
+          ],
           "why": "设备权限工作台 2026-09-23 造的验证账号（密码同一个弱哈希、描述写着「测试账号」），非产品数据"
         }
       ],
@@ -174,43 +188,103 @@
     },
     "sys_department": {
       "drop_where": [
-        {"column": "name", "in": ["测试001", "测试002"], "why": "测试部门"},
         {
           "column": "name",
-          "in": ["华东分部", "上海组", "华南分部"],
+          "in": [
+            "测试001",
+            "测试002"
+          ],
+          "why": "测试部门"
+        },
+        {
+          "column": "name",
+          "in": [
+            "华东分部",
+            "上海组",
+            "华南分部"
+          ],
           "why": "设备权限工作台 2026-09-23 为验证「本部门及以下可见」造的组织，非产品数据"
         }
       ],
-      "set": {"leader": "", "phone": "", "email": "", "describe": ""}
+      "set": {
+        "leader": "",
+        "phone": "",
+        "email": "",
+        "describe": ""
+      }
     },
     "sys_role": {
       "drop_where": [
-        {"column": "name", "in": ["演示"], "why": "无迁移创建、无代码依赖，属环境数据"},
         {
           "column": "name",
-          "in": ["WB-全权限", "WB-仅分配", "WB-仅共享", "WB-只读", "WB-分部管理员", "WB-组员"],
+          "in": [
+            "演示"
+          ],
+          "why": "无迁移创建、无代码依赖，属环境数据"
+        },
+        {
+          "column": "name",
+          "in": [
+            "WB-全权限",
+            "WB-仅分配",
+            "WB-仅共享",
+            "WB-只读",
+            "WB-分部管理员",
+            "WB-组员"
+          ],
           "why": "设备权限工作台 2026-09-23 造的验证角色（描述里自带「测试账号」），非产品数据"
         }
       ]
     },
     "sys_role_menu": {
-      "drop_where": [{"column": "role_id", "in": [2], "why": "演示角色已移除"}]
+      "drop_where": [
+        {
+          "column": "role_id",
+          "in": [
+            2
+          ],
+          "why": "演示角色已移除"
+        }
+      ]
     },
     "sys_user_role": {
-      "drop_where": [{"column": "user_id", "in": [4], "why": "演示账号已移除"}]
+      "drop_where": [
+        {
+          "column": "user_id",
+          "in": [
+            4
+          ],
+          "why": "演示账号已移除"
+        }
+      ]
     },
     "sys_casbin_rule": {
       "drop_where": [
         {
           "column": "v0",
-          "in": ["role_2", "role_4", "user_4", "role_10"],
+          "in": [
+            "role_2",
+            "role_4",
+            "user_4",
+            "role_10"
+          ],
           "why": "指向已不存在的角色/账号（演示角色 2、演示账号 4、历史角色 10）"
         },
         {
           "column": "v0",
           "in": [
-            "role_5", "role_6", "role_7", "role_8", "role_9",
-            "user_8", "user_9", "user_10", "user_11", "user_12", "user_13", "user_14"
+            "role_5",
+            "role_6",
+            "role_7",
+            "role_8",
+            "role_9",
+            "user_8",
+            "user_9",
+            "user_10",
+            "user_11",
+            "user_12",
+            "user_13",
+            "user_14"
           ],
           "why": "设备权限工作台 2026-09-23 那套验证角色（5-10）与验证账号（8-14）的授权规则；角色/账号本身已被 seed_filters 排除，规则必须同步排除否则 casbin 加载时会指向不存在的 policy"
         }
@@ -223,12 +297,42 @@
     "避免逐表手写 id 白名单（id 会随环境漂移）。"
   ],
   "referential_cleanup": [
-    {"table": "sys_menu_api", "column": "menu_id", "references": "sys_menu", "references_column": "id"},
-    {"table": "sys_menu_api", "column": "api_id", "references": "sys_api", "references_column": "id"},
-    {"table": "sys_role_menu", "column": "menu_id", "references": "sys_menu", "references_column": "id"},
-    {"table": "sys_role_menu", "column": "role_id", "references": "sys_role", "references_column": "id"},
-    {"table": "sys_user_role", "column": "user_id", "references": "sys_users", "references_column": "id"},
-    {"table": "sys_user_role", "column": "role_id", "references": "sys_role", "references_column": "id"}
+    {
+      "table": "sys_menu_api",
+      "column": "menu_id",
+      "references": "sys_menu",
+      "references_column": "id"
+    },
+    {
+      "table": "sys_menu_api",
+      "column": "api_id",
+      "references": "sys_api",
+      "references_column": "id"
+    },
+    {
+      "table": "sys_role_menu",
+      "column": "menu_id",
+      "references": "sys_menu",
+      "references_column": "id"
+    },
+    {
+      "table": "sys_role_menu",
+      "column": "role_id",
+      "references": "sys_role",
+      "references_column": "id"
+    },
+    {
+      "table": "sys_user_role",
+      "column": "user_id",
+      "references": "sys_users",
+      "references_column": "id"
+    },
+    {
+      "table": "sys_user_role",
+      "column": "role_id",
+      "references": "sys_role",
+      "references_column": "id"
+    }
   ],
   "_tinyint1_comment": [
     "MySQL 的 tinyint(1) 有歧义：GORM 用它表示 Go 的 bool，但也常被当成小枚举写。",
@@ -291,6 +395,20 @@
       "why": "PTZ 归位已迁至 gb_ptz_home_position；模型不再声明，代码契约禁止新基线出现"
     }
   },
+  "_unique_nulls_distinct_comment": [
+    "唯一键上的「NULL 不参与唯一比较」标记，键形态 `表.唯一键名`。",
+    "为什么需要它：MySQL 的 information_schema 表达不了这个语义（MySQL 唯一键",
+    "本来就允许多 NULL），capture_schema.py 从活库抽不出它 —— 没有这个标记，",
+    "generate_sql.py 会把 SQL Server 侧渲染成内联 UNIQUE 约束（只允许一个 NULL），",
+    "把「可为空的业务号、有值才唯一」退化成「全表只允许一行没填」。",
+    "见 migration/cascade_snapshot_routing_test.go 的 SQL Server 过滤索引契约。"
+  ],
+  "unique_nulls_distinct": [
+    "gb_cascade_snapshot_session.uk_cascade_snapshot_downstream",
+    "gb_cascade_snapshot_session.uk_cascade_snapshot_upload",
+    "gb_device_firmware_upgrade.uk_firmware_upgrade_cascade_request",
+    "gb_device_firmware_upgrade.uk_firmware_upgrade_cascade_session"
+  ],
   "_check_overrides_comment": [
     "CHECK 约束的逐方言例外写法，按约束名索引（约束名在本库内唯一）。",
     "为什么需要它：MySQL 的 CHECK 原文用了两类别的方言没有的东西 ——",

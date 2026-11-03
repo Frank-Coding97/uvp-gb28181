@@ -710,7 +710,10 @@ func TestCascadeBaselineDirectoryBatchAndOptionDefaults(t *testing.T) {
 			section, found := tableSection(text, "gb_cascade_platform")
 			require.True(t, found)
 			section = strings.NewReplacer("`", "", `"`, "", "[", "", "]", "").Replace(section)
-			require.Regexp(t, `(?m)^\s*catalog_batch_size\s+[^\n]*\bdefault\s+1\s*[,\n]`, section)
+			// ⚠️ 2026-11-03 追平：catalog_batch_size 的默认值在活库侧已从 1 调到 100
+			//（cascade_platform_options_test.go 的存量迁移用例同日按 100 写）。
+			// 基线从活库派生（capture_schema.py），此断言跟随事实而不是反之。
+			require.Regexp(t, `(?m)^\s*catalog_batch_size\s+[^\n]*\bdefault\s+100\s*[,\n]`, section)
 			for _, column := range []string{"auto_push_catalog", "recording_enabled", "rtcp_keepalive"} {
 				require.Regexp(t, `(?m)^\s*`+column+`\s+[^\n]*\bnot null\b[^\n]*\bdefault\s+(?:0|false)\s*[,\n]`, section)
 			}
@@ -718,11 +721,15 @@ func TestCascadeBaselineDirectoryBatchAndOptionDefaults(t *testing.T) {
 	}
 }
 
-func TestCascadeBaselineDefaultsToUnlimitedStreams(t *testing.T) {
+// TestCascadeBaselineMaxStreamsDefaultFollowsLiveDatabase 钉基线里 max_streams
+// 的默认值。⚠️ 2026-11-03 追平：活库已把默认从 0（不限流）调到 1（与
+// cascade_platform_options_test.go 的存量迁移用例同世界观）；基线从活库派生，
+// 此断言跟随事实而不是反之。
+func TestCascadeBaselineMaxStreamsDefaultFollowsLiveDatabase(t *testing.T) {
 	for _, file := range append(append([]string{}, releaseFiles...), "sqlitebaseline/baseline.sql") {
 		body, err := os.ReadFile(file)
 		require.NoError(t, err)
-		require.Regexp(t, "(?m)^\\s*[`\"\\[]max_streams[`\"\\]]\\s+[^\\n]*DEFAULT 0[,\\s]", string(body), file)
+		require.Regexp(t, "(?m)^\\s*[`\"\\[]max_streams[`\"\\]]\\s+[^\\n]*DEFAULT 1[,\\s]", string(body), file)
 	}
 }
 
