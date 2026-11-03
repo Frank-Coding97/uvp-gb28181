@@ -82,6 +82,31 @@ func deviceConfigPayloadFor(t *testing.T, blocks manscdp.DeviceConfigBlocks) str
 
 // ---- 读取与落库 ----
 
+func TestReadDeviceConfigsKeepsTargetInQueuedMessage(t *testing.T) {
+	for _, test := range []struct {
+		name, scope, code string
+		types             []string
+	}{
+		{"basic", gbmodels.ControlTargetScopeDevice, "D", []string{"BasicParam"}},
+		{"normalized-basic", gbmodels.ControlTargetScopeDevice, "D", []string{" BasicParam ", "BasicParam"}},
+		{"channel", gbmodels.ControlTargetScopeChannel, "C", []string{"VideoParamOpt"}},
+		{"mixed", gbmodels.ControlTargetScopeChannel, "C", []string{"BasicParam", "VideoParamOpt"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			service, db := newDeviceConfigTestService(t)
+			operation, err := service.ReadDeviceConfigs(context.Background(), testTarget(), test.types, 17, 23, test.name)
+			require.NoError(t, err)
+			require.Equal(t, test.scope, operation.TargetScope)
+			require.Equal(t, test.code, operation.TargetCode)
+			var queued gbmodels.GbPTZOperation
+			require.NoError(t, db.First(&queued, operation.ID).Error)
+			body, err := buildScheduledPTZBody(queued)
+			require.NoError(t, err)
+			require.Contains(t, string(body), "<DeviceID>"+test.code+"</DeviceID>")
+		})
+	}
+}
+
 // TestApplyDeviceConfigReadResponsePersistsOneRowPerType 一条应答带多组配置时，
 // **每组一行**，且缺席的类型不产生行 —— 缺席是 type_absent 的判据，不是"空配置"。
 func TestApplyDeviceConfigReadResponsePersistsOneRowPerType(t *testing.T) {

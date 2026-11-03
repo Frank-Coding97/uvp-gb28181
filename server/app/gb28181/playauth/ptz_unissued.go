@@ -102,6 +102,10 @@ func (p *PTZUnissuedAttempt) Reconcile(ctx context.Context) error {
 			return tx.Model(&gbmodels.GbPTZOperation{}).Where("id=? AND attempt=? AND status=?", op.ID, a.AttemptNo, gbmodels.PTZOperationQueued).
 				Updates(map[string]any{"status": gbmodels.PTZOperationUnknown, "error_code": "DISPATCH_NOT_INVOKED", "next_attempt_at": nil, "completed_at": now}).Error
 		}
-		return nil
+		// The original owner never invoked Send, so it cannot publish actual
+		// send timing. Make a fresh claim eligible without restoring its permit.
+		next := a.StartedAt.Add(time.Second)
+		return tx.Model(&gbmodels.GbPTZOperation{}).Where("id=? AND attempt=? AND status=?", op.ID, a.AttemptNo, gbmodels.PTZOperationQueued).
+			UpdateColumn("next_attempt_at", next).Error
 	})
 }

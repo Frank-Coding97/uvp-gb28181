@@ -67,11 +67,12 @@ func (dc *DeviceMgmtController) GetChannelDeviceConfigs(c *gin.Context) {
 		dc.FailAndAbort(c, failureMessage, nil)
 		return
 	}
+	targetScope, targetCode := ptz.DeviceConfigReadTarget(target, requested)
 
 	data := gin.H{
 		"list":              []deviceConfigEntry{},
 		"freshness":         gbmodels.PTZFreshnessUnknown,
-		"targetCode":        target.ChannelCode,
+		"targetCode":        targetCode,
 		"requestedTypes":    requested,
 		"registeredVersion": target.Profile.Version,
 	}
@@ -97,9 +98,12 @@ func (dc *DeviceMgmtController) GetChannelDeviceConfigs(c *gin.Context) {
 		}
 	}
 
+	// 应答会在同一事务里更新快照和操作终态。先读状态，再读快照，
+	// 避免拿到旧快照后读到新终态，让前端提前结束轮询。
+	data["reconcile"] = dc.deviceConfigReconcileState(c, target.DeviceID, targetScope, targetCode, requested)
 	var rows []gbmodels.GbDeviceConfig
 	result := dc.db().WithContext(c.Request.Context()).
-		Where("device_id = ? AND target_code = ?", target.DeviceID, target.ChannelCode).
+		Where("device_id = ? AND target_code = ? AND config_type IN ?", target.DeviceID, targetCode, requested).
 		Order("config_type").Find(&rows)
 	if result.Error != nil {
 		dc.FailAndAbort(c, "查询设备配置失败", result.Error)
@@ -117,7 +121,6 @@ func (dc *DeviceMgmtController) GetChannelDeviceConfigs(c *gin.Context) {
 		data["absentTypes"] = requested
 	}
 
-	data["reconcile"] = dc.deviceConfigReconcileState(c, channel)
 	dc.Success(c, data)
 }
 
@@ -165,10 +168,18 @@ func (dc *DeviceMgmtController) buildDeviceConfigEntries(
 //
 // ⛔ 查不到（从没读过 / 读失败）时一律返回 never_read，不报错：
 // 面板左栏是"事实展示"，没有事实不等于接口坏了。
-func (dc *DeviceMgmtController) deviceConfigReconcileState(c *gin.Context, channel *gbmodels.GbChannel) ptz.DeviceConfigReconcileState {
+func (dc *DeviceMgmtController) deviceConfigReconcileState(c *gin.Context, deviceID uint, targetScope, targetCode string, requested []string) ptz.DeviceConfigReconcileState {
 	var latest gbmodels.GbPTZOperation
+	conditions := make([]string, 0, len(requested))
+	args := make([]interface{}, 0, len(requested))
+	for _, configType := range requested {
+		conditions = append(conditions, "payload_json LIKE ?")
+		args = append(args, `%"`+configType+`"%`)
+	}
 	result := dc.db().WithContext(c.Request.Context()).
-		Where("channel_id = ? AND action = ?", channel.ID, ptz.ActionRefreshDeviceConfigs).
+		Where("device_id = ? AND target_scope = ? AND target_code = ? AND action = ?",
+			deviceID, targetScope, targetCode, ptz.ActionRefreshDeviceConfigs).
+		Where("("+strings.Join(conditions, " OR ")+")", args...).
 		Order("id DESC").Limit(1).Find(&latest)
 	if result.Error != nil || result.RowsAffected == 0 {
 		return ptz.DeriveDeviceConfigReconcileState(nil)

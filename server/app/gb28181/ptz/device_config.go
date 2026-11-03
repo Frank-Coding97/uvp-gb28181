@@ -100,6 +100,15 @@ func (s *Service) ReadDeviceConfigsBackground(ctx context.Context, target Target
 	return s.readDeviceConfigs(ctx, target, configTypes, actorID, actorDeptID, idempotencyKey, DeviceConfigBackgroundQueueWindow)
 }
 
+// DeviceConfigReadTarget 统一配置读取的发送、缓存查询和回读状态目标。
+// 单独查询 BasicParam 使用设备编码，其他查询保持通道编码。
+func DeviceConfigReadTarget(target Target, configTypes []string) (scope, code string) {
+	if len(configTypes) == 1 && configTypes[0] == manscdp.ConfigTypeBasicParam {
+		return gbmodels.ControlTargetScopeDevice, target.DeviceCode
+	}
+	return gbmodels.ControlTargetScopeChannel, target.ChannelCode
+}
+
 func (s *Service) readDeviceConfigs(ctx context.Context, target Target, configTypes []string, actorID, actorDeptID uint, idempotencyKey string, queueWindow time.Duration) (gbmodels.GbPTZOperation, error) {
 	normalized, err := normalizeDeviceConfigTypes(configTypes)
 	if err != nil {
@@ -109,6 +118,7 @@ func (s *Service) readDeviceConfigs(ctx context.Context, target Target, configTy
 	if profile.Version == "" {
 		profile = protocol.ProfileFor(protocol.Version2016)
 	}
+	targetScope, targetCode := DeviceConfigReadTarget(target, normalized)
 	return s.Execute(ctx, target, Command{
 		CmdType:          manscdp.CmdConfigDownload,
 		Action:           actionRefreshDeviceConfigs,
@@ -120,25 +130,11 @@ func (s *Service) readDeviceConfigs(ctx context.Context, target Target, configTy
 		ActorDeptID:      actorDeptID,
 		QueueWindow:      queueWindow,
 		Build: func(sn int) ([]byte, error) {
-			code := target.ChannelCode
-			if len(normalized) == 1 && normalized[0] == manscdp.ConfigTypeBasicParam {
-				code = target.DeviceCode
-			}
-			return manscdp.BuildConfigDownloadQueryWithProfile(profile, code, sn, normalized)
+			return manscdp.BuildConfigDownloadQueryWithProfile(profile, targetCode, sn, normalized)
 		},
-		TargetScope: func() string {
-			if len(normalized) == 1 && normalized[0] == manscdp.ConfigTypeBasicParam {
-				return gbmodels.ControlTargetScopeDevice
-			}
-			return gbmodels.ControlTargetScopeChannel
-		}(),
-		TargetCode: func() string {
-			if len(normalized) == 1 && normalized[0] == manscdp.ConfigTypeBasicParam {
-				return target.DeviceCode
-			}
-			return target.ChannelCode
-		}(),
-		Profile: profile,
+		TargetScope: targetScope,
+		TargetCode:  targetCode,
+		Profile:     profile,
 	})
 }
 

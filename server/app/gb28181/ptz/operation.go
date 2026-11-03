@@ -390,7 +390,10 @@ func (s *Service) executeLocked(ctx context.Context, target Target, command Comm
 		if err != nil {
 			return operation, err
 		}
-		attempt, err := s.intents.ClaimPTZAttempt(ctx, id, operation.ID, 0, s.now())
+		claimNow := s.now()
+		claimCtx, claimCancel := context.WithDeadline(ctx, claimNow.Add(playauth.PTZPreparationWindow))
+		attempt, err := s.intents.ClaimPTZAttempt(claimCtx, id, operation.ID, 0, claimNow)
+		claimCancel()
 		if err != nil {
 			s.synchronous.retainUnissued(err)
 			return operation, err

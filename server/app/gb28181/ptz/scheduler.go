@@ -31,6 +31,14 @@ const (
 	schedulerTransactionAttempts = 8
 	schedulerTransportWindow     = 15 * time.Second
 	schedulerApplicationWindow   = 15 * time.Second
+
+	// 结果回写预算。一次回写要跑「查 attempt → 查 operation → 更新 attempt →
+	// 更新 operation」四趟往返，跨机房/隧道链路上单趟就有 80~150ms 抖动，丢包
+	// 重传更是 200ms 起步。原先硬编码 2s 会让正常的抖动被记成 persist_failed:
+	// 结果没丢(会进 pendingResults 等下一 tick 补写),但 operation 状态会滞后,
+	// 且补写失败会让整轮 runDue 提前返回,连带停掉超时收敛与新指令派发。
+	// 故放宽到 5s,并允许通过 WithSchedulerPersistTimeout 覆盖。
+	defaultSchedulerPersistTimeout = 5 * time.Second
 )
 
 type schedulerDispatchReservation interface {
@@ -122,8 +130,9 @@ func (d *boundedSchedulerDispatcher) Stop() {
 }
 
 type schedulerConfig struct {
-	interval   time.Duration
-	dispatcher schedulerDispatcher
+	interval       time.Duration
+	dispatcher     schedulerDispatcher
+	persistTimeout time.Duration
 }
 
 type SchedulerOption func(*schedulerConfig)
@@ -132,6 +141,15 @@ func WithSchedulerInterval(interval time.Duration) SchedulerOption {
 	return func(config *schedulerConfig) {
 		if interval > 0 {
 			config.interval = interval
+		}
+	}
+}
+
+// WithSchedulerPersistTimeout 覆盖结果回写的落库预算。
+func WithSchedulerPersistTimeout(timeout time.Duration) SchedulerOption {
+	return func(config *schedulerConfig) {
+		if timeout > 0 {
+			config.persistTimeout = timeout
 		}
 	}
 }
@@ -159,6 +177,8 @@ type Scheduler struct {
 	db         *gorm.DB
 	dispatcher schedulerDispatcher
 	interval   time.Duration
+	// persistTimeout 是结果回写的落库预算,见 defaultSchedulerPersistTimeout。
+	persistTimeout time.Duration
 
 	lifecycleMu sync.Mutex
 	cancel      context.CancelFunc
@@ -178,15 +198,24 @@ type schedulerPendingResult struct {
 	sendErr    error
 	observedAt time.Time
 	lease      playauth.DeviceOperationLease
+	timing     *schedulerSendTiming
+}
+
+// Ownership is committed before Send; these are facts observed by that owner,
+// retained with the result so a failed writeback never restarts a timer or Send.
+type schedulerSendTiming struct {
+	startedAt, deadline, transportDeadline time.Time
+	nextAttempt                            *time.Time
 }
 
 type schedulerActiveAttempt struct {
-	cancel context.CancelFunc
-	done   chan struct{}
+	cancel   context.CancelFunc
+	done     chan struct{}
+	deadline time.Time
 }
 
 func NewScheduler(service *Service, options ...SchedulerOption) *Scheduler {
-	config := schedulerConfig{interval: defaultSchedulerInterval}
+	config := schedulerConfig{interval: defaultSchedulerInterval, persistTimeout: defaultSchedulerPersistTimeout}
 	for _, option := range options {
 		option(&config)
 	}
@@ -195,12 +224,24 @@ func NewScheduler(service *Service, options ...SchedulerOption) *Scheduler {
 	}
 	scheduler := &Scheduler{
 		service: service, dispatcher: config.dispatcher, interval: config.interval,
-		active: make(map[uint]schedulerActiveAttempt),
+		persistTimeout: config.persistTimeout,
+		active:         make(map[uint]schedulerActiveAttempt),
 	}
 	if service != nil {
 		scheduler.db = service.db
 	}
 	return scheduler
+}
+
+// writebackContext 从派发 ctx 派生一棵"只保留值、不继承取消"的树。
+// 派发 ctx 会因为指令租约/截止时间被取消,而结果回写是已发生的事实,
+// 必须独立跑完 —— 否则取消信号会让早已发出的指令丢失结果证据。
+func (s *Scheduler) writebackContext(parent context.Context) (context.Context, context.CancelFunc) {
+	timeout := s.persistTimeout
+	if timeout <= 0 {
+		timeout = defaultSchedulerPersistTimeout
+	}
+	return context.WithTimeout(context.WithoutCancel(parent), timeout)
 }
 
 func (s *Scheduler) Start(parent context.Context) {
@@ -279,7 +320,7 @@ func (s *Scheduler) flushPendingResults(ctx context.Context) error {
 		s.pendingClaims = s.pendingClaims[1:]
 	}
 	for id, pending := range s.pendingResults {
-		if err := s.persistAttemptResult(ctx, pending.attempt, pending.result, pending.sendErr, pending.observedAt); err != nil {
+		if err := s.persistAttemptOutcome(ctx, pending.attempt, pending.result, pending.sendErr, pending.observedAt, pending.timing); err != nil {
 			return err
 		}
 		if pending.lease != nil {
@@ -411,6 +452,21 @@ func (s *Scheduler) expireApplication(ctx context.Context, now time.Time) error 
 }
 
 func (s *Scheduler) recoverExpiredLeases(ctx context.Context, now time.Time) error {
+	// Local phase deadlines can precede the conservative durable owner lease.
+	// Cancel and join the owner before allowing its persisted exit to be used.
+	s.activeMu.Lock()
+	var expired []uint
+	for id, active := range s.active {
+		if !active.deadline.IsZero() && !active.deadline.After(now) {
+			expired = append(expired, id)
+		}
+	}
+	s.activeMu.Unlock()
+	for _, id := range expired {
+		if err := s.cancelAttempt(ctx, id); err != nil {
+			return err
+		}
+	}
 	var attempts []gbmodels.GbPTZOperationAttempt
 	if err := ptzWriter(s.db).WithContext(ctx).Table("gb_ptz_operation_attempt AS attempt").
 		Select("attempt.*").
@@ -469,7 +525,11 @@ func (s *Scheduler) claimDue(ctx context.Context, now time.Time) error {
 		if !ok {
 			return nil
 		}
-		attempt, claimed, err := s.claimAttempt(ctx, candidate.ID, now)
+		// Earlier candidates and convergence queries may have spent seconds in DB.
+		claimNow := s.service.now()
+		claimCtx, cancel := context.WithDeadline(ctx, claimNow.Add(playauth.PTZPreparationWindow))
+		attempt, claimed, err := s.claimAttempt(claimCtx, candidate.ID, claimNow)
+		cancel()
 		if err != nil {
 			s.retainUnissued(err)
 			reservation.Release()
@@ -556,22 +616,15 @@ func (s *Scheduler) claimAttempt(ctx context.Context, operationID uint, now time
 			return nil
 		}
 
-		startedAt := now
-		transportDeadline := now.Add(schedulerTransportWindow)
-		if operation.DispatchStartedAt != nil {
-			startedAt = *operation.DispatchStartedAt
-		}
+		transportDeadline := now.Add(playauth.PTZPreparationWindow + schedulerTransportWindow)
 		if operation.TransportDeadlineAt != nil {
 			transportDeadline = *operation.TransportDeadlineAt
 		}
 		attemptNo := operation.Attempt + 1
-		leaseUntil, nextAttempt := schedulerBoundaries(startedAt, now, operation.MaxAttempts)
-		if transportDeadline.Before(leaseUntil) {
-			leaseUntil = transportDeadline
-		}
+		leaseUntil := transportDeadline
 
 		updates := map[string]interface{}{
-			"attempt": attemptNo, "next_attempt_at": nextAttempt,
+			"attempt": attemptNo, "next_attempt_at": nil,
 		}
 		if operation.Attempt == 0 {
 			updates["dispatch_started_at"] = now
@@ -634,10 +687,18 @@ func (s *Scheduler) dispatchAttempt(dispatchCtx context.Context, attempt gbmodel
 }
 
 func (s *Scheduler) dispatchPreparedAttempt(dispatchCtx context.Context, attempt gbmodels.GbPTZOperationAttempt, preparedBody []byte) error {
-	ctx, cancel := context.WithDeadline(dispatchCtx, attempt.LeaseUntil)
+	ownerCtx, cancel := context.WithCancel(dispatchCtx)
+	prepareDeadline := attempt.StartedAt.Add(playauth.PTZPreparationWindow)
+	if attempt.LeaseUntil.Before(prepareDeadline) {
+		prepareDeadline = attempt.LeaseUntil
+	}
+	ctx, prepareCancel := context.WithDeadline(ownerCtx, prepareDeadline)
+	defer prepareCancel()
+	stopPreparation := context.AfterFunc(ctx, cancel)
+	defer stopPreparation()
 	done := make(chan struct{})
 	s.activeMu.Lock()
-	s.active[attempt.ID] = schedulerActiveAttempt{cancel: cancel, done: done}
+	s.active[attempt.ID] = schedulerActiveAttempt{cancel: cancel, done: done, deadline: prepareDeadline}
 	s.activeMu.Unlock()
 	defer func() {
 		cancel()
@@ -649,7 +710,13 @@ func (s *Scheduler) dispatchPreparedAttempt(dispatchCtx context.Context, attempt
 
 	var operation gbmodels.GbPTZOperation
 	var result uac.TrackedMessageResult
-	err := ptzWriter(s.db).WithContext(ctx).First(&operation, attempt.OperationID).Error
+	var timing *schedulerSendTiming
+	var err error
+	if !prepareDeadline.After(s.service.now()) {
+		err = context.DeadlineExceeded
+	} else {
+		err = ptzWriter(s.db).WithContext(ctx).First(&operation, attempt.OperationID).Error
+	}
 	var lease playauth.DeviceOperationLease
 	if err == nil && requiresPTZIntent(operation) {
 		var id playauth.DeviceOperationIntentIdentity
@@ -658,9 +725,11 @@ func (s *Scheduler) dispatchPreparedAttempt(dispatchCtx context.Context, attempt
 			err = playauth.ErrDeviceIntentUnavailable
 		}
 		if err == nil {
-			lease, err = s.service.barrier.BeginEpoch(ctx, id.DeviceCode, id.DeviceEpoch)
+			lease, err = s.service.barrier.BeginEpoch(ownerCtx, id.DeviceCode, id.DeviceEpoch)
 			if err == nil {
-				ctx = lease.Context()
+				var cancelQueries context.CancelFunc
+				ctx, cancelQueries = context.WithDeadline(lease.Context(), prepareDeadline)
+				defer cancelQueries()
 			}
 		}
 	}
@@ -685,26 +754,57 @@ func (s *Scheduler) dispatchPreparedAttempt(dispatchCtx context.Context, attempt
 					err = s.service.validateCascadeTargetTrackAuthorization(ctx, operation)
 				}
 				if err == nil {
-					result, err = s.service.sender.SendMessageTracked(ctx, operation.DeviceCode, destination, transport, body)
+					sendStarted := s.service.now()
+					if !prepareDeadline.After(sendStarted) || ctx.Err() != nil {
+						err = context.DeadlineExceeded
+					} else {
+						start := sendStarted
+						transportDeadline := start.Add(schedulerTransportWindow)
+						if attempt.AttemptNo > 1 && operation.DispatchStartedAt != nil && operation.TransportDeadlineAt != nil &&
+							!operation.TransportDeadlineAt.After(operation.DispatchStartedAt.Add(schedulerTransportWindow)) {
+							start = *operation.DispatchStartedAt
+							transportDeadline = *operation.TransportDeadlineAt
+						}
+						deadline, next := schedulerBoundaries(start, sendStarted, operation.MaxAttempts)
+						timing = &schedulerSendTiming{startedAt: start, deadline: deadline, transportDeadline: transportDeadline, nextAttempt: next}
+						// Stop the preparation timer, retaining owner/epoch cancellation.
+						stopPreparation()
+						sendBase := ownerCtx
+						if lease != nil {
+							sendBase = lease.Context()
+						}
+						sendCtx, sendCancel := context.WithDeadline(sendBase, deadline)
+						s.activeMu.Lock()
+						s.active[attempt.ID] = schedulerActiveAttempt{cancel: cancel, done: done, deadline: deadline}
+						s.activeMu.Unlock()
+						result, err = s.service.sender.SendMessageTracked(sendCtx, operation.DeviceCode, destination, transport, body)
+						sendCancel()
+					}
 				}
 			}
 		}
 	}
 	observedAt := s.service.now()
-	persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(dispatchCtx), 2*time.Second)
+	persistCtx, persistCancel := s.writebackContext(dispatchCtx)
 	defer persistCancel()
-	if persistErr := s.persistAttemptResult(persistCtx, attempt, result, err, observedAt); persistErr != nil {
+	persistStarted := time.Now()
+	if persistErr := s.persistAttemptOutcome(persistCtx, attempt, result, err, observedAt, timing); persistErr != nil {
 		s.pendingMu.Lock()
 		if s.pendingResults == nil {
 			s.pendingResults = make(map[uint]schedulerPendingResult)
 		}
-		s.pendingResults[attempt.ID] = schedulerPendingResult{attempt: attempt, result: result, sendErr: err, observedAt: observedAt, lease: lease}
+		s.pendingResults[attempt.ID] = schedulerPendingResult{attempt: attempt, result: result, sendErr: err, observedAt: observedAt, lease: lease, timing: timing}
 		s.pendingMu.Unlock()
 		// 写回失败不得无声:否则 attempt 停留 dispatching,直到租约恢复才可能被发现
 		if app.ZapLog != nil {
 			app.Log(persistCtx).Named("ptz.scheduler").Error("PTZ 调度结果持久化失败",
 				zap.String("event", "ptz.scheduler.persist_failed"),
-				zap.Uint("attempt_id", attempt.ID), zap.Uint("operation_id", attempt.OperationID), zap.Error(persistErr))
+				zap.Uint("attempt_id", attempt.ID), zap.Uint("operation_id", attempt.OperationID),
+				// 预算与实际耗时分开放:预算吃满(耗时≈预算)是链路慢,
+				// 远小于预算就失败则是事务冲突/约束错误,两者排查方向完全不同。
+				zap.Duration("writeback_budget", s.persistTimeout),
+				zap.Duration("writeback_elapsed", time.Since(persistStarted)),
+				zap.Error(persistErr))
 		}
 		return persistErr
 	} else if lease != nil {
@@ -906,7 +1006,7 @@ func buildScheduledPTZBody(operation gbmodels.GbPTZOperation) ([]byte, error) {
 	}
 }
 
-func (s *Scheduler) persistAttemptResult(ctx context.Context, attempt gbmodels.GbPTZOperationAttempt, result uac.TrackedMessageResult, sendErr error, observedAt time.Time) error {
+func (s *Scheduler) persistAttemptOutcome(ctx context.Context, attempt gbmodels.GbPTZOperationAttempt, result uac.TrackedMessageResult, sendErr error, observedAt time.Time, timing *schedulerSendTiming) error {
 	return schedulerTransaction(ctx, s.db, func(tx *gorm.DB) (persistErr error) {
 		var currentAttempt gbmodels.GbPTZOperationAttempt
 		if err := tx.First(&currentAttempt, attempt.ID).Error; err != nil {
@@ -946,6 +1046,23 @@ func (s *Scheduler) persistAttemptResult(ctx context.Context, attempt gbmodels.G
 		var operation gbmodels.GbPTZOperation
 		if err := tx.First(&operation, currentAttempt.OperationID).Error; err != nil {
 			return err
+		}
+		if timing != nil {
+			// Only narrow an existing ownership lease; never revive an expired
+			// owner or overwrite another attempt's scheduling state.
+			if timing.deadline.After(currentAttempt.LeaseUntil) || operation.Attempt != attempt.AttemptNo {
+				return playauth.ErrDeviceIntentConflict
+			}
+			if err := tx.Model(&gbmodels.GbPTZOperationAttempt{}).Where("id = ?", currentAttempt.ID).
+				UpdateColumn("lease_until", timing.deadline).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&gbmodels.GbPTZOperation{}).Where("id = ? AND attempt = ?", operation.ID, attempt.AttemptNo).
+				Updates(map[string]interface{}{"dispatch_started_at": timing.startedAt, "transport_deadline_at": timing.transportDeadline, "next_attempt_at": timing.nextAttempt}).Error; err != nil {
+				return err
+			}
+			currentAttempt.LeaseUntil = timing.deadline
+			operation.TransportDeadlineAt = &timing.transportDeadline
 		}
 		if !operation.ResponseRequired {
 			return persistOneWayAttemptResult(tx, operation, currentAttempt, result, sendErr, observedAt)

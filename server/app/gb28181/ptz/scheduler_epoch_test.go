@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
 	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
@@ -16,7 +17,7 @@ import (
 )
 
 func TestSchedulerDoesNotDispatchTransferredQueuedCommand(t *testing.T) {
-	for _, window := range []string{"before-claim", "after-claim", "unchanged", "writeback-fails", "synchronous", "other-device", "historical", "claim-commit-unknown", "retry-slots", "authority-sealed-after-claim", "synchronous-claim-unknown", "synchronous-reserve-unknown", "alarm", "queue-expired", "queue-expiry-write-fails", "home-reconcile", "home-reconcile-transferred", "home-reconcile-insert-fails", "home-reconcile-link-fails", "home-reconcile-legacy"} {
+	for _, window := range []string{"before-claim", "after-claim", "unchanged", "writeback-fails", "synchronous", "other-device", "historical", "claim-commit-unknown", "retry-slots", "authority-sealed-after-claim", "synchronous-claim-unknown", "synchronous-reserve-unknown", "alarm", "queue-expired", "queue-expiry-write-fails", "home-reconcile", "home-reconcile-transferred", "home-reconcile-insert-fails", "home-reconcile-link-fails", "home-reconcile-legacy", "slow-preparation", "slow-preparation-writeback-fails"} {
 		t.Run(window, func(t *testing.T) {
 			if !authoritytest.InProcess(t) {
 				return
@@ -217,6 +218,18 @@ func TestSchedulerDoesNotDispatchTransferredQueuedCommand(t *testing.T) {
 				service.intents, err = playauth.NewAuthorizedDeviceOperationIntentStore(faultDB, authority)
 				require.NoError(t, err)
 			}
+			if strings.HasPrefix(window, "slow-preparation") {
+				require.NoError(t, f.db.Callback().Create().After("gorm:create").Register("slow-claim", func(tx *gorm.DB) {
+					if tx.Statement.Table == "gb_ptz_operation_attempt" {
+						f.clock.Set(f.clock.Now().Add(7 * time.Second))
+					}
+				}))
+				require.NoError(t, f.db.Callback().Query().After("gorm:query").Register("slow-target", func(tx *gorm.DB) {
+					if _, targetLookup := tx.Statement.Dest.(*gbmodels.GbDevice); targetLookup {
+						f.clock.Set(f.clock.Now().Add(3 * time.Second))
+					}
+				}))
+			}
 			err = f.scheduler.RunDue(f.clock.Now())
 			if window == "claim-commit-unknown" {
 				require.Error(t, err)
@@ -262,7 +275,30 @@ func TestSchedulerDoesNotDispatchTransferredQueuedCommand(t *testing.T) {
 			if window == "writeback-fails" {
 				require.NoError(t, f.db.Exec(`CREATE TRIGGER reject_exit BEFORE UPDATE OF local_quiesced_at ON gb_ptz_operation_attempt BEGIN SELECT RAISE(ABORT, 'injected'); END`).Error)
 			}
+			if window == "slow-preparation-writeback-fails" {
+				require.NoError(t, f.db.Exec(`CREATE TRIGGER reject_timing BEFORE UPDATE OF lease_until ON gb_ptz_operation_attempt BEGIN SELECT RAISE(ABORT, 'injected'); END`).Error)
+			}
 			f.dispatcher.Drain()
+			if strings.HasPrefix(window, "slow-preparation") {
+				sentAt := f.clock.Now()
+				require.Len(t, f.sender.Calls(), 1)
+				require.True(t, f.sender.Calls()[0].deadline.Equal(sentAt.Add(time.Second)))
+				if window == "slow-preparation-writeback-fails" {
+					a := loadSchedulerAttempts(t, f.db, op.ID)[0]
+					require.Nil(t, a.LocalQuiescedAt)
+					require.NoError(t, f.db.Exec("DROP TRIGGER reject_timing").Error)
+					f.clock.Set(sentAt.Add(20 * time.Second))
+					require.NoError(t, f.scheduler.FlushResults(context.Background()))
+				}
+				got := loadSchedulerOperation(t, f.db, op.ID)
+				require.Equal(t, gbmodels.PTZOperationSent, got.Status)
+				require.True(t, got.DispatchStartedAt.Equal(sentAt), "writeback must replay original timing")
+				a := loadSchedulerAttempts(t, f.db, op.ID)[0]
+				require.Equal(t, gbmodels.PTZOperationAttemptSent, a.Status)
+				require.NotNil(t, a.LocalQuiescedAt)
+				require.Len(t, f.sender.Calls(), 1, "writeback must not resend")
+				return
+			}
 			if window == "retry-slots" {
 				start := f.clock.Now()
 				for index, offset := range []time.Duration{time.Second, 6 * time.Second} {

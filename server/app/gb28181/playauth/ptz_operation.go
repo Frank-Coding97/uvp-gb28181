@@ -10,6 +10,10 @@ import (
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
+// PTZPreparationWindow bounds the claim transaction and target preparation;
+// the transport window starts only when the committed owner invokes Send.
+const PTZPreparationWindow = 15 * time.Second
+
 // PTZIntentTarget separates the wire address from the resource which authorized
 // it. Alarm addresses are resolved through a channel; they never grant device
 // authority, including when the wire address falls back to the device code.
@@ -166,22 +170,11 @@ func (s *DeviceOperationIntentStore) ClaimPTZAttempt(ctx context.Context, id Dev
 		if op.DispatchStartedAt != nil {
 			start = *op.DispatchStartedAt
 		}
-		deadline := start.Add(15 * time.Second)
+		deadline := start.Add(PTZPreparationWindow + 15*time.Second)
 		if op.TransportDeadlineAt != nil {
 			deadline = *op.TransportDeadlineAt
 		}
 		lease := deadline
-		var next *time.Time
-		if op.MaxAttempts > 1 {
-			for _, slot := range []time.Time{start.Add(time.Second), start.Add(6 * time.Second)} {
-				if slot.After(now) && slot.Before(deadline) {
-					lease = slot
-					n := slot
-					next = &n
-					break
-				}
-			}
-		}
 		if !lease.After(now) {
 			return ErrDeviceIntentConflict
 		}
@@ -196,7 +189,7 @@ func (s *DeviceOperationIntentStore) ClaimPTZAttempt(ctx context.Context, id Dev
 			}
 		}
 		res := tx.Model(&gbmodels.GbPTZOperation{}).Where("id = ? AND attempt = ? AND device_intent_id = ? AND device_epoch = ? AND status = ?", op.ID, expectedAttempt, id.OperationID, id.DeviceEpoch, op.Status).
-			Updates(map[string]any{"attempt": expectedAttempt + 1, "dispatch_started_at": start, "transport_deadline_at": deadline, "next_attempt_at": next})
+			Updates(map[string]any{"attempt": expectedAttempt + 1, "dispatch_started_at": start, "transport_deadline_at": deadline, "next_attempt_at": nil})
 		if res.Error != nil {
 			return res.Error
 		}

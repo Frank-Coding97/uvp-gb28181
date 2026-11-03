@@ -315,7 +315,7 @@ func TestSchedulerTimelyObservedResultSurvivesDelayedWriteback(t *testing.T) {
 	attempt := loadSchedulerAttempts(t, fixture.db, operation.ID)[0]
 	observedAt := t0.Add(15*time.Second - time.Nanosecond)
 
-	fixture.clock.Set(t0.Add(15 * time.Second))
+	fixture.clock.Set(attempt.LeaseUntil)
 	require.NoError(t, fixture.scheduler.RunDue(fixture.clock.Now()))
 	require.Equal(t, gbmodels.PTZOperationUnknown, loadSchedulerOperation(t, fixture.db, operation.ID).Status)
 	require.Equal(t, gbmodels.PTZOperationAttemptUnknown, loadSchedulerAttempts(t, fixture.db, operation.ID)[0].Status)

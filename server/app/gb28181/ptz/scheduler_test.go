@@ -202,6 +202,20 @@ func loadSchedulerAttempts(t *testing.T, db *gorm.DB, operationID uint) []gbmode
 	return attempts
 }
 
+// Direct-result tests model Send entering at claim time. Production supplies
+// the actual sender-entry timing, independently of the durable owner lease.
+func (s *Scheduler) persistAttemptResult(ctx context.Context, attempt gbmodels.GbPTZOperationAttempt, result uac.TrackedMessageResult, sendErr error, observedAt time.Time) error {
+	var op gbmodels.GbPTZOperation
+	if err := s.db.WithContext(ctx).First(&op, attempt.OperationID).Error; err != nil {
+		return err
+	}
+	start := *op.DispatchStartedAt
+	deadline, next := schedulerBoundaries(start, attempt.StartedAt, op.MaxAttempts)
+	return s.persistAttemptOutcome(ctx, attempt, result, sendErr, observedAt, &schedulerSendTiming{
+		startedAt: start, deadline: deadline, transportDeadline: start.Add(schedulerTransportWindow), nextAttempt: next,
+	})
+}
+
 func TestSchedulerFixedQuerySlotsAndApplicationDeadline(t *testing.T) {
 	f := newSchedulerFixture(t, 1)
 	op := f.createOperation(t, 3)
