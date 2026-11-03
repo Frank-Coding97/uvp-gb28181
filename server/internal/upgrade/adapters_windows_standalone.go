@@ -30,11 +30,7 @@ var persistentEntries = map[string]struct{}{
 // the helper binary itself ships with every release. It cannot be replaced in
 // place while the helper is running (Windows locks the image), so the new image
 // is staged as a sidecar and the control script swaps it on the next start.
-const (
-	helperEntry        = "updater"
-	helperImage        = "uvp-updater.exe"
-	helperStagedSuffix = ".new"
-)
+// 常量与落盘动作在 helper_update.go 里（与 Unix 共用）。
 
 // WindowsStandaloneAdapter upgrades a green-package Windows installation in
 // place.
@@ -306,14 +302,10 @@ func (a *WindowsStandaloneAdapter) Activate(_ context.Context, record TaskRecord
 			return fmt.Errorf("replace %s: %w", name, err)
 		}
 	}
-	// The helper image cannot be swapped while it is running; hand it to the
-	// control script as a sidecar.
-	stagedHelper := filepath.Join(packageRoot, helperEntry, helperImage)
-	if _, err := os.Stat(stagedHelper); err == nil {
-		destination := filepath.Join(a.Layout.Root, helperEntry, helperImage+helperStagedSuffix)
-		if err := copyFileFromPath(stagedHelper, destination); err != nil {
-			return fmt.Errorf("stage updater helper image: %w", err)
-		}
+	// 助手镜像不能就地替换（Windows 锁住正在运行的映像），落成旁挂文件，
+	// 由控制脚本在下次启动助手时换上（ctl.ps1 的 Install-UpdaterImage）。
+	if _, err := stageHelperImage(packageRoot, a.Layout.Root, HelperWindowsImage); err != nil {
+		return err
 	}
 	if err := syncTree(a.Layout.Root); err != nil {
 		return fmt.Errorf("sync activated installation: %w", err)

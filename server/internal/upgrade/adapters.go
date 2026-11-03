@@ -567,6 +567,11 @@ func (a *StandaloneAdapter) activate(record TaskRecord, prepare func(string) err
 	if err := syncDirectory(a.Layout.Releases); err != nil {
 		return fmt.Errorf("sync release directory: %w", err)
 	}
+	// 助手镜像先落成旁挂文件（不就地覆盖运行中的进程），切换 current 之后再重启换上。
+	// 放在翻转 current 之前：落盘失败时还没动线上指向，失败路径更干净。
+	if _, err := stageHelperImage(release, a.Layout.Root, HelperUnixImage); err != nil {
+		return err
+	}
 	next := a.Layout.Current + ".next"
 	_ = os.Remove(next)
 	if err := os.Symlink(release, next); err != nil {

@@ -498,7 +498,12 @@ const eventLabels: Record<string, string> = {
   recovery_required: "需要恢复处理",
   cleanup_failed: "清理失败",
   auto_approved_by_policy: "自动批准",
-  auto_started: "自动开始升级"
+  auto_started: "自动开始升级",
+  // 助手镜像是安装根里的常驻进程，不随版本切换更新；这三条说明它这次换没换、
+  // 什么时候生效（见 server/internal/upgrade/helper_update.go）。
+  helper_update_restart_scheduled: "升级助手已更新",
+  helper_update_staged: "升级助手待重启生效",
+  helper_update_failed: "升级助手更新失败"
 };
 const eventLabel = (event: UpgradeEvent) => {
   // 离线导入与在线检查共用同一条准备管道，都写 downloaded；
@@ -508,7 +513,8 @@ const eventLabel = (event: UpgradeEvent) => {
 };
 const eventColor = (event: UpgradeEvent) => {
   if (event.event === "succeeded") return "green";
-  if (["failed", "import_failed", "cleanup_failed", "recovery_required"].includes(event.event)) return "red";
+  if (["failed", "import_failed", "cleanup_failed", "recovery_required", "helper_update_failed"].includes(event.event))
+    return "red";
   return event.event === "blocked" ? "orange" : "blue";
 };
 const migrationBlocked = computed(() => !migrationPlan.value?.can_apply || Boolean(migrationError.value));

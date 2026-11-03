@@ -479,10 +479,34 @@ ensure_updater_registration() {
     || fail "无法生成升级助手注册文件"
 }
 
+# 升级时新包里的助手只会落成 `updater/uvp-updater.new`：正在运行的程序不能就地
+# 覆盖（覆盖掉的是 inode，旧进程会继续跑旧代码，看着"换了却没生效"）。
+# 这里在**助手尚未运行时**把它换上；换不动就留到下次，绝不因此让启动失败 ——
+# 助手版本落后不影响业务，只是拿不到助手侧的新能力（例如后台定时探测）。
+install_staged_updater() {
+  local staged="$UPDATER_BIN.new"
+  [ -f "$staged" ] || return 0
+  if updater_running; then
+    det "升级助手正在运行，新镜像留到下次启动替换"
+    return 0
+  fi
+  if [ -f "$UPDATER_BIN" ]; then
+    cp -p "$UPDATER_BIN" "$UPDATER_BIN.bak-$(date -u +%Y%m%d%H%M%S)" 2>/dev/null || true
+  fi
+  if mv -f "$staged" "$UPDATER_BIN" 2>/dev/null; then
+    chmod 0755 "$UPDATER_BIN" 2>/dev/null || true
+    ok "升级助手已更新到本版本"
+  else
+    det "升级助手镜像更新失败（将在下次启动重试）"
+  fi
+}
+
 prepare_updater() {
   # ⛔ 必须在生成注册文件之前：注册文件的"可信路径"校验就是从 / 逐层往下走，
   #   目录不可信时 `serve` 起不来（详见 check_updater_trusted_paths 的注释）。
   check_updater_trusted_paths
+  # 注册文件由助手自己写 `register`，所以换镜像必须排在它前面。
+  install_staged_updater
   ensure_updater_registration
   # 外置数据库备份口令只通过环境变量交给独立助手；默认不从
   # config.yml 读取并导出，避免升级助手启动时把配置口令带入进程环境。

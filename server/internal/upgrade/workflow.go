@@ -203,6 +203,9 @@ func (w *WorkflowExecutor) Apply(ctx context.Context, record TaskRecord) error {
 			record.Committed = true
 		}
 		if step.next == PhaseSucceeded {
+			// 助手镜像是「安装根里的常驻进程」，不随 release 切换更新；这里把刚激活
+			// 的那份换上，否则助手侧的改进永远到不了已经在跑的现场机。
+			w.syncHelper(ctx, record)
 			return errors.Join(w.emitOutcome(ctx, record), w.cleanupCompleted(ctx, record))
 		}
 	}
@@ -381,6 +384,41 @@ func (w *WorkflowExecutor) recheckInstallation(ctx context.Context, record TaskR
 		return errors.New("installation state changed immediately before stop; new approval is required")
 	}
 	return nil
+}
+
+// syncHelper publishes the helper image that shipped with the release which was
+// just activated. It runs only once the task is durably Succeeded and the gate
+// is back to normal, so a helper problem is reported as an event and never turns
+// a good upgrade into a failed one — the business release is already live and
+// validated.
+func (w *WorkflowExecutor) syncHelper(ctx context.Context, record TaskRecord) {
+	syncer, ok := w.Adapter.(helperSynchronizer)
+	if !ok {
+		return
+	}
+	result, err := syncer.SyncHelper(context.WithoutCancel(ctx), record)
+	now := time.Now()
+	if w.Now != nil {
+		now = w.Now()
+	}
+	event := UpgradeEvent{TaskID: record.TaskID, ReleaseID: record.Version, BuildID: record.BuildID, At: now.UTC()}
+	switch {
+	case err != nil:
+		event.Event = "helper_update_failed"
+		event.Reason = err.Error()
+	case !result.Staged:
+		// 老包或自定义包没带助手镜像，没有变化就没什么可报的。
+		return
+	case result.RestartScheduled:
+		event.Event = "helper_update_restart_scheduled"
+		event.Reason = "升级助手已替换，正在重启以生效"
+	default:
+		event.Event = "helper_update_staged"
+		event.Reason = result.Reason
+	}
+	if w.Events != nil {
+		_ = w.Events.Append(ctx, event)
+	}
 }
 
 func (w *WorkflowExecutor) emitOutcome(ctx context.Context, record TaskRecord) error {
