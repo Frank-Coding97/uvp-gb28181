@@ -1697,6 +1697,24 @@ describe("device-mgmt round-2 修复回归", () => {
     expect(source).toMatch(/:deep\(\.map-center-pin svg\)\s*\{[^}]*display:\s*block/);
   });
 
+  it("视频小窗宽度必须按 border-box 算，否则超出 popup 的 max-width 会被右侧裁掉", async () => {
+    // ⛔⛔ 本项目**没有**全局 `* { box-sizing: border-box }`（只重置了 padding/margin）。
+    //    `.map-video-card` 只写 `width:300px; padding:12px` 时，300px 是内容宽度，
+    //    盒子实际占 324px；而小窗 popup 的 max-width 只有 304px 且 `overflow:hidden`
+    //    ⇒ 右边 20px 被切掉，表现就是"视频画面贴到卡片边缘、停止播放按钮显示不全"。
+    const source = await readPageSource();
+    const block = source.match(/:deep\(\.map-video-card\)\s*\{([^}]*)\}/);
+    expect(block, "必须存在 :deep(.map-video-card) 样式块").not.toBeNull();
+    const css = block![1];
+    const width = Number(css.match(/(^|[\s;])width:\s*(\d+)px/)![2]);
+    const padding = Number(css.match(/(^|[\s;])padding:\s*(\d+)px/)![2]);
+    // 小窗 popup 的 max-width：用 `offset: 24` 定位，避免和通道卡片的 280px 混淆
+    const popupMax = Number(source.match(/offset:\s*24,\s*maxWidth:\s*"(\d+)px"/)![1]);
+    const borderBox = /box-sizing:\s*border-box/.test(css);
+    // 盒子实际占位：border-box 时就是 width，否则还得加上两侧内边距
+    expect(borderBox ? width : width + padding * 2).toBeLessThanOrEqual(popupMax);
+  });
+
   // ── 实时视频小窗（贴在地图上，不再是 960px 大模态）──────────────────────
 
   // ⛔ 别直接用 coordinatedChannel 点播：那个夹具只带坐标/状态，**没有 deviceId**，

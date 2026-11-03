@@ -8989,6 +8989,14 @@ onUnmounted(() => {
    刻意与通道卡片同一族：同样的头部圆点+名称、同样的说明行、同样的动作按钮药丸。
    宽度按 300px 定死：够看清是"哪一路、人在不在"，又不会盖掉半块地图（旧模态是 960px）。 */
 :deep(.map-video-card) {
+  /* ⛔⛔ 这条不能删：本项目**没有**全局 `* { box-sizing: border-box }`
+     （`src/style/index.scss` 只重置了 padding/margin）。缺了它，300px 是**内容宽度**，
+     盒子实际占 300+12×2=324px，而下面 `.maplibregl-popup-content` 的 max-width 只有
+     304px 且 `overflow: hidden` ⇒ 右边 20px 被直接切掉：
+     视频画面贴到卡片边缘、按钮"停止播放"显示不全（2026-11-03 老板截图报的就是这个）。
+     ⚠️ 别改成"把 max-width 调大"糊过去 —— popup 的 max-width 是布局契约，
+     真正的错因是宽度算错了一整个 padding。 */
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 8px;
