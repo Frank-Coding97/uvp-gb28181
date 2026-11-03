@@ -300,6 +300,37 @@ describe("DeviceStatusFactsPanel", () => {
     wrapper.unmount();
   });
 
+  it("排队截止不能提前结束已经进入调度流程的查询", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-20T03:00:00.000Z"));
+    api.getDeviceStatus
+      .mockResolvedValueOnce(statusResponse())
+      .mockResolvedValueOnce(statusResponse({ refreshOperationId: "queued-op" }))
+      .mockResolvedValueOnce(
+        statusResponse({ state: { recordState: "off", guardState: "armed", freshness: "fresh" }, freshness: "fresh" })
+      );
+    api.getPtzOperation
+      .mockResolvedValueOnce(operationResponse("queued", "queued-op", "2026-09-20T03:00:05.000Z"))
+      .mockResolvedValueOnce(operationResponse("queued", "queued-op", "2026-09-20T03:00:05.000Z"))
+      .mockResolvedValue(operationResponse("accepted", "queued-op"));
+
+    const wrapper = mountPanel();
+    await flushPromises();
+    api.getDeviceStatus.mockClear();
+    await clickRefresh(wrapper);
+    await vi.advanceTimersByTimeAsync(5000);
+    await flushPromises();
+    expect(wrapper.text()).toContain("正在查询设备状态");
+    expect(api.getDeviceStatus).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(2000);
+    await flushPromises();
+    expect(wrapper.text()).toContain("设备未录制");
+    expect(wrapper.text()).not.toContain("查询超时");
+    expect(api.getDeviceStatus).toHaveBeenLastCalledWith(CHANNEL_ID, false);
+    wrapper.unmount();
+  });
+
   it("非终态 operation 以**服务端给的 deadline** 收敛，到点才补读合并事实", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-20T03:00:00.000Z"));

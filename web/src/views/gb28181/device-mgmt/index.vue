@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, createVNode, nextTick, onMounted, reactive, ref, render, shallowRef, watch, onUnmounted } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
 import { Message, Modal } from "@arco-design/web-vue";
 import maplibregl, { LngLatBounds, Marker as MapLibreMarker, type Map as MapLibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -62,6 +62,7 @@ import {
   refreshDeviceCatalog,
   updateCloudRecording,
   updateChannelStreamTransport,
+  updateChannelStreamIdentification,
   updateChannel,
   updateDevice,
   type BatchDeleteResult,
@@ -95,11 +96,8 @@ import DeviceMaintenanceMenu from "./DeviceMaintenanceMenu.vue";
 import DeviceRebootDialog from "./DeviceRebootDialog.vue";
 import DeviceFirmwareUpgradeDialog from "./DeviceFirmwareUpgradeDialog.vue";
 import DeviceMaintenanceRecordsDialog from "./DeviceMaintenanceRecordsDialog.vue";
-import DeviceStatusFactsPanel from "./DeviceStatusFactsPanel.vue";
-import StorageCardStatusPanel from "./StorageCardStatusPanel.vue";
+import ChannelConfigWorkspace from "./ChannelConfigWorkspace.vue";
 import CatalogRefreshProgressDialog from "./CatalogRefreshProgressDialog.vue";
-import SnapshotConfigPanel from "./SnapshotConfigPanel.vue";
-import DeviceConfigDrawer from "./DeviceConfigDrawer.vue";
 import { buildFactChannelOptions } from "./deviceFactChannel";
 import { createMaintenanceActivity, isRebootPending, isUpgradeUnresolved } from "./maintenanceActivity";
 import DirectoryPanel from "./components/DirectoryPanel.vue";
@@ -134,6 +132,7 @@ import {
 import { normalizeProtocolOverride, protocolOverrideAfterSave } from "./protocolOverrideState";
 import { consumeDeviceMgmtReturnSnapshot, saveDeviceMgmtReturnSnapshot } from "../device-record-playback/returnSnapshot";
 import { useDeviceStatusLabel } from "../useDeviceStatusDict";
+import { reportedCharsetText } from "../reportedCharsetText";
 import { useGuide } from "@/components/s-guide/useGuide";
 import { DEVICE_GUIDE_STEPS, DEVICE_GUIDE_STORAGE_KEY } from "./deviceGuide";
 import { DICT_CODE_MEDIA_NODE_STATE, MEDIA_NODE_STATE_LABEL_FALLBACK } from "../mediaNodeState";
@@ -260,24 +259,21 @@ const channelOperationTarget = ref<ChannelVO | null>(null);
  *    原来那一页挂在没有画面的抽屉里，等于让人闭眼开云台 —— 转过去看不见、转坏了也发现不了。
  *    判据就一条：**要画面反馈的动作进控制台，不要画面的动作留在这里**。
  */
-type ChannelOperationTab = "config" | "snapshot" | "status" | "storage";
-const channelOperationTab = ref<ChannelOperationTab>("config");
-/**
- * 「设备配置」页签挂的分组（`CONFIG_GROUPS` 的 key）。
- *
- * ⛔ 为什么落在这里：2026-09-20 把「录像存储 / 报警控制 / 设备维护」三个整页签从播放控制台
- *    搬进**设备详情抽屉**，同日稍后设备详情抽屉又被改成**纯只读概览**（并加了反向断言
- *    `index.deviceDetailTabs.test.ts` 的 `not.toContain("openDeviceRecordPlan(deviceDetail)")`）
- *    ⇒ 这四组从此**一处入口都没有**：代码在、接口在、报文在，界面上点不到。
- *    控制台侧栏也被 `PlayConsoleLinked.test.ts` 钉死"不许出现录像计划"，所以只能回本抽屉。
- * ⛔ 只收**通道级设备配置**这四组：
- *    - `video-param` 在播放控制台「画面设置」（按码流分行，宿主必须给播放上下文）；
- *    - `picture`（镜像 + 遮挡）在控制台底栏卡片（要画布框选，这里没有画面）。
- *    把这两组并进来就是同一份配置的第二个编辑面，改这边那边不动。
- * ⛔ 数组顺序**不决定**导航顺序：`configGroups` 按 `CONFIG_GROUPS` 的声明顺序过滤，
- *    这里的顺序只影响阅读。
- */
-const CHANNEL_CONFIG_GROUPS = ["record-plan", "alarm-record", "alarm-report", "basic"];
+const channelWorkspace = ref<InstanceType<typeof ChannelConfigWorkspace> | null>(null);
+function beforeChannelConfigCancel() {
+  void (channelWorkspace.value?.beforeLeave() ?? Promise.resolve(true)).then(allowed => {
+    if (allowed) channelOperationVisible.value = false;
+  });
+  return false;
+}
+onBeforeRouteLeave(async () => !channelOperationVisible.value || (await channelWorkspace.value?.beforeLeave()) !== false);
+function protectChannelDraft(event: BeforeUnloadEvent) {
+  if (!channelOperationVisible.value || (!channelWorkspace.value?.dirtyCount && !channelWorkspace.value?.busy)) return;
+  event.preventDefault();
+  event.returnValue = "";
+}
+onMounted(() => window.addEventListener("beforeunload", protectChannelDraft));
+onUnmounted(() => window.removeEventListener("beforeunload", protectChannelDraft));
 const channelOperationOptions = computed(() =>
   channelOperationTarget.value ? buildFactChannelOptions([channelOperationTarget.value]) : []
 );
@@ -426,6 +422,53 @@ const canRefreshCatalog = computed(() => hasPermission("gb28181:device:catalog:r
 const canManageSubscriptions = computed(() => hasPermission("gb28181:device:subscription:manage"));
 const canEditChannel = computed(() => hasPermission("gb28181:channel:edit"));
 const canEditTransport = computed(() => hasPermission("gb28181:channel:stream-transport:update"));
+const streamIdentificationGroups = [
+  {
+    label: "stream 兼容",
+    items: [
+      { value: "stream:0", label: "主码流" },
+      { value: "stream:1", label: "子码流" }
+    ]
+  },
+  {
+    label: "streamnumber",
+    items: [
+      { value: "streamnumber:0", label: "主码流" },
+      { value: "streamnumber:1", label: "子码流" }
+    ]
+  },
+  {
+    label: "大华",
+    items: [
+      { value: "streamprofile:0", label: "主码流" },
+      { value: "streamprofile:1", label: "子码流" }
+    ]
+  },
+  {
+    label: "水星 / TP-LINK",
+    items: [
+      { value: "streamMode:MAIN", label: "主码流" },
+      { value: "streamMode:SUB", label: "子码流" }
+    ]
+  }
+];
+const savingStreamIdentification = ref<Set<number>>(new Set());
+
+function streamIdentificationText(value?: string | null) {
+  if (!value) return "设备默认";
+  for (const group of streamIdentificationGroups) {
+    const item = group.items.find(option => option.value === value);
+    if (item) return `${group.label} · ${item.label}`;
+  }
+  return "未知配置";
+}
+
+function streamIdentificationNotice(item: ChannelVO) {
+  if (!isChannelPlaying(item)) return "";
+  if (item.currentStreamIdentification == null) return "当前直播请求的码流配置无法确认；新配置在下次新建直播时使用";
+  if (item.currentStreamIdentification !== (item.streamIdentification || "")) return "当前直播未使用所选配置；下次新建直播时使用";
+  return "当前直播已请求所选配置，设备实际码流未确认";
+}
 const canUpdateRecording = computed(() => hasPermission("gb28181:channel:recording:update"));
 const canStopPlayback = computed(() => hasPermission("gb28181:play:stop"));
 
@@ -803,6 +846,8 @@ function protocolSourceText(value?: string | null) {
     ] || "未说明"
   );
 }
+// 设备上报字符集的展示函数在 ../reportedCharsetText.ts（独立模块 + 单测）。
+
 function protocolVersionTooltip(item: {
   effectiveVersion?: string | null;
   effectiveVersionSource?: string | null;
@@ -2380,6 +2425,8 @@ async function loadChannelsData() {
     if (version !== channelRequestVersion) return;
     if (res.code === 0) {
       channels.value = res.data?.list || [];
+      const currentTarget = channels.value.find(channel => channel.id === channelOperationTarget.value?.id);
+      if (currentTarget) channelOperationTarget.value = currentTarget;
       total.value = res.data?.total || 0;
     }
   } catch (error: any) {
@@ -2535,10 +2582,6 @@ async function openDevice(record: DeviceVO) {
 
 function openChannelOperations(channel: ChannelVO) {
   channelOperationTarget.value = channel;
-  // ⛔ 默认停「设备配置」：这个入口的主要任务是给通道配参数（录像计划 / 报警 / 基本参数），
-  //    抓拍和设备状态是顺带看的。原来按权限落到"第一个能点的页签"，结果管理员进来看到的是
-  //    「即时控制」，而他要找的录像计划还得再点一次。
-  channelOperationTab.value = canViewDeviceFacts.value ? "config" : canSnapshotDevice.value ? "snapshot" : "status";
   channelOperationVisible.value = true;
 }
 
@@ -2550,13 +2593,14 @@ function openChannelOperations(channel: ChannelVO) {
  * ⛔ 顺序取**当前列表的渲染顺序**（`channels`），不另建索引：用户看到的是列表第几行，
  *    翻页就该按那个顺序翻；用后端全量顺序会和眼前对不上。
  */
-function stepChannelOperation(offset: number) {
+async function stepChannelOperation(offset: number) {
   const list = channels.value;
   if (!list.length) return;
   const current = channelOperationTarget.value;
   const index = current ? list.findIndex(item => item.id === current.id) : -1;
   const next = list[(index === -1 ? 0 : index + offset + list.length) % list.length];
   if (!next || next.id === current?.id) return;
+  if ((await channelWorkspace.value?.beforeLeave()) === false) return;
   channelOperationTarget.value = next;
 }
 
@@ -3331,6 +3375,28 @@ async function handleStreamTransportChange(channelId: number, streamTransport: s
     }
   } catch (error: any) {
     Message.error(error?.message || "更新失败");
+  }
+}
+
+async function handleStreamIdentificationChange(item: ChannelVO, value: string) {
+  if (!canEditTransport.value || savingStreamIdentification.value.has(item.id) || value === (item.streamIdentification || ""))
+    return;
+  savingStreamIdentification.value = new Set(savingStreamIdentification.value).add(item.id);
+  try {
+    const res = await updateChannelStreamIdentification(item.id, value);
+    if (res.code !== 0) {
+      Message.error(res.message || "播放码流配置保存失败");
+      return;
+    }
+    const current = channels.value.find(channel => channel.id === item.id);
+    if (current) current.streamIdentification = value;
+    Message.success("播放码流配置已保存，下次新建直播时使用");
+  } catch (error: any) {
+    Message.error(error?.message || "播放码流配置保存失败");
+  } finally {
+    const pending = new Set(savingStreamIdentification.value);
+    pending.delete(item.id);
+    savingStreamIdentification.value = pending;
   }
 }
 
@@ -4458,6 +4524,37 @@ onUnmounted(() => {
                       </template>
                       <strong v-else>{{ streamTransportText(item.streamTransport) }}</strong>
                     </div>
+                    <div>
+                      <span>播放码流</span>
+                      <a-select
+                        v-if="canEditTransport"
+                        :model-value="item.streamIdentification || ''"
+                        :disabled="savingStreamIdentification.has(item.id)"
+                        size="small"
+                        class="channel-card-inline-select channel-stream-select"
+                        :aria-label="`播放码流：${streamIdentificationText(item.streamIdentification)}`"
+                        :title="streamIdentificationText(item.streamIdentification)"
+                        @click.stop
+                        @dblclick.stop
+                        @change="(value: string) => handleStreamIdentificationChange(item, value)"
+                      >
+                        <a-option value="">设备默认</a-option>
+                        <a-optgroup v-for="group in streamIdentificationGroups" :key="group.label" :label="group.label">
+                          <a-option
+                            v-for="option in group.items"
+                            :key="option.value"
+                            :value="option.value"
+                            :label="`${group.label} · ${option.label}`"
+                          >
+                            {{ option.label }} ({{ option.value }})
+                          </a-option>
+                        </a-optgroup>
+                      </a-select>
+                      <strong v-else>{{ streamIdentificationText(item.streamIdentification) }}</strong>
+                    </div>
+                    <div v-if="streamIdentificationNotice(item)" class="channel-stream-notice">
+                      {{ streamIdentificationNotice(item) }}
+                    </div>
                   </div>
                   <div class="channel-card-switches">
                     <div class="switch-item">
@@ -4897,6 +4994,13 @@ onUnmounted(() => {
                   >
                   <span v-if="deviceDetail.reportedVersion" class="sub mono">· X-GB-Ver {{ deviceDetail.reportedVersion }}</span>
                 </span>
+                <span class="k">字符集</span>
+                <span class="v">
+                  {{ reportedCharsetText(deviceDetail.reportedCharset, deviceDetail.wireCharset) }}
+                  <span v-if="deviceDetail.reportedCharsetAt" class="sub mono"
+                    >· {{ dateTime(deviceDetail.reportedCharsetAt) }}</span
+                  >
+                </span>
               </div>
             </div>
 
@@ -5044,6 +5148,7 @@ onUnmounted(() => {
       :width="'min(1040px, 94vw)'"
       :footer="false"
       :mask-closable="false"
+      :on-before-cancel="beforeChannelConfigCancel"
       :align-center="true"
       unmount-on-close
     >
@@ -5083,72 +5188,19 @@ onUnmounted(() => {
       </template>
 
       <div v-if="channelOperationTarget" class="channel-config-shell">
-        <a-tabs
-          class="channel-config-tabs"
-          :active-key="channelOperationTab"
-          size="small"
-          :animation="false"
-          lazy-load
-          @update:active-key="channelOperationTab = $event as ChannelOperationTab"
-        >
-          <a-tab-pane key="config" title="设备配置" :disabled="!canViewDeviceFacts" />
-          <a-tab-pane key="status" title="设备状态" :disabled="!canViewDeviceFacts" />
-          <a-tab-pane key="snapshot" title="抓拍参数" :disabled="!canSnapshotDevice" />
-          <a-tab-pane key="storage" title="存储卡" :disabled="!canViewDeviceFacts" />
-        </a-tabs>
-
-        <div class="channel-config-pane">
-          <!--
-            「设备配置」= GB/T 28181 配置族（A.2.3.2 下发 / A.2.4.7 查询 / A.2.6.9 应答）里
-            **不需要播放上下文**的那四组：录像计划 / 报警录像 / 报警上报 / 基本参数。
-            ⛔ 这里是这四组**唯一**的界面入口：设备详情抽屉已被断言锁成只读概览
-               （`index.deviceDetailTabs.test.ts` 的 `not.toContain("openDeviceRecordPlan(deviceDetail)")`），
-               播放控制台侧栏也被锁成只有视频编码（`PlayConsoleLinked.test.ts`）。
-            ⛔ `embedded` 必带：不带就是一个 `position: fixed` 的全屏遮罩，会盖在对话框上面。
-            ⛔ `nav-side` 是侧栏竖排导航：宽对话框里顺着左边排比横排一行更符合"配置页"的形状。
-            ⛔ 用 `v-if`（`v-else-if` 链）而不是 `v-show`：切走要销毁，否则那四组的回读轮询
-               会在后台空转，还会在下次打开时拿着上一次的通道草稿。
-          -->
-          <DeviceConfigDrawer
-            v-if="channelOperationTab === 'config' && canViewDeviceFacts"
-            embedded
-            config-only
-            nav-side
-            :visible="channelOperationVisible"
-            :group-keys="CHANNEL_CONFIG_GROUPS"
-            :device-code="channelOperationTarget.deviceId"
-            :online="channelOperationTarget.status === 1"
-            :channel-id="channelOperationTarget.id"
-            :channel-name="displayName(channelOperationTarget)"
-            :can-read="canViewDeviceFacts"
-            :can-apply="canControlChannelConfig && channelOperationTarget.status === 1"
-          />
-          <SnapshotConfigPanel
-            v-else-if="channelOperationTab === 'snapshot' && canSnapshotDevice"
-            v-model:channel-id="channelOperationTarget.id"
-            :channel-options="channelOperationOptions"
-            :show-picker="false"
-            :can-snapshot="canSnapshotDevice"
-          />
-          <DeviceStatusFactsPanel
-            v-else-if="channelOperationTab === 'status' && canViewDeviceFacts"
-            v-model:channel-id="channelOperationTarget.id"
-            :channel-options="channelOperationOptions"
-            :active="channelOperationVisible"
-            :show-picker="false"
-            :can-view="canViewDeviceFacts"
-          />
-          <StorageCardStatusPanel
-            v-else-if="channelOperationTab === 'storage' && canViewDeviceFacts"
-            v-model:channel-id="channelOperationTarget.id"
-            :channel-options="channelOperationOptions"
-            :active="channelOperationVisible"
-            :show-picker="false"
-            :can-view="canViewDeviceFacts"
-            :can-format="canFormatStorageCard"
-            :device-label="channelOperationTarget.deviceId"
-          />
-        </div>
+        <ChannelConfigWorkspace
+          :key="channelOperationTarget.id"
+          ref="channelWorkspace"
+          :channel-id="channelOperationTarget.id"
+          :channel-name="displayName(channelOperationTarget)"
+          :device-code="channelOperationTarget.deviceId"
+          :online="channelOperationTarget.status === 1"
+          :channel-options="channelOperationOptions"
+          :can-read="canViewDeviceFacts"
+          :can-apply="canControlChannelConfig"
+          :can-snapshot="canSnapshotDevice"
+          :can-format="canFormatStorageCard"
+        />
       </div>
     </a-modal>
 
@@ -6940,6 +6992,11 @@ onUnmounted(() => {
 .channel-card-info > div {
   display: contents;
 }
+.channel-card-info > .channel-stream-notice {
+  display: block;
+  grid-column: 1 / -1;
+  color: var(--uvp-text-tertiary);
+}
 .channel-card-info span {
   color: var(--uvp-text-tertiary);
 }
@@ -6949,7 +7006,10 @@ onUnmounted(() => {
   color: var(--uvp-text-primary);
 }
 :deep(.channel-card-inline-select.arco-select-view-single) {
-  width: 130px !important;
+  width: 180px !important;
+}
+:deep(.channel-stream-select.arco-select-view-single) {
+  width: 180px !important;
 }
 .channel-card-info .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -8202,31 +8262,15 @@ onUnmounted(() => {
  * ⛔ `DeviceConfigDrawer` 的嵌入形态是 `.dcg-host--embedded{display:block}` +
  *    内层 `.dcg-window--embedded{height:100%}` —— 父级没有确定高度时 `100%` 解析成 auto，
  *    表现是面板塌成内容高度、状态条贴在半截。所以这里必须给**具体高度**，不能写 `100%`。
- * ⛔ 用 `calc(100vh - 208px)`：208 ≈ 对话框上下留白 + 标题栏 56 + 页签 40 + 内边距，
- *    留够之后内容自己滚，不会再套一层外层滚动条。
+ * 为标题与窗口边缘留出空间，正文与底栏各自在内部布局。
  */
 .channel-config-shell {
   display: flex;
   flex-direction: column;
   gap: 0;
-  height: min(680px, calc(100vh - 208px));
-  min-height: 420px;
+  height: min(680px, calc(100dvh - 160px));
+  min-height: min(420px, calc(100dvh - 160px));
   overflow: hidden;
-}
-.channel-config-tabs {
-  flex: none;
-}
-.channel-config-pane {
-  display: flex;
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: hidden;
-
-  > * {
-    flex: 1 1 auto;
-    min-width: 0;
-    min-height: 0;
-  }
 }
 
 /* 概览:分区标题 + 细分隔线,**不画卡片框** —— 原「设备信息」页是 5 个等权重

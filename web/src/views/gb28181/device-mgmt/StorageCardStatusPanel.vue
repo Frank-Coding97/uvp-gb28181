@@ -156,16 +156,24 @@ function schedulePoll(channelId: number, operationId: string, attempt: number, c
     pollTimer = null;
     if (isStale(channelId, currentGeneration)) return;
     let settled = false;
+    let operationError = "";
     try {
       const response = await getPtzOperation(channelId, operationId);
       settled = operationSettled(response.data?.status);
+      if (settled && response.data?.status !== "accepted") {
+        operationError = response.data?.errorMessage || response.data?.errorCode || "存储卡状态查询失败";
+      }
     } catch {
       // 读 operation 失败按「未终态」处理，继续退避重试；
       // 次数用尽后无论如何收尾一次，不让按钮永远转圈。
     }
     if (isStale(channelId, currentGeneration)) return;
     if (settled || attempt >= STORAGE_CARD_POLL_DELAYS_MS.length - 1) {
-      await load(channelId, false);
+      const read = load(channelId, false);
+      const readGeneration = generation;
+      await read;
+      if (isStale(channelId, readGeneration)) return;
+      error.value = [error.value, operationError].filter(Boolean).join("；");
       // ⛔ 只在**重读完列表之后**再决定要不要继续跟踪：那一步才拿到"设备刚报上来的
       //    卡状态"，在此之前 cards 里还是上一轮的事实，按它判断会过早收工。
       continueFormatWatch(channelId);
@@ -294,6 +302,8 @@ const channelOnline = computed(() => props.channelOptions.find(option => option.
 const emptyText = computed(() => {
   if (pending.value) return "正在查询存储卡…";
   if (!loaded.value) return "尚未读取存储卡状态。";
+  if (freshness.value === "unknown") return "尚未读取到存储卡状态，请向设备查询。";
+  if (freshness.value === "stale") return "暂无有效的存储卡状态，请重新向设备查询。";
   return "设备未安装存储卡。";
 });
 const freshnessText = computed(() => {
@@ -577,10 +587,12 @@ function formatCapacity(mb: number | null | undefined) {
 .storage-panel {
   display: grid;
   gap: 12px;
+  align-content: start;
 }
 .storage-group {
   display: grid;
   gap: 10px;
+  align-content: start;
   padding: 12px 14px 14px;
   background: var(--uvp-panel-bg);
   border: 1px solid var(--uvp-panel-border);
@@ -613,10 +625,12 @@ function formatCapacity(mb: number | null | undefined) {
 .storage-list {
   display: grid;
   gap: 12px;
+  align-content: start;
 }
 .storage-item {
   display: grid;
   gap: 6px;
+  align-content: start;
 }
 .storage-item-line {
   display: flex;

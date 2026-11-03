@@ -250,7 +250,9 @@ function scheduleRefresh(channelId: number, currentGeneration: number) {
       const tracked = result.tracked;
       if (result.operation) {
         const serverDeadline = result.operation.deadlineAt ? Date.parse(result.operation.deadlineAt) : Number.NaN;
-        if (Number.isFinite(serverDeadline)) tracked.deadlineAt = serverDeadline;
+        // queued 的截止只约束入队，调度事务提交后会切换到传输窗口；
+        // 不能把它当作整次查询的截止，抢在服务端成功前结束轮询。
+        if (result.operation.status !== "queued" && Number.isFinite(serverDeadline)) tracked.deadlineAt = serverDeadline;
         tracked.terminal = DEVICE_STATUS_TERMINAL_PHASES.has(result.operation.status);
         tracked.error =
           tracked.terminal && result.operation.status !== "accepted"
@@ -502,10 +504,12 @@ function alarmFactText(fact: DeviceAlarmFact) {
 .fact-panel {
   display: grid;
   gap: 12px;
+  align-content: start;
 }
 .fact-group {
   display: grid;
   gap: 10px;
+  align-content: start;
   padding: 12px 14px 14px;
   background: var(--uvp-panel-bg);
   border: 1px solid var(--uvp-panel-border);
@@ -558,7 +562,7 @@ function alarmFactText(fact: DeviceAlarmFact) {
   color: var(--uvp-danger);
 }
 .fact-field-grid .v.fact-unknown {
-  color: var(--uvp-warning);
+  color: var(--uvp-text-tertiary);
 }
 .fact-field-grid .v.fact-none {
   color: var(--uvp-text-tertiary);
@@ -593,7 +597,7 @@ function alarmFactText(fact: DeviceAlarmFact) {
   color: var(--uvp-danger);
 }
 .fact-alarm-chip.fact-unknown {
-  color: var(--uvp-warning);
+  color: var(--uvp-text-tertiary);
 }
 .fact-error {
   margin: 0;

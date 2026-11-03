@@ -1,6 +1,7 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia } from "pinia";
 import { ref } from "vue";
+import { Input, Modal } from "@arco-design/web-vue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import DeviceConfigDrawer from "./DeviceConfigDrawer.vue";
 import { CONFIG_GROUPS } from "./deviceConfigGroups";
@@ -1292,6 +1293,15 @@ describe("DeviceConfigDrawer 挂在通道配置对话框（navSide 侧栏导航�
     expect(wrapper.find("[data-testid='dcg-embedded-actions']").exists()).toBe(false);
   });
 
+  it("底部禁用操作仍清晰可读，禁用的主操作保留按钮面", async () => {
+    const wrapper = mountSide();
+    await flushPromises();
+
+    const footer = wrapper.get("[data-testid='dcg-actions']");
+    expect(footer.get("[data-testid='dcg-reset']").attributes("disabled")).toBeDefined();
+    expect(footer.get("[data-testid='dcg-apply']").attributes("disabled")).toBeDefined();
+  });
+
   it("底栏左侧交代「这份草稿是基于哪次回读改的」，不是一片空白", async () => {
     const wrapper = mountSide();
     await flushPromises();
@@ -1299,5 +1309,303 @@ describe("DeviceConfigDrawer 挂在通道配置对话框（navSide 侧栏导航�
     // 回读到事实时给时间点；没回读时给「尚未从设备回读」——两种都要有话说，
     // 空着会让人以为"这排按钮跟上面的表单没关系"。
     expect(wrapper.get("[data-testid='dcg-actions']").text()).toContain("最近回读");
+  });
+
+  /**
+   * 点不动要说为什么（2026-11-03 按钮专题）。
+   *
+   * ⛔ 三个按钮在「没改动 / 离线 / 只读账号 / 正在通信」下都会变灰，而灰面是**刻意保留按钮体**
+   *    的（文字用 secondary，为的是"可读"，见 `DeviceConfigControls.test.ts` 那条契约）。
+   *    代价是看不出**为什么**点不动 —— 用户分不清"没权限"和"还没改东西"，只能靠试。
+   */
+  it("按钮禁用时用 title 说明原因，而不是只把颜色调灰", async () => {
+    const wrapper = mountSide();
+    await flushPromises();
+
+    // 刚读回来、一个字都没改：两个"写"按钮都灰，但要分别说清"无需还原 / 没有改动"。
+    expect(wrapper.get("[data-testid='dcg-reset']").attributes("title")).toContain("没有未下发的改动");
+    expect(wrapper.get("[data-testid='dcg-apply']").attributes("title")).toContain("没有未下发的改动");
+    expect(wrapper.get("[data-testid='dcg-read']").attributes("title")).toContain("向设备查询");
+    wrapper.unmount();
+
+    // 通道离线：读取/下发都不该含糊成"点不动"。
+    const offline = mountSide({ online: false });
+    await flushPromises();
+    expect(offline.get("[data-testid='dcg-read']").attributes("title")).toContain("通道离线");
+    expect(offline.get("[data-testid='dcg-apply']").attributes("title")).toContain("通道离线");
+    offline.unmount();
+
+    // 只读账号：说权限，不要说成"离线"。
+    const readonly = mountSide({ canApply: false });
+    await flushPromises();
+    expect(readonly.get("[data-testid='dcg-apply']").attributes("title")).toContain("没有下发配置的权限");
+    readonly.unmount();
+  });
+
+  it("读取/下发进行中，按钮自己给出进度（文案 + loading 态）", async () => {
+    const wrapper = mountSide();
+    await flushPromises();
+
+    let acceptRead!: (value: unknown) => void;
+    api.getChannelDeviceConfigs.mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          acceptRead = resolve;
+        })
+    );
+    await wrapper.get("[data-testid='dcg-read']").trigger("click");
+    await flushPromises();
+    expect(wrapper.get("[data-testid='dcg-read']").text()).toBe("读取中…");
+    // 回读到录像计划事实之后才有可改的字段（空应答下本组整块不可编辑）。
+    acceptRead(deviceConfigOk([{ configType: "VideoRecordPlan", payload: { recordEnable: 1, streamNumber: 0, schedules: [] } }]));
+    await flushPromises();
+    expect(wrapper.get("[data-testid='dcg-read']").text()).toBe("读取");
+
+    let acceptApply!: (value: unknown) => void;
+    api.applyChannelDeviceConfigs.mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          acceptApply = resolve;
+        })
+    );
+    await wrapper.get("[data-testid='dcg-field-recordEnable'] button").trigger("click");
+    await wrapper.get("[data-testid='dcg-apply']").trigger("click");
+    await flushPromises();
+    expect(wrapper.get("[data-testid='dcg-apply']").text()).toBe("下发中…");
+    acceptApply({ code: 0, data: { reconcilePending: false, configTypes: ["VideoRecordPlan"] } });
+    await flushPromises();
+    expect(wrapper.get("[data-testid='dcg-apply']").text()).toBe("下发到设备");
+    wrapper.unmount();
+  });
+});
+
+describe("通道配置工作区的草稿隔离", () => {
+  beforeEach(() => {
+    vi.stubGlobal("ref", ref);
+    api.applyChannelDeviceConfigs.mockReset();
+    api.getChannelVideoParams.mockReset().mockResolvedValue(readOk());
+    api.getChannelDeviceConfigs.mockReset().mockResolvedValue(
+      deviceConfigOk([
+        { configType: "BasicParam", payload: { name: "原名称", heartBeatInterval: 60, heartBeatCount: 3 } },
+        { configType: "VideoRecordPlan", payload: { recordEnable: 1, streamNumber: 0, schedules: [] } }
+      ])
+    );
+  });
+
+  function workspaceDrawer() {
+    return mountDrawer({
+      embedded: true,
+      configOnly: true,
+      navSide: true,
+      externalNavigation: true,
+      groupKeys: ["record-plan", "alarm-record", "alarm-report", "basic"],
+      activeGroupKey: "basic"
+    });
+  }
+
+  it("外部导航不重复显示内导航与空标题，也不加载视频参数", async () => {
+    const wrapper = workspaceDrawer();
+    await flushPromises();
+    expect(wrapper.find(".dcg-nav").exists()).toBe(false);
+    expect(wrapper.find(".dcg-params-head").exists()).toBe(false);
+    expect(api.getChannelVideoParams).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("工作区初次加载将设备基本参数与通道缓存分开查询", async () => {
+    api.getChannelDeviceConfigs.mockImplementation((_channelId, options) =>
+      Promise.resolve(
+        options.configTypes.length === 1 && options.configTypes[0] === "BasicParam"
+          ? deviceConfigOk([
+              { configType: "BasicParam", payload: { name: "设备级名称", heartBeatInterval: 60, heartBeatCount: 3 } }
+            ])
+          : deviceConfigOk([], options.configTypes)
+      )
+    );
+    const wrapper = workspaceDrawer();
+    await flushPromises();
+    expect(api.getChannelDeviceConfigs).toHaveBeenCalledWith(3539, { refresh: false, configTypes: ["BasicParam"] });
+    expect(api.getChannelDeviceConfigs).toHaveBeenCalledWith(3539, {
+      refresh: false,
+      configTypes: ["VideoRecordPlan"]
+    });
+    expect(api.getChannelDeviceConfigs).toHaveBeenCalledWith(3539, { refresh: false, configTypes: ["VideoAlarmRecord"] });
+    expect(api.getChannelDeviceConfigs).toHaveBeenCalledWith(3539, { refresh: false, configTypes: ["AlarmReport"] });
+    expect((wrapper.get("[data-testid='dcg-field-name'] input").element as HTMLInputElement).value).toBe("设备级名称");
+    wrapper.unmount();
+  });
+
+  it("真实 Arco 输入框键入后立即保存草稿，失焦不回弹", async () => {
+    const wrapper = mount(DeviceConfigDrawer, {
+      props: {
+        visible: true,
+        channelId: 3539,
+        online: true,
+        embedded: true,
+        configOnly: true,
+        externalNavigation: true,
+        navSide: true,
+        groupKeys: ["basic"],
+        activeGroupKey: "basic"
+      },
+      global: { plugins: [createPinia()], stubs: { "a-input": { ...Input } } }
+    });
+    await flushPromises();
+    const input = wrapper.get("[data-testid='dcg-field-name'] input");
+    (input.element as HTMLInputElement).value = "新名称";
+    await input.trigger("input");
+    await flushPromises();
+    expect((input.element as HTMLInputElement).value).toBe("新名称");
+    expect((wrapper.vm as any).dirtyCount).toBe(1);
+    await input.trigger("blur");
+    expect((input.element as HTMLInputElement).value).toBe("新名称");
+    const interval = wrapper.get("[data-testid='dcg-field-heartBeatInterval'] .cfg-slider-input input");
+    (interval.element as HTMLInputElement).value = "";
+    await interval.trigger("input");
+    expect((interval.element as HTMLInputElement).value).toBe("");
+    await interval.trigger("blur");
+    expect((interval.element as HTMLInputElement).value).toBe("");
+    (interval.element as HTMLInputElement).value = "999999";
+    await interval.trigger("input");
+    await interval.trigger("keydown", { key: "Enter", keyCode: 13 });
+    expect((interval.element as HTMLInputElement).value).toBe("86400");
+    wrapper.unmount();
+  });
+
+  it("切组保留草稿，其他组回读不会覆盖，总脏项包含隐藏组", async () => {
+    const wrapper = workspaceDrawer();
+    await flushPromises();
+    await wrapper.get("[data-testid='dcg-field-name'] input").setValue("新名称");
+    expect((wrapper.vm as any).dirtyCount).toBe(1);
+    await wrapper.setProps({ activeGroupKey: "record-plan" });
+    await wrapper.get("[data-testid='dcg-read']").trigger("click");
+    await flushPromises();
+    expect((wrapper.vm as any).dirtyCount).toBe(1);
+    await wrapper.setProps({ activeGroupKey: "basic" });
+    expect((wrapper.get("[data-testid='dcg-field-name'] input").element as HTMLInputElement).value).toBe("新名称");
+    wrapper.unmount();
+  });
+
+  it("读取中的组不显示上一次未返回的警告", async () => {
+    const response = deviceConfigOk([], ["VideoRecordPlan"]);
+    response.data.reconcile.state = "pending";
+    api.getChannelDeviceConfigs.mockResolvedValue(response);
+    const wrapper = workspaceDrawer();
+    await flushPromises();
+    await wrapper.setProps({ activeGroupKey: "record-plan" });
+    expect(wrapper.find("[data-testid='dcg-absent-notice']").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("下发后的新编辑不会被自动回读覆盖", async () => {
+    vi.useFakeTimers();
+    const wrapper = workspaceDrawer();
+    try {
+      await flushPromises();
+      await wrapper.get("[data-testid='dcg-field-name'] input").setValue("已下发名称");
+      api.applyChannelDeviceConfigs.mockResolvedValue({ code: 0, data: { reconcilePending: true, configTypes: ["BasicParam"] } });
+      await wrapper.get("[data-testid='dcg-apply']").trigger("click");
+      await flushPromises();
+      expect(api.applyChannelDeviceConfigs).toHaveBeenCalledTimes(1);
+      await wrapper.get("[data-testid='dcg-field-name'] input").setValue("继续编辑名称");
+      api.getChannelDeviceConfigs.mockResolvedValue(
+        deviceConfigOk([{ configType: "BasicParam", payload: { name: "已下发名称", heartBeatInterval: 60, heartBeatCount: 3 } }])
+      );
+      await vi.advanceTimersByTimeAsync(1200);
+      expect((wrapper.get("[data-testid='dcg-field-name'] input").element as HTMLInputElement).value).toBe("继续编辑名称");
+      expect((wrapper.vm as any).dirtyCount).toBe(1);
+      await wrapper.get("[data-testid='dcg-reset']").trigger("click");
+      expect((wrapper.get("[data-testid='dcg-field-name'] input").element as HTMLInputElement).value).toBe("已下发名称");
+    } finally {
+      wrapper.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it("连续下发不同分组时，自动回读同时跟踪尚未完成的分组", async () => {
+    vi.useFakeTimers();
+    const wrapper = workspaceDrawer();
+    try {
+      await flushPromises();
+      api.applyChannelDeviceConfigs.mockResolvedValueOnce({
+        code: 0,
+        data: { reconcilePending: true, configTypes: ["BasicParam"] }
+      });
+      await wrapper.get("[data-testid='dcg-field-name'] input").setValue("已下发名称");
+      await wrapper.get("[data-testid='dcg-apply']").trigger("click");
+      await flushPromises();
+      await wrapper.setProps({ activeGroupKey: "record-plan" });
+      api.applyChannelDeviceConfigs.mockResolvedValueOnce({
+        code: 0,
+        data: { reconcilePending: true, configTypes: ["VideoRecordPlan"] }
+      });
+      await wrapper.get("[data-testid='dcg-field-recordEnable'] button").trigger("click");
+      await wrapper.get("[data-testid='dcg-apply']").trigger("click");
+      await flushPromises();
+      expect(api.applyChannelDeviceConfigs).toHaveBeenCalledTimes(2);
+      api.getChannelDeviceConfigs.mockClear();
+      api.getChannelDeviceConfigs.mockImplementation((_channelId, options) => {
+        const response = deviceConfigOk();
+        if (options.configTypes.includes("VideoRecordPlan")) response.data.reconcile.state = "pending";
+        return Promise.resolve(response);
+      });
+      await vi.advanceTimersByTimeAsync(1200);
+      expect(api.getChannelDeviceConfigs.mock.calls.map(call => call[1].configTypes)).toEqual([
+        ["VideoRecordPlan"],
+        ["BasicParam"]
+      ]);
+      // 基本参数先完成，录像计划仍在等应答时不能提前结束轮询。
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(api.getChannelDeviceConfigs).toHaveBeenCalledTimes(4);
+    } finally {
+      wrapper.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it("关闭工作区后才收到下发应答，不再启动后台回读", async () => {
+    vi.useFakeTimers();
+    const wrapper = workspaceDrawer();
+    try {
+      await flushPromises();
+      api.getChannelDeviceConfigs.mockClear();
+      let accept!: (value: unknown) => void;
+      api.applyChannelDeviceConfigs.mockImplementationOnce(
+        () =>
+          new Promise(resolve => {
+            accept = resolve;
+          })
+      );
+      await wrapper.get("[data-testid='dcg-field-name'] input").setValue("已下发名称");
+      await wrapper.get("[data-testid='dcg-apply']").trigger("click");
+      wrapper.unmount();
+      accept({ code: 0, data: { reconcilePending: true, configTypes: ["BasicParam"] } });
+      await flushPromises();
+      await vi.advanceTimersByTimeAsync(1200);
+      expect(api.getChannelDeviceConfigs).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("重新读取脏组先确认，取消保留草稿，确认后才以设备值替换", async () => {
+    const confirm = vi.spyOn(Modal, "confirm").mockImplementation(() => ({ close: vi.fn(), update: vi.fn() }));
+    const wrapper = workspaceDrawer();
+    await flushPromises();
+    api.getChannelDeviceConfigs.mockClear();
+    await wrapper.get("[data-testid='dcg-field-name'] input").setValue("本地草稿");
+    await wrapper.get("[data-testid='dcg-read']").trigger("click");
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(api.getChannelDeviceConfigs).not.toHaveBeenCalled();
+    (confirm.mock.calls[0][0] as any).onCancel?.();
+    expect((wrapper.get("[data-testid='dcg-field-name'] input").element as HTMLInputElement).value).toBe("本地草稿");
+    await wrapper.get("[data-testid='dcg-read']").trigger("click");
+    await (confirm.mock.calls[1][0] as any).onOk();
+    await flushPromises();
+    expect(api.getChannelDeviceConfigs).toHaveBeenCalledTimes(1);
+    expect((wrapper.get("[data-testid='dcg-field-name'] input").element as HTMLInputElement).value).toBe("原名称");
+    expect((wrapper.vm as any).dirtyCount).toBe(0);
+    wrapper.unmount();
+    confirm.mockRestore();
   });
 });

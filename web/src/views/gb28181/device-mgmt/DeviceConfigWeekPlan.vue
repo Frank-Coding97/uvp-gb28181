@@ -249,7 +249,7 @@ const coverageText = computed(() => {
             placeholder="HH:MM:SS"
             :aria-label="`周${WEEKDAY_LABELS[day.weekDayNum - 1]}第 ${index + 1} 段开始`"
             :data-testid="`dcw-start-${day.weekDayNum}-${index}`"
-            @change="setSegment(day.weekDayNum, index, 'start', $event)"
+            @update:model-value="setSegment(day.weekDayNum, index, 'start', $event)"
           />
           <span class="dcw-dash">→</span>
           <a-input
@@ -260,7 +260,7 @@ const coverageText = computed(() => {
             placeholder="HH:MM:SS"
             :aria-label="`周${WEEKDAY_LABELS[day.weekDayNum - 1]}第 ${index + 1} 段结束`"
             :data-testid="`dcw-stop-${day.weekDayNum}-${index}`"
-            @change="setSegment(day.weekDayNum, index, 'stop', $event)"
+            @update:model-value="setSegment(day.weekDayNum, index, 'stop', $event)"
           />
           <a-button
             html-type="button"
@@ -354,7 +354,7 @@ const coverageText = computed(() => {
 
 .dcw-row {
   display: grid;
-  grid-template-columns: 68px minmax(0, 1fr) 44px;
+  grid-template-columns: 26px 34px minmax(0, 1fr) 44px;
   gap: 8px;
   align-items: center;
 }
@@ -365,6 +365,7 @@ const coverageText = computed(() => {
   align-items: center;
   width: 26px;
   height: 14px;
+  min-height: 0;
   padding: 0 2px;
   cursor: pointer;
   background: var(--uvp-panel-border, #d5dfee);
@@ -489,7 +490,7 @@ const coverageText = computed(() => {
 
   /* ⛔ 预留一个固定高度：没排班的天也要占位，否则开关一开一关整张表会上下跳一行。 */
   min-height: 24px;
-  padding-left: 68px;
+  padding-left: 76px;
 
   &.is-empty {
     min-height: 6px;
@@ -502,9 +503,10 @@ const coverageText = computed(() => {
   align-items: center;
 }
 
-.dcw-time {
-  width: 68px;
-  height: 22px;
+.dcw .dcw-time.arco-input-wrapper {
+  width: 110px;
+  height: 28px;
+  padding: 0 6px;
   font-size: 11px;
   color: var(--uvp-text-primary);
   background: var(--uvp-dialog-control-bg, #ffffff);
@@ -515,8 +517,8 @@ const coverageText = computed(() => {
     border-color: var(--uvp-brand);
   }
 
-  :deep(.arco-input) {
-    padding: 0 5px;
+  :deep(.arco-input.arco-input-size-medium) {
+    padding: 0;
     font-size: 11px;
     color: var(--uvp-text-primary);
     text-align: center;

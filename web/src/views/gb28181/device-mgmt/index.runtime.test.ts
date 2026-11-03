@@ -66,6 +66,7 @@ const api = vi.hoisted(() => ({
   refreshDeviceCatalog: vi.fn(),
   updateCloudRecording: vi.fn(),
   updateChannelStreamTransport: vi.fn(),
+  updateChannelStreamIdentification: vi.fn(),
   updateChannel: vi.fn(),
   updateDevice: vi.fn(),
   stopPlay: vi.fn()
@@ -283,6 +284,7 @@ const routeQuery = vi.hoisted(() => ({ returnKey: undefined as string | undefine
 vi.mock("vue-router", () => ({
   useRoute: () => ({ query: routeQuery, params: {}, path: "/gb28181/devices" }),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  onBeforeRouteLeave: vi.fn(),
   createRouter: () => ({
     install: vi.fn(),
     push: vi.fn(),
@@ -524,11 +526,13 @@ function mountPage(options: { teleport?: boolean } = {}) {
         "a-input-password": passthroughStub,
         "a-button": { props: ["disabled"], template: `<button :disabled="disabled"><slot /></button>` },
         "a-select": {
-          props: ["modelValue"],
-          emits: ["update:modelValue"],
+          name: "ASelect",
+          props: ["modelValue", "disabled"],
+          emits: ["update:modelValue", "change"],
           template: `<div><button type="button" data-testid="select-online" @click="$emit('update:modelValue', 'online')">在线</button><slot /></div>`
         },
         "a-option": passthroughStub,
+        "a-optgroup": passthroughStub,
         "a-doption": { props: ["disabled"], template: `<button :disabled="disabled"><slot /></button>` },
         "a-pagination": {
           props: ["current", "pageSize", "total", "pageSizeOptions"],
@@ -583,6 +587,7 @@ describe("device-mgmt round-2 修复回归", () => {
       }
     });
     api.listChannels.mockReset().mockResolvedValue(okList());
+    api.updateChannelStreamIdentification.mockReset();
     api.listMapMarkers.mockReset().mockResolvedValue(okList());
     api.listMapClusters.mockReset().mockResolvedValue({ code: 0, message: "", data: { clusters: [] } });
     // 默认"平台还没设过中心"：进地图时不挪镜头，仍按数据包围盒走（与既有用例的假设一致）
@@ -598,6 +603,32 @@ describe("device-mgmt round-2 修复回归", () => {
     window.localStorage.clear();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("通道配置随列表刷新同步上下线状态，不重建当前工作区", async () => {
+    user.account.permissions = ["gb28181:device:view", "gb28181:ptz:view"];
+    const channel = { ...coordinatedChannel, deviceId: "34020000002000000031", status: 0 };
+    api.listChannels.mockResolvedValue(okList(1, [channel]));
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get('[data-asset-kind="channel"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('[aria-label="通道操作"]').trigger("click");
+    await flushPromises();
+    const workspace = wrapper.findComponent({ name: "ChannelConfigWorkspace" });
+    const workspaceVm = workspace.vm;
+    expect(workspace.props("online")).toBe(false);
+
+    for (const status of [1, 0]) {
+      api.listChannels.mockResolvedValue(okList(1, [{ ...channel, status }]));
+      await vi.advanceTimersByTimeAsync(10_000);
+      await flushPromises();
+      expect(workspace.props("online")).toBe(status === 1);
+      expect(workspace.props("channelOptions")).toEqual([expect.objectContaining({ online: status === 1 })]);
+      expect(wrapper.get(".channel-config-online").text()).toBe(status === 1 ? "在线" : "离线");
+      expect(wrapper.findComponent({ name: "ChannelConfigWorkspace" }).vm).toBe(workspaceVm);
+    }
+    wrapper.unmount();
   });
 
   it("列表不显示工作区提示，选择设备后保留设备信息和操作", async () => {
@@ -876,6 +907,106 @@ describe("device-mgmt round-2 修复回归", () => {
     expect(wrapper.get("article.channel-summary-card").text()).toContain("入口通道");
     expect(wrapper.find(".card-grid > template").exists()).toBe(false);
     wrapper.unmount();
+  });
+
+  it("saves a channel stream choice without changing the current live request", async () => {
+    user.account.permissions = ["gb28181:device:view", "gb28181:channel:stream-transport:update"];
+    api.listChannels.mockResolvedValue(
+      okList(1, [
+        {
+          id: 1,
+          channelId: "channel-a",
+          deviceId: "device-a",
+          name: "入口",
+          status: 1,
+          streamId: "live",
+          streamIdentification: "stream:0",
+          currentStreamIdentification: "stream:0"
+        }
+      ])
+    );
+    let resolveSave!: (value: unknown) => void;
+    api.updateChannelStreamIdentification.mockReturnValue(
+      new Promise(resolve => {
+        resolveSave = resolve;
+      })
+    );
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get('[data-asset-kind="channel"]').trigger("click");
+    await flushPromises();
+    const card = wrapper.get("article.channel-summary-card");
+    expect(card.text()).toContain("当前直播已请求所选配置，设备实际码流未确认");
+    const select = card
+      .findAllComponents({ name: "ASelect" })
+      .find((component: any) => component.props("modelValue") === "stream:0");
+    expect(select).toBeDefined();
+    for (const value of [
+      "设备默认",
+      "stream:0",
+      "stream:1",
+      "streamnumber:0",
+      "streamnumber:1",
+      "streamprofile:0",
+      "streamprofile:1",
+      "streamMode:MAIN",
+      "streamMode:SUB"
+    ]) {
+      expect(select!.text()).toContain(value);
+    }
+    select!.vm.$emit("change", "streamMode:SUB");
+    select!.vm.$emit("change", "streamMode:SUB");
+    await flushPromises();
+    expect(api.updateChannelStreamIdentification).toHaveBeenCalledTimes(1);
+    expect(api.updateChannelStreamIdentification).toHaveBeenCalledWith(1, "streamMode:SUB");
+    expect(select!.props("disabled")).toBe(true);
+    resolveSave({ code: 0 });
+    await flushPromises();
+    expect(select!.props("modelValue")).toBe("streamMode:SUB");
+    expect(card.text()).toContain("当前直播未使用所选配置");
+    wrapper.unmount();
+  });
+
+  it("keeps the selected stream on save failure and hides editing without permission", async () => {
+    user.account.permissions = ["gb28181:device:view", "gb28181:channel:stream-transport:update"];
+    api.listChannels.mockResolvedValue(
+      okList(1, [
+        {
+          id: 1,
+          channelId: "channel-a",
+          deviceId: "device-a",
+          name: "入口",
+          status: 1,
+          streamId: "live",
+          streamIdentification: "stream:1",
+          currentStreamIdentification: null
+        }
+      ])
+    );
+    api.updateChannelStreamIdentification.mockResolvedValue({ code: 1, message: "保存失败" });
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get('[data-asset-kind="channel"]').trigger("click");
+    await flushPromises();
+    const card = wrapper.get("article.channel-summary-card");
+    expect(card.text()).toContain("当前直播请求的码流配置无法确认");
+    const select = card
+      .findAllComponents({ name: "ASelect" })
+      .find((component: any) => component.props("modelValue") === "stream:1");
+    expect(select).toBeDefined();
+    select!.vm.$emit("change", "");
+    await flushPromises();
+    expect(select!.props("modelValue")).toBe("stream:1");
+    wrapper.unmount();
+
+    user.account.permissions = ["gb28181:device:view"];
+    const readonly = mountPage();
+    await flushPromises();
+    await readonly.get('[data-asset-kind="channel"]').trigger("click");
+    await flushPromises();
+    expect(readonly.get("article.channel-summary-card").text()).toContain("stream 兼容 · 子码流");
+    expect(readonly.get("article.channel-summary-card").findAllComponents({ name: "ASelect" })).toHaveLength(0);
+    readonly.unmount();
   });
 
   it("底图跟随系统主题，换完必须把「正在加载地图」遮罩收掉", async () => {

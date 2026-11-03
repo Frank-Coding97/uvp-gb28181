@@ -59,7 +59,7 @@ function isStale(channelId: number, currentGeneration: number) {
 function statusText() {
   if (error.value) return "下发失败";
   const current = session.value;
-  if (!current) return "配置后由设备上传 JPEG";
+  if (!current) return pending.value ? "正在发起抓拍…" : "尚未开始抓拍";
   if (current.state === "completed") return `已完成 ${current.receivedCount}/${current.snapNum}`;
   if (current.state === "failed") return current.error || "抓拍失败";
   return `接收中 ${current.receivedCount}/${current.snapNum}`;
@@ -116,17 +116,30 @@ onBeforeUnmount(() => clearPolling());
 
 const selectedChannel = computed(() => props.channelOptions.find(option => option.value === props.channelId) ?? null);
 const formValid = computed(
-  () => Number(snapshotCount.value) >= 1 && Number(snapshotCount.value) <= 10 && Number(snapshotInterval.value) >= 1
+  () =>
+    Number.isInteger(snapshotCount.value) &&
+    Number(snapshotCount.value) >= 1 &&
+    Number(snapshotCount.value) <= 10 &&
+    Number.isInteger(snapshotInterval.value) &&
+    Number(snapshotInterval.value) >= 1 &&
+    Number(snapshotInterval.value) <= 3600
 );
+const taskRunning = computed(() => pending.value || (!!session.value && !["completed", "failed"].includes(session.value.state)));
 const canSend = computed(
-  () => props.canSnapshot && props.channelId !== null && selectedChannel.value?.online === true && formValid.value
+  () =>
+    !taskRunning.value &&
+    props.canSnapshot &&
+    props.channelId !== null &&
+    selectedChannel.value?.online === true &&
+    formValid.value
 );
 const blockedReason = computed(() => {
+  if (taskRunning.value) return "任务进行中，请等待图片接收完成";
   if (!props.canSnapshot) return "当前账号没有图像抓拍权限";
   if (props.channelOptions.length === 0) return "该设备下暂无通道，无法下发抓拍配置";
   if (props.channelId === null) return "请先选择一个目标通道";
   if (selectedChannel.value?.online !== true) return "目标通道离线，配置无法下发";
-  if (!formValid.value) return "张数需为 1-10，间隔需为 ≥1 秒的整数";
+  if (!formValid.value) return "张数需为 1-10，间隔需为 1-3600 秒的整数";
   return "";
 });
 
@@ -164,7 +177,7 @@ function openInLibrary() {
 
     <section class="fact-group">
       <header class="fact-group-head">
-        <span class="fact-group-title"><Camera :size="14" />图像抓拍配置</span>
+        <span class="fact-group-title"><Camera :size="14" />抓拍任务</span>
         <span class="fact-group-status">GBT28181 上报</span>
       </header>
 
@@ -173,6 +186,7 @@ function openInLibrary() {
           张数
           <a-input-number
             v-model="snapshotCount"
+            :disabled="taskRunning"
             class="snapshot-input"
             data-testid="snapshot-count"
             size="small"
@@ -186,6 +200,7 @@ function openInLibrary() {
           间隔（秒）
           <a-input-number
             v-model="snapshotInterval"
+            :disabled="taskRunning"
             class="snapshot-input"
             data-testid="snapshot-interval"
             size="small"
@@ -212,7 +227,7 @@ function openInLibrary() {
             <Loader2 v-if="pending" :size="13" class="spin" />
             <Camera v-else :size="13" />
           </template>
-          下发抓拍配置
+          开始抓拍
         </a-button>
         <span v-if="blockedReason" class="snapshot-hint" data-testid="snapshot-blocked">{{ blockedReason }}</span>
       </div>
@@ -244,10 +259,12 @@ function openInLibrary() {
 .snapshot-panel {
   display: grid;
   gap: 12px;
+  align-content: start;
 }
 .fact-group {
   display: grid;
   gap: 10px;
+  align-content: start;
   padding: 12px 14px 14px;
   background: var(--uvp-panel-bg);
   border: 1px solid var(--uvp-panel-border);

@@ -115,10 +115,11 @@ function onInputCommit(valueOrEvent: string | Event) {
         class="cfg-slider-input"
         allow-clear
         inputmode="numeric"
-        :model-value="modelValue ?? ''"
+        :model-value="String(modelValue ?? '')"
         :disabled="disabled"
         :placeholder="placeholder"
         :aria-label="label || undefined"
+        @update:model-value="$emit('update:modelValue', $event)"
         @change="onInputCommit"
         @press-enter="onInputCommit"
       />

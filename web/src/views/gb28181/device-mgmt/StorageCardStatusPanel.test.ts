@@ -157,6 +157,32 @@ describe("StorageCardStatusPanel", () => {
     wrapper.unmount();
   });
 
+  it("查询被协议校验拒绝时展示原因，不能只显示状态未知", async () => {
+    vi.useFakeTimers();
+    api.getChannelStorageCards
+      .mockResolvedValueOnce(cardsResponse())
+      .mockResolvedValueOnce(cardsResponse({ refreshOperationId: "sc-op-1" }))
+      .mockResolvedValueOnce(cardsResponse());
+    api.getPtzOperation.mockResolvedValue({
+      code: 0,
+      data: {
+        operationId: "sc-op-1",
+        status: "rejected",
+        errorCode: "PROTOCOL_INVALID_RESPONSE",
+        errorMessage: "存储卡列表缺少 Num"
+      }
+    });
+    const wrapper = mountPanel();
+    await flushPromises();
+    await wrapper.get("[data-testid='storage-refresh']").trigger("click");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushPromises();
+    expect(wrapper.text()).toContain("存储卡列表缺少 Num");
+    expect(wrapper.text()).not.toContain("正在查询存储卡");
+    wrapper.unmount();
+  });
+
   it("存储卡查询和格式化按钮带有统一的可识别操作样式", async () => {
     const wrapper = await mountWithCard();
 
@@ -234,6 +260,15 @@ describe("StorageCardStatusPanel", () => {
 
     expect(wrapper.text()).toContain("设备未安装存储卡");
     expect(wrapper.find("[data-testid='storage-error']").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("缓存为空且状态未知时，不把未读取误报成未安装", async () => {
+    api.getChannelStorageCards.mockResolvedValue(cardsResponse({ freshness: "unknown" }));
+    const wrapper = mountPanel();
+    await flushPromises();
+    expect(wrapper.get("[data-testid='storage-card-empty']").text()).toContain("尚未读取");
+    expect(wrapper.text()).not.toContain("设备未安装存储卡");
     wrapper.unmount();
   });
 

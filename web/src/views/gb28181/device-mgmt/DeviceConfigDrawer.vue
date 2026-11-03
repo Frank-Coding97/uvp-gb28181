@@ -18,6 +18,7 @@
  *         漏一处就会出现"读到的是 A 通道、下发的是 B 通道"这种最难查的错。
  */
 import { computed, onBeforeUnmount, reactive, ref, watch, type Component } from "vue";
+import { Modal } from "@arco-design/web-vue";
 import {
   Camera,
   ChevronRight,
@@ -116,6 +117,8 @@ const props = withDefaults(
      *    而竖排正好把内容区的高度用起来。宿主自己知道自己是宽是窄，所以由宿主传，不在这里猜。
      */
     navSide?: boolean;
+    /** 由通道工作区提供统一导航与标题，保留内部表单和操作栏。 */
+    externalNavigation?: boolean;
     /** 嵌入工作台时，把复杂编辑器挂到宿主底部的目标节点。 */
     detailTarget?: string | HTMLElement | null;
     /**
@@ -225,6 +228,18 @@ const configGroups = computed(() =>
     group => (!props.configOnly || group.key !== "video-param") && (!props.groupKeys || props.groupKeys.includes(group.key))
   )
 );
+
+/**
+ * 面板内部的分组导航是否真的渲染。
+ *
+ * ⛔⛔ 单独抽出来是因为**布局也依赖它**：嵌入形态的 `.dcg-body` 是
+ *    `grid-template-rows: auto minmax(0, 1fr)`（第 1 行给导航、第 2 行给参数区）。
+ *    外部导航（通道配置对话框）和单组宿主（播放控制台侧栏）**根本不渲染 nav**，
+ *    此时只有一个子项 ⇒ 它被自动摆到第 1 行（`auto`）⇒ 参数区高度=内容高度，
+ *    第 2 行空着；内容一长还会盖到底部操作条上。所以"没导航"时 grid 要只剩一行。
+ * ⛔ 判据必须与模板里 nav 的 `v-if` 同源，不然两边漂移就又对不上了。
+ */
+const showGroupNav = computed(() => configGroups.value.length > 1 && !props.externalNavigation);
 /**
  * 当前分组。宿主传了 `activeGroupKey` 时以宿主为真源（见该 prop 的注释）。
  *
@@ -446,11 +461,6 @@ function boolValue(groupKey: string, fieldKey: string): boolean {
   return sv(groupKey, fieldKey) === true;
 }
 
-function numberValue(groupKey: string, fieldKey: string, fallback: number): number {
-  const parsed = Number(sv(groupKey, fieldKey));
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
 function coordsValue(groupKey: string, fieldKey: string): number[] {
   const raw = sv(groupKey, fieldKey);
   if (!Array.isArray(raw)) return [0, 0, 0, 0];
@@ -484,7 +494,7 @@ function setSchedules(groupKey: string, fieldKey: string, value: ConfigScheduleD
 
 /** 把某组的"当前值"整组重置为基准值（还原按钮用）。 */
 function resetGroup(groupKey: string) {
-  familyValues[groupKey] = { ...familyBaseline[groupKey] };
+  familyValues[groupKey] = JSON.parse(JSON.stringify(familyBaseline[groupKey]));
 }
 
 /** 本组相对最近回读值改了几项。 */
@@ -689,14 +699,36 @@ const activeIsVideo = computed(() => activeGroup.value.key === "video-param");
 const activeIsReady = computed(() => activeGroup.value.state === "ready");
 
 const activeReconcile = computed<VideoParamReconcile | null>(() =>
-  activeIsVideo.value ? videoReconcile.value : familyReconcile.value
+  activeIsVideo.value
+    ? videoReconcile.value
+    : props.externalNavigation
+      ? (familyGroupStatus[activeGroupKey.value]?.reconcile ?? null)
+      : familyReconcile.value
 );
 
 const activeLoading = computed(() => (activeIsVideo.value ? videoLoading.value : familyLoading.value));
 const activeApplying = computed(() => (activeIsVideo.value ? videoApplying.value : familyApplying.value));
-const activeError = computed(() => (activeIsVideo.value ? videoError.value : familyError.value));
-const activeObservedAt = computed(() => (activeIsVideo.value ? videoObservedAt.value : familyObservedAt.value));
-const activeFreshness = computed(() => (activeIsVideo.value ? videoFreshness.value : familyFreshness.value));
+const activeError = computed(() =>
+  activeIsVideo.value
+    ? videoError.value
+    : props.externalNavigation
+      ? (familyGroupStatus[activeGroupKey.value]?.error ?? "")
+      : familyError.value
+);
+const activeObservedAt = computed(() =>
+  activeIsVideo.value
+    ? videoObservedAt.value
+    : props.externalNavigation
+      ? (familyGroupStatus[activeGroupKey.value]?.observedAt ?? "")
+      : familyObservedAt.value
+);
+const activeFreshness = computed(() =>
+  activeIsVideo.value
+    ? videoFreshness.value
+    : props.externalNavigation
+      ? (familyGroupStatus[activeGroupKey.value]?.freshness ?? "")
+      : familyFreshness.value
+);
 const activeDirtyCount = computed(() => (activeIsVideo.value ? videoDirtyCount.value : dirtyFieldCount(activeGroupKey.value)));
 
 /* ─────────────────────── 未下发差异（差异抽屉）─────────────────────── */
@@ -781,7 +813,7 @@ const reconcileText = computed(() => {
     case "never_read":
       return `尚未读取「${label}」`;
     case "pending":
-      return `正在向设备读取「${label}」…`;
+      return reconcile.derivedFromApply ? "命令已受理，正在回读确认是否生效…" : `正在向设备读取「${label}」…`;
     case "read_ok":
       return "回读成功：以下为设备当前生效值";
     case "type_absent":
@@ -907,6 +939,19 @@ async function applyVideoParams() {
 /** 首次打开只读平台缓存时使用的完整类型集合；用户主动读取时会收窄到当前分组。 */
 const FAMILY_CONFIG_TYPES = Array.from(new Set(CONFIG_GROUPS.flatMap(group => group.configTypes)));
 
+const initialFamilyTypes = () =>
+  props.externalNavigation ? Array.from(new Set(configGroups.value.flatMap(group => group.configTypes))) : FAMILY_CONFIG_TYPES;
+const familyGroupStatus = reactive<
+  Record<string, { reconcile: VideoParamReconcile | null; observedAt: string; freshness: string; error?: string }>
+>({});
+const replaceableDrafts: Record<string, string> = {};
+let familyRequestVersion = 0;
+let familyPollVersion = 0;
+let familyPollingTypes: string[] = [];
+let disposed = false;
+const dirtyGroups = computed(() => configGroups.value.filter(group => dirtyFieldCount(group.key) > 0).map(group => group.key));
+const dirtyCount = computed(() => configGroups.value.reduce((count, group) => count + dirtyFieldCount(group.key), 0));
+const busy = computed(() => familyApplying.value || videoApplying.value);
 const familyEntries = ref<DeviceConfigEntry[]>([]);
 const familyAbsent = ref<string[]>([]);
 const familyReconcile = ref<VideoParamReconcile | null>(null);
@@ -958,7 +1003,11 @@ function applyFamilyEntries(entries: DeviceConfigEntry[]) {
       filled = true;
     }
     if (!filled) continue;
-    familyValues[group.key] = merged;
+    const preserveDraft =
+      props.externalNavigation &&
+      dirtyFieldCount(group.key) &&
+      replaceableDrafts[group.key] !== JSON.stringify(familyValues[group.key]);
+    if (!preserveDraft) familyValues[group.key] = merged;
     familyBaseline[group.key] = { ...merged };
   }
 }
@@ -1008,6 +1057,7 @@ const activeGroupFactsMissing = computed(() => {
  * pending / type_absent 分别由 reconcileText 与 absent-notice 负责，这里不重复。
  */
 const noFactsNotice = computed(() => {
+  if (activeLoading.value) return "";
   if (!activeGroupFactsMissing.value) return "";
   switch (activeReconcile.value?.state ?? "never_read") {
     case "pending":
@@ -1028,25 +1078,56 @@ const familyFieldsDisabled = computed(
   () => familyLoading.value || familyApplying.value || !props.canApply || !activeIsReady.value || activeGroupFactsMissing.value
 );
 
-async function loadDeviceConfigs(refresh: boolean, configTypes: string[] = FAMILY_CONFIG_TYPES) {
+async function loadDeviceConfigs(refresh: boolean, configTypes: string[] = initialFamilyTypes(), polling = false) {
   if (!props.channelId) {
     familyError.value = "未选择通道，无法读取设备配置。";
     return;
   }
   const requestedTypes = Array.from(new Set(configTypes));
   if (!requestedTypes.length) return;
+  const requestedGroups = configGroups.value.filter(group => group.configTypes.some(type => requestedTypes.includes(type)));
+  if (props.externalNavigation && requestedGroups.length > 1) {
+    // 各组独立查询目标与回读状态，避免设备级参数或其他组的终态相互污染。
+    const channelId = props.channelId;
+    for (const group of requestedGroups) {
+      const requestVersion = familyRequestVersion;
+      await loadDeviceConfigs(
+        refresh,
+        group.configTypes.filter(type => requestedTypes.includes(type)),
+        polling
+      );
+      if (props.channelId !== channelId || familyRequestVersion !== requestVersion + 1) return;
+    }
+    return;
+  }
+  const requestVersion = ++familyRequestVersion;
+  const channelId = props.channelId;
+  if (props.externalNavigation && refresh) {
+    for (const group of requestedGroups) {
+      replaceableDrafts[group.key] = JSON.stringify(familyValues[group.key]);
+      familyGroupStatus[group.key] = {
+        ...familyGroupStatus[group.key],
+        reconcile: { state: "pending" },
+        observedAt: familyGroupStatus[group.key]?.observedAt ?? "",
+        freshness: familyGroupStatus[group.key]?.freshness ?? ""
+      };
+    }
+  }
   familyLoading.value = true;
   familyError.value = "";
   try {
-    const response = await getChannelDeviceConfigs(props.channelId, {
+    const response = await getChannelDeviceConfigs(channelId, {
       refresh,
       configTypes: requestedTypes
     });
+    if (requestVersion !== familyRequestVersion) return;
     if (response.code !== 0 || !response.data) throw new Error(response.message || "读取设备配置失败");
     const data = response.data;
     const requested = new Set(requestedTypes);
     const entries = (data.list ?? []).filter(entry => requested.has(entry.configType));
-    familyEntries.value = [...familyEntries.value.filter(entry => !requested.has(entry.configType)), ...entries];
+    if (!props.externalNavigation || data.reconcile?.state !== "pending") {
+      familyEntries.value = [...familyEntries.value.filter(entry => !requested.has(entry.configType)), ...entries];
+    }
     familyAbsent.value = [
       ...familyAbsent.value.filter(configType => !requested.has(configType)),
       ...(data.absentTypes ?? []).filter(configType => requested.has(configType))
@@ -1057,32 +1138,62 @@ async function loadDeviceConfigs(refresh: boolean, configTypes: string[] = FAMIL
     // ⛔ 用回读到的最大值兜底而不是 local now：面板显示"回读于"就必须是
     //    设备那次应答的时刻，用前端时钟会显示成"刚刚"，看起来像刚读到。
     familyObservedAt.value = data.observedAt ?? "";
-    applyFamilyEntries(entries);
-    if (data.refreshOperationId) scheduleFamilyPoll(requestedTypes);
+    for (const group of requestedGroups) {
+      familyGroupStatus[group.key] = {
+        reconcile: data.reconcile ?? null,
+        observedAt: data.observedAt ?? "",
+        freshness: String(data.freshness ?? "")
+      };
+    }
+    if (!props.externalNavigation || data.reconcile?.state !== "pending") applyFamilyEntries(entries);
+    if (data.refreshOperationId && !polling) scheduleFamilyPoll(requestedTypes);
   } catch (error) {
+    if (requestVersion !== familyRequestVersion) return;
     familyError.value = readErrorMessage(error, "读取设备配置失败");
+    for (const group of requestedGroups) {
+      familyGroupStatus[group.key] = {
+        ...familyGroupStatus[group.key],
+        reconcile: { state: "failed" },
+        observedAt: familyGroupStatus[group.key]?.observedAt ?? "",
+        freshness: familyGroupStatus[group.key]?.freshness ?? "",
+        error: familyError.value
+      };
+    }
   } finally {
-    familyLoading.value = false;
+    if (requestVersion === familyRequestVersion) familyLoading.value = false;
   }
 }
 
 /** 下发后平台会自动回读对账，必须轮询到 reconcile 终态 —— 写入 ack 不是终态。 */
 function scheduleFamilyPoll(configTypes: string[] = FAMILY_CONFIG_TYPES) {
+  if (disposed || !props.visible) return;
+  const requestedTypes = Array.from(new Set([...(props.externalNavigation ? familyPollingTypes : []), ...configTypes]));
   clearFamilyPoll();
+  familyPollingTypes = requestedTypes;
   familyPollCount = 0;
-  const requestedTypes = Array.from(new Set(configTypes));
+  const pollVersion = familyPollVersion;
   const tick = async () => {
     if (!props.visible || !props.channelId) return;
     familyPollCount += 1;
-    await loadDeviceConfigs(false, requestedTypes);
-    const state = familyReconcile.value?.state;
-    const settled = state === "read_ok" || state === "type_absent" || state === "mismatch" || state === "failed";
+    await loadDeviceConfigs(false, requestedTypes, true);
+    if (pollVersion !== familyPollVersion || !props.visible) return;
+    const states = props.externalNavigation
+      ? configGroups.value
+          .filter(group => group.configTypes.some(type => requestedTypes.includes(type)))
+          .map(group => familyGroupStatus[group.key]?.reconcile?.state)
+      : [familyReconcile.value?.state];
+    const settled = states.every(
+      state => state === "read_ok" || state === "type_absent" || state === "mismatch" || state === "failed"
+    );
     if (!settled && familyPollCount < 10) familyPollTimer = window.setTimeout(tick, 1500);
+    else clearFamilyPoll();
   };
   familyPollTimer = window.setTimeout(tick, 1200);
 }
 
 function clearFamilyPoll() {
+  familyPollVersion += 1;
+  familyPollingTypes = [];
   if (familyPollTimer !== undefined) {
     window.clearTimeout(familyPollTimer);
     familyPollTimer = undefined;
@@ -1109,6 +1220,7 @@ async function applyGroupConfigs(groupKeys: string[]) {
     if (built.error) {
       familyError.value = built.error;
       familyErrorGroup.value = key;
+      if (props.externalNavigation) familyGroupStatus[key] = { ...familyGroupStatus[key], error: built.error };
       return;
     }
     Object.assign(blocks, built.blocks);
@@ -1118,21 +1230,30 @@ async function applyGroupConfigs(groupKeys: string[]) {
   }
   if (!Object.keys(blocks).length) return;
 
+  const channelId = props.channelId;
+  for (const key of keys) replaceableDrafts[key] = JSON.stringify(familyValues[key]);
   familyApplying.value = true;
   familyError.value = "";
   familyErrorGroup.value = keys[0] ?? "";
   try {
-    const response = await applyChannelDeviceConfigs(props.channelId, blocks, `device-config-${Date.now()}`);
+    const response = await applyChannelDeviceConfigs(channelId, blocks, `device-config-${Date.now()}`);
+    if (disposed || props.channelId !== channelId) return;
     if (response.code !== 0 || !response.data) throw new Error(response.message || "下发失败");
     if (response.data.reconcilePending) {
       const appliedTypes = response.data.configTypes?.length
         ? response.data.configTypes
         : Array.from(new Set(keys.flatMap(key => findConfigGroup(key)?.configTypes ?? [])));
+      if (props.externalNavigation) {
+        for (const key of keys)
+          familyGroupStatus[key] = { ...familyGroupStatus[key], reconcile: { state: "pending", derivedFromApply: true } };
+      }
       scheduleFamilyPoll(appliedTypes);
     }
   } catch (error) {
+    if (props.channelId !== channelId) return;
     familyError.value = readErrorMessage(error, "下发失败");
     familyErrorGroup.value = keys[0] ?? "";
+    for (const key of keys) familyGroupStatus[key] = { ...familyGroupStatus[key], error: familyError.value };
   } finally {
     familyApplying.value = false;
   }
@@ -1172,13 +1293,52 @@ function resetActiveGroup() {
 }
 
 function readActiveGroup() {
-  if (activeIsVideo.value) void loadVideoParams(true);
-  else void loadDeviceConfigs(true, activeGroup.value.configTypes);
+  const group = activeGroup.value;
+  const isVideo = activeIsVideo.value;
+  const read = () => (isVideo ? loadVideoParams(true) : loadDeviceConfigs(true, group.configTypes));
+  if (props.externalNavigation && activeDirtyCount.value) {
+    Modal.confirm({
+      title: "重新读取并覆盖本组修改？",
+      content: `「${group.label}」有未下发的修改，成功读取后将用设备值替换。`,
+      okText: "重新读取",
+      cancelText: "继续编辑",
+      onOk: read
+    });
+    return;
+  }
+  void read();
 }
 
 function applyActiveGroup() {
   if (activeIsVideo.value) void applyVideoParams();
   else void applyActiveGroupConfig();
+}
+
+/**
+ * 底栏按钮的悬浮说明 —— **点不动时要说明为什么**。
+ *
+ * ⛔ 三个按钮在「没改动 / 通道离线 / 只读账号 / 正在通信」四种情形下都会变灰，
+ *    而它们的灰面**刻意保留了按钮体**（见 `.dcg-actions .dcg-btn:disabled`：
+ *    文字用 secondary 而不是更浅的 disabled 色，为的是「可读」）。代价是
+ *    **看不出为什么点不动** —— 用户分不清"我没权限"和"我还没改东西"，
+ *    只能去猜，猜错了就去点，点了没反应，就成了"按钮坏了"。
+ * ⇒ 用 `title` 把判据讲出来。顺序与 `:disabled` 的表达式同源，改一处必须改两处。
+ */
+function footerHint(kind: "reset" | "read" | "apply"): string {
+  if (activeApplying.value) return "正在下发，等设备应答后自动回读确认";
+  if (activeLoading.value) return "正在向设备读取，等应答后本组才会解锁";
+  if (kind === "reset") {
+    return activeDirtyCount.value ? "丢弃本组未下发的改动，退回到最近一次回读值" : "本组没有未下发的改动，无需还原";
+  }
+  if (kind === "read") {
+    if (!props.canRead) return "当前账号没有读取设备配置的权限";
+    if (!props.online) return "通道离线，无法向设备读取";
+    return activeDirtyCount.value ? "向设备查询本组当前值（会覆盖未下发的改动）" : "向设备查询本组当前值";
+  }
+  if (!props.canApply) return "当前账号没有下发配置的权限（只读）";
+  if (!props.online) return "通道离线，无法下发";
+  if (!activeDirtyCount.value) return "本组没有未下发的改动";
+  return "把本组改动下发到设备，结果以设备回读为准";
 }
 
 /* ─────────── 控制台底部「画面卡片」（遮挡 / 镜像）的读写口 ─────────── */
@@ -1715,7 +1875,7 @@ watch(
       return;
     }
     if (!props.channelId) return;
-    if (!videoRows.value.length) void loadVideoParams(false);
+    if (!props.externalNavigation && !videoRows.value.length) void loadVideoParams(false);
     if (!familyEntries.value.length) void loadDeviceConfigs(false);
   },
   { immediate: true }
@@ -1724,6 +1884,10 @@ watch(
 watch(
   () => props.channelId,
   () => {
+    familyRequestVersion += 1;
+    clearFamilyPoll();
+    for (const key of Object.keys(familyGroupStatus)) delete familyGroupStatus[key];
+    for (const key of Object.keys(replaceableDrafts)) delete replaceableDrafts[key];
     videoRows.value = [];
     videoDraft.value = [];
     videoReconcile.value = null;
@@ -1744,7 +1908,7 @@ watch(
       familyBaseline[group.key] = configGroupDefaults(group.key);
     }
     if (props.visible && props.channelId) {
-      void loadVideoParams(false);
+      if (!props.externalNavigation) void loadVideoParams(false);
       void loadDeviceConfigs(false);
     }
   }
@@ -1800,6 +1964,9 @@ function setOsdItems(rows: ConfigTextItem[]) {
 }
 
 defineExpose({
+  dirtyCount,
+  dirtyGroups,
+  busy,
   selectGroup,
   selectStream,
   // 这三个入口按**当前分组**走对应通道：外部（播放控制台标签页的按钮）不需要知道
@@ -1872,6 +2039,8 @@ defineExpose({
 });
 
 onBeforeUnmount(() => {
+  disposed = true;
+  familyRequestVersion += 1;
   clearVideoPoll();
   clearFamilyPoll();
 });
@@ -1886,7 +2055,7 @@ onBeforeUnmount(() => {
   >
     <section
       class="dcg-window"
-      :class="{ 'dcg-window--embedded': embedded, 'dcg-window--side': navSide }"
+      :class="{ 'dcg-window--embedded': embedded, 'dcg-window--side': navSide, 'dcg-window--external': externalNavigation }"
       role="dialog"
       :aria-modal="embedded ? undefined : true"
       :aria-label="`设备配置 · ${titleText}`"
@@ -1905,7 +2074,7 @@ onBeforeUnmount(() => {
         </a-button>
       </header>
 
-      <div class="dcg-body">
+      <div class="dcg-body" :class="{ 'is-navless': !showGroupNav }">
         <aside v-if="!embedded" class="dcg-preview">
           <div class="dcg-screen">
             <div class="dcg-screen-empty">
@@ -1927,7 +2096,7 @@ onBeforeUnmount(() => {
               type="outline"
               class="dcg-btn"
               data-testid="dcg-reset"
-              :disabled="activeApplying || !activeDirtyCount"
+              :disabled="activeLoading || activeApplying || !activeDirtyCount"
               @click="resetActiveGroup"
             >
               <RotateCcw :size="12" />还原
@@ -1998,7 +2167,7 @@ onBeforeUnmount(() => {
           </div>
         </aside>
 
-        <nav v-if="configGroups.length > 1" class="dcg-nav" :class="{ 'dcg-nav--side': navSide }" aria-label="配置分组">
+        <nav v-if="showGroupNav" class="dcg-nav" :class="{ 'dcg-nav--side': navSide }" aria-label="配置分组">
           <a-button
             v-for="group in configGroups"
             :key="group.key"
@@ -2026,7 +2195,7 @@ onBeforeUnmount(() => {
         </nav>
 
         <section class="dcg-params">
-          <header class="dcg-params-head" :class="{ 'is-video-embedded': embedded && activeIsVideo }">
+          <header v-if="!externalNavigation" class="dcg-params-head" :class="{ 'is-video-embedded': embedded && activeIsVideo }">
             <div v-if="!embedded || (configGroups.length <= 1 && !activeIsVideo)" class="dcg-params-title-wrap">
               <span
                 class="dcg-params-title"
@@ -2053,7 +2222,7 @@ onBeforeUnmount(() => {
                 class="dcg-btn"
                 data-testid="dcg-reset"
                 title="还原为最近回读值"
-                :disabled="activeApplying || !activeDirtyCount"
+                :disabled="activeLoading || activeApplying || !activeDirtyCount"
                 @click="resetActiveGroup"
               >
                 <RotateCcw :size="12" />还原
@@ -2063,7 +2232,7 @@ onBeforeUnmount(() => {
                 type="outline"
                 class="dcg-btn"
                 data-testid="dcg-read"
-                :disabled="activeLoading || !canRead || !online"
+                :disabled="activeLoading || activeApplying || !canRead || !online"
                 @click="readActiveGroup"
               >
                 <RefreshCcw :size="12" />读取
@@ -2073,7 +2242,7 @@ onBeforeUnmount(() => {
                 type="primary"
                 class="dcg-btn is-primary"
                 data-testid="dcg-apply"
-                :disabled="activeApplying || !activeDirtyCount || !canApply"
+                :disabled="activeLoading || activeApplying || !activeDirtyCount || !canApply"
                 @click="applyActiveGroup"
               >
                 <Send :size="12" />下发
@@ -2125,7 +2294,7 @@ onBeforeUnmount(() => {
                       class="dcg-btn"
                       data-testid="dcg-reset"
                       title="还原为最近回读值"
-                      :disabled="activeApplying || !activeDirtyCount"
+                      :disabled="activeLoading || activeApplying || !activeDirtyCount"
                       @click="resetActiveGroup"
                     >
                       <RotateCcw :size="12" />还原
@@ -2135,7 +2304,7 @@ onBeforeUnmount(() => {
                       type="outline"
                       class="dcg-btn"
                       data-testid="dcg-read"
-                      :disabled="activeLoading || !canRead || !online"
+                      :disabled="activeLoading || activeApplying || !canRead || !online"
                       @click="readActiveGroup"
                     >
                       <RefreshCcw :size="12" />读取
@@ -2145,7 +2314,7 @@ onBeforeUnmount(() => {
                       type="primary"
                       class="dcg-btn is-primary"
                       data-testid="dcg-apply"
-                      :disabled="activeApplying || !activeDirtyCount || !canApply"
+                      :disabled="activeLoading || activeApplying || !activeDirtyCount || !canApply"
                       @click="applyActiveGroup"
                     >
                       <Send :size="12" />下发
@@ -2180,7 +2349,7 @@ onBeforeUnmount(() => {
                         class="dcg-btn"
                         data-testid="dcg-reset"
                         title="还原为最近回读值"
-                        :disabled="activeApplying || !activeDirtyCount"
+                        :disabled="activeLoading || activeApplying || !activeDirtyCount"
                         @click="resetActiveGroup"
                       >
                         <RotateCcw :size="12" />还原
@@ -2190,7 +2359,7 @@ onBeforeUnmount(() => {
                         type="outline"
                         class="dcg-btn"
                         data-testid="dcg-read"
-                        :disabled="activeLoading || !canRead || !online"
+                        :disabled="activeLoading || activeApplying || !canRead || !online"
                         @click="readActiveGroup"
                       >
                         <RefreshCcw :size="12" />读取
@@ -2200,7 +2369,7 @@ onBeforeUnmount(() => {
                         type="primary"
                         class="dcg-btn is-primary"
                         data-testid="dcg-apply"
-                        :disabled="activeApplying || !activeDirtyCount || !canApply"
+                        :disabled="activeLoading || activeApplying || !activeDirtyCount || !canApply"
                         @click="applyActiveGroup"
                       >
                         <Send :size="12" />下发
@@ -2509,7 +2678,11 @@ onBeforeUnmount(() => {
                   <Info :size="11" />
                   <span>{{ noFactsNotice }}</span>
                 </p>
-                <p v-if="activeGroupAbsentTypes.length" class="dcg-notice" data-testid="dcg-absent-notice">
+                <p
+                  v-if="activeGroupAbsentTypes.length && !activeLoading && activeReconcile?.state !== 'pending'"
+                  class="dcg-notice"
+                  data-testid="dcg-absent-notice"
+                >
                   <Info :size="11" />
                   <span v-if="embedded">设备未返回部分配置，其他字段仍按设备回读值显示；未返回的那部分暂不可编辑。</span>
                   <span v-else>
@@ -2560,7 +2733,13 @@ onBeforeUnmount(() => {
               </div>
 
               <template v-else>
-                <div v-for="field in primaryFields" :key="field.key" class="dcg-row" :data-testid="`dcg-field-${field.key}`">
+                <div
+                  v-for="field in primaryFields"
+                  :key="field.key"
+                  class="dcg-row"
+                  :class="{ 'is-schedules': field.kind === 'schedules' }"
+                  :data-testid="`dcg-field-${field.key}`"
+                >
                   <span class="dcg-row-label">{{ field.label }}</span>
                   <!-- ⛔ 没有设备事实时不给控件：空白模板上的数字会被当成设备值，改一下还能下发 -->
                   <div v-if="activeGroupFactsMissing" class="dcg-row-control">
@@ -2603,7 +2782,7 @@ onBeforeUnmount(() => {
 
                     <DeviceConfigSlider
                       v-else-if="field.kind === 'slider'"
-                      :model-value="numberValue(activeGroup.key, field.key, field.min)"
+                      :model-value="textValue(activeGroup.key, field.key)"
                       :min="field.min"
                       :max="field.max"
                       :step="field.step"
@@ -2666,7 +2845,7 @@ onBeforeUnmount(() => {
                       :placeholder="field.placeholder"
                       :maxlength="field.maxlength"
                       :aria-label="field.label"
-                      @change="setSv(activeGroup.key, field.key, $event)"
+                      @update:model-value="setSv(activeGroup.key, field.key, $event)"
                     />
                   </div>
                   <span v-if="fieldHint(field, activeGroup.key) && !embedded" class="dcg-row-hint">{{
@@ -2688,7 +2867,7 @@ onBeforeUnmount(() => {
                     class="dcg-btn"
                     data-testid="dcg-reset"
                     title="还原为最近回读值"
-                    :disabled="activeApplying || !activeDirtyCount"
+                    :disabled="activeLoading || activeApplying || !activeDirtyCount"
                     @click="resetActiveGroup"
                   >
                     <RotateCcw :size="12" />还原
@@ -2698,7 +2877,7 @@ onBeforeUnmount(() => {
                     type="outline"
                     class="dcg-btn"
                     data-testid="dcg-read"
-                    :disabled="activeLoading || !canRead || !online"
+                    :disabled="activeLoading || activeApplying || !canRead || !online"
                     @click="readActiveGroup"
                   >
                     <RefreshCcw :size="12" />读取
@@ -2708,7 +2887,7 @@ onBeforeUnmount(() => {
                     type="primary"
                     class="dcg-btn is-primary"
                     data-testid="dcg-apply"
-                    :disabled="activeApplying || !activeDirtyCount || !canApply"
+                    :disabled="activeLoading || activeApplying || !activeDirtyCount || !canApply"
                     @click="applyActiveGroup"
                   >
                     <Send :size="12" />下发
@@ -2855,36 +3034,54 @@ onBeforeUnmount(() => {
           <span v-if="activeDirtyCount > 0" class="dcg-actions__dirty">{{ activeDirtyCount }} 项未下发</span>
         </span>
         <div class="dcg-actions__btns">
+          <!--
+            ⛔ 三个按钮都用 `#icon` 槽 + `:loading`，不要继续写"图标 + 文字"一行人读内容：
+               一是不带槽时 Arco 的 `loading` 会**在图标前面再插一个转圈图标**（默认槽内容照 render），
+               变成"两个图标 + 文字"；二是自带转圈比手写 keyframes 更贴合房规。
+            ⛔ 文案与 `title` 都按「正在通信 / 没权限 / 离线 / 没改动」分档给，
+               光变灰不解释原因，用户分不清"不能点"和"不用点"。
+            ⛔⛔ **自己的 loading 不进自己的 `:disabled`**：进了就会变灰 —— 「下发到设备」一点
+               就褪成次要按钮的灰面，看上去像"按坏了"。加载中 Arco 自己会拦点击
+               （`handleClick` 里 `props.loading` 直接 return），不需要再靠 disabled 挡。
+               对面那个（读取中不许下发、下发中不许读取）仍然要写。
+          -->
           <a-button
             html-type="button"
             type="outline"
             class="dcg-btn"
             data-testid="dcg-reset"
-            title="还原为最近回读值"
-            :disabled="activeApplying || !activeDirtyCount"
+            :title="footerHint('reset')"
+            :disabled="activeLoading || activeApplying || !activeDirtyCount"
             @click="resetActiveGroup"
           >
-            <RotateCcw :size="12" />还原
+            <template #icon><RotateCcw :size="13" /></template>
+            还原
           </a-button>
           <a-button
             html-type="button"
             type="outline"
             class="dcg-btn"
             data-testid="dcg-read"
-            :disabled="activeLoading || !canRead || !online"
+            :title="footerHint('read')"
+            :loading="activeLoading"
+            :disabled="activeApplying || !canRead || !online"
             @click="readActiveGroup"
           >
-            <RefreshCcw :size="12" />读取
+            <template #icon><RefreshCcw :size="13" /></template>
+            {{ activeLoading ? "读取中…" : "读取" }}
           </a-button>
           <a-button
             html-type="button"
             type="primary"
             class="dcg-btn is-primary"
             data-testid="dcg-apply"
-            :disabled="activeApplying || !activeDirtyCount || !canApply"
+            :title="footerHint('apply')"
+            :loading="activeApplying"
+            :disabled="activeLoading || !activeDirtyCount || !canApply"
             @click="applyActiveGroup"
           >
-            <Send :size="12" />下发到设备
+            <template #icon><Send :size="13" /></template>
+            {{ activeApplying ? "下发中…" : "下发到设备" }}
           </a-button>
         </div>
       </footer>
@@ -3033,6 +3230,17 @@ onBeforeUnmount(() => {
   grid-template-columns: minmax(0, 1fr);
 }
 
+/*
+ * ⛔⛔ 没有分组导航时（外部导航的通道配置对话框、单组宿主），`.dcg-body` 里只剩参数区一个子项，
+ *   而模板写的是两行（`auto` 给导航、`1fr` 给参数区）。子项会被**摆到第 1 行**（auto）
+ *   ⇒ 参数区高度=内容高度，第 2 行空着；内容一长还会越过网格、盖到底部操作条上。
+ *   只剩一行时直接给 `minmax(0, 1fr)`，参数区才真的吃满。
+ * ⚠️ 类名来自 `showGroupNav`，与 nav 的 `v-if` 同源 —— 别再手写一遍条件。
+ */
+.dcg-window--embedded .dcg-body.is-navless {
+  grid-template-rows: minmax(0, 1fr);
+}
+
 /* ⛔ 嵌入形态的分组导航**横排 + 按组数等分**，不要写死列数。
   原来是 `grid-template-columns: repeat(4, minmax(0, 1fr))`：只有 2 个组时
   第 3、4 列永远空着，看上去像"导航坏了半排"。宿主传几组是它自己的事
@@ -3098,16 +3306,46 @@ onBeforeUnmount(() => {
   text-align: left;
 }
 
-/* 底部操作条：全局动作（下发的是整组报文），固定住，不跟内容滚。 */
+/* 底部操作条：全局动作（下发的是整组报文），固定住，不跟内容滚。
+ *
+ * ⛔ 左右 22px 是跟 `.channel-workspace-heading`（`20px 22px`）对齐用的：原来写 14px，
+ *    底栏那行「尚未从设备回读」比它上面第一行标题往里缩了 8px，一眼看过去就是"没对齐"。
+ * ⛔ 尺寸按房规（`.uvp-system-dialog .arco-modal-footer .arco-btn` 那套：高 32、圆角 8、
+ *    min-width 88）。原来是 26px + 圆角 4 的迷你工具条 —— 同一颗对话框里两套按钮尺寸，
+ *    而底栏是**主操作**，不该比别处更小。
+ * ⚠️ 只覆盖 `.dcg-actions` 里的 `.dcg-btn`：编码卡头部、嵌入操作条仍是紧凑尺寸，
+ *    那些地方是按"一行塞得下"排的，跟着放大就会挤出横向滚动。 */
 .dcg-actions {
   display: flex;
   flex: none;
   gap: 12px;
   align-items: center;
-  padding: 10px 14px;
+  padding: 11px 22px;
   background: var(--uvp-dialog-footer-bg, #fbfdff);
   border-top: 1px solid var(--uvp-dialog-border, #e6edf7);
 }
+
+.dcg-actions .dcg-btn.arco-btn[type="button"] {
+  gap: 0;
+  min-width: 88px;
+  height: 32px;
+  padding: 0 14px;
+  font-size: 13px;
+  border-radius: 8px;
+}
+
+/* Arco 把 `#icon` 槽包成 `.arco-btn-icon` 并给 8px 右边距，对 13px 字偏宽。 */
+.dcg-actions .dcg-btn .arco-btn-icon {
+  margin-right: 5px;
+}
+
+/* ⛔ Arco 的加载态会盖一层 `background:#fff; opacity:.4` 的 `::before` 蒙版。
+   蒙在实心蓝的「下发到设备」上就是把主色冲淡成浅蓝（正是这套 token 要避免的"发白发糊"），
+   暗色下则是一层灰。我们已经在按钮里换成了转圈图标 + 「下发中…」文案，蒙版没有信息量。 */
+.dcg-actions .dcg-btn.arco-btn-loading::before {
+  content: none;
+}
+
 .dcg-actions__meta {
   display: flex;
   gap: 8px;
@@ -3126,9 +3364,18 @@ onBeforeUnmount(() => {
 .dcg-actions__btns {
   display: flex;
   flex: none;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
   margin-left: auto;
+}
+
+// 让局部按钮与全局 Arco 禁用规则使用同一套可读的颜色。
+.dcg-actions .dcg-btn:disabled {
+  --uvp-text-disabled: var(--uvp-text-secondary);
+}
+.dcg-actions .dcg-btn.is-primary:disabled {
+  --uvp-dialog-control-bg: var(--uvp-secondary-action-bg);
+  --uvp-panel-border: var(--uvp-secondary-action-border);
 }
 
 .dcg-window--embedded .dcg-params-head {
@@ -3361,15 +3608,30 @@ onBeforeUnmount(() => {
     opacity: 1;
   }
 
+  /*
+   * ⛔⛔ 实心底色必须是 `--uvp-solid-*`，**不能**用 `--uvp-brand`。
+   *   `--uvp-brand` 是**文字/图标色**，暗色下刻意调浅成 #60a5fa；白字压上去对比度只有 ~2.5:1，
+   *   「下发到设备」会整块发白糊掉 —— 而它恰好是这颗对话框里唯一的主操作。
+   *   原来写的是 `var(--uvp-brand, #2563eb)`：**带兜底值**，于是
+   *   `style/model/solid-surface-token.test.ts` 里那条「白字压 brand 底」的全仓扫描
+   *   （正则要求 `var(--uvp-brand)` 紧跟 `)`）扫不到它，一路漏到现在。
+   *   亮色下两者都是 #2563eb 所以看不出来，暗色下才现原形。
+   */
   &.is-primary:not(:disabled) {
-    color: #ffffff;
-    background: var(--uvp-brand, #2563eb);
-    border-color: var(--uvp-brand-strong, #1d4ed8);
+    color: var(--uvp-solid-text);
+    background: var(--uvp-solid-bg);
+    border-color: var(--uvp-solid-border);
   }
 
   &.is-primary:hover:not(:disabled) {
-    color: #ffffff;
-    background: var(--uvp-brand-strong, #1d4ed8);
+    color: var(--uvp-solid-text);
+    background: var(--uvp-solid-hover-bg);
+    border-color: var(--uvp-solid-hover-bg);
+  }
+
+  &.is-primary:active:not(:disabled) {
+    background: var(--uvp-solid-active-bg);
+    border-color: var(--uvp-solid-active-bg);
   }
 }
 
@@ -3523,8 +3785,10 @@ onBeforeUnmount(() => {
   }
 
   &.is-active {
-    color: #ffffff;
-    background: var(--uvp-brand, #2563eb);
+    /* 同一处坑的另一半：白字压 `--uvp-brand` 在暗色下只有 ~2.5:1（#60a5fa），
+       选中的分组看着像"褪色了"。实心面走 solid。 */
+    color: var(--uvp-solid-text);
+    background: var(--uvp-solid-bg);
 
     .dcg-nav-caret {
       transform: rotate(90deg);
@@ -3587,7 +3851,12 @@ onBeforeUnmount(() => {
 .dcg-params {
   display: flex;
   flex-direction: column;
+
+  /* ⛔ 必须写：面板现在真的会被宿主撑到宿主高度（见 ChannelConfigWorkspace 的
+     `.channel-workspace-editor`），网格行是 `minmax(0, 1fr)`；不压 min-height 的话，
+     内容一长这一栏就会**顶出网格行**、盖到底部操作条上。 */
   min-width: 0;
+  min-height: 0;
 }
 
 .dcg-params-head {
@@ -4461,6 +4730,7 @@ body[arco-theme="dark"] .dcg-segment button.arco-btn[type="button"]:not(.is-on, 
   position: relative;
   width: 34px;
   height: 18px;
+  min-height: 0;
   padding: 0;
   cursor: pointer;
   background: #cbd5e1;
@@ -4614,5 +4884,18 @@ body[arco-theme="dark"] .dcg-segment button.arco-btn[type="button"]:not(.is-on, 
 
 .dcg-compact-row .dcg-segment button.arco-btn[type="button"] {
   flex: 1;
+}
+.dcg-window--embedded.dcg-window--external .dcg-body {
+  grid-template-columns: minmax(0, 1fr);
+}
+.dcg-window--external .dcg-params-body {
+  padding: 18px 22px;
+}
+.dcg-window--external .dcg-row.is-schedules {
+  grid-template-columns: minmax(0, 1fr);
+
+  .dcg-row-label {
+    text-align: left;
+  }
 }
 </style>

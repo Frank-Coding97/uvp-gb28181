@@ -116,6 +116,12 @@ export interface DeviceVO {
   /** Raw X-GB-Ver reported by the device, if any. */
   reportedVersion?: string | null;
   reportedVersionAt?: string | null;
+  /** 设备最近一次上报报文里 XML 声明的字符集（空 = 未声明或未上报过）。 */
+  reportedCharset?: string | null;
+  /** 平台按「内容优先」实际判定的解码字符集；与 reportedCharset 不一致 = 设备声明不可信。 */
+  wireCharset?: string | null;
+  /** 当前这组字符集事实的确认时间。 */
+  reportedCharsetAt?: string | null;
   /** Manual override or auto resolution mode. */
   protocolOverride?: ProtocolOverride | string;
   effectiveVersion?: "2016" | "2022" | string;
@@ -315,6 +321,8 @@ export interface ChannelVO {
   streamId: string;
   onDemandLive: boolean; // 无人观看时是否自动关闭
   streamTransport: string; // 流传输模式: UDP / TCP-Active / TCP-Passive
+  streamIdentification?: string;
+  currentStreamIdentification?: string | null;
   audioEnabled: boolean; // 点播是否接收音频
   cloudRecordingEnabled: boolean;
   cloudRecordingState: string;
@@ -810,6 +818,13 @@ export const updateChannelStreamTransport = (id: number, streamTransport: Stream
     "patch",
     baseUrlApi(`gb28181/device-mgmt/channel/${id}/stream-transport`),
     { data: { streamTransport } }
+  );
+
+export const updateChannelStreamIdentification = (id: number, streamIdentification: string) =>
+  http.request<BaseResult<{ id: number; streamIdentification: string }>>(
+    "patch",
+    baseUrlApi(`gb28181/device-mgmt/channel/${id}/stream-transport`),
+    { data: { streamIdentification } }
   );
 
 export const updateChannel = (

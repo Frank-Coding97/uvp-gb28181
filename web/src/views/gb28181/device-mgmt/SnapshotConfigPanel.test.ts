@@ -108,7 +108,7 @@ describe("SnapshotConfigPanel", () => {
 
     const wrapper = mountPanel();
     await flushPromises();
-    expect(wrapper.get("[data-testid='snapshot-status']").text()).toBe("配置后由设备上传 JPEG");
+    expect(wrapper.get("[data-testid='snapshot-status']").text()).toBe("尚未开始抓拍");
 
     await wrapper.get("[data-testid='snapshot-count']").setValue("2");
     await wrapper.get("[data-testid='snapshot-interval']").setValue("3");
@@ -240,7 +240,7 @@ describe("SnapshotConfigPanel", () => {
     await flushPromises();
 
     expect(wrapper.find("[data-testid='snapshot-results']").exists()).toBe(false);
-    expect(wrapper.get("[data-testid='snapshot-status']").text()).toBe("配置后由设备上传 JPEG");
+    expect(wrapper.get("[data-testid='snapshot-status']").text()).toBe("尚未开始抓拍");
     wrapper.unmount();
   });
 
@@ -322,5 +322,19 @@ describe("SnapshotConfigPanel", () => {
     expect(source).not.toMatch(/<input\s+v-model/);
     expect(source).toContain('class="control-action-button"');
     expect(source).toContain('html-type="button"');
+  });
+});
+
+describe("抓拍任务防重复提交", () => {
+  it("接收图片期间再次点击不会创建第二个任务", async () => {
+    api.createDeviceSnapshotSession.mockReset().mockResolvedValue({ code: 0, data: session() });
+    api.getDeviceSnapshotSession.mockReset().mockResolvedValue({ code: 0, data: session() });
+    const wrapper = mountPanel();
+    await wrapper.get("[data-testid='snapshot-submit']").trigger("click");
+    await flushPromises();
+    expect(wrapper.get("[data-testid='snapshot-submit']").attributes("disabled")).toBeDefined();
+    await wrapper.get("[data-testid='snapshot-submit']").trigger("click");
+    expect(api.createDeviceSnapshotSession).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
   });
 });

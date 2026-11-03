@@ -145,28 +145,21 @@ describe("device detail drawer segments", () => {
     expect(drawerSource).toMatch(/\.dcg-window--embedded \.dcg-nav \{[\s\S]{0,200}?flex-direction: row;/);
   });
 
-  it("通道配置对话框按当前通道复用抓拍、状态、存储三个标签", () => {
-    expect(source).toContain('import SnapshotConfigPanel from "./SnapshotConfigPanel.vue"');
-    expect(source).toContain('import DeviceStatusFactsPanel from "./DeviceStatusFactsPanel.vue"');
-    expect(source).toContain('import StorageCardStatusPanel from "./StorageCardStatusPanel.vue"');
-    // ⛔ 云台面板不许搬回来：这个面板没有画面，云台等于闭眼开车（转过去看不见、转坏了也发现不了）。
-    //    云台/变倍/聚焦全归播放控制台。
+  it("通道配置通过统一工作区复用抓拍、状态、存储面板", () => {
+    expect(source).toContain('import ChannelConfigWorkspace from "./ChannelConfigWorkspace.vue"');
     expect(source).not.toContain('import DeviceControlPanel from "./DeviceControlPanel.vue"');
-    expect(source).toContain('v-model:channel-id="channelOperationTarget.id"');
+    expect(source).toContain(':channel-id="channelOperationTarget.id"');
     expect(source).toContain(':channel-options="channelOperationOptions"');
-    expect(source).toContain('class="channel-config-tabs"');
-    expect(source).toContain('title="设备状态"');
-    expect(source).toContain('title="抓拍参数"');
-    expect(source).toContain('title="存储卡"');
     expect(source).toContain("const channelOperationOptions = computed");
     expect(source).toContain("openChannelOperations(record)");
-    // 面板组件本身要认这个开关（否则传了不生效，选择器照旧各渲染一份）
-    for (const file of ["SnapshotConfigPanel.vue", "DeviceStatusFactsPanel.vue", "StorageCardStatusPanel.vue"]) {
-      const panel = readFileSync(resolve(process.cwd(), `src/views/gb28181/device-mgmt/${file}`), "utf8");
-      expect(panel, file).toContain("showPicker?: boolean;");
-      expect(panel, file).toContain('v-if="props.showPicker !== false"');
+    const workspace = readFileSync(resolve(process.cwd(), "src/views/gb28181/device-mgmt/ChannelConfigWorkspace.vue"), "utf8");
+    for (const name of ["SnapshotConfigPanel", "DeviceStatusFactsPanel", "StorageCardStatusPanel"]) {
+      expect(workspace).toContain(`<${name}`);
+      const panel = readFileSync(resolve(process.cwd(), `src/views/gb28181/device-mgmt/${name}.vue`), "utf8");
+      expect(panel, name).toContain("showPicker?: boolean;");
+      expect(panel, name).toContain('v-if="props.showPicker !== false"');
     }
-    expect(source).toContain(':active="channelOperationVisible"');
+    expect(workspace).toContain(':show-picker="false"');
   });
 
   it("通道操作入口由 device:control / device:snapshot / ptz:view 任一权限放行", () => {
