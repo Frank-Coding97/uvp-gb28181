@@ -130,7 +130,7 @@
           </a-form-item>
 
           <a-form-item field="status" label="状态" validate-trigger="blur">
-            <a-switch type="round" :checked-value="1" :unchecked-value="0" v-model="addFrom.status">
+            <a-switch type="circle" :checked-value="1" :unchecked-value="0" v-model="addFrom.status">
               <template #checked> 启用 </template>
               <template #unchecked> 禁用 </template>
             </a-switch>
@@ -168,14 +168,14 @@
           <a-row :gutter="24" justify="center">
             <a-col :span="8">
               <span class="text-right-gap">展开全部</span>
-              <a-switch type="round" v-model="treeSwitch.expandAll" @change="onExpandAll">
+              <a-switch type="circle" v-model="treeSwitch.expandAll" @change="onExpandAll">
                 <template #checked> 是 </template>
                 <template #unchecked> 否 </template>
               </a-switch>
             </a-col>
             <a-col :span="8">
               <span class="text-right-gap">全选节点</span>
-              <a-switch type="round" v-model="treeSwitch.selectAll" @change="onSelectAll">
+              <a-switch type="circle" v-model="treeSwitch.selectAll" @change="onSelectAll">
                 <template #checked> 是 </template>
                 <template #unchecked> 否 </template>
               </a-switch>

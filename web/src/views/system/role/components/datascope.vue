@@ -20,13 +20,13 @@
           <a-card v-if="treeData.length > 0" :bordered="false" class="tree-operation-card">
             <a-space size="medium">
               <span>展开全部</span>
-              <a-switch type="round" v-model="treeSwitch.expandAll" @change="onExpandAll">
+              <a-switch type="circle" v-model="treeSwitch.expandAll" @change="onExpandAll">
                 <template #checked> 是 </template>
                 <template #unchecked> 否 </template>
               </a-switch>
 
               <span>全选节点</span>
-              <a-switch type="round" v-model="treeSwitch.selectAll" @change="onSelectAll">
+              <a-switch type="circle" v-model="treeSwitch.selectAll" @change="onSelectAll">
                 <template #checked> 是 </template>
                 <template #unchecked> 否 </template>
               </a-switch>
@@ -34,7 +34,7 @@
               <a-tooltip content="父子节点关联选择，开启后选中父节点会自动选中所有子节点">
                 <span>父子关联 <icon-question-circle-fill /></span>
               </a-tooltip>
-              <a-switch type="round" v-model="treeSwitch.checkStrictly" @change="onCheckStrictlyChange">
+              <a-switch type="circle" v-model="treeSwitch.checkStrictly" @change="onCheckStrictlyChange">
                 <template #checked> 是 </template>
                 <template #unchecked> 否 </template>
               </a-switch>

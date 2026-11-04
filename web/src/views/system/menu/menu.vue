@@ -286,7 +286,7 @@
           <a-row :gutter="24">
             <a-col :span="8" v-if="[1, 2].includes(addFrom.type)">
               <a-form-item field="hide" label="显示状态" validate-trigger="blur">
-                <a-switch type="round" v-model="addFrom.hide" :checked-value="0" :unchecked-value="1">
+                <a-switch type="circle" v-model="addFrom.hide" :checked-value="0" :unchecked-value="1">
                   <template #checked> 显示 </template>
                   <template #unchecked> 隐藏 </template>
                 </a-switch>
@@ -294,7 +294,7 @@
             </a-col>
             <a-col :span="8" v-if="[1, 2].includes(addFrom.type)">
               <a-form-item field="disable" label="启用状态" validate-trigger="blur">
-                <a-switch type="round" v-model="addFrom.disable" :checked-value="0" :unchecked-value="1">
+                <a-switch type="circle" v-model="addFrom.disable" :checked-value="0" :unchecked-value="1">
                   <template #checked> 启用 </template>
                   <template #unchecked> 禁用 </template>
                 </a-switch>
@@ -302,7 +302,7 @@
             </a-col>
             <a-col :span="8" v-if="addFrom.type == 2">
               <a-form-item field="keepAlive" label="是否缓存" validate-trigger="blur">
-                <a-switch type="round" v-model="addFrom.keepAlive" :checked-value="1" :unchecked-value="0">
+                <a-switch type="circle" v-model="addFrom.keepAlive" :checked-value="1" :unchecked-value="0">
                   <template #checked> 是 </template>
                   <template #unchecked> 否 </template>
                 </a-switch>
@@ -312,7 +312,7 @@
           <a-row :gutter="24" v-if="addFrom.type == 2">
             <a-col :span="8">
               <a-form-item field="affix" label="固定Tabs" validate-trigger="blur">
-                <a-switch type="round" v-model="addFrom.affix" :checked-value="1" :unchecked-value="0">
+                <a-switch type="circle" v-model="addFrom.affix" :checked-value="1" :unchecked-value="0">
                   <template #checked> 是 </template>
                   <template #unchecked> 否 </template>
                 </a-switch>
@@ -320,7 +320,7 @@
             </a-col>
             <a-col :span="8">
               <a-form-item field="isLink" label="是否外链" validate-trigger="blur">
-                <a-switch type="round" v-model="addFrom.isLink" :checked-value="1" :unchecked-value="0" @change="onIsLink">
+                <a-switch type="circle" v-model="addFrom.isLink" :checked-value="1" :unchecked-value="0" @change="onIsLink">
                   <template #checked> 是 </template>
                   <template #unchecked> 否 </template>
                 </a-switch>
@@ -328,7 +328,7 @@
             </a-col>
             <a-col :span="8">
               <a-form-item field="iframe" label="内嵌窗口" validate-trigger="blur" :disabled="!addFrom.isLink">
-                <a-switch type="round" v-model="addFrom.iframe" :checked-value="1" :unchecked-value="0" @change="onIframe">
+                <a-switch type="circle" v-model="addFrom.iframe" :checked-value="1" :unchecked-value="0" @change="onIframe">
                   <template #checked> 是 </template>
                   <template #unchecked> 否 </template>
                 </a-switch>
@@ -339,7 +339,7 @@
             <a-input v-model="addFrom.link" placeholder="请输入路由路径" allow-clear />
           </a-form-item>
           <a-form-item field="affix" label="全屏显示" validate-trigger="blur" v-if="addFrom.type == 2">
-            <a-switch type="round" v-model="addFrom.isFull" :checked-value="1" :unchecked-value="0">
+            <a-switch type="circle" v-model="addFrom.isFull" :checked-value="1" :unchecked-value="0">
               <template #checked> 是 </template>
               <template #unchecked> 否 </template>
             </a-switch>

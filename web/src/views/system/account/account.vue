@@ -216,7 +216,7 @@
             />
           </a-form-item>
           <a-form-item field="status" label="状态" validate-trigger="blur">
-            <a-switch type="round" :checked-value="1" :unchecked-value="0" v-model="addFrom.status">
+            <a-switch type="circle" :checked-value="1" :unchecked-value="0" v-model="addFrom.status">
               <template #checked> 启用 </template>
               <template #unchecked> 禁用 </template>
             </a-switch>

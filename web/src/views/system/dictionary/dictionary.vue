@@ -122,7 +122,7 @@
             <a-textarea v-model="addFrom.description" placeholder="请输入字典描述" allow-clear />
           </a-form-item>
           <a-form-item field="description" label="状态" validate-trigger="blur">
-            <a-switch type="round" :checked-value="1" :unchecked-value="0" v-model="addFrom.status">
+            <a-switch type="circle" :checked-value="1" :unchecked-value="0" v-model="addFrom.status">
               <template #checked> 启用 </template>
               <template #unchecked> 禁用 </template>
             </a-switch>
@@ -235,7 +235,7 @@
             <a-input v-model="deatilForm.value" placeholder="请输入字典值" allow-clear />
           </a-form-item>
           <a-form-item field="description" label="状态" validate-trigger="blur">
-            <a-switch type="round" :checked-value="1" :unchecked-value="0" v-model="deatilForm.status">
+            <a-switch type="circle" :checked-value="1" :unchecked-value="0" v-model="deatilForm.status">
               <template #checked> 启用 </template>
               <template #unchecked> 禁用 </template>
             </a-switch>
