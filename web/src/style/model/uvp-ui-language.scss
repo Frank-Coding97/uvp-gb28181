@@ -1614,38 +1614,64 @@ body[arco-theme="dark"] .uvp-system-form {
 // 现统一到唯一真源 src/styles/uvp-buttons.scss（三档尺寸 + 六级语义），
 // 门禁 src/styles/uvp-buttons.test.ts。**不要再往本文件加 .arco-btn 的几何或配色。**
 
-.arco-trigger-popup .arco-popconfirm {
-  padding: 2px;
-  background: var(--uvp-popconfirm-bg);
-  border: 1px solid var(--uvp-popconfirm-border);
-  border-radius: 14px;
-  box-shadow: var(--uvp-popconfirm-shadow);
+/* ⛔⛔ 确认气泡（`a-popconfirm`）皮肤 —— 2026-11-04 重写。
+ *
+ * 为什么重写：Arco 的 popconfirm 有**两层类名**，以前这里全打在错的那一层上：
+ *   ① `.arco-popconfirm`            = Trigger 的**触发器根节点**，自身没有任何底色；
+ *   ② `.arco-popconfirm-popup-content` = Trigger 的 `content-class`，**真正有背景的面板**。
+ *   旧规则把 background / border 写在 `.arco-trigger-popup .arco-popconfirm` 这一层上，视觉上等于没写：
+ *   面板继续用 Arco 默认 `--color-bg-popup`，暗色下是 #373739 中性灰 ⇒
+ *   「灰盒子压在深蓝卡片上」，和 `uvp-tooltip.scss` 里记的完全同一个病。
+ *   `.arco-popconfirm-title` 更是不存在的类（Arco Vue 的 Popconfirm 只有 `content`，没有 title prop）。
+ *
+ * 顺带修掉的双层内边距：面板自己有 padding，旧规则又给 body / footer 各加一层 ⇒
+ *   内容被推到离左边缘 ~40px。现在内边距只由面板出，body / footer 归零。
+ *
+ * ⛔ 必须 `!important`：arco.css 在 `main.ts` 里 import 在 `style/index.scss` **之后**，
+ *   `.arco-popconfirm-popup-content` 是单类（0-1-0），我们同写单类会被后加载的 arco 盖掉。
+ */
+.arco-trigger-popup .arco-popconfirm-popup-content {
+  padding: 14px 16px 12px !important;
+  color: var(--uvp-text-primary) !important;
+  background: var(--uvp-popconfirm-bg) !important;
+  border: 1px solid var(--uvp-popconfirm-border) !important;
+  border-radius: 14px !important;
+  box-shadow: var(--uvp-popconfirm-shadow) !important;
 }
 
-.arco-trigger-popup .arco-popconfirm .arco-popconfirm-body {
-  padding: 14px 14px 10px;
+.arco-trigger-popup .arco-popconfirm-popup-content .arco-popconfirm-body {
+  padding: 0 !important;
+  margin-bottom: 12px !important;
+  color: var(--uvp-text-primary) !important;
 }
 
-.arco-trigger-popup .arco-popconfirm .arco-popconfirm-icon {
-  color: var(--uvp-warning);
+.arco-trigger-popup .arco-popconfirm-popup-content .arco-popconfirm-icon {
+  color: var(--uvp-warning) !important;
 }
 
-.arco-trigger-popup .arco-popconfirm .arco-popconfirm-title {
-  font-weight: 680;
-  color: var(--uvp-text-primary);
+.arco-trigger-popup .arco-popconfirm-popup-content .arco-popconfirm-content {
+  margin: 0 !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  line-height: 20px !important;
+  color: var(--uvp-text-primary) !important;
 }
 
-.arco-trigger-popup .arco-popconfirm .arco-popconfirm-content {
-  margin-top: 4px;
-  line-height: 20px;
-  color: var(--uvp-text-secondary);
+.arco-trigger-popup .arco-popconfirm-popup-content .arco-popconfirm-footer {
+  display: flex !important;
+  gap: 8px !important;
+  justify-content: flex-end !important;
+  padding: 0 !important;
 }
 
-.arco-trigger-popup .arco-popconfirm .arco-popconfirm-footer {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  padding: 0 14px 14px;
+/* 箭头是旋转 45° 的方块，必须与面板同底色 + 同描边，否则接缝处露出 Arco 的灰底、断一条线。
+ * ⚠️ 只覆盖 `border-color`，不写 `border` —— 朝向面板那两条边由 Trigger 的
+ *   `[trigger-placement] .arco-trigger-arrow { border-top/right: none }`（无 !important）裁掉，
+ *   写 `border: … !important` 会让箭头变成贴着面板的小方框。
+ *   与 `uvp-tooltip.scss` 里 `.arco-tooltip-popup-arrow` 的处理保持一致。 */
+.arco-trigger-popup .arco-popconfirm-popup-arrow {
+  background-color: var(--uvp-popconfirm-bg) !important;
+  border-color: var(--uvp-popconfirm-border) !important;
 }
 
 // ⛔ popconfirm 底部按钮的尺寸与配色 2026-11-04 起也走统一真源
