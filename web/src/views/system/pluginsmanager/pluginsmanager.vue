@@ -139,6 +139,7 @@
               content="卸载后将删除插件的所有文件和数据库表。"
               type="warning"
               @ok="handleDeletePlugin"
+              :ok-button-props="{ status: 'danger' }"
             >
               <a-button type="primary" status="danger" v-hasPerm="['system:pluginsmanager:uninstall']">
                 <template #icon><IconDelete /></template>

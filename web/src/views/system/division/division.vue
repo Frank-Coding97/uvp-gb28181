@@ -80,7 +80,7 @@
                   <template #icon><icon-plus /></template>
                   <span>新增</span>
                 </a-link>
-                <a-popconfirm type="warning" content="确定删除该部门吗?" @ok="deleteDivision(record)">
+                <a-popconfirm type="warning" content="确定删除该部门吗?" @ok="deleteDivision(record)" :ok-button-props="{ status: 'danger' }">
                   <a-link
                     class="uvp-table-action uvp-table-action--delete"
                     v-hasPerm="['system:division:delete']"

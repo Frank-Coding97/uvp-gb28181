@@ -84,6 +84,7 @@
                   content="确定删除该字典吗?"
                   :disabled="isSystemDict(record.code)"
                   @ok="onDelete(record)"
+                  :ok-button-props="{ status: 'danger' }"
                 >
                   <a-link
                     class="uvp-table-action uvp-table-action--delete"
@@ -199,6 +200,7 @@
                     content="确定删除该字典吗?"
                     :disabled="currentDictReadonly"
                     @ok="onDeleteDetail(record)"
+                    :ok-button-props="{ status: 'danger' }"
                   >
                     <a-link
                       class="uvp-table-action uvp-table-action--delete"

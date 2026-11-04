@@ -917,6 +917,7 @@ defineExpose({ openFavoriteDialogForChannels });
             :content="`确认移除“${node.channel ? displayChannelName(node.channel) : ''}”吗？`"
             type="warning"
             @ok="removeFavoriteChannel(node)"
+            :ok-button-props="{ status: 'danger' }"
           >
             <button
               class="favorite-remove"
@@ -946,6 +947,7 @@ defineExpose({ openFavoriteDialogForChannels });
             :content="`确认删除收藏组“${node.favoriteGroup.name}”吗？`"
             type="warning"
             @ok="removeFavoriteGroup(node)"
+            :ok-button-props="{ status: 'danger' }"
           >
             <button
               class="favorite-remove"
