@@ -189,10 +189,26 @@ describe("security preview system integration", () => {
     expect(source).toContain('<s-layout-search class="security-list-search event-search-panel">');
     expect(source).toContain('<s-layout-search class="security-list-search ban-search-panel">');
     expect(source).toContain('<s-layout-search class="security-list-search rule-search-panel">');
-    expect(source).toContain('placeholder="筛选本页来源、原因或策略"');
-    expect(source).toContain('placeholder="筛选本页匹配内容或备注"');
-    expect(source).toContain(':data="filteredAutoBans"');
-    expect(source).toContain(':data="filteredCurrentRules"');
+    expect(source).toContain('placeholder="来源、触发方法或原因编码"');
+    expect(source).toContain('placeholder="匹配内容、备注或范围"');
+    expect(source).toContain(':data="autoBans"');
+    expect(source).toContain(':data="currentRules"');
+  });
+
+  // 2026-11-04 治理：三个台账原来是"边输边筛当前页"，既没有查询按钮，翻页也搜不到人。
+  // 现在与图像库/在线用户等列表页统一：条件走服务端，点查询才提交，提交后回第 1 页。
+  it("submits list filters through the query button instead of filtering the current page", () => {
+    expect(source.match(/>查询<\/a-button>/g)).toHaveLength(3);
+    expect(source).not.toContain("筛选本页");
+    expect(source).not.toContain("filteredEvents");
+    expect(source).not.toContain("filteredAutoBans");
+    expect(source).not.toContain("filteredCurrentRules");
+    expect(source).toContain("eventQuery");
+    expect(source).toContain("banQuery");
+    expect(source).toContain("ruleQuery");
+    expect(source).toContain("applyEventQuery");
+    expect(source).toContain("applyBanQuery");
+    expect(source).toContain("applyRuleQuery");
   });
 
   it("aligns list filters with the online-user search controls", () => {
@@ -253,7 +269,7 @@ describe("security preview system integration", () => {
 
   it("keeps later event pages stable during automatic refresh", () => {
     expect(source).toContain("const shouldRefreshEvents = forceLists || showMessage || eventPage.value === 1");
-    expect(source).toContain("shouldRefreshEvents ? listSecurityEvents");
+    expect(source).toContain("? listSecurityEvents");
   });
 
   it("uses a compact framed layout for actionable security advice", () => {

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 	"uvplatform.com/uvp-gb28181/app/utils/response"
 
@@ -21,6 +22,58 @@ type SecuritySnapshot struct {
 	Bans    []gbsecurity.FirewallBan    `json:"bans"`
 	Agent   gbsecurity.AgentStatus      `json:"agent"`
 	AsOf    time.Time                   `json:"asOf"`
+}
+
+// SecurityEventView 在聚合数据上补一个服务端判定的风险等级。
+// 台账页按等级翻页时，筛选与展示必须同源，不能让前端各判一套。
+type SecurityEventView struct {
+	gbsecurity.EventAggregate
+	Severity gbsecurity.EventSeverity `json:"severity"`
+}
+
+func securityEventViews(items []gbsecurity.EventAggregate) []SecurityEventView {
+	views := make([]SecurityEventView, 0, len(items))
+	for _, item := range items {
+		views = append(views, SecurityEventView{
+			EventAggregate: item,
+			Severity:       gbsecurity.EventSeverityFor(item.Action, item.Reason),
+		})
+	}
+	return views
+}
+
+// securityKeyword 统一收口：去空白、转小写，空白关键字视为不过滤。
+func securityKeyword(ctx *gin.Context) string {
+	return strings.ToLower(strings.TrimSpace(ctx.Query("keyword")))
+}
+
+func securityKeywordMatch(keyword string, fields ...string) bool {
+	if keyword == "" {
+		return true
+	}
+	for _, field := range fields {
+		if strings.Contains(strings.ToLower(field), keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+// banFirewallState 把 agentState 归一成台账上展示的三档，口径与前端一致。
+func banFirewallState(ban gbsecurity.FirewallBan) string {
+	switch ban.AgentState {
+	case "applied":
+		return "applied"
+	case "failed":
+		return "failed"
+	default:
+		return "pending"
+	}
+}
+
+func securityBadQuery(ctx *gin.Context, message string) {
+	response.SetBusinessResult(ctx, http.StatusBadRequest, false)
+	ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": message})
 }
 
 type SecurityPolicyView struct {
@@ -109,7 +162,23 @@ func (c *SecurityController) Events(ctx *gin.Context) {
 		securityUnavailable(ctx)
 		return
 	}
-	items := append([]gbsecurity.EventAggregate(nil), c.provider.Events()...)
+	severity := gbsecurity.EventSeverity(strings.ToLower(strings.TrimSpace(ctx.Query("severity"))))
+	if !severity.Valid() {
+		securityBadQuery(ctx, "invalid severity")
+		return
+	}
+	keyword := securityKeyword(ctx)
+	source := c.provider.Events()
+	items := make([]gbsecurity.EventAggregate, 0, len(source))
+	for _, item := range source {
+		if !securityKeywordMatch(keyword, item.SourceIP, item.DeviceID, item.Method, item.UserAgent, string(item.Reason), string(item.Action)) {
+			continue
+		}
+		if severity != "" && gbsecurity.EventSeverityFor(item.Action, item.Reason) != severity {
+			continue
+		}
+		items = append(items, item)
+	}
 	sort.SliceStable(items, func(i, j int) bool {
 		if items[i].LastSeenAt.Equal(items[j].LastSeenAt) {
 			return items[i].SourceIP < items[j].SourceIP
@@ -118,7 +187,7 @@ func (c *SecurityController) Events(ctx *gin.Context) {
 	})
 	page, pageSize := securityPageParams(ctx)
 	total := len(items)
-	c.Success(ctx, gin.H{"items": securityPage(items, page, pageSize), "total": total, "page": page, "pageSize": pageSize})
+	c.Success(ctx, gin.H{"items": securityEventViews(securityPage(items, page, pageSize)), "total": total, "page": page, "pageSize": pageSize})
 }
 
 func (c *SecurityController) Bans(ctx *gin.Context) {
@@ -126,6 +195,12 @@ func (c *SecurityController) Bans(ctx *gin.Context) {
 		securityUnavailable(ctx)
 		return
 	}
+	firewallState := strings.ToLower(strings.TrimSpace(ctx.Query("firewallState")))
+	if firewallState != "" && firewallState != "applied" && firewallState != "pending" && firewallState != "failed" {
+		securityBadQuery(ctx, "invalid firewallState")
+		return
+	}
+	keyword := securityKeyword(ctx)
 	items := append([]gbsecurity.FirewallBan(nil), c.provider.Bans()...)
 	if ctx.Query("activeOnly") == "true" {
 		activeItems := make([]gbsecurity.FirewallBan, 0, len(items))
@@ -135,6 +210,25 @@ func (c *SecurityController) Bans(ctx *gin.Context) {
 			}
 		}
 		items = activeItems
+	}
+	if keyword != "" || firewallState != "" {
+		filtered := make([]gbsecurity.FirewallBan, 0, len(items))
+		for _, item := range items {
+			if !securityKeywordMatch(keyword,
+				item.Decision.SourceIP,
+				item.Decision.DeviceID,
+				string(item.Decision.Reason),
+				item.Decision.TriggerMethod,
+				string(item.Decision.PolicyMode),
+			) {
+				continue
+			}
+			if firewallState != "" && banFirewallState(item) != firewallState {
+				continue
+			}
+			filtered = append(filtered, item)
+		}
+		items = filtered
 	}
 	sort.SliceStable(items, func(i, j int) bool {
 		if items[i].Decision.CreatedAt.Equal(items[j].Decision.CreatedAt) {
@@ -210,11 +304,34 @@ func (c *SecurityController) AccessRules(ctx *gin.Context) {
 	}
 	listType := gbsecurity.AccessListType(ctx.Query("listType"))
 	if listType != "" && listType != gbsecurity.ListBlacklist && listType != gbsecurity.ListAllowlist {
-		response.SetBusinessResult(ctx, http.StatusBadRequest, false)
-		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": "invalid listType"})
+		securityBadQuery(ctx, "invalid listType")
 		return
 	}
-	items := append([]gbsecurity.AccessRule(nil), c.provider.AccessRules(listType)...)
+	matchType := gbsecurity.AccessMatchType(strings.ToLower(strings.TrimSpace(ctx.Query("matchType"))))
+	if matchType != "" && matchType != gbsecurity.MatchIP && matchType != gbsecurity.MatchCIDR && matchType != gbsecurity.MatchUserAgent {
+		securityBadQuery(ctx, "invalid matchType")
+		return
+	}
+	status := gbsecurity.AccessRuleStatus(strings.ToLower(strings.TrimSpace(ctx.Query("status"))))
+	if status != "" && status != gbsecurity.RuleEnabled && status != gbsecurity.RuleDisabled {
+		securityBadQuery(ctx, "invalid status")
+		return
+	}
+	keyword := securityKeyword(ctx)
+	source := c.provider.AccessRules(listType)
+	items := make([]gbsecurity.AccessRule, 0, len(source))
+	for _, item := range source {
+		if !securityKeywordMatch(keyword, item.MatchValue, item.Note, item.Scope, string(item.MatchType)) {
+			continue
+		}
+		if matchType != "" && item.MatchType != matchType {
+			continue
+		}
+		if status != "" && item.Status != status {
+			continue
+		}
+		items = append(items, item)
+	}
 	sort.SliceStable(items, func(i, j int) bool {
 		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
 			return items[i].ID > items[j].ID

@@ -144,6 +144,106 @@ func TestSecurityControllerAccessRulesPaginatesFilteredListNewestFirst(t *testin
 	require.Equal(t, uint64(3), response.Data.Items[0].ID)
 }
 
+func TestSecurityControllerEventsFiltersByKeywordAndSeverity(t *testing.T) {
+	base := time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)
+	provider := &securityControllerProvider{events: []gbsecurity.EventAggregate{
+		{SourceIP: "203.0.113.1", Method: "INVITE", Reason: gbsecurity.ReasonUnknownMethod, Action: gbsecurity.ActionDrop, LastSeenAt: base},
+		{SourceIP: "203.0.113.2", Method: "REGISTER", Reason: gbsecurity.ReasonDigestFailure, Action: gbsecurity.ActionSample, LastSeenAt: base.Add(time.Minute)},
+		{SourceIP: "198.51.100.7", Method: "MESSAGE", Reason: gbsecurity.ReasonUnknownMethod, Action: gbsecurity.ActionBan, UserAgent: "friendly-scanner", LastSeenAt: base.Add(2 * time.Minute)},
+	}}
+
+	byKeyword := decodeSecurityPage[SecurityEventView](t,
+		serveSecurityList(t, "/events?keyword=FRIENDLY", NewSecurityController(provider).Events))
+	require.Equal(t, 1, byKeyword.Data.Total)
+	require.Equal(t, "198.51.100.7", byKeyword.Data.Items[0].SourceIP)
+
+	// 高危包含两种来源：已封禁，以及设备枚举/鉴权类原因 —— 这里故意用"已记录但原因高危"的事件验证。
+	bySeverity := decodeSecurityPage[SecurityEventView](t,
+		serveSecurityList(t, "/events?severity=high", NewSecurityController(provider).Events))
+	require.Equal(t, 2, bySeverity.Data.Total)
+	for _, item := range bySeverity.Data.Items {
+		require.Equal(t, gbsecurity.SeverityHigh, item.Severity)
+	}
+
+	mediumOnly := decodeSecurityPage[SecurityEventView](t,
+		serveSecurityList(t, "/events?severity=medium&keyword=203.0.113", NewSecurityController(provider).Events))
+	require.Equal(t, 1, mediumOnly.Data.Total)
+	require.Equal(t, "203.0.113.1", mediumOnly.Data.Items[0].SourceIP)
+}
+
+func TestSecurityControllerBansFiltersByKeywordAndFirewallState(t *testing.T) {
+	base := time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)
+	provider := &securityControllerProvider{bans: []gbsecurity.FirewallBan{
+		{Decision: gbsecurity.BanDecision{DecisionID: "b1", SourceIP: "203.0.113.9", Reason: gbsecurity.ReasonUnknownMethod, TriggerMethod: "INVITE", CreatedAt: base}, AgentState: "applied"},
+		{Decision: gbsecurity.BanDecision{DecisionID: "b2", SourceIP: "203.0.113.10", Reason: gbsecurity.ReasonDigestFailure, TriggerMethod: "REGISTER", CreatedAt: base.Add(time.Minute)}, AgentState: "failed"},
+		{Decision: gbsecurity.BanDecision{DecisionID: "b3", SourceIP: "198.51.100.3", Reason: gbsecurity.ReasonUnknownMethod, TriggerMethod: "MESSAGE", CreatedAt: base.Add(2 * time.Minute)}, AgentState: "pending"},
+	}}
+
+	byState := decodeSecurityPage[gbsecurity.FirewallBan](t,
+		serveSecurityList(t, "/bans?firewallState=failed", NewSecurityController(provider).Bans))
+	require.Equal(t, 1, byState.Data.Total)
+	require.Equal(t, "b2", byState.Data.Items[0].Decision.DecisionID)
+
+	// keyword 命中原因原值，不是中文文案（中文由前端展示层负责）。
+	byKeyword := decodeSecurityPage[gbsecurity.FirewallBan](t,
+		serveSecurityList(t, "/bans?keyword=digest", NewSecurityController(provider).Bans))
+	require.Equal(t, 1, byKeyword.Data.Total)
+	require.Equal(t, "b2", byKeyword.Data.Items[0].Decision.DecisionID)
+
+	combined := decodeSecurityPage[gbsecurity.FirewallBan](t,
+		serveSecurityList(t, "/bans?keyword=203.0.113&firewallState=applied", NewSecurityController(provider).Bans))
+	require.Equal(t, 1, combined.Data.Total)
+	require.Equal(t, "b1", combined.Data.Items[0].Decision.DecisionID)
+}
+
+func TestSecurityControllerAccessRulesFiltersByKeywordTypeAndStatus(t *testing.T) {
+	base := time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)
+	provider := &securityControllerProvider{rules: []gbsecurity.AccessRule{
+		{ID: 1, ListType: gbsecurity.ListBlacklist, MatchType: gbsecurity.MatchIP, MatchValue: "203.0.113.4", Status: gbsecurity.RuleEnabled, CreatedAt: base},
+		{ID: 2, ListType: gbsecurity.ListBlacklist, MatchType: gbsecurity.MatchUserAgent, MatchValue: "friendly-scanner", Status: gbsecurity.RuleDisabled, Note: "扫描器", CreatedAt: base.Add(time.Minute)},
+		{ID: 3, ListType: gbsecurity.ListAllowlist, MatchType: gbsecurity.MatchCIDR, MatchValue: "10.0.0.0/8", Status: gbsecurity.RuleEnabled, CreatedAt: base.Add(2 * time.Minute)},
+	}}
+
+	byType := decodeSecurityPage[gbsecurity.AccessRule](t,
+		serveSecurityList(t, "/access-rules?listType=blacklist&matchType=user_agent", NewSecurityController(provider).AccessRules))
+	require.Equal(t, 1, byType.Data.Total)
+	require.Equal(t, uint64(2), byType.Data.Items[0].ID)
+
+	byStatus := decodeSecurityPage[gbsecurity.AccessRule](t,
+		serveSecurityList(t, "/access-rules?status=enabled", NewSecurityController(provider).AccessRules))
+	require.Equal(t, 2, byStatus.Data.Total)
+
+	byKeywordAndType := decodeSecurityPage[gbsecurity.AccessRule](t,
+		serveSecurityList(t, "/access-rules?keyword=SCANNER&matchType=user_agent&status=disabled", NewSecurityController(provider).AccessRules))
+	require.Equal(t, 1, byKeywordAndType.Data.Total)
+	require.Equal(t, uint64(2), byKeywordAndType.Data.Items[0].ID)
+}
+
+func TestSecurityControllerRejectsUnknownListFilters(t *testing.T) {
+	provider := &securityControllerProvider{}
+	cases := []struct {
+		target  string
+		handler gin.HandlerFunc
+	}{
+		{"/events?severity=urgent", NewSecurityController(provider).Events},
+		{"/bans?firewallState=syncing", NewSecurityController(provider).Bans},
+		{"/access-rules?matchType=domain", NewSecurityController(provider).AccessRules},
+		{"/access-rules?status=archived", NewSecurityController(provider).AccessRules},
+	}
+	for _, tc := range cases {
+		t.Run(tc.target, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			router := gin.New()
+			router.GET("/events", tc.handler)
+			router.GET("/bans", tc.handler)
+			router.GET("/access-rules", tc.handler)
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest("GET", tc.target, nil))
+			require.Equal(t, 400, recorder.Code)
+		})
+	}
+}
+
 func TestSecurityPolicyViewExposesPermanentAutomaticBan(t *testing.T) {
 	view := securityPolicyView(gbsecurity.DefaultPolicy())
 	require.True(t, view.PermanentAutoBan)

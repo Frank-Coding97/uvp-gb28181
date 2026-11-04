@@ -41,6 +41,8 @@ import {
   type FirewallBan,
   type SecurityAccessRule,
   type SecurityEventAggregate,
+  type SecurityEventSeverity,
+  type SecurityFirewallState,
   type SecurityPolicy,
   type SecuritySnapshot
 } from "@/api/gb28181-security";
@@ -55,6 +57,17 @@ import {
   isHighRiskSecurityReason
 } from "./securityFormatting";
 import { buildAccessRuleTogglePayload } from "./securityRules";
+import {
+  firewallStateParam,
+  isEmptyQuery,
+  matchTypeParam,
+  normalizeKeyword,
+  severityParam,
+  statusParam,
+  STATE_ANY,
+  TYPE_ANY,
+  RISK_ANY
+} from "./securityQuery";
 
 type TabKey = "overview" | "events" | "bans" | "blacklist" | "allowlist" | "policy";
 type RuleKind = "blacklist" | "allowlist";
@@ -127,13 +140,21 @@ const activeTab = ref<TabKey>("overview");
 const live = ref(true);
 const period = ref<SecurityTrendPeriod>("24h");
 const trendPeriods: SecurityTrendPeriod[] = ["1h", "24h", "7d"];
-const eventSeverity = ref("全部风险");
+const eventSeverity = ref<string>(RISK_ANY);
 const eventSearch = ref("");
 const banSearch = ref("");
-const banFirewallState = ref("全部状态");
+const banFirewallState = ref<string>(STATE_ANY);
 const ruleSearch = ref("");
-const ruleTypeFilter = ref("全部类型");
-const ruleStatusFilter = ref("全部状态");
+const ruleTypeFilter = ref<string>(TYPE_ANY);
+const ruleStatusFilter = ref<string>(STATE_ANY);
+// ⛔ 台账筛选一律是"草稿 + 提交"两段式：输入框只改草稿，点「查询」才落到 xxxQuery 并重查。
+//    原来是输入即筛（computed 过滤本页），跨页找不到人；现在与全站列表页一致走后端条件。
+const eventQuery = ref<{ keyword: string; severity?: SecurityEventSeverity }>({ keyword: "" });
+const banQuery = ref<{ keyword: string; firewallState?: SecurityFirewallState }>({ keyword: "" });
+const ruleQuery = ref<{ keyword: string; matchType?: SecurityAccessRule["matchType"]; status?: "enabled" | "disabled" }>({
+  keyword: ""
+});
+const querying = ref<"" | "events" | "bans" | "rules">("");
 const tablePageSizeOptions = [10, 20, 50, 100];
 const eventPage = ref(1);
 const eventPageSize = ref(10);
@@ -147,6 +168,8 @@ const blackRuleTotal = ref(0);
 const allowRulePage = ref(1);
 const allowRulePageSize = ref(10);
 const allowRuleTotal = ref(0);
+// 总览"安全建议"专用的白名单总数：只在不带筛选条件时刷新，避免被台账查询污染。
+const allowOverviewTotal = ref(0);
 const registerValidationNote = "REGISTER 始终校验格式、鉴权和设备身份；无效请求拒绝，修正后可重新注册";
 const protectionModes: ProtectionModeOption[] = [
   {
@@ -214,39 +237,9 @@ let themeObserver: MutationObserver | null = null;
 let refreshTimer: number | null = null;
 let refreshInFlight = false;
 
-const filteredEvents = computed(() =>
-  events.value.filter(item => {
-    const severityMatches = eventSeverity.value === "全部风险" || item.severity === eventSeverity.value;
-    const keyword = eventSearch.value.trim().toLowerCase();
-    const keywordMatches =
-      !keyword || [item.source, item.method, item.userAgent, item.rule].some(value => value.toLowerCase().includes(keyword));
-    return severityMatches && keywordMatches;
-  })
-);
-
+// 台账数据本身由后端按已提交条件分页返回，这里不再做本页过滤 ——
+// 保留"本页过滤"会让分页 total 与可见行数对不上，也搜不到其它页的记录。
 const currentRules = computed(() => (activeTab.value === "allowlist" ? allowRules.value : blackRules.value));
-const filteredAutoBans = computed(() => {
-  const keyword = banSearch.value.trim().toLowerCase();
-  return autoBans.value.filter(item => {
-    const keywordMatches =
-      !keyword ||
-      [item.source, item.location, item.reason, item.evidence, item.mode, item.method].some(value =>
-        value.toLowerCase().includes(keyword)
-      );
-    const stateMatches = banFirewallState.value === "全部状态" || item.firewallState === banFirewallState.value;
-    return keywordMatches && stateMatches;
-  });
-});
-const filteredCurrentRules = computed(() => {
-  const keyword = ruleSearch.value.trim().toLowerCase();
-  return currentRules.value.filter(item => {
-    const keywordMatches =
-      !keyword || [item.value, item.note, item.scope, item.type].some(value => value.toLowerCase().includes(keyword));
-    const typeMatches = ruleTypeFilter.value === "全部类型" || item.type === ruleTypeFilter.value;
-    const statusMatches = ruleStatusFilter.value === "全部状态" || item.enabled === (ruleStatusFilter.value === "已启用");
-    return keywordMatches && typeMatches && statusMatches;
-  });
-});
 const currentRulePage = computed(() => (activeTab.value === "allowlist" ? allowRulePage.value : blackRulePage.value));
 const currentRulePageSize = computed(() => (activeTab.value === "allowlist" ? allowRulePageSize.value : blackRulePageSize.value));
 const currentRuleTotal = computed(() => (activeTab.value === "allowlist" ? allowRuleTotal.value : blackRuleTotal.value));
@@ -299,7 +292,8 @@ const overviewBans = computed(() =>
     .filter(item => item.status === "active" || item.status === "agent_failed")
     .map((item, index) => mapBan(item, index))
 );
-const attentionCount = computed(() => banTotal.value + (allowRuleTotal.value > 0 ? 1 : 0));
+// 总览计数取快照（全量、不受台账筛选和分页影响），不要用列表接口的 total。
+const attentionCount = computed(() => overviewBans.value.length + (allowOverviewTotal.value > 0 ? 1 : 0));
 const enabledDefenseLayers = computed(() => 1 + (securityAgent.value.connected ? 1 : 0));
 const policyWindowLabel = computed(() => (securityPolicy.value ? `${securityPolicy.value.window} 秒窗口` : "策略窗口读取中"));
 const shortWindowInviteRuleLabel = computed(() =>
@@ -456,12 +450,20 @@ function expiryToIso(expiry: string) {
   return duration ? new Date(Date.now() + duration).toISOString() : undefined;
 }
 
+// 等级优先取服务端下发的 severity（筛选就按它算），快照接口不带时才本地兜底。
+// ⛔ 本地兜底必须与 server/app/gb28181/security/severity.go 的 EventSeverityFor 一致。
+function eventSeverityLabel(event: SecurityEventAggregate): SecurityEvent["severity"] {
+  if (event.severity) {
+    return event.severity === "high" ? "高危" : event.severity === "medium" ? "中危" : "低危";
+  }
+  return event.action === "ban" || isHighRiskSecurityReason(event.reason) ? "高危" : event.action === "drop" ? "中危" : "低危";
+}
+
 function mapEvent(event: SecurityEventAggregate, index: number, offset = 0): SecurityEvent {
-  const highRisk = event.action === "ban" || isHighRiskSecurityReason(event.reason);
   const location = event.riskScope === "device" ? `设备 ${event.deviceId || "未知"}` : "来源 IP";
   return {
     id: offset + index + 1,
-    severity: highRisk ? "高危" : event.action === "drop" ? "中危" : "低危",
+    severity: eventSeverityLabel(event),
     source: event.sourceIp,
     location,
     method: event.method || "未知",
@@ -504,16 +506,32 @@ async function refreshPreview(showMessage = false, forceLists = false) {
     const shouldRefreshAllowRules = forceLists || showMessage || allowRulePage.value === 1;
     const [snapshot, eventResult, banResult, policy, black, allow, agentHealth] = await Promise.all([
       getSecuritySnapshot(),
-      shouldRefreshEvents ? listSecurityEvents({ page: eventPage.value, pageSize: eventPageSize.value }) : Promise.resolve(null),
+      shouldRefreshEvents
+        ? listSecurityEvents({ page: eventPage.value, pageSize: eventPageSize.value, ...eventQuery.value })
+        : Promise.resolve(null),
       shouldRefreshBans
-        ? listSecurityBans({ page: banPage.value, pageSize: banPageSize.value, activeOnly: true })
+        ? listSecurityBans({
+            page: banPage.value,
+            pageSize: banPageSize.value,
+            activeOnly: true,
+            ...(banQuery.value.keyword ? { keyword: banQuery.value.keyword } : {}),
+            ...(banQuery.value.firewallState ? { firewallState: banQuery.value.firewallState } : {})
+          })
         : Promise.resolve(null),
       getSecurityPolicy(),
       shouldRefreshBlackRules
-        ? listSecurityAccessRules("blacklist", { page: blackRulePage.value, pageSize: blackRulePageSize.value })
+        ? listSecurityAccessRules("blacklist", {
+            page: blackRulePage.value,
+            pageSize: blackRulePageSize.value,
+            ...ruleQuery.value
+          })
         : Promise.resolve(null),
       shouldRefreshAllowRules
-        ? listSecurityAccessRules("allowlist", { page: allowRulePage.value, pageSize: allowRulePageSize.value })
+        ? listSecurityAccessRules("allowlist", {
+            page: allowRulePage.value,
+            pageSize: allowRulePageSize.value,
+            ...ruleQuery.value
+          })
         : Promise.resolve(null),
       getSecurityAgentHealth()
     ]);
@@ -557,6 +575,8 @@ async function refreshPreview(showMessage = false, forceLists = false) {
     }
     if (allow?.code === 0) {
       allowRuleTotal.value = allow.data?.total || 0;
+      // 总览的"待处理"计数只认同口径（无筛选）的总数，否则查一次白名单就把建议数算小。
+      if (isEmptyQuery(ruleQuery.value)) allowOverviewTotal.value = allowRuleTotal.value;
       allowRules.value = (allow.data?.items || []).map(mapRule);
     }
     if (showMessage) Message.success("安全数据已刷新");
@@ -585,18 +605,55 @@ function handleBanPageSizeChange(pageSize: number) {
   banPage.value = 1;
   void refreshPreview(false, true);
 }
+// ⛔ 三个台账统一「查询 → 提交条件 → 回第 1 页」，与图像库/在线用户等列表页一致。
+//    不要把条件改回 watch 自动提交：翻页和每 10 秒自动刷新都会连带重算。
+async function runQuery(tab: "events" | "bans" | "rules") {
+  querying.value = tab;
+  try {
+    await refreshPreview(false, true);
+  } finally {
+    querying.value = "";
+  }
+}
+function applyEventQuery() {
+  const severity = severityParam(eventSeverity.value);
+  eventQuery.value = { keyword: normalizeKeyword(eventSearch.value), ...(severity ? { severity } : {}) };
+  eventPage.value = 1;
+  return runQuery("events");
+}
+function applyBanQuery() {
+  const firewallState = firewallStateParam(banFirewallState.value);
+  banQuery.value = { keyword: normalizeKeyword(banSearch.value), ...(firewallState ? { firewallState } : {}) };
+  banPage.value = 1;
+  return runQuery("bans");
+}
+function applyRuleQuery() {
+  const matchType = matchTypeParam(ruleTypeFilter.value);
+  const status = statusParam(ruleStatusFilter.value);
+  ruleQuery.value = {
+    keyword: normalizeKeyword(ruleSearch.value),
+    ...(matchType ? { matchType } : {}),
+    ...(status ? { status } : {})
+  };
+  if (activeTab.value === "allowlist") allowRulePage.value = 1;
+  else blackRulePage.value = 1;
+  return runQuery("rules");
+}
 function resetEventSearch() {
-  eventSeverity.value = "全部风险";
+  eventSeverity.value = RISK_ANY;
   eventSearch.value = "";
+  return applyEventQuery();
 }
 function resetBanSearch() {
   banSearch.value = "";
-  banFirewallState.value = "全部状态";
+  banFirewallState.value = STATE_ANY;
+  return applyBanQuery();
 }
 function resetRuleSearch() {
   ruleSearch.value = "";
-  ruleTypeFilter.value = "全部类型";
-  ruleStatusFilter.value = "全部状态";
+  ruleTypeFilter.value = TYPE_ANY;
+  ruleStatusFilter.value = STATE_ANY;
+  return applyRuleQuery();
 }
 function handleRulePageChange(page: number) {
   if (activeTab.value === "allowlist") allowRulePage.value = page;
@@ -685,8 +742,11 @@ async function removeRule(_kind: RuleKind, id: number) {
 }
 
 function showBanEvents(item: AutoBanRecord) {
+  // 这是"程序带条件跳转"，条件由系统给，直接提交查询（用户仍需自己点查询的场景只限手工输入）。
   eventSearch.value = item.source;
+  eventSeverity.value = RISK_ANY;
   activeTab.value = "events";
+  void applyEventQuery();
 }
 
 async function unbanPreview(item: AutoBanRecord) {
@@ -962,17 +1022,17 @@ onBeforeUnmount(() => {
               </div>
               <span class="attention-count">{{ attentionCount }}</span>
             </div>
-            <button v-if="banTotal" class="attention-row" type="button" @click="activeTab = 'bans'">
+            <button v-if="overviewBans.length" class="attention-row" type="button" @click="activeTab = 'bans'">
               <span class="attention-icon danger"><Ban :size="18" /></span
               ><span
-                ><strong>{{ banTotal }} 条自动封禁待复核</strong
+                ><strong>{{ overviewBans.length }} 条自动封禁待复核</strong
                 ><small>新自动封禁永久生效，请核对来源后决定是否人工解封。</small></span
               ><ChevronRight :size="16" />
             </button>
-            <button v-if="allowRuleTotal" class="attention-row" type="button" @click="activeTab = 'allowlist'">
+            <button v-if="allowOverviewTotal" class="attention-row" type="button" @click="activeTab = 'allowlist'">
               <span class="attention-icon warning"><UserRoundCheck :size="18" /></span
               ><span
-                ><strong>{{ allowRuleTotal }} 条白名单规则</strong><small>可信出口加入白名单后可减少误判。</small></span
+                ><strong>{{ allowOverviewTotal }} 条白名单规则</strong><small>可信出口加入白名单后可减少误判。</small></span
               ><ChevronRight :size="16" />
             </button>
             <div v-if="!attentionCount" class="empty-state attention-empty" role="status">
@@ -990,8 +1050,9 @@ onBeforeUnmount(() => {
               <a-input
                 v-model="eventSearch"
                 allow-clear
-                placeholder="筛选本页 IP、方法或 User-Agent"
-                aria-label="筛选本页风险事件"
+                placeholder="IP、方法或 User-Agent"
+                aria-label="筛选风险事件"
+                @press-enter="applyEventQuery"
                 ><template #prefix><Search :size="15" /></template
               ></a-input>
             </div>
@@ -1002,11 +1063,14 @@ onBeforeUnmount(() => {
               >
             </div>
           </template>
-          <template #actions><a-button @click="resetEventSearch">重置</a-button></template>
+          <template #actions>
+            <a-button type="primary" :loading="querying === 'events'" @click="applyEventQuery">查询</a-button>
+            <a-button :disabled="querying === 'events'" @click="resetEventSearch">重置</a-button>
+          </template>
         </s-layout-search>
         <a-table
           class="security-table uvp-data-table"
-          :data="filteredEvents"
+          :data="events"
           row-key="id"
           :pagination="eventPagination"
           :scroll="{ x: 1050, y: '100%' }"
@@ -1041,7 +1105,12 @@ onBeforeUnmount(() => {
         <s-layout-search class="security-list-search ban-search-panel">
           <template #fields>
             <div class="security-list-filter security-list-filter--keyword">
-              <a-input v-model="banSearch" allow-clear placeholder="筛选本页来源、原因或策略" aria-label="筛选本页自动封禁"
+              <a-input
+                v-model="banSearch"
+                allow-clear
+                placeholder="来源、触发方法或原因编码"
+                aria-label="筛选自动封禁"
+                @press-enter="applyBanQuery"
                 ><template #prefix><Search :size="15" /></template
               ></a-input>
             </div>
@@ -1052,11 +1121,14 @@ onBeforeUnmount(() => {
               >
             </div>
           </template>
-          <template #actions><a-button @click="resetBanSearch">重置</a-button></template>
+          <template #actions>
+            <a-button type="primary" :loading="querying === 'bans'" @click="applyBanQuery">查询</a-button>
+            <a-button :disabled="querying === 'bans'" @click="resetBanSearch">重置</a-button>
+          </template>
         </s-layout-search>
         <a-table
           class="security-table uvp-data-table ban-table"
-          :data="filteredAutoBans"
+          :data="autoBans"
           row-key="id"
           :pagination="banPagination"
           :scroll="{ x: 1060, y: '100%' }"
@@ -1128,8 +1200,9 @@ onBeforeUnmount(() => {
               <a-input
                 v-model="ruleSearch"
                 allow-clear
-                placeholder="筛选本页匹配内容或备注"
-                :aria-label="`筛选本页${activeTab === 'blacklist' ? '黑名单' : '白名单'}`"
+                placeholder="匹配内容、备注或范围"
+                :aria-label="`筛选${activeTab === 'blacklist' ? '黑名单' : '白名单'}`"
+                @press-enter="applyRuleQuery"
                 ><template #prefix><Search :size="15" /></template
               ></a-input>
             </div>
@@ -1145,11 +1218,14 @@ onBeforeUnmount(() => {
               >
             </div>
           </template>
-          <template #actions><a-button @click="resetRuleSearch">重置</a-button></template>
+          <template #actions>
+            <a-button type="primary" :loading="querying === 'rules'" @click="applyRuleQuery">查询</a-button>
+            <a-button :disabled="querying === 'rules'" @click="resetRuleSearch">重置</a-button>
+          </template>
         </s-layout-search>
         <a-table
           class="security-table uvp-data-table"
-          :data="filteredCurrentRules"
+          :data="currentRules"
           row-key="id"
           :pagination="rulePagination"
           :scroll="{ x: 900, y: '100%' }"

@@ -4,6 +4,8 @@ import type { BaseResult } from "./types";
 
 export type SecurityMode = "observe" | "protect" | "strict";
 export type SecurityRiskScope = "source" | "device";
+export type SecurityEventSeverity = "high" | "medium" | "low";
+export type SecurityFirewallState = "applied" | "pending" | "failed";
 export interface SecurityEventAggregate {
   bucketAt: string;
   sourceIp: string;
@@ -14,6 +16,8 @@ export interface SecurityEventAggregate {
   userAgent?: string;
   reason: string;
   action: string;
+  /** 服务端判定的风险等级；/snapshot 不下发，列表接口会带。 */
+  severity?: SecurityEventSeverity;
   count: number;
   scoreDelta: number;
   firstSeenAt: string;
@@ -94,8 +98,21 @@ export interface SecurityPageParams {
   page?: number;
   pageSize?: number;
 }
+// 台账筛选一律走服务端：keyword 匹配原始值（IP / 方法 / User-Agent / 原因编码 / 匹配内容），
+// 中文文案由展示层负责，不参与查询。
+export interface SecurityEventPageParams extends SecurityPageParams {
+  keyword?: string;
+  severity?: SecurityEventSeverity;
+}
 export interface SecurityBanPageParams extends SecurityPageParams {
   activeOnly?: boolean;
+  keyword?: string;
+  firewallState?: SecurityFirewallState;
+}
+export interface SecurityRulePageParams extends SecurityPageParams {
+  keyword?: string;
+  matchType?: AccessMatchType;
+  status?: "enabled" | "disabled";
 }
 export interface SecurityPage<T> {
   items: T[];
@@ -106,7 +123,7 @@ export interface SecurityPage<T> {
 
 export const getSecuritySnapshot = () =>
   http.request<BaseResult<SecuritySnapshot>>("get", baseUrlApi("gb28181/security/snapshot"));
-export const listSecurityEvents = (params: SecurityPageParams = {}) =>
+export const listSecurityEvents = (params: SecurityEventPageParams = {}) =>
   http.request<BaseResult<SecurityPage<SecurityEventAggregate>>>("get", baseUrlApi("gb28181/security/events"), { params });
 export const listSecurityBans = (params: SecurityBanPageParams = {}) =>
   http.request<BaseResult<SecurityPage<FirewallBan>>>("get", baseUrlApi("gb28181/security/bans"), { params });
@@ -121,7 +138,7 @@ export const updateSecurityPolicy = (policy: SecurityPolicy) =>
 export const getSecurityAgentHealth = () =>
   http.request<BaseResult<AgentStatus>>("get", baseUrlApi("gb28181/security/agent/health"));
 export const buildSecurityStreamUrl = () => baseUrlApi("gb28181/security/stream");
-export const listSecurityAccessRules = (listType?: AccessListType, params: SecurityPageParams = {}) =>
+export const listSecurityAccessRules = (listType?: AccessListType, params: SecurityRulePageParams = {}) =>
   http.request<BaseResult<SecurityPage<SecurityAccessRule>>>("get", baseUrlApi("gb28181/security/access-rules"), {
     params: { ...params, ...(listType ? { listType } : {}) }
   });
