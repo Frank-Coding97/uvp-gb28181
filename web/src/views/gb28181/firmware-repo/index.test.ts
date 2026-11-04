@@ -452,6 +452,27 @@ describe("firmware-repo/index", () => {
     });
   });
 
+  describe("TC7.19: 「上传固件」是新建动作，必须与「查询」区分色相", () => {
+    /**
+     * ⛔ 契约：extra 槽的上传键必须挂 `uvp-create-btn`（绿实心），不能只写 `type="primary"`。
+     *   原因（2026-11-04 老板实拍暗色截图指出）：`body[arco-theme="dark"]` 里那条
+     *   `:is(.arco-btn-primary…)` 覆盖带 `!important`，会把搜索区所有 primary 统一刷成
+     *   `--uvp-solid-bg`（#2563eb）—— 亮色下靠 s-layout-search 的 :deep 兜底还是绿的，
+     *   暗色下就和左边「查询」变成同一个蓝，一屏两个主按钮，层次全丢。
+     *   `uvp-create-btn` 在该规则的排除列表里，两个主题都稳绿。
+     */
+    it("上传固件按钮带 uvp-create-btn（绿 = 新建）", () => {
+      const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/firmware-repo/index.vue"), "utf8");
+      // ⛔ 不能截到最近的 `</template>`：extra 槽里有 `<template #icon>` 子槽，
+      //   那样会提前截断、把按钮文案切掉。用外层容器的闭合标签做边界。
+      const column = source.slice(source.indexOf("<template #extra>"), source.indexOf("</s-layout-search>"));
+      expect(column).toContain('class="uvp-create-btn"');
+      expect(column).toContain("上传固件");
+      // 查询键保持蓝色主按钮，两者的色相必须不同 —— 不允许两处都只写裸 primary
+      expect(column).not.toMatch(/<a-button type="primary"\s+@click="showUploadDialog/);
+    });
+  });
+
   describe("TC7.16: 工具函数测试", () => {
     it("formatFileSize 应该正确格式化文件大小", () => {
       const wrapper = mountRepo();

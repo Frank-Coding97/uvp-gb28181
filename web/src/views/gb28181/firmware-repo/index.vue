@@ -31,7 +31,15 @@
         </a-button>
       </template>
       <template #extra>
-        <a-button type="primary" @click="showUploadDialog = true">
+        <!--
+          ⛔ class="uvp-create-btn" 不能省：上传固件属于「新建资源」，全仓口径是绿实心
+          （account / menu / role / dict / division 的「新增」都这么写）。
+          只写 type="primary" 的话，亮色下靠 s-layout-search 的 :deep 兜底还能绿，
+          但暗色主题里 `body[arco-theme="dark"] :is(.arco-btn-primary…)` 带 !important
+          会把所有 primary 刷成 --uvp-solid-bg（#2563eb）⇒ 和左边的「查询」撞成同一个蓝，
+          「一屏最多一个主按钮」直接失效。挂了本类就在该规则的排除列表里，两个主题都稳绿。
+        -->
+        <a-button type="primary" class="uvp-create-btn" @click="showUploadDialog = true">
           <template #icon>
             <Plus :size="15" />
           </template>
