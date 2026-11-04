@@ -345,12 +345,19 @@ watch(
 .slot-editor-meta strong {
   color: var(--uvp-brand-strong);
 }
+
+/* 已选区间汇总：**天横向排成列、每天的时段在列内竖着排**。
+   原来是「一天一行、时段横着铺」，7 天要占 7 行、还挤在固定 148px 里滚动，
+   一屏只看得见三四天（2026-11-04 老板要求横排）。
+   ⛔ 用 max-height 不是 height：只选一天时不该留一条 148px 的空白带。
+   内层 groups 单独给死 max-height（= 148 - 上下 padding），
+   否则内容超高时会被外层 overflow:hidden 裁掉且**没有滚动条**。 */
 .selected-period-summary {
   box-sizing: border-box;
   display: grid;
   grid-template-columns: 130px minmax(0, 1fr);
   gap: 12px;
-  height: 148px;
+  max-height: 148px;
   padding: 12px 14px;
   margin-top: 12px;
   overflow: hidden;
@@ -382,33 +389,43 @@ watch(
   line-height: 24px;
   color: var(--uvp-text-tertiary);
 }
+
+/* 天与天之间横向排（一周最多 7 列），列内时段竖着叠。
+   minmax(104px, 1fr) 是按 chip 实际宽度（`00:00–24:00` ≈ 84px）留的余量，
+   窄屏（<820px 那档）天数不变、只是每行放得少、自动换行。 */
 .selected-period-groups {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  gap: 10px 12px;
+  align-content: start;
   min-width: 0;
+  max-height: 124px;
   padding-right: 4px;
   overflow-y: auto;
 }
 .selected-period-group {
-  display: grid;
-  grid-template-columns: 42px minmax(0, 1fr);
-  gap: 8px;
-  align-items: start;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+  min-width: 0;
 }
 .selected-period-group > strong {
   font-size: 12px;
-  line-height: 24px;
+  line-height: 16px;
   color: var(--uvp-text-secondary);
 }
 .selected-period-group > div {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+  min-width: 0;
 }
 .selected-period-chip {
   display: inline-flex;
   align-items: center;
+  max-width: 100%;
   min-height: 24px;
   padding: 0 8px;
   font-size: 11px;

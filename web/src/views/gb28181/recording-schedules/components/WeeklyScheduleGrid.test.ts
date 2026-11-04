@@ -66,4 +66,24 @@ describe("WeeklyScheduleGrid shared modes", () => {
     expect(updates?.[0][0][0][0]).toBe(true);
     expect(emptySlots[0][0]).toBe(false);
   });
+
+  it("「全天 / 清空」两枚按钮塞得进末列（曾经被裁掉半颗）", () => {
+    /*
+     * 现场（老板 2026-11-04 截图）：末列 80px，而全局 small 档按钮 min-width 是 64px，
+     * 两枚并排 = 64×2 + 4 + 10 = 142px ⇒ 顶出列外，被 `.week-slot-grid{overflow:hidden}`
+     * 裁成「清空」只剩左半边。
+     * ⛔ 原因是原来那条 `.day-actions :deep(.arco-btn-size-mini)` 写错了类名：模板传的是
+     * `size="small"`（mini 已全站并入 small）⇒ 紧凑规则从未命中过。
+     * 这里同时钉三件事：按钮挂了专用类、紧凑规则还在、末列宽度容得下。
+     */
+    expect(source.match(/class="week-day-action"/g)).toHaveLength(2);
+    const compact = source.match(/\.day-actions :deep\(\.week-day-action\)\s*\{([^}]*)}/s)?.[1] ?? "";
+    expect(compact).toContain("min-width: 34px");
+    // ⛔ 死选择器不许回来：mini 类在模板里根本不存在。
+    //    用「行首选择器」判据，注释里提到类名不会误伤自己。
+    expect(source).not.toMatch(/^\.day-actions :deep\(\.arco-btn-size-mini\)/m);
+    // 末列宽度 ≥ 5(padding) + 34 + 4(gap) + 34 + 5(padding) = 82
+    const lastColumn = source.match(/grid-template-columns: 82px repeat\(24, minmax\(36px, 1fr\)\) (\d+)px/)?.[1];
+    expect(Number(lastColumn)).toBeGreaterThanOrEqual(82);
+  });
 });

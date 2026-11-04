@@ -33,8 +33,8 @@
           </template>
         </div>
         <div v-if="editable" class="day-actions">
-          <a-button size="small" @click="fillDay(dayIndex)">全天</a-button>
-          <a-button size="small" status="danger" @click="clearDay(dayIndex)">清空</a-button>
+          <a-button size="small" class="week-day-action" @click="fillDay(dayIndex)">全天</a-button>
+          <a-button size="small" status="danger" class="week-day-action" @click="clearDay(dayIndex)">清空</a-button>
         </div>
       </div>
     </div>
@@ -139,7 +139,8 @@ onBeforeUnmount(() => window.removeEventListener("mouseup", stopPaint));
   border-radius: 10px;
 }
 .week-slot-grid.editable {
-  min-width: 1026px;
+  /* 82（星期列）+ 24×36（小时格）+ 88（快捷操作列）= 1034 */
+  min-width: 1034px;
 }
 .week-grid-header,
 .week-grid-row {
@@ -148,7 +149,10 @@ onBeforeUnmount(() => window.removeEventListener("mouseup", stopPaint));
 }
 .week-slot-grid.editable .week-grid-header,
 .week-slot-grid.editable .week-grid-row {
-  grid-template-columns: 82px repeat(24, minmax(36px, 1fr)) 80px;
+  /* 末列是「快捷操作」：宽度必须 ≥ 两枚紧凑按钮之和，
+     否则按钮会顶出列外、被 `.week-slot-grid { overflow: hidden }` 裁掉半颗。
+     实测需求 = 5+34+4+34+5 = 82，留 88 兜住字体/缩放的误差。 */
+  grid-template-columns: 82px repeat(24, minmax(36px, 1fr)) 88px;
 }
 .week-grid-header {
   min-height: 34px;
@@ -263,9 +267,16 @@ button.time-slot:hover {
   border-left: 1px solid var(--color-border-3);
   box-shadow: -6px 0 8px -8px rgb(15 23 42 / 45%);
 }
-.day-actions :deep(.arco-btn-size-mini) {
+
+/* 网格右侧的紧凑操作键。
+   ⛔ 这里必须压 min-width：全局 small 档是 `--uvp-btn-min-w-sm: 64px`，
+   两枚并排就是 64×2 + 4(gap) + 10(padding) = 142px，会顶穿 88px 的列、
+   被外层 `overflow: hidden` 裁掉半颗（老板 2026-11-04 截图：「清空」只剩左半边）。
+   这是「密集网格内控件」的例外；⛔ 原来的选择器写的是 Arco 的 mini 尺寸类，
+   而模板传的是 `size="small"`（mini 已全站并入 small）⇒ 那条规则**从未命中过**。 */
+.day-actions :deep(.week-day-action) {
   min-width: 34px;
-  padding: 0 5px;
+  padding: 0 6px;
   font-size: 11px;
   border-radius: 6px;
 }
