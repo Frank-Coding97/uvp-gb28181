@@ -18,6 +18,9 @@ describe("playback log layout", () => {
 
   it("uses the shared table panel and action contracts", () => {
     expect(source).toContain('class="uvp-table-action uvp-table-action--detail"');
+    // 操作列必须带表头，且按钮是「图标 + 文字」而不是纯图标（老板 11-04 要求）。
+    expect(source).toContain('title: "操作"');
+    expect(source).toContain("<span>详情</span>");
     expect(
       hasRuleBlock(
         source,
