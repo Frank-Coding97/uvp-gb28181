@@ -137,7 +137,27 @@ func TestSnapshotLibraryPermissionMigrationIsIdempotent(t *testing.T) {
 		"/api/gb28181/device-mgmt/snapshots/archive",
 		"sys_menu_api",
 		"not exists",
+		// 存量角色补齐段：必须按 casbin 已有策略反查（见脚本第 8 段注释），
+		// ⛔ 别改成「勾了图像库菜单的角色全补」—— 那是凭空发删除权。
+		"sys_role_menu",
+		"sys_casbin_rule",
+		"concat('role_'",
 	} {
 		require.Contains(t, sql, strings.ToLower(token), "迁移脚本缺少 %s", token)
+	}
+}
+
+// 默认种子只给系统管理员勾下载/删除：新装环境里不应有第二个角色直接拿到删除权。
+func TestSnapshotLibrarySeedGrantsButtonsToAdminOnly(t *testing.T) {
+	type roleMenu struct {
+		RoleID int `json:"role_id"`
+		MenuID int `json:"menu_id"`
+	}
+	for _, row := range readSeedJSONL[roleMenu](t, "sys_role_menu.jsonl") {
+		if row.MenuID != snapshotDownloadMenuID && row.MenuID != snapshotDeleteMenuID {
+			continue
+		}
+		require.Equal(t, 1, row.RoleID,
+			"菜单 %d 只应授予系统管理员(role_1)，实际也给了 role_%d", row.MenuID, row.RoleID)
 	}
 }

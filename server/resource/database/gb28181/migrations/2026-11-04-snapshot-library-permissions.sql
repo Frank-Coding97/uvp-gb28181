@@ -63,3 +63,19 @@ WHERE ma.`menu_id` = 140450
      OR (a.`path` = '/api/gb28181/device-mgmt/snapshots/:id/content' AND a.`method` = 'GET')
      OR (a.`path` = '/api/gb28181/device-mgmt/snapshots/archive' AND a.`method` = 'GET')
       );
+
+-- 8) 存量角色补齐：**按 casbin 已有策略反查**，只给「本来就调得动这个接口」的角色补按钮。
+--    ⛔ 不能写成「所有勾了图像库菜单的角色都补」—— 那等于凭空发删除权：
+--       改造前 639 没挂任何菜单，除了 casbin 里显式写过 DELETE 的角色，谁也删不了。
+--    这里以「接口权限 → 按钮」为准，保证按钮显示与后端放行口径一致。
+INSERT INTO `sys_role_menu` (`role_id`, `menu_id`)
+SELECT DISTINCT r.`id`, 140620 FROM `sys_casbin_rule` c
+JOIN `sys_role` r ON c.`v0` = CONCAT('role_', r.`id`)
+WHERE c.`v1` = '/api/gb28181/device-mgmt/snapshots/archive' AND c.`v2` = 'GET'
+  AND NOT EXISTS (SELECT 1 FROM `sys_role_menu` rm WHERE rm.`role_id` = r.`id` AND rm.`menu_id` = 140620);
+
+INSERT INTO `sys_role_menu` (`role_id`, `menu_id`)
+SELECT DISTINCT r.`id`, 140621 FROM `sys_casbin_rule` c
+JOIN `sys_role` r ON c.`v0` = CONCAT('role_', r.`id`)
+WHERE c.`v1` = '/api/gb28181/device-mgmt/snapshots' AND c.`v2` = 'DELETE'
+  AND NOT EXISTS (SELECT 1 FROM `sys_role_menu` rm WHERE rm.`role_id` = r.`id` AND rm.`menu_id` = 140621);
