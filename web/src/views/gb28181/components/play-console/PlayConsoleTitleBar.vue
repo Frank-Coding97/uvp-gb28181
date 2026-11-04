@@ -177,16 +177,20 @@ const emit = defineEmits<{
 .console-window-action.arco-btn[type="button"] svg {
   flex: 0 0 auto;
 }
+
+/* 标题栏两颗：小窗 = 次级（浅蓝，改的是"看的方式"），关闭 = 否定（中性灰，放弃这次播放）。
+   2026-11-04 治理：原来两颗都靠同一个 list-toolbar 底，只差小窗带一点品牌色，
+   在标题栏深色底上基本分不出来。 */
 .console-window-action.arco-btn[type="button"].is-minimize {
-  color: var(--uvp-brand);
-  background: color-mix(in srgb, var(--uvp-brand) 7%, var(--uvp-panel-bg));
-  border-color: color-mix(in srgb, var(--uvp-brand) 24%, var(--uvp-panel-border));
+  color: var(--uvp-btn-secondary-text);
+  background: var(--uvp-btn-secondary-bg);
+  border-color: var(--uvp-btn-secondary-border);
 }
 .console-window-action.arco-btn[type="button"].is-minimize:hover {
-  color: var(--uvp-brand-strong);
-  background: var(--uvp-brand-soft);
-  border-color: var(--uvp-brand);
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--uvp-brand) 14%, transparent);
+  color: var(--uvp-btn-secondary-text);
+  background: var(--uvp-btn-secondary-bg-hover);
+  border-color: var(--uvp-btn-secondary-text);
+  box-shadow: none;
 }
 .console-window-action.arco-btn[type="button"].is-config {
   color: var(--uvp-brand-strong, var(--uvp-brand));
@@ -199,16 +203,20 @@ const emit = defineEmits<{
   border-color: var(--uvp-brand);
   box-shadow: 0 4px 12px color-mix(in srgb, var(--uvp-brand) 14%, transparent);
 }
+
+/* 「关闭」= 否定（中性灰）。
+   ⛔ 这里原来是软红：红是全站「会删掉数据」的专用色。关掉播放器只是放弃这次观看，
+      既不删录像也不删配置，用红会让用户以为点下去会丢东西 —— 和工具栏「删除」撞语义。 */
 .console-window-action.arco-btn[type="button"].is-close {
-  color: color-mix(in srgb, var(--uvp-danger) 76%, var(--uvp-text-secondary));
-  background: color-mix(in srgb, var(--uvp-danger) 4%, var(--uvp-panel-bg));
-  border-color: color-mix(in srgb, var(--uvp-danger) 18%, var(--uvp-panel-border));
+  color: var(--uvp-btn-neutral-text);
+  background: var(--uvp-btn-neutral-bg);
+  border-color: var(--uvp-btn-neutral-border);
 }
 .console-window-action.arco-btn[type="button"].is-close:hover {
-  color: var(--uvp-danger);
-  background: var(--uvp-danger-soft);
-  border-color: var(--uvp-danger-border);
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--uvp-danger) 12%, transparent);
+  color: var(--uvp-btn-neutral-text);
+  background: var(--uvp-btn-neutral-bg-hover);
+  border-color: var(--uvp-btn-neutral-border);
+  box-shadow: none;
 }
 .console-window-action.arco-btn[type="button"]:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--uvp-brand) 48%, transparent);

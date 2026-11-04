@@ -40,6 +40,10 @@ const emit = defineEmits<{ (e: "toggle"): void }>();
   font-size: 10.5px;
   color: var(--uvp-text-secondary);
 }
+
+/* 雨刷：静止时「开启雨刷」= 中性灰（什么都没有在动）；
+   开着时文案变「关闭雨刷」，语义是**让它停下** ⇒ 琥珀。
+   ⛔ 原来开着态是品牌浅蓝，和"选中了某个视图"长得一样，看不出这是一台正在转的硬件。 */
 .wiper-toggle.arco-btn[type="button"] {
   display: inline-flex;
   gap: 5px;
@@ -48,22 +52,23 @@ const emit = defineEmits<{ (e: "toggle"): void }>();
   height: 22px;
   padding: 0 6px;
   font-size: 10.5px;
-  color: var(--uvp-text-secondary);
+  color: var(--uvp-btn-neutral-text);
   cursor: pointer;
-  background: transparent;
-  border: 1px solid var(--uvp-panel-border);
+  background: var(--uvp-btn-neutral-bg);
+  border: 1px solid var(--uvp-btn-neutral-border);
   border-radius: 5px;
   transition: all 0.15s ease;
 }
 .wiper-toggle.arco-btn[type="button"]:hover:not(:disabled) {
-  color: var(--uvp-brand);
-  border-color: var(--uvp-brand);
+  color: var(--uvp-btn-neutral-text);
+  background: var(--uvp-btn-neutral-bg-hover);
+  border-color: var(--uvp-btn-neutral-border);
 }
 .wiper-toggle.arco-btn[type="button"].active {
   font-weight: 600;
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
-  border-color: var(--uvp-brand);
+  color: var(--uvp-btn-stop-text);
+  background: var(--uvp-btn-stop-bg);
+  border-color: var(--uvp-btn-stop-border);
 }
 .wiper-toggle.arco-btn[type="button"]:disabled {
   color: var(--uvp-text-disabled);

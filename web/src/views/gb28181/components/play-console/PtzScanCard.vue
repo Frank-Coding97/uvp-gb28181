@@ -54,6 +54,7 @@ const emit = defineEmits<{
           size="small"
           html-type="button"
           class="btn-primary sm scan-toggle"
+          :class="{ 'is-stop': state === 'start-sent' }"
           data-testid="scan-toggle"
           :disabled="!canSend"
           @click="emit('command', state === 'start-sent' ? 'scan_stop' : 'scan_start')"

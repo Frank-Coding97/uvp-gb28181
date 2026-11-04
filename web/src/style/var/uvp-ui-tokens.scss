@@ -241,6 +241,15 @@
   --uvp-btn-success-bg: #16845f;
   --uvp-btn-success-bg-hover: #0f6f4f;
   --uvp-btn-success-text: #ffffff;
+
+  /* 新增·描边（控制台卡片里的「添加」这类小号新增键）。
+     ⛔ 深色主题下不能拿上面的 #16845f 当文字色：那是给实心底配白字的，
+        直接放在深底上当字色只有 2 点几的对比度，10.5px 的小字根本看不清。
+     文字色取 #047857，在 --uvp-btn-success-soft 上实测 5.21:1。 */
+  --uvp-btn-success-soft: #ecfdf5;
+  --uvp-btn-success-soft-hover: #d1fae5;
+  --uvp-btn-success-line: #a7f3d0;
+  --uvp-btn-success-ink: #047857;
   --uvp-btn-focus-ring: 0 0 0 3px rgb(37 99 235 / 24%);
   --uvp-btn-disabled-opacity: 0.55;
 }
@@ -415,6 +424,10 @@ body[arco-theme="dark"] {
   --uvp-btn-success-bg: #16845f;
   --uvp-btn-success-bg-hover: #0f6f4f;
   --uvp-btn-success-text: #ffffff;
+  --uvp-btn-success-soft: rgb(52 211 153 / 12%);
+  --uvp-btn-success-soft-hover: rgb(52 211 153 / 20%);
+  --uvp-btn-success-line: rgb(52 211 153 / 38%);
+  --uvp-btn-success-ink: #6ee7b7;
   --uvp-btn-focus-ring: 0 0 0 3px rgb(96 165 250 / 28%);
   --uvp-btn-disabled-opacity: 0.5;
 }

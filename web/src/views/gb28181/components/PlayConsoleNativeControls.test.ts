@@ -63,11 +63,51 @@ describe("播放控制台表单控件", () => {
 
   it("紧凑按钮样式覆盖 Arco 类型默认值并保留原尺寸", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/play-console/detail-cards.scss"), "utf8");
+    // ⚠️ 2026-11-04 有意改契约：「同步」的文字色从 `--uvp-text-secondary`（灰）
+    //    改成 `--uvp-refresh-btn-text`（青绿）。原因见下一条用例 ——
+    //    「同步」和「添加」原来同一个灰/蓝描边，但一个只读、一个会写库。
+    //    尺寸那半（padding: 2px 6px）仍然必须保留，它是这条用例真正要守的东西。
     expect(
-      hasRuleBlock(source, '.resource-sync-btn.arco-btn[type="button"]', "padding: 2px 6px", "color: var(--uvp-text-secondary)")
+      hasRuleBlock(source, '.resource-sync-btn.arco-btn[type="button"]', "padding: 2px 6px", "color: var(--uvp-refresh-btn-text)")
     ).toBe(true);
     expect(hasRuleBlock(source, '.mask-switch.arco-btn[type="button"]', "height: 20px", "padding: 0 7px")).toBe(true);
     expect(hasRuleBlock(source, '.mirror-choice.arco-btn[type="button"]', "padding: 6px 4px")).toBe(true);
+  });
+
+  it("控制台按钮按「点下去发生什么」分色，同一个色相不许身兼两义", () => {
+    const cards = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/play-console/detail-cards.scss"), "utf8");
+    const ptz = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/components/play-console/PlayConsolePtzSidebar.vue"),
+      "utf8"
+    );
+
+    // ① 「添加」= 新增一条数据 ⇒ 绿描边（不是绿实心：卡片里只有 10.5px 字）。
+    expect(hasRuleBlock(cards, '.preset-save-btn.arco-btn[type="button"]', "color: var(--uvp-btn-success-ink)")).toBe(true);
+    const dialogs = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/components/play-console/PlayConsoleDialogs.vue"),
+      "utf8"
+    );
+    expect(hasRuleBlock(dialogs, '.cruise-stop-add.arco-btn[type="button"]', "background: var(--uvp-btn-success-soft)")).toBe(
+      true
+    );
+
+    // ② 「停止跟踪」和「自动跟踪」必须是两个颜色 —— 这是控制台里最贵的一次误点。
+    expect(
+      hasRuleBlock(ptz, '.target-track-switch button.arco-btn[type="button"].is-stop', "background: var(--uvp-btn-stop-bg)")
+    ).toBe(true);
+    // 默认（自动 / 框选）走次级浅蓝，不能和停止态同色。
+    expect(
+      hasRuleBlock(ptz, '.target-track-switch button.arco-btn[type="button"]', "background: var(--uvp-btn-secondary-bg)")
+    ).toBe(true);
+
+    // ③ 「开始扫描 / 停止扫描」是同一颗按钮换文案，颜色必须跟着换。
+    const scanCard = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/play-console/PtzScanCard.vue"), "utf8");
+    expect(scanCard).toContain(":class=\"{ 'is-stop': state === 'start-sent' }\"");
+    expect(hasRuleBlock(cards, '.btn-primary.is-stop.arco-btn[type="button"]', "background: var(--uvp-btn-stop-bg)")).toBe(true);
+
+    // ④ 请求关键帧 / 读取当前位置 = 只取数 ⇒ 青绿，不许沿用次级浅蓝。
+    expect(hasRuleBlock(ptz, '.ptz-iframe button.arco-btn[type="button"]', "color: var(--uvp-refresh-btn-text)")).toBe(true);
+    expect(hasRuleBlock(ptz, ".btn-ghost.is-fetch", "color: var(--uvp-refresh-btn-text)")).toBe(true);
   });
 
   it("普通标签和状态说明使用清晰的次级文字，保留语义状态颜色", () => {

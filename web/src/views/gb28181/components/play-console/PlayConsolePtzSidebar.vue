@@ -428,7 +428,7 @@ const {
           type="outline"
           size="small"
           html-type="button"
-          class="btn-ghost sm"
+          class="btn-ghost sm is-fetch"
           aria-label="读取当前位置"
           @click="readPreciseStatus"
         >
@@ -492,6 +492,7 @@ const {
             data-testid="ptz-target-track-stop"
             :title="capabilityActionTitle('targetTrack', '停止跟踪')"
             :disabled="targetTrackPending"
+            class="is-stop"
             aria-label="停止跟踪"
             @click="submitTargetTrack('Stop')"
           >
@@ -525,6 +526,22 @@ const {
   gap: 10px;
 }
 
+/* 「读取当前位置」= 只取数（青绿）。
+   ⛔ 这里挂的是本地修饰类 `is-fetch` 而不是真源的 `uvp-refresh-btn`：
+      控制台自己那套 `.btn-primary/.btn-ghost` 副本权重比真源的裸语义类高，
+      直接挂上去会被压回浅蓝（本轮治理踩过一次，现象是「改了但没变」）。 */
+.btn-ghost.is-fetch {
+  color: var(--uvp-refresh-btn-text);
+  background: var(--uvp-refresh-btn-bg);
+  border: 1px solid var(--uvp-refresh-btn-border);
+}
+
+.btn-ghost.is-fetch:hover:not(:disabled) {
+  color: var(--uvp-refresh-btn-text);
+  background: var(--uvp-refresh-btn-hover-bg);
+  border-color: var(--uvp-refresh-btn-text);
+}
+
 /* ═══════════ 云台面板 ═══════════ */
 .mode-switch {
   display: grid;
@@ -549,10 +566,15 @@ const {
   border-radius: 6px;
   transition: all 0.15s ease;
 }
+
+/* 选中态用蓝实心而不是浅蓝描边（2026-11-04 老板：控制台按钮按动作分色）。
+   ⛔ 模式开关是「现在处在哪个模式」的指示器，浅蓝底和旁边真正的次级按钮长得一样，
+      用户扫一眼分不出"这是我选中的"还是"这是个能点的"。
+   ⚠️ 白字必须配 --uvp-solid-bg 实心底，不能配 --uvp-brand（暗色下那是浅蓝，白字压上去只有 2.5:1）。 */
 .mode-switch button.arco-btn[type="button"].active {
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--uvp-brand) 26%, transparent);
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
+  box-shadow: none;
 }
 .tag-2022 {
   padding: 1px 4px;
@@ -809,8 +831,8 @@ const {
 }
 .talk-mode-switch button.arco-btn[type="button"].active {
   font-weight: 600;
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
 }
 .talk-mode-switch button.arco-btn[type="button"]:disabled {
   color: var(--uvp-text-disabled);
@@ -822,6 +844,10 @@ const {
   background: var(--uvp-brand-soft);
 }
 
+/* 对讲：空闲时「开始对讲」= 青绿（和全站刷新/取数同一族，都是"开一条通道拿数据"）；
+   讲话中变成「停止对讲」，语义是**让它停下** ⇒ 琥珀。
+   ⛔ 原来讲话中用软红：红是全站「会删掉数据」的专用色，对讲既不删数据也不毁东西，
+      用红会让人以为按下去会丢什么。 */
 .talk-button.arco-btn[type="button"] {
   display: flex;
   gap: 7px;
@@ -833,23 +859,24 @@ const {
   margin: 8px auto 2px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--uvp-brand);
+  color: var(--uvp-refresh-btn-text);
   touch-action: none;
   cursor: pointer;
   user-select: none;
-  background: var(--uvp-brand-soft);
-  border: 1px solid color-mix(in srgb, var(--uvp-brand) 34%, var(--uvp-panel-border));
+  background: var(--uvp-refresh-btn-bg);
+  border: 1px solid var(--uvp-refresh-btn-border);
   border-radius: 8px;
   transition: all 0.15s ease;
 }
 .talk-button.arco-btn[type="button"]:hover:not(:disabled) {
-  border-color: var(--uvp-brand);
+  background: var(--uvp-refresh-btn-hover-bg);
+  border-color: var(--uvp-refresh-btn-text);
 }
 .talk-button.arco-btn[type="button"].active {
-  color: var(--uvp-danger);
-  background: var(--uvp-danger-soft);
-  border-color: var(--uvp-danger-border);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--uvp-danger) 10%, transparent);
+  color: var(--uvp-btn-stop-text);
+  background: var(--uvp-btn-stop-bg);
+  border-color: var(--uvp-btn-stop-border);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--uvp-btn-stop-text) 12%, transparent);
 }
 .talk-button.arco-btn[type="button"]:disabled {
   color: var(--uvp-text-disabled);
@@ -1015,25 +1042,28 @@ const {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 4px;
 }
+
+/* 3D 拖拽：进入一种画面手势模式 ⇒ 次级（浅蓝）；当前正处于该模式 ⇒ 蓝实心。 */
 .drag-zoom-switch button.arco-btn[type="button"] {
   height: 26px;
   padding: 0;
   font-size: 10.5px;
-  color: var(--uvp-text-secondary);
+  color: var(--uvp-btn-secondary-text);
   cursor: pointer;
-  background: transparent;
-  border: 1px solid var(--uvp-panel-border);
+  background: var(--uvp-btn-secondary-bg);
+  border: 1px solid var(--uvp-btn-secondary-border);
   border-radius: 5px;
 }
 .drag-zoom-switch button.arco-btn[type="button"]:hover:not(:disabled) {
-  color: var(--uvp-brand);
-  border-color: var(--uvp-brand);
+  color: var(--uvp-btn-secondary-text);
+  background: var(--uvp-btn-secondary-bg-hover);
+  border-color: var(--uvp-btn-secondary-text);
 }
 .drag-zoom-switch button.arco-btn[type="button"].active {
   font-weight: 600;
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
-  border-color: var(--uvp-brand);
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
+  border-color: var(--uvp-solid-bg);
 }
 .drag-zoom-switch button.arco-btn[type="button"]:disabled {
   color: var(--uvp-text-disabled);
@@ -1057,6 +1087,8 @@ const {
   border: 1px solid var(--uvp-panel-border);
   border-radius: 8px;
 }
+
+/* 请求关键帧：不改任何配置，只是让设备**再吐一个 I 帧**出来 ⇒ 取数（青绿）。 */
 .ptz-iframe button.arco-btn[type="button"] {
   display: inline-flex;
   gap: 5px;
@@ -1065,15 +1097,16 @@ const {
   height: 26px;
   padding: 0 8px;
   font-size: 11px;
-  color: var(--uvp-text-secondary);
+  color: var(--uvp-refresh-btn-text);
   cursor: pointer;
-  background: transparent;
-  border: 1px solid var(--uvp-panel-border);
+  background: var(--uvp-refresh-btn-bg);
+  border: 1px solid var(--uvp-refresh-btn-border);
   border-radius: 5px;
 }
 .ptz-iframe button.arco-btn[type="button"]:hover:not(:disabled) {
-  color: var(--uvp-brand);
-  border-color: var(--uvp-brand);
+  color: var(--uvp-refresh-btn-text);
+  background: var(--uvp-refresh-btn-hover-bg);
+  border-color: var(--uvp-refresh-btn-text);
 }
 .ptz-iframe button.arco-btn[type="button"]:disabled {
   color: var(--uvp-text-disabled);
@@ -1100,6 +1133,10 @@ const {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
 }
+
+/* 目标跟踪三颗：自动 / 框选 = 改视图（浅蓝），停止 = 让它停（琥珀）。
+   ⛔ 原来三颗一模一样：都是透明底灰描边。而「自动跟踪」和「停止跟踪」是**相反**的两个动作，
+      长得一样意味着随时可能点反 —— 这是控制台里最贵的一次误点。 */
 .target-track-switch button.arco-btn[type="button"] {
   display: inline-flex;
   gap: 4px;
@@ -1108,21 +1145,32 @@ const {
   height: 26px;
   padding: 0 4px;
   font-size: 11px;
-  color: var(--uvp-text-secondary);
+  color: var(--uvp-btn-secondary-text);
   cursor: pointer;
-  background: transparent;
-  border: 1px solid var(--uvp-panel-border);
+  background: var(--uvp-btn-secondary-bg);
+  border: 1px solid var(--uvp-btn-secondary-border);
   border-radius: 5px;
 }
 .target-track-switch button.arco-btn[type="button"]:hover:not(:disabled) {
-  color: var(--uvp-brand);
-  border-color: var(--uvp-brand);
+  color: var(--uvp-btn-secondary-text);
+  background: var(--uvp-btn-secondary-bg-hover);
+  border-color: var(--uvp-btn-secondary-text);
 }
 .target-track-switch button.arco-btn[type="button"].active {
   font-weight: 600;
-  color: var(--uvp-warning);
-  background: color-mix(in srgb, var(--uvp-warning) 14%, transparent);
-  border-color: var(--uvp-warning);
+  color: var(--uvp-btn-stop-text);
+  background: var(--uvp-btn-stop-bg);
+  border-color: var(--uvp-btn-stop-border);
+}
+.target-track-switch button.arco-btn[type="button"].is-stop {
+  color: var(--uvp-btn-stop-text);
+  background: var(--uvp-btn-stop-bg);
+  border-color: var(--uvp-btn-stop-border);
+}
+.target-track-switch button.arco-btn[type="button"].is-stop:hover:not(:disabled) {
+  color: var(--uvp-btn-stop-text);
+  background: var(--uvp-btn-stop-bg-hover);
+  border-color: var(--uvp-btn-stop-text);
 }
 .target-track-switch button.arco-btn[type="button"]:disabled {
   color: var(--uvp-text-disabled);
@@ -1131,8 +1179,9 @@ const {
   border-color: var(--uvp-panel-border);
   opacity: 1;
 }
-.target-track-switch button.arco-btn[type="button"].active:disabled {
-  background: var(--uvp-warning-soft);
+.target-track-switch button.arco-btn[type="button"].active:disabled,
+.target-track-switch button.arco-btn[type="button"].is-stop:disabled {
+  background: var(--uvp-dialog-control-bg);
 }
 
 /* 状态三行:意图 / 下发结果 / 说明。⛔ 字号与颜色都往"事实"靠,不要做成告警条 ——

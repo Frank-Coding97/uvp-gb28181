@@ -120,6 +120,37 @@
 ⚠️ `uvp-btn-neutral` 同时写进了主按钮与次级按钮的排除列表（`:where(:not(…))`），
 所以 `type="primary"` 的「关闭」加了它也会变灰——不需要再改 `type`。
 
+### 3.2a 深色控制台的 `is-*` 修饰类（2026-11-04）
+
+播放控制台（`components/play-console/` + `PlayConsoleLinked.vue`）自成一套按钮皮肤。
+它的 `.btn-primary` / `.btn-ghost` 权重是 `0,3,1`，比真源的裸语义类（`0,1,0`）高，
+**直接挂 `uvp-stop-btn` 会被压回原色**（现象是"改了但没变"）。所以那边用修饰类 + token：
+
+| 类 | 语义 | 走哪组 token |
+|---|---|---|
+| `is-fetch` | 只取数：读取、请求关键帧、读取当前位置、同步 | `--uvp-refresh-btn-*`（青绿） |
+| `is-stop` | 让它停下：停止扫描、停止跟踪、关闭雨刷、停止对讲 | `--uvp-btn-stop-*`（琥珀） |
+| `is-neutral` | 否定：关闭、取消、还原 | `--uvp-btn-neutral-*`（灰） |
+| `is-primary` | 写进设备：应用定位、下发、开始扫描 | `--uvp-solid-*`（蓝实心，原有） |
+
+三条规则：
+
+1. **同一个色相不许身兼两义。** 「自动跟踪」和「停止跟踪」必须是两个颜色 ——
+   这是控制台里最贵的一次误点，两个相反动作长得一样。
+2. **「开始 X / 停止 X」是同一颗按钮换文案时，`is-stop` 必须跟着状态切。**
+   例如扫描卡：`:class="{ 'is-stop': state === 'start-sent' }"`。
+   ⛔ 不许让"停止"藏在蓝实心里。
+3. **新增类走绿描边，不走绿实心。** 控制台卡片里的「添加」只有 10.5px 字、
+   紧挨着「同步」，实心绿块头会压过旁边文字。为此新增一组 token：
+   `--uvp-btn-success-soft / -soft-hover / -line / -ink`（亮暗成对）。
+
+⛔ 这几处自己写配色**不违反单一真源**：`button-single-source.test.ts` 对
+`components/play-console/` 和 `PlayConsoleLinked.vue` 开了白名单（深色控制台自成皮肤）。
+但**必须引 token**，不许写死 hex —— 写死的话暗色主题会跟着一起坏。
+
+⚠️ 控制台的 `.btn-ghost` 默认色本轮从「透明底灰字」改成「浅蓝底蓝字」（次级语义），
+与全局 `arco-overrides.scss` 的 `.btn-ghost` 对齐；「关闭 / 取消」一律显式挂 `is-neutral`。
+
 ### 3.3 全站拉平记录（2026-11-04 落地）
 
 | 语义 | 改动量 | 做法 |

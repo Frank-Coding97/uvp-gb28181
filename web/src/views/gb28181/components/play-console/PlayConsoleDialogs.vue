@@ -127,7 +127,7 @@ async function handleCruiseSaveBeforeOk(done: (closable?: boolean) => void) {
           type="outline"
           size="small"
           html-type="button"
-          class="btn-ghost sm"
+          class="btn-ghost sm is-neutral"
           :disabled="homeSettingsSubmitting"
           @click="closeHomeSettingsDialog"
         >
@@ -630,6 +630,9 @@ async function handleCruiseSaveBeforeOk(done: (closable?: boolean) => void) {
   border-color: var(--uvp-panel-border);
   opacity: 1;
 }
+
+/* 「新增巡航点」= 往这条航线里加一个点 ⇒ 绿（新增语义）。
+   ⛔ 原来是品牌浅蓝，和弹窗里的「确定」同族，看不出这是一个"会多出一条数据"的动作。 */
 .cruise-stop-add.arco-btn[type="button"] {
   display: inline-flex;
   gap: 6px;
@@ -641,10 +644,10 @@ async function handleCruiseSaveBeforeOk(done: (closable?: boolean) => void) {
   margin-top: 3px;
   font-size: 12px;
   font-weight: 600;
-  color: var(--uvp-brand);
+  color: var(--uvp-btn-success-ink);
   cursor: pointer;
-  background: var(--uvp-brand-soft);
-  border: 1px solid color-mix(in srgb, var(--uvp-brand) 44%, var(--uvp-panel-border));
+  background: var(--uvp-btn-success-soft);
+  border: 1px dashed var(--uvp-btn-success-line);
   border-radius: 6px;
   transition:
     background 0.18s ease,
@@ -652,12 +655,13 @@ async function handleCruiseSaveBeforeOk(done: (closable?: boolean) => void) {
     color 0.18s ease;
 }
 .cruise-stop-add.arco-btn[type="button"]:hover:not(:disabled) {
-  color: var(--uvp-solid-text);
-  background: var(--uvp-solid-bg);
-  border-color: var(--uvp-solid-border);
+  color: var(--uvp-btn-success-text);
+  background: var(--uvp-btn-success-bg);
+  border-color: var(--uvp-btn-success-bg);
+  border-style: solid;
 }
 .cruise-stop-add.arco-btn[type="button"]:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--uvp-brand) 52%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--uvp-btn-success-bg) 52%, transparent);
   outline-offset: 2px;
 }
 .cruise-stop-add.arco-btn[type="button"]:disabled {

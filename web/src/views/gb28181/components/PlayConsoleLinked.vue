@@ -6459,9 +6459,9 @@ provide(PLAY_CONSOLE_CONTEXT, {
 }
 
 .picture-draft-revert.arco-btn[type="button"] {
-  color: var(--uvp-text-secondary);
-  background: transparent;
-  border: 1px solid var(--uvp-panel-border);
+  color: var(--uvp-btn-neutral-text);
+  background: var(--uvp-btn-neutral-bg);
+  border: 1px solid var(--uvp-btn-neutral-border);
 }
 
 .picture-draft-submit.arco-btn[type="button"] {

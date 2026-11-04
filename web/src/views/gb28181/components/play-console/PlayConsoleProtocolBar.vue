@@ -178,10 +178,15 @@ const emit = defineEmits<{
   background: var(--uvp-brand-soft);
   border-color: color-mix(in srgb, var(--uvp-brand) 32%, transparent);
 }
+
+/* 当前在播的协议 = 蓝实心。
+   ⛔ 原来是浅蓝底蓝字，和旁边几个"能点的"几乎一个样 —— 协议条贴在画面下方，
+      用户扫一眼要能立刻看出"我现在看的是哪一路流"。 */
 .proto-btn.arco-btn[type="button"].active {
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
-  border-color: color-mix(in srgb, var(--uvp-brand) 42%, transparent);
+  font-weight: 600;
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
+  border-color: var(--uvp-solid-bg);
 }
 .proto-btn.arco-btn[type="button"]:disabled {
   color: rgb(148 163 184 / 72%);

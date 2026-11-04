@@ -76,7 +76,7 @@ const isEmpty = computed(() => !props.rows.length);
           shape="square"
           html-type="button"
           aria-label="还原码流改动"
-          class="vpc-btn"
+          class="vpc-btn is-neutral"
           data-testid="vpc-reset"
           :disabled="!dirtyCount"
           :title="dirtyCount ? `还原 ${dirtyCount} 项改动` : '无改动'"
@@ -90,7 +90,7 @@ const isEmpty = computed(() => !props.rows.length);
           shape="square"
           html-type="button"
           aria-label="读取编码参数"
-          class="vpc-btn"
+          class="vpc-btn is-fetch"
           data-testid="vpc-read"
           :disabled="!canRead || applying"
           @click="emit('read')"
@@ -247,23 +247,39 @@ const isEmpty = computed(() => !props.rows.length);
   width: 90px;
 }
 
+/* 三颗纯图标键（还原 / 读取 / 下发），26×26，只有图标没有文字。
+   ⭐ 正因为没有文字，颜色就是唯一的区分手段：以前三颗都是"透明底 + 灰图标"，
+      而其中一颗会真的把参数写进设备。现在按语义分开：还原灰、读取青绿、下发蓝。 */
 .vpc-btn.arco-btn[type="button"] {
   display: inline-grid;
   place-items: center;
   width: 26px;
   height: 26px;
   padding: 0;
-  color: var(--uvp-text-secondary);
+  color: var(--uvp-btn-neutral-text);
   cursor: pointer;
-  background: transparent;
-  border: 1px solid var(--uvp-panel-border);
+  background: var(--uvp-btn-neutral-bg);
+  border: 1px solid var(--uvp-btn-neutral-border);
   border-radius: 5px;
   transition: all 0.15s ease;
 }
 
 .vpc-btn.arco-btn[type="button"]:hover:not(:disabled) {
-  color: var(--uvp-brand);
-  border-color: var(--uvp-brand);
+  color: var(--uvp-btn-neutral-text);
+  background: var(--uvp-btn-neutral-bg-hover);
+  border-color: var(--uvp-btn-neutral-border);
+}
+
+.vpc-btn.arco-btn[type="button"].is-fetch {
+  color: var(--uvp-refresh-btn-text);
+  background: var(--uvp-refresh-btn-bg);
+  border-color: var(--uvp-refresh-btn-border);
+}
+
+.vpc-btn.arco-btn[type="button"].is-fetch:hover:not(:disabled) {
+  color: var(--uvp-refresh-btn-text);
+  background: var(--uvp-refresh-btn-hover-bg);
+  border-color: var(--uvp-refresh-btn-text);
 }
 
 .vpc-btn.arco-btn[type="button"].is-primary {
