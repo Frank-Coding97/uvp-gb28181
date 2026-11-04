@@ -125,6 +125,28 @@ describe("device management toolbar layout", () => {
     }
   });
 
+  it("centers both action columns so the gaps on either side stay symmetric", () => {
+    // ⛔ 契约：操作列必须 align="center"（全仓列表页主流写法）。
+    //   `.uvp-table-actions` 是 inline-flex，只在自己盒子内居中；单元格默认左对齐 ⇒
+    //   列宽 400/420 而按钮组只有 ~350，整组贴左、右侧空出一大截
+    //   （2026-11-04 老板截图指出"全部居左了"）。
+    const flat = squash(source);
+
+    for (const dataSource of [':data="channels"', ':data="devices"']) {
+      const tableStart = flat.indexOf(dataSource);
+      const tableEnd = flat.indexOf("</a-table>", tableStart);
+      expect(tableStart).toBeGreaterThan(-1);
+      expect(tableEnd).toBeGreaterThan(tableStart);
+
+      const table = flat.slice(tableStart, tableEnd);
+      const columnStart = table.indexOf('title="操作"');
+      expect(columnStart).toBeGreaterThan(-1);
+      const column = table.slice(columnStart, table.indexOf("</a-table-column>", columnStart));
+
+      expect(column, `${dataSource} 的操作列要居中`).toContain('align="center"');
+    }
+  });
+
   it("keeps the double-click drilldown free of any floating hint", () => {
     // 2026-10-05 老板要求去掉设备列表上跟随光标的「双击进入通道」浮层。
     // 双击下钻本身保留(onDeviceDblclick 仍在),这里钉住"不要再挂回来"。

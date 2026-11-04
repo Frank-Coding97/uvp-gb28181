@@ -4095,7 +4095,7 @@ onUnmounted(() => {
                    旧值 350 只够 6 个：任一通道「直播中」时多出「停止」，该行比列宽多出 38px，
                    会把「删除」顶出列外被表格右缘裁掉。列宽改动后同步维护 :scroll.x
                    (上面通道表的 scroll.x = Σ列宽 2090 + 勾选列 40 = 2130)。 -->
-              <a-table-column title="操作" :width="400" fixed="right">
+              <a-table-column title="操作" :width="400" align="center" fixed="right">
                 <template #cell="{ record }">
                   <div class="uvp-table-actions">
                     <a-link
@@ -4257,7 +4257,7 @@ onUnmounted(() => {
                   ><span :class="{ warn: !record.online }">{{ dateTime(record.keepaliveTime) }}</span></template
                 >
               </a-table-column>
-              <a-table-column title="操作" :width="420" fixed="right">
+              <a-table-column title="操作" :width="420" align="center" fixed="right">
                 <template #cell="{ record }">
                   <div class="uvp-table-actions" data-guide="row-actions">
                     <a-link class="uvp-table-action uvp-table-action--preview" @click="showDeviceChannels(record)">
@@ -6605,6 +6605,7 @@ onUnmounted(() => {
 }
 .uvp-data-table :deep(.uvp-table-actions) {
   gap: 1px;
+  justify-content: center;
   white-space: nowrap;
 }
 .uvp-data-table :deep(.uvp-table-action) {
