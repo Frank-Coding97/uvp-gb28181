@@ -190,8 +190,19 @@
       <div>
         <a-form ref="formRef" :layout="layoutMode.layout" auto-label-width :rules="rules" :model="addFrom">
           <a-form-item field="type" label="菜单类型" validate-trigger="blur">
-            <a-radio-group type="button" :disabled="!!addFrom.id" v-model="addFrom.type" @change="typeChange">
-              <a-radio v-for="item in menuType" :key="item.value" :value="item.value">{{ item.name }}</a-radio>
+            <a-radio-group
+              class="menu-type-tabs"
+              type="button"
+              :disabled="!!addFrom.id"
+              v-model="addFrom.type"
+              @change="typeChange"
+            >
+              <a-radio v-for="item in menuType" :key="item.value" :value="item.value">
+                <span class="menu-type-tabs__item">
+                  <component :is="item.icon" :size="14" :stroke-width="1.7" class="menu-type-tabs__icon" />
+                  <span>{{ item.name }}</span>
+                </span>
+              </a-radio>
             </a-radio-group>
           </a-form-item>
           <a-form-item field="parentId" label="上级菜单" validate-trigger="blur">
@@ -379,6 +390,7 @@ import { deepClone, getPascalCase } from "@/utils";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import { Modal } from "@arco-design/web-vue";
 import SNumberField from "@/components/s-number-field/index.vue";
+import { FileText, Folder, SquareMousePointer } from "@lucide/vue";
 const { isMobile } = useDevicesSize();
 const layoutMode = computed(() => {
   let info = {
@@ -482,10 +494,10 @@ const rules = ref({
   permission: [{ required: true, message: "请输入权限标识" }]
 });
 
-const menuType = ref([
-  { name: "目录", value: 1 },
-  { name: "菜单", value: 2 },
-  { name: "按钮", value: 3 }
+const menuType = ref<{ name: string; value: number; icon: Component }[]>([
+  { name: "目录", value: 1, icon: markRaw(Folder) },
+  { name: "菜单", value: 2, icon: markRaw(FileText) },
+  { name: "按钮", value: 3, icon: markRaw(SquareMousePointer) }
 ]);
 const addFrom = ref<any>({
   type: 1,
@@ -889,6 +901,25 @@ onMounted(() => {
   vertical-align: middle;
   content: "";
   background: rgb(148 163 184 / 28%);
+}
+
+/* ── 菜单类型页签：文字前的类型图标 ─────────── */
+.menu-type-tabs__item {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  line-height: 26px;
+  vertical-align: middle;
+}
+
+.menu-type-tabs__icon {
+  flex: none;
+  color: inherit;
+  opacity: 0.72;
+}
+
+.menu-type-tabs :deep(.arco-radio-checked) .menu-type-tabs__icon {
+  opacity: 1;
 }
 
 /* ── 导入模式弹窗 ─────────────────────────── */

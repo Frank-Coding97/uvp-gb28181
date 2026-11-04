@@ -52,4 +52,18 @@ describe("menu page workspace layout", () => {
     expect(hasMarkup(actions, "<template #icon><icon-safe /></template>")).toBe(true);
     expect(hasMarkup(actions, "<span>API权限</span>")).toBe(true);
   });
+
+  it("puts a type icon on each 菜单类型 tab", () => {
+    // 目录 / 菜单 / 按钮 三个页签都要「图标 + 文案」，且图标来自菜单类型自身配置
+    const start = source.indexOf('<a-radio v-for="item in menuType"');
+    const end = source.indexOf("</a-radio-group>", start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const tabs = source.slice(start, end);
+
+    expect(hasMarkup(tabs, '<component :is="item.icon"')).toBe(true);
+    expect(hasMarkup(tabs, "<span>{{ item.name }}</span>")).toBe(true);
+    const configured = source.match(/icon: markRaw\(\w+\)/g) ?? [];
+    expect(configured.length).toBe(3);
+  });
 });
