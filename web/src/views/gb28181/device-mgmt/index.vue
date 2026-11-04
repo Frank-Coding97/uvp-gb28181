@@ -6655,48 +6655,58 @@ onUnmounted(() => {
   display: block;
 }
 
-/* ⛔ 行内操作按钮统一走一个「专属色」（violet），只跟页面主按钮的品牌蓝、危险操作的红区分开。
-   ⛔ 不要再按动作分五色（曾经是 蓝/紫/青/绿/棕 五套）——老板 2026-11-04：
-   「用个别的颜色，和别的按钮颜色区分下就可以」，五色在暗色底上又暗又花。 */
-.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--preview),
-.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--record),
-.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--more),
-.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--detail),
-.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--sync),
-.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--subscribe),
+/* ⭐ 行内操作按钮一律「一个动作一个颜色」（老板 2026-11-04：「这些按钮都需要用不同的颜色，
+   我不想让它用统一的颜色」——曾经试过统一成一支紫，被否）。
+   色相分工：播放=蓝、录像=紫、操作/更多=玫红、详情=青、同步=绿、订阅=品牌蓝、编辑=琥珀，
+   停止/删除=红（危险语义，不与上述共用）。新增动作请挑一个没被占用的色相，别复用。 */
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--preview) {
+  color: #2563eb;
+}
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--preview:hover) {
+  color: #1d4ed8;
+  background: rgb(37 99 235 / 8%);
+}
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--record) {
+  color: #6b4f9b;
+}
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--record:hover) {
+  color: #5a3f89;
+  background: rgb(107 79 155 / 8%);
+}
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--more) {
+  color: #be185d;
+}
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--more:hover) {
+  color: #9d174d;
+  background: rgb(190 24 93 / 8%);
+}
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--detail) {
+  color: #0f7490;
+}
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--detail:hover) {
+  color: #0e7490;
+  background: rgb(14 116 144 / 8%);
+}
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--sync) {
+  color: #0f766e;
+}
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--sync:hover) {
+  color: #0f675f;
+  background: rgb(15 118 110 / 8%);
+}
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--subscribe) {
+  color: var(--uvp-brand);
+}
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--subscribe:hover) {
+  color: var(--uvp-brand-strong);
+  background: var(--uvp-brand-soft);
+}
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--edit) {
-  color: #7c3aed;
+  color: #b7791f;
 }
-.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--preview:hover),
-.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--record:hover),
-.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--more:hover),
-.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--detail:hover),
-.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--sync:hover),
-.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--subscribe:hover),
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--edit:hover) {
-  color: #6d28d9;
-  background: rgb(124 58 237 / 8%);
-}
-
-/* 暗色底上 #7c3aed 会发闷，换一支亮紫；危险操作的红由全局兜底，这里不碰。 */
-:global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--preview),
-:global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--record),
-:global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--more),
-:global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--detail),
-:global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--sync),
-:global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--subscribe),
-:global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--edit) {
-  color: #c4b5fd;
-}
-:global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--preview:hover),
-:global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--record:hover),
-:global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--more:hover),
-:global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--detail:hover),
-:global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--sync:hover),
-:global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--subscribe:hover),
-:global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--edit:hover) {
-  color: #ddd6fe;
-  background: rgb(196 181 253 / 12%);
+  color: #9a6b18;
+  background: rgb(183 121 31 / 9%);
 }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--stop) {
   color: #dc2626;
