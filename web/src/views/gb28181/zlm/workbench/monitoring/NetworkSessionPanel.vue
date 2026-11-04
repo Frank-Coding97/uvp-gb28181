@@ -383,7 +383,6 @@ defineExpose({ refresh: requestRefresh });
             ><template #icon><icon-refresh /></template>{{ refreshButtonLabel }}</a-button
           ></template
         >
-        <template #extra><span class="scope-note">需完整 MediaIdentity，踢除还需 kickable=true</span></template>
       </s-layout-search>
 
       <div v-if="!viewerTarget" class="monitoring-state" role="status">
