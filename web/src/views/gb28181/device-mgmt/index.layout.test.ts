@@ -92,7 +92,11 @@ describe("device management toolbar layout", () => {
       "openStatusEvents",
       "openSubscriptionManager",
       "openEditDeviceModal",
-      "handleDeleteDevice"
+      // ⛔ 2026-11-04：设备头「更多」下拉里的删除项仍然只能弹窗 —— doption 一点下拉就收起，
+      //   挂在它身上的 a-popconfirm 会随之卸载。所以这里钉的是弹窗入口
+      //   requestDeleteDeviceFromMenu，而不是执行函数 handleDeleteDevice（后者的气泡入口
+      //   在表格行内与卡片按钮上，由各页面自己的用例覆盖）。
+      "requestDeleteDeviceFromMenu"
     ]) {
       expect(source).toContain(`${action}(selectedDevice)`);
     }

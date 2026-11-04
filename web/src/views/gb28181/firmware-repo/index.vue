@@ -90,9 +90,24 @@
           <a-link class="uvp-table-action" :disabled="downloading" @click="handleDownload(record)">
             <template #icon><Download :size="13" /></template><span>下载</span>
           </a-link>
-          <a-link class="uvp-table-action uvp-table-action--delete" :disabled="deleting" @click="handleDelete(record)">
-            <template #icon><Trash2 :size="13" /></template><span>删除</span>
-          </a-link>
+          <a-popconfirm
+            type="warning"
+            ok-text="删除"
+            cancel-text="取消"
+            :ok-button-props="{ status: 'danger' }"
+            :disabled="deleting"
+            @ok="handleDelete(record)"
+          >
+            <template #content>
+              <div class="uvp-confirm-title">删除固件？</div>
+              <div class="uvp-confirm-desc">
+                即将删除固件「{{ record.version }}」（{{ record.fileName }}）及其文件，此操作不可恢复。
+              </div>
+            </template>
+            <a-link class="uvp-table-action uvp-table-action--delete" :disabled="deleting">
+              <template #icon><Trash2 :size="13" /></template><span>删除</span>
+            </a-link>
+          </a-popconfirm>
         </div>
       </template>
     </a-table>
@@ -320,40 +335,27 @@ async function handleDownload(record: FirmwareRepository) {
 }
 
 /**
- * 删除确认弹窗。
- * ⛔ 与设备列表**逐字对齐** `device-mgmt/index.vue` handleDeleteDevice（1958 行）的配置：
- *   Modal.warning（**不是** Modal.confirm）+ hideCancel:false + okText/cancelText
- *   + okButtonProps:{status:"danger"}，且**不传 modalClass**。
+ * 删除固件（确认气泡的 @ok 直连本函数）。
  *
- * ⛔⛔ 为什么必须是 warning 而不是 confirm：两者都是 Arco 的 simple 弹窗，但
- *   warning 会渲染一个**橙色感叹号图标**（见 arco modal.js：messageType==="warning"
- *   才插 exclamation-circle-fill），confirm 没有图标。老板看到的就是这个差别。
- * ⛔ 也不传 modalClass="uvp-system-dialog"：那是给 `<a-modal modal-class>` 用的
- *   （挂在 .arco-modal 面板上），simple 弹窗结构不同，挂了不生效、反而和设备列表不一致。
+ * ⛔ 2026-11-04 反转：这里原先是 Modal.warning 弹窗，注释还专门论证过"必须 warning
+ *   不能 confirm、不能传 modalClass"。老板要求全站删除统一成 a-popconfirm 气泡后，
+ *   那套论证整体作废 —— 现在形态由气泡承担（橙色警示图标 + 危险色确认按钮），
+ *   文案仍保留「不可恢复」这句关键后果。
  */
-function handleDelete(record: FirmwareRepository) {
-  Modal.warning({
-    title: "删除固件",
-    content: `即将删除固件「${record.version}」（${record.fileName}）及其文件。此操作不可恢复,是否继续?`,
-    hideCancel: false,
-    okText: "删除",
-    cancelText: "取消",
-    okButtonProps: { status: "danger" },
-    onOk: async () => {
-      deleting.value = true;
-      try {
-        await deleteFirmware(record.id);
-        Message.success("固件已删除");
-        afterMutateSuccess();
-      } catch (error: any) {
-        // ⛔ 后端对"已被设备升级记录引用"会返回明确原因，直接透传给用户，
-        //   不要二次包装成"删除失败"把原因吃掉。
-        Message.error(error?.message || "删除失败");
-      } finally {
-        deleting.value = false;
-      }
-    }
-  });
+async function handleDelete(record: FirmwareRepository) {
+  if (deleting.value) return;
+  deleting.value = true;
+  try {
+    await deleteFirmware(record.id);
+    Message.success("固件已删除");
+    afterMutateSuccess();
+  } catch (error: any) {
+    // ⛔ 后端对"已被设备升级记录引用"会返回明确原因，直接透传给用户，
+    //   不要二次包装成"删除失败"把原因吃掉。
+    Message.error(error?.message || "删除失败");
+  } finally {
+    deleting.value = false;
+  }
 }
 
 /**

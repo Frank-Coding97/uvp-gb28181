@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
-import { Message, Modal } from "@arco-design/web-vue";
+import { Message } from "@arco-design/web-vue";
 import { CircleStop, Download, Eye, Layers, RefreshCw, RotateCcw, Search, Star, Trash2 } from "@lucide/vue";
 import { hasPermission } from "@/hooks/usePermission";
 import { copyTextToClipboard } from "@/utils/app";
@@ -367,26 +367,19 @@ async function toggleFavorite(task: RecordCacheTask) {
   }
 }
 
-function confirmDelete(task: RecordCacheTask) {
-  Modal.warning({
-    title: "删除缓存",
-    content: `将删除「${task.channelName || task.deviceName}」这段录像的服务器缓存文件，且不可恢复。`,
-    hideCancel: false,
-    okText: "删除",
-    cancelText: "取消",
-    onOk: async () => {
-      pendingTaskId.value = task.taskId;
-      try {
-        await deleteRecordCacheTask(task.taskId);
-        Message.success("已删除");
-        await loadTasks();
-      } catch {
-        Message.error("删除失败");
-      } finally {
-        pendingTaskId.value = "";
-      }
-    }
-  });
+/** 删除缓存（确认气泡的 @ok 直连本函数；文案在模板 slot 里）。 */
+async function deleteTask(task: RecordCacheTask) {
+  if (pendingTaskId.value) return;
+  pendingTaskId.value = task.taskId;
+  try {
+    await deleteRecordCacheTask(task.taskId);
+    Message.success("已删除");
+    await loadTasks();
+  } catch {
+    Message.error("删除失败");
+  } finally {
+    pendingTaskId.value = "";
+  }
 }
 
 /**
@@ -730,15 +723,26 @@ onMounted(() => {
                     </template>
                   </a-dropdown>
                 </template>
-                <a-link
+                <a-popconfirm
                   v-if="!isRecordCacheTaskStoppable(record.state)"
-                  class="uvp-table-action uvp-table-action--delete"
+                  type="warning"
+                  ok-text="删除"
+                  cancel-text="取消"
+                  :ok-button-props="{ status: 'danger' }"
                   :disabled="!canDelete"
-                  @click="confirmDelete(record)"
+                  @ok="deleteTask(record)"
                 >
-                  <template #icon><Trash2 :size="13" /></template>
-                  <span>删除</span>
-                </a-link>
+                  <template #content>
+                    <div class="uvp-confirm-title">删除缓存？</div>
+                    <div class="uvp-confirm-desc">
+                      将删除「{{ record.channelName || record.deviceName }}」这段录像的服务器缓存文件，且不可恢复。
+                    </div>
+                  </template>
+                  <a-link class="uvp-table-action uvp-table-action--delete" :disabled="!canDelete">
+                    <template #icon><Trash2 :size="13" /></template>
+                    <span>删除</span>
+                  </a-link>
+                </a-popconfirm>
               </div>
             </template>
           </a-table-column>

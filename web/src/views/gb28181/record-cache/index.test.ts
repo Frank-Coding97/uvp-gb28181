@@ -83,6 +83,14 @@ const stubs = {
     template: "<input class='search-input' />"
   },
   "a-empty": { props: ["description"], template: "<span>{{ description }}</span>" },
+  // ⛔ 2026-11-04 起删除改成 a-popconfirm 气泡：点「删除」只打开气泡，
+  //    必须再点气泡里的 ok 才真正落库。stub 把这两步拆开暴露给用例。
+  "a-popconfirm": {
+    emits: ["ok"],
+    props: ["disabled", "okText", "cancelText", "okButtonProps"],
+    template:
+      "<span v-bind='$attrs'><span class='popconfirm-content'><slot name='content' /></span><slot /><button class='popconfirm-ok' :disabled='disabled' @click='$emit(`ok`)'>{{ okText }}</button></span>"
+  },
   "a-tag": { template: "<span class='cache-tag'><slot /></span>" },
   "a-progress": {
     props: ["percent", "status", "showText", "size"],
@@ -646,18 +654,18 @@ describe("record cache workspace", () => {
     expect(api.listRecordCacheTasks).toHaveBeenCalledTimes(2);
   });
 
-  it("删除要先经过确认弹窗，确认后才真正删除", async () => {
+  it("删除要先经过确认气泡，确认后才真正删除", async () => {
     api.listRecordCacheTasks.mockResolvedValue(page([task({ state: "succeeded", progress: 1 })]));
     const wrapper = mount(RecordCachePage, { global: { stubs } });
     await flushPromises();
 
     await buttonByText(wrapper, "删除").trigger("click");
-    expect(modalWarning).toHaveBeenCalledTimes(1);
-    // 只点删除按钮不能落库：必须走到确认回调里。
+    // 只点删除按钮不能落库：必须走到气泡的确认回调里。
     expect(api.deleteRecordCacheTask).not.toHaveBeenCalled();
+    // 气泡里要写明后果（缓存文件删了不可恢复）
+    expect(wrapper.get(".popconfirm-content").text()).toContain("不可恢复");
 
-    const options = modalWarning.mock.calls[0][0] as { onOk: () => Promise<void> };
-    await options.onOk();
+    await wrapper.get(".popconfirm-ok").trigger("click");
     await flushPromises();
 
     expect(api.deleteRecordCacheTask).toHaveBeenCalledWith("t1");

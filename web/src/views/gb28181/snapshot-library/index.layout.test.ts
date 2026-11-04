@@ -334,17 +334,22 @@ describe("image library download and batch actions", () => {
     expect(pageSource).not.toMatch(/class="[^"]*library-selection-action/);
     // ⛔ 「清空选择」不许退回 `type="text"`：按钮就得有按钮的形（老板原话「它不是按钮吗」）。
     expect(pageSource).not.toMatch(/type="text"[^>]*library-clear-selection/);
-    // ⛔ 工具栏里的删除不许升成实心红：实心红是「确认删除弹窗里那一个」专用。
-    // v-if 在 2026-11-04 多了 canDelete 前置（删除权单独拆出来了），
-    // 但「有选中才出现」这条契约不变。
-    expect(pageSource).toMatch(/<a-button\s+v-if="canDelete && selectedIds\.size"\s+size="small"\s+status="danger"/);
+    // ⛔ 工具栏里的删除不许升成实心红：实心红是「确认气泡里那一个」专用。
+    // 「有选中才出现」这条契约不变，只是 2026-11-04 改气泡后 v-if 落到了外层
+    // a-popconfirm 上（按钮本身不再挂 v-if）。
+    expect(pageSource).toMatch(
+      /<a-popconfirm\s+v-if="canDelete && selectedIds\.size"[\s\S]{0,500}?<a-button\s+size="small"\s+status="danger"/
+    );
     expect(pageSource).not.toMatch(/type="primary"\s+status="danger"/);
   });
 
-  it("uses the shared modal confirmation pattern for destructive batch deletion", () => {
-    expect(pageSource).toContain("Modal.confirm({");
-    expect(pageSource).toContain('okButtonProps: { status: "danger" }');
-    expect(pageSource).not.toContain("<a-popconfirm");
+  it("destructive batch deletion goes through the shared confirm bubble", () => {
+    // ⛔ 2026-11-04 反转：这里原先钉的是「必须 Modal.confirm、不许用 a-popconfirm」。
+    //    老板要求全站删除统一成气泡后，改钉气泡一侧（文案必须写明不可恢复）。
+    expect(pageSource).toContain("不可恢复");
+    expect(pageSource).toContain(`:ok-button-props="{ status: 'danger' }"`);
+    expect(pageSource).toContain('@ok="deleteSelected"');
+    expect(pageSource).not.toContain("Modal.confirm({");
   });
 
   it("keeps the card image area a fixed height so rows do not stagger", () => {

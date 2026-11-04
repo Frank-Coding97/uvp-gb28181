@@ -288,33 +288,21 @@ describe("firmware-repo/index", () => {
      *   固件叫"删除固件"、设备叫"删除设备"，本来就不该相等）。
      *   基准页改了这两项这里就会红，不会出现"两边各写一套、看着像但其实不一样"的漂移。
      */
-    const deviceListDeleteConfirm = {
-      hideCancel: false,
-      okText: "删除",
-      cancelText: "取消",
-      okButtonProps: { status: "danger" }
-    };
+    // ⛔ 2026-11-04 反转：删除原先用 Modal.warning（还专门论证过"必须 warning、
+    //   不能 confirm、不能传 modalClass"）。老板要求全站删除统一成 a-popconfirm 气泡后，
+    //   那套论证作废；这里改钉气泡一侧 —— 文案要点名固件版本与文件名，且确认按钮是危险色。
+    it("删除走确认气泡，文案点名固件版本与文件名", () => {
+      const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/firmware-repo/index.vue"), "utf8");
+      const start = source.indexOf("<a-popconfirm");
+      const block = source.slice(start, source.indexOf("</a-popconfirm>", start));
 
-    // ⛔ 契约：与设备列表**逐字对齐**。
-    //   两条最容易被忽略、且一眼就能看出来的差异：
-    //   ① 用 Modal.warning 而不是 Modal.confirm —— 两者都是 simple 弹窗，但 warning 会渲染
-    //      一个橙色感叹号图标，confirm 没有（见 arco modal.js messageType==="warning" 分支）；
-    //   ② **不传 modalClass** —— `uvp-system-dialog` 是给 `<a-modal modal-class>` 用的（挂在
-    //      .arco-modal 面板上），simple 弹窗结构不同、挂不上去，设备列表也没挂。
-    it("应该用与设备列表一致的危险确认弹窗", async () => {
-      const wrapper = mountRepo();
-      await flushPromises();
-
-      wrapper.vm.handleDelete(mockFirmwareList[0]);
-
-      expect(Modal.warning).toHaveBeenCalledWith(expect.objectContaining(deviceListDeleteConfirm));
-
-      const config = vi.mocked(Modal.warning).mock.calls[0][0] as any;
-      // ⛔ 不得再挂 modalClass：与设备列表保持一致，且对 simple 弹窗无效
-      expect(config.modalClass).toBeUndefined();
-      // 弹窗文案要点名固件版本与文件名，避免"删的是哪个"看不懂
-      expect(config.content).toContain("v1.0.0");
-      expect(config.content).toContain("firmware-v1.bin");
+      expect(block).toContain("record.version");
+      expect(block).toContain("record.fileName");
+      expect(block).toContain("不可恢复");
+      expect(block).toContain(":ok-button-props=\"{ status: 'danger' }\"");
+      expect(block).toContain('@ok="handleDelete(record)"');
+      // 不许再退回 Modal 形态
+      expect(source).not.toContain('title: "删除固件"');
     });
 
     it("⛔ 不得退回 Modal.confirm（confirm 没有警告图标，和设备列表观感不同）", async () => {
@@ -339,22 +327,13 @@ describe("firmware-repo/index", () => {
     });
 
     it("用户确认后应调用 deleteFirmware 并刷新列表", async () => {
-      let onOkCallback: (() => Promise<void>) | undefined;
-      vi.mocked(Modal.warning).mockImplementation((config: any) => {
-        onOkCallback = config.onOk;
-        return {} as any;
-      });
-
       vi.mocked(api.deleteFirmware).mockResolvedValue({ data: {} } as any);
 
       const wrapper = mountRepo();
       await flushPromises();
       vi.clearAllMocks();
 
-      wrapper.vm.handleDelete(mockFirmwareList[0]);
-      expect(onOkCallback).toBeDefined();
-
-      await onOkCallback!();
+      await wrapper.vm.handleDelete(mockFirmwareList[0]);
       await flushPromises();
 
       expect(api.deleteFirmware).toHaveBeenCalledWith(1);
@@ -363,11 +342,6 @@ describe("firmware-repo/index", () => {
     });
 
     it("删掉当前页最后一条时应回退一页，避免停在越界空页（看着像没删掉）", async () => {
-      let onOkCallback: (() => Promise<void>) | undefined;
-      vi.mocked(Modal.warning).mockImplementation((config: any) => {
-        onOkCallback = config.onOk;
-        return {} as any;
-      });
       vi.mocked(api.deleteFirmware).mockResolvedValue({ data: {} } as any);
 
       const wrapper = mountRepo();
@@ -378,8 +352,7 @@ describe("firmware-repo/index", () => {
       wrapper.vm.tableData = [mockFirmwareList[0]];
       vi.clearAllMocks();
 
-      wrapper.vm.handleDelete(mockFirmwareList[0]);
-      await onOkCallback!();
+      await wrapper.vm.handleDelete(mockFirmwareList[0]);
       await flushPromises();
 
       expect(api.listFirmware).toHaveBeenCalledWith(expect.objectContaining({ page: 2 }));
@@ -388,37 +361,24 @@ describe("firmware-repo/index", () => {
     // 后端对"已被设备升级记录引用"返回明确原因，必须原样透传，
     // 不能被二次包装成"删除失败"把原因吃掉（那是用户唯一能判断该怎么办的信息）。
     it("被设备升级记录引用时原样透传后端原因", async () => {
-      let onOkCallback: (() => Promise<void>) | undefined;
-      vi.mocked(Modal.warning).mockImplementation((config: any) => {
-        onOkCallback = config.onOk;
-        return {} as any;
-      });
       vi.mocked(api.deleteFirmware).mockRejectedValue(new Error("固件: 已被设备升级记录引用，无法删除（3 条设备升级记录）"));
 
       const wrapper = mountRepo();
       await flushPromises();
 
-      wrapper.vm.handleDelete(mockFirmwareList[0]);
-      await onOkCallback!();
+      await wrapper.vm.handleDelete(mockFirmwareList[0]);
       await flushPromises();
 
       expect(Message.error).toHaveBeenCalledWith("固件: 已被设备升级记录引用，无法删除（3 条设备升级记录）");
     });
 
     it("删除失败时应显示错误消息", async () => {
-      let onOkCallback: (() => Promise<void>) | undefined;
-      vi.mocked(Modal.warning).mockImplementation((config: any) => {
-        onOkCallback = config.onOk;
-        return {} as any;
-      });
-
       vi.mocked(api.deleteFirmware).mockRejectedValue(new Error("删除失败"));
 
       const wrapper = mountRepo();
       await flushPromises();
 
-      wrapper.vm.handleDelete(mockFirmwareList[0]);
-      await onOkCallback!();
+      await wrapper.vm.handleDelete(mockFirmwareList[0]);
       await flushPromises();
 
       expect(Message.error).toHaveBeenCalledWith("删除失败");

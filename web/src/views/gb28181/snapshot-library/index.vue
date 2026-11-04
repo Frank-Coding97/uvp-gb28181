@@ -117,18 +117,24 @@
           <!-- ⛔ 工具栏里的删除用**软红**（`status="danger"` 就够），不要 `type="primary"`：
                实心红是「确认删除弹窗里那一个」专用，放在常驻工具条上会变成整条唯一的高饱和块，
                反而压过下载（2026-11-04 治理时降档）。 -->
-          <a-button
+          <a-popconfirm
             v-if="canDelete && selectedIds.size"
-            size="small"
-            status="danger"
-            data-testid="library-batch-delete"
-            :loading="deleting"
+            type="warning"
+            ok-text="删除"
+            cancel-text="取消"
+            :ok-button-props="{ status: 'danger' }"
             :disabled="deleting"
-            @click="requestDeleteSelected"
+            @ok="deleteSelected"
           >
-            <template #icon><Delete :size="14" /></template>
-            {{ deleting ? "正在删除…" : "批量删除" }}
-          </a-button>
+            <template #content>
+              <div class="uvp-confirm-title">批量删除抓拍图？</div>
+              <div class="uvp-confirm-desc">将永久删除选中的 {{ selectedIds.size }} 张抓拍图及磁盘文件，删除后不可恢复。</div>
+            </template>
+            <a-button size="small" status="danger" data-testid="library-batch-delete" :loading="deleting" :disabled="deleting">
+              <template #icon><Delete :size="14" /></template>
+              {{ deleting ? "正在删除…" : "批量删除" }}
+            </a-button>
+          </a-popconfirm>
         </div>
 
         <div class="library-body">
@@ -438,7 +444,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { Message, Modal } from "@arco-design/web-vue";
+import { Message } from "@arco-design/web-vue";
 import { CheckSquare, Delete, Download, Eye, ImageOff, RotateCcw, Search } from "@lucide/vue";
 import { getAccessToken } from "@/utils/auth";
 import { getBaseUrl } from "@/api/utils";
@@ -652,8 +658,13 @@ function toggleSelectAll() {
  * ⛔ 只在**当前页**可见范围内选（selectedIds 本身就是本页勾选的），删完重新拉列表，
  * 不要前端自行 filter —— 后端才是权威（可能有越权行被后端跳过）。
  */
+/**
+ * 批量删除抓拍图（确认气泡的 @ok 直连本函数；文案在模板 slot 里）。
+ * ⛔ 2026-11-04 起删除统一用 `a-popconfirm` 气泡，原来的 Modal.confirm 包装已删。
+ */
 async function deleteSelected() {
-  if (deleting.value) return;
+  // 按钮已按 canDelete 隐藏；这里是第二道闸 —— 快捷键/脚本/后续新增入口都不能绕过。
+  if (!canDelete.value || deleting.value) return;
   const ids = [...selectedIds.value];
   if (!ids.length) return;
   deleting.value = true;
@@ -679,21 +690,6 @@ async function deleteSelected() {
   } finally {
     deleting.value = false;
   }
-}
-
-function requestDeleteSelected() {
-  // 按钮已按 canDelete 隐藏；这里是第二道闸 —— 快捷键/脚本/后续新增入口都不能绕过。
-  if (!canDelete.value || deleting.value || !selectedIds.value.size) return;
-  const count = selectedIds.value.size;
-  Modal.confirm({
-    title: "批量删除抓拍图",
-    content: `将永久删除选中的 ${count} 张抓拍图及磁盘文件，删除后不可恢复。`,
-    okText: "删除",
-    cancelText: "取消",
-    okButtonProps: { status: "danger" },
-    escToClose: true,
-    onOk: () => deleteSelected()
-  });
 }
 
 function clearSelection() {

@@ -61,7 +61,11 @@ describe("device-mgmt guest permission boundary", () => {
       const bodyStart = Math.max(start, asyncStart);
       expect(bodyStart, entry).toBeGreaterThan(-1);
       const body = source.slice(bodyStart, source.indexOf("\n}", bodyStart) + 2);
-      expect(body, entry).toContain(`if (!${permission}.value) return;`);
+      // ⛔ 只要求「函数体第一句就判权限并早退」，不锁死后半句：
+      //   2026-11-04 改气泡时把「正在删除」的防重入并进了同一个条件
+      //   （`if (!canDeleteDevice.value || deleting.value) return;`），
+      //   权限闸门本身没变，锁死字面量会让这种等价改写白红一次。
+      expect(body, entry).toMatch(new RegExp(`if \\(!${permission}\\.value\\b`));
     }
   });
 

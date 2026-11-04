@@ -92,6 +92,14 @@ const stubs = {
       "<select :data-testid='$attrs[`data-testid`]' :data-placeholder='placeholder' :value='modelValue' @change='$emit(`update:modelValue`, $event.target.value || undefined)'><slot /></select>"
   },
   "a-option": { props: ["value"], template: "<option :value='value'><slot /></option>" },
+  // ⛔ 2026-11-04 起批量删除改成 a-popconfirm 气泡：点按钮只打开气泡，
+  //    必须再点气泡里的 ok 才真正删除。stub 把这两步拆开暴露给用例。
+  "a-popconfirm": {
+    emits: ["ok"],
+    props: ["disabled", "okText", "cancelText", "okButtonProps"],
+    template:
+      "<span v-bind='$attrs'><span class='popconfirm-content'><slot name='content' /></span><slot /><button class='popconfirm-ok' :disabled='disabled' @click='$emit(`ok`)'>{{ okText }}</button></span>"
+  },
   "a-range-picker": {
     // ⛔ `name` 必须显式声明：`findComponent({ name: "a-range-picker" })` 按组件名找，
     // 匿名桩找不到（会返回空 wrapper，报 "Cannot call vm on an empty VueWrapper"）。
@@ -640,18 +648,12 @@ describe("snapshot library page", () => {
     expect(wrapper.find('[data-testid="library-batch-delete"]').exists()).toBe(true);
 
     await wrapper.find('[data-testid="library-batch-delete"]').trigger("click");
-    expect(modal.confirm).toHaveBeenCalledWith(
-      expect.objectContaining({
-        title: "批量删除抓拍图",
-        content: expect.stringContaining("2 张"),
-        okText: "删除",
-        cancelText: "取消",
-        okButtonProps: { status: "danger" },
-        escToClose: true
-      })
-    );
+    // 点按钮只打开气泡，不落库；气泡文案要写明张数与「不可恢复」
     expect(gbApi.deleteSnapshots).not.toHaveBeenCalled();
-    await modal.confirm.mock.calls[0][0].onOk();
+    const bubbleCopy = wrapper.get(".popconfirm-content").text();
+    expect(bubbleCopy).toContain("2 张");
+    expect(bubbleCopy).toContain("不可恢复");
+    await wrapper.get(".popconfirm-ok").trigger("click");
     await flushPromises();
 
     expect(gbApi.deleteSnapshots).toHaveBeenCalledWith([1, 2]);
@@ -676,8 +678,7 @@ describe("snapshot library page", () => {
     await flushPromises();
 
     await wrapper.find('[data-testid="library-batch-delete"]').trigger("click");
-    expect(modal.confirm).toHaveBeenCalledOnce();
-    await modal.confirm.mock.calls[0][0].onOk();
+    await wrapper.get(".popconfirm-ok").trigger("click");
     await flushPromises();
 
     // 还在批量模式、选择还在 ⇒ 用户可直接重试。

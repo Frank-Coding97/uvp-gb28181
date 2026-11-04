@@ -3352,8 +3352,38 @@ function reportBatchResult(res: BatchDeleteResult, total: number) {
   Message.warning(`成功 ${okCount} / ${total},失败 ${failCount}:${res.failed[0]?.error || ""}`);
 }
 
+/**
+ * 删除设备（确认气泡的 @ok 直连本函数）。
+ * ⛔ 2026-11-04 起行内/卡片上的删除统一走 a-popconfirm 气泡，原来的 Modal.warning 已删。
+ */
 async function handleDeleteDevice(record: DeviceVO) {
-  if (!canDeleteDevice.value) return;
+  if (!canDeleteDevice.value || deleting.value) return;
+  deleting.value = true;
+  try {
+    const res = await deleteDevice(record.id);
+    if (res.code === 0) {
+      Message.success("设备已删除");
+      if (selectedDevice.value?.id === record.id) onDeviceSelect(null);
+      void onDevicesChanged();
+      afterDeleteSuccess();
+    } else {
+      Message.error(res.message || "删除失败");
+    }
+  } catch (error: any) {
+    Message.error(error?.message || "删除失败");
+  } finally {
+    deleting.value = false;
+  }
+}
+
+/**
+ * 设备详情头部「更多」下拉里的删除项。
+ * ⛔⛔ 这里**只能**用弹窗：doption 一点下拉就收起，挂在它身上的 a-popconfirm 会随之卸载，
+ *   气泡根本来不及显示（这不是偷懒，是 Trigger 的挂载点没了）。
+ *   要做到全气泡，得先把「删除设备」从下拉里搬成独立按钮 —— 属于 UI 结构调整，等老板拍板。
+ */
+function requestDeleteDeviceFromMenu(record: DeviceVO) {
+  if (!canDeleteDevice.value || deleting.value) return;
   Modal.warning({
     title: "删除设备",
     content: `即将删除设备「${deviceNameText(record)}(${record.deviceId})」及其所有通道、目录挂载。此操作不可恢复,是否继续?`,
@@ -3361,53 +3391,27 @@ async function handleDeleteDevice(record: DeviceVO) {
     okText: "删除",
     cancelText: "取消",
     okButtonProps: { status: "danger" },
-    onOk: async () => {
-      deleting.value = true;
-      try {
-        const res = await deleteDevice(record.id);
-        if (res.code === 0) {
-          Message.success("设备已删除");
-          if (selectedDevice.value?.id === record.id) onDeviceSelect(null);
-          void onDevicesChanged();
-          afterDeleteSuccess();
-        } else {
-          Message.error(res.message || "删除失败");
-        }
-      } catch (error: any) {
-        Message.error(error?.message || "删除失败");
-      } finally {
-        deleting.value = false;
-      }
-    }
+    onOk: () => handleDeleteDevice(record)
   });
 }
 
+/** 删除通道（确认气泡的 @ok 直连本函数）。 */
 async function handleDeleteChannel(record: ChannelVO) {
-  if (!canDeleteChannel.value) return;
-  Modal.warning({
-    title: "删除通道",
-    content: `即将删除通道「${displayName(record)}(${record.channelId})」及其所有目录挂载。此操作不可恢复,是否继续?`,
-    hideCancel: false,
-    okText: "删除",
-    cancelText: "取消",
-    okButtonProps: { status: "danger" },
-    onOk: async () => {
-      deleting.value = true;
-      try {
-        const res = await deleteChannel(record.id);
-        if (res.code === 0) {
-          Message.success("通道已删除");
-          afterDeleteSuccess();
-        } else {
-          Message.error(res.message || "删除失败");
-        }
-      } catch (error: any) {
-        Message.error(error?.message || "删除失败");
-      } finally {
-        deleting.value = false;
-      }
+  if (!canDeleteChannel.value || deleting.value) return;
+  deleting.value = true;
+  try {
+    const res = await deleteChannel(record.id);
+    if (res.code === 0) {
+      Message.success("通道已删除");
+      afterDeleteSuccess();
+    } else {
+      Message.error(res.message || "删除失败");
     }
-  });
+  } catch (error: any) {
+    Message.error(error?.message || "删除失败");
+  } finally {
+    deleting.value = false;
+  }
 }
 
 async function handleStreamTransportChange(channelId: number, streamTransport: string) {
@@ -3551,34 +3555,32 @@ async function handleBatchDelete() {
   if (assetKind.value === "channel" && !canDeleteChannel.value) return;
   const ids = [...selectedRowKeys.value];
   if (ids.length === 0) return;
+  deleting.value = true;
+  try {
+    const deleteBatch = assetKind.value === "device" ? batchDeleteDevices : batchDeleteChannels;
+    const res = await deleteBatch(ids);
+    if (res.code === 0 && res.data) {
+      reportBatchResult(res.data, ids.length);
+      afterDeleteSuccess();
+    } else {
+      Message.error(res.message || "批量删除失败");
+    }
+  } catch (error: any) {
+    Message.error(error?.message || "批量删除失败");
+  } finally {
+    deleting.value = false;
+  }
+}
+
+/** 批量删除气泡里的文案（模板直接用，避免在模板里堆三元表达式）。 */
+const batchDeleteCopy = computed(() => {
   const target = assetKind.value === "device" ? "设备" : "通道";
   const cascade = assetKind.value === "device" ? "所属通道、目录挂载" : "所有目录挂载";
-  Modal.warning({
-    title: `批量删除${target}`,
-    content: `即将删除 ${ids.length} 个${target}及其${cascade}。此操作不可恢复,是否继续?`,
-    hideCancel: false,
-    okText: "全部删除",
-    cancelText: "取消",
-    okButtonProps: { status: "danger" },
-    onOk: async () => {
-      deleting.value = true;
-      try {
-        const deleteBatch = assetKind.value === "device" ? batchDeleteDevices : batchDeleteChannels;
-        const res = await deleteBatch(ids);
-        if (res.code === 0 && res.data) {
-          reportBatchResult(res.data, ids.length);
-          afterDeleteSuccess();
-        } else {
-          Message.error(res.message || "批量删除失败");
-        }
-      } catch (error: any) {
-        Message.error(error?.message || "批量删除失败");
-      } finally {
-        deleting.value = false;
-      }
-    }
-  });
-}
+  return {
+    title: `批量删除${target}？`,
+    desc: `即将删除 ${selectedRowKeys.value.length} 个${target}及其${cascade}，此操作不可恢复。`
+  };
+});
 
 function resetAutoRefreshCountdown() {
   autoRefreshCountdown.value = AUTO_REFRESH_INTERVAL_SECONDS;
@@ -3894,7 +3896,7 @@ onUnmounted(() => {
                 <a-doption
                   :disabled="deleting || !canDeleteDevice"
                   :style="{ color: 'var(--uvp-danger)' }"
-                  @click="handleDeleteDevice(selectedDevice)"
+                  @click="requestDeleteDeviceFromMenu(selectedDevice)"
                   >删除设备</a-doption
                 >
               </template>
@@ -3940,14 +3942,26 @@ onUnmounted(() => {
             <strong>{{ selectedCount }}</strong> 项已选
           </div>
           <div class="batch-ops">
-            <button
-              class="btn-danger"
-              type="button"
+            <a-popconfirm
+              type="warning"
+              ok-text="全部删除"
+              cancel-text="取消"
+              :ok-button-props="{ status: 'danger' }"
               :disabled="deleting || (assetKind === 'device' ? !canDeleteDevice : !canDeleteChannel)"
-              @click="handleBatchDelete"
+              @ok="handleBatchDelete"
             >
-              批量删除
-            </button>
+              <template #content>
+                <div class="uvp-confirm-title">{{ batchDeleteCopy.title }}</div>
+                <div class="uvp-confirm-desc">{{ batchDeleteCopy.desc }}</div>
+              </template>
+              <button
+                class="btn-danger"
+                type="button"
+                :disabled="deleting || (assetKind === 'device' ? !canDeleteDevice : !canDeleteChannel)"
+              >
+                批量删除
+              </button>
+            </a-popconfirm>
           </div>
         </div>
 
@@ -4174,14 +4188,25 @@ onUnmounted(() => {
                       <template #icon><Pencil :size="13" /></template>
                       <span>编辑</span>
                     </a-link>
-                    <a-link
-                      class="uvp-table-action uvp-table-action--delete"
+                    <a-popconfirm
+                      type="warning"
+                      ok-text="删除"
+                      cancel-text="取消"
+                      :ok-button-props="{ status: 'danger' }"
                       :disabled="deleting || !canDeleteChannel"
-                      @click="handleDeleteChannel(record)"
+                      @ok="handleDeleteChannel(record)"
                     >
-                      <template #icon><Trash2 :size="13" /></template>
-                      <span>删除</span>
-                    </a-link>
+                      <template #content>
+                        <div class="uvp-confirm-title">删除通道？</div>
+                        <div class="uvp-confirm-desc">
+                          即将删除通道「{{ displayName(record) }}（{{ record.channelId }}）」及其所有目录挂载，此操作不可恢复。
+                        </div>
+                      </template>
+                      <a-link class="uvp-table-action uvp-table-action--delete" :disabled="deleting || !canDeleteChannel">
+                        <template #icon><Trash2 :size="13" /></template>
+                        <span>删除</span>
+                      </a-link>
+                    </a-popconfirm>
                   </div>
                 </template>
               </a-table-column>
@@ -4320,13 +4345,26 @@ onUnmounted(() => {
                     >
                       <template #icon><Pencil :size="13" /></template><span>编辑</span>
                     </a-link>
-                    <a-link
-                      class="uvp-table-action uvp-table-action--delete"
+                    <a-popconfirm
+                      type="warning"
+                      ok-text="删除"
+                      cancel-text="取消"
+                      :ok-button-props="{ status: 'danger' }"
                       :disabled="deleting || !canDeleteDevice"
-                      @click="handleDeleteDevice(record)"
+                      @ok="handleDeleteDevice(record)"
                     >
-                      <template #icon><Trash2 :size="13" /></template><span>删除</span>
-                    </a-link>
+                      <template #content>
+                        <div class="uvp-confirm-title">删除设备？</div>
+                        <div class="uvp-confirm-desc">
+                          即将删除设备「{{ deviceNameText(record) }}（{{
+                            record.deviceId
+                          }}）」及其所有通道、目录挂载，此操作不可恢复。
+                        </div>
+                      </template>
+                      <a-link class="uvp-table-action uvp-table-action--delete" :disabled="deleting || !canDeleteDevice">
+                        <template #icon><Trash2 :size="13" /></template><span>删除</span>
+                      </a-link>
+                    </a-popconfirm>
                     <a-dropdown trigger="click" position="br">
                       <a-link class="uvp-table-action uvp-table-action--more" :disabled="!canViewMaintenance">
                         <span>维护</span><MoreHorizontal :size="13" />
@@ -4470,15 +4508,26 @@ onUnmounted(() => {
                     >
                       <Pencil :size="13" /></button
                   ></a-tooltip>
-                  <a-tooltip content="删除设备" position="top"
-                    ><button
-                      class="icon-btn small framed danger"
-                      type="button"
-                      :disabled="deleting || !canDeleteDevice"
-                      @click.stop="handleDeleteDevice(item)"
-                    >
-                      <Trash2 :size="13" /></button
-                  ></a-tooltip>
+                  <a-popconfirm
+                    type="warning"
+                    ok-text="删除"
+                    cancel-text="取消"
+                    :ok-button-props="{ status: 'danger' }"
+                    :disabled="deleting || !canDeleteDevice"
+                    @click.stop
+                    @ok="handleDeleteDevice(item)"
+                  >
+                    <template #content>
+                      <div class="uvp-confirm-title">删除设备？</div>
+                      <div class="uvp-confirm-desc">
+                        即将删除设备「{{ deviceNameText(item) }}（{{ item.deviceId }}）」及其所有通道、目录挂载，此操作不可恢复。
+                      </div>
+                    </template>
+                    <a-tooltip content="删除设备" position="top"
+                      ><button class="icon-btn small framed danger" type="button" :disabled="deleting || !canDeleteDevice">
+                        <Trash2 :size="13" /></button
+                    ></a-tooltip>
+                  </a-popconfirm>
                   <a-dropdown trigger="click" position="br" :popup-max-height="false">
                     <button class="icon-btn small framed" type="button" aria-label="更多设备操作" :disabled="!canViewMaintenance">
                       <MoreHorizontal :size="13" />
@@ -4721,16 +4770,31 @@ onUnmounted(() => {
                       >
                         <Pencil :size="13" /></button
                     ></a-tooltip>
-                    <a-tooltip content="删除通道" position="top"
-                      ><button
-                        class="icon-btn small framed danger"
-                        type="button"
-                        aria-label="删除通道"
-                        :disabled="deleting || !canDeleteChannel"
-                        @click.stop="handleDeleteChannel(item)"
-                      >
-                        <Trash2 :size="13" /></button
-                    ></a-tooltip>
+                    <a-popconfirm
+                      type="warning"
+                      ok-text="删除"
+                      cancel-text="取消"
+                      :ok-button-props="{ status: 'danger' }"
+                      :disabled="deleting || !canDeleteChannel"
+                      @click.stop
+                      @ok="handleDeleteChannel(item)"
+                    >
+                      <template #content>
+                        <div class="uvp-confirm-title">删除通道？</div>
+                        <div class="uvp-confirm-desc">
+                          即将删除通道「{{ displayName(item) }}（{{ item.channelId }}）」及其所有目录挂载，此操作不可恢复。
+                        </div>
+                      </template>
+                      <a-tooltip content="删除通道" position="top"
+                        ><button
+                          class="icon-btn small framed danger"
+                          type="button"
+                          aria-label="删除通道"
+                          :disabled="deleting || !canDeleteChannel"
+                        >
+                          <Trash2 :size="13" /></button
+                      ></a-tooltip>
+                    </a-popconfirm>
                   </div>
                 </div>
               </article>
