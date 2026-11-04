@@ -404,7 +404,10 @@ function formatTime(value?: string | null) {
         <a-alert v-if="error" type="error" class="openapi-detail__alert" role="alert">
           {{ error }} <a-button size="small" @click="load" class="uvp-refresh-btn">重试</a-button>
         </a-alert>
-        <a-spin v-if="loading && !client" class="openapi-detail__loading" />
+        <div v-if="loading && !client" class="openapi-detail__loading" role="status" aria-live="polite">
+          <a-spin />
+          <span>正在读取客户端信息…</span>
+        </div>
         <template v-if="client && detailReady">
           <a-card class="uvp-system-panel openapi-detail__summary" :bordered="false">
             <div class="openapi-detail__summary-content">
@@ -531,7 +534,15 @@ function formatTime(value?: string | null) {
   margin-bottom: 14px;
 }
 .openapi-detail__loading {
-  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  min-height: min(480px, 60vh);
+  font-size: 13px;
+  color: var(--color-text-3);
+  text-align: center;
 }
 .openapi-detail__summary {
   margin-bottom: 18px;
