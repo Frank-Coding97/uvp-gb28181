@@ -229,6 +229,15 @@ describe("cascade platform editor layout", () => {
     expect(source).toMatch(/class="uvp-table-action uvp-table-action--delete"/);
   });
 
+  it("merges the upstream platform name and its address into one list column", () => {
+    const columns = source.slice(source.indexOf("<template #columns>"), source.indexOf("<template #empty>"));
+    expect(columns).not.toContain('title="上级地址"');
+    expect(columns).toContain('<a-table-column title="上级平台" :width="300">');
+    expect(columns).toContain("{{ record.host }}:{{ record.port }}");
+    expect(columns).toContain("record.transport");
+    expect(source).toContain(":scroll=\"{ x: '100%', minWidth: 2020 }\"");
+  });
+
   it("keeps the long form scrollable inside the dialog viewport", () => {
     expect(source).toContain(".cascade-platform-dialog .arco-modal-body");
     expect(source).toContain("max-height: calc(100dvh - 260px);");

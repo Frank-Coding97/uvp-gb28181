@@ -73,23 +73,18 @@
           :data="filteredPlatforms"
           :bordered="false"
           :pagination="false"
-          :scroll="{ x: '100%', minWidth: 2130 }"
+          :scroll="{ x: '100%', minWidth: 2020 }"
         >
           <template #columns>
-            <a-table-column title="上级平台" :width="220">
+            <a-table-column title="上级平台" :width="300">
               <template #cell="{ record }">
                 <div class="entity-cell">
                   <strong>{{ record.name }}</strong>
                   <code>{{ record.upstreamServerId }}</code>
+                  <small class="entity-cell__endpoint"
+                    >{{ record.host }}:{{ record.port }}{{ record.transport ? " · " + record.transport : "" }}</small
+                  >
                   <a-tag v-if="record.credentialNeedsReset" color="orange">需重新填写认证密码</a-tag>
-                </div>
-              </template>
-            </a-table-column>
-            <a-table-column title="上级地址" :width="190">
-              <template #cell="{ record }">
-                <div class="entity-cell">
-                  <span>{{ record.host }}:{{ record.port }}</span
-                  ><small>{{ record.transport }}</small>
                 </div>
               </template>
             </a-table-column>
@@ -1207,6 +1202,11 @@ onUnmounted(() => {
   color: var(--color-text-3);
   letter-spacing: 0;
   white-space: nowrap;
+}
+
+/* 上级地址并入“上级平台”列后做次级行：等宽数字便于多行 IP:端口 纵向对齐 */
+.entity-cell__endpoint {
+  font-variant-numeric: tabular-nums;
 }
 .cascade-actions :deep(.arco-link) {
   display: inline-flex;
