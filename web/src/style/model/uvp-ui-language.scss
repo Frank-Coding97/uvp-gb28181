@@ -1568,6 +1568,23 @@ body[arco-theme="dark"] .uvp-system-form {
   background-color: var(--uvp-brand);
 }
 
+/* 「文字 + 开关」行：系统管理各页统一 10px 间距、垂直居中。
+   ⛔ 不要再用 inline 空白或页面局部 margin 凑间距（曾出现 gap 实测为 0 的情况）。 */
+.uvp-switch-row {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 24px;
+}
+
+/* 多个「文字 + 开关」并排：行内 10px、行间 24px、换行后仍对齐 */
+.uvp-switch-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  align-items: center;
+}
+
 .uvp-system-dialog .arco-card,
 .uvp-system-dialog__body .arco-card,
 .uvp-system-form .arco-card {

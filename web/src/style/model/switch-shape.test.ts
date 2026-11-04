@@ -46,12 +46,44 @@ describe("开关形状：一律圆角", () => {
     expect(overrides).toMatch(/\.arco-switch\s+\.arco-switch-handle\s*\{[^}]*border-radius:\s*50%/);
   });
 
-  it("分配权限抽屉：文字与开关用 flex 留间距，不靠 inline 空白", () => {
+  it("全局兜底：任何 type 的开关滑块都强制圆形", () => {
+    const overrides = readFileSync(resolve(SRC, "styles/arco-overrides.scss"), "utf8");
+
+    expect(overrides).toMatch(/\.arco-switch\s+\.arco-switch-handle\s*\{[^}]*border-radius:\s*50%/);
+  });
+
+  it("系统管理下的开关：全部显式 circle，且不出现 small 尺寸", () => {
+    const systemFiles = files.filter(file => rel(file).includes("views/system/"));
+    const offenders: string[] = [];
+
+    for (const file of systemFiles) {
+      const source = sources.get(file) ?? "";
+      for (const [tag] of source.matchAll(/<a-switch\b[^>]*>/g)) {
+        if (!/type="circle"/.test(tag) || /size="small"/.test(tag)) offenders.push(`${rel(file)} → ${tag.replace(/\s+/g, " ")}`);
+      }
+    }
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("「文字 + 开关」统一用 uvp-switch-row 留间距，不靠 inline 空白或局部 margin", () => {
+    const language = readFileSync(resolve(SRC, "style/model/uvp-ui-language.scss"), "utf8");
+
+    // 全局真源：间距只在这里定义，页面不再各写一套
+    expect(language).toMatch(/\.uvp-switch-row\s*\{[^}]*gap:\s*10px/);
+
     const role = sources.get(resolve(SRC, "views/system/role/role.vue")) ?? "";
     const drawer = role.match(/<template #title> 分配权限 <\/template>[\s\S]*?<\/a-drawer>/)?.[0] ?? "";
+    expect(drawer).toContain('class="uvp-switch-row"');
 
-    expect(drawer).toContain('class="perm-switch"');
-    expect(drawer).not.toContain("text-right-gap");
-    expect(role).toMatch(/\.perm-switch\s*\{[^}]*gap:\s*\d+px/);
+    const datascope = sources.get(resolve(SRC, "views/system/role/components/datascope.vue")) ?? "";
+    expect(datascope).toContain('class="uvp-switch-row"');
+
+    const upgrade = sources.get(resolve(SRC, "views/system/service-upgrade/index.vue")) ?? "";
+    expect(upgrade).toContain('class="uvp-switch-row"');
+
+    // 旧写法：抄了类名却忘了在页面里定义，实测间距为 0
+    const deadClass = files.filter(file => /class="[^"]*\btext-right-gap\b/.test(sources.get(file) ?? ""));
+    expect(deadClass.map(rel)).toEqual([]);
   });
 });

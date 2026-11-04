@@ -18,27 +18,33 @@
         <div class="data-scope-tree">
           <!-- 部门树操作按钮 -->
           <a-card v-if="treeData.length > 0" :bordered="false" class="tree-operation-card">
-            <a-space size="medium">
-              <span>展开全部</span>
-              <a-switch type="circle" v-model="treeSwitch.expandAll" @change="onExpandAll">
-                <template #checked> 是 </template>
-                <template #unchecked> 否 </template>
-              </a-switch>
+            <div class="uvp-switch-group">
+              <div class="uvp-switch-row">
+                <span>展开全部</span>
+                <a-switch type="circle" v-model="treeSwitch.expandAll" @change="onExpandAll">
+                  <template #checked> 是 </template>
+                  <template #unchecked> 否 </template>
+                </a-switch>
+              </div>
 
-              <span>全选节点</span>
-              <a-switch type="circle" v-model="treeSwitch.selectAll" @change="onSelectAll">
-                <template #checked> 是 </template>
-                <template #unchecked> 否 </template>
-              </a-switch>
+              <div class="uvp-switch-row">
+                <span>全选节点</span>
+                <a-switch type="circle" v-model="treeSwitch.selectAll" @change="onSelectAll">
+                  <template #checked> 是 </template>
+                  <template #unchecked> 否 </template>
+                </a-switch>
+              </div>
 
-              <a-tooltip content="父子节点关联选择，开启后选中父节点会自动选中所有子节点">
-                <span>父子关联 <icon-question-circle-fill /></span>
-              </a-tooltip>
-              <a-switch type="circle" v-model="treeSwitch.checkStrictly" @change="onCheckStrictlyChange">
-                <template #checked> 是 </template>
-                <template #unchecked> 否 </template>
-              </a-switch>
-            </a-space>
+              <div class="uvp-switch-row">
+                <a-tooltip content="父子节点关联选择，开启后选中父节点会自动选中所有子节点">
+                  <span>父子关联 <icon-question-circle-fill /></span>
+                </a-tooltip>
+                <a-switch type="circle" v-model="treeSwitch.checkStrictly" @change="onCheckStrictlyChange">
+                  <template #checked> 是 </template>
+                  <template #unchecked> 否 </template>
+                </a-switch>
+              </div>
+            </div>
           </a-card>
 
           <!-- 部门树 -->
@@ -269,17 +275,9 @@ defineExpose({
   padding: 12px 14px;
 }
 
-.tree-operation-card :deep(.arco-space) {
-  row-gap: 10px;
-}
-
 .tree-container :deep(.arco-card-body) {
   max-height: 280px;
   padding: 10px 12px;
   overflow: auto;
-}
-
-.text-right-gap {
-  margin-right: 8px;
 }
 </style>

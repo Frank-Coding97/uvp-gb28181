@@ -16,7 +16,7 @@
     <fieldset :disabled="disabled">
       <a-form :model="draft" layout="vertical" class="uvp-system-form">
         <a-form-item label="是否启用 HTTPS">
-          <a-switch v-model="draft.enabled" :disabled="disabled" />
+          <a-switch type="circle" v-model="draft.enabled" :disabled="disabled" />
           <template #extra>切换后需点击“应用 HTTPS 配置”才会生效；ZLMediaKit 的 HTTPS/WSS 仍保持开启。</template>
         </a-form-item>
         <div v-if="status?.supported" data-testid="access-preview" class="https-settings__access-preview">

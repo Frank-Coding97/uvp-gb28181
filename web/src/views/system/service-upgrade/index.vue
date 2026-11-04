@@ -44,10 +44,10 @@
         <div class="version-footer">
           <div class="version-meta">
             <div class="version-source"><span class="upgrade-caption">更新源</span><span>官方内置</span></div>
-            <div class="version-auto-check" data-testid="auto-check-switch">
+            <div class="uvp-switch-row" data-testid="auto-check-switch">
               <span class="upgrade-caption">定时检查</span>
               <a-switch
-                size="small"
+                type="circle"
                 :model-value="autoCheckEnabled"
                 :loading="settingAutoCheck"
                 :disabled="!canSetAutoCheck"
@@ -1366,11 +1366,6 @@ onUnmounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-}
-.version-auto-check {
-  display: inline-flex;
-  gap: 8px;
-  align-items: center;
 }
 .version-ignored {
   display: inline-flex;

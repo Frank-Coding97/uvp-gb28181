@@ -73,6 +73,7 @@
           <a-table-column title="任务状态" data-index="status" :width="150" ellipsis tooltip>
             <template #cell="{ record }">
               <a-switch
+                type="circle"
                 v-model="record.status"
                 :checked-value="1"
                 :unchecked-value="0"

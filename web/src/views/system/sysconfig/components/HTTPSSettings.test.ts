@@ -17,7 +17,8 @@ const render = () =>
     global: {
       stubs: {
         "a-switch": {
-          props: ["modelValue", "disabled"],
+          // type 只是外观属性，声明成 prop 免得透传到 input 上把 checkbox 改成别的类型
+          props: ["modelValue", "disabled", "type"],
           emits: ["update:modelValue"],
           template:
             '<input type="checkbox" :checked="modelValue" :disabled="disabled" @change="$emit(\'update:modelValue\',$event.target.checked)" />'

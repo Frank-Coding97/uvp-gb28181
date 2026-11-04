@@ -167,8 +167,8 @@
         <a-card>
           <a-row :gutter="24" justify="center">
             <a-col :span="8">
-              <div class="perm-switch">
-                <span class="perm-switch__label">展开全部</span>
+              <div class="uvp-switch-row">
+                <span>展开全部</span>
                 <a-switch type="circle" v-model="treeSwitch.expandAll" @change="onExpandAll">
                   <template #checked> 是 </template>
                   <template #unchecked> 否 </template>
@@ -176,8 +176,8 @@
               </div>
             </a-col>
             <a-col :span="8">
-              <div class="perm-switch">
-                <span class="perm-switch__label">全选节点</span>
+              <div class="uvp-switch-row">
+                <span>全选节点</span>
                 <a-switch type="circle" v-model="treeSwitch.selectAll" @change="onSelectAll">
                   <template #checked> 是 </template>
                   <template #unchecked> 否 </template>
@@ -185,11 +185,11 @@
               </div>
             </a-col>
             <a-col :span="8">
-              <div class="perm-switch">
+              <div class="uvp-switch-row">
                 <a-tooltip
                   content="权限树的父子节点独立，因为若节点关联，父节点会存在半选情况，半选节点的ID不会返回，会导致菜单无法渲染"
                 >
-                  <span class="perm-switch__label">父子关联 <icon-question-circle-fill /></span>
+                  <span>父子关联 <icon-question-circle-fill /></span>
                 </a-tooltip>
               </div>
             </a-col>
@@ -627,19 +627,6 @@ getMenuList();
 /* 分配权限抽屉：控制开关卡片紧凑 */
 :deep(.arco-drawer-body .arco-card) {
   margin-bottom: 12px;
-}
-
-/* 分配权限抽屉：文字与开关同一行、垂直居中，并留出呼吸间距（原写法靠 inline 空隙，实测为 0） */
-.perm-switch {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  min-height: 24px;
-}
-
-.perm-switch__label {
-  font-size: 14px;
-  white-space: nowrap;
 }
 
 :deep(.arco-drawer-body .arco-card-body) {

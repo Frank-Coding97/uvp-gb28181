@@ -415,9 +415,3 @@ onMounted(() => {
   border-color: var(--uvp-danger-border);
 }
 </style>
-
-<style lang="scss" scoped>
-.text-right-gap {
-  margin-right: 5px;
-}
-</style>

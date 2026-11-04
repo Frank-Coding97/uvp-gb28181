@@ -91,7 +91,8 @@ function mountPage(realUpload = false, renderRows = false) {
         "a-space": { template: "<span><slot /></span>" },
         "a-upload": realUpload ? false : { template: "<div><slot name='upload-button' /></div>" },
         "a-switch": {
-          props: { modelValue: Boolean, disabled: Boolean, loading: Boolean },
+          // type 只是外观属性，声明成 prop 免得透传到 input 上把 checkbox 改成别的类型
+          props: { modelValue: Boolean, disabled: Boolean, loading: Boolean, type: String },
           emits: ["update:modelValue", "change"],
           template:
             "<input type='checkbox' :checked='modelValue' :disabled='disabled' @change='$emit(\"change\", $event.target.checked)' />"

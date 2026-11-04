@@ -111,7 +111,7 @@
               <a-row :gutter="24">
                 <a-col :span="isMobile ? 24 : 12">
                   <a-form-item field="open" label="启用验证码">
-                    <a-switch v-model="configData.captcha.open">
+                    <a-switch type="circle" v-model="configData.captcha.open">
                       <template #checked>开启</template>
                       <template #unchecked>关闭</template>
                     </a-switch>
@@ -206,7 +206,7 @@
                 </a-col>
                 <a-col :span="isMobile ? 24 : 12">
                   <a-form-item field="requireSpecialChar" label="密码必须包含特殊字符">
-                    <a-switch v-model="configData.safe.requireSpecialChar">
+                    <a-switch type="circle" v-model="configData.safe.requireSpecialChar">
                       <template #checked>是</template>
                       <template #unchecked>否</template>
                     </a-switch>
