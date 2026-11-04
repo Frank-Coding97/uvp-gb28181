@@ -6715,6 +6715,33 @@ onUnmounted(() => {
   color: #b91c1c;
   background: rgb(220 38 38 / 8%);
 }
+
+/* 暗色底上上面这些深色值会发闷发灰（老板截图就是暗色），逐色换成同色相的亮版本，
+   色相分工不变 —— 暗色下按钮之间仍要能一眼分开。 */
+:global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--preview) {
+  color: #60a5fa;
+}
+:global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--record) {
+  color: #c4b5fd;
+}
+:global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--more) {
+  color: #f9a8d4;
+}
+:global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--detail) {
+  color: #67e8f9;
+}
+:global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--sync) {
+  color: #6ee7b7;
+}
+:global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--subscribe) {
+  color: var(--uvp-brand);
+}
+:global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--edit) {
+  color: #fbbf24;
+}
+:global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--stop) {
+  color: #f87171;
+}
 :global(.arco-dropdown:has(.device-action-menu-item)) {
   padding: 4px;
   background: var(--uvp-panel-bg);
