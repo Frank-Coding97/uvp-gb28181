@@ -707,6 +707,11 @@ function archiveStamp() {
  * 这一步只回 `{count, skipped, bytes}`，确认有图可打包之后才真正触发下载。
  *
  * ⛔ 不用 fetch 拿 zip 再转 blob：那等于把整包攒在标签页内存里（见 triggerNativeDownload）。
+ *
+ * ⛔ 预检和下载走**两套鉴权**，别统一：
+ * - 预检是普通 fetch ⇒ 令牌放 Authorization 头（不落进 URL / 访问日志）；
+ * - 下载是 `<a download>`，浏览器原生发起、加不了头 ⇒ 只能靠 `?token=`
+ *   （后端 `queryTokenAllowlist` 为此单独放行了这个精确路径）。
  */
 async function downloadSelected() {
   const targets = rows.value.filter(item => selectedIds.value.has(item.id));
@@ -714,8 +719,8 @@ async function downloadSelected() {
   const ids = targets.map(item => item.id);
   downloading.value = true;
   try {
-    const response = await fetch(snapshotArchiveUrl(ids, accessToken.value, getBaseUrl(), { preflight: true }), {
-      headers: { Accept: "application/json" }
+    const response = await fetch(snapshotArchiveUrl(ids, "", getBaseUrl(), { preflight: true }), {
+      headers: { Accept: "application/json", Authorization: `Bearer ${accessToken.value}` }
     });
     const payload = await response.json().catch(() => null);
     const count = Number(payload?.data?.count ?? 0);

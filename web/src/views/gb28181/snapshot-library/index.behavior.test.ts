@@ -312,11 +312,16 @@ describe("snapshot library page", () => {
     expect(probeUrl).toContain("/api/gb28181/device-mgmt/snapshots/archive?");
     expect(probeUrl).toContain("ids=1%2C3");
     expect(probeUrl).toContain("preflight=1");
-    expect(probeUrl).toContain("token=tok-1");
+    // ⛔ 预检是普通 fetch ⇒ 令牌走请求头，不进 URL：否则令牌会落进 nginx 访问日志。
+    expect(probeUrl).not.toContain("token=");
+    const probeHeaders = (fetchMock.mock.calls[0][1] as { headers?: Record<string, string> } | undefined)?.headers ?? {};
+    expect(probeHeaders.Authorization).toBe("Bearer tok-1");
 
     // 真正的下载只触发一次，且**不带** preflight（那一次只回 JSON）。
+    // ⛔ 下载走 `<a download>`，浏览器原生发起加不了头 ⇒ 这一步只能用 ?token=。
     expect(downloads).toHaveLength(1);
     expect(downloads[0].href).toContain("ids=1%2C3");
+    expect(downloads[0].href).toContain("token=tok-1");
     expect(downloads[0].href).not.toContain("preflight");
     expect(downloads[0].download).toMatch(/^抓拍图-\d{8}-\d{6}\.zip$/);
     expect(messages.success).toHaveBeenCalledWith(expect.stringContaining("2 张"));

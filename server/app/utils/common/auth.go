@@ -26,6 +26,10 @@ var queryTokenAllowlist = map[string]struct{}{
 	"/api/gb28181/sip-traces/stream":    {}, // 信令跟踪实时报文 SSE
 	"/api/gb28181/logs/stream":          {}, // 运行日志 SSE
 	"/api/gb28181/security/stream":      {}, // 安全事件 SSE
+	// 图像库批量下载：前端用 `<a download>` 让浏览器原生发起，带不了请求头。
+	// ⛔ 只放行这**一个精确路径**（不是前缀）：同前缀下的列表 / 详情 / 删除仍只认请求头，
+	// 否则 `/snapshots/:id` 这类接口的令牌也会跟着进访问日志。
+	"/api/gb28181/device-mgmt/snapshots/archive": {},
 }
 
 // 图像库取图接口（`<img>` 直连，带不了请求头）：`/api/gb28181/device-mgmt/snapshots/:id/content`。
@@ -79,7 +83,7 @@ func GetAccessToken(c *gin.Context) (string, error) {
 	}
 
 	// 都没有找到 token
-	return "", errors.New("token is required in Authorization header (Bearer {token}); URL parameter (?token=) is only accepted for streaming and image endpoints")
+	return "", errors.New("token is required in Authorization header (Bearer {token}); URL parameter (?token=) is only accepted for streaming, image and snapshot-archive endpoints")
 }
 
 // GetClaims 从上下文获取 Claims

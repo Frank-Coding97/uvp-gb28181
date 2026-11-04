@@ -37,6 +37,9 @@ func TestGetAccessTokenAllowsQueryTokenOnAllowlistedEndpoints(t *testing.T) {
 		"/api/gb28181/logs/stream?token=query-token",
 		"/api/gb28181/security/stream?token=query-token",
 		"/api/gb28181/device-mgmt/snapshots/42/content?token=query-token",
+		// 批量下载：前端 `<a download>` 由浏览器原生发起，带不了 Authorization 头，
+		// 不在这里放行的话点"批量下载"必然 401（2026-11-04 实测踩过）。
+		"/api/gb28181/device-mgmt/snapshots/archive?ids=1,2,3&token=query-token",
 	}
 	for _, target := range cases {
 		t.Run(target, func(t *testing.T) {
@@ -61,7 +64,11 @@ func TestGetAccessTokenRejectsQueryTokenOutsideAllowlist(t *testing.T) {
 		{"GET", "/api/gb28181/device-mgmt/snapshots?token=query-token"},
 		{"GET", "/api/gb28181/device-mgmt/snapshots/42?token=query-token"},
 		{"GET", "/api/gb28181/device-mgmt/snapshots/42/content/extra?token=query-token"},
+		// 批量下载只放行**精确路径**：同前缀下的兄弟路径不能被这条规则带出去。
+		{"GET", "/api/gb28181/device-mgmt/snapshots/archive/extra?token=query-token"},
+		{"GET", "/api/gb28181/device-mgmt/snapshots/archive2?token=query-token"},
 		// 写操作即使落在白名单路径上也只认请求头。
+		{"POST", "/api/gb28181/device-mgmt/snapshots/archive?token=query-token"},
 		{"POST", "/api/gb28181/security/stream?token=query-token"},
 	}
 	for _, tc := range cases {

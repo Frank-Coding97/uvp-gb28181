@@ -136,6 +136,11 @@ describe("image library download and batch actions", () => {
     expect(pageSource).toContain("data?.count");
     // ⛔ 少了几张要说出来：用户对着列表数张数，包里少了会以为是系统丢图。
     expect(pageSource).toContain("skipped");
+    // ⛔ 预检是普通 fetch，令牌必须走请求头（URL 里传空 token）：
+    // 写回 `?token=` 就等于把令牌又塞进 nginx 访问日志 —— 白名单只该为
+    // 那个"加不了头"的 `<a download>` 开一次口。
+    expect(pageSource).toContain('snapshotArchiveUrl(ids, "", getBaseUrl(), { preflight: true })');
+    expect(pageSource).toContain("Authorization: `Bearer ${accessToken.value}`");
   });
 
   it("scopes bulk selection to the current page instead of the whole result set", () => {

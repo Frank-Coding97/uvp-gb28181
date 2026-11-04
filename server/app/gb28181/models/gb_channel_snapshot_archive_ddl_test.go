@@ -80,6 +80,26 @@ func TestSnapshotArchiveIsRegisteredInEveryDialectSnapshot(t *testing.T) {
 	}
 }
 
+// TestSnapshotArchivePathAcceptsQueryToken 批量下载路径必须在 `?token=` 白名单里。
+//
+// ⛔ 这是 2026-11-04 真机踩出来的 401：前端下载那一步是 `<a download>`，由浏览器原生
+// 发起、加不了 Authorization 头，而 `common.GetAccessToken` 的 URL 令牌白名单只收
+// 流式（SSE）与取图接口 ⇒ 点「批量下载」必然 401（日志里只有一句
+// "token is required in Authorization header"，看不出是白名单没收录）。
+//
+// ⛔ 为什么不在 common 包里断言：`queryTokenAllowlist` 是包内变量，改路径常量时
+// 那边只能用字面量，两边各写一个字符串就又回到"改一处忘一处"。这里读源文件做跨文件
+// 契约，改歪了会红。
+func TestSnapshotArchivePathAcceptsQueryToken(t *testing.T) {
+	root := dualVersionDDLRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "app", "utils", "common", "auth.go"))
+	require.NoError(t, err)
+	// ⛔ 判据写成 `"<path>": {}` 整条 map 条目：只匹配路径字符串的话，
+	// 注释里提到这个路径也会蹭绿（而注释救不了 401）。
+	require.Contains(t, string(raw), `"`+snapshotArchiveAPIPathLiteral+`": {}`,
+		"批量下载接口没进 ?token= 白名单：<a download> 带不了 Authorization 头，前端点了只会 401")
+}
+
 // TestSnapshotArchiveMigrationIsIdempotentAndComplete 补开发库的迁移必须可重复执行，
 // 且内容与三方言快照一致 —— 否则开发库与新建库会分叉。
 //
