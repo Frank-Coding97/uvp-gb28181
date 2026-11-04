@@ -542,7 +542,7 @@ onMounted(() => {
               :loading="rowsLoading"
               :pagination="tablePagination"
               row-key="id"
-              :scroll="{ x: 1200, y: '85%' }"
+              :scroll="{ x: 900, y: '85%' }"
               :row-selection="canAssign || canShare ? { type: 'checkbox', showCheckedAll: true } : undefined"
               class="uvp-data-table device-data-table"
               @select="onTableSelect"
@@ -551,18 +551,16 @@ onMounted(() => {
               @page-size-change="onPageSizeChange"
             >
               <template #columns>
-                <a-table-column title="设备编号" :width="200">
+                <a-table-column title="设备" :width="300">
                   <template #cell="{ record }">
-                    <a-tooltip :content="record.deviceId" position="top">
-                      <span class="code-main text-ellipsis">{{ record.deviceId }}</span>
-                    </a-tooltip>
-                  </template>
-                </a-table-column>
-                <a-table-column title="设备名称" :width="180">
-                  <template #cell="{ record }">
-                    <a-tooltip :content="record.name || '-'" position="top">
-                      <span class="text-ellipsis">{{ record.name || "-" }}</span>
-                    </a-tooltip>
+                    <div class="device-cell">
+                      <a-tooltip :content="record.name || '-'" position="top">
+                        <span class="device-cell__name">{{ record.name || "-" }}</span>
+                      </a-tooltip>
+                      <a-tooltip :content="record.deviceId" position="top">
+                        <span class="device-cell__code">{{ record.deviceId }}</span>
+                      </a-tooltip>
+                    </div>
                   </template>
                 </a-table-column>
                 <a-table-column title="状态" :width="100" align="center">
@@ -1322,8 +1320,31 @@ onMounted(() => {
   gap: 12px;
 }
 
-.code-main {
-  font-family: var(--font-mono, monospace);
+/* 设备名称 + 编号合并成一列：上行名称（主），下行国标编号（次） */
+.device-cell {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.3;
+
+  &__name {
+    overflow: hidden;
+    color: var(--uvp-text-primary);
+    font-size: 13px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__code {
+    overflow: hidden;
+    color: var(--uvp-text-tertiary);
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 .channel-text {

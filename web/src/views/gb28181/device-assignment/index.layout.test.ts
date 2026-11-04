@@ -15,4 +15,16 @@ describe("device assignment department tree", () => {
   it("keeps vertical scrolling inside the device table", () => {
     expect(source).toMatch(/\.right-box\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?overflow:\s*hidden;/);
   });
+
+  it("merges device name and device code into one two-line cell", () => {
+    expect(source).toContain('title="设备"');
+    expect(source).not.toContain('title="设备编号"');
+    expect(source).not.toContain('title="设备名称"');
+    expect(source).toContain("device-cell__name");
+    expect(source).toContain("device-cell__code");
+
+    const cellStyle = source.match(/\.device-cell\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+    expect(cellStyle).toContain("flex-direction: column");
+    expect(cellStyle).toContain("min-width: 0");
+  });
 });
