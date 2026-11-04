@@ -246,12 +246,16 @@
 
 // 行内的「刷新」文字链（表格上方、面板角落），只染字不改底。
 // 用于原生 <button> 只想要颜色、不想被三档几何接管（如错误态里的「重试」）。
+// 行内 / 图标键上的「刷新、重试」——**只染色，不动任何尺寸**。
+// ⛔ 这里必须 `!important`：它只是 0,1,0，而各页 scoped 里 `xxx button{color:…}`
+//    编译后是 0,2,0 且后注入 ⇒ 不加就无法覆盖（2026-11-04 实测：上传失败的「重试」
+//    挂上类以后仍是灰的）。它的语义就是「把这个词染成刷新的青绿」，压过页面副本是预期行为。
 .uvp-refresh-text {
-  color: var(--uvp-refresh-btn-text);
+  color: var(--uvp-refresh-btn-text) !important;
 
   &:hover,
   &:focus-visible {
-    color: var(--uvp-refresh-btn-text);
+    color: var(--uvp-refresh-btn-text) !important;
   }
 }
 

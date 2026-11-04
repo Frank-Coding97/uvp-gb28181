@@ -91,7 +91,13 @@ const emit = defineEmits<{
               <span aria-hidden="true"><i /></span>
               自动刷新
             </button>
-            <button type="button" :aria-label="`刷新${title}`" :disabled="loading" @click="emit('refresh')">
+            <button
+              type="button"
+              :aria-label="`刷新${title}`"
+              :disabled="loading"
+              @click="emit('refresh')"
+              class="uvp-refresh-text"
+            >
               <RefreshCw :size="14" :class="{ 'is-spinning': loading }" aria-hidden="true" />
               刷新
             </button>

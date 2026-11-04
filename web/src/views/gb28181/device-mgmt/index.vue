@@ -5899,8 +5899,13 @@ onUnmounted(() => {
   width: 24px;
   height: 24px;
 }
-.btn-primary,
-.btn-ghost,
+
+/* ⛔⛔ 2026-11-04 把 `.btn-primary` / `.btn-ghost` 从这条**共享几何**里摘出去。
+   它们编译后是 0,2,0（scoped 会多一个 [data-v-x]），压过真源 `.uvp-page-action-btn`
+   的 0,1,0 ⇒ 头部「刷新 9s」明明是 40px 档，却被这里的 32px 按下去，跟旁边的
+   「新建设备」不齐。现在这两个老类的基础几何由 `arco-overrides.scss` 全局提供
+   （值同样是 32px + inline-flex + gap），挂了语义类的则完全归真源。
+   下面三个类（btn-group / btn-danger / play-cta）没有体系对应物，几何留在这里。 */
 .btn-group,
 .btn-danger,
 .play-cta {

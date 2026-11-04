@@ -75,7 +75,7 @@ const statusRole = computed(() => (props.status === "error" || props.status === 
       </button>
       <button
         type="button"
-        class="media-workbench-header__refresh"
+        class="uvp-refresh-text media-workbench-header__refresh"
         :aria-label="`刷新${title}`"
         :disabled="loading"
         @click="emit('refresh')"

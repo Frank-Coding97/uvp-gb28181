@@ -166,7 +166,7 @@ defineExpose({ refresh });
       <div class="runtime-context-toolbar__meta">
         <span v-if="runtimeUpdatedAt">数据更新于 {{ runtimeUpdatedAt }}</span>
         <span v-else>{{ loading ? "正在更新数据" : "等待首次采样" }}</span>
-        <button type="button" :disabled="loading" aria-label="刷新节点运行态" @click="refresh">
+        <button type="button" :disabled="loading" aria-label="刷新节点运行态" @click="refresh" class="uvp-refresh-text">
           <RefreshCw :size="14" :class="{ 'is-spinning': loading }" aria-hidden="true" />
           刷新
         </button>

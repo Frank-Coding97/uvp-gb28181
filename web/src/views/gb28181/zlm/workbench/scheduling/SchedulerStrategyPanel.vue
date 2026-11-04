@@ -143,7 +143,7 @@ defineExpose({ refresh });
     <div v-if="switchError" class="switch-error" role="alert">{{ switchError }}</div>
     <div v-if="loadError" class="load-error" role="alert">
       <span>{{ loadErrorText }}</span>
-      <button type="button" @click="refresh">重新加载</button>
+      <button type="button" @click="refresh" class="uvp-refresh-text">重新加载</button>
     </div>
     <div v-if="!active" class="inactive-state" role="status">当前视图未激活，未请求调度策略。</div>
     <div v-else-if="loading && !available.length" class="loading-state" role="status">正在读取调度策略…</div>
@@ -221,8 +221,7 @@ defineExpose({ refresh });
   margin-left: 4px;
   color: var(--zlm-brand-600);
 }
-.panel-actions button,
-.load-error button {
+.panel-actions button {
   min-height: 32px;
   padding: 0 11px;
   color: var(--zlm-text-2);
@@ -231,6 +230,11 @@ defineExpose({ refresh });
   border: 1px solid var(--zlm-border);
   border-radius: var(--zlm-radius-md);
 }
+
+/* 错误态里的「重新加载」是刷新语义（青色），配色归按钮真源。
+   ⛔ 别把它再并回上面那条：父选择器 + 标签 = 0,2,1，会压过语义类的 0,1,1，
+      结果就是"挂了类还是白底"——和 2026-11-04 设备页刷新键同一个病。
+      几何仍由下方 `.load-error button`（28px 紧凑档）提供。 */
 .panel-actions button:hover,
 .load-error button:hover {
   color: var(--zlm-brand-600);

@@ -299,7 +299,7 @@ defineExpose({ refresh });
     </div>
     <div v-else-if="loadError" class="query-error" role="alert">
       <strong>{{ errorPresentation.label }}</strong
-      ><button v-if="errorPresentation.retryable" type="button" @click="refresh">重新查询</button>
+      ><button v-if="errorPresentation.retryable" type="button" @click="refresh" class="uvp-refresh-text">重新查询</button>
     </div>
     <div v-if="!active" class="inactive-state" role="status">当前视图未激活，未请求调度日志。</div>
 

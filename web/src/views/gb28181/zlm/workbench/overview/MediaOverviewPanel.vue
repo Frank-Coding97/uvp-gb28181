@@ -234,7 +234,7 @@ function bytesText(value: number | null) {
       <Server :size="34" aria-hidden="true" />
       <strong>{{ errorPresentation.label }}</strong>
       <span>{{ errorPresentation.retryable ? "可刷新重试；当前未清空其他工作台。" : "请确认账号权限或重新登录。" }}</span>
-      <button v-if="errorPresentation.retryable" type="button" class="primary-button" @click="refresh">重新加载</button>
+      <button v-if="errorPresentation.retryable" type="button" class="uvp-refresh-btn" @click="refresh">重新加载</button>
     </div>
     <div v-else-if="chartState.status === 'empty'" class="overview-state" role="status" aria-label="尚未配置媒体节点">
       <Server :size="34" aria-hidden="true" />

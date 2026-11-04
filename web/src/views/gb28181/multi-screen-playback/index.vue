@@ -710,7 +710,7 @@ onBeforeUnmount(() => {
                 </div>
                 <div v-else-if="slot.status === 'error'" class="slot-state error-state" role="alert">
                   <AlertTriangle :size="24" aria-hidden="true" /><strong>{{ slot.error }}</strong
-                  ><button class="text-action" type="button" @click.stop="retrySlot(slot)">
+                  ><button class="uvp-refresh-text text-action" type="button" @click.stop="retrySlot(slot)">
                     <RefreshCw :size="14" aria-hidden="true" />重试
                   </button>
                 </div>

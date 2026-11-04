@@ -77,7 +77,14 @@ function changeScope(next: string | number | Event) {
       {{ errorText }}；仍显示上次成功目录。
     </span>
     <span v-else-if="stale" class="media-scope-bar__notice" role="status">节点目录可能已过期，可手动刷新。</span>
-    <button v-if="showRefresh" type="button" aria-label="刷新节点目录" :disabled="loading" @click="emit('refresh')">
+    <button
+      v-if="showRefresh"
+      type="button"
+      aria-label="刷新节点目录"
+      :disabled="loading"
+      @click="emit('refresh')"
+      class="uvp-refresh-text"
+    >
       <RefreshCw :size="13" :class="{ 'is-spinning': loading }" aria-hidden="true" />
       更新节点
     </button>

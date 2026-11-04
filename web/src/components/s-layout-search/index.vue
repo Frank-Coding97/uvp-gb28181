@@ -123,28 +123,28 @@ defineOptions({ name: "SLayoutSearch" });
   box-shadow: 0 8px 16px -14px rgb(37 99 235 / 55%);
 }
 
-.uvp-search-panel__actions :deep(.arco-btn:not(.arco-btn-primary)) {
-  color: var(--uvp-text-secondary);
-  background: var(--uvp-search-secondary-btn-bg);
-  border-color: var(--uvp-search-secondary-btn-border);
-  box-shadow: var(--uvp-search-secondary-btn-shadow);
-}
+/* ⛔⛔ 2026-11-04 删掉这里原有的「非主按钮 = 白底」规则（`.uvp-search-panel__actions
+   :deep(.arco-btn:not(.arco-btn-primary))` 白底 + 蓝字 hover）。
+   它是**全部 38 个列表页**「重置 / 导出」等次级按钮发白的唯一来源：本组件被
+   `s-layout-search` 复用，该选择器特异性 0,3,0，压过按钮真源 0,1,0 ⇒ 真源里定的
+   浅蓝底一直显示不出来。现在次级按钮交给 `src/styles/uvp-buttons.scss`，
+   本文件只保留「档位」（40px）与主按钮的色阶微调。 */
 
-.uvp-search-panel__actions :deep(.arco-btn:not(.arco-btn-primary):hover) {
-  color: var(--uvp-brand-strong);
-  background: var(--uvp-search-secondary-btn-hover-bg);
-  border-color: rgb(37 99 235 / 24%);
-}
-
-.uvp-search-panel__extra :deep(.arco-btn-primary) {
-  background: #16845f;
-  border-color: #16845f;
+/* extra 槽的主按钮沿用「新增」绿；但要避开已挂语义类的按钮，
+   否则 `:deep(.arco-btn-primary)` 会把刷新/取消类也刷成绿。 */
+.uvp-search-panel__extra
+  :deep(.arco-btn-primary:where(:not(.uvp-create-btn, .uvp-refresh-btn, .uvp-stop-btn, .uvp-btn-neutral, .uvp-btn-secondary))) {
+  background: var(--uvp-btn-success-bg);
+  border-color: var(--uvp-btn-success-bg);
   box-shadow: 0 10px 18px -15px rgb(22 132 95 / 58%);
 }
 
-.uvp-search-panel__extra :deep(.arco-btn-primary:hover) {
-  background: #0f6f4f;
-  border-color: #0f6f4f;
+.uvp-search-panel__extra
+  :deep(
+    .arco-btn-primary:where(:not(.uvp-create-btn, .uvp-refresh-btn, .uvp-stop-btn, .uvp-btn-neutral, .uvp-btn-secondary)):hover
+  ) {
+  background: var(--uvp-btn-success-bg-hover);
+  border-color: var(--uvp-btn-success-bg-hover);
   box-shadow: 0 12px 20px -15px rgb(15 111 79 / 64%);
 }
 

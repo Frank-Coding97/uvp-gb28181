@@ -561,10 +561,14 @@ body[arco-theme="dark"] {
 }
 
 .btn-ghost:where(:not(.uvp-refresh-btn, .uvp-create-btn, .uvp-btn-primary, .uvp-btn-secondary, .uvp-btn-neutral)) {
-  color: var(--uvp-text-secondary);
+  /* ⭐ 2026-11-04：老类 `.btn-ghost` 的底从「白底灰字」改成**次级语义（浅蓝底蓝字）**。
+     全仓还有几十处沿用这个老类（批量条、错误重试、卡片动作…），改这一处等于一次性
+     把它们全部上色，不用逐页去挂类。token 走 `--uvp-btn-secondary-*`，暗色自带一份，
+     不会再出现"暗色下还是白底"（`--uvp-search-secondary-btn-bg` 没有暗色定义）。 */
+  color: var(--uvp-btn-secondary-text);
   cursor: pointer;
-  background: var(--uvp-search-secondary-btn-bg);
-  border: 1px solid var(--uvp-search-secondary-btn-border);
+  background: var(--uvp-btn-secondary-bg);
+  border: 1px solid var(--uvp-btn-secondary-border);
   transition:
     color 0.15s ease,
     background 0.15s ease,
@@ -572,13 +576,13 @@ body[arco-theme="dark"] {
     transform 0.1s ease;
 
   &:hover {
-    color: var(--uvp-brand);
-    background: var(--uvp-brand-soft);
-    border-color: color-mix(in srgb, var(--uvp-brand) 32%, transparent);
+    color: var(--uvp-btn-secondary-text);
+    background: var(--uvp-btn-secondary-bg-hover);
+    border-color: var(--uvp-btn-secondary-border-hover);
   }
 
   &:active {
-    background: color-mix(in srgb, var(--uvp-brand) 14%, var(--uvp-brand-soft));
+    background: var(--uvp-btn-secondary-bg-active);
     transform: scale(0.96);
   }
 
