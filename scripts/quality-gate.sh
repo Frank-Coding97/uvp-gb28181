@@ -178,6 +178,11 @@ fi
 # 动指针不能动清单。这三条都靠这个测试守住。
 run_check "在线升级发布脚本" "$ROOT" 'node --test scripts/publish-upgrade-channel.test.mjs'
 
+# ---------- 增量升级包生成器 ----------
+# 增量包会直接覆盖现场机的程序文件，误把 config/ 或 data/ 打进去就等于换了台机器；
+# 助手镜像若就地覆盖正在运行的进程，看着"换了却没生效"。这两条都靠这个测试守住。
+run_check "增量升级包生成器" "$ROOT" 'node --test scripts/build-update-package.test.mjs'
+
 # ---------- 完整档额外检查 ----------
 if [ "$MODE" = "full" ]; then
   if [ -x "$WEB_BIN/vue-tsc" ]; then

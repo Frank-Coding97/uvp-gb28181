@@ -1,0 +1,228 @@
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+
+import {
+  buildUpdatePackage,
+  collectFiles,
+  diffReleases,
+  payloadNameFor
+} from "./build-update-package.mjs";
+
+function write(root, rel, content, mode = 0o644) {
+  const full = path.join(root, rel);
+  mkdirSync(path.dirname(full), { recursive: true });
+  writeFileSync(full, content);
+  chmodSync(full, mode);
+}
+
+function sha(path) {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+/** 造一对假的发行目录：覆盖改动 / 新增 / 删除 / 实例状态四类。 */
+function fixture() {
+  const root = mkdtempSync(path.join(os.tmpdir(), "uvp-update-pkg-"));
+  const from = path.join(root, "from");
+  const to = path.join(root, "to");
+
+  for (const dir of [from, to]) {
+    writeFileSync(path.join(dir, "..", "keep"), "");
+  }
+  mkdirSync(from, { recursive: true });
+  mkdirSync(to, { recursive: true });
+
+  // 两个版本都有、内容不同 ⇒ modify
+  write(from, "bin/uvp-server", "old-server-binary\n", 0o755);
+  write(to, "bin/uvp-server", "new-server-binary\n", 0o755);
+  write(from, "updater/uvp-updater", "old-helper\n", 0o755);
+  write(to, "updater/uvp-updater", "new-helper\n", 0o755);
+  write(from, "uvp-gb28181-ctl.sh", "#!/bin/sh\nexit 0\n", 0o755);
+  write(to, "uvp-gb28181-ctl.sh", "#!/bin/sh\nexit 0\n", 0o755);
+  write(from, "version.json", JSON.stringify({ version: "1.1.16", build_id: "b16" }));
+  write(to, "version.json", JSON.stringify({ version: "1.1.17", build_id: "b17" }));
+
+  // 只有新版 ⇒ add
+  write(to, "resource/public/static/new-hash.js", "new asset\n");
+  // 只有旧版 ⇒ delete
+  write(from, "resource/public/static/old-hash.js", "old asset\n");
+
+  // 实例状态：两个版本都不同，但绝不能进包
+  write(from, "config/config.yml", "audience: old\n");
+  write(to, "config/config.yml", "audience: new\n");
+  write(from, "config/config.env", "UVP_KEY=old\n");
+  write(to, "config/config.env", "UVP_KEY=new\n");
+  write(from, "data/uvp.db", "old db\n");
+  write(to, "data/uvp.db", "new db\n");
+  write(from, "logs/app.log", "old log\n");
+  write(to, "logs/app.log", "new log\n");
+
+  return { root, from, to };
+}
+
+test("实例状态目录不进入文件清单", () => {
+  const { from } = fixture();
+  const { files, skipped } = collectFiles(from);
+  assert.deepEqual(skipped.sort(), ["config", "data", "logs"]);
+  assert.ok(files.every((rel) => !/^(config|data|logs|run)\//.test(rel)));
+  assert.ok(files.includes("bin/uvp-server"));
+});
+
+test("助手镜像改名为 .new，其余路径保持不变", () => {
+  assert.equal(payloadNameFor("updater/uvp-updater"), "updater/uvp-updater.new");
+  assert.equal(payloadNameFor("updater/uvp-updater.exe"), "updater/uvp-updater.exe.new");
+  assert.equal(payloadNameFor("bin/uvp-server"), "bin/uvp-server");
+});
+
+test("差异分类：新增 / 改动 / 删除", () => {
+  const { from, to } = fixture();
+  const diff = diffReleases(from, to);
+  assert.deepEqual(diff.add, ["resource/public/static/new-hash.js"]);
+  assert.deepEqual(diff.remove, ["resource/public/static/old-hash.js"]);
+  assert.deepEqual(diff.modify.sort(), ["bin/uvp-server", "updater/uvp-updater", "version.json"]);
+  assert.equal(diff.from.version, "1.1.16");
+  assert.equal(diff.to.version, "1.1.17");
+});
+
+test("同版本拒绝生成", () => {
+  const { from } = fixture();
+  assert.throws(
+    () => buildUpdatePackage({ fromDir: from, toDir: from, platform: "linux-amd64", outDir: os.tmpdir() }),
+    /版本相同/
+  );
+});
+
+test("生成的包结构完整且校验值自洽", () => {
+  const { root, from, to } = fixture();
+  const result = buildUpdatePackage({
+    fromDir: from,
+    toDir: to,
+    platform: "linux-amd64",
+    outDir: path.join(root, "out"),
+    createdAt: "2026-11-05T00:00:00.000Z"
+  });
+
+  const manifest = JSON.parse(readFileSync(path.join(result.staging, "manifest.json"), "utf8"));
+  assert.equal(manifest.from_version, "1.1.16");
+  assert.equal(manifest.to_version, "1.1.17");
+  assert.deepEqual(manifest.excluded_top_dirs, ["config", "data", "logs", "run"]);
+  assert.equal(result.stem, "uvp-gb28181-update-linux-amd64-1.1.16-to-1.1.17");
+
+  // payload 里绝不能出现 config / data / logs
+  const payloadFiles = collectFiles(path.join(result.staging, "payload")).files;
+  assert.ok(payloadFiles.every((rel) => !/^(config|data|logs|run)\//.test(rel)));
+  assert.ok(payloadFiles.includes("updater/uvp-updater.new"));
+  assert.ok(!payloadFiles.includes("updater/uvp-updater"));
+
+  // files.sha256 必须与 payload 实际内容逐条对上
+  const lines = readFileSync(path.join(result.staging, "files.sha256"), "utf8").trim().split("\n");
+  assert.equal(lines.length, payloadFiles.length);
+  for (const line of lines) {
+    const [digest, relPath] = line.split(/\s+/);
+    assert.equal(digest, sha(path.join(result.staging, relPath)), `${relPath} 的校验值对不上`);
+  }
+
+  assert.equal(readFileSync(path.join(result.staging, "deletes.txt"), "utf8").trim(), "resource/public/static/old-hash.js");
+
+  const apply = readFileSync(path.join(result.staging, "apply.sh"), "utf8");
+  assert.ok(apply.includes('FROM_VERSION="1.1.16"'));
+  assert.ok(apply.includes('TO_VERSION="1.1.17"'));
+  assert.ok(!apply.includes("__FROM_VERSION__"));
+  assert.ok(statSync(path.join(result.staging, "apply.sh")).mode & 0o100, "apply.sh 必须可执行");
+
+  assert.ok(existsSync(result.archive));
+  assert.equal(readFileSync(`${result.archive}.sha256`, "utf8").split(/\s+/)[0], result.sha256);
+
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("apply.sh 在模拟安装根上完成升级，且不动配置与数据", () => {
+  const { root, from, to } = fixture();
+  const outDir = path.join(root, "out");
+  buildUpdatePackage({ fromDir: from, toDir: to, platform: "linux-amd64", outDir });
+
+  // 解开增量包
+  const unpack = path.join(root, "unpack");
+  mkdirSync(unpack, { recursive: true });
+  execFileSync("tar", ["-xzf", path.join(outDir, "uvp-gb28181-update-linux-amd64-1.1.16-to-1.1.17.tar.gz"), "-C", unpack]);
+  const pkg = path.join(unpack, "uvp-gb28181-update-linux-amd64-1.1.16-to-1.1.17");
+
+  // 造一个"现场安装根"：旧版文件 + 现场特有的配置与数据
+  const installRoot = path.join(root, "site");
+  execFileSync("cp", ["-R", `${from}/.`, installRoot]);
+  write(installRoot, "config/config.yml", "audience: site-specific\n");
+  write(installRoot, "data/uvp.db", "site database\n");
+  // 桩 ctl.sh：stop-all / start 直接返回成功
+  write(
+    installRoot,
+    "uvp-gb28181-ctl.sh",
+    `#!/bin/sh\ncase "$1" in stop-all|start) exit 0 ;; *) exit 0 ;; esac\n`,
+    0o755
+  );
+
+  execFileSync("sh", [path.join(pkg, "apply.sh"), "-r", installRoot], { stdio: "pipe" });
+
+  // 程序文件已替换
+  assert.equal(readFileSync(path.join(installRoot, "bin/uvp-server"), "utf8"), "new-server-binary\n");
+  assert.equal(JSON.parse(readFileSync(path.join(installRoot, "version.json"), "utf8")).version, "1.1.17");
+  assert.ok(statSync(path.join(installRoot, "bin/uvp-server")).mode & 0o100, "二进制必须保持可执行");
+
+  // 助手走旁挂，不就地覆盖
+  assert.equal(readFileSync(path.join(installRoot, "updater/uvp-updater"), "utf8"), "old-helper\n");
+  assert.equal(readFileSync(path.join(installRoot, "updater/uvp-updater.new"), "utf8"), "new-helper\n");
+
+  // 旧资产被删、新资产已落
+  assert.ok(!existsSync(path.join(installRoot, "resource/public/static/old-hash.js")));
+  assert.equal(
+    readFileSync(path.join(installRoot, "resource/public/static/new-hash.js"), "utf8"),
+    "new asset\n"
+  );
+
+  // 现场配置与数据库纹丝不动
+  assert.equal(readFileSync(path.join(installRoot, "config/config.yml"), "utf8"), "audience: site-specific\n");
+  assert.equal(readFileSync(path.join(installRoot, "data/uvp.db"), "utf8"), "site database\n");
+
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("apply.sh 版本不匹配时拒绝执行且不改文件", () => {
+  const { root, from, to } = fixture();
+  const outDir = path.join(root, "out");
+  buildUpdatePackage({ fromDir: from, toDir: to, platform: "linux-amd64", outDir });
+
+  const unpack = path.join(root, "unpack");
+  mkdirSync(unpack, { recursive: true });
+  execFileSync("tar", ["-xzf", path.join(outDir, "uvp-gb28181-update-linux-amd64-1.1.16-to-1.1.17.tar.gz"), "-C", unpack]);
+  const pkg = path.join(unpack, "uvp-gb28181-update-linux-amd64-1.1.16-to-1.1.17");
+
+  const installRoot = path.join(root, "site");
+  execFileSync("cp", ["-R", `${from}/.`, installRoot]);
+  write(installRoot, "version.json", JSON.stringify({ version: "1.1.15" }));
+  write(installRoot, "uvp-gb28181-ctl.sh", "#!/bin/sh\nexit 0\n", 0o755);
+
+  let failed = false;
+  try {
+    execFileSync("sh", [path.join(pkg, "apply.sh"), "-r", installRoot], { stdio: "pipe" });
+  } catch (error) {
+    failed = true;
+    assert.match(String(error.stderr), /版本不匹配/);
+  }
+  assert.ok(failed, "版本不匹配必须失败");
+  assert.equal(readFileSync(path.join(installRoot, "bin/uvp-server"), "utf8"), "old-server-binary\n");
+  assert.equal(existsSync(path.join(installRoot, "updater/uvp-updater.new")), false);
+
+  rmSync(root, { recursive: true, force: true });
+});
