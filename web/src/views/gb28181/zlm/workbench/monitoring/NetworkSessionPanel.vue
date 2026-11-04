@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, toRef, watch } from "vue";
+import { computed, onBeforeUnmount, reactive, ref, toRef, watch } from "vue";
 import { Message } from "@arco-design/web-vue";
 import { Network, Radio, ShieldAlert, Users } from "lucide-vue-next";
 
@@ -38,10 +38,12 @@ const props = withDefaults(
     view: "network" | "viewers";
     scope: MediaScope;
     nodeId: number | null;
+    autoRefresh?: boolean;
     initialQuery?: Record<string, unknown>;
   }>(),
   {
     active: true,
+    autoRefresh: true,
     initialQuery: undefined
   }
 );
@@ -58,6 +60,10 @@ const loadError = ref<unknown>(null);
 const kickVisible = ref(false);
 const kickViewer = ref<ZLMStreamViewer | null>(null);
 const kickNodeName = ref("");
+const AUTO_REFRESH_SECONDS = 10;
+const refreshCountdown = ref(0);
+let refreshCountdownTimer: ReturnType<typeof setInterval> | null = null;
+let disposed = false;
 
 const scopeLabel = computed(() => (props.scope === "all" ? "全部节点" : `节点 #${props.nodeId ?? "—"}`));
 const viewerTarget = computed(() => buildViewerTarget(viewerFilter));
@@ -65,7 +71,12 @@ const hasKickPermission = computed(
   () => userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes("gb28181:zlm:session:kick")
 );
 const errorPresentation = computed(() => zlmErrorPresentation(loadError.value));
-const paused = computed(() => kickVisible.value);
+const pollingPaused = computed(() => !props.autoRefresh || kickVisible.value);
+// 观看者标签要先填完整媒体身份才会真正发请求，空查询时不该挂一个假倒计时。
+const queryReady = computed(() => props.view === "network" || viewerTarget.value !== null);
+const refreshButtonLabel = computed(() =>
+  props.active && props.autoRefresh && refreshCountdown.value > 0 ? `刷新（${refreshCountdown.value}s）` : "刷新"
+);
 const requestNodeId = computed(() => (props.scope === "all" ? 1 : props.nodeId));
 const networkRows = computed(() =>
   (networkData.value?.list ?? []).map(record => ({ ...record, rowKey: `${record.nodeId}:${record.id}` }))
@@ -77,8 +88,8 @@ const viewerRows = computed(() =>
 const { refresh } = useZLMRuntimePolling<PollPayload>({
   nodeId: requestNodeId,
   active: toRef(props, "active"),
-  paused,
-  intervalMs: 8_000,
+  paused: pollingPaused,
+  intervalMs: 10_000,
   async load(nodeId, signal) {
     loading.value = true;
     const tab = props.view;
@@ -108,10 +119,12 @@ const { refresh } = useZLMRuntimePolling<PollPayload>({
     }
     loadError.value = null;
     loading.value = false;
+    scheduleRefreshCountdown();
   },
   onError(error) {
     loadError.value = error;
     loading.value = false;
+    scheduleRefreshCountdown();
   }
 });
 
@@ -123,27 +136,65 @@ watch([() => props.scope, () => props.nodeId], () => {
   viewerData.value = null;
   loadError.value = null;
   loading.value = props.scope === "all" || props.nodeId !== null;
-  if (props.active) refresh();
+  if (props.active) requestRefresh();
 });
 
 watch(
   () => props.view,
   () => {
     loadError.value = null;
-    if (props.active) refresh();
+    if (props.active) requestRefresh();
   }
 );
 
+watch([() => props.active, () => props.autoRefresh, pollingPaused], () => {
+  if (!props.active || !props.autoRefresh || pollingPaused.value) clearRefreshCountdown();
+});
+
+onBeforeUnmount(() => {
+  disposed = true;
+  clearRefreshCountdown();
+});
+
+/* 倒计时与实际轮询同源：轮询在请求结束后才排下一次定时器，
+   所以「刷新（10s）」从本次落库开始倒数，到点正好是下一次自动刷新。 */
+function clearRefreshCountdown() {
+  if (refreshCountdownTimer) clearInterval(refreshCountdownTimer);
+  refreshCountdownTimer = null;
+  refreshCountdown.value = 0;
+}
+
+function tickRefreshCountdown() {
+  if (refreshCountdown.value > 1) {
+    refreshCountdown.value -= 1;
+    return;
+  }
+  refreshCountdown.value = 0;
+  clearRefreshCountdown();
+}
+
+function scheduleRefreshCountdown() {
+  clearRefreshCountdown();
+  if (disposed || !props.active || !props.autoRefresh || pollingPaused.value || !queryReady.value) return;
+  refreshCountdown.value = AUTO_REFRESH_SECONDS;
+  refreshCountdownTimer = setInterval(tickRefreshCountdown, 1_000);
+}
+
+function requestRefresh() {
+  clearRefreshCountdown();
+  refresh();
+}
+
 function queryNetwork() {
   networkFilter.page = 1;
-  refresh();
+  requestRefresh();
 }
 
 function resetNetwork() {
   networkFilter.peerIp = "";
   networkFilter.localPort = "";
   networkFilter.page = 1;
-  refresh();
+  requestRefresh();
 }
 
 function queryViewers() {
@@ -153,7 +204,7 @@ function queryViewers() {
     Message.warning("请填写完整的 Schema、VHost、App 和 Stream");
     return;
   }
-  refresh();
+  requestRefresh();
 }
 
 function resetViewers() {
@@ -163,29 +214,29 @@ function resetViewers() {
   viewerFilter.stream = "";
   viewerPage.value = 1;
   viewerData.value = null;
-  if (props.active) refresh();
+  if (props.active) requestRefresh();
 }
 
 function changeNetworkPage(nextPage: number) {
   networkFilter.page = nextPage;
-  refresh();
+  requestRefresh();
 }
 
 function changeNetworkPageSize(nextSize: number) {
   networkFilter.pageSize = nextSize;
   networkFilter.page = 1;
-  refresh();
+  requestRefresh();
 }
 
 function changeViewerPage(nextPage: number) {
   viewerPage.value = nextPage;
-  refresh();
+  requestRefresh();
 }
 
 function changeViewerPageSize(nextSize: number) {
   viewerPageSize.value = nextSize;
   viewerPage.value = 1;
-  refresh();
+  requestRefresh();
 }
 
 function openKick(viewer: ZLMStreamViewer) {
@@ -199,10 +250,10 @@ function kickDone(result: { kicked: boolean; alreadyDisconnected: boolean; uncer
   if (result.uncertain) Message.warning("踢除结果未确认，请刷新回读");
   else if (result.alreadyDisconnected) Message.info("观看会话已断开");
   else Message.success("观看会话已踢除");
-  refresh();
+  requestRefresh();
 }
 
-defineExpose({ refresh });
+defineExpose({ refresh: requestRefresh });
 </script>
 
 <template>
@@ -238,8 +289,12 @@ defineExpose({ refresh });
         /></template>
         <template #actions
           ><a-button type="primary" @click="queryNetwork">查询</a-button><a-button @click="resetNetwork">重置</a-button
-          ><a-button class="uvp-page-action-btn uvp-refresh-btn" :loading="loading" @click="refresh"
-            ><template #icon><icon-refresh /></template>刷新</a-button
+          ><a-button
+            class="uvp-page-action-btn uvp-refresh-btn session-refresh-btn"
+            aria-label="刷新网络会话"
+            :loading="loading"
+            @click="requestRefresh"
+            ><template #icon><icon-refresh /></template>{{ refreshButtonLabel }}</a-button
           ></template
         >
         <template #extra
@@ -250,7 +305,7 @@ defineExpose({ refresh });
       <div v-if="loading && !networkData" class="monitoring-state" role="status"><a-spin />正在加载网络会话…</div>
       <div v-else-if="loadError && !networkData" class="monitoring-state monitoring-state--error" role="alert">
         <ShieldAlert :size="36" /><strong>{{ errorPresentation.label }}</strong
-        ><a-button v-if="errorPresentation.retryable" @click="refresh" class="uvp-refresh-btn">重新加载</a-button>
+        ><a-button v-if="errorPresentation.retryable" @click="requestRefresh" class="uvp-refresh-btn">重新加载</a-button>
       </div>
       <template v-else>
         <section class="session-table-panel">
@@ -319,8 +374,13 @@ defineExpose({ refresh });
         <template #actions
           ><a-button type="primary" :disabled="!viewerTarget" @click="queryViewers">查询</a-button
           ><a-button @click="resetViewers">重置</a-button
-          ><a-button class="uvp-page-action-btn uvp-refresh-btn" :loading="loading" :disabled="!viewerTarget" @click="refresh"
-            ><template #icon><icon-refresh /></template>刷新</a-button
+          ><a-button
+            class="uvp-page-action-btn uvp-refresh-btn session-refresh-btn"
+            aria-label="刷新媒体观看者"
+            :loading="loading"
+            :disabled="!viewerTarget"
+            @click="requestRefresh"
+            ><template #icon><icon-refresh /></template>{{ refreshButtonLabel }}</a-button
           ></template
         >
         <template #extra><span class="scope-note">需完整 MediaIdentity，踢除还需 kickable=true</span></template>
@@ -423,6 +483,11 @@ defineExpose({ refresh });
 .session-search {
   flex: none;
   margin-bottom: 12px;
+}
+
+/* 倒计时会让按钮文案在「刷新」和「刷新（10s）」之间变化，固定最小宽度防止布局抖动。 */
+.session-refresh-btn {
+  min-width: 128px;
 }
 .peer-filter {
   width: 220px;

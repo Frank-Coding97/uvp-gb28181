@@ -89,6 +89,7 @@ function refreshAll() {
           ref="sessionPanel"
           :active="['sessions', 'viewers'].includes(workspace.activeView.value)"
           :view="workspace.activeView.value === 'viewers' ? 'viewers' : 'network'"
+          :auto-refresh="workspace.autoRefresh.value"
           :scope="workspace.scope.value"
           :node-id="nodeId"
           :initial-query="route.query"

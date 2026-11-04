@@ -106,6 +106,26 @@ describe("media monitoring workbench", () => {
     expect(streamPanel).not.toContain('class="row-actions"');
   });
 
+  it("gives the network session and viewer tabs the same ten-second countdown", () => {
+    const page = readFileSync(resolve(root, "workbench/MediaMonitoring.vue"), "utf8");
+    const panel = readFileSync(resolve(root, "workbench/monitoring/NetworkSessionPanel.vue"), "utf8");
+
+    // 两个标签共用一个面板组件，所以自动刷新开关要传下去、倒计时只需实现一份
+    const sessionTag = page.match(/<NetworkSessionPanel[\s\S]*?>/)?.[0] ?? "";
+    expect(sessionTag).toContain(':auto-refresh="workspace.autoRefresh.value"');
+    expect(panel).toContain("const AUTO_REFRESH_SECONDS = 10");
+    expect(panel).toContain("intervalMs: 10_000");
+    expect(panel).toContain("refreshCountdownTimer = setInterval(tickRefreshCountdown, 1_000)");
+    // 倒计时必须从「本次落库」开始，失败也要重新起表，否则失败后按钮永久停在 0
+    expect(panel).toMatch(/publish\(value\)\s*\{[\s\S]*?scheduleRefreshCountdown\(\)/);
+    expect(panel).toMatch(/onError\(error\)\s*\{[\s\S]*?scheduleRefreshCountdown\(\)/);
+    expect(panel).toContain("refreshCountdown.value -= 1");
+    expect(panel).toContain("刷新（${refreshCountdown.value}s）");
+    // 文案在「刷新」和「刷新（10s）」之间变长，两个刷新按钮都要固定最小宽度
+    expect(panel.match(/uvp-refresh-btn session-refresh-btn/g)).toHaveLength(2);
+    expect(hasRuleBlock(panel, ".session-refresh-btn", "min-width: 128px")).toBe(true);
+  });
+
   it("keeps the vertical scrollbar on the table body instead of the outer panel", () => {
     const page = readFileSync(resolve(root, "workbench/MediaMonitoring.vue"), "utf8");
     // 页面区必须是确定高度的弹性列，否则下面的表格拿不到高度、只好撑高整页
