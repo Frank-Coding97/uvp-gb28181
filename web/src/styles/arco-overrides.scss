@@ -44,6 +44,12 @@ html body[arco-theme="dark"] {
 }
 
 // ========== Switch 开关 ==========
+// 滑块形状唯一真源：不论页面写哪种 type，滑块一律圆形
+// （Arco 的 type="round" 会把滑块做成方角，历史上被误用过 17 处；这里兜底，避免再靠人肉审查）
+.arco-switch .arco-switch-handle {
+  border-radius: 50% !important;
+}
+
 .arco-switch {
   background-color: var(--uvp-panel-border) !important;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--uvp-text-tertiary) 24%, transparent) !important;

@@ -20,6 +20,8 @@ const walk = (dir: string): string[] =>
 
 const files = walk(SRC);
 const rel = (file: string) => relative(process.cwd(), file);
+// 全仓扫描放模块加载期：机器繁忙时逐文件同步读会顶到默认 5s 超时（曾误报过一条红灯）
+const sources = new Map(files.map(file => [file, readFileSync(file, "utf8")]));
 
 describe("开关形状：一律圆角", () => {
   it("扫描到的 .vue 文件数正常（防止目录写错后静默通过）", () => {
@@ -27,14 +29,29 @@ describe("开关形状：一律圆角", () => {
   });
 
   it("没有页面使用方角滑块的 type=round", () => {
-    const offenders = files.filter(file => /<a-switch[^>]*\stype="round"/.test(readFileSync(file, "utf8")));
+    const offenders = files.filter(file => /<a-switch[^>]*\stype="round"/.test(sources.get(file) ?? ""));
 
     expect(offenders.map(rel)).toEqual([]);
   });
 
   it("账号管理的状态开关显式声明 circle（不依赖组件库默认值）", () => {
-    const account = readFileSync(resolve(SRC, "views/system/account/account.vue"), "utf8");
+    const account = sources.get(resolve(SRC, "views/system/account/account.vue")) ?? "";
 
     expect(account).toMatch(/<a-switch type="circle" :checked-value="1" :unchecked-value="0"/);
+  });
+
+  it("全局兜底：任何 type 的开关滑块都强制圆形", () => {
+    const overrides = readFileSync(resolve(SRC, "styles/arco-overrides.scss"), "utf8");
+
+    expect(overrides).toMatch(/\.arco-switch\s+\.arco-switch-handle\s*\{[^}]*border-radius:\s*50%/);
+  });
+
+  it("分配权限抽屉：文字与开关用 flex 留间距，不靠 inline 空白", () => {
+    const role = sources.get(resolve(SRC, "views/system/role/role.vue")) ?? "";
+    const drawer = role.match(/<template #title> 分配权限 <\/template>[\s\S]*?<\/a-drawer>/)?.[0] ?? "";
+
+    expect(drawer).toContain('class="perm-switch"');
+    expect(drawer).not.toContain("text-right-gap");
+    expect(role).toMatch(/\.perm-switch\s*\{[^}]*gap:\s*\d+px/);
   });
 });
