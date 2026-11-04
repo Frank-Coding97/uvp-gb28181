@@ -70,7 +70,7 @@
             </template>
           </a-table-column>
           <a-table-column title="重试次数" data-index="retryCount" :width="150" ellipsis tooltip />
-          <a-table-column title="操作" :width="96" :fixed="isMobile ? '' : 'right'">
+          <a-table-column title="操作" :width="96" align="center" :fixed="isMobile ? '' : 'right'">
             <template #cell="{ record }">
               <div class="uvp-table-actions">
                 <a-popconfirm content="确定要删除这条数据吗？" @ok="handleDelete(record.id)">

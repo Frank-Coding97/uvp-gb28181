@@ -27,4 +27,8 @@ describe("定时任务页面外壳", () => {
     expect(actionCell).toContain("<icon-delete />");
     expect(actionCell).toContain("<span>删除</span>");
   });
+
+  it("操作列内容居中（与 sysjobs / sysapi 等基准页一致）", () => {
+    expect(source).toMatch(/<a-table-column title="操作"[^>]*align="center"/);
+  });
 });
