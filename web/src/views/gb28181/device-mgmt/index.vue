@@ -6657,8 +6657,12 @@ onUnmounted(() => {
 
 /* ⭐ 行内操作按钮一律「一个动作一个颜色」（老板 2026-11-04：「这些按钮都需要用不同的颜色，
    我不想让它用统一的颜色」——曾经试过统一成一支紫，被否）。
-   色相分工：播放=蓝、录像=紫、操作/更多=玫红、详情=青、同步=绿、订阅=品牌蓝、编辑=琥珀，
-   停止/删除=红（危险语义，不与上述共用）。新增动作请挑一个没被占用的色相，别复用。 */
+   色相分工（两张表各自一排之内不出现重复色相）：
+   · 通道表：播放=蓝、录像=紫、操作=玫红、详情=青、编辑=琥珀、停止=橙、删除=红
+   · 设备表：通道=蓝、刷新=绿、订阅=紫、详情=青、编辑=琥珀、删除=红、维护=玫红
+   ⛔ 订阅原来是品牌蓝，跟「通道/播放」的蓝几乎同色，看不出区别 ⇒ 改紫。
+   ⛔ 停止原来是红、删除又是默认蓝，一红一蓝跟语义不搭 ⇒ 停止让橙（中断），红留给删除（危险）。
+   新增动作请挑一个本表没被占用的色相，别复用。 */
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--preview) {
   color: #2563eb;
 }
@@ -6695,11 +6699,11 @@ onUnmounted(() => {
   background: rgb(15 118 110 / 8%);
 }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--subscribe) {
-  color: var(--uvp-brand);
+  color: #7c3aed;
 }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--subscribe:hover) {
-  color: var(--uvp-brand-strong);
-  background: var(--uvp-brand-soft);
+  color: #6d28d9;
+  background: rgb(124 58 237 / 8%);
 }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--edit) {
   color: #b7791f;
@@ -6709,9 +6713,16 @@ onUnmounted(() => {
   background: rgb(183 121 31 / 9%);
 }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--stop) {
-  color: #dc2626;
+  color: #c2410c;
 }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--stop:hover) {
+  color: #9a3412;
+  background: rgb(194 65 12 / 8%);
+}
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--delete) {
+  color: #dc2626;
+}
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--delete:hover) {
   color: #b91c1c;
   background: rgb(220 38 38 / 8%);
 }
@@ -6734,12 +6745,15 @@ onUnmounted(() => {
   color: #6ee7b7;
 }
 :global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--subscribe) {
-  color: var(--uvp-brand);
+  color: #c4b5fd;
 }
 :global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--edit) {
   color: #fbbf24;
 }
 :global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--stop) {
+  color: #fb923c;
+}
+:global(body[arco-theme="dark"] .device-mgmt-page .uvp-data-table .uvp-table-action--delete) {
   color: #f87171;
 }
 :global(.arco-dropdown:has(.device-action-menu-item)) {

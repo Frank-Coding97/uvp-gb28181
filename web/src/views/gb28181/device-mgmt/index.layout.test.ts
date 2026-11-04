@@ -337,3 +337,30 @@ describe("map live video card", () => {
     }
   });
 });
+
+describe("row action palette", () => {
+  // ⛔ 老板 2026-11-04：「这些按钮都需要用不同的颜色，我不想让它用统一的颜色」。
+  //    曾经把整排统一成一支紫被当场否掉；也曾漏配 `--delete`（按钮退回默认蓝，
+  //    跟「播放/通道」同色，看着就像没配）。这两条是那次踩坑留下的防回归。
+  const markup = source.slice(0, source.indexOf("<style"));
+  const used = [...new Set([...markup.matchAll(/uvp-table-action--([a-z]+)/g)].map(m => m[1]))];
+
+  it("gives every row action its own colour, no shared hue", () => {
+    expect(used.length).toBeGreaterThan(4);
+    const colours = new Map<string, string>();
+    for (const variant of used) {
+      const rule = source.match(new RegExp(`\\.uvp-table-action--${variant}\\)\\s*\\{[^}]*color:\\s*([^;]+);`));
+      expect(rule, `行内操作 --${variant} 没有配色规则（会退回默认色，跟别的动作撞色）`).toBeTruthy();
+      colours.set(variant, rule![1].trim());
+    }
+    const summary = [...colours].map(([k, v]) => `${k}=${v}`).join(", ");
+    expect(new Set(colours.values()).size, `有两个动作用了同一个颜色：${summary}`).toBe(colours.size);
+  });
+
+  it("keeps a dark-mode variant for every row action", () => {
+    for (const variant of used) {
+      const rule = source.match(new RegExp(`:global\\(body\\[arco-theme="dark"\\][^)]*--${variant}\\)\\s*\\{`));
+      expect(rule, `行内操作 --${variant} 缺暗色分支（暗底上会发闷，和相邻按钮分不清）`).toBeTruthy();
+    }
+  });
+});
