@@ -20,7 +20,14 @@
           位置在平台名**下面单独一行**（不是并排）：并排会把「统一视频接入平台」顶得没地方。
         -->
         <div v-if="pending" class="logo_version_row">
-          <a-popover v-model:popup-visible="noticeVisible" trigger="click" position="right" :content-style="{ padding: 0 }">
+          <a-popover
+            v-model:popup-visible="noticeVisible"
+            trigger="click"
+            position="right"
+            content-class="logo-version__popup"
+            arrow-class="logo-version__arrow"
+            :content-style="{ padding: 0 }"
+          >
             <button
               class="logo_version"
               :class="{ 'logo_version--dark': isDark }"
@@ -391,27 +398,31 @@ const isTitle = computed(() => {
 }
 
 // 有新版本：橙色提示块 + 主按钮（照 Sub2API 的层次）
+// ⛔ 配色一律走 --uvp-warning* 三件套，不要写死浅黄 / 亮黄的十六进制色值：
+//   写死的是「亮色皮肤」，暗色主题下这块浅黄面板压在深蓝卡片上，比 Arco 的灰底还刺眼。
+//   现有 token 跨主题自动成立（亮色 = 浅琥珀底 + 深琥珀字，暗色 = 半透明琥珀 + 浅琥珀字），
+//   与侧边栏 `.logo_version--dark` 徽标是同一族色。
 .version-card_update {
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding: 10px 12px;
   margin-bottom: 10px;
-  background: #fff8e6;
-  border: 1px solid #fbd88b;
+  background: var(--uvp-warning-soft);
+  border: 1px solid var(--uvp-warning-border);
   border-radius: 10px;
 }
 
 .version-card_update-title {
   font-size: 13px;
   font-weight: 700;
-  color: #b45309;
+  color: var(--uvp-warning);
 }
 
 .version-card_update-version {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
-  color: #b45309;
+  color: var(--uvp-warning);
 }
 
 .version-card_action {
@@ -456,5 +467,28 @@ const isTitle = computed(() => {
       opacity: 0.6;
     }
   }
+}
+</style>
+
+<style>
+/* 浮层表面。⛔ 必须显式声明：Arco 的 `.arco-popover-popup-content` 用的是
+   `--color-bg-popup` + `--color-neutral-3` + 自己的阴影 —— 那套中性灰（暗色下偏暖 #373739，
+   亮色下纯白）跟本仓的蓝白 / 蓝黑面板摆在一起就是"两套皮肤"
+   （同一排的个人下拉、录像缓存弹层走的都是 `--uvp-popconfirm-*`）。
+   这里复用**同一组浮层 token**，三处观感就齐了。
+   `!important`：这些都是单类选择器、与 Arco 同优先级，谁后加载谁赢 —— 不能赌注入顺序。 */
+.logo-version__popup {
+  overflow: hidden;
+  background-color: var(--uvp-popconfirm-bg) !important;
+  border: 1px solid var(--uvp-popconfirm-border) !important;
+  border-radius: 12px !important;
+  box-shadow: var(--uvp-popconfirm-shadow) !important;
+}
+
+/* 箭头是独立元素（`.arco-popover-popup-arrow`），不跟着表面走。
+   漏了它就会在面板边上留一个浅色小三角，比不修还显眼。 */
+.logo-version__arrow {
+  background-color: var(--uvp-popconfirm-bg) !important;
+  border-color: var(--uvp-popconfirm-border) !important;
 }
 </style>

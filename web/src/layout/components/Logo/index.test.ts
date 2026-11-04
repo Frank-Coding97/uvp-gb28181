@@ -1,4 +1,6 @@
 import { createPinia, setActivePinia } from "pinia";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { mount } from "@vue/test-utils";
 import { computed, nextTick, ref } from "vue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -75,7 +77,7 @@ import Logo from "./index.vue";
 
 const PopoverStub = {
   name: "APopover",
-  props: ["popupVisible", "trigger", "position"],
+  props: ["popupVisible", "trigger", "position", "contentClass", "arrowClass"],
   emits: ["update:popupVisible"],
   template: `<div class="popover-stub"><slot /><div class="popover-content"><slot name="content" /></div></div>`
 };
@@ -176,5 +178,33 @@ describe("Logo", () => {
     const card = wrapper.get('[data-testid="logo-version-card"]');
     expect(card.text()).not.toContain("忽略此版本");
     wrapper.unmount();
+  });
+
+  /**
+   * 浮层皮肤门禁（2026-11-05）。
+   * ⛔ 卡片内容由 popover teleport 到 body，`.version-card` 自己的配色管不到
+   *   **面板本身**：Arco 默认 `--color-bg-popup`（暗色是偏暖的中性灰 #373739）会直接露出来，
+   *   跟本仓蓝黑 / 蓝白面板摆一起就是"两套皮肤"。
+   *   所以必须挂 content-class / arrow-class 去覆盖（同 PersonalDropdown、RecordCacheTaskCenter），
+   *   漏一个就会在面板边上留个浅色小三角。
+   */
+  it("升级卡片必须挂浮层类名，且配色走主题 token 而非写死色值", async () => {
+    upgrade.state.pending = true;
+    const wrapper = mountLogo();
+    await nextTick();
+
+    const popover = wrapper.findComponent(PopoverStub);
+    expect(popover.props("contentClass")).toBe("logo-version__popup");
+    expect(popover.props("arrowClass")).toBe("logo-version__arrow");
+    wrapper.unmount();
+
+    const source = readFileSync(resolve(process.cwd(), "src/layout/components/Logo/index.vue"), "utf8");
+    // 浮层表面 + 箭头都要落在同一组浮层 token 上（popover 的底色由这一层决定）。
+    expect(source).toMatch(/\.logo-version__popup \{[^}]*background-color: var\(--uvp-popconfirm-bg\) !important;/);
+    expect(source).toMatch(/\.logo-version__arrow \{[^}]*background-color: var\(--uvp-popconfirm-bg\) !important;/);
+    // 「有新版本」提示块同理：写死浅黄在暗色下会变成压不住的亮块。
+    expect(source).toMatch(/\.version-card_update \{[^}]*background: var\(--uvp-warning-soft\);/);
+    expect(source).not.toContain("#fff8e6");
+    expect(source).not.toContain("#fbd88b");
   });
 });
