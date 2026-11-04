@@ -214,7 +214,7 @@
 // 刷新是"重新拉一次数据"，既不是提交也不是删除，给它独立的青绿色相：
 // 整行按钮里一眼能认出"这个是刷新"，又不会抢走主按钮的位置。
 // ⚠️ 2026-11-04 从 arco-overrides.scss 迁入本真源（那儿靠 !important 硬压，
-//    与"六级语义从一处出"冲突）。迁入后去掉 !important，靠文件内顺序取胜。
+//    与"语义只从一处出"冲突）。迁入后去掉 !important，靠文件内顺序取胜。
 .uvp-refresh-btn {
   color: var(--uvp-refresh-btn-text);
   background: var(--uvp-refresh-btn-bg);
