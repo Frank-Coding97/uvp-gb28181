@@ -3782,7 +3782,7 @@ INSERT INTO [sys_api] ([id], [title], [path], [method], [api_group], [created_at
 (683, N'忽略更新版本', N'/api/system/upgrade/notice/ignore', N'POST', N'服务升级', N'2026-10-29 11:26:25.000000', N'2026-10-29 11:26:25.000000', NULL, 1),
 (684, N'取消忽略更新版本', N'/api/system/upgrade/notice/ignore', N'DELETE', N'服务升级', N'2026-10-29 11:26:25.000000', N'2026-10-29 11:26:25.000000', NULL, 1),
 (685, N'设置定时检查更新', N'/api/system/upgrade/notice/auto-check', N'POST', N'服务升级', N'2026-10-29 12:18:23.000000', N'2026-10-29 12:18:23.000000', NULL, 1),
-(686, N'批量下载抓拍图像', N'/api/gb28181/device-mgmt/snapshots/archive', N'GET', N'图像库', N'2026-11-04 16:06:27.000000', N'2026-11-04 16:06:27.000000', NULL, 1),
+(686, N'批量下载抓拍图像', N'/api/gb28181/device-mgmt/snapshots/archive', N'GET', N'图像库', N'2026-11-04 16:41:24.000000', N'2026-11-04 16:41:24.000000', NULL, 1),
 (687, N'清空定时任务日志', N'/api/sysJobResults/clear', N'POST', N'日志中心', N'2026-11-04 18:55:00.000000', N'2026-11-04 18:55:00.000000', NULL, 1);
 SET IDENTITY_INSERT [sys_api] OFF;
 SET IDENTITY_INSERT [sys_casbin_rule] ON;
@@ -8156,7 +8156,7 @@ INSERT INTO [sys_menu] ([id], [parent_id], [path], [name], [redirect], [componen
 (140498, 0, N'/gb28181/openapi-client', N'gb28181-openapi-client', N'', N'gb28181/openapi-client/index', N'OpenAPI 客户端', 0, 0, 0, 0, 0, N'', 0, N'', N'lucide:Plug', 140, 2, 0, N'', N'2026-09-10 10:13:12.000000', N'2026-09-15 18:59:24.000000', NULL, 1),
 (140507, 0, N'/log-center', N'LogCenter', NULL, NULL, N'日志中心', 0, 0, 0, 1, 0, N'', 0, N'', N'lucide:FileClock', 170, 1, 0, N'', N'2026-09-17 14:40:02.000000', N'2026-09-17 14:40:02.000000', NULL, NULL),
 (140508, 140358, N'', N'GbDeviceStorageCardFormat', NULL, N'', N'格式化存储卡', 0, 1, 0, 0, 0, N'', 0, N'', N'', 1, 3, 0, N'gb28181:device:format_sd', N'2026-09-20 17:12:58.000000', N'2026-09-20 17:12:58.000000', NULL, 1),
-(140509, 0, N'/gb28181/snapshot-library', N'snapshot-library', NULL, N'gb28181/snapshot-library/index', N'图像库', 0, 0, 0, 0, 0, N'', 0, N'', N'lucide:Images', 90, 2, 0, N'', N'2026-09-20 17:19:27.000000', N'2026-09-20 17:23:13.000000', NULL, 1),
+(140509, 0, N'/gb28181/snapshot-library', N'snapshot-library', NULL, N'gb28181/snapshot-library/index', N'图像库', 0, 0, 0, 0, 0, N'', 0, N'', N'lucide:Images', 90, 2, 0, N'gb28181:snapshot:view', N'2026-09-20 17:19:27.000000', N'2026-11-04 19:14:43.000000', NULL, 1),
 (140510, 140507, N'/gb28181/playback-log', N'gb28181-playback-log', NULL, N'gb28181/playback-log/index', N'播放日志', 0, 0, 0, 0, 0, N'', 0, N'', N'lucide:FileClock', 60, 2, 0, N'gb28181:play-log:view', N'2026-09-21 20:34:45.000000', N'2026-10-06 15:09:52.000000', NULL, 1);
 
 INSERT INTO [sys_menu] ([id], [parent_id], [path], [name], [redirect], [component], [title], [is_full], [hide], [disable], [keep_alive], [affix], [link], [iframe], [svg_icon], [icon], [sort], [type], [is_link], [permission], [created_at], [updated_at], [deleted_at], [created_by]) VALUES
@@ -8174,7 +8174,9 @@ INSERT INTO [sys_menu] ([id], [parent_id], [path], [name], [redirect], [componen
 (140616, 10, N'/system/service-upgrade/index', N'service-upgrade', NULL, N'system/service-upgrade/index', N'服务升级', 0, 0, 0, 0, 0, N'', 0, N'', N'lucide:CloudDownload', 100, 2, 0, N'', N'2026-10-16 14:52:29.000000', N'2026-10-16 14:52:29.000000', NULL, 1),
 (140617, 140616, N'', N'ServiceUpgradeRead', NULL, N'', N'查看服务升级', 0, 0, 0, 0, 0, N'', 0, N'', N'', 0, 3, 0, N'system:upgrade:read', N'2026-10-16 14:52:29.000000', N'2026-10-16 14:52:29.000000', NULL, 1),
 (140618, 140616, N'', N'ServiceUpgradeManage', NULL, N'', N'管理服务升级', 0, 0, 0, 0, 0, N'', 0, N'', N'', 0, 3, 0, N'system:upgrade:manage', N'2026-10-16 14:52:29.000000', N'2026-10-16 14:52:29.000000', NULL, 1),
-(140619, 140347, N'', N'SysJobResultsClear', NULL, N'', N'一键清理', 0, 0, 0, 0, 0, N'', 0, N'', N'', 1, 3, 0, N'system:sysjobresults:clear', N'2026-11-04 18:55:00.000000', N'2026-11-04 18:55:00.000000', NULL, 1);
+(140619, 140347, N'', N'SysJobResultsClear', NULL, N'', N'一键清理', 0, 0, 0, 0, 0, N'', 0, N'', N'', 1, 3, 0, N'system:sysjobresults:clear', N'2026-11-04 18:55:00.000000', N'2026-11-04 18:55:00.000000', NULL, 1),
+(140620, 140509, N'', N'', NULL, N'', N'批量下载图像', 0, 0, 0, 1, 0, N'', 0, N'', N'', 1, 3, 0, N'gb28181:snapshot:download', N'2026-11-04 19:14:43.000000', N'2026-11-04 19:14:43.000000', NULL, 1),
+(140621, 140509, N'', N'', NULL, N'', N'删除图像', 0, 0, 0, 1, 0, N'', 0, N'', N'', 2, 3, 0, N'gb28181:snapshot:delete', N'2026-11-04 19:14:43.000000', N'2026-11-04 19:14:43.000000', NULL, 1);
 SET IDENTITY_INSERT [sys_menu] OFF;
 INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
 (1, 5),
@@ -8543,8 +8545,6 @@ INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
 (140449, 505),
 (140450, 483),
 (140450, 519),
-(140450, 587),
-(140450, 589),
 (140451, 489),
 (140451, 504),
 (140451, 524),
@@ -8578,11 +8578,11 @@ INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
 (140455, 495),
 (140455, 496),
 (140455, 497),
-(140455, 498);
+(140455, 498),
+(140455, 535),
+(140456, 534);
 
 INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
-(140455, 535),
-(140456, 534),
 (140456, 579),
 (140457, 499),
 (140458, 466),
@@ -8652,6 +8652,8 @@ INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
 (140496, 558),
 (140497, 557),
 (140508, 588),
+(140509, 587),
+(140509, 589),
 (140510, 593),
 (140510, 594),
 (140610, 629),
@@ -8678,8 +8680,9 @@ INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
 (140618, 683),
 (140618, 684),
 (140618, 685),
-(140450, 686),
-(140619, 687);
+(140619, 687),
+(140620, 686),
+(140621, 639);
 SET IDENTITY_INSERT [sys_role] ON;
 INSERT INTO [sys_role] ([id], [name], [sort], [status], [description], [parent_id], [created_at], [updated_at], [deleted_at], [created_by], [data_scope], [checked_depts]) VALUES
 (1, N'系统管理员', 0, 1, N'最高权限管理员角色', 0, N'2025-09-01 17:32:12.000000', N'2025-09-30 15:53:24.000000', NULL, 1, 1, N''),
@@ -8899,6 +8902,7 @@ INSERT INTO [sys_role_menu] ([role_id], [menu_id]) VALUES
 (1, 140616),
 (1, 140617),
 (1, 140618),
+(1, 140619),
 (3, 1),
 (3, 140358),
 (3, 140365),
@@ -8911,8 +8915,7 @@ INSERT INTO [sys_role_menu] ([role_id], [menu_id]) VALUES
 (3, 140452),
 (3, 140455),
 (3, 140457),
-(3, 140510),
-(1, 140619);
+(3, 140510);
 INSERT INTO [sys_user_role] ([user_id], [role_id]) VALUES
 (1, 1);
 SET IDENTITY_INSERT [sys_users] ON;

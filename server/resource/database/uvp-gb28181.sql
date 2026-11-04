@@ -3381,7 +3381,7 @@ INSERT INTO `sys_api` (`id`, `title`, `path`, `method`, `api_group`, `created_at
 (683, '忽略更新版本', '/api/system/upgrade/notice/ignore', 'POST', '服务升级', '2026-10-29 11:26:25.000000', '2026-10-29 11:26:25.000000', NULL, 1),
 (684, '取消忽略更新版本', '/api/system/upgrade/notice/ignore', 'DELETE', '服务升级', '2026-10-29 11:26:25.000000', '2026-10-29 11:26:25.000000', NULL, 1),
 (685, '设置定时检查更新', '/api/system/upgrade/notice/auto-check', 'POST', '服务升级', '2026-10-29 12:18:23.000000', '2026-10-29 12:18:23.000000', NULL, 1),
-(686, '批量下载抓拍图像', '/api/gb28181/device-mgmt/snapshots/archive', 'GET', '图像库', '2026-11-04 16:06:27.000000', '2026-11-04 16:06:27.000000', NULL, 1),
+(686, '批量下载抓拍图像', '/api/gb28181/device-mgmt/snapshots/archive', 'GET', '图像库', '2026-11-04 16:41:24.000000', '2026-11-04 16:41:24.000000', NULL, 1),
 (687, '清空定时任务日志', '/api/sysJobResults/clear', 'POST', '日志中心', '2026-11-04 18:55:00.000000', '2026-11-04 18:55:00.000000', NULL, 1);
 INSERT INTO `sys_casbin_rule` (`id`, `ptype`, `v0`, `v1`, `v2`, `v3`, `v4`, `v5`) VALUES
 (6266, 'g', 'user_1', 'role_1', '*', '', '', ''),
@@ -7745,7 +7745,7 @@ INSERT INTO `sys_menu` (`id`, `parent_id`, `path`, `name`, `redirect`, `componen
 (140498, 0, '/gb28181/openapi-client', 'gb28181-openapi-client', '', 'gb28181/openapi-client/index', 'OpenAPI 客户端', 0, 0, 0, 0, 0, '', 0, '', 'lucide:Plug', 140, 2, 0, '', '2026-09-10 10:13:12.000000', '2026-09-15 18:59:24.000000', NULL, 1),
 (140507, 0, '/log-center', 'LogCenter', NULL, NULL, '日志中心', 0, 0, 0, 1, 0, '', 0, '', 'lucide:FileClock', 170, 1, 0, '', '2026-09-17 14:40:02.000000', '2026-09-17 14:40:02.000000', NULL, NULL),
 (140508, 140358, '', 'GbDeviceStorageCardFormat', NULL, '', '格式化存储卡', 0, 1, 0, 0, 0, '', 0, '', '', 1, 3, 0, 'gb28181:device:format_sd', '2026-09-20 17:12:58.000000', '2026-09-20 17:12:58.000000', NULL, 1),
-(140509, 0, '/gb28181/snapshot-library', 'snapshot-library', NULL, 'gb28181/snapshot-library/index', '图像库', 0, 0, 0, 0, 0, '', 0, '', 'lucide:Images', 90, 2, 0, '', '2026-09-20 17:19:27.000000', '2026-09-20 17:23:13.000000', NULL, 1),
+(140509, 0, '/gb28181/snapshot-library', 'snapshot-library', NULL, 'gb28181/snapshot-library/index', '图像库', 0, 0, 0, 0, 0, '', 0, '', 'lucide:Images', 90, 2, 0, 'gb28181:snapshot:view', '2026-09-20 17:19:27.000000', '2026-11-04 19:14:43.000000', NULL, 1),
 (140510, 140507, '/gb28181/playback-log', 'gb28181-playback-log', NULL, 'gb28181/playback-log/index', '播放日志', 0, 0, 0, 0, 0, '', 0, '', 'lucide:FileClock', 60, 2, 0, 'gb28181:play-log:view', '2026-09-21 20:34:45.000000', '2026-10-06 15:09:52.000000', NULL, 1);
 
 INSERT INTO `sys_menu` (`id`, `parent_id`, `path`, `name`, `redirect`, `component`, `title`, `is_full`, `hide`, `disable`, `keep_alive`, `affix`, `link`, `iframe`, `svg_icon`, `icon`, `sort`, `type`, `is_link`, `permission`, `created_at`, `updated_at`, `deleted_at`, `created_by`) VALUES
@@ -7763,7 +7763,9 @@ INSERT INTO `sys_menu` (`id`, `parent_id`, `path`, `name`, `redirect`, `componen
 (140616, 10, '/system/service-upgrade/index', 'service-upgrade', NULL, 'system/service-upgrade/index', '服务升级', 0, 0, 0, 0, 0, '', 0, '', 'lucide:CloudDownload', 100, 2, 0, '', '2026-10-16 14:52:29.000000', '2026-10-16 14:52:29.000000', NULL, 1),
 (140617, 140616, '', 'ServiceUpgradeRead', NULL, '', '查看服务升级', 0, 0, 0, 0, 0, '', 0, '', '', 0, 3, 0, 'system:upgrade:read', '2026-10-16 14:52:29.000000', '2026-10-16 14:52:29.000000', NULL, 1),
 (140618, 140616, '', 'ServiceUpgradeManage', NULL, '', '管理服务升级', 0, 0, 0, 0, 0, '', 0, '', '', 0, 3, 0, 'system:upgrade:manage', '2026-10-16 14:52:29.000000', '2026-10-16 14:52:29.000000', NULL, 1),
-(140619, 140347, '', 'SysJobResultsClear', NULL, '', '一键清理', 0, 0, 0, 0, 0, '', 0, '', '', 1, 3, 0, 'system:sysjobresults:clear', '2026-11-04 18:55:00.000000', '2026-11-04 18:55:00.000000', NULL, 1);
+(140619, 140347, '', 'SysJobResultsClear', NULL, '', '一键清理', 0, 0, 0, 0, 0, '', 0, '', '', 1, 3, 0, 'system:sysjobresults:clear', '2026-11-04 18:55:00.000000', '2026-11-04 18:55:00.000000', NULL, 1),
+(140620, 140509, '', '', NULL, '', '批量下载图像', 0, 0, 0, 1, 0, '', 0, '', '', 1, 3, 0, 'gb28181:snapshot:download', '2026-11-04 19:14:43.000000', '2026-11-04 19:14:43.000000', NULL, 1),
+(140621, 140509, '', '', NULL, '', '删除图像', 0, 0, 0, 1, 0, '', 0, '', '', 2, 3, 0, 'gb28181:snapshot:delete', '2026-11-04 19:14:43.000000', '2026-11-04 19:14:43.000000', NULL, 1);
 INSERT INTO `sys_menu_api` (`menu_id`, `api_id`) VALUES
 (1, 5),
 (1, 6),
@@ -8131,8 +8133,6 @@ INSERT INTO `sys_menu_api` (`menu_id`, `api_id`) VALUES
 (140449, 505),
 (140450, 483),
 (140450, 519),
-(140450, 587),
-(140450, 589),
 (140451, 489),
 (140451, 504),
 (140451, 524),
@@ -8166,11 +8166,11 @@ INSERT INTO `sys_menu_api` (`menu_id`, `api_id`) VALUES
 (140455, 495),
 (140455, 496),
 (140455, 497),
-(140455, 498);
+(140455, 498),
+(140455, 535),
+(140456, 534);
 
 INSERT INTO `sys_menu_api` (`menu_id`, `api_id`) VALUES
-(140455, 535),
-(140456, 534),
 (140456, 579),
 (140457, 499),
 (140458, 466),
@@ -8240,6 +8240,8 @@ INSERT INTO `sys_menu_api` (`menu_id`, `api_id`) VALUES
 (140496, 558),
 (140497, 557),
 (140508, 588),
+(140509, 587),
+(140509, 589),
 (140510, 593),
 (140510, 594),
 (140610, 629),
@@ -8266,8 +8268,9 @@ INSERT INTO `sys_menu_api` (`menu_id`, `api_id`) VALUES
 (140618, 683),
 (140618, 684),
 (140618, 685),
-(140450, 686),
-(140619, 687);
+(140619, 687),
+(140620, 686),
+(140621, 639);
 INSERT INTO `sys_role` (`id`, `name`, `sort`, `status`, `description`, `parent_id`, `created_at`, `updated_at`, `deleted_at`, `created_by`, `data_scope`, `checked_depts`) VALUES
 (1, '系统管理员', 0, 1, '最高权限管理员角色', 0, '2025-09-01 17:32:12.000000', '2025-09-30 15:53:24.000000', NULL, 1, 1, ''),
 (3, '游客', 0, 1, '只读游客：允许业务查看、实时观看和录像回放；禁止下载、控制与修改', 0, '2026-08-24 20:29:31.000000', '2026-09-05 18:46:37.000000', NULL, 1, 4, '');
@@ -8485,6 +8488,7 @@ INSERT INTO `sys_role_menu` (`role_id`, `menu_id`) VALUES
 (1, 140616),
 (1, 140617),
 (1, 140618),
+(1, 140619),
 (3, 1),
 (3, 140358),
 (3, 140365),
@@ -8497,8 +8501,7 @@ INSERT INTO `sys_role_menu` (`role_id`, `menu_id`) VALUES
 (3, 140452),
 (3, 140455),
 (3, 140457),
-(3, 140510),
-(1, 140619);
+(3, 140510);
 INSERT INTO `sys_user_role` (`user_id`, `role_id`) VALUES
 (1, 1);
 INSERT INTO `sys_users` (`id`, `username`, `password`, `email`, `status`, `dept_id`, `phone`, `sex`, `nick_name`, `avatar`, `description`, `created_at`, `updated_at`, `deleted_at`, `created_by`, `must_change_password`) VALUES
