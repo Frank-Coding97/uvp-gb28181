@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { Message } from "@arco-design/web-vue";
+import { Message, Modal } from "@arco-design/web-vue";
 import { CirclePower, Pencil, PowerOff, Settings, Trash2 } from "lucide-vue-next";
 import { useRouter } from "vue-router";
 
@@ -215,9 +215,7 @@ async function withOp(node: ZLMNode, name: string, run: () => Promise<void>) {
   }
 }
 
-async function handleEnabled(node: ZLMNode) {
-  if (!canManage.value) return;
-  const nextEnabled = node.enabled === false;
+async function toggleNodeEnabled(node: ZLMNode, nextEnabled: boolean) {
   await withOp(node, nextEnabled ? "enable" : "disable", async () => {
     try {
       const response = nextEnabled ? await enableZLMNode(node.id) : await disableZLMNode(node.id);
@@ -231,6 +229,30 @@ async function handleEnabled(node: ZLMNode) {
     } catch (error) {
       Message.error(zlmErrorPresentation(error).label);
     }
+  });
+}
+
+/**
+ * 启停同一个入口，但只有「停用」需要二次确认。
+ *
+ * 停用会把节点从调度池里摘掉 —— 误点一下就会让后续点播悄悄换到别的节点，
+ * 现场很难第一时间反应过来是哪次点击造成的。启用是无害操作，不必多一次点击。
+ */
+function handleEnabled(node: ZLMNode) {
+  if (!canManage.value) return;
+  const nextEnabled = node.enabled === false;
+  if (nextEnabled) {
+    void toggleNodeEnabled(node, true);
+    return;
+  }
+  Modal.confirm({
+    title: "停用媒体节点",
+    content: `停用「${node.name}」后，该节点不再参与新任务调度，正在拉流和录像的会话不受影响。确认停用？`,
+    okText: "停用",
+    cancelText: "取消",
+    okButtonProps: { status: "danger" },
+    escToClose: true,
+    onOk: () => toggleNodeEnabled(node, false)
   });
 }
 
