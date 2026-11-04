@@ -173,9 +173,22 @@
                       ><Send :size="14" />推送</a-link
                     >
                   </a-tooltip>
-                  <a-link class="uvp-table-action uvp-table-action--delete" :disabled="!canManage" @click="confirmDelete(record)"
-                    ><Trash2 :size="14" />删除</a-link
+                  <a-popconfirm
+                    type="warning"
+                    ok-text="删除"
+                    cancel-text="取消"
+                    :ok-button-props="{ status: 'danger' }"
+                    :disabled="!canManage"
+                    @ok="deletePlatform(record)"
                   >
+                    <template #content>
+                      <div class="uvp-confirm-title">删除上级平台？</div>
+                      <div class="uvp-confirm-desc">将删除“{{ record.name }}”。存在活动媒体会话时服务端会拒绝删除。</div>
+                    </template>
+                    <a-link class="uvp-table-action uvp-table-action--delete" :disabled="!canManage"
+                      ><Trash2 :size="14" />删除</a-link
+                    >
+                  </a-popconfirm>
                 </div>
               </template>
             </a-table-column>
@@ -630,7 +643,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
-import { Message, Modal } from "@arco-design/web-vue";
+import { Message } from "@arco-design/web-vue";
 import dayjs from "dayjs";
 import {
   Building2,
@@ -1006,23 +1019,22 @@ async function toggleEnabled(platform: CascadePlatform, next: boolean) {
   }
 }
 
-function confirmDelete(platform: CascadePlatform) {
-  Modal.warning({
-    title: "删除上级平台",
-    content: `确定删除“${platform.name}”吗？存在活动媒体会话时服务端会拒绝删除。`,
-    hideCancel: false,
-    onOk: async () => {
-      const response = await deleteCascadePlatform(platform.id);
-      if (response.runtimeSynced === false) {
-        Message.warning(response.deleted ? "上级平台已删除，但运行时尚未同步" : "上级平台已停用，但删除尚未完成");
-      } else if (!response.deleted) {
-        Message.warning("上级平台删除尚未完成，请刷新后重试");
-      } else {
-        Message.success("上级平台已删除");
-      }
-      await refresh();
+// ⛔ 2026-11-04 起删除走 a-popconfirm 气泡（确认步骤在模板里），这里只负责执行。
+async function deletePlatform(platform: CascadePlatform) {
+  if (!canManage.value) return;
+  try {
+    const response = await deleteCascadePlatform(platform.id);
+    if (response.runtimeSynced === false) {
+      Message.warning(response.deleted ? "上级平台已删除，但运行时尚未同步" : "上级平台已停用，但删除尚未完成");
+    } else if (!response.deleted) {
+      Message.warning("上级平台删除尚未完成，请刷新后重试");
+    } else {
+      Message.success("上级平台已删除");
     }
-  });
+    await refresh();
+  } catch (error: any) {
+    Message.error(error?.message || "删除上级平台失败，请稍后重试");
+  }
 }
 
 function profileLabel(value: string) {

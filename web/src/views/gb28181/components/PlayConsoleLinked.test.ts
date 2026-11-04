@@ -7,6 +7,8 @@ import { defineComponent, h, nextTick, reactive } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AccessTokenKey } from "@/utils/auth";
+import PtzCruiseCard from "./play-console/PtzCruiseCard.vue";
+import PtzPresetCard from "./play-console/PtzPresetCard.vue";
 
 // VChart 会拉起 lottie-web 这类浏览器专属依赖,jsdom 下拿不到 canvas 上下文就会整包
 // 加载失败。本文件只覆盖概览条与弹窗的开关行为,图表细节由 ProbeTimelineDialog 自己负责。
@@ -5611,30 +5613,27 @@ describe("PlayConsoleLinked 双区联动", () => {
     nextWrapper.unmount();
   });
 
-  it("确认删除回调执行时重新校验预置位和巡航权限", async () => {
-    let warningConfig: any;
-    const warning = vi.spyOn(Modal, "warning").mockImplementation((config: any) => {
-      warningConfig = config;
-      return {} as any;
-    });
+  // ⛔ 2026-11-04：删除确认从 Modal.warning 改成卡片里的 a-popconfirm 气泡
+  //    （确认 UI 在 PtzPresetCard / PtzCruiseCard 里），所以这里直接触发卡片的
+  //    delete 事件来验证"执行时再校验一次权限"这条契约。
+  it("执行删除时重新校验预置位和巡航权限", async () => {
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
 
-    await wrapper.get(".preset-tile-del").trigger("click");
     userState.account.permissions = ["gb28181:ptz:view"];
     await nextTick();
-    await warningConfig.onOk?.();
+    wrapper.findComponent(PtzPresetCard).vm.$emit("delete", 1);
+    await flushPromises();
     expect(api.deletePtzPreset).not.toHaveBeenCalled();
 
     userState.account.permissions = ["*:*:*"];
     await nextTick();
-    await wrapper.get(".cruise-tile .preset-tile-del").trigger("click");
     userState.account.permissions = ["gb28181:ptz:view"];
     await nextTick();
-    await warningConfig.onOk?.();
+    wrapper.findComponent(PtzCruiseCard).vm.$emit("delete", 3);
+    await flushPromises();
     expect(api.controlPtzCruise).not.toHaveBeenCalled();
 
-    warning.mockRestore();
     wrapper.unmount();
   });
 

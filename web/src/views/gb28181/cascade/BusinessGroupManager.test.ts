@@ -189,6 +189,14 @@ function mountManager(props: Record<string, unknown> = {}) {
           template: `<span class="badge-stub" :data-status="status">{{ text }}</span>`
         },
         "a-spin": { template: "<div><slot /></div>" },
+        // ⛔ 2026-11-04 起树行内那颗删除按钮走 a-popconfirm 气泡（右键菜单那颗仍是 Modal）。
+        //    把 ok 暴露成 `.popconfirm-ok`，用例据此验证"点按钮只开气泡、确认后才真删"。
+        "a-popconfirm": {
+          emits: ["ok"],
+          props: ["disabled", "okText", "cancelText", "okButtonProps"],
+          template:
+            "<span v-bind='$attrs'><span class='popconfirm-content'><slot name='content' /></span><slot /><button class='popconfirm-ok' :disabled='disabled' @click='$emit(`ok`)'>{{ okText }}</button></span>"
+        },
         "a-alert": { template: "<div><slot /></div>" },
         "a-empty": { template: "<div><slot /></div>" },
         "a-dropdown": {
@@ -796,6 +804,33 @@ describe("cascade business-group manager", () => {
     expect((dialogEl("[aria-label='上级组织']").element as HTMLSelectElement).value).toBe(organization.code);
     expect(wrapper.find("[role='menu']").exists()).toBe(false);
     expect(api.replace).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("keeps the in-row delete button on a two-step bubble instead of a modal", async () => {
+    const organization = {
+      ...root,
+      code: "34020000002160000003",
+      kind: "organization" as const,
+      parentCode: root.code,
+      name: "运维"
+    };
+    api.get.mockResolvedValue({ ...baseData(), nodes: [root, organization] });
+    const wrapper = mountManager();
+    await flushPromises();
+    wrapper.findComponent({ name: "Tabs" }).vm.$emit("change", "directory");
+    await flushPromises();
+
+    const row = () => wrapper.find(`[data-code='${organization.code}']`);
+    // 点按钮只开气泡：节点还在，且不能顺手弹一个 Modal
+    await wrapper.get(`[data-code='${organization.code}'] [data-action='delete-node']`).trigger("click");
+    expect(row().exists()).toBe(true);
+    expect(confirmConfigs).toHaveLength(0);
+    expect(wrapper.get(`[data-code='${organization.code}'] .popconfirm-content`).text()).toContain("运维");
+
+    // 气泡里点确认才真的删
+    await wrapper.get(`[data-code='${organization.code}'] .popconfirm-ok`).trigger("click");
+    expect(row().exists()).toBe(false);
     wrapper.unmount();
   });
 

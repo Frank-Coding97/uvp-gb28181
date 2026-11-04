@@ -90,17 +90,30 @@ const emit = defineEmits<{
             <span class="preset-name">{{ preset.name }}</span>
           </a-button>
         </a-tooltip>
-        <a-button
-          type="text"
-          size="small"
-          html-type="button"
-          class="preset-tile-del"
-          :title="`删除 #${preset.id}`"
-          :aria-label="`删除预置位 #${preset.id}`"
-          @click.stop="emit('delete', preset.id)"
+        <a-popconfirm
+          type="warning"
+          ok-text="删除"
+          cancel-text="取消"
+          :ok-button-props="{ status: 'danger' }"
+          :data-testid="`preset-delete-confirm-${preset.id}`"
+          @ok="emit('delete', preset.id)"
         >
-          <X :size="11" />
-        </a-button>
+          <template #content>
+            <div class="uvp-confirm-title">删除预置位？</div>
+            <div class="uvp-confirm-desc">将删除 #{{ preset.id }} {{ preset.name }}，删除命令会下发到设备。</div>
+          </template>
+          <a-button
+            type="text"
+            size="small"
+            html-type="button"
+            class="preset-tile-del"
+            :title="`删除 #${preset.id}`"
+            :aria-label="`删除预置位 #${preset.id}`"
+            @click.stop
+          >
+            <X :size="11" />
+          </a-button>
+        </a-popconfirm>
       </div>
 
       <a-popover
@@ -159,17 +172,29 @@ const emit = defineEmits<{
                   >
                     <Navigation :size="11" />
                   </a-button>
-                  <a-button
-                    type="text"
-                    size="small"
-                    html-type="button"
-                    class="preset-popover-del"
-                    title="删除此预置位"
-                    :aria-label="`删除预置位 #${preset.id}`"
-                    @click="emit('delete', preset.id)"
+                  <a-popconfirm
+                    type="warning"
+                    ok-text="删除"
+                    cancel-text="取消"
+                    :ok-button-props="{ status: 'danger' }"
+                    :data-testid="`preset-popover-delete-confirm-${preset.id}`"
+                    @ok="emit('delete', preset.id)"
                   >
-                    <Trash2 :size="11" />
-                  </a-button>
+                    <template #content>
+                      <div class="uvp-confirm-title">删除预置位？</div>
+                      <div class="uvp-confirm-desc">将删除 #{{ preset.id }} {{ preset.name }}，删除命令会下发到设备。</div>
+                    </template>
+                    <a-button
+                      type="text"
+                      size="small"
+                      html-type="button"
+                      class="preset-popover-del"
+                      title="删除此预置位"
+                      :aria-label="`删除预置位 #${preset.id}`"
+                    >
+                      <Trash2 :size="11" />
+                    </a-button>
+                  </a-popconfirm>
                 </div>
               </div>
             </div>

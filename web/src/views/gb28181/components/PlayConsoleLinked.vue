@@ -2935,25 +2935,19 @@ async function handleSavePresetBeforeOk(done: (closable?: boolean) => void) {
     done(false);
   }
 }
+// ⛔ 2026-11-04 起删除走 a-popconfirm 气泡（确认按钮在 PtzPresetCard 里），这里只负责执行。
 async function deletePreset(id: number) {
   if (!canDeletePtzPreset.value || !props.channel) return;
-  Modal.warning({
-    title: `确认删除预置位 #${id}?`,
-    content: "删除命令会下发到设备。",
-    okText: "确认删除",
-    cancelText: "取消",
-    onOk: async () => {
-      if (!hasPermission("gb28181:ptz:preset:delete") || !props.channel) return;
-      try {
-        const response = await deletePtzPreset(props.channel!.id, id);
-        if (response.code !== 0) throw new Error(response.message || "删除预置位失败");
-        if (activePresetId.value === id) activePresetId.value = null;
-        await loadPresets();
-      } catch (error: any) {
-        Message.error(error?.message || "删除预置位失败");
-      }
-    }
-  });
+  // ⛔ 执行前再校验一次权限：气泡可能开着的时候权限被撤掉了（见同名用例）。
+  if (!hasPermission("gb28181:ptz:preset:delete") || !props.channel) return;
+  try {
+    const response = await deletePtzPreset(props.channel.id, id);
+    if (response.code !== 0) throw new Error(response.message || "删除预置位失败");
+    if (activePresetId.value === id) activePresetId.value = null;
+    await loadPresets();
+  } catch (error: any) {
+    Message.error(error?.message || "删除预置位失败");
+  }
 }
 
 async function executeCruiseToggle(id: number) {
@@ -3107,33 +3101,26 @@ function toggleWiper() {
   return sendWiperCommand(wiperState.value === "on-sent" ? "off" : "on");
 }
 
+// ⛔ 同上：确认按钮在 PtzCruiseCard 的气泡里，这里只负责执行。
 async function deleteCruise(id: number) {
   if (!canControlPtzCruise.value || !props.channel) return;
   const channelId = props.channel.id;
   const token = sessionToken;
-  Modal.warning({
-    title: "删除巡航轨迹",
-    content: `确认删除巡航轨迹 #${id}?此操作会下发到设备,不可撤销。`,
-    hideCancel: false,
-    okText: "删除",
-    cancelText: "取消",
-    onOk: async () => {
-      if (!hasPermission("gb28181:ptz:cruise") || !props.channel) return;
-      try {
-        const response = await controlPtzCruise(channelId, { action: "delete", trackId: id });
-        if (token !== sessionToken || props.channel?.id !== channelId) return;
-        if (response.code !== 0) throw new Error(response.message || "删除巡航失败");
-        if (activeCruiseId.value === id) {
-          activeCruiseId.value = null;
-          cruiseState.value = "stopped";
-        }
-        Message.info(`巡航 #${id} 删除指令已下发,等设备回传确认`);
-        await loadCruises(channelId, token, false);
-      } catch (error: any) {
-        Message.error(error?.message || "删除巡航失败");
-      }
+  // 执行前再校验一次权限（气泡开着时权限可能已被撤掉）。
+  if (!hasPermission("gb28181:ptz:cruise") || !props.channel) return;
+  try {
+    const response = await controlPtzCruise(channelId, { action: "delete", trackId: id });
+    if (token !== sessionToken || props.channel?.id !== channelId) return;
+    if (response.code !== 0) throw new Error(response.message || "删除巡航失败");
+    if (activeCruiseId.value === id) {
+      activeCruiseId.value = null;
+      cruiseState.value = "stopped";
     }
-  });
+    Message.info(`巡航 #${id} 删除指令已下发,等设备回传确认`);
+    await loadCruises(channelId, token, false);
+  } catch (error: any) {
+    Message.error(error?.message || "删除巡航失败");
+  }
 }
 
 function openHomeSettingsDialog() {

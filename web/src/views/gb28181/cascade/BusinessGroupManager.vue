@@ -184,18 +184,31 @@
                         @click.stop="openEditNodeDialog(node)"
                         ><icon-edit
                       /></a-button>
-                      <a-button
-                        class="business-group-tree-button"
-                        size="small"
-                        type="text"
-                        status="danger"
-                        :data-action="node.kind === 'group' ? 'delete-root' : 'delete-node'"
-                        :title="nodeDeleteReason(node) || '删除空节点'"
-                        :aria-label="`删除 ${nodeLabel(node)}`"
+                      <a-popconfirm
+                        type="warning"
+                        ok-text="删除"
+                        cancel-text="取消"
+                        :ok-button-props="{ status: 'danger' }"
                         :disabled="!canWrite || saving || channelPickerVisible || Boolean(nodeDeleteReason(node))"
-                        @click.stop="requestDeleteNode(node)"
-                        ><icon-delete
-                      /></a-button>
+                        @ok="deleteNode(node.code)"
+                      >
+                        <template #content>
+                          <div class="uvp-confirm-title">删除组织？</div>
+                          <div class="uvp-confirm-desc">确认删除空组织“{{ nodePath(node.code) }}”吗？</div>
+                        </template>
+                        <a-button
+                          class="business-group-tree-button"
+                          size="small"
+                          type="text"
+                          status="danger"
+                          :data-action="node.kind === 'group' ? 'delete-root' : 'delete-node'"
+                          :title="nodeDeleteReason(node) || '删除空节点'"
+                          :aria-label="`删除 ${nodeLabel(node)}`"
+                          :disabled="!canWrite || saving || channelPickerVisible || Boolean(nodeDeleteReason(node))"
+                          @click.stop
+                          ><icon-delete
+                        /></a-button>
+                      </a-popconfirm>
                     </span>
                   </span>
                   <template #content>
@@ -1230,9 +1243,23 @@ function submitNodeDialog() {
   saveError.value = "";
 }
 
-/** 树节点上的删除入口：拦一道"能不能删"再落到二次确认（确认条复用 `deleteNode`）。 */
+/**
+ * 树节点右键菜单里的删除入口。
+ *
+ * ⛔ 这条入口**只能留 Modal**：`a-doption` 被点后下拉立刻卸载（`contextMenuCode = ''`），
+ *    挂在上面的 a-popconfirm 永远没机会显形 —— 与设备列表同一个结构性限制。
+ *    行内那颗常显的删除按钮走气泡（见模板）。
+ */
 function requestDeleteNode(node: BusinessNode) {
-  deleteNode(node.code);
+  if (!canDeleteNode(node.code)) return;
+  Modal.confirm({
+    title: "删除组织",
+    content: `确认删除空组织“${nodePath(node.code)}”？`,
+    okText: "确认删除",
+    cancelText: "取消",
+    okButtonProps: { status: "danger" },
+    onOk: () => removeNode(node.code)
+  });
 }
 
 function allowedParents(node: BusinessNode) {
@@ -1249,6 +1276,19 @@ function nodeDeleteReason(node: BusinessNode): string {
   return nodeHasContents(node.code) ? "请先移动下级组织或直属通道。" : "";
 }
 
+/**
+ * 删除前的守卫（两个入口共用）：能不能删、为什么不能删。
+ * 业务根（215）被禁止删除：它承载整棵共享目录树，`publishGroup` 开着时还会对外发布。
+ */
+function canDeleteNode(code: string): boolean {
+  if (!props.canWrite || nodeHasContents(code)) return false;
+  if (nodes.value.find(node => node.code === code)?.kind === "group" && publishGroup.value) {
+    validationError.value = "发布开启时不能删除业务根，请先关闭业务分组发布。";
+    return false;
+  }
+  return true;
+}
+
 function setNodeMenu(code: string, visible: boolean) {
   if (!visible) {
     if (contextMenuCode.value === code) contextMenuCode.value = "";
@@ -1260,23 +1300,11 @@ function setNodeMenu(code: string, visible: boolean) {
 }
 
 /**
- * 删除组织节点 —— 走 confirm 弹窗二次确认（2026-10-15 起页面内不再有内嵌确认条）。
- * 业务根（215）被禁止删除：它承载整棵共享目录树，`publishGroup` 开着时还会对外发布。
+ * 行内删除按钮确认后的执行体 —— 确认步骤在模板的 a-popconfirm 气泡里（2026-11-04 起）。
  */
 function deleteNode(code: string) {
-  if (!props.canWrite || nodeHasContents(code)) return;
-  if (nodes.value.find(node => node.code === code)?.kind === "group" && publishGroup.value) {
-    validationError.value = "发布开启时不能删除业务根，请先关闭业务分组发布。";
-    return;
-  }
-  Modal.confirm({
-    title: "删除组织",
-    content: `确认删除空组织“${nodePath(code)}”？`,
-    okText: "确认删除",
-    cancelText: "取消",
-    okButtonProps: { status: "danger" },
-    onOk: () => removeNode(code)
-  });
+  if (!canDeleteNode(code)) return;
+  removeNode(code);
 }
 
 function removeNode(code: string) {

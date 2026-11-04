@@ -137,17 +137,30 @@ const emit = defineEmits<{
             <span class="preset-name">{{ track.name }}</span>
             <span v-if="track.pending" class="cruise-status-badge">未验证</span>
           </a-button>
-          <a-button
-            type="text"
-            size="small"
-            html-type="button"
-            class="preset-tile-del"
-            :title="`删除巡航 #${track.id}`"
-            :aria-label="`删除巡航 #${track.id}`"
-            @click.stop="emit('delete', track.id)"
+          <a-popconfirm
+            type="warning"
+            ok-text="删除"
+            cancel-text="取消"
+            :ok-button-props="{ status: 'danger' }"
+            :data-testid="`cruise-delete-confirm-${track.id}`"
+            @ok="emit('delete', track.id)"
           >
-            <X :size="11" />
-          </a-button>
+            <template #content>
+              <div class="uvp-confirm-title">删除巡航轨迹？</div>
+              <div class="uvp-confirm-desc">将删除巡航 #{{ track.id }} {{ track.name }}，此操作会下发到设备，不可撤销。</div>
+            </template>
+            <a-button
+              type="text"
+              size="small"
+              html-type="button"
+              class="preset-tile-del"
+              :title="`删除巡航 #${track.id}`"
+              :aria-label="`删除巡航 #${track.id}`"
+              @click.stop
+            >
+              <X :size="11" />
+            </a-button>
+          </a-popconfirm>
         </div>
       </a-tooltip>
 
@@ -207,17 +220,31 @@ const emit = defineEmits<{
                       <Square v-if="tileState(track) === 'stop'" :size="11" />
                       <Play v-else :size="11" />
                     </a-button>
-                    <a-button
-                      type="text"
-                      size="small"
-                      html-type="button"
-                      class="preset-popover-del"
-                      title="删除此巡航轨迹"
-                      :aria-label="`删除巡航 ${track.name}`"
-                      @click="emit('delete', track.id)"
+                    <a-popconfirm
+                      type="warning"
+                      ok-text="删除"
+                      cancel-text="取消"
+                      :ok-button-props="{ status: 'danger' }"
+                      :data-testid="`cruise-popover-delete-confirm-${track.id}`"
+                      @ok="emit('delete', track.id)"
                     >
-                      <Trash2 :size="11" />
-                    </a-button>
+                      <template #content>
+                        <div class="uvp-confirm-title">删除巡航轨迹？</div>
+                        <div class="uvp-confirm-desc">
+                          将删除巡航 #{{ track.id }} {{ track.name }}，此操作会下发到设备，不可撤销。
+                        </div>
+                      </template>
+                      <a-button
+                        type="text"
+                        size="small"
+                        html-type="button"
+                        class="preset-popover-del"
+                        title="删除此巡航轨迹"
+                        :aria-label="`删除巡航 ${track.name}`"
+                      >
+                        <Trash2 :size="11" />
+                      </a-button>
+                    </a-popconfirm>
                   </div>
                 </div>
               </a-tooltip>

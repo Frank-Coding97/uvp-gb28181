@@ -18,6 +18,17 @@ const CONTROL_COMPONENTS = [
   "PtzWiperCard.vue"
 ];
 
+/**
+ * ⛔ 2026-11-04 起预置位/巡航的删除走 a-popconfirm 气泡：点垃圾桶只开气泡，
+ *    必须再点气泡里的 ok 才 emit('delete')。stub 把 ok 暴露成 `.popconfirm-ok`。
+ */
+const popconfirmStub = {
+  emits: ["ok"],
+  props: ["disabled", "okText", "cancelText", "okButtonProps"],
+  template:
+    "<span v-bind='$attrs'><span class='popconfirm-content'><slot name='content' /></span><slot /><button class='popconfirm-ok' :disabled='disabled' @click='$emit(`ok`)'>{{ okText }}</button></span>"
+};
+
 function readComponent(name: string) {
   return readFileSync(resolve(process.cwd(), "src/views/gb28181/components/play-console", name), "utf8");
 }
@@ -48,13 +59,18 @@ describe("播放控制台 PTZ 控件", () => {
         syncLabel: "同步",
         syncTitle: "从设备同步",
         tooltipDelay: 0
-      }
+      },
+      global: { stubs: { "a-popconfirm": popconfirmStub } }
     });
 
     await wrapper.get('[data-testid="preset-sync-btn"]').trigger("click");
     await wrapper.get('[data-testid="preset-save-btn"]').trigger("click");
     await wrapper.find(".preset-tile-hit").trigger("click");
+    // ⛔ 删除是两步：点垃圾桶只开气泡，不能直接 emit
     await wrapper.find(".preset-tile-del").trigger("click");
+    expect(wrapper.emitted("delete")).toBeUndefined();
+    expect(wrapper.get(".popconfirm-content").text()).toContain("入口");
+    await wrapper.get(".popconfirm-ok").trigger("click");
 
     expect(wrapper.emitted("sync")).toHaveLength(1);
     expect(wrapper.emitted("add")).toHaveLength(1);
