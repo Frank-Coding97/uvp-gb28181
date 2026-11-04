@@ -1311,7 +1311,8 @@ has_pgrep() { command -v pgrep >/dev/null 2>&1; }
 #   /proc 由内核提供、不需要任何外部命令，正好把这条路补上。
 #   有 pgrep 时仍优先用 pgrep（一次调用，胜过遍历整个 /proc）。
 proc_pids_by_exe() {
-  local exe="$1" d pid arg p
+  local exe="$1" d pid p
+  local exe_name="${exe##*/}"
   # ⛔⛔ 必须排除「调用者自身」：本函数的 argv 文本里可能就写着这个路径
   #   （例如 `bash -c '<脚本正文>'` 这种调用方式），不排除就会把自己算成
   #   目标进程 —— 判活恒为真、stop 直接自杀（2026-10-12 在 Linux 上跑契约
@@ -1323,26 +1324,82 @@ proc_pids_by_exe() {
   #   进程查找恒为空 ⇒ 兜底静默失效（症状又是「stop 说停了、进程还在」）。
   #   ⇒ 一律写 `${BASHPID:-$$}`：有就用真值，没有就退回 $$（至少排掉主 shell）。
   local self_a="$$" self_b="${BASHPID:-$$}"
+  # ⛔⛔ **祖先进程永远不是目标**（安全底线，与精确匹配无关）。
+  #   2026-11-05 线上误杀的正是「调用者自己的父进程」：升级收尾的重启脚本
+  #   用 `sh -c` 调 `ctl.sh stop-updater`，脚本是这次调用的父进程 ⇒ 单靠
+  #   「排除自身」永远排不掉它。无论复核能不能用，这一条都必须生效。
+  local ance="${PPID:-}"
+
+  # _pbe_match <pid>：这个 pid 是不是**那个可执行文件本身**。
+  # 返回码是三态：0 = 是；1 = 不是；2 = 复核不了（无 /proc 且 ps 不可用）。
+  #
+  # ⛔⛔ 2026-11-05 线上（1.1.13→1.1.17 在线升级）真踩到：原判据是「任一 argv
+  #   包含该路径」，它会把 `sh -c "<脚本文本里写着该路径>"` 这种**纯文本命中**
+  #   当成目标进程。而升级收尾的重启脚本恰好就是这个形状（脚本文本里写着
+  #   `BIN=/…/updater/uvp-updater`）⇒ `stop-updater` 在杀助手的同时，把**发起
+  #   这次重启的脚本自己**一起杀掉了；脚本死在 "image replaced" 之后，
+  #   紧跟的 `start-updater` 永远没机会执行 ⇒ 升级任务记 succeeded、业务是新版，
+  #   但助手没了 ⇒ 前端「服务升级」页全量 503「升级助手不可用」。
+  #   ⇒ 判据从「任一 argv 包含」收紧成两级（脚本正文只出现在 `sh -c` 的 argv[1]，
+  #     两级都不命中）：
+  #       ① /proc/<pid>/exe 就指向它 —— 最准，argv[0] 被改写也照样成立；
+  #       ② argv[0] **恰好**等于绝对路径或程序名（兼容 redis 把 argv[0] 改成 basename）。
+  #   ⛔ 不能只留 ①：无 /proc 的平台（macOS）与 argv[0] 被改名的进程只能靠 ②。
+  _pbe_match() {
+    local p_pid="$1" p_link="" p_first=""
+    if [ -L "/proc/$p_pid/exe" ]; then
+      p_link="$(readlink "/proc/$p_pid/exe" 2>/dev/null || true)"
+      # 可执行文件被删除/升级换掉后，内核会在这个链接末尾加 " (deleted)"。
+      p_link="${p_link% (deleted)}"
+      if [ -n "$p_link" ] && [ "$p_link" = "$exe" ]; then return 0; fi
+    fi
+    if [ -r "/proc/$p_pid/cmdline" ]; then
+      # cmdline 是 NUL 分隔的 argv；只取**第一段**（argv[0]）。
+      IFS= read -r -d '' p_first < "/proc/$p_pid/cmdline" || true
+      case "$p_first" in
+        "$exe"|"$exe_name") return 0 ;;
+      esac
+      return 1
+    fi
+    # 无 /proc 的平台（macOS）：comm 是内核记的短名（`exec -a` 改写的 argv[0]
+    # 不会出现在这里），所以 comm 与 command 首段都要核一次。
+    # ⛔ ps 跑不起来（受限环境/权限被拒）时返回 2 = "复核不了"，不能当成
+    #   "不是目标" —— 那会让兜底静默失效（症状又回到「stop 说停了、进程还在」）。
+    p_first="$(ps -o comm= -p "$p_pid" 2>/dev/null)" || return 2
+    case "$p_first" in
+      "$exe"|"$exe_name") return 0 ;;
+    esac
+    p_first="$(ps -o command= -p "$p_pid" 2>/dev/null)" || return 2
+    case "$p_first" in
+      "$exe"|"$exe "*) return 0 ;;
+    esac
+    return 1
+  }
+
+  # _pbe_self <pid>：自己/当前子 shell/直接父进程 —— 一律不算目标。
+  _pbe_self() {
+    if [ "$1" = "$self_a" ] || [ "$1" = "$self_b" ]; then return 0; fi
+    if [ -n "$ance" ] && [ "$1" = "$ance" ]; then return 0; fi
+    return 1
+  }
+
   if has_pgrep; then
     while IFS= read -r p; do
       [ -n "$p" ] || continue
-      if [ "$p" = "$self_a" ] || [ "$p" = "$self_b" ]; then continue; fi
-      printf '%s\n' "$p"
+      if _pbe_self "$p"; then continue; fi
+      # pgrep 只做**预筛**：真正算不算由 _pbe_match 复核（见上面的误杀事故）。
+      # ⛔ `_pbe_match "$p"` 直接当 if 条件用不行 —— 非 0 退出码在 `set -e` 下
+      #   会把脚本带走；必须先接住返回码再判。
+      _pbe_rc=0; _pbe_match "$p" || _pbe_rc=$?
+      if [ "$_pbe_rc" -eq 0 ] || [ "$_pbe_rc" -eq 2 ]; then printf '%s\n' "$p"; fi
     done < <(pgrep -f "$exe" 2>/dev/null || true)
     return 0
   fi
   for d in /proc/[0-9]*; do
     pid="${d#/proc/}"
-    if [ "$pid" = "$self_a" ] || [ "$pid" = "$self_b" ]; then continue; fi
-    if [ -r "$d/cmdline" ]; then
-      # cmdline 是 NUL 分隔的 argv；用 bash 内建 read -d '' 逐段比对，
-      # 全程不调外部命令（tr/grep 在精简系统里也不保证存在）。
-      while IFS= read -r -d '' arg; do
-        case "$arg" in
-          *"$exe"*) printf '%s\n' "$pid"; break ;;
-        esac
-      done < "$d/cmdline" || true
-    fi
+    if _pbe_self "$pid"; then continue; fi
+    _pbe_rc=0; _pbe_match "$pid" || _pbe_rc=$?
+    if [ "$_pbe_rc" -eq 0 ]; then printf '%s\n' "$pid"; fi
   done
   return 0
 }

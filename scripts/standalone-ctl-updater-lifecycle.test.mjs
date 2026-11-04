@@ -377,6 +377,57 @@ test('什么都没跑时 stop_updater 是幂等的（rc=0，不报错）', () =>
   }
 });
 
+// ---------------------------------------------------------------------------
+// ⛔⛔ 2026-11-05 线上事故：1.1.13 → 1.1.17 在线升级「成功」了，助手却没了。
+//
+// 升级收尾时 workflow 会拉起一个**脱离的**
+//   sh -c 'sleep 3; … BIN=/…/updater/uvp-updater; … cp/mv; … stop-updater; start-updater'
+// 来换掉助手并重启它。而 proc_pids_by_exe 原来的判据是「**任一 argv 包含**该路径」，
+// 这段脚本文本里恰好写着助手路径 ⇒ `stop-updater` 把**发起重启的脚本自己**
+// 也算成助手一起 kill 掉，脚本死在 "helper update: image replaced" 之后，
+// `start-updater` 永远执行不到。
+//
+// 现场证据：logs/updater-sync.log 只有 begin + image replaced 两行，
+// 既没有 done 也没有任何 failed（脚本是被信号打死的，来不及写日志）；
+// updater.log 空、run/updater.sock 不存在 ⇒ 前端「服务升级」页全量 503。
+//
+// 判据收紧成「/proc/<pid>/exe 指向它 或 argv[0] 恰好等于它」后，
+// 脚本文本只出现在 argv[1] ⇒ 不再命中。
+// ---------------------------------------------------------------------------
+test('命令行里只是"写着"助手路径的脚本不算助手进程（升级收尾自杀事故）', { skip: process.platform !== 'linux' }, async () => {
+  const pkg = makePkg();
+  // 模拟那次重启脚本的形态：正文里就有 BIN=<助手绝对路径>。
+  const decoy = spawn(BASH, ['-c', `sleep 30; BIN=${JSON.stringify(pkg.bin)}; echo "$BIN"`], {
+    stdio: 'ignore',
+  });
+  try {
+    // 等 exec 生效（避免刚到 pid 就被判定）。
+    await new Promise((r) => setTimeout(r, 150));
+
+    const probe = runHarness(pkg, `printf 'PIDS=%s\\n' "$(proc_pids_by_exe "$UPDATER_BIN")"`);
+    assert.equal(probe.status, 0, probe.stderr);
+    assert.doesNotMatch(
+      probe.stdout,
+      new RegExp(`PIDS=.*\\b${decoy.pid}\\b`),
+      '脚本文本里出现的路径被当成了助手进程 —— stop-updater 会杀掉发起重启的脚本自己',
+    );
+
+    // 而且真的 stop 一次也不能把它带走（这才是事故的直接后果）。
+    const stop = runHarness(pkg, 'stop_updater');
+    assert.equal(stop.status, 0, stop.stderr);
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(alive(decoy.pid), true, 'stop_updater 杀掉了只是文本里含路径的无关进程');
+  } finally {
+    pkg.cleanup();
+    try {
+      decoy.kill('SIGKILL');
+    } catch {
+      /* 已经退了 */
+    }
+  }
+});
+
+
 // ⛔ 这个用例必须建在 $HOME 下，不能用 os.tmpdir()：/tmp 是 1777（root 所有），
 //   逐层往上走时会被判成"不可信且改不动"，那测的就不是我们要测的东西了。
 test('安装目录是 775 时自动收成 755（不再让助手起不来）', () => {
