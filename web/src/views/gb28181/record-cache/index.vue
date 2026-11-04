@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import { Message, Modal } from "@arco-design/web-vue";
-import { CircleStop, Download, Layers, RefreshCw, RotateCcw, Search, Star, Trash2 } from "@lucide/vue";
+import { CircleStop, Download, Eye, Layers, RefreshCw, RotateCcw, Search, Star, Trash2 } from "@lucide/vue";
 import { hasPermission } from "@/hooks/usePermission";
+import { copyTextToClipboard } from "@/utils/app";
 import {
   cancelRecordCacheTask,
   createRecordCacheDownload,
@@ -25,7 +26,12 @@ const canDownload = computed(() => hasPermission("gb28181:record-cache:download"
 const canDelete = computed(() => hasPermission("gb28181:record-cache:delete"));
 const canFavorite = computed(() => hasPermission("gb28181:record-cache:favorite"));
 
-/** 分页档位。与本仓统一口径一致（见 `src/style/model/pagination-unification.test.ts`）。 */
+/**
+ * 分页档位。与本仓统一口径一致（见 `src/style/model/pagination-unification.test.ts`）。
+ *
+ * 默认取**第一档 10 条**（老板 2026-11-04 要求）：本页一行两行文字、行高比普通列表高，
+ * 20 条一屏放不下，用户得先滚一段才看到分页条。
+ */
 const RECORD_CACHE_PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
 const loading = ref(false);
@@ -71,10 +77,44 @@ const filters = reactive({
    */
   favorite: undefined as string | undefined
 });
-const pagination = reactive({ page: 1, size: RECORD_CACHE_PAGE_SIZE_OPTIONS[1], total: 0 });
+const pagination = reactive({ page: 1, size: RECORD_CACHE_PAGE_SIZE_OPTIONS[0], total: 0 });
 const pendingTaskId = ref("");
 const downloadingKey = ref("");
 const favoritePendingId = ref("");
+
+/**
+ * 详情弹窗当前展示的任务。
+ *
+ * ⛔ 直接持有**列表里的那个对象**，不另外拷一份、也不重新请求详情接口：
+ *    终态字段（大小 / 时长 / 各时间戳）列表本来就带全了；活动态的实时进度由
+ *    `mergeLiveProgress()` 每 5 秒写回同一批对象 ⇒ 弹窗开着时数字会跟着一起动，
+ *    不会出现"列表在跳、弹窗停在打开那一刻"。
+ */
+const detailTask = ref<RecordCacheTask | null>(null);
+const detailVisible = ref(false);
+
+function openDetail(task: RecordCacheTask) {
+  detailTask.value = task;
+  detailVisible.value = true;
+}
+
+function closeDetail() {
+  detailVisible.value = false;
+  detailTask.value = null;
+}
+
+/**
+ * 复制任务 ID。
+ *
+ * 任务 ID 是排障时唯一能和日志 / 后端对上号的指代，而它现在只出现在详情弹窗里
+ * （表格里那一列已按老板要求拿掉）⇒ 必须给一个不用手抄的出口。
+ */
+async function copyTaskId() {
+  if (!detailTask.value) return;
+  const ok = await copyTextToClipboard(detailTask.value.taskId);
+  if (ok) Message.success("任务 ID 已复制");
+  else Message.error("复制失败，请手动选择文本");
+}
 
 const stateOptions: Array<{ label: string; value: RecordCacheState }> = [
   { label: "排队中", value: "queued" },
@@ -98,8 +138,22 @@ function favoriteQueryValue(): boolean | undefined {
   return undefined;
 }
 
+/**
+ * 任务状态 → 文案 + 标签颜色（Arco `a-tag` 的预设色名）。
+ *
+ * ⛔ 七个状态**必须七个不同色相**：状态列是这张表最先被扫的一列，两种状态同色
+ *   就等于「看起来没状态」（老板 2026-11-04 看到一屏灰标签后提出的）。
+ *     · 排队中 / 已取消、缓存中 / 整理中 这两对原来分别都撞色（蓝蓝、灰灰）。
+ *     · 已过期不再跟已取消共用灰：过期是「录像已被保留期清理」这一独立结局，
+ *       用金色跟「人为取消」的灰分开。
+ * 语义分组：进行中＝冷色（青→蓝）、收尾＝橙（别急着关页面）、
+ *         成功＝绿、失败＝红、人为终止＝灰、自然失效＝紫。
+ * ⛔ 过期别用金色/黄色系：Arco 的 `gold` 标签是「浅黄底 + 亮黄字」，
+ *    实测对比度只有 1.6:1，表格里几乎看不清（橙色的「整理中」也偏低，但那是既有口径）。
+ * 判据见 `render-contract.test.ts`「七个状态各用一种标签颜色」。
+ */
 const stateMeta: Record<RecordCacheState, { text: string; color: string }> = {
-  queued: { text: "排队中", color: "arcoblue" },
+  queued: { text: "排队中", color: "cyan" },
   running: { text: "缓存中", color: "arcoblue" },
   // ⛔ 收尾整理**不是**「缓存中」：录像已经全部拉完，剩下的是后端把分片拼成一个文件。
   // 显示成「缓存中」会让用户以为还在耗流量/还在占设备通道。
@@ -107,7 +161,7 @@ const stateMeta: Record<RecordCacheState, { text: string; color: string }> = {
   succeeded: { text: "已完成", color: "green" },
   failed: { text: "失败", color: "red" },
   cancelled: { text: "已取消", color: "gray" },
-  expired: { text: "已过期", color: "gray" }
+  expired: { text: "已过期", color: "purple" }
 };
 
 function stateText(state: RecordCacheState) {
@@ -466,9 +520,12 @@ onMounted(() => {
           <a-button :disabled="loading" @click="reset"
             ><template #icon><RotateCcw :size="15" /></template>重置</a-button
           >
-          <a-button :disabled="loading" title="刷新" @click="loadTasks(true)"
-            ><template #icon><RefreshCw :size="15" /></template
-          ></a-button>
+          <!-- 刷新是「青绿软底」语义（uvp-refresh-btn），且按本系统的按钮风格必须是
+               「图标 + 文字」：只画一个图标会掉回次级浅蓝，跟旁边的重置撞色，
+               也认不出是刷新。 -->
+          <a-button class="uvp-refresh-btn" :disabled="loading" title="刷新" @click="loadTasks(true)"
+            ><template #icon><RefreshCw :size="15" /></template>刷新</a-button
+          >
         </template>
       </s-layout-search>
 
@@ -478,18 +535,14 @@ onMounted(() => {
         :loading="loading"
         :pagination="false"
         :bordered="false"
-        :scroll="{ x: 2290, y: '100%' }"
+        :scroll="{ x: 1890, y: '100%' }"
         row-key="taskId"
       >
         <template #columns>
-          <!-- 任务 ID 是排障时的唯一指代（日志、下载地址、后端排查都按它对齐），所以放最前
-               并完整露出来，不做省略号截断。表格 `scroll.x` 有 2000+ 需要横向滚动，
-               它是排障入口，不该滚出视野 ⇒ 钉在左侧。 -->
-          <a-table-column title="任务 ID" :width="300" fixed="left">
-            <template #cell="{ record }">
-              <span class="mono" :title="record.taskId">{{ record.taskId }}</span>
-            </template>
-          </a-table-column>
+          <!-- ⛔ 这里**没有**「任务 ID」列（老板 2026-11-04 要求拿掉）：
+               它是排障用的长串（36 位 UUID），摆在第一列会把设备 / 通道挤到屏幕外，
+               而真正要排障的人点「详情」就能看到完整 ID（还能一键复制）。
+               想加回来之前先想清楚：那一列会占掉 300px，等于牺牲设备/通道的可读性。 -->
 
           <!-- 「设备」和「通道」各自把**名称 + 国标编码**合成一格（上行名称、下行编码）。
                ⛔ 编码一行都不折：20 位国标编码按 mono 字体量下来 ~168px，加内边距要 180 起步，
@@ -516,23 +569,6 @@ onMounted(() => {
                 </span>
                 <span class="record-cache-cell__sub mono">{{ record.channelCode || "-" }}</span>
               </div>
-            </template>
-          </a-table-column>
-
-          <!-- 录像区间只有"起 / 至"两行时间戳，内容宽度是固定的（`2026-10-06 12:53:49`），
-               290 是当初随手给的富余值，实际只需 ~230 就不会折行。 -->
-          <a-table-column title="录像区间" :width="180">
-            <template #cell="{ record }">
-              <div class="record-cache-cell record-cache-cell--stack">
-                <span>{{ formatTime(record.startTime) }}</span>
-                <span class="record-cache-cell__sub">至 {{ formatTime(record.endTime) }}</span>
-              </div>
-            </template>
-          </a-table-column>
-
-          <a-table-column title="状态" :width="100">
-            <template #cell="{ record }">
-              <a-tag :color="stateColor(record.state)" size="small">{{ stateText(record.state) }}</a-tag>
             </template>
           </a-table-column>
 
@@ -569,6 +605,30 @@ onMounted(() => {
             </template>
           </a-table-column>
 
+          <a-table-column title="状态" :width="100">
+            <template #cell="{ record }">
+              <a-tag :color="stateColor(record.state)" size="small">{{ stateText(record.state) }}</a-tag>
+            </template>
+          </a-table-column>
+
+          <!-- 录像区间只有"起 / 至"两行时间戳，内容宽度是固定的（`2026-10-06 12:53:49`），
+               290 是当初随手给的富余值，实际只需 ~230 就不会折行。 -->
+          <a-table-column title="录像区间" :width="180">
+            <template #cell="{ record }">
+              <div class="record-cache-cell record-cache-cell--stack">
+                <span>{{ formatTime(record.startTime) }}</span>
+                <span class="record-cache-cell__sub">至 {{ formatTime(record.endTime) }}</span>
+              </div>
+            </template>
+          </a-table-column>
+
+          <!-- 时长 = 这段录像**本身**多长（`totalSeconds`，由起止时间算出），
+               跟「进度」列里那个"已缓存 / 总时长"是两回事：那一行比的是进度，
+               这里要能一眼读出"这段有多长"（挑缓存哪段、估算占多大空间都靠它）。
+               ⛔ 别改成 `endTime - startTime` 现算：跨天的段会算错，且后端已有权威值。 -->
+          <a-table-column title="时长" :width="110">
+            <template #cell="{ record }">{{ formatDuration(record.totalSeconds) }}</template>
+          </a-table-column>
           <a-table-column title="大小" :width="110">
             <template #cell="{ record }">{{ formatByteSize(record.cachedBytes) }}</template>
           </a-table-column>
@@ -577,9 +637,9 @@ onMounted(() => {
             <template #cell="{ record }">{{ record.downloadSpeed }}×</template>
           </a-table-column>
 
-          <a-table-column title="操作人" :width="110">
-            <template #cell="{ record }">{{ record.createdByName || "-" }}</template>
-          </a-table-column>
+          <!-- 「操作人」列 2026-11-04 撤掉：一屏只判断"这段缓存成没成"，操作人不是
+               判断依据，却要占 110px。人挪进「详情」弹窗（那里有完整时间线）。
+               ⛔ 别只注释掉留一坨死模板 —— 想加回来按 need 重新写。 -->
 
           <a-table-column title="创建时间" :width="180">
             <template #cell="{ record }">{{ formatTime(record.createdAt) }}</template>
@@ -589,13 +649,25 @@ onMounted(() => {
             <template #cell="{ record }">{{ formatTime(record.expiresAt) }}</template>
           </a-table-column>
 
-          <!-- 「操作」列宽度按最挤的一行给足：取消收藏(4 字，最长的一档) + 下载 + 分段 + 删除。
+          <!-- 「操作」列宽度按**最挤的一行**给足，不是按常见行。
                ⛔ 收藏原来是靠左的独立一列（老板 2026-10-06 要求并进来），
                独立列占掉一格宽度、且横向滚动时和操作区分处两端，两处都得找。
-               并进操作列后它天然跟着 `fixed="right"` 钉住，位置也稳定（永远第一个）。 -->
-          <a-table-column title="操作" :width="260" align="center" fixed="right">
+               并进操作列后它天然跟着 `fixed="right"` 钉住，位置也稳定。
+               ⭐ 2026-11-04 加了「详情」（任务 ID 从表格里拿掉，改在弹窗里看），
+                  最挤的是「已完成 + 多分片 + 已收藏」那行，五颗并排：
+                  详情 53 + 取消收藏 79 + 下载 53 + 分段 53 + 删除 53 = 291，加 4×4 间隙 ≈ 307。
+                  真机实测单颗宽度就是这么来的（`getBoundingClientRect`，13px 字号带 13px 图标）。
+                  ⇒ 320 起步；⛔ 别再退回 200/260，那两档都会把「删除」裁掉半颗
+                  （同一天 WeeklyScheduleGrid 的「清空」就是这么被 `overflow: hidden` 吃掉的）。 -->
+          <a-table-column title="操作" :width="320" align="center" fixed="right">
             <template #cell="{ record }">
               <div class="uvp-table-actions">
+                <!-- ⛔ 详情排最前：它是只读入口，其余都是会改状态的动作，
+                     把只读的放在一排动作前面，误点代价最低（同仓告警 / 录像计划都是这么排的）。 -->
+                <a-link class="uvp-table-action uvp-table-action--detail" @click="openDetail(record)">
+                  <template #icon><Eye :size="13" /></template>
+                  <span>详情</span>
+                </a-link>
                 <!-- ⛔ 用 `a-link`（本仓操作列的唯一基准），别换成 `a-button`：Arco 按钮自带
                      padding / 圆角 / hover 底色，在同一张表里就成了第二套观感。
                      ⛔ 纯图标在操作列里认不出是什么（同一排还有星标以外的下载/删除），
@@ -675,6 +747,76 @@ onMounted(() => {
           <a-empty description="还没有缓存任务。在「设备录像」页面选一段录像点「缓存到服务器」即可。" />
         </template>
       </a-table>
+
+      <!-- 任务详情。
+           ⛔ 表格里已经拿掉了「任务 ID」（36 位 UUID 占 300px，把设备/通道挤出屏幕），
+              这类"平时不看、排障必看"的字段一律收在这里，表格只留一眼要判断的列。
+           ⛔ `modal-class="uvp-system-dialog"` 不能省：暗色下的面板底色 / 描边 / 页脚
+              全挂在那组全局规则上，漏了就是"两套皮肤"（见 system-dialog-unification 用例）。 -->
+      <a-modal
+        :visible="detailVisible"
+        title="缓存任务详情"
+        :width="720"
+        :footer="false"
+        modal-class="uvp-system-dialog record-cache-detail-dialog"
+        unmount-on-close
+        @cancel="closeDetail"
+      >
+        <a-descriptions
+          v-if="detailTask"
+          class="uvp-system-description uvp-system-description--compact record-cache-detail"
+          :column="2"
+          bordered
+        >
+          <a-descriptions-item label="任务 ID">
+            <span class="record-cache-detail__id mono">{{ detailTask.taskId }}</span>
+            <a-link class="record-cache-detail__copy" @click="copyTaskId">复制</a-link>
+          </a-descriptions-item>
+          <a-descriptions-item label="操作人">{{ detailTask.createdByName || "-" }}</a-descriptions-item>
+
+          <a-descriptions-item label="设备">
+            <div class="record-cache-cell record-cache-cell--stack">
+              <span class="record-cache-cell__title">{{ detailTask.deviceName || "-" }}</span>
+              <span class="record-cache-cell__sub mono">{{ detailTask.deviceId || "-" }}</span>
+            </div>
+          </a-descriptions-item>
+          <a-descriptions-item label="通道">
+            <div class="record-cache-cell record-cache-cell--stack">
+              <span class="record-cache-cell__title">{{ detailTask.channelName || "-" }}</span>
+              <span class="record-cache-cell__sub mono">{{ detailTask.channelCode || "-" }}</span>
+            </div>
+          </a-descriptions-item>
+
+          <a-descriptions-item label="状态">
+            <a-tag :color="stateColor(detailTask.state)" size="small">{{ stateText(detailTask.state) }}</a-tag>
+          </a-descriptions-item>
+          <a-descriptions-item label="收藏">
+            {{ detailTask.favorite ? "已收藏（不会被自动清理）" : "未收藏" }}
+          </a-descriptions-item>
+
+          <a-descriptions-item label="录像起点">{{ formatTime(detailTask.startTime) }}</a-descriptions-item>
+          <a-descriptions-item label="录像终点">{{ formatTime(detailTask.endTime) }}</a-descriptions-item>
+
+          <a-descriptions-item label="时长">{{ formatDuration(detailTask.totalSeconds) }}</a-descriptions-item>
+          <a-descriptions-item label="大小">{{ formatByteSize(detailTask.cachedBytes) }}</a-descriptions-item>
+
+          <a-descriptions-item label="进度">
+            {{ progressPercent(detailTask) }}%（已缓存 {{ formatDuration(detailTask.cachedSeconds) }}）
+          </a-descriptions-item>
+          <a-descriptions-item label="倍速">{{ detailTask.downloadSpeed }}×</a-descriptions-item>
+
+          <a-descriptions-item label="创建时间">{{ formatTime(detailTask.createdAt) }}</a-descriptions-item>
+          <a-descriptions-item label="过期时间">{{ formatTime(detailTask.expiresAt) }}</a-descriptions-item>
+
+          <a-descriptions-item label="开始缓存">{{ formatTime(detailTask.startedAt) }}</a-descriptions-item>
+          <a-descriptions-item label="完成时间">{{ formatTime(detailTask.finishedAt) }}</a-descriptions-item>
+
+          <!-- 失败原因可能是一整段后端错误（含 URL / 状态码），占两列才不至于折成一堆行。 -->
+          <a-descriptions-item v-if="detailTask.lastError" label="失败原因" :span="2">
+            <span class="record-cache-detail__error">{{ detailTask.lastError }}</span>
+          </a-descriptions-item>
+        </a-descriptions>
+      </a-modal>
 
       <!-- ⛔ 独立分页条必须挂 `uvp-pagination-bar`：本仓分页条的统一基类，
            三开关（总数 / 每页条数 / 跳页）与档位口径见
@@ -856,6 +998,38 @@ onMounted(() => {
    不生效、且多一层依赖），所以模板里给这行也写了同一个 `data-state`。 */
 .record-cache-progress[data-state="failed"] .record-cache-progress__percent {
   color: var(--uvp-danger);
+}
+
+/* ── 详情弹窗 ──────────────────────────────────────────────────────────────── */
+
+/* 任务 ID 是本页唯一的排障指代（36 位 UUID），必须能整串看清、不能折行断成两半。 */
+.record-cache-detail :deep(.arco-descriptions-item-label) {
+  width: 88px;
+  white-space: nowrap;
+}
+
+/* 表格里名称要单行省略（列宽固定），弹窗里宽度够，别把设备名也截掉。 */
+.record-cache-detail .record-cache-cell__title {
+  overflow: visible;
+  white-space: normal;
+}
+
+.record-cache-detail__id {
+  word-break: break-all;
+  user-select: all;
+}
+
+.record-cache-detail__copy {
+  margin-left: 8px;
+  font-size: 12px;
+}
+
+/* 失败原因是一整段后端错误（含 URL / 状态码），按普通正文排会挤成一团。 */
+.record-cache-detail__error {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--uvp-danger);
+  word-break: break-all;
 }
 
 @media (width <= 760px) {

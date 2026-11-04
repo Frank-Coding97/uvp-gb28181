@@ -270,9 +270,38 @@ describe("录像缓存进度条的配色契约（源码级）", () => {
   });
 
   it("已取消 / 已过期压成灰色，别显示成「卡在某个百分比」", () => {
+    // 注意：这条说的是**进度条**压灰（状态列的小标签另有配色，见下一条）。
     for (const state of ["cancelled", "expired"]) {
       expect(source).toContain(`[data-state="${state}"]`);
     }
     expect(source).toContain("var(--uvp-text-tertiary)");
+  });
+
+  it("七个状态各用一种标签颜色，一个都不许撞", () => {
+    /*
+     * ⛔ 老板 2026-11-04 提出：状态列一屏全是灰标签，等于「没有状态」。
+     *    改之前撞了两对：排队中/缓存中都是 arcoblue、已取消/已过期都是 gray。
+     *
+     * 为什么钉源码而不是渲染 DOM：`a-table` 的 `#cell` 插槽里 `<a-tag>` 在 happy-dom 下
+     * 会渲染成一个**没有 class 的裸 span**（color/size 退化成 DOM 属性），
+     * 查不到 `arco-tag-*` 类；真实浏览器里是正常的，属测试环境差异。
+     *
+     * 判据用**逐个状态点名期望色**，而不是"去重后长度 = 7"：
+     * 后者在"把撞色那两对同时调成另一个同色"时仍然通过，照样会漏。
+     */
+    const meta = source.slice(source.indexOf("const stateMeta"), source.indexOf("function stateText"));
+    const colors: Record<string, string> = {};
+    for (const match of meta.matchAll(/(\w+):\s*\{\s*text:\s*"[^"]+",\s*color:\s*"([^"]+)"/g)) {
+      colors[match[1]] = match[2];
+    }
+    expect(colors).toEqual({
+      queued: "cyan",
+      running: "arcoblue",
+      merging: "orange",
+      succeeded: "green",
+      failed: "red",
+      cancelled: "gray",
+      expired: "purple"
+    });
   });
 });

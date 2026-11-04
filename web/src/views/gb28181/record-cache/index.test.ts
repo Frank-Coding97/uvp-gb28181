@@ -98,6 +98,18 @@ const stubs = {
     props: ["current", "pageSize", "total", "pageSizeOptions"],
     emits: ["change", "page-size-change"],
     template: "<div data-testid='cache-pager' />"
+  },
+  // 详情弹窗：只渲染 `visible` 为真的那一次，跟真组件的 `unmount-on-close` 行为一致 ——
+  // 关窗后再按文案找内容会找不到，这正是"关掉就是关掉"的判据。
+  "a-modal": {
+    props: ["visible", "title", "footer", "width", "modalClass"],
+    emits: ["cancel"],
+    template: "<section v-if='visible' class='cache-detail-modal' :data-title='title'><slot /></section>"
+  },
+  "a-descriptions": { props: ["column", "bordered"], template: "<dl class='cache-desc-list'><slot /></dl>" },
+  "a-descriptions-item": {
+    props: ["label", "span"],
+    template: "<div class='cache-desc' :data-label='label'><slot /></div>"
   }
 };
 
@@ -147,7 +159,7 @@ function task(overrides: Partial<RecordCacheTask> = {}): RecordCacheTask {
 }
 
 function page(list: RecordCacheTask[]) {
-  return { code: 0, data: { list, total: list.length, page: 1, size: 20 } };
+  return { code: 0, data: { list, total: list.length, page: 1, size: 10 } };
 }
 
 function buttonByText(wrapper: ReturnType<typeof mount>, text: string) {
@@ -221,7 +233,7 @@ describe("record cache workspace", () => {
 
     expect(api.listRecordCacheTasks).toHaveBeenCalledWith({
       page: 1,
-      size: 20,
+      size: 10,
       state: undefined,
       keyword: undefined
     });
@@ -378,15 +390,16 @@ describe("record cache workspace", () => {
     await flushPromises();
     expect(api.listRecordCacheTasks).toHaveBeenLastCalledWith({
       page: 1,
-      size: 20,
+      size: 10,
       state: "failed",
       keyword: undefined
     });
   });
 
-  it("表格里能看到设备、通道的名称与国标编码，以及任务 ID", async () => {
+  it("表格里能看到设备、通道的名称与国标编码与时长，但不放任务 ID", async () => {
     // 用户 2026-10-05 提的：只有通道名/设备名时对不上号，排查问题要能直接看到编码；
     // 2026-10-06 调整为「设备」「通道」两列，每列 = 上行名称 + 下行编码。
+    // 2026-11-04 老板要求：任务 ID（36 位 UUID）从表格里拿掉，改到详情弹窗里看。
     const wrapper = mount(RecordCachePage, { global: { stubs } });
     await flushPromises();
 
@@ -404,11 +417,55 @@ describe("record cache workspace", () => {
     // 通道那格取的是 channelCode（国标编码）—— 不是 `channelId`（库里的自增主键 31），
     // 那个号在设备侧根本不存在，显示出来只会让人对不上。
     expect(columnText("通道")).toBe("东门出入口34020000001320000002");
-    expect(columnText("任务 ID")).toBe("t1");
+    // 时长 = 录像本身多长（totalSeconds 1936 = 32 分 16 秒），不是"已缓存"那一段。
+    expect(columnText("时长")).toBe("32分16秒");
+    // 任务 ID 不许再回到表格里（它占 300px，把设备/通道挤出屏幕）——只在详情弹窗里出现。
+    expect(wrapper.findAll("[data-title]").some(node => node.attributes("data-title") === "任务 ID")).toBe(false);
     // 「通道 / 设备」「设备 ID」「通道 ID」三个旧列已经并成两列，别把它们留回来。
     for (const legacy of ["通道 / 设备", "设备 ID", "通道 ID"]) {
       expect(wrapper.findAll("[data-title]").some(node => node.attributes("data-title") === legacy)).toBe(false);
     }
+  });
+
+  it("点操作列的「详情」：弹窗里给出任务 ID、操作人和完整时间线", async () => {
+    // 任务 ID 从表格搬到弹窗后，只靠表格是拿不到排障指代的 ——
+    // 这条钉住"搬走了但没丢"，以及老板点名要的「操作人」也在弹窗里。
+    const wrapper = mount(RecordCachePage, { global: { stubs } });
+    await flushPromises();
+
+    expect(wrapper.find(".cache-detail-modal").exists()).toBe(false);
+
+    await wrapper.get(".uvp-table-action--detail").trigger("click");
+    await flushPromises();
+
+    const modal = wrapper.get(".cache-detail-modal");
+    const item = (label: string) => {
+      const node = modal.findAll(".cache-desc").find(candidate => candidate.attributes("data-label") === label);
+      if (!node) throw new Error(`详情弹窗里没有「${label}」这一项`);
+      return node.text();
+    };
+
+    expect(modal.attributes("data-title")).toBe("缓存任务详情");
+    expect(item("任务 ID")).toContain("t1");
+    expect(item("操作人")).toBe("admin");
+    expect(item("设备")).toContain("34020000001320000001");
+    expect(item("通道")).toContain("34020000001320000002");
+    expect(item("时长")).toBe("32分16秒");
+    // 失败原因只在真失败时出现，跑着的任务不该凭空多一行。
+    expect(modal.findAll(".cache-desc").some(node => node.attributes("data-label") === "失败原因")).toBe(false);
+  });
+
+  it("失败任务的详情里会显示后端给的失败原因", async () => {
+    api.listRecordCacheTasks.mockResolvedValue(page([task({ state: "failed", lastError: "拉流超时：ZLM 无响应" })]));
+    api.getRecordCacheTask.mockResolvedValue({ code: 0, data: task({ state: "failed" }) });
+    const wrapper = mount(RecordCachePage, { global: { stubs } });
+    await flushPromises();
+
+    await wrapper.get(".uvp-table-action--detail").trigger("click");
+    await flushPromises();
+
+    const row = wrapper.findAll(".cache-desc").find(candidate => candidate.attributes("data-label") === "失败原因");
+    expect(row?.text()).toBe("拉流超时：ZLM 无响应");
   });
 
   it("点星标收藏：调接口、按回包回写、给出提示", async () => {
@@ -483,7 +540,7 @@ describe("record cache workspace", () => {
     // 默认不筛：`favorite` 必须是 undefined（传 false 会被后端当成"只看未收藏"）。
     expect(api.listRecordCacheTasks).toHaveBeenLastCalledWith({
       page: 1,
-      size: 20,
+      size: 10,
       state: undefined,
       keyword: undefined
     });
@@ -494,7 +551,7 @@ describe("record cache workspace", () => {
     await flushPromises();
     expect(api.listRecordCacheTasks).toHaveBeenLastCalledWith({
       page: 1,
-      size: 20,
+      size: 10,
       state: undefined,
       keyword: undefined,
       favorite: true
@@ -505,7 +562,7 @@ describe("record cache workspace", () => {
     await flushPromises();
     expect(api.listRecordCacheTasks).toHaveBeenLastCalledWith({
       page: 1,
-      size: 20,
+      size: 10,
       state: undefined,
       keyword: undefined,
       favorite: false
@@ -525,7 +582,7 @@ describe("record cache workspace", () => {
     await flushPromises();
     expect(api.listRecordCacheTasks).toHaveBeenLastCalledWith({
       page: 1,
-      size: 20,
+      size: 10,
       state: undefined,
       keyword: undefined
     });
