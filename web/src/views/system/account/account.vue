@@ -3,38 +3,13 @@
     <div class="snow-fill-inner uvp-page-shell-flat container uvp-split-list-page">
       <s-fold-page :width="280">
         <template #sider>
-          <div class="left-box uvp-tree-panel">
-            <div class="uvp-tree-panel__head">
-              <span class="uvp-tree-panel__title">组织部门</span>
-            </div>
-            <a-input
-              class="uvp-tree-panel__search"
-              v-model="deptSearchKeyword"
-              placeholder="请输入部门名称"
-              @input="onDeptSearch"
-              @clear="onDeptSearch"
-              allow-clear
-            >
-              <template #prefix>
-                <icon-search />
-              </template>
-            </a-input>
-            <div class="tree-box uvp-tree-panel__body">
-              <a-tree ref="treeRef" :field-names="fieldNames" :data="filteredTreeData" show-line @select="onSelectTree">
-                <template #icon="{ isLeaf, expanded }">
-                  <component
-                    :is="isLeaf ? Building2 : expanded ? FolderOpen : Folder"
-                    class="uvp-tree-node-icon"
-                    :size="15"
-                    :stroke-width="2"
-                  />
-                </template>
-                <template #switcher-icon>
-                  <ChevronDown class="arco-tree-node-switcher-icon" :size="13" :stroke-width="2.2" />
-                </template>
-              </a-tree>
-            </div>
-          </div>
+          <dept-tree-panel
+            ref="deptTreePanelRef"
+            class="left-box"
+            :data="treeData"
+            :selected-keys="selectedDeptKeys"
+            @select="onSelectTree"
+          />
         </template>
 
         <template #content>
@@ -257,6 +232,7 @@
 
 <script setup lang="ts">
 import { getDivisionAPI } from "@/api/department";
+import type { DivisionItem } from "@/api/department";
 import { getRolesAPI } from "@/api/role";
 import { getAccountListAPI, addAccountAPI, editAccountAPI, deleteAccountAPI } from "@/api/user";
 //import { getAccountDetailAPI} from "@/api/user";
@@ -264,7 +240,6 @@ import { deepClone } from "@/utils";
 import { formatTime } from "@/globals";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import { useStatusLabel } from "@/hooks/useDictOptions";
-import { Building2, ChevronDown, Folder, FolderOpen } from "@lucide/vue";
 import { storeToRefs } from "pinia";
 import { useSysConfigStore } from "@/store/modules/sys-config";
 import { buildPasswordPolicyRules, firstPasswordPolicyError } from "@/utils/password-policy";
@@ -294,11 +269,11 @@ const form = ref({
   status: null
 });
 
-// 部门搜索关键字
-const deptSearchKeyword = ref("");
-
-// 选中的部门ID集合，用于过滤用户列表
+// 选中的部门ID集合，用于过滤用户列表（含所选部门的下级部门）
 const selectedDeptIds = ref<number[]>([]);
+// 树上高亮的部门节点（受控选中，单选）
+const selectedDeptKeys = ref<Array<string | number>>([]);
+const deptTreePanelRef = ref<{ clearSearch: () => void } | null>(null);
 
 const search = () => {
   pagination.value.current = 1;
@@ -313,16 +288,10 @@ const reset = () => {
     phone: "",
     status: null
   };
-  // 重置部门搜索关键字
-  deptSearchKeyword.value = "";
-  // 重置部门选择
+  // 重置部门搜索与部门选中（搜索框状态在部门树组件内部）
+  deptTreePanelRef.value?.clearSearch();
+  selectedDeptKeys.value = [];
   selectedDeptIds.value = [];
-  // 清空树的选中状态
-  if (treeRef.value) {
-    treeRef.value.selectAll(false);
-  }
-  // 重新加载完整的部门树
-  filteredTreeData.value = treeData.value;
   getAccount();
   // 延迟重置标志位，确保不会影响正常的树选择事件
   setTimeout(() => {
@@ -532,53 +501,11 @@ const handlePageSizeChange = (pageSize: number) => {
   getAccount();
 };
 
-// 部门树
-const fieldNames = ref({
-  key: "id",
-  title: "name",
-  children: "children"
-});
-const treeData = ref();
-const filteredTreeData = ref(); // 过滤后的部门树数据
-const treeRef = ref();
-
-// 部门搜索处理函数
-const onDeptSearch = () => {
-  if (!deptSearchKeyword.value) {
-    // 如果搜索关键字为空，显示完整的部门树
-    filteredTreeData.value = treeData.value;
-    return;
-  }
-
-  // 过滤部门树数据
-  const filterTree = (nodes: any[]) => {
-    if (!nodes || nodes.length === 0) return [];
-
-    const result = [];
-    for (const node of nodes) {
-      // 检查当前节点是否匹配搜索关键字
-      const isMatch = node.name.includes(deptSearchKeyword.value);
-
-      // 递归过滤子节点
-      const filteredChildren = filterTree(node.children);
-
-      // 如果当前节点匹配或者有匹配的子节点，则保留该节点
-      if (isMatch || filteredChildren.length > 0) {
-        const newNode = { ...node };
-        // 如果当前节点匹配，显示所有子节点
-        // 如果当前节点不匹配，但子节点匹配，则只显示匹配的子节点
-        newNode.children = isMatch ? node.children : filteredChildren;
-        result.push(newNode);
-      }
-    }
-    return result;
-  };
-
-  filteredTreeData.value = filterTree(treeData.value);
-};
+// 部门树（面板头、搜索、展开与图标样式由 dept-tree-panel 统一提供）
+const treeData = ref<DivisionItem[]>([]);
 
 // 通过ID在树中查找节点
-const findNodeById = (nodes: any[], id: number): any => {
+const findNodeById = (nodes: DivisionItem[], id: number): DivisionItem | null => {
   for (const node of nodes) {
     if (node.id === id) {
       return node;
@@ -594,11 +521,11 @@ const findNodeById = (nodes: any[], id: number): any => {
 };
 
 // 递归获取节点及其所有子节点的ID
-const getAllChildrenIds = (node: any): number[] => {
+const getAllChildrenIds = (node: DivisionItem): number[] => {
   let ids: number[] = [node.id];
 
   if (node.children && node.children.length > 0) {
-    node.children.forEach((child: any) => {
+    node.children.forEach((child: DivisionItem) => {
       ids = ids.concat(getAllChildrenIds(child));
     });
   }
@@ -610,33 +537,18 @@ const getAllChildrenIds = (node: any): number[] => {
 const getDivision = async () => {
   let { data } = await getDivisionAPI();
   treeData.value = data.list;
-  filteredTreeData.value = data.list; // 初始化过滤后的数据
-  setTimeout(() => {
-    treeRef.value.expandAll();
-  }, 0);
 };
 
 // 部门树选择事件处理
-const onSelectTree = (selectedKeys: any[]) => {
+const onSelectTree = (selectedKeys: Array<string | number>) => {
+  selectedDeptKeys.value = selectedKeys;
   // 如果正在重置操作中，不执行后续逻辑
   if (isResetting.value) {
     return;
   }
   // 获取选中部门及其子部门的ID集合
-  if (selectedKeys.length > 0 && treeData.value) {
-    // 获取选中的节点
-    const selectedNodeId = selectedKeys[0];
-    const selectedNode = findNodeById(treeData.value, selectedNodeId);
-
-    if (selectedNode) {
-      // 获取该节点及其所有子节点的ID
-      selectedDeptIds.value = getAllChildrenIds(selectedNode);
-    } else {
-      selectedDeptIds.value = [];
-    }
-  } else {
-    selectedDeptIds.value = [];
-  }
+  const selectedNode = selectedKeys.length > 0 ? findNodeById(treeData.value, Number(selectedKeys[0])) : null;
+  selectedDeptIds.value = selectedNode ? getAllChildrenIds(selectedNode) : [];
 
   pagination.value.current = 1;
   getAccount();
@@ -683,47 +595,6 @@ onMounted(() => {
   :deep(.arco-btn) {
     box-sizing: border-box;
     border-radius: 10px;
-  }
-}
-
-.uvp-tree-panel__search {
-  box-sizing: border-box;
-  background: var(--uvp-search-control-bg) !important;
-  border: 1px solid var(--uvp-search-secondary-btn-border) !important;
-  border-radius: 10px !important;
-  box-shadow: var(--uvp-search-control-shadow) !important;
-
-  &:focus-within {
-    border-color: var(--uvp-brand) !important;
-    box-shadow: var(--uvp-search-control-focus-shadow) !important;
-  }
-
-  :deep(.arco-input::placeholder) {
-    color: var(--uvp-text-tertiary);
-    opacity: 1;
-  }
-}
-
-.container {
-  display: flex;
-  min-height: 0;
-
-  .left-box {
-    display: flex;
-    flex-shrink: 0; // 防止被压缩
-    flex-direction: column;
-    width: 100%;
-    height: 100%;
-
-    .tree-box {
-      flex: 1;
-      overflow: auto;
-    }
-  }
-
-  .right-box {
-    flex: 1;
-    min-width: 0; // 防止 flex 子元素溢出
   }
 }
 </style>

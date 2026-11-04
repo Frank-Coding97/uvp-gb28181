@@ -69,7 +69,8 @@ describe("permission workbench page shell", () => {
   });
 
   it("adds semantic colors for branch and leaf department icons", () => {
-    const content = source();
+    // 分色与树面板一起沉到了共用组件（账号管理也用同一套），契约落在组件源码上
+    const content = readFileSync(resolve(process.cwd(), "src/components/dept-tree-panel/index.vue"), "utf-8");
     expect(content).toContain("uvp-tree-node-icon--branch");
     expect(content).toContain("uvp-tree-node-icon--leaf");
     expect(content).toContain("#c47a18");

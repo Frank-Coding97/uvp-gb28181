@@ -9,8 +9,6 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleAlert,
-  Folder,
-  FolderOpen,
   Info,
   ListChecks,
   Monitor,
@@ -53,16 +51,7 @@ const canShare = computed(() => permissions.value.includes("*:*:*") || permissio
 
 // ---- 左侧部门树 ----
 const deptTree = ref<DivisionItem[]>([]);
-const deptSearchKeyword = ref("");
-const filteredDeptTree = computed(() => {
-  if (!deptSearchKeyword.value.trim()) return deptTree.value;
-  const keyword = deptSearchKeyword.value.trim();
-  const match = (nodes: DivisionItem[]): DivisionItem[] =>
-    nodes
-      .map(node => ({ ...node, children: node.children?.length ? match(node.children) : [] }))
-      .filter(node => node.name.includes(keyword) || (node.children?.length ?? 0) > 0);
-  return match(deptTree.value);
-});
+const selectedDeptKeys = ref<Array<string | number>>([]);
 const selectedDeptId = ref<number | undefined>(undefined);
 const mainView = ref<"assignment" | "sharing">("assignment");
 const guideExpanded = ref(false);
@@ -95,6 +84,7 @@ const loadDeptTree = async () => {
 };
 
 const onSelectDept = (keys: Array<string | number>) => {
+  selectedDeptKeys.value = keys;
   selectedDeptId.value = keys.length ? Number(keys[0]) : undefined;
   page.value = 1;
   void loadDevices();
@@ -373,46 +363,11 @@ onMounted(() => {
     <div class="snow-fill-inner uvp-page-shell-flat container uvp-split-list-page">
       <s-fold-page :width="280">
         <template #sider>
-          <div class="left-box uvp-tree-panel">
-            <div class="uvp-tree-panel__head">
-              <span class="uvp-tree-panel__title">组织部门</span>
-            </div>
-            <a-input class="uvp-tree-panel__search" v-model="deptSearchKeyword" placeholder="请输入部门名称" allow-clear>
-              <template #prefix>
-                <icon-search />
-              </template>
-            </a-input>
-            <div class="tree-box uvp-tree-panel__body">
-              <a-tree
-                v-if="deptTree.length"
-                :data="filteredDeptTree"
-                :field-names="{ key: 'id', title: 'name', children: 'children' }"
-                default-expand-all
-                show-line
-                @select="onSelectDept"
-              >
-                <template #icon="{ isLeaf, expanded }">
-                  <component
-                    :is="isLeaf ? Building2 : expanded ? FolderOpen : Folder"
-                    :class="['uvp-tree-node-icon', isLeaf ? 'uvp-tree-node-icon--leaf' : 'uvp-tree-node-icon--branch']"
-                    :size="15"
-                    :stroke-width="2"
-                  />
-                </template>
-                <template #switcher-icon>
-                  <ChevronDown class="arco-tree-node-switcher-icon" :size="13" :stroke-width="2.2" />
-                </template>
-                <template #title="node">
-                  <div class="dept-tree-node">
-                    <span class="dept-tree-node__name">{{ node.name }}</span>
-                    <a-link :disabled="!canAssign" class="dept-tree-node__assign" @click.stop="openDeptAssign(node)">
-                      分配本部门设备
-                    </a-link>
-                  </div>
-                </template>
-              </a-tree>
-            </div>
-          </div>
+          <dept-tree-panel class="left-box" :data="deptTree" :selected-keys="selectedDeptKeys" @select="onSelectDept">
+            <template #node-extra="{ node }">
+              <a-link :disabled="!canAssign" @click.stop="openDeptAssign(node)">分配本部门设备</a-link>
+            </template>
+          </dept-tree-panel>
         </template>
 
         <template #content>
@@ -664,38 +619,6 @@ onMounted(() => {
 </template>
 
 <style scoped lang="less">
-.uvp-tree-panel :deep(.uvp-tree-node-icon--branch) {
-  color: #c47a18;
-}
-
-.uvp-tree-panel :deep(.uvp-tree-node-icon--leaf) {
-  color: #0f8b83;
-}
-
-.uvp-tree-panel :deep(.arco-tree-node-title:hover .uvp-tree-node-icon),
-.uvp-tree-panel :deep(.arco-tree-node-selected .uvp-tree-node-icon) {
-  color: var(--uvp-brand-strong);
-}
-
-.dept-tree-node {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-
-  &__name {
-    font-size: 13px;
-  }
-  &__assign {
-    display: none;
-    font-size: 12px;
-  }
-}
-
-.dept-tree-node:hover .dept-tree-node__assign {
-  display: inline;
-}
-
 .workbench-guide {
   margin-bottom: 14px;
   padding: 12px 14px;

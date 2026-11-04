@@ -79,6 +79,7 @@ declare module 'vue' {
     AUpload: typeof import('@arco-design/web-vue')['Upload']
     AWatermark: typeof import('@arco-design/web-vue')['Watermark']
     ChunkUpload: typeof import('./components/upload/chunk-upload.vue')['default']
+    DeptTreePanel: typeof import('./components/dept-tree-panel/index.vue')['default']
     FileUpload: typeof import('./components/upload/file-upload.vue')['default']
     ImageUpload: typeof import('./components/upload/image-upload.vue')['default']
     MultiImageUpload: typeof import('./components/upload/multi-image-upload.vue')['default']
