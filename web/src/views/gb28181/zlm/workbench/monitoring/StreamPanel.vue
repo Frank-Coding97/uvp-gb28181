@@ -390,7 +390,7 @@ defineExpose({ refresh: requestRefresh });
     </div>
     <template v-else>
       <section class="stream-table-panel">
-        <a-table :data="rows" row-key="rowKey" :pagination="false" class="uvp-data-table">
+        <a-table :data="rows" row-key="rowKey" :pagination="false" :scroll="{ y: '100%' }" class="uvp-data-table">
           <template #columns>
             <a-table-column title="媒体身份" :width="310"
               ><template #cell="{ record }"
@@ -563,12 +563,21 @@ defineExpose({ refresh: requestRefresh });
 </template>
 
 <style scoped>
+/* ⛔ 与 NetworkSessionPanel 同一套高度链：竖向滚动条落在表体上，不是最外层。
+   flex + min-height:0 缺一层，表格就会把整页撑高、表头跟着页面滚。
+   高度用 `flex: 1` 而不是 `height: 100%`：上方还有提示条/搜索栏时，
+   百分比会按容器全高算，把底部分页顶出可视区。 */
 .monitoring-panel {
   box-sizing: border-box;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
   color: var(--zlm-text-2);
 }
 .monitoring-banner {
+  flex: none;
   padding: 9px 12px;
   margin: 10px 0;
   font-size: var(--zlm-fs-caption);
@@ -603,6 +612,7 @@ defineExpose({ refresh: requestRefresh });
   border-color: var(--zlm-danger-500);
 }
 .stream-search {
+  flex: none;
   margin: 0 0 12px;
 }
 .stream-refresh-btn {
@@ -636,6 +646,10 @@ defineExpose({ refresh: requestRefresh });
   box-shadow: var(--uvp-search-control-focus-shadow) !important;
 }
 .stream-table-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
   overflow: hidden;
   background: var(--uvp-panel-bg);
   border: 1px solid var(--uvp-panel-border);
@@ -717,6 +731,7 @@ defineExpose({ refresh: requestRefresh });
 }
 .stream-pagination {
   display: flex;
+  flex: none;
   flex-wrap: wrap;
   gap: 16px;
   align-items: center;

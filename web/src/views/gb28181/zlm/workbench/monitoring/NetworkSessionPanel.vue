@@ -207,9 +207,6 @@ defineExpose({ refresh });
 
 <template>
   <div class="monitoring-panel session-panel">
-    <div v-if="props.scope === 'all'" class="monitoring-banner" role="status">
-      当前展示全部可见节点的会话数据，结果保留节点来源。
-    </div>
     <div v-if="loadError && (networkData || viewerData)" class="monitoring-banner monitoring-banner--warning" role="status">
       本次刷新失败：{{ errorPresentation.label }}；保留当前 Tab 的筛选、分页和上一次数据。
     </div>
@@ -257,7 +254,13 @@ defineExpose({ refresh });
       </div>
       <template v-else>
         <section class="session-table-panel">
-          <a-table :data="networkRows" :loading="loading" row-key="rowKey" :pagination="false" class="uvp-data-table"
+          <a-table
+            :data="networkRows"
+            :loading="loading"
+            row-key="rowKey"
+            :pagination="false"
+            :scroll="{ y: '100%' }"
+            class="uvp-data-table"
             ><template #columns
               ><a-table-column title="节点" :width="140"
                 ><template #cell="{ record }">{{ record.nodeName || `节点 #${record.nodeId}` }}</template></a-table-column
@@ -333,7 +336,13 @@ defineExpose({ refresh });
       </div>
       <template v-else>
         <section class="session-table-panel">
-          <a-table :data="viewerRows" :loading="loading" row-key="rowKey" :pagination="false" class="uvp-data-table"
+          <a-table
+            :data="viewerRows"
+            :loading="loading"
+            row-key="rowKey"
+            :pagination="false"
+            :scroll="{ y: '100%' }"
+            class="uvp-data-table"
             ><template #columns
               ><a-table-column title="节点" :width="140"
                 ><template #cell="{ record }">{{ record.nodeName || `节点 #${record.nodeId}` }}</template></a-table-column
@@ -383,12 +392,21 @@ defineExpose({ refresh });
 </template>
 
 <style scoped>
+/* ⛔ 竖向滚动条必须落在表体上，不能落在外层面板：这一层是 flex 列，
+   `min-height: 0` 缺一个，下面的表格就撑高整页 ⇒ 表头跟着页面滚走。
+   高度用 `flex: 1` 而不是 `height: 100%` —— 上方还有搜索栏/提示条时，
+   百分比会按容器全高算，把底部分页顶出可视区。 */
 .monitoring-panel {
   box-sizing: border-box;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
   color: var(--zlm-text-2);
 }
 .monitoring-banner {
+  flex: none;
   padding: 9px 12px;
   margin: 10px 0;
   font-size: var(--zlm-fs-caption);
@@ -403,6 +421,7 @@ defineExpose({ refresh });
   border-color: var(--zlm-warn-500);
 }
 .session-search {
+  flex: none;
   margin-bottom: 12px;
 }
 .peer-filter {
@@ -449,6 +468,10 @@ defineExpose({ refresh });
   border-color: var(--zlm-danger-500);
 }
 .session-table-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
   overflow: hidden;
   background: var(--uvp-panel-bg);
   border: 1px solid var(--uvp-panel-border);
@@ -468,6 +491,7 @@ defineExpose({ refresh });
 }
 .session-pagination {
   display: flex;
+  flex: none;
   gap: 16px;
   align-items: center;
   justify-content: space-between;

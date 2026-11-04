@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { Component } from "vue";
 import { RefreshCw } from "lucide-vue-next";
 import type { MediaNodeCatalogNode, MediaScope } from "@/store/modules/media-workbench";
 import MediaScopeBar from "./components/MediaScopeBar.vue";
@@ -9,6 +10,8 @@ export interface MediaWorkspaceView {
   key: string;
   label: string;
   description?: string;
+  /** 标签左侧图标（lucide 组件，可选）。不传就只渲染文字，向后兼容单视图页面。 */
+  icon?: Component;
 }
 
 withDefaults(
@@ -126,7 +129,8 @@ const emit = defineEmits<{
         :title="view.description"
         @click="emit('update:activeView', view.key)"
       >
-        {{ view.label }}
+        <component :is="view.icon" v-if="view.icon" :size="15" aria-hidden="true" />
+        <span>{{ view.label }}</span>
       </button>
     </nav>
 
@@ -263,12 +267,22 @@ const emit = defineEmits<{
 }
 .media-workspace-shell__tabs button {
   position: relative;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
   min-height: 38px;
   padding: 0 14px;
   color: var(--zlm-text-3);
   cursor: pointer;
   background: transparent;
   border: 0;
+}
+.media-workspace-shell__tabs button > svg {
+  flex: none;
+  opacity: 0.85;
+}
+.media-workspace-shell__tabs button.is-active > svg {
+  opacity: 1;
 }
 .media-workspace-shell__tabs button:hover {
   color: var(--zlm-brand-600);

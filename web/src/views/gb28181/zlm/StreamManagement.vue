@@ -57,13 +57,20 @@ onMounted(loadNodes);
 </template>
 
 <style scoped>
+/* ⛔ 必须做成 flex 列：面板（StreamPanel）靠 `flex: 1 + min-height: 0`
+   把可用高度算出来，表格才能自己滚；这里若还是普通块级 + overflow:auto，
+   面板高度退回 auto，竖向滚动条又回到这一层（表头跟着页面滚走）。 */
 .legacy-stream-management {
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   height: 100%;
   padding: 4px 8px 24px;
-  overflow: auto;
+  overflow: hidden;
 }
 .legacy-stream-error {
+  flex: none;
   padding: 9px 12px;
   margin: 10px 0;
   font-size: var(--zlm-fs-caption);
