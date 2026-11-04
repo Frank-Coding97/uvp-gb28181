@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 	"uvplatform.com/uvp-gb28181/app/global/app"
@@ -262,7 +263,55 @@ func operationLogRequestData(c *gin.Context, requestBody []byte) string {
 		}
 		return "{\"sensitive\":true}"
 	}
-	return sanitizeRequestData(requestBody)
+	if len(requestBody) > 0 {
+		return sanitizeRequestData(requestBody)
+	}
+	// 无请求体（典型 GET 查询）时记录查询串：审计只捕获 Body 会让详情页
+	// 恒显示空白，而查询条件全在 URL 上，恰恰是最需要回溯的部分。
+	return sanitizeQueryString(c.Request.URL.RawQuery)
+}
+
+// sensitiveAuditKeys 不得落审计的键名（统一小写比较）。
+var sensitiveAuditKeys = map[string]struct{}{
+	"password":        {},
+	"confirmpassword": {},
+	"newpassword":     {},
+	"oldpassword":     {},
+	"token":           {},
+	"accesstoken":     {},
+	"apikey":          {},
+	"secret":          {},
+	"apisecret":       {},
+}
+
+func isSensitiveAuditKey(key string) bool {
+	_, ok := sensitiveAuditKeys[strings.ToLower(key)]
+	return ok
+}
+
+// sanitizeQueryString 脱敏并还原查询串：ParseQuery 失败时直接丢弃，
+// 宁可少记，也不让可能含凭据的原文进入审计。
+func sanitizeQueryString(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	values, err := url.ParseQuery(raw)
+	if err != nil {
+		return ""
+	}
+	for key := range values {
+		if isSensitiveAuditKey(key) {
+			values[key] = []string{"***"}
+		}
+	}
+	encoded := values.Encode()
+	if decoded, err := url.QueryUnescape(encoded); err == nil {
+		encoded = decoded
+	}
+	if len(encoded) > 10000 {
+		return encoded[:10000] + "...(truncated)"
+	}
+	return encoded
 }
 
 // getOperationModule 获取操作模块。
@@ -371,10 +420,9 @@ func sanitizeNested(value interface{}) interface{} {
 	switch nested := value.(type) {
 	case map[string]interface{}:
 		for key, item := range nested {
-			switch strings.ToLower(key) {
-			case "password", "confirmpassword", "newpassword", "oldpassword", "token", "accesstoken", "apikey", "secret", "apisecret":
+			if isSensitiveAuditKey(key) {
 				nested[key] = "***"
-			default:
+			} else {
 				nested[key] = sanitizeNested(item)
 			}
 		}

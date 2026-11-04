@@ -33,7 +33,8 @@
           </a-button>
         </template>
         <template #extra>
-          <a-button @click="onExport" v-hasPerm="['system:log:export']">
+          <!-- 导出 = 只取数不改数 ⇒ 青绿（与「刷新」同一色相，见 uvp-buttons.scss）。 -->
+          <a-button class="uvp-export-btn" @click="onExport" v-hasPerm="['system:log:export']">
             <template #icon><icon-export /></template>
             <span>导出</span>
           </a-button>
@@ -144,10 +145,12 @@
         <a-descriptions-item label="部门">{{ currentLog.deptName }}</a-descriptions-item>
         <a-descriptions-item label="操作时间">{{ formatTime(currentLog.createdAt) }}</a-descriptions-item>
         <a-descriptions-item label="请求参数">
-          <pre class="log-detail-block">{{ currentLog.requestData }}</pre>
+          <pre v-if="currentLog.requestData" class="log-detail-block">{{ currentLog.requestData }}</pre>
+          <span v-else class="log-detail-empty">无（该请求未携带参数）</span>
         </a-descriptions-item>
         <a-descriptions-item label="响应数据">
-          <pre class="log-detail-block">{{ currentLog.responseData }}</pre>
+          <pre v-if="currentLog.responseData" class="log-detail-block">{{ currentLog.responseData }}</pre>
+          <span v-else class="log-detail-empty">无（当前未记录响应数据）</span>
         </a-descriptions-item>
         <a-descriptions-item label="错误信息" v-if="currentLog.errorMsg">
           <pre class="log-detail-block log-detail-block--error">{{ currentLog.errorMsg }}</pre>
@@ -396,15 +399,19 @@ onMounted(() => {
   color: var(--uvp-text-secondary);
   overflow-wrap: break-word;
   white-space: pre-wrap;
-  background: #f8fbff;
-  border: 1px solid #e6edf7;
+  background: var(--uvp-shell-muted);
+  border: 1px solid var(--uvp-panel-border);
   border-radius: 10px;
+}
+
+.log-detail-empty {
+  color: var(--uvp-text-tertiary);
 }
 
 .log-detail-block--error {
   color: var(--uvp-danger);
-  background: #fff7f7;
-  border-color: #f4d0d0;
+  background: var(--uvp-danger-soft);
+  border-color: var(--uvp-danger-border);
 }
 </style>
 
