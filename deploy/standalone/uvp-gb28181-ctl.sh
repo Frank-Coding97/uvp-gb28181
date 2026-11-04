@@ -503,11 +503,15 @@ install_helper_image() {
   mkdir -p "$(dirname "$UPDATER_BIN")" 2>/dev/null || true
   if [ -f "$UPDATER_BIN" ]; then
     cp -p "$UPDATER_BIN" "$UPDATER_BIN.bak-$(date -u +%Y%m%d%H%M%S)" 2>/dev/null || true
+    # 只留最近 3 份备份。⛔ 别写成 `for old in $(ls -1t ...)`：shellcheck 报 SC2045
+    # （ls 输出按空白切分，路径带空格就错位），而出包脚本的前置门禁会因此拒绝出包。
+    # 用 while read 逐行读，才是 shellcheck 认的写法。
     local keep=0 old
-    for old in $(ls -1t "$UPDATER_BIN".bak-* 2>/dev/null); do
+    while IFS= read -r old; do
+      [ -n "$old" ] || continue
       keep=$((keep + 1))
       if [ "$keep" -gt 3 ]; then rm -f "$old"; fi
-    done
+    done < <(ls -1t "$UPDATER_BIN".bak-* 2>/dev/null)
   fi
   local replaced=1
   if [ "$from_release" -eq 1 ]; then
