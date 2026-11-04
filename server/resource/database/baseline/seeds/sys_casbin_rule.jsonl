@@ -530,3 +530,4 @@
 {"id": 10356, "ptype": "p", "v0": "role_1", "v1": "/api/system/upgrade/notice/ignore", "v2": "DELETE", "v3": "*", "v4": "", "v5": ""}
 {"id": 10357, "ptype": "p", "v0": "role_1", "v1": "/api/system/upgrade/notice/auto-check", "v2": "POST", "v3": "*", "v4": "", "v5": ""}
 {"id": 10358, "ptype": "p", "v0": "role_1", "v1": "/api/gb28181/device-mgmt/snapshots/archive", "v2": "GET", "v3": "*", "v4": "", "v5": ""}
+{"id": 10359, "ptype": "p", "v0": "role_1", "v1": "/api/sysJobResults/clear", "v2": "POST", "v3": "*", "v4": "", "v5": ""}

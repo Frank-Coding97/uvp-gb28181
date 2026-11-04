@@ -3517,7 +3517,8 @@ INSERT INTO "sys_api" ("id", "title", "path", "method", "api_group", "created_at
 (683, '忽略更新版本', '/api/system/upgrade/notice/ignore', 'POST', '服务升级', '2026-10-29 11:26:25.000000', '2026-10-29 11:26:25.000000', NULL, 1),
 (684, '取消忽略更新版本', '/api/system/upgrade/notice/ignore', 'DELETE', '服务升级', '2026-10-29 11:26:25.000000', '2026-10-29 11:26:25.000000', NULL, 1),
 (685, '设置定时检查更新', '/api/system/upgrade/notice/auto-check', 'POST', '服务升级', '2026-10-29 12:18:23.000000', '2026-10-29 12:18:23.000000', NULL, 1),
-(686, '批量下载抓拍图像', '/api/gb28181/device-mgmt/snapshots/archive', 'GET', '图像库', '2026-11-04 16:06:27.000000', '2026-11-04 16:06:27.000000', NULL, 1);
+(686, '批量下载抓拍图像', '/api/gb28181/device-mgmt/snapshots/archive', 'GET', '图像库', '2026-11-04 16:06:27.000000', '2026-11-04 16:06:27.000000', NULL, 1),
+(687, '清空定时任务日志', '/api/sysJobResults/clear', 'POST', '日志中心', '2026-11-04 18:55:00.000000', '2026-11-04 18:55:00.000000', NULL, 1);
 INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5") VALUES
 (6266, 'g', 'user_1', 'role_1', '*', '', '', ''),
 (8166, 'p', 'role_3', '/api/users/logout', 'POST', '*', '', ''),
@@ -4054,7 +4055,8 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (10355, 'p', 'role_1', '/api/system/upgrade/notice/ignore', 'POST', '*', '', ''),
 (10356, 'p', 'role_1', '/api/system/upgrade/notice/ignore', 'DELETE', '*', '', ''),
 (10357, 'p', 'role_1', '/api/system/upgrade/notice/auto-check', 'POST', '*', '', ''),
-(10358, 'p', 'role_1', '/api/gb28181/device-mgmt/snapshots/archive', 'GET', '*', '', '');
+(10358, 'p', 'role_1', '/api/gb28181/device-mgmt/snapshots/archive', 'GET', '*', '', ''),
+(10359, 'p', 'role_1', '/api/sysJobResults/clear', 'POST', '*', '', '');
 INSERT INTO "sys_civil_code" ("code", "name", "short_name", "parent_code", "level", "pinyin", "created_at", "updated_at") VALUES
 ('110000', '北京市', '北京市', '', 1, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),
 ('110100', '北京市市辖区', '市辖区', '110000', 2, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),
@@ -7896,7 +7898,8 @@ INSERT INTO "sys_menu" ("id", "parent_id", "path", "name", "redirect", "componen
 (140615, 140610, '', '', NULL, '', '收藏缓存', 0, 0, 0, 1, 0, '', 0, '', '', 5, 3, 0, 'gb28181:record-cache:favorite', '2026-10-05 11:52:03.000000', '2026-10-05 11:52:03.000000', NULL, 1),
 (140616, 10, '/system/service-upgrade/index', 'service-upgrade', NULL, 'system/service-upgrade/index', '服务升级', 0, 0, 0, 0, 0, '', 0, '', 'lucide:CloudDownload', 100, 2, 0, '', '2026-10-16 14:52:29.000000', '2026-10-16 14:52:29.000000', NULL, 1),
 (140617, 140616, '', 'ServiceUpgradeRead', NULL, '', '查看服务升级', 0, 0, 0, 0, 0, '', 0, '', '', 0, 3, 0, 'system:upgrade:read', '2026-10-16 14:52:29.000000', '2026-10-16 14:52:29.000000', NULL, 1),
-(140618, 140616, '', 'ServiceUpgradeManage', NULL, '', '管理服务升级', 0, 0, 0, 0, 0, '', 0, '', '', 0, 3, 0, 'system:upgrade:manage', '2026-10-16 14:52:29.000000', '2026-10-16 14:52:29.000000', NULL, 1);
+(140618, 140616, '', 'ServiceUpgradeManage', NULL, '', '管理服务升级', 0, 0, 0, 0, 0, '', 0, '', '', 0, 3, 0, 'system:upgrade:manage', '2026-10-16 14:52:29.000000', '2026-10-16 14:52:29.000000', NULL, 1),
+(140619, 140347, '', 'SysJobResultsClear', NULL, '', '一键清理', 0, 0, 0, 0, 0, '', 0, '', '', 1, 3, 0, 'system:sysjobresults:clear', '2026-11-04 18:55:00.000000', '2026-11-04 18:55:00.000000', NULL, 1);
 INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (1, 5),
 (1, 6),
@@ -8399,7 +8402,8 @@ INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (140618, 683),
 (140618, 684),
 (140618, 685),
-(140450, 686);
+(140450, 686),
+(140619, 687);
 INSERT INTO "sys_role" ("id", "name", "sort", "status", "description", "parent_id", "created_at", "updated_at", "deleted_at", "created_by", "data_scope", "checked_depts") VALUES
 (1, '系统管理员', 0, 1, '最高权限管理员角色', 0, '2025-09-01 17:32:12.000000', '2025-09-30 15:53:24.000000', NULL, 1, 1, ''),
 (3, '游客', 0, 1, '只读游客：允许业务查看、实时观看和录像回放；禁止下载、控制与修改', 0, '2026-08-24 20:29:31.000000', '2026-09-05 18:46:37.000000', NULL, 1, 4, '');
@@ -8629,7 +8633,8 @@ INSERT INTO "sys_role_menu" ("role_id", "menu_id") VALUES
 (3, 140452),
 (3, 140455),
 (3, 140457),
-(3, 140510);
+(3, 140510),
+(1, 140619);
 INSERT INTO "sys_user_role" ("user_id", "role_id") VALUES
 (1, 1);
 INSERT INTO "sys_users" ("id", "username", "password", "email", "status", "dept_id", "phone", "sex", "nick_name", "avatar", "description", "created_at", "updated_at", "deleted_at", "created_by", "must_change_password") VALUES
@@ -8638,11 +8643,11 @@ INSERT INTO "sys_users" ("id", "username", "password", "email", "status", "dept_
 -- 自增水位：种子行用的是显式 id，PostgreSQL 的序列不会自己前进，
 -- 不补这一步，全新装环境第一次 INSERT 就会撞主键。
 SELECT setval(pg_get_serial_sequence('gb_sip_security_policy', 'id'), 1, true);
-SELECT setval(pg_get_serial_sequence('sys_api', 'id'), 686, true);
-SELECT setval(pg_get_serial_sequence('sys_casbin_rule', 'id'), 10358, true);
+SELECT setval(pg_get_serial_sequence('sys_api', 'id'), 687, true);
+SELECT setval(pg_get_serial_sequence('sys_casbin_rule', 'id'), 10359, true);
 SELECT setval(pg_get_serial_sequence('sys_department', 'id'), 1, true);
 SELECT setval(pg_get_serial_sequence('sys_dict', 'id'), 38, true);
 SELECT setval(pg_get_serial_sequence('sys_dict_item', 'id'), 299, true);
-SELECT setval(pg_get_serial_sequence('sys_menu', 'id'), 140618, true);
+SELECT setval(pg_get_serial_sequence('sys_menu', 'id'), 140619, true);
 SELECT setval(pg_get_serial_sequence('sys_role', 'id'), 3, true);
 SELECT setval(pg_get_serial_sequence('sys_users', 'id'), 1, true);

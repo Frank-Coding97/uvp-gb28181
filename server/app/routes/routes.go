@@ -456,6 +456,8 @@ func InitRoutes(engine *gin.Engine) *openapiauth.Gateway {
 				sysJobResults.GET("/:id", sysJobResultsControllers.GetByID)
 				// 删除定时任务执行结果
 				sysJobResults.DELETE("/delete", sysJobResultsControllers.Delete)
+				// 一键清理（清空全部）定时任务执行结果
+				sysJobResults.POST("/clear", sysJobResultsControllers.Clear)
 			}
 
 			// GB28181 国标业务路由(设备管理等)

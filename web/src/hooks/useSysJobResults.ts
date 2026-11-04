@@ -1,6 +1,6 @@
 import { ref, computed } from "vue";
 import type { SysJobResultsData, SysJobResultsListParams, SysJobResultsListResult } from "../api/sysjobresults";
-import { getSysJobResultsList, deleteSysJobResults } from "../api/sysjobresults";
+import { getSysJobResultsList, deleteSysJobResults, clearSysJobResults } from "../api/sysjobresults";
 
 export const useSysJobResultsPluginHook = () => {
   // State
@@ -67,6 +67,15 @@ export const useSysJobResultsPluginHook = () => {
     }
   };
 
+  // 一键清理：清空全部日志，返回实际删除条数
+  const clearData = async (): Promise<number> => {
+    const response = await clearSysJobResults();
+    const deletedCount = response.data?.deletedCount ?? 0;
+    dataList.value = [];
+    total.value = Math.max(0, total.value - deletedCount);
+    return deletedCount;
+  };
+
   // 重置搜索条件
   const resetSearchParams = () => {
     searchParams.value = {};
@@ -93,6 +102,7 @@ export const useSysJobResultsPluginHook = () => {
     // Actions
     fetchDataList,
     deleteData,
+    clearData,
     resetSearchParams
   };
 };

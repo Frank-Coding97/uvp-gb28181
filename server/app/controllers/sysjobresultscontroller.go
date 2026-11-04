@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"uvplatform.com/uvp-gb28181/app/middleware"
 	"uvplatform.com/uvp-gb28181/app/models"
 	"uvplatform.com/uvp-gb28181/app/service"
 
@@ -33,6 +34,19 @@ func (c *SysJobResultsController) Delete(ctx *gin.Context) {
 	}
 
 	c.SuccessWithMessage(ctx, "删除成功", nil)
+}
+
+// Clear 清空sys_job_results全部记录（一键清理）
+func (c *SysJobResultsController) Clear(ctx *gin.Context) {
+	// 审计口径：这是一次删除动作，操作日志里要落「删除」而不是「其他」
+	middleware.MarkDeleteOperation(ctx)
+
+	deletedCount, err := c.SysJobResultsService.ClearAll(ctx)
+	if err != nil {
+		c.FailAndAbort(ctx, "清空定时任务日志失败", err)
+	}
+
+	c.SuccessWithMessage(ctx, "清空成功", gin.H{"deletedCount": deletedCount})
 }
 
 // GetByID 根据ID获取sys_job_results信息

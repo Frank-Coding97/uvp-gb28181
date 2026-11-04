@@ -44,3 +44,10 @@ export const getSysJobResultsList = (params: SysJobResultsListParams) => {
 export const deleteSysJobResults = (id: number) => {
   return http.request<BaseResult>("delete", baseUrlApi(`sysJobResults/delete`), { data: { id } });
 };
+
+export type SysJobResultsClearResult = BaseResult<{ deletedCount: number }>;
+
+/** 一键清理：清空全部定时任务执行日志（后端物理删除） */
+export const clearSysJobResults = () => {
+  return http.request<SysJobResultsClearResult>("post", baseUrlApi("sysJobResults/clear"));
+};

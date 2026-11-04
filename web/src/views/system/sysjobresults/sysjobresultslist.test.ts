@@ -32,3 +32,44 @@ describe("定时任务页面外壳", () => {
     expect(source).toMatch(/<a-table-column title="操作"[^>]*align="center"/);
   });
 });
+
+describe("一键清理", () => {
+  it("搜索区有「一键清理」按钮，且带独立权限点", () => {
+    expect(source).toContain('data-testid="sysjobresults-clear-all"');
+    expect(source).toContain("<span>一键清理</span>");
+    expect(source).toContain("v-hasPerm=\"['system:sysjobresults:clear']\"");
+    // 破坏性动作走实测基准：primary + status="warning"（同告警管理页 alarm-clear-all-btn）
+    expect(source).toMatch(/status="warning"/);
+  });
+
+  it("点击一键清理必须先弹确认框，且文案说明是「全部」", () => {
+    const clearFn = source.slice(source.indexOf("const requestClearAll"));
+    expect(clearFn).toContain("Modal.warning(");
+    expect(clearFn).toContain("全部定时任务执行日志");
+    expect(clearFn).toContain('okButtonProps: { status: "danger" }');
+    // 确认之后才真正调接口
+    expect(clearFn).toContain("onOk: () => performClearAll()");
+    expect(source).toContain("await clearData()");
+  });
+});
+
+describe("单条删除", () => {
+  /**
+   * ⛔ 不能用 a-popconfirm 气泡：日志页误删代价高，且气泡贴单元格、容易在移动端误触。
+   * 全仓删除类操作统一 Modal.warning（橙色警示图标 + danger 主按钮）。
+   */
+  it("删除改成弹窗确认，不再用气泡", () => {
+    // ⛔ 断言必须带 `<` 前缀：注释里"不再用 a-popconfirm"这句本身含关键词，裸 toContain 会自伤
+    expect(source).not.toMatch(/<a-popconfirm[\s>]/);
+    const deleteFn = source.slice(source.indexOf("const requestDelete"));
+    expect(deleteFn).toContain("Modal.warning(");
+    expect(deleteFn).toContain("不可恢复");
+    expect(deleteFn).toContain('okButtonProps: { status: "danger" }');
+  });
+
+  it("删除按钮仍在操作列内、逐行单独删除", () => {
+    const actionCell = source.slice(source.indexOf('title="操作"'));
+    expect(actionCell).toContain('@click="requestDelete(record)"');
+    expect(actionCell).toContain("<span>删除</span>");
+  });
+});

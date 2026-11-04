@@ -31,6 +31,12 @@ func (s *SysJobResultsService) Delete(c *gin.Context, id uint64) error {
 	return nil
 }
 
+// ClearAll 清空sys_job_results全部记录，返回删除行数
+func (s *SysJobResultsService) ClearAll(c *gin.Context) (int64, error) {
+	sysJobResultsList := models.NewSysJobResultsList()
+	return sysJobResultsList.ClearAll(c.Request.Context())
+}
+
 // GetByID 根据ID获取sys_job_results
 func (s *SysJobResultsService) GetByID(c *gin.Context, id uint64) (*models.SysJobResults, error) {
 	// 查找sys_job_results记录

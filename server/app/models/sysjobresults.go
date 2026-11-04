@@ -70,6 +70,19 @@ func (l *SysJobResultsList) Find(c context.Context, funcs ...func(*gorm.DB) *gor
 	return app.DB().WithContext(c).Model(&SysJobResults{}).Scopes(funcs...).Find(l).Error
 }
 
+// ClearAll 清空sys_job_results全部记录（硬删除），返回删除行数
+//
+// ⛔ 本表没有 deleted_at 列，Delete 就是物理删除；GORM 对「无 where 的全局删除」默认
+//   返回 ErrMissingWhereClause，这里必须显式给一个恒真条件（不用 AllowGlobalUpdate，
+//   全仓没有先例，恒真 where 的语义更直白）。
+func (l *SysJobResultsList) ClearAll(c context.Context) (int64, error) {
+	result := app.DB().WithContext(c).Where("1 = 1").Delete(&SysJobResults{})
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
+}
+
 // GetTotal 获取sys_job_results总数
 func (l *SysJobResultsList) GetTotal(c context.Context, query ...func(*gorm.DB) *gorm.DB) (int64, error) {
 	var count int64

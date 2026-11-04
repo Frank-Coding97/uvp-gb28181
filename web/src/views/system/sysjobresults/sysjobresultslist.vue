@@ -32,6 +32,22 @@
             <template #icon><icon-refresh /></template>
             <span>重置</span>
           </a-button>
+          <!--
+            一键清理：破坏性动作，位置/样式照告警管理页 alarm-management/index.vue 的
+            「一键清理」基准（搜索区 actions 末尾、primary + status="warning"、Eraser 图标）。
+          -->
+          <a-button
+            data-testid="sysjobresults-clear-all"
+            type="primary"
+            status="warning"
+            :loading="clearing"
+            :disabled="clearing"
+            v-hasPerm="['system:sysjobresults:clear']"
+            @click="requestClearAll"
+          >
+            <template #icon><Eraser :size="15" /></template>
+            <span>一键清理</span>
+          </a-button>
         </template>
       </s-layout-search>
 
@@ -73,12 +89,14 @@
           <a-table-column title="操作" :width="96" align="center" :fixed="isMobile ? '' : 'right'">
             <template #cell="{ record }">
               <div class="uvp-table-actions">
-                <a-popconfirm content="确定要删除这条数据吗？" @ok="handleDelete(record.id)">
-                  <a-link class="uvp-table-action uvp-table-action--delete" v-hasPerm="['system:sysjobresults:delete']">
-                    <template #icon><icon-delete /></template>
-                    <span>删除</span>
-                  </a-link>
-                </a-popconfirm>
+                <a-link
+                  class="uvp-table-action uvp-table-action--delete"
+                  v-hasPerm="['system:sysjobresults:delete']"
+                  @click="requestDelete(record)"
+                >
+                  <template #icon><icon-delete /></template>
+                  <span>删除</span>
+                </a-link>
               </div>
             </template>
           </a-table-column>
@@ -89,16 +107,20 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, computed, onMounted, watch } from "vue";
+import { reactive, computed, ref, onMounted, watch } from "vue";
 import { useRoute } from "vue-router";
+import { Modal, Message } from "@arco-design/web-vue";
+import { Eraser } from "lucide-vue-next";
 import { useSysJobResultsPluginHook } from "@/hooks/useSysJobResults";
 import { formatTime } from "@/globals";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 
 const route = useRoute();
 const { isMobile } = useDevicesSize();
-const { dataList, loading, total, currentPage, pageSize, fetchDataList, deleteData, resetSearchParams } =
+const { dataList, loading, total, currentPage, pageSize, fetchDataList, deleteData, clearData, resetSearchParams } =
   useSysJobResultsPluginHook();
+
+const clearing = ref(false);
 
 // 搜索表单
 const searchForm = reactive({
@@ -161,17 +183,67 @@ const handleReset = () => {
   loadData(1);
 };
 
+/**
+ * 单条删除确认弹窗。
+ * ⛔ 用 Modal.warning（不是 Modal.confirm）：本仓删除类操作统一带橙色警示图标 +
+ *   danger 主按钮，与设备列表 / 固件仓库的删除确认「逐字对齐」；confirm 没有图标。
+ * ⛔ 不再用 a-popconfirm 气泡：气泡样式贴单元格、误触即执行，日志页误删代价高。
+ */
+const requestDelete = (record: { id: number }) => {
+  Modal.warning({
+    title: "删除日志记录",
+    content: "将物理删除这条定时任务日志，删除后不可恢复。",
+    okText: "删除",
+    cancelText: "取消",
+    hideCancel: false,
+    escToClose: true,
+    okButtonProps: { status: "danger" },
+    onOk: () => handleDelete(record.id)
+  });
+};
+
 // 删除数据
 const handleDelete = async (id: number) => {
   try {
     await deleteData(id);
-    // 重新加载当前页数据
+    // 重新加载当前页数据（删完末页可能变空，按当前页重拉，列表自己会回退）
     await loadData();
-    // 显示删除成功消息
-    // 这里可以使用项目的消息提示机制
-  } catch (error) {
-    // 显示删除失败消息
-    console.error("删除失败:", error);
+    Message.success("删除成功");
+  } catch (error: any) {
+    Message.error(error?.message || "删除失败");
+  }
+};
+
+/**
+ * 一键清理（清空全部日志）。
+ * ⛔ 与单条删除共用一套弹窗形态，但文案要说清「全部」——这个按钮不受页面筛选条件影响。
+ * 成功后回到第一页重拉，避免停在已清空的末页。
+ */
+const requestClearAll = () => {
+  if (clearing.value) return;
+  Modal.warning({
+    title: "一键清理定时任务日志",
+    content: "将清空全部定时任务执行日志（不受当前筛选条件影响），删除后不可恢复。",
+    okText: "清空",
+    cancelText: "取消",
+    hideCancel: false,
+    escToClose: true,
+    okButtonProps: { status: "danger" },
+    onOk: () => performClearAll()
+  });
+};
+
+const performClearAll = async () => {
+  if (clearing.value) return;
+  clearing.value = true;
+  try {
+    const deletedCount = await clearData();
+    Message.success(`已清空 ${deletedCount} 条日志`);
+    await loadData(1);
+  } catch (error: any) {
+    Message.error(error?.message || "清空失败");
+  } finally {
+    clearing.value = false;
   }
 };
 
