@@ -37,25 +37,46 @@ import type { MediaChartSpec } from "@/views/gb28181/zlm/workbench/chart/overvie
 import DashboardChart from "../dashboard/DashboardChart.vue";
 
 const props = defineProps<{ samples: PulseSample[]; abnormalWindows: AbnormalWindow[]; asOf?: number }>();
+const BUCKET_SECONDS = 60;
 // Use server snapshot time so client clock skew cannot turn a partial bucket into a full minute.
 const completeSamples = computed(() => {
   const asOf = props.asOf;
-  return asOf == null ? props.samples : props.samples.filter(sample => sample.t + 60 <= asOf);
+  return asOf == null ? props.samples : props.samples.filter(sample => sample.t + BUCKET_SECONDS <= asOf);
+});
+// ⛔ 时间轴必须按分钟补齐：x 轴是时间轴，后端一旦漏掉某个桶（重启/落库延迟/统计缺口），
+// 相邻两点之间会被连线直接跨过去，"这一分钟到底几条"就无从判断。
+// 补成"缺失分钟 = 0 条 + known:false"，曲线在时间维度上恒等距，缺口只影响文案。
+const denseSamples = computed(() => {
+  const list = completeSamples.value;
+  if (list.length === 0) return [] as PulseSample[];
+  const byTime = new Map<number, PulseSample>();
+  let start = list[0].t;
+  let end = list[0].t;
+  for (const sample of list) {
+    byTime.set(sample.t, sample);
+    if (sample.t < start) start = sample.t;
+    if (sample.t > end) end = sample.t;
+  }
+  const dense: PulseSample[] = [];
+  for (let t = start; t <= end; t += BUCKET_SECONDS) {
+    dense.push(byTime.get(t) ?? { t, msgPerSec: 0, failPct: 0, known: false });
+  }
+  return dense;
 });
 const currentBucket = computed(() => {
   const sample = props.samples.at(-1);
   return sample && props.asOf != null && sample.t <= props.asOf && props.asOf < sample.t + 60 ? sample : null;
 });
 const hasSamples = computed(() => props.samples.length > 0);
-const knownSamples = computed(() => completeSamples.value.filter(sample => sample.known !== false));
-const hasGap = computed(() => props.samples.some(sample => sample.known === false));
+const knownSamples = computed(() => denseSamples.value.filter(sample => sample.known !== false));
+const hasGap = computed(() => denseSamples.value.some(sample => sample.known === false));
 // 只要拿到了完整分钟的桶就出图：统计覆盖未知的分钟按 0 绘制，不再折叠成"暂无信令"，
 // 否则整窗都是空桶时仪表盘会退化成一句占位文案，看不出"确实是 0 条"。
-const hasData = computed(() => completeSamples.value.length > 0);
+const hasData = computed(() => denseSamples.value.length > 0);
 const maxMsg = computed(() => Math.max(0, ...knownSamples.value.map(sample => sample.msgPerSec)));
 const axisMax = computed(() => Math.max(1, Math.ceil(maxMsg.value * 1.1)));
 const currentMsg = computed(() => {
-  const current = completeSamples.value.at(-1);
+  const current = denseSamples.value.at(-1);
   return current && current.known !== false ? current.msgPerSec : "--";
 });
 
@@ -74,7 +95,7 @@ const spec = computed<MediaChartSpec>(() => {
   // 原先 unknown ⇒ null + invalidType: break，一条断成好几截的折线在仪表盘上
   // 会被读成"采集中断/平台掉线"，而实际上那条分钟就是没有信令（= 0 条）。
   // "存在缺口"这件事改由底部提示与 tooltip 说明承载，曲线本身不再断开。
-  const values = completeSamples.value.map(sample => {
+  const values = denseSamples.value.map(sample => {
     const known = sample.known !== false;
     return {
       time: sample.t * 1000,
@@ -225,10 +246,17 @@ const spec = computed<MediaChartSpec>(() => {
 <style scoped lang="scss">
 .pulse {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 8px;
   min-width: 0;
-  min-height: 150px;
+
+  /* ⛔ 这里曾经是 min-height: 150px：卡片被压缩时 flex 仍按 150 撑，
+     而 .pulse__chart 只分到 90px 且 overflow:hidden ⇒ 画布底部被裁掉 60px，
+     y=0 基线和 x 轴标签整块消失。没有信令的分钟曲线正好画在 y=0，
+     于是"没有信令"看起来就是折线断掉了（媒体速率卡片更高，所以没这个现象）。
+     画布尺寸只能由可见区域决定，宁可压缩高度也不能裁掉基线。 */
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -284,16 +312,16 @@ const spec = computed<MediaChartSpec>(() => {
 }
 .pulse__chart {
   display: grid;
-  flex: 1;
+  flex: 1 1 auto;
   grid-template-rows: minmax(0, 1fr);
   width: 100%;
-  min-height: 150px;
+  min-height: 0;
   overflow: hidden;
 }
 
 .pulse__chart > .dashboard-chart {
   position: relative;
-  min-height: 150px;
+  min-height: 0;
 }
 
 .pulse__empty {
@@ -301,7 +329,7 @@ const spec = computed<MediaChartSpec>(() => {
   align-items: center;
   justify-content: center;
   height: 100%;
-  min-height: 150px;
+  min-height: 60px;
   font-size: 12px;
   color: var(--uvp-text-tertiary);
 }

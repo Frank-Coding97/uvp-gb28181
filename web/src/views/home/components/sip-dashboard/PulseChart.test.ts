@@ -89,6 +89,27 @@ describe("SIP pulse chart", () => {
     expect(wrapper.text()).toContain("统计存在缺口（缺口按 0 计入）");
   });
 
+  // ⛔ 后端一旦漏掉某个分钟桶（重启/落库延迟），时间轴上的相邻两点会被直接连过去，
+  //    这一分钟到底是 0 条还是丢数据就无从判断。补点后曲线在时间维度上恒等距。
+  it("densifies minutes missing from the payload so a hole cannot skew the time axis", () => {
+    const wrapper = mount(PulseChart, {
+      props: {
+        samples: [
+          { t: 60, msgPerSec: 5, failPct: 0, known: true },
+          { t: 240, msgPerSec: 3, failPct: 0, known: true }
+        ],
+        abnormalWindows: []
+      }
+    });
+    const spec = wrapper.getComponent({ name: "DashboardChart" }).props("spec");
+
+    expect(spec.data[0].values.map((d: any) => d.time)).toEqual([60000, 120000, 180000, 240000]);
+    expect(spec.data[0].values.map((d: any) => d.messages)).toEqual([5, 0, 0, 3]);
+    // 补出来的分钟必须标成"统计缺口"，不能伪装成真实的 0 条。
+    expect(spec.data[0].values[1].known).toBe(false);
+    expect(wrapper.text()).toContain("统计存在缺口（缺口按 0 计入）");
+  });
+
   it("still draws a flat zero curve when every bucket in the window is uncovered", () => {
     const wrapper = mount(PulseChart, {
       props: { samples: [{ t: 60, msgPerSec: 0, failPct: 0, known: false }], abnormalWindows: [] }
