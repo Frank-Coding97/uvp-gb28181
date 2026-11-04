@@ -146,26 +146,20 @@ describe("system drawer surface scoping", () => {
 });
 
 describe("play console button scope", () => {
-  it("does not apply generic dialog button sizing and surfaces to the console modal", () => {
-    const scope = ".uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal))";
-    expect(hasRuleBlock(source.replace(/\s+/g, ""), `${scope}.arco-btn`.replace(/\s+/g, ""), "min-height:34px")).toBe(true);
-    expect(
-      hasRuleBlock(source.replace(/\s+/g, ""), `${scope}.arco-btn-primary`.replace(/\s+/g, ""), "border-color:transparent")
-    ).toBe(true);
-    expect(
-      hasRuleBlock(
-        source.replace(/\s+/g, ""),
-        `${scope}.arco-btn:not(.arco-btn-primary)`.replace(/\s+/g, ""),
-        "background:#ffffff"
-      )
-    ).toBe(true);
-    expect(
-      hasRuleBlock(
-        source.replace(/\s+/g, ""),
-        `body[arco-theme="dark"]${scope}.arco-btn-primary`.replace(/\s+/g, ""),
-        "box-shadow:"
-      )
-    ).toBe(true);
+  // 2026-11-04 起按钮的几何与配色**不在本文件**：统一真源是 src/styles/uvp-buttons.scss。
+  // 原来这里断言的是「系统弹窗那套 34px / 白底 / 渐变」的 4 条规则存在，
+  // 目的是让播放控制台逃开它；现在全局只有一套（控制台也吃同一套几何），
+  // 所以断言改成：① 统一真源确实给了几何与语义色；② 系统弹窗的**专属表面**仍不得落到控制台。
+  it("takes button geometry from the single source instead of dialog-scoped copies", () => {
+    const buttons = readFileSync(resolve(process.cwd(), "src/styles/uvp-buttons.scss"), "utf8");
+    expect(hasRuleBlock(squash(buttons), ".arco-btn", "height:var(--uvp-btn-h-md)")).toBe(true);
+    expect(hasRuleBlock(squash(buttons), ".arco-btn", "border-radius:var(--uvp-btn-radius)")).toBe(true);
+    expect(hasRuleBlock(squash(buttons), ".arco-btn-primary", "background:var(--uvp-btn-primary-bg)")).toBe(true);
+    expect(hasRuleBlock(squash(buttons), ".arco-btn-secondary", "background:var(--uvp-btn-secondary-bg)")).toBe(true);
+  });
+
+  it("keeps dialog-only surfaces off the console modal", () => {
+    // 控制台是深色底，系统弹窗的浅色表面对它无效且会糊；这条保护意图不变。
     expect(source).not.toMatch(/\.uvp-system-dialog \.arco-btn(?:[,\s]|-)/);
   });
 });

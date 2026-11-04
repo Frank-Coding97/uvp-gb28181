@@ -104,12 +104,21 @@ const withoutClass = modals.filter(({ tag }) => !carriesDialogClass(tag));
 
 describe("system dialog skin coverage", () => {
   it("keeps modal and drawer cancel buttons flat in every interaction state", () => {
-    const styles = readFileSync(resolve(root, "styles/arco-overrides.scss"), "utf8");
-    for (const selector of [".arco-modal-footer .arco-btn-secondary", ".arco-drawer-footer .arco-btn-secondary"]) {
-      expect(hasRuleBlock(styles, selector, "box-shadow: none !important", "transform: none !important")).toBe(true);
-      expect(hasRuleBlock(styles, selector, "background: var(--uvp-search-secondary-btn-bg) !important")).toBe(true);
-      expect(hasRuleBlock(styles, `${selector}:focus-visible`, "outline: 2px solid var(--uvp-brand) !important")).toBe(true);
+    const overrides = readFileSync(resolve(root, "styles/arco-overrides.scss"), "utf8");
+    const cancelSelectors = [".arco-modal-footer .arco-btn-secondary", ".arco-drawer-footer .arco-btn-secondary"];
+    for (const selector of cancelSelectors) {
+      // 位移与键盘焦点仍由 overrides 负责（需要 !important 才压得住 Arco 自身的 hover）。
+      expect(hasRuleBlock(overrides, selector, "transform: none !important")).toBe(true);
+      expect(hasRuleBlock(overrides, `${selector}:focus-visible`, "outline: 2px solid var(--uvp-brand) !important")).toBe(true);
     }
+    // ⛔ 配色 2026-11-04 起收敛到单一真源：取消键 = 中性灰（不是白底，也不是浅蓝）。
+    //    overrides 里再写一份 background 就会跟真源打架，所以要断言它**没有**再写。
+    const buttons = readFileSync(resolve(root, "styles/uvp-buttons.scss"), "utf8");
+    for (const selector of cancelSelectors) {
+      expect(hasRuleBlock(buttons, selector, "background: var(--uvp-btn-neutral-bg)")).toBe(true);
+      expect(hasRuleBlock(buttons, selector, "box-shadow: none")).toBe(true);
+    }
+    expect(overrides).not.toMatch(/\.arco-modal-footer \.arco-btn-secondary[^{]*\{[^}]*background:/s);
     const simpleStyles = readFileSync(resolve(root, "style/model/uvp-modal-simple.scss"), "utf8");
     expect(hasRuleBlock(simpleStyles, ".arco-modal-simple .arco-modal-footer .arco-btn-secondary", "box-shadow: none")).toBe(
       true

@@ -1,0 +1,231 @@
+// ════════════════════════════════════════════════════════════════════════════
+// 按钮体系 · 唯一真源（2026-11-04 建立）
+// ════════════════════════════════════════════════════════════════════════════
+// 解决的问题（老板 2026-11-04 提的三条）：
+//   1. 按钮样式不统一 —— 各处圆角 2/6/8/10px 混用、白底灰字 vs 蓝底白字混用；
+//   2. 按钮大小不一   —— Arco 原生 32px / 项目 34px / page-action 40px /
+//                        small 28px / mini 24px / popconfirm 32px 共 6 种高度并存；
+//   3. 只有重点按钮有颜色 —— 全仓 549 个 a-button 里 125 个 primary 有蓝底，
+//                        其余约 370 个默认按钮全是"白底 + 灰字"，整屏只有一两个亮点。
+// 三条硬规则（违反即门禁变红，见 src/styles/uvp-buttons.test.ts）：
+//   ⛔ 尺寸只有三档：lg 40 / md 34 / sm 28。Arco 的 32(default) 与 24(mini) 一律归并。
+//   ⛔ 颜色只从本文件的 6 个语义里选：primary / secondary / neutral / danger / stop / create。
+//   ⛔ 页面里**禁止**再写 `.arco-btn { height / padding / border-radius / font-size }`。
+// 语义与用法：
+//   type="primary"                     主操作（提交/保存/确定）。**一屏最多一个**。
+//   type="secondary" 或不写 type        次级操作（关闭/返回/普通查询）→ 浅蓝底蓝字。
+//   弹窗/抽屉 footer 的 secondary       取消类 → 中性灰底，与主按钮形成明确对比。
+//   status="danger"                    删除/清空等破坏性操作 → 软红底红字。
+//   status="danger" + type="primary"    确认弹窗的「确认删除」→ 实心红。
+//   class="uvp-create-btn"             列表页「新增」→ 绿实心（定义在 arco-overrides.scss）。
+//   class="uvp-stop-btn"               中断进行中的动作（停止录像/取消任务）→ 琥珀软底。
+//   type="text"                        表格行内/轻量动作 → 透明底，hover 才出浅底。
+//   class="uvp-page-action-btn"        页面头部 CTA → 40px 档（定义在 arco-overrides.scss）。
+// ⚠️ 加载顺序：main.ts 里必须排在 `@arco-themes/vue-gi-demo/css/arco.css` **之后**，
+//    否则同特异性的 Arco 原生规则会反过来盖掉本文件（Arco 主题给了 .arco-btn 高度）。
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── 1. 几何：三档尺寸 ────────────────────────────────────────────────────────
+// `.arco-btn-size-default` / `-medium` 是 Arco 真实挂的类，必须一起写，
+// 否则只改 `.arco-btn` 会被 size 类同特异性反超。
+.arco-btn,
+.arco-btn-size-default,
+.arco-btn-size-medium {
+  box-sizing: border-box;
+  min-width: var(--uvp-btn-min-w-md);
+  height: var(--uvp-btn-h-md);
+  padding: 0 var(--uvp-btn-pad-md);
+  font-size: var(--uvp-btn-fs-md);
+  font-weight: var(--uvp-btn-weight);
+  line-height: 1;
+  border-radius: var(--uvp-btn-radius);
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+
+.arco-btn-size-large {
+  min-width: var(--uvp-btn-min-w-lg);
+  height: var(--uvp-btn-h-lg);
+  padding: 0 var(--uvp-btn-pad-lg);
+  font-size: var(--uvp-btn-fs-md);
+}
+
+.arco-btn-size-small,
+.arco-btn-size-mini {
+  min-width: var(--uvp-btn-min-w-sm);
+
+  // ⛔ mini 归并到 small：24px 与 28px 并排会一眼看出高低差，且 mini 的可点区域偏小。
+  height: var(--uvp-btn-h-sm);
+  padding: 0 var(--uvp-btn-pad-sm);
+  font-size: var(--uvp-btn-fs-sm);
+  border-radius: var(--uvp-btn-radius-sm);
+}
+
+// 图标按钮：正方形，不受 min-width 影响（必须排在 size 规则之后）。
+.arco-btn-only-icon {
+  width: var(--uvp-btn-h-md);
+  min-width: var(--uvp-btn-h-md);
+  padding: 0;
+}
+
+.arco-btn-size-small.arco-btn-only-icon,
+.arco-btn-size-mini.arco-btn-only-icon {
+  width: var(--uvp-btn-h-sm);
+  min-width: var(--uvp-btn-h-sm);
+}
+
+// ── 2. 主操作 ────────────────────────────────────────────────────────────────
+// ⛔ 排除语义变体要用 `:where()`，**不能写成一串 `:not(.a):not(.b)`**：
+//    CSS Selectors L4 里 `:not()` 的特异性 = 参数的特异性（会累加），
+//    连写 4 个就把这条规则抬到 0,5,0，反而压过下面 footer 的 0,3,0 ⇒ 取消键被染蓝。
+//    `:where()` 的贡献恒为 0，选择器保持 0,1,0，级联顺序才符合预期。
+.arco-btn-primary:where(:not(.arco-btn-status-danger, .uvp-create-btn, .uvp-refresh-btn, .uvp-stop-btn)) {
+  color: var(--uvp-btn-primary-text);
+  background: var(--uvp-btn-primary-bg);
+  border-color: var(--uvp-btn-primary-border);
+  box-shadow: var(--uvp-btn-primary-shadow);
+
+  &:hover:not(.arco-btn-loading, .arco-btn-disabled),
+  &:focus-visible:not(.arco-btn-disabled) {
+    color: var(--uvp-btn-primary-text);
+    background: var(--uvp-btn-primary-bg-hover);
+    box-shadow: var(--uvp-btn-primary-shadow-hover);
+  }
+
+  &:active:not(.arco-btn-loading, .arco-btn-disabled) {
+    background: var(--uvp-btn-primary-bg-active);
+  }
+}
+
+// ── 3. 次级操作：浅蓝底蓝字（不再是白底灰字）────────────────────────────────
+.arco-btn-secondary,
+.arco-btn-outline,
+.arco-btn:where(
+    :not(.arco-btn-primary, .arco-btn-text, .arco-btn-status-danger, .uvp-create-btn, .uvp-refresh-btn, .uvp-stop-btn)
+  ) {
+  color: var(--uvp-btn-secondary-text);
+  background: var(--uvp-btn-secondary-bg);
+  border: 1px solid var(--uvp-btn-secondary-border);
+  box-shadow: var(--uvp-btn-secondary-shadow);
+
+  &:hover:not(.arco-btn-loading, .arco-btn-disabled),
+  &:focus-visible:not(.arco-btn-disabled) {
+    color: var(--uvp-btn-secondary-text);
+    background: var(--uvp-btn-secondary-bg-hover);
+    border-color: var(--uvp-btn-secondary-border-hover);
+  }
+
+  &:active:not(.arco-btn-loading, .arco-btn-disabled) {
+    background: var(--uvp-btn-secondary-bg-active);
+  }
+}
+
+// 弹窗 / 抽屉底部：主次两个键统一 88px，短文案（取消/确定）也不会宽度参差。
+.arco-modal-footer .arco-btn,
+.arco-drawer-footer .arco-btn {
+  min-width: 88px;
+}
+
+// 弹窗 / 抽屉底部的「取消」：中性灰，跟主按钮拉开层次。
+// 特异性 0,2,0 高于上面的 0,1,0，不需要 !important。
+.arco-modal-footer .arco-btn-secondary,
+.arco-drawer-footer .arco-btn-secondary {
+  min-width: 88px;
+  color: var(--uvp-btn-neutral-text);
+  background: var(--uvp-btn-neutral-bg);
+  border-color: var(--uvp-btn-neutral-border);
+  box-shadow: none;
+
+  &:hover:not(.arco-btn-loading, .arco-btn-disabled) {
+    color: var(--uvp-btn-neutral-text);
+    background: var(--uvp-btn-neutral-bg-hover);
+    border-color: var(--uvp-btn-neutral-border);
+  }
+
+  &:active:not(.arco-btn-loading, .arco-btn-disabled) {
+    background: var(--uvp-btn-neutral-bg-active);
+  }
+}
+
+// ── 4. 文字按钮 ──────────────────────────────────────────────────────────────
+.arco-btn-text {
+  min-width: 0;
+  padding: 0 8px;
+  color: var(--uvp-btn-secondary-text);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+
+  &:hover:not(.arco-btn-loading, .arco-btn-disabled) {
+    color: var(--uvp-btn-secondary-text);
+    background: var(--uvp-btn-secondary-bg);
+  }
+}
+
+// ── 5. 危险 / 停止 ───────────────────────────────────────────────────────────
+.arco-btn-status-danger:not(.arco-btn-primary) {
+  color: var(--uvp-btn-danger-soft-text);
+  background: var(--uvp-btn-danger-soft-bg);
+  border-color: var(--uvp-btn-danger-soft-border);
+  box-shadow: none;
+
+  &:hover:not(.arco-btn-loading, .arco-btn-disabled) {
+    color: var(--uvp-btn-danger-soft-text);
+    background: var(--uvp-btn-danger-soft-bg-hover);
+    border-color: var(--uvp-btn-danger-soft-border);
+  }
+}
+
+// 实心红：确认弹窗的「确认删除」。modal-simple 里还有一份针对简化弹窗的兜底，
+// 这里覆盖工具栏 / 页面内的危险主按钮，两条口径一致。
+.arco-btn-primary.arco-btn-status-danger {
+  color: var(--uvp-btn-danger-solid-text);
+  background: var(--uvp-btn-danger-solid-bg);
+  border-color: var(--uvp-btn-danger-solid-bg);
+  box-shadow: none;
+
+  &:hover:not(.arco-btn-loading, .arco-btn-disabled) {
+    color: var(--uvp-btn-danger-solid-text);
+    background: var(--uvp-btn-danger-solid-bg-hover);
+    border-color: var(--uvp-btn-danger-solid-bg-hover);
+  }
+}
+
+// 中断进行中的动作（停止录像 / 取消任务）。页面直接加这个类，不要再各页 :deep() 补一份。
+.uvp-stop-btn {
+  color: var(--uvp-btn-stop-text);
+  background: var(--uvp-btn-stop-bg);
+  border-color: var(--uvp-btn-stop-border);
+  box-shadow: none;
+
+  &:hover:not(.arco-btn-loading, .arco-btn-disabled),
+  &:focus-visible:not(.arco-btn-disabled) {
+    color: var(--uvp-btn-stop-text);
+    background: var(--uvp-btn-stop-bg-hover);
+    border-color: var(--uvp-btn-stop-border);
+  }
+}
+
+// ── 6. 交互细节 ──────────────────────────────────────────────────────────────
+// 悬停只做 1px 上浮，且 loading / disabled / 文字按钮不参与（轻微位移已够，不做缩放）。
+// 同样用 `:where()` 压成 0 特异性，页面里想关掉位移只要写一条普通规则即可。
+.arco-btn:where(:not(.arco-btn-text, .arco-btn-loading, .arco-btn-disabled)):hover {
+  transform: translateY(-1px);
+}
+
+.arco-btn:focus-visible {
+  outline: 2px solid var(--uvp-brand);
+  outline-offset: 2px;
+}
+
+.arco-btn.arco-btn-disabled,
+.arco-btn[disabled] {
+  cursor: not-allowed;
+  box-shadow: none;
+  opacity: var(--uvp-btn-disabled-opacity);
+  transform: none;
+}

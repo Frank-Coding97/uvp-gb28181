@@ -618,22 +618,9 @@ body {
   margin-left: 0;
 }
 
-.uvp-list-toolbar .arco-btn {
-  min-width: 84px;
-}
-
-.uvp-list-toolbar .arco-btn-secondary,
-.uvp-list-toolbar .arco-btn-outline,
-.uvp-list-toolbar .arco-btn:not(.arco-btn-primary) {
-  background: #ffffff;
-  border-color: var(--uvp-list-panel-border);
-}
-
-.uvp-list-toolbar .arco-btn:not(.arco-btn-primary):hover {
-  color: var(--uvp-brand-strong);
-  background: #f9fbff;
-  border-color: rgb(37 99 235 / 22%);
-}
+// ⛔ 工具栏按钮的尺寸与配色不再在这里定义 —— 统一走 src/styles/uvp-buttons.scss。
+//   这里曾经有一份 `min-width: 84px` + 白底 + 蓝字 hover 的副本，与系统表单/弹窗里
+//   另外三份副本互相覆盖，才出现「同是次级按钮，三处三种底色」的问题。
 
 body,
 .gb28181-page,
@@ -1359,11 +1346,7 @@ body[arco-theme="dark"] .uvp-system-form {
   border-top: 1px solid var(--uvp-dialog-border) !important;
 }
 
-.uvp-system-dialog .arco-modal-footer .arco-btn,
-.uvp-system-drawer .arco-drawer-footer .arco-btn {
-  min-width: 88px;
-  border-radius: 8px;
-}
+// ⛔ 弹窗/抽屉底部按钮的 min-width 与圆角已并入统一真源（src/styles/uvp-buttons.scss）。
 
 /* 抽屉详情与加载态统一跟随主题，涵盖未使用业务 description class 的页面。 */
 .uvp-system-drawer .arco-drawer-body .arco-descriptions-title {
@@ -1602,107 +1585,11 @@ body[arco-theme="dark"] .uvp-system-form {
   gap: 8px;
 }
 
-.uvp-system-form .arco-btn {
-  min-width: 88px;
-  min-height: 34px;
-  padding-inline: 14px;
-  font-weight: 600;
-  border-radius: 8px;
-  transition:
-    transform 0.18s ease,
-    box-shadow 0.18s ease,
-    border-color 0.18s ease,
-    background-color 0.18s ease,
-    color 0.18s ease;
-}
-
-.uvp-list-toolbar .arco-btn,
-.uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal)) .arco-btn,
-.uvp-system-dialog__body .arco-btn,
-.uvp-system-form .arco-btn {
-  min-height: 34px;
-  padding-inline: 14px;
-  font-weight: 600;
-  letter-spacing: 0;
-}
-
-.uvp-list-toolbar .arco-btn:hover,
-.uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal)) .arco-btn:hover,
-.uvp-system-dialog__body .arco-btn:hover,
-.uvp-system-form .arco-btn:hover {
-  transform: translateY(-1px);
-}
-
-.uvp-list-toolbar .arco-btn-primary,
-.uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal)) .arco-btn-primary,
-.uvp-system-dialog__body .arco-btn-primary,
-.uvp-system-form .arco-btn-primary {
-  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-  border-color: transparent;
-  box-shadow: 0 10px 20px -16px rgb(37 99 235 / 70%);
-}
-
-.uvp-list-toolbar .arco-btn-primary:hover,
-.uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal)) .arco-btn-primary:hover,
-.uvp-system-dialog__body .arco-btn-primary:hover,
-.uvp-system-form .arco-btn-primary:hover {
-  box-shadow: 0 14px 24px -18px rgb(29 78 216 / 72%);
-}
-
-.uvp-list-toolbar .arco-btn-secondary,
-.uvp-list-toolbar .arco-btn-outline,
-.uvp-list-toolbar .arco-btn:not(.arco-btn-primary),
-.uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal)) .arco-btn-secondary,
-.uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal)) .arco-btn-outline,
-.uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal)) .arco-btn:not(.arco-btn-primary),
-.uvp-system-dialog__body .arco-btn-secondary,
-.uvp-system-dialog__body .arco-btn-outline,
-.uvp-system-dialog__body .arco-btn:not(.arco-btn-primary),
-.uvp-system-form .arco-btn-secondary,
-.uvp-system-form .arco-btn-outline,
-.uvp-system-form .arco-btn:not(.arco-btn-primary) {
-  color: var(--uvp-text-secondary);
-  background: #ffffff;
-  border-color: var(--uvp-dialog-border);
-}
-
-.uvp-list-toolbar .arco-btn-secondary:hover,
-.uvp-list-toolbar .arco-btn-outline:hover,
-.uvp-list-toolbar .arco-btn:not(.arco-btn-primary):hover,
-.uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal)) .arco-btn-secondary:hover,
-.uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal)) .arco-btn-outline:hover,
-.uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal))
-  .arco-btn:not(.arco-btn-primary):hover,
-.uvp-system-dialog__body .arco-btn-secondary:hover,
-.uvp-system-dialog__body .arco-btn-outline:hover,
-.uvp-system-dialog__body .arco-btn:not(.arco-btn-primary):hover,
-.uvp-system-form .arco-btn-secondary:hover,
-.uvp-system-form .arco-btn-outline:hover,
-.uvp-system-form .arco-btn:not(.arco-btn-primary):hover {
-  color: var(--uvp-brand-strong);
-  background: #f9fbff;
-  border-color: rgb(37 99 235 / 20%);
-  box-shadow: 0 8px 18px -18px rgb(37 99 235 / 60%);
-}
-
-.uvp-list-toolbar .arco-btn-status-danger,
-.uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal)) .arco-btn-status-danger,
-.uvp-system-dialog__body .arco-btn-status-danger,
-.uvp-system-form .arco-btn-status-danger {
-  color: var(--uvp-danger);
-  background: var(--uvp-danger-soft);
-  border-color: var(--uvp-danger-border);
-  box-shadow: none;
-}
-
-.uvp-list-toolbar .arco-btn-status-danger:hover,
-.uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal)) .arco-btn-status-danger:hover,
-.uvp-system-dialog__body .arco-btn-status-danger:hover,
-.uvp-system-form .arco-btn-status-danger:hover {
-  color: #c53030;
-  background: #ffe8e8;
-  border-color: #efb7b7;
-}
+// ⛔⛔ 按钮的尺寸 / 配色全部移出本文件（2026-11-04）。
+// 这里原本有 4 份互相覆盖的副本（列表工具栏 / 系统弹窗 / 弹窗 body / 系统表单），
+// 每份各写一遍 min-height:34px + 白底蓝字 + 渐变主按钮 ⇒ 同一种按钮在不同容器里长成三种样子。
+// 现统一到唯一真源 src/styles/uvp-buttons.scss（三档尺寸 + 六级语义），
+// 门禁 src/styles/uvp-buttons.test.ts。**不要再往本文件加 .arco-btn 的几何或配色。**
 
 .arco-trigger-popup .arco-popconfirm {
   padding: 2px;
@@ -1738,26 +1625,8 @@ body[arco-theme="dark"] .uvp-system-form {
   padding: 0 14px 14px;
 }
 
-.arco-trigger-popup .arco-popconfirm .arco-popconfirm-footer .arco-btn {
-  min-width: 68px;
-  min-height: 32px;
-  padding-inline: 12px;
-  font-weight: 600;
-  border-radius: 8px;
-}
-
-.arco-trigger-popup .arco-popconfirm .arco-btn:not(.arco-btn-primary) {
-  color: var(--uvp-text-secondary);
-  background: #ffffff;
-  border-color: var(--uvp-dialog-border);
-}
-
-.arco-trigger-popup .arco-popconfirm .arco-btn-primary {
-  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-  border-color: transparent;
-  box-shadow: 0 10px 20px -18px rgb(37 99 235 / 68%);
-}
-
+// ⛔ popconfirm 底部按钮的尺寸与配色 2026-11-04 起也走统一真源
+//   （原来是第 4 套：min-width 68 / min-height 32 / 白底 —— 与弹窗 34px 又不一样）。
 .arco-trigger-popup .arco-trigger-arrow-fill {
   fill: #ffffff;
 }
@@ -2035,26 +1904,7 @@ body[arco-theme="dark"] .uvp-pagination-bar .arco-pagination-item,
 body[arco-theme="dark"] .uvp-data-table .arco-pagination-options .arco-select-view,
 body[arco-theme="dark"] .uvp-pagination-bar .arco-pagination-options .arco-select-view,
 body[arco-theme="dark"] .uvp-data-table .arco-pagination-jumper-input,
-body[arco-theme="dark"] .uvp-pagination-bar .arco-pagination-jumper-input,
-body[arco-theme="dark"] .uvp-list-toolbar .arco-btn-secondary,
-body[arco-theme="dark"] .uvp-list-toolbar .arco-btn-outline,
-body[arco-theme="dark"] .uvp-list-toolbar .arco-btn:not(.arco-btn-primary),
-body[arco-theme="dark"]
-  .uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal))
-  .arco-btn-secondary,
-body[arco-theme="dark"]
-  .uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal))
-  .arco-btn-outline,
-body[arco-theme="dark"]
-  .uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal))
-  .arco-btn:not(.arco-btn-primary),
-body[arco-theme="dark"] .uvp-system-dialog__body .arco-btn-secondary,
-body[arco-theme="dark"] .uvp-system-dialog__body .arco-btn-outline,
-body[arco-theme="dark"] .uvp-system-dialog__body .arco-btn:not(.arco-btn-primary),
-body[arco-theme="dark"] .uvp-system-form .arco-btn-secondary,
-body[arco-theme="dark"] .uvp-system-form .arco-btn-outline,
-body[arco-theme="dark"] .uvp-system-form .arco-btn:not(.arco-btn-primary),
-body[arco-theme="dark"] .arco-trigger-popup .arco-popconfirm .arco-btn:not(.arco-btn-primary) {
+body[arco-theme="dark"] .uvp-pagination-bar .arco-pagination-jumper-input {
   color: var(--uvp-text-secondary);
   background: var(--uvp-dialog-control-bg);
   border-color: var(--uvp-dialog-border);
@@ -2121,29 +1971,6 @@ body[arco-theme="dark"] .uvp-system-form .arco-picker-disabled {
   color: var(--uvp-text-tertiary);
   background: #0f1823;
   box-shadow: inset 0 0 0 1px rgb(116 133 154 / 14%);
-}
-
-body[arco-theme="dark"] .uvp-list-toolbar .arco-btn:not(.arco-btn-primary):hover,
-body[arco-theme="dark"]
-  .uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal))
-  .arco-btn:not(.arco-btn-primary):hover,
-body[arco-theme="dark"] .uvp-system-dialog__body .arco-btn:not(.arco-btn-primary):hover,
-body[arco-theme="dark"] .uvp-system-form .arco-btn:not(.arco-btn-primary):hover {
-  color: var(--uvp-brand-strong);
-  background: #1a2a3b;
-  border-color: rgb(96 165 250 / 28%);
-  box-shadow: 0 10px 22px -18px rgb(96 165 250 / 56%);
-}
-
-body[arco-theme="dark"] .uvp-list-toolbar .arco-btn-primary,
-body[arco-theme="dark"]
-  .uvp-system-dialog:where(:not(.play-console-modal, .home-settings-modal, .cruise-save-modal))
-  .arco-btn-primary,
-body[arco-theme="dark"] .uvp-system-dialog__body .arco-btn-primary,
-body[arco-theme="dark"] .uvp-system-form .arco-btn-primary,
-body[arco-theme="dark"] .arco-trigger-popup .arco-popconfirm .arco-btn-primary {
-  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-  box-shadow: 0 12px 24px -16px rgb(59 130 246 / 70%);
 }
 
 body[arco-theme="dark"] .uvp-data-table .arco-table-container {

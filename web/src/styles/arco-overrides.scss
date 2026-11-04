@@ -26,21 +26,15 @@ html body[arco-theme="dark"] {
 }
 
 // ========== 弹窗 / 抽屉取消按钮 ==========
-// 次按钮统一为平面样式，覆盖确认框内高光及普通弹窗的悬停上浮。
+// 配色已由 src/styles/uvp-buttons.scss 统一（中性灰底）。这里**只保留**不随主题走的
+// 交互细节：确认框里 Arco 自带的上浮位移要去掉，否则取消键会比主按钮"跳"。
 .arco-modal-footer .arco-btn-secondary,
 .arco-drawer-footer .arco-btn-secondary {
-  background: var(--uvp-search-secondary-btn-bg) !important;
-  box-shadow: none !important;
   transform: none !important;
   transition:
     background-color 0.2s ease,
     border-color 0.2s ease,
     color 0.2s ease;
-}
-
-.arco-modal-footer .arco-btn-secondary:not(.arco-btn-disabled):hover,
-.arco-drawer-footer .arco-btn-secondary:not(.arco-btn-disabled):hover {
-  background: var(--uvp-search-secondary-btn-hover-bg) !important;
 }
 
 .arco-modal-footer .arco-btn-secondary:focus-visible,
@@ -338,26 +332,29 @@ body[arco-theme="dark"] .arco-switch[disabled].arco-switch-checked {
 
 // ========== 刷新工具按钮 ==========
 // 刷新是中性工具动作,使用独立蓝绿色语义色,与查询/危险操作区分。
+// ⛔ 尺寸走 src/styles/uvp-buttons.scss 的三档体系：这里是「页面头部 CTA」= lg 档，
+//    只允许覆盖档位，不要再写裸 px（旧的 40px/10px 曾与工具栏 34px/8px 并存，看着像两套系统）。
 .uvp-page-action-btn {
   box-sizing: border-box;
-  min-width: 88px;
-  height: 40px;
-  padding-inline: 14px;
-  font-weight: 600;
-  border-radius: 10px;
+  min-width: var(--uvp-btn-min-w-md);
+  height: var(--uvp-btn-h-lg);
+  padding-inline: var(--uvp-btn-pad-md);
+  font-size: var(--uvp-btn-fs-md);
+  font-weight: var(--uvp-btn-weight);
+  border-radius: var(--uvp-btn-radius);
 }
 
 .uvp-create-btn {
-  color: #ffffff !important;
-  background: #16845f !important;
-  border-color: #16845f !important;
+  color: var(--uvp-btn-success-text) !important;
+  background: var(--uvp-btn-success-bg) !important;
+  border-color: var(--uvp-btn-success-bg) !important;
   box-shadow: 0 10px 18px -15px rgb(22 132 95 / 58%) !important;
 
   &:hover:not([disabled], .arco-btn-disabled),
   &:focus-visible:not([disabled], .arco-btn-disabled) {
-    color: #ffffff !important;
-    background: #0f6f4f !important;
-    border-color: #0f6f4f !important;
+    color: var(--uvp-btn-success-text) !important;
+    background: var(--uvp-btn-success-bg-hover) !important;
+    border-color: var(--uvp-btn-success-bg-hover) !important;
     box-shadow: 0 12px 20px -15px rgb(15 111 79 / 64%) !important;
   }
 }

@@ -27,8 +27,11 @@ describe("global switch styling", () => {
   });
 
   it("defines shared page-action sizing and create semantics", () => {
-    expect(source).toMatch(/\.uvp-page-action-btn\s*\{[^}]*min-width:\s*88px;[^}]*height:\s*40px;[^}]*border-radius:\s*10px;/s);
-    expect(source).toMatch(/\.uvp-create-btn\s*\{[^}]*background:\s*#16845f[^}]*border-color:\s*#16845f/s);
-    expect(source).toMatch(/\.uvp-create-btn[\s\S]*&:hover[^}]*background:\s*#0f6f4f[^}]*border-color:\s*#0f6f4f/s);
+    // 2026-11-04 起尺寸与配色都走 --uvp-btn-* token（唯一真源 uvp-buttons.scss），
+    // 这里只锁「页头 CTA = lg 档 + 统一圆角」「新增 = 绿实心」两条语义，不再钉字面色值。
+    expect(source).toMatch(/\.uvp-page-action-btn\s*\{[^}]*height:\s*var\(--uvp-btn-h-lg\)/s);
+    expect(source).toMatch(/\.uvp-page-action-btn\s*\{[^}]*border-radius:\s*var\(--uvp-btn-radius\)/s);
+    expect(source).toMatch(/\.uvp-create-btn\s*\{[^}]*background:\s*var\(--uvp-btn-success-bg\)/s);
+    expect(source).toMatch(/\.uvp-create-btn[\s\S]*&:hover[^}]*background:\s*var\(--uvp-btn-success-bg-hover\)/s);
   });
 });
