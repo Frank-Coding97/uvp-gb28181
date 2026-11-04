@@ -42,7 +42,9 @@
           </a-button>
         </template>
         <template #extra>
-          <a-button type="primary" @click="handleCreate" v-hasPerm="['system:sysjobs:add']">
+          <!-- ⛔ class="uvp-create-btn" 不能省：新增属于「新增」语义，全仓口径是绿实心（#16845f），
+               不挂这个类就只剩 type="primary" 的蓝，跟左边「查询」撞成两个主按钮。 -->
+          <a-button type="primary" class="uvp-create-btn" @click="handleCreate" v-hasPerm="['system:sysjobs:add']">
             <template #icon>
               <icon-plus />
             </template>
