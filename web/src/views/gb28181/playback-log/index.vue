@@ -31,9 +31,11 @@
           <a-button :disabled="loading" @click="reset"
             ><template #icon><RotateCcw :size="15" /></template>重置</a-button
           >
-          <a-button :disabled="loading" title="刷新" @click="loadRows"
-            ><template #icon><RefreshCw :size="15" /></template
-          ></a-button>
+          <!-- 刷新走「青绿软底」语义；且按本系统风格必须是「图标 + 文字」，
+               纯图标会掉回次级浅蓝、与重置撞色。 -->
+          <a-button class="uvp-refresh-btn" :disabled="loading" title="刷新" @click="loadRows"
+            ><template #icon><RefreshCw :size="15" /></template>刷新</a-button
+          >
         </template>
       </s-layout-search>
 

@@ -187,6 +187,19 @@ describe("单一真源不许被第二套规则覆盖", () => {
     expect(OVERRIDES).not.toMatch(/\.uvp-refresh-btn\s*\{/);
   });
 
+  it("取数语义（下载 / 导出）与刷新共用青绿，且不抢主按钮的蓝", () => {
+    // 老板 2026-11-04 定：下载/导出 = 「只把数据取走、一个字节都不改」，
+    // 与「刷新」同一心智 ⇒ 同一色相（青绿），但类名分开命名，将来要分深浅只改一处。
+    expect(hasRuleBlock(BUTTONS, ".uvp-export-btn", "background: var(--uvp-refresh-btn-bg)")).toBe(true);
+    // 三条彩色规则都必须排除它，否则会被染成浅蓝/蓝实心。
+    for (const block of [".arco-btn-primary", ".arco-btn-secondary", ".arco-btn-outline"]) {
+      const rule = BUTTONS.match(new RegExp(`\\${block}:where\\(([\\s\\S]*?)\\)`))?.[1] ?? "";
+      expect(rule, `${block} 的排除列表漏了 .uvp-export-btn`).toContain(".uvp-export-btn");
+    }
+    // 原生 <button> 也要能用同一套语义（几何 + 配色）。
+    expect(BUTTONS).toMatch(/button\.uvp-export-btn:where\(:not\(\.uvp-page-action-btn\)\)/);
+  });
+
   it("原生 <button> 也有语义类入口（全仓 240+ 个原生按钮的唯一入口）", () => {
     // ⛔ 仪表盘页头的刷新之前就是原生 button + 本地 `.secondary`（白底黑字），
     //    上一轮统一按钮体系完全没管到它 —— 因为那套规则只作用于 `.arco-btn`。

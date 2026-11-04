@@ -65,7 +65,7 @@
             </span>
             <a-button
               v-if="activeView === 'files'"
-              class="recording-reconcile-button"
+              class="recording-reconcile-button uvp-page-action-btn"
               data-testid="recording-reconcile"
               :loading="reconciling"
               :disabled="!canReconcile"
@@ -234,7 +234,7 @@
                       </a-tag>
                     </template>
                   </a-table-column>
-                  <a-table-column title="操作" data-testid="recording-actions-column" :width="280" align="center" fixed="right">
+                  <a-table-column title="操作" data-testid="recording-actions-column" :width="160" align="center" fixed="right">
                     <template #cell="{ record }">
                       <div class="uvp-table-actions cloud-recording-actions">
                         <a-link

@@ -19,9 +19,11 @@ import {
   List,
   Loader2,
   MapPinned as MapIcon,
+  Maximize2,
   MoreHorizontal,
   Play,
   Pencil,
+  RotateCcw,
   RadioTower,
   RefreshCcw,
   Search,
@@ -4710,9 +4712,15 @@ onUnmounted(() => {
             </a-input>
             <span class="map-camera-count">摄像头：{{ total }}</span>
             <div class="map-toolbar-spacer"></div>
-            <a-button class="uvp-refresh-btn map-action map-action--refresh" @click="loadMapData">刷新</a-button>
-            <a-button class="map-action map-action--reset" @click="resetMapView">复位</a-button>
-            <a-button class="map-action map-action--fit" @click="fitMapToData">适应视野</a-button>
+            <a-button class="uvp-refresh-btn map-action map-action--refresh" @click="loadMapData"
+              ><template #icon><RefreshCcw :size="14" /></template>刷新</a-button
+            >
+            <a-button class="map-action map-action--reset" @click="resetMapView"
+              ><template #icon><RotateCcw :size="14" /></template>复位</a-button
+            >
+            <a-button class="map-action map-action--fit" @click="fitMapToData"
+              ><template #icon><Maximize2 :size="14" /></template>适应视野</a-button
+            >
             <!-- 平台默认中心（执法仪场景每次进来先看到辖区那一片）：点进去选地图上的点，再确认保存。 -->
             <a-button
               v-if="canEditDevice"
@@ -4720,9 +4728,8 @@ onUnmounted(() => {
               :disabled="mapCenterSaving || mapCenterPicking"
               title="在地图上点选一个位置，设为平台默认视野"
               @click="startMapCenterPicking"
+              ><template #icon><Crosshair :size="14" /></template>设为默认中心</a-button
             >
-              设为默认中心
-            </a-button>
           </div>
           <!-- 选点态提示条：告诉用户「刚才是进入了一个模式」，并把确认/取消放在眼前。
                ⛔ 不能用 a-modal 之类的遮罩做这件事 —— 它会把地图挡住，而这里恰恰要求用户去点地图。 -->
@@ -7170,6 +7177,7 @@ onUnmounted(() => {
   left: 14px;
   z-index: 2;
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
   min-height: 44px;

@@ -83,7 +83,19 @@
 //    CSS Selectors L4 里 `:not()` 的特异性 = 参数的特异性（会累加），
 //    连写 4 个就把这条规则抬到 0,5,0，反而压过下面 footer 的 0,3,0 ⇒ 取消键被染蓝。
 //    `:where()` 的贡献恒为 0，选择器保持 0,1,0，级联顺序才符合预期。
-.arco-btn-primary:where(:not(.arco-btn-status-danger, .uvp-create-btn, .uvp-refresh-btn, .uvp-stop-btn, .uvp-btn-neutral)) {
+// ⛔⛔ 为什么每条彩色规则都要再写一遍 `[class]` 变体（2026-11-04 补）：
+//    Arco 主题里每个变体的选择器都是 `.arco-btn-secondary, .arco-btn-secondary[type='button'], …`
+//    —— `<a-button>` 渲染出来恒带 `type="button"`，命中的是**第二条**，特异性 0,2,0。
+//    我们原来只写 `.arco-btn-secondary`（0,1,0），同特异性靠顺序取胜的前提不成立 ⇒
+//    全站次级按钮实际渲染成 Arco 的「透明底 + 灰边」，这就是老板看到的「重置按钮没有颜色」。
+//    `[class]` 恒为真（挂了类的元素必有 class 属性）却能把特异性抬到 0,2,0，
+//    与 Arco 打平后再靠加载顺序取胜，且不用 !important。
+.arco-btn-primary:where(
+    :not(.arco-btn-status-danger, .uvp-create-btn, .uvp-refresh-btn, .uvp-export-btn, .uvp-stop-btn, .uvp-btn-neutral)
+  ),
+.arco-btn-primary[class]:where(
+    :not(.arco-btn-status-danger, .uvp-create-btn, .uvp-refresh-btn, .uvp-export-btn, .uvp-stop-btn, .uvp-btn-neutral)
+  ) {
   color: var(--uvp-btn-primary-text);
   background: var(--uvp-btn-primary-bg);
   border-color: var(--uvp-btn-primary-border);
@@ -102,8 +114,54 @@
 }
 
 // ── 3. 次级操作：浅蓝底蓝字（不再是白底灰字）────────────────────────────────
-.arco-btn-secondary,
-.arco-btn-outline,
+// `[class]` 变体的来由见第 2 节顶部注释（Arco 的 `[type='button']` 是 0,2,0）。
+// ⛔ 三条选择器必须**统一**排除语义类：`<a-button class="uvp-btn-neutral">` 渲染出来
+//    恒带 `.arco-btn-secondary`（Arco 默认 type），不排除的话「取消」会被染成浅蓝，
+//    与下面的中性灰规则打平后只能靠顺序赌胜负。
+.arco-btn-secondary:where(
+    :not(
+      .uvp-create-btn,
+      .uvp-refresh-btn,
+      .uvp-export-btn,
+      .uvp-stop-btn,
+      .uvp-btn-primary,
+      .uvp-btn-secondary,
+      .uvp-btn-neutral
+    )
+  ),
+.arco-btn-secondary[class]:where(
+    :not(
+      .uvp-create-btn,
+      .uvp-refresh-btn,
+      .uvp-export-btn,
+      .uvp-stop-btn,
+      .uvp-btn-primary,
+      .uvp-btn-secondary,
+      .uvp-btn-neutral
+    )
+  ),
+.arco-btn-outline:where(
+    :not(
+      .uvp-create-btn,
+      .uvp-refresh-btn,
+      .uvp-export-btn,
+      .uvp-stop-btn,
+      .uvp-btn-primary,
+      .uvp-btn-secondary,
+      .uvp-btn-neutral
+    )
+  ),
+.arco-btn-outline[class]:where(
+    :not(
+      .uvp-create-btn,
+      .uvp-refresh-btn,
+      .uvp-export-btn,
+      .uvp-stop-btn,
+      .uvp-btn-primary,
+      .uvp-btn-secondary,
+      .uvp-btn-neutral
+    )
+  ),
 .arco-btn:where(
     :not(
       .arco-btn-primary,
@@ -111,7 +169,24 @@
       .arco-btn-status-danger,
       .uvp-create-btn,
       .uvp-refresh-btn,
+      .uvp-export-btn,
       .uvp-stop-btn,
+      .uvp-btn-primary,
+      .uvp-btn-secondary,
+      .uvp-btn-neutral
+    )
+  ),
+.arco-btn[class]:where(
+    :not(
+      .arco-btn-primary,
+      .arco-btn-text,
+      .arco-btn-status-danger,
+      .uvp-create-btn,
+      .uvp-refresh-btn,
+      .uvp-export-btn,
+      .uvp-stop-btn,
+      .uvp-btn-primary,
+      .uvp-btn-secondary,
       .uvp-btn-neutral
     )
   ) {
@@ -139,9 +214,12 @@
 }
 
 // 弹窗 / 抽屉底部的「取消」：中性灰，跟主按钮拉开层次。
-// 特异性 0,2,0 高于上面的 0,1,0，不需要 !important。
+// 特异性 0,2,0 高于上面的 0,1,0，不需要 !important；`[class]` 变体是 0,3,0，
+// 用来压过 Arco 的 `.arco-btn-secondary[type='button']`（0,2,0）。
 .arco-modal-footer .arco-btn-secondary,
-.arco-drawer-footer .arco-btn-secondary {
+.arco-modal-footer .arco-btn-secondary[class],
+.arco-drawer-footer .arco-btn-secondary,
+.arco-drawer-footer .arco-btn-secondary[class] {
   min-width: 88px;
   color: var(--uvp-btn-neutral-text);
   background: var(--uvp-btn-neutral-bg);
@@ -160,7 +238,8 @@
 }
 
 // ── 4. 文字按钮 ──────────────────────────────────────────────────────────────
-.arco-btn-text {
+.arco-btn-text,
+.arco-btn-text[class] {
   min-width: 0;
   padding: 0 8px;
   color: var(--uvp-btn-secondary-text);
@@ -175,7 +254,8 @@
 }
 
 // ── 5. 危险 / 停止 ───────────────────────────────────────────────────────────
-.arco-btn-status-danger:not(.arco-btn-primary) {
+.arco-btn-status-danger:not(.arco-btn-primary),
+.arco-btn-status-danger[class]:not(.arco-btn-primary) {
   color: var(--uvp-btn-danger-soft-text);
   background: var(--uvp-btn-danger-soft-bg);
   border-color: var(--uvp-btn-danger-soft-border);
@@ -190,7 +270,8 @@
 
 // 实心红：确认弹窗的「确认删除」。modal-simple 里还有一份针对简化弹窗的兜底，
 // 这里覆盖工具栏 / 页面内的危险主按钮，两条口径一致。
-.arco-btn-primary.arco-btn-status-danger {
+.arco-btn-primary.arco-btn-status-danger,
+.arco-btn-primary.arco-btn-status-danger[class] {
   color: var(--uvp-btn-danger-solid-text);
   background: var(--uvp-btn-danger-solid-bg);
   border-color: var(--uvp-btn-danger-solid-bg);
@@ -204,7 +285,8 @@
 }
 
 // 中断进行中的动作（停止录像 / 取消任务）。页面直接加这个类，不要再各页 :deep() 补一份。
-.uvp-stop-btn {
+.uvp-stop-btn,
+.uvp-stop-btn[class] {
   color: var(--uvp-btn-stop-text);
   background: var(--uvp-btn-stop-bg);
   border-color: var(--uvp-btn-stop-border);
@@ -218,14 +300,20 @@
   }
 }
 
-// ── 7. 刷新 / 工具动作（青绿）────────────────────────────────────────────────
-// 刷新是"重新拉一次数据"，既不是提交也不是删除，给它独立的青绿色相：
-// 整行按钮里一眼能认出"这个是刷新"，又不会抢走主按钮的位置。
+// ── 7. 刷新 / 取数（青绿）────────────────────────────────────────────────────
+// 这一色相只表示**一件事**：点下去不改变任何数据，只是把数据重新拿一份出来。
+//   uvp-refresh-btn  刷新 / 重试 / 读取 / 对账（重新拉一次）
+//   uvp-export-btn   下载 / 导出（取走一份）
+// 分开命名的理由：两者的"文案"不同，将来若要区分深浅只改一处；现在共用同一组 token，
+// 因为对用户而言"刷新"和"下载"的心智是同一类：**都不敢动数据**。
 // ⚠️ 2026-11-04 从 arco-overrides.scss 迁入本真源（那儿靠 !important 硬压，
 //    与"语义只从一处出"冲突）。迁入后去掉 !important，靠文件内顺序取胜。
 // ⛔ 这里写完整 border 而不是只写 border-color：原生 <button> 不经过 Arco，
 //    只给颜色会露出浏览器默认的 2px outset 边框（页面里的 .btn-ghost 副本删掉后尤其明显）。
-.uvp-refresh-btn {
+.uvp-refresh-btn,
+.uvp-refresh-btn[class],
+.uvp-export-btn,
+.uvp-export-btn[class] {
   color: var(--uvp-refresh-btn-text);
   background: var(--uvp-refresh-btn-bg);
   border: 1px solid var(--uvp-refresh-btn-border);
@@ -259,13 +347,57 @@
   }
 }
 
-.uvp-refresh-link {
+.uvp-refresh-link,
+.uvp-refresh-link[class] {
   color: var(--uvp-refresh-btn-text);
 
   &:hover,
   &:focus-visible {
     color: var(--uvp-refresh-btn-text);
     background: var(--uvp-refresh-btn-hover-bg);
+  }
+}
+
+// ── 7.5 a-button 上的语义类：只染配色，几何仍归第 1 节三档 ──────────────────
+// 原生 <button> 走下面第 8 节（连几何一起接管）；但 `<a-button class="uvp-btn-neutral">`
+// 这种写法全仓有 37 处（弹窗取消键），它同时带 `.arco-btn-secondary` 且命中 Arco 的
+// `[type='button']`（0,2,0）—— 不单独给一条 0,2,0 的规则，这些按钮就既不是次级色
+// 也不是中性色，直接掉回 Arco 的透明底（2026-11-04 实测）。
+// ⛔ 这里**只写颜色**：height/padding 一律留给三档，否则 small 档会被拉成 34px。
+.arco-btn.uvp-btn-primary {
+  color: var(--uvp-btn-primary-text);
+  background: var(--uvp-btn-primary-bg);
+  border-color: var(--uvp-btn-primary-border);
+  box-shadow: var(--uvp-btn-primary-shadow);
+
+  &:hover:not(.arco-btn-loading, .arco-btn-disabled) {
+    color: var(--uvp-btn-primary-text);
+    background: var(--uvp-btn-primary-bg-hover);
+  }
+}
+
+.arco-btn.uvp-btn-secondary {
+  color: var(--uvp-btn-secondary-text);
+  background: var(--uvp-btn-secondary-bg);
+  border-color: var(--uvp-btn-secondary-border);
+  box-shadow: var(--uvp-btn-secondary-shadow);
+
+  &:hover:not(.arco-btn-loading, .arco-btn-disabled) {
+    color: var(--uvp-btn-secondary-text);
+    background: var(--uvp-btn-secondary-bg-hover);
+    border-color: var(--uvp-btn-secondary-border-hover);
+  }
+}
+
+.arco-btn.uvp-btn-neutral {
+  color: var(--uvp-btn-neutral-text);
+  background: var(--uvp-btn-neutral-bg);
+  border-color: var(--uvp-btn-neutral-border);
+  box-shadow: none;
+
+  &:hover:not(.arco-btn-loading, .arco-btn-disabled) {
+    color: var(--uvp-btn-neutral-text);
+    background: var(--uvp-btn-neutral-bg-hover);
   }
 }
 
@@ -278,11 +410,13 @@
 //   uvp-btn-secondary  次级操作（蓝底蓝字）
 //   uvp-btn-neutral    取消 / 关闭（中性灰）
 //   uvp-refresh-btn    刷新（青绿，见上）
+//   uvp-export-btn     下载 / 导出（青绿，见上）
 // ⚠️ `.uvp-page-action-btn` 是 40px 档，必须排除，否则会被压回 34px。
 button.uvp-btn-primary,
 button.uvp-btn-secondary,
 button.uvp-btn-neutral,
-button.uvp-refresh-btn:where(:not(.uvp-page-action-btn)) {
+button.uvp-refresh-btn:where(:not(.uvp-page-action-btn)),
+button.uvp-export-btn:where(:not(.uvp-page-action-btn)) {
   box-sizing: border-box;
   display: inline-flex;
   gap: 6px;
