@@ -76,7 +76,7 @@
           :scroll="{ x: '100%', minWidth: 2020 }"
         >
           <template #columns>
-            <a-table-column title="上级平台" :width="300">
+            <a-table-column title="上级平台" :width="230">
               <template #cell="{ record }">
                 <div class="entity-cell">
                   <strong>{{ record.name }}</strong>
@@ -88,7 +88,7 @@
                 </div>
               </template>
             </a-table-column>
-            <a-table-column title="本平台身份" :width="218">
+            <a-table-column title="本平台身份" :width="200">
               <template #cell="{ record }">
                 <div class="entity-cell">
                   <code>{{ record.localDeviceId }}</code
@@ -96,7 +96,7 @@
                 </div>
               </template>
             </a-table-column>
-            <a-table-column title="共享通道" :width="190">
+            <a-table-column title="共享通道" :width="150">
               <template #cell="{ record }">
                 <a-link class="shared-channels-link" :disabled="!canView" @click="openSharedDirectory(record)">
                   <ListVideo :size="14" />
@@ -104,29 +104,28 @@
                 </a-link>
               </template>
             </a-table-column>
-            <a-table-column title="运行状态" :width="150">
+            <a-table-column title="运行状态" :width="100">
               <template #cell="{ record }">
                 <a-tooltip :content="cascadeStatus(record).detail">
                   <a-tag :color="cascadeStatus(record).color">{{ cascadeStatus(record).label }}</a-tag>
                 </a-tooltip>
               </template>
             </a-table-column>
-            <a-table-column title="上级订阅" :width="280">
-              <template #cell="{ record }">
-                <UpstreamSubscriptions :subscriptions="record.subscriptions" :stale="Boolean(errorMessage)" />
-              </template>
-            </a-table-column>
             <a-table-column title="启用" :width="86" align="center">
               <template #cell="{ record }">
                 <a-tooltip :content="record.enabled ? '已启用，向上级保持注册；关闭即注销' : '已停用，开启后向上级发起注册'">
                   <a-switch
-                    size="small"
                     :model-value="record.enabled"
                     :loading="actionId === record.id"
                     :disabled="!canEnable"
                     @change="(value: boolean | string | number) => toggleEnabled(record, Boolean(value))"
                   />
                 </a-tooltip>
+              </template>
+            </a-table-column>
+            <a-table-column title="上级订阅" :width="280">
+              <template #cell="{ record }">
+                <UpstreamSubscriptions :subscriptions="record.subscriptions" :stale="Boolean(errorMessage)" />
               </template>
             </a-table-column>
             <a-table-column title="注册 / 心跳周期（秒）" :width="170">

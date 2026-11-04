@@ -229,13 +229,23 @@ describe("cascade platform editor layout", () => {
     expect(source).toMatch(/class="uvp-table-action uvp-table-action--delete"/);
   });
 
+  it("keeps the enable switch at the default size like other status columns", () => {
+    // 2026-11-04 老板反馈「启用按钮和其他页面不一样」：实测本页 28×16（size="small"），
+    // 录像计划等页面状态列是 44×24 默认尺寸。行内单开关一律用默认尺寸，
+    // small 只用于「一行里塞多个小开关」的场景（设备管理的音频/按需直播那种）。
+    const cell = source.slice(source.indexOf('title="启用"'), source.indexOf('title="上级订阅"'));
+    expect(cell).toContain("<a-switch");
+    expect(cell).not.toContain('size="small"');
+  });
+
   it("merges the upstream platform name and its address into one list column", () => {
     const columns = source.slice(source.indexOf("<template #columns>"), source.indexOf("<template #empty>"));
+    // 只断言「合成了一列」这个行为，不锁死列宽 —— 列宽是按真机观感反复微调的旋钮。
     expect(columns).not.toContain('title="上级地址"');
-    expect(columns).toContain('<a-table-column title="上级平台" :width="300">');
-    expect(columns).toContain("{{ record.host }}:{{ record.port }}");
-    expect(columns).toContain("record.transport");
-    expect(source).toContain(":scroll=\"{ x: '100%', minWidth: 2020 }\"");
+    const platformColumn = columns.slice(columns.indexOf('title="上级平台"'), columns.indexOf('title="本平台身份"'));
+    expect(platformColumn).toContain("record.upstreamServerId");
+    expect(platformColumn).toContain("{{ record.host }}:{{ record.port }}");
+    expect(platformColumn).toContain("record.transport");
   });
 
   it("keeps the long form scrollable inside the dialog viewport", () => {
