@@ -534,7 +534,9 @@ onBeforeUnmount(() => invalidateRequests());
               <CircleX :size="16" />
               <div>
                 <strong>记录加载失败</strong><span>{{ mergedError }}</span
-                ><button type="button" data-testid="maintenance-records-retry" @click="retryCurrent">重试</button>
+                ><button type="button" data-testid="maintenance-records-retry" @click="retryCurrent" class="uvp-refresh-text">
+                  重试
+                </button>
               </div>
             </div>
             <div v-else-if="mergedLoading && !mergedRecords.length" class="records-state" role="status">

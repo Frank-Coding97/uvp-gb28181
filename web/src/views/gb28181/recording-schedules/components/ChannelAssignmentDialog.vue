@@ -192,7 +192,7 @@
       <div class="assignment-footer">
         <span>{{ footerSummary }}</span>
         <a-space>
-          <a-button @click="close">取消</a-button>
+          <a-button @click="close" class="uvp-btn-neutral">取消</a-button>
           <a-button
             type="primary"
             :loading="submitting"

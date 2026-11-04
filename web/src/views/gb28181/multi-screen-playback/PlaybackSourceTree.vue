@@ -853,7 +853,9 @@ defineExpose({ openFavoriteDialogForChannels });
       </div>
     </div>
 
-    <div v-if="error" class="tree-error" role="alert">{{ error }}<button type="button" @click="refresh()">重试</button></div>
+    <div v-if="error" class="tree-error" role="alert">
+      {{ error }}<button type="button" @click="refresh()" class="uvp-refresh-text">重试</button>
+    </div>
     <a-spin :loading="loading" class="tree-loading">
       <div class="tree-content" role="tree">
         <div

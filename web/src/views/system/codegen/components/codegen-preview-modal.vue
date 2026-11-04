@@ -201,7 +201,7 @@
 
     <template #footer>
       <a-space>
-        <a-button @click="closePreviewModal">退出</a-button>
+        <a-button @click="closePreviewModal" class="uvp-btn-neutral">退出</a-button>
         <a-button type="primary" v-hasPerm="['system:codegen:insertmenuandapi']" @click="generateMenuAndApi">生成菜单</a-button>
       </a-space>
     </template>

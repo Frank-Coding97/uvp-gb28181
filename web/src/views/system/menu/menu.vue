@@ -26,7 +26,7 @@
           </a-button>
         </template>
         <template #extra>
-          <a-button type="primary" @click="onAdd" v-hasPerm="['system:menu:add']">
+          <a-button type="primary" @click="onAdd" v-hasPerm="['system:menu:add']" class="uvp-create-btn">
             <template #icon><icon-plus /></template>
             <span>新增</span>
           </a-button>

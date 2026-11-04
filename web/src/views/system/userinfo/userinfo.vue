@@ -108,7 +108,7 @@
         <div class="avatar-upload-modal__actions">
           <a-space>
             <a-button type="primary" @click="confirmUploadAvatar">确定</a-button>
-            <a-button @click="resetAvatarUpload">取消</a-button>
+            <a-button @click="resetAvatarUpload" class="uvp-btn-neutral">取消</a-button>
           </a-space>
         </div>
       </div>

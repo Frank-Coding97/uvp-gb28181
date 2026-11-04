@@ -182,7 +182,7 @@ function confirm() {
       </label>
 
       <div class="zlm-danger-dialog__actions">
-        <a-button :disabled="busy" @click="close">取消</a-button>
+        <a-button :disabled="busy" @click="close" class="uvp-btn-neutral">取消</a-button>
         <a-button status="danger" type="primary" :loading="busy" :disabled="!canConfirm" @click="confirm">
           {{ actionLabel }}
         </a-button>

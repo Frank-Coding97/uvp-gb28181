@@ -248,7 +248,7 @@ function changePageSize(next: number) {
     <section class="data-panel">
       <div v-if="loadError && !pageData" class="state-box state-box--error" role="alert">
         <ShieldAlert :size="28" /><strong>{{ errorPresentation.label }}</strong
-        ><a-button @click="refresh">重新加载</a-button>
+        ><a-button @click="refresh" class="uvp-refresh-btn">重新加载</a-button>
       </div>
       <div v-else-if="scopeBlocked" class="state-box" role="status">
         <strong>请选择具体节点</strong><span>全部节点模式不会发起逐节点 FFmpeg 查询。</span>
@@ -349,7 +349,7 @@ function changePageSize(next: number) {
       <div v-if="deleteLoading" class="preflight-state"><a-spin /><span>正在读取后端真实状态与归属…</span></div>
       <div v-else class="preflight-state" :class="{ 'state-box--error': deleteError }">
         <strong>{{ deleteError ? zlmErrorPresentation(deleteError).label : deleteReason }}</strong
-        ><a-button @click="closeDelete">关闭</a-button>
+        ><a-button @click="closeDelete" class="uvp-btn-neutral">关闭</a-button>
       </div>
     </a-modal>
   </section>

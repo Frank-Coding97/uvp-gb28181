@@ -76,7 +76,13 @@
             恢复
           </a-button>
           <!-- 重试按钮 -->
-          <a-button v-if="item.status === 'error'" type="text" size="small" @click.stop="handleRetry(index)">
+          <a-button
+            v-if="item.status === 'error'"
+            class="uvp-refresh-text"
+            type="text"
+            size="small"
+            @click.stop="handleRetry(index)"
+          >
             <template #icon><icon-refresh /></template>
             重试
           </a-button>

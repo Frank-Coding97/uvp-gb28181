@@ -20,7 +20,7 @@
           </a-button>
         </template>
         <template #extra>
-          <a-button type="primary" @click="onAdd" v-hasPerm="['system:dict:add']">
+          <a-button type="primary" @click="onAdd" v-hasPerm="['system:dict:add']" class="uvp-create-btn">
             <template #icon><icon-plus /></template>
             <span>新增</span>
           </a-button>
@@ -147,7 +147,13 @@
         </div>
         <a-row>
           <a-space wrap>
-            <a-button type="primary" @click="onAddDetail" :disabled="currentDictReadonly" v-hasPerm="['system:dictitem:add']">
+            <a-button
+              type="primary"
+              @click="onAddDetail"
+              :disabled="currentDictReadonly"
+              v-hasPerm="['system:dictitem:add']"
+              class="uvp-create-btn"
+            >
               <template #icon><icon-plus /></template>
               <span>新增</span>
             </a-button>

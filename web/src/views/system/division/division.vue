@@ -19,7 +19,7 @@
           </a-button>
         </template>
         <template #extra>
-          <a-button type="primary" @click="onAdd" v-hasPerm="['system:division:add']">
+          <a-button type="primary" @click="onAdd" v-hasPerm="['system:division:add']" class="uvp-create-btn">
             <template #icon><icon-plus /></template>
             <span>新增</span>
           </a-button>

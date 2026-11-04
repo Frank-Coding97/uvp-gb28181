@@ -314,7 +314,13 @@ onBeforeUnmount(() => clearSession());
           <p v-if="displayResult.deduplicated" class="reboot-deduplicated">已有相同重启请求，已返回原操作。</p>
           <div class="reboot-result-actions">
             <a-button data-testid="device-reboot-view-records" @click="viewRecords"> 查看本次记录 </a-button>
-            <a-button data-testid="device-reboot-result-close" :disabled="submitPending" @click="closeDialog">关闭</a-button>
+            <a-button
+              data-testid="device-reboot-result-close"
+              :disabled="submitPending"
+              @click="closeDialog"
+              class="uvp-btn-neutral"
+              >关闭</a-button
+            >
           </div>
         </section>
 
@@ -337,7 +343,9 @@ onBeforeUnmount(() => clearSession());
           <p v-else class="reboot-hint"><AlertTriangle :size="14" />“请求已发送”只代表平台发出请求，不代表设备已经完成重启。</p>
           <p v-if="submissionError" class="reboot-error" role="alert"><CircleX :size="14" />{{ submissionError }}</p>
           <div class="reboot-confirm-actions">
-            <a-button data-testid="device-reboot-cancel" :disabled="submitPending" @click="closeDialog">取消</a-button>
+            <a-button data-testid="device-reboot-cancel" :disabled="submitPending" @click="closeDialog" class="uvp-btn-neutral"
+              >取消</a-button
+            >
             <a-button
               data-testid="device-reboot-confirm"
               type="primary"

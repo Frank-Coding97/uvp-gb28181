@@ -232,7 +232,7 @@ async function submit() {
 
     <template #footer>
       <div class="editor-footer">
-        <a-button :disabled="submitting" @click="close">取消</a-button>
+        <a-button :disabled="submitting" @click="close" class="uvp-btn-neutral">取消</a-button>
         <a-button
           data-testid="group-submit"
           :type="mode === 'delete' ? 'primary' : 'primary'"

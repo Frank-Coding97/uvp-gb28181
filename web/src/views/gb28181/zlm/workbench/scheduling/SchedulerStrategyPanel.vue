@@ -125,7 +125,9 @@ defineExpose({ refresh });
         <span class="current-label"
           >当前生效 <strong>{{ currentTitle }}</strong></span
         >
-        <button type="button" class="refresh-button" :disabled="loading || !active" @click="refresh">刷新</button>
+        <button type="button" class="uvp-refresh-text refresh-button" :disabled="loading || !active" @click="refresh">
+          刷新
+        </button>
         <button
           type="button"
           class="primary-button"

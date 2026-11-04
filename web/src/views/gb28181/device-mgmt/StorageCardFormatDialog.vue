@@ -419,7 +419,9 @@ onBeforeUnmount(() => clearSession());
           <CircleX :size="14" />{{ submissionError }}
         </p>
         <div class="scf-confirm-actions">
-          <a-button data-testid="storage-format-cancel" :disabled="submitPending" @click="closeDialog">取消</a-button>
+          <a-button data-testid="storage-format-cancel" :disabled="submitPending" @click="closeDialog" class="uvp-btn-neutral"
+            >取消</a-button
+          >
           <a-button
             data-testid="storage-format-confirm"
             status="danger"

@@ -203,7 +203,7 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
 
       <div v-if="error" class="online-user-error" role="alert">
         <span>{{ error }}</span>
-        <a-button size="small" @click="load()">重试</a-button>
+        <a-button size="small" @click="load()" class="uvp-refresh-btn">重试</a-button>
       </div>
 
       <a-table

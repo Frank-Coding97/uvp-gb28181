@@ -437,7 +437,7 @@ async function handleSubmit() {
 
     <template #footer>
       <div class="form-actions">
-        <a-button :disabled="loading" @click="close">取消</a-button>
+        <a-button :disabled="loading" @click="close" class="uvp-btn-neutral">取消</a-button>
         <a-button v-if="!editing && currentStep === 2" :disabled="loading" @click="returnToConnectionStep">上一步</a-button>
         <a-button v-if="!editing && currentStep === 1" type="primary" :loading="loading" @click="handleProbe"
           >连接并读取</a-button

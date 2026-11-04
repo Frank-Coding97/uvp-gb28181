@@ -177,7 +177,13 @@ function bytesText(value: number | null) {
         <span v-if="overview" :class="`freshness freshness--${freshness.tone}`" :title="freshness.description">
           {{ freshness.label }} · {{ overview.asOf }}
         </span>
-        <button type="button" class="panel-refresh" :disabled="loading" aria-label="刷新媒体总览" @click="refresh">
+        <button
+          type="button"
+          class="uvp-refresh-text panel-refresh"
+          :disabled="loading"
+          aria-label="刷新媒体总览"
+          @click="refresh"
+        >
           <Activity :size="15" :class="{ 'is-spinning': loading }" aria-hidden="true" />
           {{ loading ? "采集中" : "刷新" }}
         </button>

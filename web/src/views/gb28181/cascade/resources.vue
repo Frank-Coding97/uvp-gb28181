@@ -2,7 +2,9 @@
   <div class="cascade-resources-page">
     <a-alert v-if="!canView" type="warning">当前账号无权查看级联共享与目录。</a-alert>
     <a-spin v-else :loading="loading" class="cascade-resources-body">
-      <a-alert v-if="error" type="error">{{ error }} <a-button size="small" @click="load">重试</a-button></a-alert>
+      <a-alert v-if="error" type="error"
+        >{{ error }} <a-button size="small" @click="load" class="uvp-refresh-btn">重试</a-button></a-alert
+      >
       <BusinessGroupManager
         v-else-if="platform"
         :key="platform.id"

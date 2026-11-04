@@ -319,7 +319,7 @@ watch(
     </div>
     <template #footer>
       <a-space>
-        <a-button @click="requestClose">取消</a-button>
+        <a-button @click="requestClose" class="uvp-btn-neutral">取消</a-button>
         <a-button type="primary" :loading="submitting" :disabled="!draftCount" @click="submit">保存变更</a-button>
       </a-space>
     </template>

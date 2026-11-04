@@ -18,7 +18,7 @@
       <ShieldAlert :size="27" aria-hidden="true" />
       <strong>{{ failureCopy.title }}</strong>
       <span>{{ failureCopy.detail }}</span>
-      <button v-if="loadState === 'error'" type="button" class="sip-card__retry" @click="retry">
+      <button v-if="loadState === 'error'" type="button" class="uvp-refresh-text sip-card__retry" @click="retry">
         <RefreshCw :size="14" aria-hidden="true" />重新加载
       </button>
     </div>

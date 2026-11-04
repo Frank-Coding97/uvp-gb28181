@@ -623,7 +623,7 @@
       </a-form>
       <template #footer>
         <div class="dialog-actions">
-          <a-button :disabled="saving" @click="editorVisible = false">取消</a-button>
+          <a-button :disabled="saving" @click="editorVisible = false" class="uvp-btn-neutral">取消</a-button>
           <a-button v-if="editorStep > 1" :disabled="saving" @click="editorStep--">上一步</a-button>
           <a-button v-if="editorStep < 5" type="primary" @click="nextEditorStep">下一步</a-button>
           <a-button v-else type="primary" :loading="saving" @click="savePlatform">确认保存</a-button>

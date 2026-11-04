@@ -4,7 +4,7 @@
       <a-alert v-if="!canWrite" type="info" class="business-group-readonly">当前账号只有查看权限，共享与目录为只读。</a-alert>
       <a-alert v-if="loadError" type="error" class="business-group-alert">
         {{ loadError }}
-        <a-button size="small" data-action="retry-load" @click="load">重试</a-button>
+        <a-button size="small" data-action="retry-load" @click="load" class="uvp-refresh-btn">重试</a-button>
       </a-alert>
 
       <template v-else-if="snapshot">
@@ -544,7 +544,9 @@
         ⛔ 同步依赖 `src/test/setup.ts` 里 a-modal 桩渲染 `footer` 插槽。
       -->
       <template #footer>
-        <a-button data-action="cancel-node-dialog" :disabled="saving" @click="nodeDialog.visible = false">取消</a-button>
+        <a-button data-action="cancel-node-dialog" :disabled="saving" @click="nodeDialog.visible = false" class="uvp-btn-neutral"
+          >取消</a-button
+        >
         <a-button
           type="primary"
           data-action="confirm-node-dialog"
@@ -575,7 +577,9 @@
         </label>
       </div>
       <template #footer>
-        <a-button data-action="cancel-move-dialog" :disabled="saving" @click="moveDialog.visible = false">取消</a-button>
+        <a-button data-action="cancel-move-dialog" :disabled="saving" @click="moveDialog.visible = false" class="uvp-btn-neutral"
+          >取消</a-button
+        >
         <a-button
           type="primary"
           data-action="confirm-move-dialog"

@@ -70,7 +70,7 @@
                 </a-button>
               </template>
               <template #extra>
-                <a-button type="primary" @click="onAdd" v-hasPerm="['system:account:add']">
+                <a-button type="primary" @click="onAdd" v-hasPerm="['system:account:add']" class="uvp-create-btn">
                   <template #icon><icon-plus /></template>
                   <span>新增</span>
                 </a-button>

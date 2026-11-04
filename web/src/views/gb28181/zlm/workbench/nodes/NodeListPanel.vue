@@ -335,7 +335,7 @@ function relativeTime(value?: string) {
     <div v-else-if="loadError && !scopedNodes.length" class="page-state page-state--error" role="alert">
       <strong>{{ errorPresentation.label }}</strong>
       <span>{{ errorPresentation.retryable ? "可以刷新重试。" : "请确认账号权限或登录状态。" }}</span>
-      <a-button v-if="errorPresentation.retryable" @click="refreshRows">重新加载</a-button>
+      <a-button v-if="errorPresentation.retryable" @click="refreshRows" class="uvp-refresh-btn">重新加载</a-button>
     </div>
     <section v-else class="node-table-wrap">
       <a-table :data="filteredNodes" :loading="loading" row-key="id" :pagination="false" class="node-table uvp-data-table">

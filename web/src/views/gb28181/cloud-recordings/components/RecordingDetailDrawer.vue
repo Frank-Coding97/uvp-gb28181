@@ -24,7 +24,7 @@
         <a-alert v-if="errorMessage" type="error" class="recording-detail-error">
           <div class="recording-detail-error__body">
             <span>{{ errorMessage }}</span>
-            <a-button data-testid="detail-retry" size="small" @click="loadDetail">重试</a-button>
+            <a-button data-testid="detail-retry" size="small" @click="loadDetail" class="uvp-refresh-btn">重试</a-button>
           </div>
         </a-alert>
 

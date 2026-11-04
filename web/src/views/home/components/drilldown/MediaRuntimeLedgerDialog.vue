@@ -697,7 +697,7 @@ function changeNetworkPageSize(value: number) {
     @cancel="closeForce"
     ><div class="preflight-state">
       <a-spin v-if="forceLoading" /><strong>{{ forceLoading ? "正在核对 RTP 接收服务和业务持有…" : forceError }}</strong
-      ><a-button v-if="!forceLoading" @click="closeForce">关闭</a-button>
+      ><a-button v-if="!forceLoading" @click="closeForce" class="uvp-btn-neutral">关闭</a-button>
     </div></a-modal
   >
 

@@ -402,7 +402,7 @@ function formatTime(value?: string | null) {
       <a-empty v-else-if="!Number.isSafeInteger(clientId) || clientId <= 0" description="无效的客户端 ID" />
       <template v-else>
         <a-alert v-if="error" type="error" class="openapi-detail__alert" role="alert">
-          {{ error }} <a-button size="small" @click="load">重试</a-button>
+          {{ error }} <a-button size="small" @click="load" class="uvp-refresh-btn">重试</a-button>
         </a-alert>
         <a-spin v-if="loading && !client" class="openapi-detail__loading" />
         <template v-if="client && detailReady">

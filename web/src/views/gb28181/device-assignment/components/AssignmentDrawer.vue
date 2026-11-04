@@ -193,7 +193,7 @@ const submit = async () => {
     </div>
     <template #footer>
       <a-space>
-        <a-button @click="visible = false">取消</a-button>
+        <a-button @click="visible = false" class="uvp-btn-neutral">取消</a-button>
         <a-button type="primary" :loading="submitting" :disabled="!targetDeptId" @click="submit">保存调整</a-button>
       </a-space>
     </template>

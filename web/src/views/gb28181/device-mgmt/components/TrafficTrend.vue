@@ -391,7 +391,7 @@ onBeforeUnmount(() => {
     >
       <div v-if="detailError" class="detail-error" role="alert">
         <span>{{ detailError }}</span
-        ><a-button size="small" @click="loadDetails">重试</a-button>
+        ><a-button size="small" @click="loadDetails" class="uvp-refresh-btn">重试</a-button>
       </div>
       <a-table v-else :data="detailList" :loading="detailLoading" :pagination="false" row-key="id" :scroll="{ x: 900 }">
         <template #columns>

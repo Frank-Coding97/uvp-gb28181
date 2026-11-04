@@ -118,7 +118,7 @@
       <!-- 底部按钮 -->
       <div class="modal-footer">
         <a-space>
-          <a-button @click="handleModalCancel">取消</a-button>
+          <a-button @click="handleModalCancel" class="uvp-btn-neutral">取消</a-button>
           <a-button type="primary" @click="handleModalConfirm">确定</a-button>
         </a-space>
       </div>

@@ -253,7 +253,7 @@ defineExpose({ refresh });
       <div v-if="loading && !networkData" class="monitoring-state" role="status"><a-spin />正在加载网络会话…</div>
       <div v-else-if="loadError && !networkData" class="monitoring-state monitoring-state--error" role="alert">
         <ShieldAlert :size="36" /><strong>{{ errorPresentation.label }}</strong
-        ><a-button v-if="errorPresentation.retryable" @click="refresh">重新加载</a-button>
+        ><a-button v-if="errorPresentation.retryable" @click="refresh" class="uvp-refresh-btn">重新加载</a-button>
       </div>
       <template v-else>
         <section class="session-table-panel">

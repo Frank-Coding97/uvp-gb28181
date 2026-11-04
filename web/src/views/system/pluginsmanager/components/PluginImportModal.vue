@@ -75,7 +75,7 @@
 
     <template #footer>
       <a-space>
-        <a-button @click="handleClose">取消</a-button>
+        <a-button @click="handleClose" class="uvp-btn-neutral">取消</a-button>
         <a-button type="primary" :loading="importLoading" :disabled="!selectedFile" @click="confirmImport">
           <template #icon><icon-upload /></template>
           <span>导入</span>

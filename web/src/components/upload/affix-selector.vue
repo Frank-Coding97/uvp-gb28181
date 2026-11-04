@@ -61,7 +61,7 @@
       <!-- 底部操作按钮 -->
       <div class="footer-actions">
         <a-space>
-          <a-button @click="handleClose">取消</a-button>
+          <a-button @click="handleClose" class="uvp-btn-neutral">取消</a-button>
           <a-button type="primary" :disabled="selectedKeys.length === 0" @click="handleConfirm">
             确认选择 ({{ selectedKeys.length }})
           </a-button>

@@ -50,7 +50,7 @@
 
     <div v-if="scope === 'local' && loadError" class="picker-state-panel picker-error" role="alert">
       <span>通道加载失败：{{ loadError }}</span>
-      <a-button size="small" data-action="retry" @click="loadLocalPage">重试</a-button>
+      <a-button size="small" data-action="retry" @click="loadLocalPage" class="uvp-refresh-btn">重试</a-button>
     </div>
     <div v-else-if="!loading && !visibleCandidates.length" class="picker-state-panel" :data-action="emptyAction">
       <strong>{{ emptyTitle }}</strong>
@@ -170,7 +170,7 @@
         </p>
       </div>
       <div class="picker-actions">
-        <a-button size="small" data-action="cancel" @click="$emit('cancel')">取消</a-button>
+        <a-button size="small" data-action="cancel" @click="$emit('cancel')" class="uvp-btn-neutral">取消</a-button>
         <a-button
           size="small"
           type="primary"

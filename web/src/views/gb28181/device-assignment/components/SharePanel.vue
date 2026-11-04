@@ -221,7 +221,7 @@ watch(
         </a-tab-pane>
       </a-tabs>
       <div class="share-panel__footer">
-        <a-button @click="visible = false">取消</a-button>
+        <a-button @click="visible = false" class="uvp-btn-neutral">取消</a-button>
         <a-button type="primary" @click="saveChanges">保存变更</a-button>
       </div>
     </div>

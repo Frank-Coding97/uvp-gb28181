@@ -145,7 +145,7 @@
                 <span>卸载插件</span>
               </a-button>
             </a-popconfirm>
-            <a-button @click="detailVisible = false">
+            <a-button @click="detailVisible = false" class="uvp-btn-neutral">
               <template #icon><IconClose /></template>
               <span>退出</span>
             </a-button>

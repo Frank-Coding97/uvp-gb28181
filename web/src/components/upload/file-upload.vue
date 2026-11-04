@@ -17,7 +17,13 @@
               <template #icon><icon-download /></template>
               下载
             </a-button>
-            <a-button v-if="fileItem.status === 'error'" type="text" size="small" @click="handleRetry(index)">
+            <a-button
+              v-if="fileItem.status === 'error'"
+              class="uvp-refresh-text"
+              type="text"
+              size="small"
+              @click="handleRetry(index)"
+            >
               <template #icon><icon-refresh /></template>
               重试
             </a-button>

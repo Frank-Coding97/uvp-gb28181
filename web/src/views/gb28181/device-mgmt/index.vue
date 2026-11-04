@@ -4710,7 +4710,7 @@ onUnmounted(() => {
             </a-input>
             <span class="map-camera-count">摄像头：{{ total }}</span>
             <div class="map-toolbar-spacer"></div>
-            <a-button class="map-action map-action--refresh" @click="loadMapData">刷新</a-button>
+            <a-button class="uvp-refresh-btn map-action map-action--refresh" @click="loadMapData">刷新</a-button>
             <a-button class="map-action map-action--reset" @click="resetMapView">复位</a-button>
             <a-button class="map-action map-action--fit" @click="fitMapToData">适应视野</a-button>
             <!-- 平台默认中心（执法仪场景每次进来先看到辖区那一片）：点进去选地图上的点，再确认保存。 -->
@@ -4743,7 +4743,12 @@ onUnmounted(() => {
             >
               保存为中心
             </a-button>
-            <a-button class="map-center-picker__cancel" size="small" :disabled="mapCenterSaving" @click="stopMapCenterPicking">
+            <a-button
+              class="uvp-btn-neutral map-center-picker__cancel"
+              size="small"
+              :disabled="mapCenterSaving"
+              @click="stopMapCenterPicking"
+            >
               取消
             </a-button>
           </div>
@@ -5306,7 +5311,7 @@ onUnmounted(() => {
                 <div v-if="statusEventError" class="status-event-state error" role="alert">
                   <strong>上下线记录加载失败</strong>
                   <span>{{ statusEventError }}</span>
-                  <a-button size="small" @click="loadStatusEvents()">重试</a-button>
+                  <a-button size="small" @click="loadStatusEvents()" class="uvp-refresh-btn">重试</a-button>
                 </div>
                 <a-empty v-else-if="!statusEventLoading && statusEventList.length === 0" description="暂无上下线记录" />
                 <a-timeline v-else class="status-event-timeline">
@@ -5326,7 +5331,8 @@ onUnmounted(() => {
               <div v-if="statusEventList.length" class="status-event-load-more">
                 <span v-if="statusEventLoadingMore"><Loader2 :size="14" class="spin" /> 正在加载更多</span>
                 <span v-else-if="statusEventLoadMoreError" class="error"
-                  >{{ statusEventLoadMoreError }} <button type="button" @click="loadMoreStatusEvents">重试</button></span
+                  >{{ statusEventLoadMoreError }}
+                  <button type="button" @click="loadMoreStatusEvents" class="uvp-refresh-text">重试</button></span
                 >
                 <span v-else-if="!statusEventHasMore">已展示全部 {{ statusEventTotal }} 条</span>
                 <span v-else>向下滚动加载更多 · 已加载 {{ statusEventList.length }}/{{ statusEventTotal }} 条</span>
@@ -5355,7 +5361,7 @@ onUnmounted(() => {
             </div>
             <div v-if="runtimeChannelsError" class="runtime-channel-state" role="alert">
               <span>{{ runtimeChannelsError }}，当前仍可查看设备汇总</span>
-              <a-button size="small" @click="loadRuntimeChannels(statusEventDevice)">重试</a-button>
+              <a-button size="small" @click="loadRuntimeChannels(statusEventDevice)" class="uvp-refresh-btn">重试</a-button>
             </div>
             <TrafficTrend
               v-if="runtimeActiveTab === 'traffic'"
@@ -5385,7 +5391,7 @@ onUnmounted(() => {
             </div>
             <div v-if="runtimeChannelsError" class="runtime-channel-state error" role="alert">
               <span>{{ runtimeChannelsError }}，当前仍展示全部通道</span>
-              <a-button size="small" @click="loadRuntimeChannels(statusEventDevice)">重试</a-button>
+              <a-button size="small" @click="loadRuntimeChannels(statusEventDevice)" class="uvp-refresh-btn">重试</a-button>
             </div>
             <ViewerTable
               v-if="runtimeActiveTab === 'viewers'"
@@ -5425,7 +5431,7 @@ onUnmounted(() => {
         </a-form-item>
       </a-form>
       <template #footer>
-        <a-button @click="createDeviceVisible = false">取消</a-button>
+        <a-button @click="createDeviceVisible = false" class="uvp-btn-neutral">取消</a-button>
         <a-button type="primary" :loading="creatingDevice" @click="handleCreateDevice">创建</a-button>
       </template>
     </a-modal>
@@ -5487,7 +5493,7 @@ onUnmounted(() => {
         </a-form-item>
       </a-form>
       <template #footer>
-        <a-button @click="cancelEditDevice">取消</a-button>
+        <a-button @click="cancelEditDevice" class="uvp-btn-neutral">取消</a-button>
         <a-button type="primary" :loading="editingDevice" @click="handleEditDevice">保存</a-button>
       </template>
     </a-modal>
@@ -5559,7 +5565,7 @@ onUnmounted(() => {
         </a-form-item>
       </a-form>
       <template #footer>
-        <a-button @click="cancelEditChannel">取消</a-button>
+        <a-button @click="cancelEditChannel" class="uvp-btn-neutral">取消</a-button>
         <a-button type="primary" :loading="editingChannel" @click="handleEditChannel">保存</a-button>
       </template>
     </a-modal>

@@ -107,7 +107,7 @@
 
     <template #footer>
       <div class="detail-actions">
-        <a-button type="primary" @click="emit('update:visible', false)">关闭</a-button>
+        <a-button type="primary" @click="emit('update:visible', false)" class="uvp-btn-neutral">关闭</a-button>
       </div>
     </template>
   </a-modal>

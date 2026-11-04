@@ -57,7 +57,7 @@
       <a-alert v-if="errorMessage" type="error" class="recording-player-error">
         <div>
           <span>{{ errorMessage }}</span>
-          <a-button data-testid="player-retry" size="small" @click="loadAccess(true)">重试</a-button>
+          <a-button data-testid="player-retry" size="small" @click="loadAccess(true)" class="uvp-refresh-btn">重试</a-button>
         </div>
       </a-alert>
     </div>

@@ -108,7 +108,7 @@ function formatBytes(value: number) {
             {{ item === "1h" ? "1 小时" : item === "24h" ? "24 小时" : "7 天" }}
           </button>
         </div>
-        <button v-if="error" type="button" class="retry" @click="emit('retry')">重试</button>
+        <button v-if="error" type="button" class="uvp-refresh-text retry" @click="emit('retry')">重试</button>
       </div>
       <p v-if="error" class="drilldown-notice" :class="{ stale }" role="status">
         {{ stale ? `刷新失败，继续展示上次数据：${error}` : error }}

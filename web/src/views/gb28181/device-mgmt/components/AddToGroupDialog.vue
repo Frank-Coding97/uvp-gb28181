@@ -109,7 +109,7 @@ async function submit() {
     </div>
     <template #footer>
       <div class="dialog-footer">
-        <a-button :disabled="submitting" @click="close">取消</a-button>
+        <a-button :disabled="submitting" @click="close" class="uvp-btn-neutral">取消</a-button>
         <a-button data-testid="add-to-group-submit" type="primary" :disabled="!canSubmit" :loading="submitting" @click="submit">
           <template #icon><FolderPlus :size="14" /></template>
           添加

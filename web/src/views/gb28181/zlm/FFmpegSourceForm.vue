@@ -140,7 +140,7 @@ function close() {
         </a-form-item>
       </div>
       <div class="ffmpeg-form__actions">
-        <a-button :disabled="loading" @click="close">取消</a-button>
+        <a-button :disabled="loading" @click="close" class="uvp-btn-neutral">取消</a-button>
         <a-button type="primary" html-type="submit" :loading="loading" :disabled="!decision.allowed">确认创建</a-button>
       </div>
     </a-form>

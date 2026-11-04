@@ -83,7 +83,7 @@
 //    CSS Selectors L4 里 `:not()` 的特异性 = 参数的特异性（会累加），
 //    连写 4 个就把这条规则抬到 0,5,0，反而压过下面 footer 的 0,3,0 ⇒ 取消键被染蓝。
 //    `:where()` 的贡献恒为 0，选择器保持 0,1,0，级联顺序才符合预期。
-.arco-btn-primary:where(:not(.arco-btn-status-danger, .uvp-create-btn, .uvp-refresh-btn, .uvp-stop-btn)) {
+.arco-btn-primary:where(:not(.arco-btn-status-danger, .uvp-create-btn, .uvp-refresh-btn, .uvp-stop-btn, .uvp-btn-neutral)) {
   color: var(--uvp-btn-primary-text);
   background: var(--uvp-btn-primary-bg);
   border-color: var(--uvp-btn-primary-border);
@@ -105,7 +105,15 @@
 .arco-btn-secondary,
 .arco-btn-outline,
 .arco-btn:where(
-    :not(.arco-btn-primary, .arco-btn-text, .arco-btn-status-danger, .uvp-create-btn, .uvp-refresh-btn, .uvp-stop-btn)
+    :not(
+      .arco-btn-primary,
+      .arco-btn-text,
+      .arco-btn-status-danger,
+      .uvp-create-btn,
+      .uvp-refresh-btn,
+      .uvp-stop-btn,
+      .uvp-btn-neutral
+    )
   ) {
   color: var(--uvp-btn-secondary-text);
   background: var(--uvp-btn-secondary-bg);
@@ -235,6 +243,16 @@
 }
 
 // 行内的「刷新」文字链（表格上方、面板角落），只染字不改底。
+// 用于原生 <button> 只想要颜色、不想被三档几何接管（如错误态里的「重试」）。
+.uvp-refresh-text {
+  color: var(--uvp-refresh-btn-text);
+
+  &:hover,
+  &:focus-visible {
+    color: var(--uvp-refresh-btn-text);
+  }
+}
+
 .uvp-refresh-link {
   color: var(--uvp-refresh-btn-text);
 

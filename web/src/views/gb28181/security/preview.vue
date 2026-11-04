@@ -1372,7 +1372,8 @@ onBeforeUnmount(() => {
         >白名单只降低来源风险分，不会绕过 SIP 格式、鉴权和设备身份校验。</a-alert
       >
       <div class="drawer-actions">
-        <a-button @click="ruleDrawerVisible = false">取消</a-button><a-button type="primary" @click="saveRule">保存规则</a-button>
+        <a-button @click="ruleDrawerVisible = false" class="uvp-btn-neutral">取消</a-button
+        ><a-button type="primary" @click="saveRule">保存规则</a-button>
       </div>
     </a-modal>
   </main>

@@ -188,7 +188,7 @@ defineExpose({ refresh });
     </div>
     <div v-else-if="loadError && !runtime" class="monitoring-state monitoring-state--error" role="alert">
       <Server :size="34" /><strong>{{ errorPresentation.label }}</strong
-      ><a-button v-if="errorPresentation.retryable" @click="refresh">重新加载</a-button>
+      ><a-button v-if="errorPresentation.retryable" @click="refresh" class="uvp-refresh-btn">重新加载</a-button>
     </div>
     <div v-else-if="!runtime" class="monitoring-state" role="status">
       <Server :size="34" /><strong>等待运行态采样</strong><span>后端将持续保留最近 5 分钟趋势。</span>

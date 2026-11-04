@@ -88,7 +88,7 @@
 
     <template #footer>
       <a-space>
-        <a-button @click="close">取消</a-button>
+        <a-button @click="close" class="uvp-btn-neutral">取消</a-button>
         <a-button type="primary" @click="save"
           ><template #icon><Save :size="15" /></template>保存计划</a-button
         >

@@ -386,7 +386,7 @@ defineExpose({ refresh: requestRefresh });
     <div v-if="loading && !pageData" class="monitoring-state" role="status"><a-spin />正在读取{{ scopeLabel }}媒体流…</div>
     <div v-else-if="loadError && !pageData" class="monitoring-state monitoring-state--error" role="alert">
       <ShieldAlert :size="34" /><strong>{{ errorPresentation.label }}</strong
-      ><a-button v-if="errorPresentation.retryable" @click="requestRefresh">重新加载</a-button>
+      ><a-button v-if="errorPresentation.retryable" @click="requestRefresh" class="uvp-refresh-btn">重新加载</a-button>
     </div>
     <template v-else>
       <section class="stream-table-panel">

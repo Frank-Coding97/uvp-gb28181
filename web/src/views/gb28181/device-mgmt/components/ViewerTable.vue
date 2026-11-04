@@ -168,7 +168,7 @@ onBeforeUnmount(() => {
     </div>
     <div v-if="error" class="viewer-error" role="alert">
       <span>{{ error }}</span
-      ><a-button size="small" @click="load('initial')">重试</a-button>
+      ><a-button size="small" @click="load('initial')" class="uvp-refresh-btn">重试</a-button>
     </div>
     <a-table
       v-else

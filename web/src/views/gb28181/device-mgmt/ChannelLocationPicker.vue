@@ -221,7 +221,7 @@ function resetView() {
           清除坐标
         </a-button>
         <span class="location-picker__spacer"></span>
-        <a-button size="small" @click="close">取消</a-button>
+        <a-button size="small" @click="close" class="uvp-btn-neutral">取消</a-button>
         <a-button size="small" type="primary" @click="handleConfirm">保存位置</a-button>
       </div>
     </div>

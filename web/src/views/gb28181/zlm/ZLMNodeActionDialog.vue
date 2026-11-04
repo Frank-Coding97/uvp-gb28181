@@ -230,7 +230,7 @@ async function confirm(payload: { fingerprint: string }) {
       <strong>未执行任何管理动作</strong>
       <span>{{ loadError }}</span>
       <div v-if="!purgeConfirming">
-        <a-button @click="close">取消</a-button>
+        <a-button @click="close" class="uvp-btn-neutral">取消</a-button>
         <a-button type="primary" @click="loadPreflight">重新预检</a-button>
         <a-button :disabled="!canPurge" status="danger" data-test="purge-entry" @click="purgeConfirming = true"
           >强制移除</a-button
@@ -244,7 +244,7 @@ async function confirm(payload: { fingerprint: string }) {
           <span>由于读不到影响，它上面是否还有流、录制和级联会话是未知的；重新上线后需手动清理残留。</span>
           <span>指向它的设备「首选节点」会被重置为自动调度。</span>
           <div>
-            <a-button :disabled="purging" @click="purgeConfirming = false">返回</a-button>
+            <a-button :disabled="purging" @click="purgeConfirming = false" class="uvp-btn-neutral">返回</a-button>
             <a-button status="danger" data-test="purge-confirm" :loading="purging" @click="purgeUnreachable">确认移除</a-button>
           </div>
         </div>
