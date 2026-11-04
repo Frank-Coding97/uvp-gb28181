@@ -5,6 +5,8 @@ import {
   formatCapturedAt,
   formatSnapshotMd5,
   formatSnapshotSize,
+  mayDeleteSnapshotLibrary,
+  mayDownloadSnapshotLibrary,
   mayViewSnapshotLibrary,
   normalizeSnapshotQuery,
   resolveSnapshotSource,
@@ -21,6 +23,8 @@ import {
   snapshotShowsChannelCode,
   snapshotShowsReportedName,
   snapshotSourceLabel,
+  SNAPSHOT_DELETE_PERMISSION,
+  SNAPSHOT_DOWNLOAD_PERMISSION,
   SNAPSHOT_LIBRARY_PERMISSION
 } from "./snapshotLibraryState";
 
@@ -32,10 +36,31 @@ describe("image library permission", () => {
 
   it("does not let neighbouring permissions open the page", () => {
     // ⛔ 用别的 gb28181 权限（哪怕是云台控制这种"看起来同级"的）必须为假：
-    // 菜单可见性与两个接口的 casbin 授权都绑在 device:snapshot 上，前端放宽就是越权给入口。
+    // 前端放宽就是越权给入口。
     expect(mayViewSnapshotLibrary(["gb28181:ptz:view"])).toBe(false);
     expect(mayViewSnapshotLibrary(["gb28181:device:view"])).toBe(false);
+    // ⛔ 2026-11-04 起查看权从 device:snapshot 拆出来了：抓拍配置的权限码
+    // 不该再顺带打开图像库（这正是拆分的目的）。
+    expect(mayViewSnapshotLibrary(["gb28181:device:snapshot"])).toBe(false);
     expect(mayViewSnapshotLibrary([])).toBe(false);
+  });
+
+  it("keeps download and delete as two separate switches", () => {
+    // 只有查看权：能进页面，但不能下载、不能删。
+    expect(mayViewSnapshotLibrary([SNAPSHOT_LIBRARY_PERMISSION])).toBe(true);
+    expect(mayDownloadSnapshotLibrary([SNAPSHOT_LIBRARY_PERMISSION])).toBe(false);
+    expect(mayDeleteSnapshotLibrary([SNAPSHOT_LIBRARY_PERMISSION])).toBe(false);
+
+    // 给了下载不等于给了删除，反之亦然 —— 两个权限码之间没有蕴含关系。
+    expect(mayDeleteSnapshotLibrary([SNAPSHOT_DOWNLOAD_PERMISSION])).toBe(false);
+    expect(mayDownloadSnapshotLibrary([SNAPSHOT_DELETE_PERMISSION])).toBe(false);
+
+    expect(mayDownloadSnapshotLibrary([SNAPSHOT_DOWNLOAD_PERMISSION])).toBe(true);
+    expect(mayDeleteSnapshotLibrary([SNAPSHOT_DELETE_PERMISSION])).toBe(true);
+
+    // 全权通配仍然一把过。
+    expect(mayDownloadSnapshotLibrary(["*:*:*"])).toBe(true);
+    expect(mayDeleteSnapshotLibrary(["*:*:*"])).toBe(true);
   });
 });
 

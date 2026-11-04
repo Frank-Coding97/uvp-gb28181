@@ -8,8 +8,24 @@ import type { SnapshotLibraryQuery, SnapshotLibrarySource } from "@/api/gb28181"
  * 倒也没错，但 `source=` 一旦写歪就是「参数错被当成没数据」这类最难查的故障。
  */
 
-/** 与菜单授权、两个接口的 casbin 授权**同码**（见迁移 2026-09-20-channel-snapshot-library）。 */
-export const SNAPSHOT_LIBRARY_PERMISSION = "gb28181:device:snapshot";
+/**
+ * 图像库自己的权限码，与菜单 140509 的 `permission` 列**逐字一致**。
+ *
+ * ⛔ 2026-11-04 之前这里借的是 `gb28181:device:snapshot`（挂在「多屏播放 →
+ * 设备图像抓拍会话」上）⇒ 想给某人看图像库就必须同时给他抓拍权，想收回抓拍
+ * 又连图像库一起没了。现在三者分开（迁移 2026-11-04-snapshot-library-permissions）：
+ *
+ * - `gb28181:snapshot:view`     —— 菜单 140509 自带（勾菜单即得，含取图/列表接口）
+ * - `gb28181:snapshot:download` —— 按钮 140620（批量下载接口 686）
+ * - `gb28181:snapshot:delete`   —— 按钮 140621（删除接口 639）
+ */
+export const SNAPSHOT_LIBRARY_PERMISSION = "gb28181:snapshot:view";
+
+/** 批量下载（zip）与单张下载按钮的权限码；接口侧只有批量下载能硬控。 */
+export const SNAPSHOT_DOWNLOAD_PERMISSION = "gb28181:snapshot:download";
+
+/** 删除图片的权限码，对应 `DELETE /api/gb28181/device-mgmt/snapshots`。 */
+export const SNAPSHOT_DELETE_PERMISSION = "gb28181:snapshot:delete";
 
 /**
  * 图像库页面路由，与后端菜单行的 `path` 逐字一致。
@@ -52,6 +68,22 @@ export const SNAPSHOT_SOURCE_OPTIONS: Array<{ value: SnapshotLibrarySource; labe
 
 export function mayViewSnapshotLibrary(permissions: string[]): boolean {
   return permissions.includes(ALL_PERMISSION) || permissions.includes(SNAPSHOT_LIBRARY_PERMISSION);
+}
+
+/**
+ * 能不能下载图片。
+ *
+ * ⛔ 单张下载走的还是取图接口（587），后端分不出「看缩略图」和「存原图」，
+ * 所以这里只是**界面级**收口：没下载权的账号不该看到下载按钮，
+ * 但真要拦死必须另开一个下载接口（当前没做）。
+ */
+export function mayDownloadSnapshotLibrary(permissions: string[]): boolean {
+  return permissions.includes(ALL_PERMISSION) || permissions.includes(SNAPSHOT_DOWNLOAD_PERMISSION);
+}
+
+/** 能不能删除图片（后端 DELETE /snapshots 由 casbin 硬控，这里只决定按钮是否出现）。 */
+export function mayDeleteSnapshotLibrary(permissions: string[]): boolean {
+  return permissions.includes(ALL_PERMISSION) || permissions.includes(SNAPSHOT_DELETE_PERMISSION);
 }
 
 /** 把任意字符串收窄成合法来源；不认识的一律当"未选"。 */
@@ -158,7 +190,7 @@ export function snapshotQueryFromFilters(filters: SnapshotLibraryFilters): Recor
 /**
  * 给取图地址补鉴权（以及子路径部署时补 base）。
  *
- * ⛔ 图像库读接口在鉴权组里（`gb28181:device:snapshot`），`<img src>` 带不了
+ * ⛔ 图像库读接口在鉴权组里，`<img src>` 带不了
  * Authorization 头 ⇒ 不补 token 的话整页缩略图全是 401 破图。
  * 走 `?token=` 是本仓既有约定（后端 `common.GetAccessToken` 同时接受 header 与 query，
  * 见 `sipDashboardStreamUrl` 的同款处理）。
