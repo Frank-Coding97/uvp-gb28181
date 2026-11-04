@@ -141,7 +141,9 @@ describe("security preview system integration", () => {
     expect(hasMarkup(source, '<a-tab-pane key="bans"><template #title><Ban :size="14" />自动封禁</template></a-tab-pane>')).toBe(
       true
     );
-    expect(source).toContain("activeTab === 'bans'");
+    // 自动封禁页只留台账：不放「调整策略」跳转（策略是独立页签，两个入口会打架）。
+    expect(source).not.toContain("调整策略");
+    expect(hasMarkup(source, "v-else-if=\"['events', 'blacklist', 'allowlist'].includes(activeTab)\"")).toBe(true);
     expect(source).toContain("进入原因");
     expect(source).toContain("主机防火墙{{ record.firewallState }}");
     expect(source).toContain("转为手动黑名单");
@@ -173,7 +175,7 @@ describe("security preview system integration", () => {
 
   it("matches the shared system toolbar sizing for refresh and rule actions", () => {
     expect(source).toContain('class="uvp-page-action-btn uvp-refresh-btn" aria-label="刷新安全数据"');
-    expect(hasMarkup(source, '<a-button v-else class="uvp-page-action-btn uvp-create-btn" type="primary"')).toBe(true);
+    expect(hasMarkup(source, 'class="uvp-page-action-btn uvp-create-btn"')).toBe(true);
     expect(source).not.toContain("security-create-action");
   });
 
@@ -281,7 +283,9 @@ describe("security preview system integration", () => {
 
   it("renders operational data from security APIs instead of fixed demo values", () => {
     expect(source).toContain("getSecurityAgentHealth()");
-    expect(source).toContain('listSecurityAccessRules("blacklist", { page:');
+    // ⛔ 别钉整行：条件对象一长，prettier 就会把 `{ page:` 折到下一行。
+    expect(hasMarkup(source, 'listSecurityAccessRules("blacklist", { page:')).toBe(true);
+    expect(hasMarkup(source, 'listSecurityAccessRules("allowlist", { page:')).toBe(true);
     expect(source).toContain("updateSecurityAccessRule(rule.id");
     expect(source).toContain("expiryToIso(ruleExpiry.value)");
     expect(source).toContain("自动封禁有效期");

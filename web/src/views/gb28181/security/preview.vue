@@ -863,11 +863,10 @@ onBeforeUnmount(() => {
           <a-button v-if="activeTab === 'policy'" type="primary" @click="savePolicyPreview"
             ><template #icon><Check :size="16" /></template>保存策略</a-button
           >
-          <a-button v-else-if="activeTab === 'bans'" type="primary" @click="activeTab = 'policy'"
-            ><template #icon><SlidersHorizontal :size="16" /></template>调整策略</a-button
-          >
+          <!-- ⛔ 自动封禁页不再放策略跳转按钮（老板 2026-11-04）：策略是独立页签，
+               从台账里再塞一个跳转按钮只会让两个入口打架。 -->
           <a-button
-            v-else
+            v-else-if="['events', 'blacklist', 'allowlist'].includes(activeTab)"
             class="uvp-page-action-btn uvp-create-btn"
             type="primary"
             @click="openRuleDrawer(activeTab === 'allowlist' ? 'allowlist' : 'blacklist')"
