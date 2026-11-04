@@ -503,7 +503,15 @@ defineExpose({
                 <template #icon><RefreshCw :size="16" /></template>刷新
               </a-button>
             </a-tooltip>
-            <a-button type="primary" :disabled="!canCreate" @click="openCreate"
+            <!--
+              ⛔ class="uvp-create-btn" 不能省：新建客户端属于「新增」类动作，全站口径是绿实心
+              （account / menu / role / dict / 固件库的「新增/上传」都这么写）。
+              只写 type="primary" 的后果：暗色主题里 `body[arco-theme="dark"] :is(.arco-btn-primary…)`
+              带 !important 会把所有 primary 刷成同一个蓝，于是和左边「查询」并排同色、
+              一屏两个主按钮；而旁边的「刷新」是青绿，反而比新建更像重点。
+              挂了本类就在那条覆盖的排除列表里，两主题都稳绿。
+            -->
+            <a-button type="primary" class="uvp-create-btn" :disabled="!canCreate" @click="openCreate"
               ><template #icon><Plus :size="16" /></template>新建客户端</a-button
             >
           </template>
@@ -511,7 +519,8 @@ defineExpose({
 
         <div v-if="error" class="openapi-client-page__error" role="alert">
           <span>{{ error }}</span>
-          <a-button size="small" @click="load">重试</a-button>
+          <!-- 「重试」= 重新取一次数据，走刷新语义（与 detail.vue 错误态那颗保持一致） -->
+          <a-button size="small" class="uvp-refresh-btn" @click="load">重试</a-button>
         </div>
         <a-table
           v-if="!error"

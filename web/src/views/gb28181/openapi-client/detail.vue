@@ -428,7 +428,8 @@ function formatTime(value?: string | null) {
                     <span>已授权 {{ grantedCount }} / {{ availableScopes.length }} 项</span>
                   </div>
                 </div>
-                <a-button :loading="loading" @click="load"
+                <!-- 「刷新」只重取不改数据，走刷新语义（与列表页那颗一致，原先是裸灰按钮） -->
+                <a-button class="uvp-refresh-btn" :loading="loading" @click="load"
                   ><template #icon><RefreshCw :size="15" /></template>刷新</a-button
                 >
               </div>
@@ -468,7 +469,7 @@ function formatTime(value?: string | null) {
                   </a-select>
                 </template>
                 <template #actions>
-                  <a-button :loading="auditLoading" @click="loadAudits"
+                  <a-button class="uvp-refresh-btn" :loading="auditLoading" @click="loadAudits"
                     ><template #icon><RefreshCw :size="15" /></template>刷新</a-button
                   >
                 </template>

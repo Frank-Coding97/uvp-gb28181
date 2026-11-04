@@ -560,4 +560,19 @@ describe("OpenAPI client page", () => {
     expect(api.rotate).not.toHaveBeenCalled();
     confirm.mockRestore();
   });
+
+  /**
+   * ⛔ 契约（老板 2026-11-04 实拍暗色截图指出）：搜索区右侧三颗按钮的色相必须分得开。
+   *   「查询」= 蓝主按钮、「刷新」= 青绿（uvp-refresh-btn）、「新建客户端」= 绿实心（uvp-create-btn）。
+   *   新建原先只写裸 `type="primary"`：暗色主题里 `body[arco-theme="dark"]` 那条
+   *   `:is(.arco-btn-primary…)` 覆盖带 !important，会把所有 primary 统一刷成同一个蓝，
+   *   于是「新建客户端」和「查询」并排同色，而旁边的青绿「刷新」反倒更抢眼。
+   */
+  it("新建客户端挂 uvp-create-btn（绿），刷新挂 uvp-refresh-btn（青绿），不靠裸 primary 凑", async () => {
+    const source = await import("./index.vue?raw");
+    expect(source.default).toContain('class="uvp-create-btn"');
+    expect(source.default).toContain('class="uvp-refresh-btn"');
+    // 允许 `type="primary"`（查询键与新建键都要它），但不许出现「裸 primary 的新建键」
+    expect(source.default).not.toMatch(/<a-button type="primary" :disabled="!canCreate"/);
+  });
 });
