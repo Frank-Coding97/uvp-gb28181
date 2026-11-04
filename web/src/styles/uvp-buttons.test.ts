@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { hasRuleBlock } from "@/test/source-assert";
+import { hasRuleBlock, ruleBlocks } from "@/test/source-assert";
 
 /**
  * 按钮体系门禁（2026-11-04 建立）。
@@ -212,6 +212,19 @@ describe("单一真源不许被第二套规则覆盖", () => {
     // 2026-11-04 从 arco-overrides 迁入：那边是 `!important` 硬压，与「语义从一处出」冲突。
     expect(hasRuleBlock(BUTTONS, ".uvp-refresh-btn", "background: var(--uvp-refresh-btn-bg)")).toBe(true);
     expect(OVERRIDES).not.toMatch(/\.uvp-refresh-btn\s*\{/);
+  });
+
+  it("图标键上的刷新语义常年上色，不是 hover 才出", () => {
+    // 2026-11-04 老板：「设备目录那个刷新图标键，只有悬浮才出这个颜色，能不能不悬浮也是」。
+    // 页面 `.icon-button { background: transparent; color: 灰 }`（0,2,0）压过
+    // `.uvp-refresh-btn`（0,1,0），只有带 `:not([disabled])` 的 hover 态（0,3,0）才反超
+    // ⇒ 静态是灰的、一悬浮才跳青绿。真源必须给图标键一条 ≥0,2,1 的**纯配色**规则。
+    const blocks = ruleBlocks(BUTTONS, "button.uvp-refresh-btn[class]:where(");
+    expect(blocks.length, "图标键的刷新配色规则不在了").toBeGreaterThan(0);
+    expect(blocks[0]).toContain("color: var(--uvp-refresh-btn-text)");
+    expect(blocks[0]).toContain("background: var(--uvp-refresh-btn-bg)");
+    // 几何仍归页面（方形定尺）：这条规则里一个尺寸声明都不许有。
+    expect(blocks[0]).not.toMatch(/(^|;)\s*(width|height|min-width|min-height|padding)\s*:/);
   });
 
   it("取数语义（下载 / 导出）与刷新共用青绿，且不抢主按钮的蓝", () => {

@@ -472,6 +472,38 @@
   }
 }
 
+// ── 7.6 图标键上的刷新语义：**常年上色**，不是 hover 才出 ─────────────────────
+// 图标键（26/28px 方形，只有图标没有文案）的**几何归页面**，但**配色该由语义决定**。
+// ⛔ 踩过（2026-11-04 老板截图）：「设备目录」面板头那个刷新图标键静态是灰的，
+//    只有悬浮才浮出青绿底。原因 = 页面那条 `.icon-button { color: var(--uvp-text-tertiary);
+//    background: transparent }` 编译后是 0,2,0，压过第 7 节的 `.uvp-refresh-btn`（0,1,0）；
+//    而 hover 态因 `:not([disabled])` 抬到 0,3,0 才反超 ⇒ 只有悬浮才有色。
+// 修法：给图标键单独一条 0,2,1 的规则（`[class]` 抬一档 + `button` 元素一档），
+//      只写「色 / 底 / 边」，一个尺寸声明都不写（尺寸仍归页面的 .icon-btn 一族）。
+// ⚠️ 设备卡片那个 `.icon-btn.framed.info`（0,4,0）比这条高，仍走它自己的青蓝配色，不受影响。
+button.uvp-refresh-btn[class]:where(.icon-btn, .icon-button, .tree-icon-button) {
+  color: var(--uvp-refresh-btn-text);
+  background: var(--uvp-refresh-btn-bg);
+  border: 1px solid var(--uvp-refresh-btn-border);
+
+  &:hover:not([disabled]) {
+    color: var(--uvp-refresh-btn-text);
+    background: var(--uvp-refresh-btn-hover-bg);
+    border-color: var(--uvp-refresh-btn-border);
+  }
+
+  &:active:not([disabled]) {
+    color: var(--uvp-refresh-btn-text);
+    background: var(--uvp-refresh-btn-active-bg);
+    border-color: var(--uvp-refresh-btn-border);
+  }
+
+  &[disabled] {
+    cursor: not-allowed;
+    opacity: var(--uvp-btn-disabled-opacity);
+  }
+}
+
 // ── 7.5 a-button 上的语义类：只染配色，几何仍归第 1 节三档 ──────────────────
 // 原生 <button> 走下面第 8 节（连几何一起接管）；但 `<a-button class="uvp-btn-neutral">`
 // 这种写法全仓有 37 处（弹窗取消键），它同时带 `.arco-btn-secondary` 且命中 Arco 的
