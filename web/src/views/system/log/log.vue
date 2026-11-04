@@ -97,7 +97,10 @@
           <a-table-column title="操作" :width="96" align="center" :fixed="isMobile ? '' : 'right'">
             <template #cell="{ record }">
               <div class="uvp-table-actions">
-                <a-link class="uvp-table-action uvp-table-action--detail" @click="viewDetail(record)">详情</a-link>
+                <a-link class="uvp-table-action uvp-table-action--detail" @click="viewDetail(record)">
+                  <template #icon><Eye :size="13" /></template>
+                  <span>详情</span>
+                </a-link>
               </div>
             </template>
           </a-table-column>
@@ -157,6 +160,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed } from "vue";
 import { useRoute } from "vue-router";
+import { Eye } from "lucide-vue-next";
 import { getOperationLogsAPI, deleteOperationLogsAPI, exportOperationLogsAPI, type OperationLogItem } from "@/api/log";
 import useGlobalProperties from "@/hooks/useGlobalProperties";
 import { formatTime } from "@/globals";
