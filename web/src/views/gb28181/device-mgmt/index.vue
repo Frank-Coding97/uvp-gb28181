@@ -5913,12 +5913,6 @@ onUnmounted(() => {
   white-space: nowrap;
   border-radius: 10px;
 }
-.btn-primary {
-  font-weight: 600;
-  color: var(--uvp-solid-text);
-  background: var(--uvp-solid-bg);
-  border: 0;
-}
 .btn-primary.long {
   width: 100%;
 }
@@ -5948,26 +5942,15 @@ onUnmounted(() => {
   cursor: not-allowed;
   opacity: 0.5;
 }
-.btn-ghost {
-  color: var(--uvp-text-secondary);
-  cursor: pointer;
-  background: var(--uvp-search-secondary-btn-bg);
-  border: 1px solid var(--uvp-search-secondary-btn-border);
-  transition:
-    color 0.15s ease,
-    background 0.15s ease,
-    border-color 0.15s ease,
-    transform 0.1s ease;
-}
-.btn-ghost:hover {
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
-  border-color: color-mix(in srgb, var(--uvp-brand) 32%, transparent);
-}
-.btn-ghost:active {
-  background: color-mix(in srgb, var(--uvp-brand) 14%, var(--uvp-brand-soft));
-  transform: scale(0.96);
-}
+
+/* ⛔⛔ 2026-11-04 删除页面自持的 .btn-ghost / .btn-primary 配色副本。
+   它们是 scoped 规则（编译后带 [data-v-x]，特异性 0,2,0），会压过按钮真源里
+   0,1,0 的 `.uvp-refresh-btn` ⇒ 头部「刷新 9s」挂了刷新语义类却还是白底
+   （hover 能变青绿，是因为 :hover 把特异性抬到了 0,3,0 —— 这个"只有悬浮才生效"
+   就是被 scoped 副本压住的典型症状）。
+   全局 .btn-ghost / .btn-primary 在 arco-overrides.scss，值与这里完全一致，
+   删掉后视觉不变；语义类（uvp-refresh-btn / uvp-create-btn / uvp-btn-neutral）
+   从此说了算。**本页面不要再写按钮配色。** */
 .btn-ghost.active {
   color: var(--uvp-brand);
   background: var(--uvp-brand-soft);
@@ -6078,7 +6061,8 @@ onUnmounted(() => {
 }
 .refresh-countdown {
   font-variant-numeric: tabular-nums;
-  color: var(--uvp-text-tertiary);
+  color: inherit;
+  opacity: 0.72;
 }
 .segmented {
   display: inline-flex;
@@ -6120,7 +6104,10 @@ onUnmounted(() => {
 .status-select {
   min-width: 126px;
 }
-.toolbar-actions > .btn-ghost {
+
+/* ⛔ 排除挂了体系语义类的按钮（刷新 / 取消 / 新建）：几何归 `uvp-buttons.scss` 的三档，
+   这里只负责「使用引导」这类没有语义类的图标键。 */
+.toolbar-actions > .btn-ghost:where(:not(.uvp-refresh-btn, .uvp-btn-neutral, .uvp-create-btn)) {
   flex: 0 0 auto;
   min-width: 84px;
   height: 40px;

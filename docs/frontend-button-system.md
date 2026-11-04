@@ -107,6 +107,13 @@
 已用 `:where(:not(…))` 让这两个老类**主动让位**：只要挂了 `uvp-refresh-btn` / `uvp-create-btn` / `uvp-btn-primary|secondary|neutral`，几何与配色全归真源。
 新页面请**不要再写 `.btn-ghost`**，直接写 `<button class="uvp-btn-secondary">`。
 
+⛔⛔⛔ **比上面更狠的是「页面 scoped 副本」**：页面 `<style scoped>` 里自写的 `.btn-ghost` 编译后是
+`.btn-ghost[data-v-x]`，特异性 **0,2,0**，压过真源所有 0,1,0 的语义类。
+**典型症状：静态是白底、一悬浮就变青绿** —— 因为只真源的 `:hover` 把特异性抬到了 0,3,0。
+判据：只要出现"只有 hover/active 生效"，就是被更高特异性的静态规则压住了，去页内搜同名的 `.btn-*`。
+已处理：`views/gb28181/device-mgmt/index.vue` 删掉自持的 `.btn-ghost` / `.btn-primary` 配色（全局已有同值定义），
+`.toolbar-actions > .btn-ghost` 加 `:where(:not(.uvp-refresh-btn, .uvp-btn-neutral, .uvp-create-btn))`。
+
 ### 3.2 判断"该不该实心"
 
 按**操作区**（一个搜索面板 / 一个弹窗 / 一行工具条）算，不是按页面算：

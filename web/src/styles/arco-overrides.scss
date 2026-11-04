@@ -350,10 +350,11 @@ body[arco-theme="dark"] .arco-switch[disabled].arco-switch-checked {
   border-radius: var(--uvp-btn-radius);
 }
 
+// 同 .uvp-refresh-btn：原生 <button> 只给颜色会露 UA 默认边框，这里写完整 border。
 .uvp-create-btn {
   color: var(--uvp-btn-success-text) !important;
   background: var(--uvp-btn-success-bg) !important;
-  border-color: var(--uvp-btn-success-bg) !important;
+  border: 1px solid var(--uvp-btn-success-bg) !important;
   box-shadow: 0 10px 18px -15px rgb(22 132 95 / 58%) !important;
 
   &:hover:not([disabled], .arco-btn-disabled),

@@ -223,10 +223,12 @@
 // 整行按钮里一眼能认出"这个是刷新"，又不会抢走主按钮的位置。
 // ⚠️ 2026-11-04 从 arco-overrides.scss 迁入本真源（那儿靠 !important 硬压，
 //    与"语义只从一处出"冲突）。迁入后去掉 !important，靠文件内顺序取胜。
+// ⛔ 这里写完整 border 而不是只写 border-color：原生 <button> 不经过 Arco，
+//    只给颜色会露出浏览器默认的 2px outset 边框（页面里的 .btn-ghost 副本删掉后尤其明显）。
 .uvp-refresh-btn {
   color: var(--uvp-refresh-btn-text);
   background: var(--uvp-refresh-btn-bg);
-  border-color: var(--uvp-refresh-btn-border);
+  border: 1px solid var(--uvp-refresh-btn-border);
   box-shadow: none;
 
   &:hover:not(.arco-btn-loading, .arco-btn-disabled, [disabled]) {
