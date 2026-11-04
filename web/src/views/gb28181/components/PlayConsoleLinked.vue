@@ -5419,7 +5419,7 @@ provide(PLAY_CONSOLE_CONTEXT, {
                 <AlertTriangle :size="42" />
                 <strong>点播未完成</strong>
                 <span>{{ phaseHint }}</span>
-                <a-button type="primary" size="mini" html-type="button" class="btn-primary player-retry" @click="reconnect">
+                <a-button type="primary" size="small" html-type="button" class="btn-primary player-retry" @click="reconnect">
                   <RefreshCcw :size="14" />重试
                 </a-button>
               </div>
@@ -5573,7 +5573,7 @@ provide(PLAY_CONSOLE_CONTEXT, {
                 <span class="picture-draft-actions">
                   <a-button
                     type="text"
-                    size="mini"
+                    size="small"
                     html-type="button"
                     class="picture-draft-revert"
                     data-testid="picture-draft-revert"
@@ -5584,7 +5584,7 @@ provide(PLAY_CONSOLE_CONTEXT, {
                   </a-button>
                   <a-button
                     type="primary"
-                    size="mini"
+                    size="small"
                     html-type="button"
                     class="picture-draft-submit"
                     data-testid="picture-draft-apply"

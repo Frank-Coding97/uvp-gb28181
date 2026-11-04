@@ -160,7 +160,7 @@ onMounted(loadDevices);
   <div class="gb28181-page">
     <a-card class="left" :bordered="false" title="设备 / 通道">
       <template #extra>
-        <a-button class="uvp-refresh-btn" size="mini" @click="loadDevices">刷新</a-button>
+        <a-button class="uvp-refresh-btn" size="small" @click="loadDevices">刷新</a-button>
       </template>
       <a-spin :loading="treeLoading">
         <a-tree :data="treeData as any" :load-more="onLoadMore as any" :default-expanded-keys="[]" @select="onTreeSelect">

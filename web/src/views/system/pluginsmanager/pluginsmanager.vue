@@ -130,7 +130,7 @@
             <a-checkbox v-model="exportIncludeData"> 导出包含数据库数据（不勾选则只会导出结构） </a-checkbox>
           </div>
           <a-space>
-            <a-button type="primary" @click="exportPlugin(currentPlugin)" v-hasPerm="['system:pluginsmanager:export']">
+            <a-button @click="exportPlugin(currentPlugin)" v-hasPerm="['system:pluginsmanager:export']">
               <template #icon><IconDownload /></template>
               <span>导出插件</span>
             </a-button>

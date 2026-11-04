@@ -452,8 +452,11 @@ describe("snapshot library page", () => {
     expect(button("library-batch-toggle")?.props("type")).toBe("primary");
     expect(button("library-select-all")?.props("type")).toBe("secondary");
     expect(button("library-select-all")?.classes()).toContain("library-selection-action");
-    expect(button("library-batch-download")?.props("type")).toBe("primary");
+    // ⛔ 2026-11-04 起「批量下载」是次要动作（次要 / 导出类统一用 secondary 浅蓝底），
+    //    主操作只留给「保存/提交」这一级；此处原先断言 primary，属于「满屏都是重点」的那类写法。
+    expect(button("library-batch-download")?.props("type")).toBe("secondary");
     await wrapper.find('[data-testid="library-pick-1"]').setValue(true);
+    // 危险操作仍然要突出：primary + status=danger = 实心红（见 uvp-buttons.scss）。
     expect(button("library-batch-delete")?.props()).toMatchObject({ type: "primary", status: "danger" });
     wrapper.unmount();
   });

@@ -55,8 +55,8 @@
           <span class="uvp-dialog-selection__summary">
             已选择 <a-tag color="arcoblue">{{ selectedApiIds.length }}</a-tag> 个API
           </span>
-          <a-button type="outline" size="mini" @click="clearSelection">清空选择</a-button>
-          <a-button :type="showSelectedOnly ? 'primary' : 'outline'" size="mini" @click="toggleShowSelected">
+          <a-button type="outline" size="small" @click="clearSelection">清空选择</a-button>
+          <a-button :type="showSelectedOnly ? 'primary' : 'outline'" size="small" @click="toggleShowSelected">
             {{ showSelectedOnly ? "显示全部" : "显示已选" }}
           </a-button>
         </div>

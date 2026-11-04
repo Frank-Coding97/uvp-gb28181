@@ -8,7 +8,7 @@ const emit = defineEmits<{ (e: "toggle"): void }>();
     <span class="wiper-label"><Waves :size="12" />雨刷</span>
     <a-button
       type="text"
-      size="mini"
+      size="small"
       html-type="button"
       class="wiper-toggle"
       :class="{ active: state === 'on-sent' }"

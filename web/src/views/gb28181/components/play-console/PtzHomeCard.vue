@@ -54,7 +54,7 @@ const emit = defineEmits<{ (e: "configure"): void; (e: "close"): void; (e: "refr
       <div class="home-card-actions">
         <a-button
           type="primary"
-          size="mini"
+          size="small"
           html-type="button"
           v-if="
             presentation.showConfigure &&
@@ -73,7 +73,7 @@ const emit = defineEmits<{ (e: "configure"): void; (e: "close"): void; (e: "refr
           <Settings :size="12" />{{ confirmed?.enabled ? "修改设置" : "配置并启用" }}</a-button
         ><a-button
           type="outline"
-          size="mini"
+          size="small"
           html-type="button"
           v-if="confirmed?.enabled"
           class="btn-ghost sm home-close-btn"
@@ -85,7 +85,7 @@ const emit = defineEmits<{ (e: "configure"): void; (e: "close"): void; (e: "refr
           <CircleSlash :size="12" />关闭</a-button
         ><a-button
           type="outline"
-          size="mini"
+          size="small"
           html-type="button"
           v-if="presentation.showQuery"
           class="btn-ghost sm uvp-refresh-btn"

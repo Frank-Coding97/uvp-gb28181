@@ -80,7 +80,7 @@ const {
     <div class="mode-switch">
       <a-button
         type="text"
-        size="mini"
+        size="small"
         html-type="button"
         data-testid="ptz-mode-speed"
         :class="{ active: ptzMode === 'speed' }"
@@ -92,7 +92,7 @@ const {
       </a-button>
       <a-button
         type="text"
-        size="mini"
+        size="small"
         html-type="button"
         data-testid="ptz-mode-precise"
         :class="{ active: ptzMode === 'precise' }"
@@ -146,7 +146,7 @@ const {
       <div class="talk-mode-switch" aria-label="对讲模式">
         <a-button
           type="text"
-          size="mini"
+          size="small"
           html-type="button"
           :class="{ active: talkMode === 'broadcast' }"
           :disabled="talkState !== 'idle' || !talkAvailable"
@@ -159,7 +159,7 @@ const {
         </a-button>
         <a-button
           type="text"
-          size="mini"
+          size="small"
           html-type="button"
           :class="{ active: talkMode === 'talk' }"
           :disabled="talkState !== 'idle' || !talkAvailable"
@@ -173,7 +173,7 @@ const {
       </div>
       <a-button
         type="text"
-        size="mini"
+        size="small"
         html-type="button"
         class="talk-button"
         data-testid="talk-button"
@@ -218,7 +218,7 @@ const {
           <div class="lens-btns">
             <a-button
               type="text"
-              size="mini"
+              size="small"
               html-type="button"
               title="放大"
               aria-label="镜头放大"
@@ -235,7 +235,7 @@ const {
             </a-button>
             <a-button
               type="text"
-              size="mini"
+              size="small"
               html-type="button"
               title="缩小"
               aria-label="镜头缩小"
@@ -257,7 +257,7 @@ const {
           <div class="lens-btns">
             <a-button
               type="text"
-              size="mini"
+              size="small"
               html-type="button"
               title="远焦(按住连续)"
               aria-label="远焦，按住连续"
@@ -274,7 +274,7 @@ const {
             </a-button>
             <a-button
               type="text"
-              size="mini"
+              size="small"
               html-type="button"
               title="近焦(按住连续)"
               aria-label="近焦，按住连续"
@@ -296,7 +296,7 @@ const {
           <div class="lens-btns">
             <a-button
               type="text"
-              size="mini"
+              size="small"
               html-type="button"
               title="开大(按住连续)"
               aria-label="光圈开大，按住连续"
@@ -313,7 +313,7 @@ const {
             </a-button>
             <a-button
               type="text"
-              size="mini"
+              size="small"
               html-type="button"
               title="缩小(按住连续)"
               aria-label="光圈缩小，按住连续"
@@ -340,7 +340,7 @@ const {
           <div class="drag-zoom-switch" aria-label="3D 拖拽方向">
             <a-button
               type="text"
-              size="mini"
+              size="small"
               html-type="button"
               :class="{ active: dragZoomMode && dragZoomAction === 'drag_zoom_in' }"
               data-testid="ptz-drag-zoom-in"
@@ -354,7 +354,7 @@ const {
             </a-button>
             <a-button
               type="text"
-              size="mini"
+              size="small"
               html-type="button"
               :class="{ active: dragZoomMode && dragZoomAction === 'drag_zoom_out' }"
               data-testid="ptz-drag-zoom-out"
@@ -415,7 +415,7 @@ const {
       <div class="precise-actions">
         <a-button
           type="primary"
-          size="mini"
+          size="small"
           html-type="button"
           class="btn-primary sm"
           data-testid="ptz-precise-apply"
@@ -426,7 +426,7 @@ const {
         </a-button>
         <a-button
           type="outline"
-          size="mini"
+          size="small"
           html-type="button"
           class="btn-ghost sm"
           aria-label="读取当前位置"
@@ -440,7 +440,7 @@ const {
         <span class="lens-label"><Video :size="12" />关键帧</span>
         <a-button
           type="outline"
-          size="mini"
+          size="small"
           html-type="button"
           data-testid="ptz-iframe-request"
           :title="capabilityActionTitle('iFrame', '请求关键帧')"
@@ -459,7 +459,7 @@ const {
         <div class="target-track-switch" aria-label="目标跟踪方式">
           <a-button
             type="outline"
-            size="mini"
+            size="small"
             html-type="button"
             data-testid="ptz-target-track-auto"
             :title="capabilityActionTitle('targetTrack', '自动跟踪')"
@@ -472,7 +472,7 @@ const {
           </a-button>
           <a-button
             type="outline"
-            size="mini"
+            size="small"
             html-type="button"
             :class="{ active: targetTrackMode }"
             data-testid="ptz-target-track-manual"
@@ -487,7 +487,7 @@ const {
           </a-button>
           <a-button
             type="outline"
-            size="mini"
+            size="small"
             html-type="button"
             data-testid="ptz-target-track-stop"
             :title="capabilityActionTitle('targetTrack', '停止跟踪')"

@@ -47,7 +47,7 @@ const emit = defineEmits<{
             <a-button
               :disabled="!canSharePlayback"
               type="text"
-              size="mini"
+              size="small"
               shape="square"
               html-type="button"
               class="protocol-copy-btn"
@@ -67,7 +67,7 @@ const emit = defineEmits<{
         v-for="option in shortcutOptions"
         :key="option.value"
         type="secondary"
-        size="mini"
+        size="small"
         html-type="button"
         class="proto-btn"
         :class="{ active: protocol === option.value }"

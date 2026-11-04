@@ -8,7 +8,7 @@
   </a-doption>
   <a-badge v-else-if="canDownload" :count="store.activeCount" :max-count="9" dot>
     <a-tooltip content="下载任务">
-      <a-button type="text" size="mini" class="icon_btn" aria-label="下载任务" :aria-expanded="visible" @click="visible = true">
+      <a-button type="text" size="small" class="icon_btn" aria-label="下载任务" :aria-expanded="visible" @click="visible = true">
         <template #icon><Download :size="18" /></template>
       </a-button>
     </a-tooltip>
@@ -39,12 +39,12 @@
         </div>
         <div class="recording-download-item__actions">
           <a-tooltip v-if="canRetry(task.status)" :content="task.status === 'ready' ? '重新触发浏览器下载' : '从零重新下载'">
-            <a-button type="text" size="mini" aria-label="重新下载" @click="retry(task.taskId)"
+            <a-button type="text" size="small" aria-label="重新下载" @click="retry(task.taskId)"
               ><template #icon><RefreshCw :size="16" /></template
             ></a-button>
           </a-tooltip>
           <a-tooltip v-if="canCancel(task.status)" content="取消下载">
-            <a-button type="text" size="mini" status="danger" aria-label="取消下载" @click="cancel(task.taskId)"
+            <a-button type="text" size="small" status="danger" aria-label="取消下载" @click="cancel(task.taskId)"
               ><template #icon><X :size="16" /></template
             ></a-button>
           </a-tooltip>

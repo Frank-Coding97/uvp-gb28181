@@ -40,7 +40,7 @@ const emit = defineEmits<{
         <a-button
           class="console-window-action is-minimize"
           type="secondary"
-          size="mini"
+          size="small"
           html-type="button"
           data-testid="play-console-minimize"
           title="切换为小窗播放"
@@ -54,7 +54,7 @@ const emit = defineEmits<{
         <a-button
           class="console-window-action is-close"
           type="secondary"
-          size="mini"
+          size="small"
           html-type="button"
           data-testid="play-console-close"
           title="关闭并停止播放"
@@ -70,7 +70,7 @@ const emit = defineEmits<{
         <a-button
           class="console-window-action is-compact"
           type="secondary"
-          size="mini"
+          size="small"
           shape="square"
           html-type="button"
           data-testid="play-console-restore"
@@ -84,7 +84,7 @@ const emit = defineEmits<{
         <a-button
           class="console-window-action is-close is-compact"
           type="secondary"
-          size="mini"
+          size="small"
           shape="square"
           html-type="button"
           data-testid="play-console-close-mini"

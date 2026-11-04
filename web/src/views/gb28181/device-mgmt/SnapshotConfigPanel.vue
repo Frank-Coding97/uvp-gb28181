@@ -237,7 +237,7 @@ function openInLibrary() {
 
       <!-- 这一批图在库里的入口：会话本身刷新即丢，图片不会 —— 跳过去按会话看全量。 -->
       <div v-if="session?.sessionId" class="snapshot-library-link">
-        <a-button size="mini" :disabled="!libraryReady" data-testid="snapshot-library-open" @click="openInLibrary">
+        <a-button size="small" :disabled="!libraryReady" data-testid="snapshot-library-open" @click="openInLibrary">
           <template #icon><Images :size="12" /></template>
           在图像库中查看本次抓拍
         </a-button>

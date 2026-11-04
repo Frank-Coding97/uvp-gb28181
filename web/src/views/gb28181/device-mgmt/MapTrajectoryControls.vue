@@ -131,7 +131,7 @@ const speedOptions = [
         style="width: 100%"
         @change="onRangeChange"
       />
-      <a-button class="uvp-btn-primary" size="mini" type="primary" :loading="loading" :disabled="!canSearch" @click="onSearch">
+      <a-button class="uvp-btn-primary" size="small" type="primary" :loading="loading" :disabled="!canSearch" @click="onSearch">
         查询
       </a-button>
     </div>

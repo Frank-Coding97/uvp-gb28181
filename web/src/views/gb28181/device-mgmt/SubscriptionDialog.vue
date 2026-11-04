@@ -188,7 +188,7 @@ watch(
         <div class="subscription-actions">
           <a-button
             type="primary"
-            size="mini"
+            size="small"
             @click="saveSettings(item.kind)"
             :loading="pendingKind === item.kind"
             :disabled="pendingKind !== null"
@@ -198,7 +198,7 @@ watch(
           </a-button>
           <a-button
             class="subscription-renew"
-            size="mini"
+            size="small"
             @click="renew(item.kind)"
             :loading="pendingKind === item.kind"
             :disabled="pendingKind !== null || !byKind.get(item.kind)?.enabled"

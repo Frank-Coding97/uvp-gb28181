@@ -95,13 +95,7 @@
             {{ allSelected ? "取消本页全选" : "全选本页" }}
           </a-button>
           <a-button size="small" data-testid="library-clear-selection" @click="clearSelection">清空</a-button>
-          <a-button
-            size="small"
-            type="primary"
-            data-testid="library-batch-download"
-            :disabled="downloading"
-            @click="downloadSelected"
-          >
+          <a-button size="small" data-testid="library-batch-download" :disabled="downloading" @click="downloadSelected">
             <template #icon><Download :size="14" /></template>
             {{ downloading ? "正在下载…" : "批量下载" }}
           </a-button>
@@ -394,7 +388,7 @@
           </div>
 
           <div class="library-detail-actions">
-            <a-button type="primary" long data-testid="library-detail-download" @click="downloadOne(detail)">
+            <a-button long data-testid="library-detail-download" @click="downloadOne(detail)">
               <template #icon><Download :size="15" /></template>
               下载这一张
             </a-button>

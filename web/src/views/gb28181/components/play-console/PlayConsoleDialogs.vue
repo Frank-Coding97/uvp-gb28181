@@ -125,7 +125,7 @@ async function handleCruiseSaveBeforeOk(done: (closable?: boolean) => void) {
       <div class="home-settings-actions">
         <a-button
           type="outline"
-          size="mini"
+          size="small"
           html-type="button"
           class="btn-ghost sm"
           :disabled="homeSettingsSubmitting"
@@ -135,7 +135,7 @@ async function handleCruiseSaveBeforeOk(done: (closable?: boolean) => void) {
         </a-button>
         <a-button
           type="primary"
-          size="mini"
+          size="small"
           html-type="button"
           class="btn-primary sm"
           data-testid="home-dialog-submit"
@@ -267,7 +267,7 @@ async function handleCruiseSaveBeforeOk(done: (closable?: boolean) => void) {
               </a-select>
               <a-button
                 type="text"
-                size="mini"
+                size="small"
                 html-type="button"
                 class="cruise-stop-move"
                 :disabled="cruiseDraft.submitting || index === 0"
@@ -279,7 +279,7 @@ async function handleCruiseSaveBeforeOk(done: (closable?: boolean) => void) {
               </a-button>
               <a-button
                 type="text"
-                size="mini"
+                size="small"
                 html-type="button"
                 class="cruise-stop-move"
                 :disabled="cruiseDraft.submitting || index === cruiseDraft.stops.length - 1"
@@ -291,7 +291,7 @@ async function handleCruiseSaveBeforeOk(done: (closable?: boolean) => void) {
               </a-button>
               <a-button
                 type="text"
-                size="mini"
+                size="small"
                 html-type="button"
                 class="cruise-stop-del"
                 :disabled="cruiseDraft.submitting || cruiseDraft.stops.length <= 1"
@@ -305,7 +305,7 @@ async function handleCruiseSaveBeforeOk(done: (closable?: boolean) => void) {
           </div>
           <a-button
             type="outline"
-            size="mini"
+            size="small"
             html-type="button"
             class="cruise-stop-add"
             data-testid="cruise-stop-add-btn"

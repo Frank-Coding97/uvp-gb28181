@@ -20,7 +20,7 @@ const emit = defineEmits<{ (e: "select", value: string): void }>();
         v-for="option in options"
         :key="option.value"
         type="text"
-        size="mini"
+        size="small"
         html-type="button"
         class="mirror-choice"
         :class="{ active: mirror === option.value }"

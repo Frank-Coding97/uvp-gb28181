@@ -24,12 +24,12 @@
             <div class="upload-list-picture-mask">
               <div class="action-buttons">
                 <a-tooltip content="预览">
-                  <a-button type="text" size="mini" @click="handlePreview(fileItem)">
+                  <a-button type="text" size="small" @click="handlePreview(fileItem)">
                     <icon-eye />
                   </a-button>
                 </a-tooltip>
                 <a-tooltip content="删除">
-                  <a-button type="text" size="mini" @click="handleRemove(index)" status="danger">
+                  <a-button type="text" size="small" @click="handleRemove(index)" status="danger">
                     <icon-delete />
                   </a-button>
                 </a-tooltip>

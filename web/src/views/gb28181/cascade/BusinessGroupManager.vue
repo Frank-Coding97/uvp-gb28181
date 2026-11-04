@@ -4,7 +4,7 @@
       <a-alert v-if="!canWrite" type="info" class="business-group-readonly">当前账号只有查看权限，共享与目录为只读。</a-alert>
       <a-alert v-if="loadError" type="error" class="business-group-alert">
         {{ loadError }}
-        <a-button size="mini" data-action="retry-load" @click="load">重试</a-button>
+        <a-button size="small" data-action="retry-load" @click="load">重试</a-button>
       </a-alert>
 
       <template v-else-if="snapshot">
@@ -164,7 +164,7 @@
                     <span class="business-group-tree-buttons">
                       <a-button
                         class="business-group-tree-button"
-                        size="mini"
+                        size="small"
                         type="text"
                         data-action="add-organization"
                         :title="`新建${node.kind === 'group' ? '虚拟组织' : '下级组织'}`"
@@ -175,7 +175,7 @@
                       /></a-button>
                       <a-button
                         class="business-group-tree-button"
-                        size="mini"
+                        size="small"
                         type="text"
                         data-action="edit-organization"
                         title="编辑节点信息"
@@ -186,7 +186,7 @@
                       /></a-button>
                       <a-button
                         class="business-group-tree-button"
-                        size="mini"
+                        size="small"
                         type="text"
                         status="danger"
                         :data-action="node.kind === 'group' ? 'delete-root' : 'delete-node'"
@@ -458,14 +458,14 @@
       {{ saveError }}
       <a-button
         v-if="resourceSyncPending"
-        size="mini"
+        size="small"
         data-action="retry-resource-sync"
         :disabled="!canWrite || saving || revisionConflict"
         @click="save"
         >{{ dirty ? "保存修改并重试同步" : "重试资源同步" }}</a-button
       >
       <template v-if="revisionConflict"
-        ><a-button size="mini" data-action="reload-latest" @click="requestReloadLatest">重新读取最新目录</a-button></template
+        ><a-button size="small" data-action="reload-latest" @click="requestReloadLatest">重新读取最新目录</a-button></template
       >
     </a-alert>
 

@@ -25,7 +25,7 @@ const emit = defineEmits<{
       <span class="section-title"
         ><MoveHorizontal :size="13" />自动扫描<a-button
           type="text"
-          size="mini"
+          size="small"
           html-type="button"
           v-if="state === 'start-sent'"
           class="cruise-running-chip"
@@ -51,7 +51,7 @@ const emit = defineEmits<{
           @input="emit('update:group', Number($event ?? 0))"
         /><a-button
           type="primary"
-          size="mini"
+          size="small"
           html-type="button"
           class="btn-primary sm scan-toggle"
           data-testid="scan-toggle"
@@ -66,7 +66,7 @@ const emit = defineEmits<{
       <div class="scan-row">
         <a-button
           type="outline"
-          size="mini"
+          size="small"
           html-type="button"
           class="btn-ghost sm scan-bound-btn"
           data-testid="scan-set-left"
@@ -76,7 +76,7 @@ const emit = defineEmits<{
           设左边界</a-button
         ><a-button
           type="outline"
-          size="mini"
+          size="small"
           html-type="button"
           class="btn-ghost sm scan-bound-btn"
           data-testid="scan-set-right"
@@ -100,7 +100,7 @@ const emit = defineEmits<{
           @input="emit('update:speed', Number($event ?? 0))"
         /><a-button
           type="outline"
-          size="mini"
+          size="small"
           html-type="button"
           class="btn-ghost sm"
           data-testid="scan-set-speed"

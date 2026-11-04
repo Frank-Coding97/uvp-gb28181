@@ -26,7 +26,7 @@ function openSetup() {
 
 <template>
   <a-tooltip v-if="visible" :content="tooltip" position="bottom">
-    <a-button size="mini" type="text" class="icon_btn sip-setup-bell" aria-label="平台接入配置提醒" @click="openSetup">
+    <a-button size="small" type="text" class="icon_btn sip-setup-bell" aria-label="平台接入配置提醒" @click="openSetup">
       <template #icon>
         <Bell :size="18" />
       </template>

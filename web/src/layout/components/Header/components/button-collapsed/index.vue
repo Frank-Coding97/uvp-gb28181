@@ -1,7 +1,7 @@
 <template>
   <div class="menu_fold">
     <a-button
-      size="mini"
+      size="small"
       type="text"
       class="menu_fold_icon"
       id="system-collapsed"

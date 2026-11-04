@@ -36,7 +36,7 @@ const emit = defineEmits<{
       <span class="linked-card-actions">
         <a-button
           type="text"
-          size="mini"
+          size="small"
           html-type="button"
           class="resource-sync-btn"
           data-testid="preset-sync-btn"
@@ -51,7 +51,7 @@ const emit = defineEmits<{
         </a-button>
         <a-button
           type="text"
-          size="mini"
+          size="small"
           html-type="button"
           class="preset-save-btn"
           data-testid="preset-save-btn"
@@ -79,7 +79,7 @@ const emit = defineEmits<{
         >
           <a-button
             type="text"
-            size="mini"
+            size="small"
             html-type="button"
             class="preset-tile-hit preset-item"
             :aria-label="`调用预置位 #${preset.id} ${preset.name}`"
@@ -92,7 +92,7 @@ const emit = defineEmits<{
         </a-tooltip>
         <a-button
           type="text"
-          size="mini"
+          size="small"
           html-type="button"
           class="preset-tile-del"
           :title="`删除 #${preset.id}`"
@@ -114,7 +114,7 @@ const emit = defineEmits<{
       >
         <a-button
           type="text"
-          size="mini"
+          size="small"
           html-type="button"
           class="preset-tile-more"
           data-testid="preset-more-btn"
@@ -150,7 +150,7 @@ const emit = defineEmits<{
                 <div class="preset-popover-actions">
                   <a-button
                     type="text"
-                    size="mini"
+                    size="small"
                     html-type="button"
                     class="preset-popover-call"
                     title="调用此预置位"
@@ -161,7 +161,7 @@ const emit = defineEmits<{
                   </a-button>
                   <a-button
                     type="text"
-                    size="mini"
+                    size="small"
                     html-type="button"
                     class="preset-popover-del"
                     title="删除此预置位"

@@ -404,7 +404,7 @@ defineExpose({ refresh, discardDrafts });
                       :class="{ dirty: dirty[record.key] !== undefined }"
                       @change="(value: string | number) => onChange(record, String(value))"
                     />
-                    <a-button v-if="dirty[record.key] !== undefined" size="mini" type="text" @click="resetItem(record.key)"
+                    <a-button v-if="dirty[record.key] !== undefined" size="small" type="text" @click="resetItem(record.key)"
                       >还原</a-button
                     >
                   </div>
@@ -416,7 +416,7 @@ defineExpose({ refresh, discardDrafts });
                       :class="{ dirty: dirty[record.key] !== undefined }"
                       @input="(value: string) => onChange(record, value)"
                     />
-                    <a-button v-if="dirty[record.key] !== undefined" size="mini" type="text" @click="resetItem(record.key)"
+                    <a-button v-if="dirty[record.key] !== undefined" size="small" type="text" @click="resetItem(record.key)"
                       >还原</a-button
                     >
                   </div>

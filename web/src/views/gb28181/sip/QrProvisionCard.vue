@@ -191,7 +191,7 @@ onMounted(() => {
         <div v-if="qrUrl" class="qr-url">
           <span class="qr-url__label">二维码链接</span>
           <code class="qr-url__value">{{ qrUrl }}</code>
-          <a-button size="mini" type="text" @click="copyUrl">复制</a-button>
+          <a-button size="small" type="text" @click="copyUrl">复制</a-button>
         </div>
 
         <a-button type="primary" class="qr-generate" :loading="loading" @click="generate()">

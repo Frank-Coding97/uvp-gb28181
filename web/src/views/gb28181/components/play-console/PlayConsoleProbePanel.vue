@@ -124,7 +124,7 @@ const emit = defineEmits<{ (event: "openTimeline"): void }>();
         </div>
         <a-button
           type="text"
-          size="mini"
+          size="small"
           html-type="button"
           class="frame-overview"
           :class="{ muted: !props.probeOverview }"

@@ -125,7 +125,7 @@ const durationModel = computed({
       <div v-if="canDiagnosePlayback" class="probe-action-row">
         <a-button
           type="primary"
-          size="mini"
+          size="small"
           html-type="button"
           class="probe-action"
           data-testid="probe-start"

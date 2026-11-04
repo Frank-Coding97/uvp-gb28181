@@ -41,7 +41,7 @@ const emit = defineEmits<{
       <span class="linked-card-actions">
         <a-button
           type="text"
-          size="mini"
+          size="small"
           html-type="button"
           class="mask-switch"
           :class="{ on: maskOn, pending: maskPending }"
@@ -54,7 +54,7 @@ const emit = defineEmits<{
         </a-button>
         <a-button
           type="text"
-          size="mini"
+          size="small"
           html-type="button"
           class="resource-sync-btn"
           data-testid="picture-read-btn"
@@ -66,7 +66,7 @@ const emit = defineEmits<{
         </a-button>
         <a-button
           type="text"
-          size="mini"
+          size="small"
           html-type="button"
           class="preset-save-btn"
           data-testid="picture-mask-add-btn"
@@ -115,7 +115,7 @@ const emit = defineEmits<{
         ><span v-else class="mask-slot-blank">空位</span>
         <a-button
           type="text"
-          size="mini"
+          size="small"
           shape="square"
           html-type="button"
           v-if="region.used"

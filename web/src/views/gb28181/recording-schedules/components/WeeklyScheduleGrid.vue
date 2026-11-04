@@ -33,8 +33,8 @@
           </template>
         </div>
         <div v-if="editable" class="day-actions">
-          <a-button size="mini" @click="fillDay(dayIndex)">全天</a-button>
-          <a-button size="mini" status="danger" @click="clearDay(dayIndex)">清空</a-button>
+          <a-button size="small" @click="fillDay(dayIndex)">全天</a-button>
+          <a-button size="small" status="danger" @click="clearDay(dayIndex)">清空</a-button>
         </div>
       </div>
     </div>

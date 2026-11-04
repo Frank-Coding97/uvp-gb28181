@@ -46,7 +46,7 @@ const emit = defineEmits<{
         <Route :size="13" />巡航轨迹<em v-if="tracks.length" class="preset-count">{{ tracks.length }}</em>
         <a-button
           type="text"
-          size="mini"
+          size="small"
           html-type="button"
           v-if="activeId !== null && state !== 'stopped'"
           class="cruise-running-chip"
@@ -63,7 +63,7 @@ const emit = defineEmits<{
       <span class="linked-card-actions">
         <a-button
           type="text"
-          size="mini"
+          size="small"
           html-type="button"
           class="resource-sync-btn"
           data-testid="cruise-sync-btn"
@@ -78,7 +78,7 @@ const emit = defineEmits<{
         </a-button>
         <a-button
           type="text"
-          size="mini"
+          size="small"
           html-type="button"
           class="preset-save-btn"
           data-testid="cruise-add-btn"
@@ -124,7 +124,7 @@ const emit = defineEmits<{
         >
           <a-button
             type="text"
-            size="mini"
+            size="small"
             html-type="button"
             class="preset-tile-hit cruise-item"
             :disabled="!track.enabled && !track.pending"
@@ -139,7 +139,7 @@ const emit = defineEmits<{
           </a-button>
           <a-button
             type="text"
-            size="mini"
+            size="small"
             html-type="button"
             class="preset-tile-del"
             :title="`删除巡航 #${track.id}`"
@@ -162,7 +162,7 @@ const emit = defineEmits<{
       >
         <a-button
           type="text"
-          size="mini"
+          size="small"
           html-type="button"
           class="preset-tile-more"
           data-testid="cruise-more-btn"
@@ -197,7 +197,7 @@ const emit = defineEmits<{
                   <div class="preset-popover-actions">
                     <a-button
                       type="text"
-                      size="mini"
+                      size="small"
                       html-type="button"
                       class="preset-popover-call"
                       :disabled="!track.enabled && !track.pending"
@@ -209,7 +209,7 @@ const emit = defineEmits<{
                     </a-button>
                     <a-button
                       type="text"
-                      size="mini"
+                      size="small"
                       html-type="button"
                       class="preset-popover-del"
                       title="删除此巡航轨迹"

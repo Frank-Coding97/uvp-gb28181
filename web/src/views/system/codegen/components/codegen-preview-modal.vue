@@ -48,7 +48,7 @@
         <div class="preview-content-body">
           <div v-if="activeTab === 'model' && previewData.model" class="code-wrapper">
             <div class="code-header">
-              <a-button type="primary" size="small" @click="copyCode('model')">
+              <a-button size="small" @click="copyCode('model')">
                 <template #icon><icon-copy /></template>
                 <span>复制代码</span>
               </a-button>
@@ -63,7 +63,7 @@
 
           <div v-if="activeTab === 'modelparam' && previewData.modelparam" class="code-wrapper">
             <div class="code-header">
-              <a-button type="primary" size="small" @click="copyCode('modelparam')">
+              <a-button size="small" @click="copyCode('modelparam')">
                 <template #icon><icon-copy /></template>
                 <span>复制代码</span>
               </a-button>
@@ -78,7 +78,7 @@
 
           <div v-if="activeTab === 'controller' && previewData.controller" class="code-wrapper">
             <div class="code-header">
-              <a-button type="primary" size="small" @click="copyCode('controller')">
+              <a-button size="small" @click="copyCode('controller')">
                 <template #icon><icon-copy /></template>
                 <span>复制代码</span>
               </a-button>
@@ -93,7 +93,7 @@
 
           <div v-if="activeTab === 'service' && previewData.service" class="code-wrapper">
             <div class="code-header">
-              <a-button type="primary" size="small" @click="copyCode('service')">
+              <a-button size="small" @click="copyCode('service')">
                 <template #icon><icon-copy /></template>
                 <span>复制代码</span>
               </a-button>
@@ -108,7 +108,7 @@
 
           <div v-if="activeTab === 'routes' && previewData.routes" class="code-wrapper">
             <div class="code-header">
-              <a-button type="primary" size="small" @click="copyCode('routes')">
+              <a-button size="small" @click="copyCode('routes')">
                 <template #icon><icon-copy /></template>
                 <span>复制代码</span>
               </a-button>
@@ -123,7 +123,7 @@
 
           <div v-if="activeTab === 'init' && previewData.init" class="code-wrapper">
             <div class="code-header">
-              <a-button type="primary" size="small" @click="copyCode('init')">
+              <a-button size="small" @click="copyCode('init')">
                 <template #icon><icon-copy /></template>
                 <span>复制代码</span>
               </a-button>
@@ -138,7 +138,7 @@
 
           <div v-if="activeTab === 'frontendApi' && previewData.frontendApi" class="code-wrapper">
             <div class="code-header">
-              <a-button type="primary" size="small" @click="copyCode('frontendApi')">
+              <a-button size="small" @click="copyCode('frontendApi')">
                 <template #icon><icon-copy /></template>
                 <span>复制代码</span>
               </a-button>
@@ -153,7 +153,7 @@
 
           <div v-if="activeTab === 'frontendHooks' && previewData.frontendHooks" class="code-wrapper">
             <div class="code-header">
-              <a-button type="primary" size="small" @click="copyCode('frontendHooks')">
+              <a-button size="small" @click="copyCode('frontendHooks')">
                 <template #icon><icon-copy /></template>
                 <span>复制代码</span>
               </a-button>
@@ -168,7 +168,7 @@
 
           <div v-if="activeTab === 'frontendStore' && previewData.frontendStore" class="code-wrapper">
             <div class="code-header">
-              <a-button type="primary" size="small" @click="copyCode('frontendStore')">
+              <a-button size="small" @click="copyCode('frontendStore')">
                 <template #icon><icon-copy /></template>
                 <span>复制代码</span>
               </a-button>
@@ -183,7 +183,7 @@
 
           <div v-if="activeTab === 'frontendView' && previewData.frontendView" class="code-wrapper">
             <div class="code-header">
-              <a-button type="primary" size="small" @click="copyCode('frontendView')">
+              <a-button size="small" @click="copyCode('frontendView')">
                 <template #icon><icon-copy /></template>
                 <span>复制代码</span>
               </a-button>

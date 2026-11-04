@@ -72,7 +72,7 @@ const isEmpty = computed(() => !props.rows.length);
         </a-select>
         <a-button
           type="text"
-          size="mini"
+          size="small"
           shape="square"
           html-type="button"
           aria-label="还原码流改动"
@@ -86,7 +86,7 @@ const isEmpty = computed(() => !props.rows.length);
         </a-button>
         <a-button
           type="text"
-          size="mini"
+          size="small"
           shape="square"
           html-type="button"
           aria-label="读取编码参数"
@@ -99,7 +99,7 @@ const isEmpty = computed(() => !props.rows.length);
         </a-button>
         <a-button
           type="primary"
-          size="mini"
+          size="small"
           shape="square"
           html-type="button"
           aria-label="应用编码参数"
@@ -157,7 +157,7 @@ const isEmpty = computed(() => !props.rows.length);
               v-for="opt in BIT_RATE_TYPE_OPTIONS"
               :key="opt.value"
               type="text"
-              size="mini"
+              size="small"
               html-type="button"
               :class="{ 'is-on': currentRow.bitRateType === opt.value }"
               @click="currentRow.bitRateType = opt.value"

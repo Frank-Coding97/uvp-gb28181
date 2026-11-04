@@ -60,14 +60,14 @@
               <CircleDot :size="10" :class="{ pulse: connected && following }" />
               {{ following ? "FOLLOW" : "PAUSED" }}
             </span>
-            <a-button size="mini" class="term-action" @click="toggleFollowing">
+            <a-button size="small" class="term-action" @click="toggleFollowing">
               <template #icon><component :is="following ? Pause : Play" :size="12" /></template>
               {{ following ? "暂停跟随" : "继续跟随" }}
             </a-button>
-            <a-button size="mini" class="term-action" title="清空页面缓冲" @click="clearEvents">
+            <a-button size="small" class="term-action" title="清空页面缓冲" @click="clearEvents">
               <template #icon><Eraser :size="12" /></template>
             </a-button>
-            <a-button size="mini" class="term-action" title="下载当前筛选结果" @click="downloadLogs">
+            <a-button size="small" class="term-action" title="下载当前筛选结果" @click="downloadLogs">
               <template #icon><Download :size="12" /></template>
             </a-button>
           </div>

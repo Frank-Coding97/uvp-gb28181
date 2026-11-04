@@ -31,12 +31,12 @@
               <div class="arco-upload-list-picture-mask">
                 <div class="action-buttons">
                   <a-tooltip content="预览">
-                    <a-button type="text" size="mini" @click.stop="handlePreview">
+                    <a-button type="text" size="small" @click.stop="handlePreview">
                       <icon-eye />
                     </a-button>
                   </a-tooltip>
                   <a-tooltip content="删除">
-                    <a-button type="text" size="mini" @click.stop="handleRemove" status="danger">
+                    <a-button type="text" size="small" @click.stop="handleRemove" status="danger">
                       <IconDelete />
                     </a-button>
                   </a-tooltip>

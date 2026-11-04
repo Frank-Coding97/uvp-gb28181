@@ -4712,7 +4712,7 @@ onUnmounted(() => {
             <div class="map-toolbar-spacer"></div>
             <a-button class="map-action map-action--refresh" @click="loadMapData">刷新</a-button>
             <a-button class="map-action map-action--reset" @click="resetMapView">复位</a-button>
-            <a-button class="map-action map-action--fit" type="primary" @click="fitMapToData">适应视野</a-button>
+            <a-button class="map-action map-action--fit" @click="fitMapToData">适应视野</a-button>
             <!-- 平台默认中心（执法仪场景每次进来先看到辖区那一片）：点进去选地图上的点，再确认保存。 -->
             <a-button
               v-if="canEditDevice"
@@ -4736,14 +4736,14 @@ onUnmounted(() => {
             <a-button
               class="map-center-picker__confirm"
               type="primary"
-              size="mini"
+              size="small"
               :loading="mapCenterSaving"
               :disabled="!mapCenterPick"
               @click="confirmMapCenterPick"
             >
               保存为中心
             </a-button>
-            <a-button class="map-center-picker__cancel" size="mini" :disabled="mapCenterSaving" @click="stopMapCenterPicking">
+            <a-button class="map-center-picker__cancel" size="small" :disabled="mapCenterSaving" @click="stopMapCenterPicking">
               取消
             </a-button>
           </div>
@@ -5163,7 +5163,7 @@ onUnmounted(() => {
           </span>
           <div class="channel-config-switch">
             <span class="channel-config-switch__idx"> 第 {{ channelOperationIndex + 1 }} / {{ channels.length }} 路 </span>
-            <a-button-group size="mini" class="channel-config-switch__group">
+            <a-button-group size="small" class="channel-config-switch__group">
               <a-button
                 html-type="button"
                 data-testid="channel-config-prev"
@@ -5355,7 +5355,7 @@ onUnmounted(() => {
             </div>
             <div v-if="runtimeChannelsError" class="runtime-channel-state" role="alert">
               <span>{{ runtimeChannelsError }}，当前仍可查看设备汇总</span>
-              <a-button size="mini" @click="loadRuntimeChannels(statusEventDevice)">重试</a-button>
+              <a-button size="small" @click="loadRuntimeChannels(statusEventDevice)">重试</a-button>
             </div>
             <TrafficTrend
               v-if="runtimeActiveTab === 'traffic'"
@@ -5385,7 +5385,7 @@ onUnmounted(() => {
             </div>
             <div v-if="runtimeChannelsError" class="runtime-channel-state error" role="alert">
               <span>{{ runtimeChannelsError }}，当前仍展示全部通道</span>
-              <a-button size="mini" @click="loadRuntimeChannels(statusEventDevice)">重试</a-button>
+              <a-button size="small" @click="loadRuntimeChannels(statusEventDevice)">重试</a-button>
             </div>
             <ViewerTable
               v-if="runtimeActiveTab === 'viewers'"

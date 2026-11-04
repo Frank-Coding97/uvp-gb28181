@@ -26,7 +26,7 @@ const emit = defineEmits<{
       v-for="tab in tabs"
       :key="tab.key"
       type="text"
-      size="mini"
+      size="small"
       html-type="button"
       class="tab"
       :class="{ active: activeTab === tab.key }"
