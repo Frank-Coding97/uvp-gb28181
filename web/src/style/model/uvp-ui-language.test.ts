@@ -145,6 +145,23 @@ describe("system drawer surface scoping", () => {
   });
 });
 
+describe("dialog selection strip theme", () => {
+  // 2026-11-04 实机取证：暗色下整条「已选择 N 个 API」是白的（采样 rgb(249,251,255)）。
+  // 根因是 `background: #f8fbff` 写死 —— 亮色下看不出问题，暗色下等于在深色抽屉里贴一张白纸；
+  // 而且条内次级按钮/tag 的暗色值是**半透明蓝**，压在白色父底上会合成成浅蓝，看着像没切主题。
+  it("paints the strip with a theme token instead of a literal light surface", () => {
+    expect(hasRuleBlock(source, ".uvp-dialog-selection", "background: var(--uvp-list-toolbar-bg)")).toBe(true);
+  });
+
+  it("keeps literal colors out of that rule block", () => {
+    const squashed = squash(source);
+    const start = squashed.indexOf(".uvp-dialog-selection{");
+    expect(start).toBeGreaterThan(-1);
+    const block = squashed.slice(start, squashed.indexOf("}", start));
+    expect(block).not.toMatch(/background:#/);
+  });
+});
+
 describe("play console button scope", () => {
   // 2026-11-04 起按钮的几何与配色**不在本文件**：统一真源是 src/styles/uvp-buttons.scss。
   // 原来这里断言的是「系统弹窗那套 34px / 白底 / 渐变」的 4 条规则存在，

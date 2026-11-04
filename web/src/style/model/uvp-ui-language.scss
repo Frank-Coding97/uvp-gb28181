@@ -558,6 +558,12 @@ body {
   margin-bottom: 0;
 }
 
+/* ⛔⛔ 底色必须走 token，不能写死浅色（2026-11-04 修）：
+   原来写的是 `background: #f8fbff`，亮色下看着正常，暗色下就是一整条**白纸**贴在深色抽屉里
+   （实机采样 rgb(249,251,255)），而且会连带毁掉条内的按钮与标签 —— 次级按钮 / tag 的暗色值都是
+   **半透明蓝**（如 `rgb(96 165 250 / 18%)`），压在白色父底上合成出来反而是浅蓝，看着像没切主题。
+   换成 `--uvp-list-toolbar-bg`（亮 #f8fbff / 暗 #142130）后亮色观感零变化，暗色自动跟随。
+   ⛔ 同类「弹窗内的工具条」一律复用这一对 token，禁止再出现字面浅色。 */
 .uvp-dialog-selection {
   display: flex;
   flex-wrap: wrap;
@@ -565,7 +571,7 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
-  background: #f8fbff;
+  background: var(--uvp-list-toolbar-bg);
   border: 1px solid var(--uvp-dialog-border);
   border-radius: 12px;
 }
