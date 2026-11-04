@@ -15,6 +15,18 @@ vi.mock("@/api/gb28181", () => api);
 import PlaybackSchemePanel from "./PlaybackSchemePanel.vue";
 
 const summary = { id: 9, name: "门岗值班", layoutSize: 4, slotCount: 2, updatedAt: "2026-08-07T15:00:00Z" };
+
+// ⛔ 2026-11-04 起删除播放方案改成 a-popconfirm 气泡：点"删除"只开气泡，必须再点
+//    气泡里的 ok 才算确认（原先走 Modal.confirm）。stub 把 ok 暴露成 `.popconfirm-ok`。
+const stubs = {
+  "a-popconfirm": {
+    emits: ["ok"],
+    props: ["disabled", "okText", "cancelText", "okButtonProps"],
+    template:
+      "<span v-bind='$attrs'><span class='popconfirm-content'><slot name='content' /></span><slot /><button class='popconfirm-ok' :disabled='disabled' @click='$emit(`ok`)'>{{ okText }}</button></span>"
+  }
+};
+
 const detail = {
   ...summary,
   slots: [
@@ -58,7 +70,8 @@ describe("PlaybackSchemePanel", () => {
 
   function mountPanel(slots = [{ slotIndex: 0, deviceCode: "device-1", channelCode: "channel-1" }]) {
     return mount(PlaybackSchemePanel, {
-      props: { visible: true, currentLayout: 4, currentSlots: slots }
+      props: { visible: true, currentLayout: 4, currentSlots: slots },
+      global: { stubs }
     });
   }
 
@@ -103,5 +116,21 @@ describe("PlaybackSchemePanel", () => {
     expect(wrapper.text()).toContain("先选择通道");
     await wrapper.get("[data-test=close-schemes]").trigger("click");
     expect(wrapper.emitted("update:visible")?.[0]).toEqual([false]);
+  });
+
+  // ⛔ 2026-11-04：删除必须"点菜单项 → 气泡里再确认"两步，且确认按钮为红色危险样式。
+  it("deletes a scheme only after confirming in the danger bubble", async () => {
+    const wrapper = mountPanel();
+    await flushPromises();
+
+    await wrapper.get("[data-test=scheme-menu-9]").trigger("click");
+    await wrapper.get("[data-test=remove-scheme-9]").trigger("click");
+    expect(api.deletePlaybackScheme).not.toHaveBeenCalled();
+    expect(wrapper.get(".popconfirm-content").text()).toContain("门岗值班");
+    expect(wrapper.get(".popconfirm-content").text()).toContain("不可恢复");
+
+    await wrapper.get(".popconfirm-ok").trigger("click");
+    await flushPromises();
+    expect(api.deletePlaybackScheme).toHaveBeenCalledWith(9);
   });
 });

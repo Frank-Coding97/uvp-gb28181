@@ -88,6 +88,14 @@ const stubs = {
     template: "<a :data-testid='$attrs[`data-testid`]' @click='$emit(`click`)'><slot name='icon' /><slot /></a>"
   },
   "a-tag": { template: "<span><slot /></span>" },
+  // ⛔ 2026-11-04 起删除改成 a-popconfirm 气泡：点按钮只打开气泡，必须再点气泡里的
+  //    ok 才算确认（原先走 Modal.warning）。stub 把 ok 暴露成 `.popconfirm-ok`。
+  "a-popconfirm": {
+    emits: ["ok"],
+    props: ["disabled", "okText", "cancelText", "okButtonProps"],
+    template:
+      "<span v-bind='$attrs'><span class='popconfirm-content'><slot name='content' /></span><slot /><button class='popconfirm-ok' :disabled='disabled' @click='$emit(`ok`)'>{{ okText }}</button></span>"
+  },
   "a-alert": { template: "<div><slot /></div>" },
   "a-empty": { props: ["description"], template: "<div>{{ description }}</div>" },
   "a-select": { template: "<select><slot /></select>" },
@@ -387,12 +395,36 @@ describe("CloudRecordings", () => {
     expect(source).toContain('class="uvp-table-action uvp-table-action--delete"');
 
     await wrapper.get("[data-testid='select-first-recording']").trigger("click");
+    // ⛔ 点按钮只弹气泡，不能直接删；确认文案走 #content 插槽，确认按钮必须是红色
     await wrapper.get("[data-testid='recording-batch-delete']").trigger("click");
-    const confirmation = modalWarning.mock.calls[0][0];
-    expect(confirmation.content).toContain("1 个录像文件");
-    await confirmation.onOk();
+    expect(api.batchDeleteRecordingFiles).not.toHaveBeenCalled();
+    expect(modalWarning).not.toHaveBeenCalled();
+    expect(wrapper.get(".popconfirm-content").text()).toContain("1 个录像文件");
+    expect(wrapper.get(".popconfirm-content").text()).toContain("不可恢复");
+    expect(source).toMatch(/<a-popconfirm[^>]*:ok-button-props="\{ status: 'danger' \}"/);
+    await wrapper.get(".popconfirm-ok").trigger("click");
     await flushPromises();
     expect(api.batchDeleteRecordingFiles).toHaveBeenCalledWith(["9007199254740993"]);
+  });
+
+  // ⛔ 2026-11-04：单行删除也必须是"点链接 → 气泡里再确认"两步，且不再弹 Modal。
+  it("deletes a single recording file only after confirming in the bubble", async () => {
+    account.permissions = ["gb28181:recording:view", "gb28181:recording:delete"];
+    const wrapper = mount(CloudRecordings, { global: { stubs } });
+    await flushPromises();
+
+    await wrapper.get("[data-testid='delete-9007199254740993']").trigger("click");
+    expect(api.deleteRecordingFile).not.toHaveBeenCalled();
+    expect(modalWarning).not.toHaveBeenCalled();
+    const bubble = wrapper.findAll(".popconfirm-content").filter(item => item.text().includes("record.mp4"));
+    expect(bubble).toHaveLength(1);
+    expect(bubble[0].text()).toContain("不可恢复");
+
+    const okButtons = wrapper.findAll(".popconfirm-ok");
+    await okButtons[okButtons.length - 1].trigger("click");
+    await flushPromises();
+    expect(api.deleteRecordingFile).toHaveBeenCalledWith("9007199254740993");
+    expect(messages.success).toHaveBeenCalledWith("录像文件已删除");
   });
 
   it("separates active recordings from catalog files", async () => {

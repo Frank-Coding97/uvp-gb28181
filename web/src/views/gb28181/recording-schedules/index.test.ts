@@ -116,10 +116,16 @@ describe("recording schedule prototype", () => {
     expect(source).not.toContain("uvp-table-action--danger");
   });
 
-  it("routes plan deletion through the standard warning dialog instead of a popconfirm", () => {
-    expect(source).not.toContain("<a-popconfirm");
-    expect(source).toContain('@click="removePlan(record)"');
-    expect(source).toContain("Modal.warning({");
+  // ⛔ 2026-11-04 反转契约：这里原本钉的是"删除必须走 Modal.warning、不许用气泡"，
+  //    全站统一后删除一律走 a-popconfirm 气泡（确认按钮红色），Modal 那条路禁止回潮。
+  it("routes plan deletion through the red popconfirm bubble instead of a modal", () => {
+    const markup = source.replace(/\s+/g, "");
+    expect(markup).toContain("<a-popconfirm");
+    expect(markup).toContain(`:ok-button-props="{status:'danger'}"`);
+    expect(markup).toContain(`@ok="deletePlan(record)"`);
+    expect(markup).toContain("请先解除分配");
+    expect(markup).not.toContain('@click="deletePlan(record)"');
+    expect(source).not.toContain("Modal.warning({");
   });
 
   it("gives editing its own green tone while preserving disabled links", () => {

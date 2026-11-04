@@ -133,12 +133,26 @@
                     <a-link class="uvp-table-action uvp-table-action--assign" :disabled="!canAssign" @click="openAssign(record)"
                       ><template #icon><Link2 :size="13" /></template>分配通道</a-link
                     >
-                    <a-link
-                      class="uvp-table-action uvp-table-action--delete"
+                    <a-popconfirm
+                      type="warning"
+                      ok-text="删除"
+                      cancel-text="取消"
+                      :ok-button-props="{ status: 'danger' }"
                       :disabled="!canMaintain || deletingPlanId !== null"
-                      @click="removePlan(record)"
-                      ><template #icon><Trash2 :size="13" /></template>删除</a-link
+                      @ok="deletePlan(record)"
                     >
+                      <template #content>
+                        <div class="uvp-confirm-title">删除录像计划？</div>
+                        <div class="uvp-confirm-desc">
+                          将删除录像计划“{{ record.name }}”。已分配通道的计划无法删除，请先解除分配。
+                        </div>
+                      </template>
+                      <a-link
+                        class="uvp-table-action uvp-table-action--delete"
+                        :disabled="!canMaintain || deletingPlanId !== null"
+                        ><template #icon><Trash2 :size="13" /></template>删除</a-link
+                      >
+                    </a-popconfirm>
                   </div>
                 </template>
               </a-table-column>
@@ -359,7 +373,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
-import { Message, Modal } from "@arco-design/web-vue";
+import { Message } from "@arco-design/web-vue";
 import dayjs from "dayjs";
 import {
   Activity,
@@ -642,32 +656,20 @@ async function confirmAssignment(payload: {
   );
   await Promise.all([loadPlans(), loadExecutionPlans(false)]);
 }
-function removePlan(plan: RecordingSchedule) {
+// ⛔ 2026-11-04 起删除走 a-popconfirm 气泡（确认步骤在模板里），这里只负责执行。
+async function deletePlan(plan: RecordingSchedule) {
   if (!canMaintain.value || deletingPlanId.value !== null) return;
-  Modal.warning({
-    title: "删除录像计划",
-    content: `确定删除录像计划「${plan.name}」吗？已分配通道的计划无法删除，请先解除分配。`,
-    hideCancel: false,
-    okText: "删除",
-    cancelText: "取消",
-    okButtonProps: { status: "danger" },
-    onBeforeOk: async () => {
-      if (!canMaintain.value || deletingPlanId.value !== null) return false;
-      deletingPlanId.value = plan.id;
-      try {
-        await deleteRecordingPlan(Number(plan.id));
-        Message.success(`录像计划“${plan.name}”已删除`);
-        // 删除已成功，刷新失败不应让用户再次提交删除；请求层负责展示接口错误。
-        await Promise.allSettled([loadPlans(), loadEnabledPlanTotal()]);
-        return true;
-      } catch {
-        // 请求层已展示后端错误，保留确认框以便重试。
-        return false;
-      } finally {
-        deletingPlanId.value = null;
-      }
-    }
-  });
+  deletingPlanId.value = plan.id;
+  try {
+    await deleteRecordingPlan(Number(plan.id));
+    Message.success(`录像计划“${plan.name}”已删除`);
+    // 删除已成功，刷新失败不应让用户再次提交删除；请求层负责展示接口错误。
+    await Promise.allSettled([loadPlans(), loadEnabledPlanTotal()]);
+  } catch {
+    // 请求层已展示后端错误（如"已分配通道不能删除"），用户可再次点删除重试。
+  } finally {
+    deletingPlanId.value = null;
+  }
 }
 function stateTone(state: ScheduleChannel["state"]) {
   if (state === "录像中") return "success";

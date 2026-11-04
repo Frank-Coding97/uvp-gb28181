@@ -196,15 +196,9 @@ async function persistReplacement(scheme: PlaybackSchemeSummary) {
   }
 }
 
-function remove(scheme: PlaybackSchemeSummary) {
-  Modal.confirm({
-    title: "删除播放方案",
-    content: `确认删除“${scheme.name}”吗？`,
-    okText: "确认删除",
-    cancelText: "取消",
-    okButtonProps: { status: "danger" },
-    onOk: () => persistRemoval(scheme)
-  });
+// ⛔ 2026-11-04 起删除走 a-popconfirm 气泡（确认步骤在模板里），这里只负责执行。
+async function removeScheme(scheme: PlaybackSchemeSummary) {
+  await persistRemoval(scheme);
 }
 
 async function persistRemoval(scheme: PlaybackSchemeSummary) {
@@ -378,7 +372,22 @@ watch(
             <div v-if="menuSchemeId === scheme.id" class="scheme-menu">
               <button type="button" @click="rename(scheme)">重命名</button
               ><button type="button" :disabled="!hasCurrentSlots" @click="replace(scheme)">用当前画面覆盖</button
-              ><button type="button" class="danger" @click="remove(scheme)"><Trash2 :size="14" aria-hidden="true" />删除</button>
+              ><a-popconfirm
+                type="warning"
+                ok-text="删除"
+                cancel-text="取消"
+                :ok-button-props="{ status: 'danger' }"
+                :disabled="saving"
+                @ok="removeScheme(scheme)"
+              >
+                <template #content>
+                  <div class="uvp-confirm-title">删除播放方案？</div>
+                  <div class="uvp-confirm-desc">将删除“{{ scheme.name }}”这个方案，删除后不可恢复。</div>
+                </template>
+                <button type="button" class="danger" :data-test="`remove-scheme-${scheme.id}`">
+                  <Trash2 :size="14" aria-hidden="true" />删除
+                </button>
+              </a-popconfirm>
             </div>
           </li>
         </ul>

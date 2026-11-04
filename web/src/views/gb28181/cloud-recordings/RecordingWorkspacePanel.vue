@@ -150,16 +150,30 @@
                 >已选 <strong>{{ selectedRowKeys.length }}</strong> 个录像文件</span
               >
               <div class="recording-batch-bar__actions">
-                <a-button
-                  data-testid="recording-batch-delete"
-                  status="danger"
-                  :loading="batchDeleting"
+                <a-popconfirm
+                  type="warning"
+                  ok-text="删除"
+                  cancel-text="取消"
+                  :ok-button-props="{ status: 'danger' }"
                   :disabled="batchDeleting"
-                  @click="requestBatchDelete"
+                  @ok="deleteSelectedFiles"
                 >
-                  <template #icon><Trash2 :size="14" /></template>
-                  批量删除
-                </a-button>
+                  <template #content>
+                    <div class="uvp-confirm-title">批量删除录像文件？</div>
+                    <div class="uvp-confirm-desc">
+                      将从 ZLMediaKit 节点物理删除选中的 {{ selectedRowKeys.length }} 个录像文件，删除后不可恢复。
+                    </div>
+                  </template>
+                  <a-button
+                    data-testid="recording-batch-delete"
+                    status="danger"
+                    :loading="batchDeleting"
+                    :disabled="batchDeleting"
+                  >
+                    <template #icon><Trash2 :size="14" /></template>
+                    批量删除
+                  </a-button>
+                </a-popconfirm>
                 <a-button :disabled="batchDeleting" @click="selectedRowKeys = []">取消选择</a-button>
               </div>
             </div>
@@ -264,16 +278,30 @@
                             <span>下载</span>
                           </a-link>
                         </template>
-                        <a-link
-                          :data-testid="`delete-${record.id}`"
-                          class="uvp-table-action uvp-table-action--delete"
-                          :loading="deletingIds.has(record.id)"
+                        <a-popconfirm
+                          type="warning"
+                          ok-text="删除"
+                          cancel-text="取消"
+                          :ok-button-props="{ status: 'danger' }"
                           :disabled="deletingIds.has(record.id) || !canDelete"
-                          @click="requestDelete(record)"
+                          @ok="deleteFile(record)"
                         >
-                          <template #icon><Trash2 :data-testid="`delete-icon-${record.id}`" :size="13" /></template>
-                          <span>删除</span>
-                        </a-link>
+                          <template #content>
+                            <div class="uvp-confirm-title">删除录像文件？</div>
+                            <div class="uvp-confirm-desc">
+                              将从 ZLMediaKit 节点物理删除“{{ record.fileName || record.id }}”，删除后不可恢复。
+                            </div>
+                          </template>
+                          <a-link
+                            :data-testid="`delete-${record.id}`"
+                            class="uvp-table-action uvp-table-action--delete"
+                            :loading="deletingIds.has(record.id)"
+                            :disabled="deletingIds.has(record.id) || !canDelete"
+                          >
+                            <template #icon><Trash2 :data-testid="`delete-icon-${record.id}`" :size="13" /></template>
+                            <span>删除</span>
+                          </a-link>
+                        </a-popconfirm>
                       </div>
                     </template>
                   </a-table-column>
@@ -735,18 +763,10 @@ async function performStopRecording(id: string) {
   }
 }
 
-function requestDelete(recording: RecordingFile) {
+// ⛔ 2026-11-04 起删除走 a-popconfirm 气泡（确认步骤在模板里），这里只负责执行。
+async function deleteFile(recording: RecordingFile) {
   if (!canDelete.value || deletingIds.value.has(recording.id)) return;
-  Modal.warning({
-    title: "删除录像文件",
-    content: `将从 ZLMediaKit 节点物理删除“${recording.fileName || recording.id}”，删除后不可恢复。`,
-    okText: "删除",
-    cancelText: "取消",
-    hideCancel: false,
-    escToClose: true,
-    okButtonProps: { status: "danger" },
-    onOk: () => performDelete(recording.id)
-  });
+  await performDelete(recording.id);
 }
 
 async function performDelete(id: string) {
@@ -767,18 +787,10 @@ async function performDelete(id: string) {
   }
 }
 
-function requestBatchDelete() {
-  if (!canDelete.value || !selectedRowKeys.value.length || batchDeleting.value) return;
-  Modal.warning({
-    title: "批量删除录像文件",
-    content: `将从 ZLMediaKit 节点物理删除选中的 ${selectedRowKeys.value.length} 个录像文件，删除后不可恢复。`,
-    okText: "删除",
-    cancelText: "取消",
-    hideCancel: false,
-    escToClose: true,
-    okButtonProps: { status: "danger" },
-    onOk: () => performBatchDelete()
-  });
+// ⛔ 同上：批量删除的确认在模板的气泡里，这里只执行。
+async function deleteSelectedFiles() {
+  if (!canDelete.value || batchDeleting.value || !selectedRowKeys.value.length) return;
+  await performBatchDelete();
 }
 
 async function performBatchDelete() {
