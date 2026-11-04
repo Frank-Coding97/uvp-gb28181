@@ -231,6 +231,17 @@ const selectedDirectory = computed(() =>
 );
 const directoryPanelRef = ref<InstanceType<typeof DirectoryPanel> | null>(null);
 const mapChannelTreeRef = ref<InstanceType<typeof MapChannelTree> | null>(null);
+
+/**
+ * 左侧目录栏是否收起（与「账号管理」左侧部门树同一个交互：分界线上的圆形箭头按钮）。
+ *
+ * 只收起**面板宽度**，不动目录数据与展开状态：收起再展开时目录树、选中项、
+ * 滚动位置全部原样（`DirectoryPanel` 始终挂载，列宽变 12px 而已）。
+ */
+const catalogCollapsed = ref(false);
+const toggleCatalogCollapsed = () => {
+  catalogCollapsed.value = !catalogCollapsed.value;
+};
 /** 从左侧通道树点过来、正在地图上高亮的那一路通道。 */
 const mapSelectedChannelId = ref<number | null>(null);
 /**
@@ -3683,7 +3694,23 @@ onUnmounted(() => {
       :progress="catalogRefreshProgress"
       @close="closeCatalogRefreshProgress"
     />
-    <div class="workspace">
+    <div class="workspace" :class="{ 'catalog-collapsed': catalogCollapsed }">
+      <!-- 目录栏收起按钮：照「账号管理」左栏的做法，圆形箭头压在两栏分界线中部。
+           ⛔ 只改列宽、不用 v-if 拆掉 DirectoryPanel —— 收起再展开要原样保留
+           树的展开状态 / 选中项 / 滚动位置。 -->
+      <a-tooltip :content="catalogCollapsed ? '展开设备目录' : '收起设备目录'" position="br">
+        <button
+          class="catalog-collapse-btn"
+          type="button"
+          data-testid="catalog-collapse-toggle"
+          :aria-label="catalogCollapsed ? '展开设备目录' : '收起设备目录'"
+          :aria-expanded="!catalogCollapsed"
+          @click="toggleCatalogCollapsed"
+        >
+          <ChevronLeft v-if="!catalogCollapsed" :size="13" :stroke-width="2" />
+          <ChevronRight v-else :size="13" :stroke-width="2" />
+        </button>
+      </a-tooltip>
       <s-layout-search class="workspace-toolbar">
         <template #fields>
           <div class="workspace-toolbar-row">
@@ -6105,12 +6132,55 @@ onUnmounted(() => {
   border-color: color-mix(in srgb, var(--uvp-brand) 28%, transparent);
 }
 .workspace {
+  /* 收起按钮是绝对定位，锚点必须是这一层（不能靠外层容器）。 */
+  position: relative;
   display: grid;
   flex: 1;
   grid-template-rows: auto minmax(0, 1fr);
   grid-template-columns: 320px minmax(0, 1fr);
   gap: 0;
   min-height: 0;
+}
+
+/* 收起目录栏：只把第一列压到 12px（留给分界线 + 收起按钮），目录树本身不卸载。
+   ⛔ 别改成 display:none / 0px —— 0 宽时按钮会压到内容区首字符上。
+   ⛔ 这条不能写进 `.workspace { }` 里面：嵌套编译出来是 `.workspace .workspace.catalog-collapsed`，
+      永远不匹配（自己踩过，收起后列宽不变）。 */
+.workspace.catalog-collapsed {
+  grid-template-columns: 12px minmax(0, 1fr);
+}
+
+/* 照「账号管理」左栏的圆形收起按钮：压在两栏分界线中部，hover 轻微放大。
+   位置用 left = 列宽（320/260）而不是 right:-12px，因为这里父容器要 overflow 裁剪目录树。 */
+.catalog-collapse-btn {
+  position: absolute;
+  top: 50%;
+  left: 320px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--uvp-text-secondary);
+  cursor: pointer;
+  background: var(--uvp-panel-bg);
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 50%;
+  box-shadow: 0 0 10px 0 rgb(0 0 0 / 5%);
+  transform: translate(-50%, -50%);
+  transition:
+    left 0.15s ease,
+    transform 0.1s,
+    color 0.15s;
+}
+.catalog-collapse-btn:hover {
+  color: var(--uvp-brand);
+  transform: translate(-50%, -50%) scale(1.1);
+}
+.workspace.catalog-collapsed .catalog-collapse-btn {
+  left: 12px;
 }
 .workspace-toolbar {
   grid-column: 1 / -1;
@@ -9216,6 +9286,11 @@ onUnmounted(() => {
     grid-template-rows: auto minmax(0, 1fr);
     grid-template-columns: 260px minmax(0, 1fr);
   }
+
+  /* 列宽变 260 ⇒ 按钮锚点跟着走（同特异性，靠源码顺序覆盖上面的 320px）。 */
+  .catalog-collapse-btn {
+    left: 260px;
+  }
   .toolbar-actions {
     flex-wrap: wrap;
   }
@@ -9226,6 +9301,15 @@ onUnmounted(() => {
     grid-template-rows: auto 310px minmax(440px, 1fr);
     grid-template-columns: minmax(0, 1fr);
     overflow: auto;
+  }
+
+  /* 窄屏目录栏变成上下堆叠，收起按钮没有意义：隐藏且让折叠态不生效，
+     否则在手机上点过收起、再拉宽窗口会得到一个 12px 的怪条。 */
+  .catalog-collapse-btn {
+    display: none;
+  }
+  .workspace.catalog-collapsed {
+    grid-template-columns: minmax(0, 1fr);
   }
   .catalog-pane {
     border-right: 0;
