@@ -3926,7 +3926,6 @@ onUnmounted(() => {
             v-if="assetKind === 'channel'"
             v-model:selected-keys="selectedRowKeys"
             :data="channels"
-            :loading="rowsLoading"
             :pagination="tablePagination"
             row-key="id"
             :scroll="{ x: 2340, y: '85%' }"
@@ -4157,12 +4156,14 @@ onUnmounted(() => {
                 </template>
               </a-table-column>
             </template>
+            <template #empty>
+              <a-empty class="table-empty" :description="rowsLoading ? '加载中…' : '暂无符合条件的通道'" />
+            </template>
           </a-table>
           <a-table
             v-else
             v-model:selected-keys="selectedRowKeys"
             :data="devices"
-            :loading="rowsLoading"
             :pagination="tablePagination"
             row-key="id"
             :scroll="{ x: 2040, y: '85%' }"
@@ -4313,6 +4314,9 @@ onUnmounted(() => {
                   </div>
                 </template>
               </a-table-column>
+            </template>
+            <template #empty>
+              <a-empty class="table-empty" :description="rowsLoading ? '加载中…' : '暂无符合条件的设备'" />
             </template>
           </a-table>
         </div>
@@ -6821,6 +6825,12 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
 }
+
+/* 表格不再挂 loading 遮罩（刷新时遮罩会挡住用户操作），空/加载态改由 empty 槽文字承担 */
+.table-empty {
+  padding: 24px 0;
+}
+
 .card-pagination {
   display: flex;
   flex: 0 0 auto;
