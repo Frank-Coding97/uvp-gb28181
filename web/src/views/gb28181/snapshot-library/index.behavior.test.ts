@@ -9,7 +9,9 @@ const gbApi = vi.hoisted(() => ({ listSnapshotLibrary: vi.fn(), deleteSnapshots:
 // ⛔ 源码断言需要真实文件内容：勾选框"外层不能包 label"这类不变量
 // 靠渲染结果测不出来（桩渲染不出浏览器对 label 的默认激活行为）。
 const pageSource = readFileSync(resolve(process.cwd(), "src/views/gb28181/snapshot-library/index.vue"), "utf8");
-const accountState = vi.hoisted(() => ({ permissions: ["gb28181:device:snapshot"] as string[] }));
+const accountState = vi.hoisted(() => ({
+  permissions: ["gb28181:snapshot:view", "gb28181:snapshot:download", "gb28181:snapshot:delete"] as string[]
+}));
 const account = reactive(accountState);
 const messages = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn() }));
 const modal = vi.hoisted(() => ({ confirm: vi.fn() }));
@@ -167,7 +169,7 @@ function mountPage() {
 
 describe("snapshot library page", () => {
   beforeEach(() => {
-    account.permissions = ["gb28181:device:snapshot"];
+    account.permissions = ["gb28181:snapshot:view", "gb28181:snapshot:download", "gb28181:snapshot:delete"];
     gbApi.listSnapshotLibrary.mockReset();
     replace.mockClear();
     replace.mockResolvedValue(undefined);
@@ -367,7 +369,7 @@ describe("snapshot library page", () => {
     await wrapper.find('[data-testid="library-batch-download"]').trigger("click");
     await flushPromises();
 
-    expect(downloads).toHaveLength(0, "预检不通过时不许触发下载（否则会下一个装着错误信息的文件）");
+    expect(downloads, "预检不通过时不许触发下载（否则会下一个装着错误信息的文件）").toHaveLength(0);
     expect(messages.error).toHaveBeenCalledWith(expect.stringContaining("不在服务器上"));
     wrapper.unmount();
   });
@@ -513,17 +515,21 @@ describe("snapshot library page", () => {
     const button = (testId: string) =>
       wrapper.findAllComponents({ name: "a-button" }).find(button => button.attributes("data-testid") === testId);
 
-    // 闲置态：不写 type ⇒ 真源的次级色（浅蓝）。
-    expect(button("library-batch-toggle")?.props("type")).not.toBe("primary");
+    // 选择族 = 紫（uvp-select-btn）。⛔ 2026-11-04 老板：「每个按钮颜色都不一样」，
+    // 原来闲置态借次级浅蓝、进入批量后借中性灰 ⇒ 跟「重置」「全选本页」撞成三颗一样。
+    expect(button("library-batch-toggle")?.classes()).toContain("uvp-select-btn");
     expect(button("library-batch-toggle")?.classes()).not.toContain("uvp-btn-neutral");
-    await wrapper.find('[data-testid="library-batch-toggle"]').trigger("click");
-    // 进入批量模式 → 文案变「退出批量选择」，语义是**放弃当前上下文** ⇒ 中性灰。
-    // ⛔ 2026-11-04 治理（老板：颜色太单调）：原来是实心蓝，跟「查询」撞成两个重点。
-    expect(button("library-batch-toggle")?.classes()).toContain("uvp-btn-neutral");
     expect(button("library-batch-toggle")?.props("type")).not.toBe("primary");
-    expect(button("library-select-all")?.props("type")).toBe("secondary");
-    // 「清空」只清已选，是轻动作 ⇒ 文字按钮，不跟下载/删除抢实色块。
-    expect(button("library-clear-selection")?.props("type")).toBe("text");
+    await wrapper.find('[data-testid="library-batch-toggle"]').trigger("click");
+    // 进入批量模式 → 文案变「退出批量选择」，但**颜色不跟着切**：
+    // 它是位置固定的模式开关，颜色随模式跳会显得闪。
+    expect(button("library-batch-toggle")?.classes()).toContain("uvp-select-btn");
+    expect(button("library-batch-toggle")?.props("type")).not.toBe("primary");
+    // 全选本页 = 天蓝；清空选择 = 琥珀。两者原来是「次级浅蓝」「无底文字」，
+    // 现在是按钮就得有按钮的形和各自的色相。
+    expect(button("library-select-all")?.classes()).toContain("uvp-sky-btn");
+    expect(button("library-clear-selection")?.classes()).toContain("uvp-clear-btn");
+    expect(button("library-clear-selection")?.props("type")).not.toBe("text");
     // 下载/导出 = 只取数不改数 ⇒ 青绿（uvp-export-btn），与「刷新」同色相。
     expect(button("library-batch-download")?.classes()).toContain("uvp-export-btn");
     expect(button("library-batch-download")?.props("type")).not.toBe("primary");
@@ -735,6 +741,44 @@ describe("snapshot library page", () => {
     expect(wrapper.find('[data-testid="library-grid"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="library-keyword"]').exists()).toBe(false);
     expect(gbApi.listSnapshotLibrary).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("hides every destructive entry for a view-only account", async () => {
+    // ⛔ 2026-11-04 拆分三档权限后的核心行为：只有查看权的账号（审核/演示）
+    // 必须看不到下载和删除，连「批量选择」都不该露出来（勾了也没动作可做）。
+    account.permissions = ["gb28181:snapshot:view"];
+    gbApi.listSnapshotLibrary.mockResolvedValue(listResult([row(1)]));
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="library-grid"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="library-batch-toggle"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="library-batch-download"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="library-download-1"]').exists()).toBe(false);
+
+    // 详情抽屉里的下载按钮同样不能出现。
+    await wrapper.find('[data-testid="library-detail-1"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[data-testid="library-detail-download"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("keeps delete invisible when the account may download but not delete", async () => {
+    // 「能下载 ≠ 能删除」：两个按钮各自绑自己的权限码，不能一处放行处处放行。
+    account.permissions = ["gb28181:snapshot:view", "gb28181:snapshot:download"];
+    gbApi.listSnapshotLibrary.mockResolvedValue(listResult([row(1)]));
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="library-batch-toggle"]').exists()).toBe(true);
+    await wrapper.find('[data-testid="library-batch-toggle"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[data-testid="library-batch-download"]').exists()).toBe(true);
+
+    await wrapper.find('[data-testid="library-pick-1"]').setValue(true);
+    await flushPromises();
+    expect(wrapper.find('[data-testid="library-batch-delete"]').exists()).toBe(false);
     wrapper.unmount();
   });
 });

@@ -2,7 +2,7 @@
   <div class="snow-fill">
     <div class="snow-fill-inner uvp-page-shell-flat snapshot-library-shell">
       <a-alert v-if="!canView" class="library-notice" type="warning">
-        当前账号没有图像抓拍权限，无法查看图像库。请联系管理员分配「图像抓拍」（gb28181:device:snapshot）权限。
+        当前账号没有图像库查看权限，无法查看图像库。请联系管理员分配「查看图像库」（gb28181:snapshot:view）权限。
       </a-alert>
 
       <template v-else>
@@ -45,10 +45,11 @@
                  它是"这次要看多少张"的前置开关，属于查询条件的一部分；
                  放工具条上则要等勾了选才出现，而勾选框本身又只在批量模式显示 ——
                  鸡生蛋，用户根本找不到从哪进入批量模式。 -->
-            <!-- 进入批量模式后这颗变成「退出批量选择」⇒ 语义是**放弃当前上下文**（⑤），
-                 用中性灰。⛔ 原来是 `:type` 在 primary/secondary 之间切，一进批量模式
-                 就跟「查询」撞成两个蓝实心，主次全乱（2026-11-04 治理时改正）。 -->
-            <a-button :class="{ 'uvp-btn-neutral': batchMode }" data-testid="library-batch-toggle" @click="toggleBatchMode">
+            <!-- 进入批量模式后这颗变成「退出批量选择」，但**颜色不变**：它是一颗位置固定的
+                 模式开关，颜色跟着模式跳会显得闪（2026-11-04 老板定：每个按钮颜色都不一样，
+                 用紫 = 选择族；原来在 primary/secondary 之间切，一进批量模式就跟「查询」
+                 撞成两个蓝实心，主次全乱）。 -->
+            <a-button v-if="canBatch" class="uvp-select-btn" data-testid="library-batch-toggle" @click="toggleBatchMode">
               <template #icon><CheckSquare :size="15" /></template>
               {{ batchMode ? "退出批量选择" : "批量选择" }}
             </a-button>
@@ -58,7 +59,9 @@
               <template #icon><Search :size="15" /></template>
               查询
             </a-button>
-            <a-button data-testid="library-reset" :disabled="loading" @click="reset">
+            <!-- 「重置」= 清空筛选条件 ⇒ 中性灰（uvp-btn-neutral）。
+                 ⛔ 原来不写类 ⇒ 落进次级浅蓝，跟批量工具条上的「全选本页」同色。 -->
+            <a-button class="uvp-btn-neutral" data-testid="library-reset" :disabled="loading" @click="reset">
               <template #icon><RotateCcw :size="15" /></template>
               重置
             </a-button>
@@ -83,15 +86,22 @@
              勾选一个自己都拉不到的集合等于骗人。范围限定在「本页」。 -->
         <div v-if="batchMode" class="library-batch" data-testid="library-batch-bar">
           <span class="library-batch-count">已选 {{ selectedIds.size }} 张</span>
-          <a-button size="small" type="secondary" data-testid="library-select-all" @click="toggleSelectAll">
+          <!-- 全选本页 = 扩大已选范围 ⇒ 天蓝（uvp-sky-btn）。⛔ 原来不写类 ⇒ 次级浅蓝，
+               跟「重置」撞色（2026-11-04 老板定：每个按钮颜色都不一样）。 -->
+          <a-button size="small" class="uvp-sky-btn" data-testid="library-select-all" @click="toggleSelectAll">
             {{ allSelected ? "取消本页全选" : "全选本页" }}
           </a-button>
-          <!-- 「清空」清的是**已选**，不是图库数据；改文字按钮，避免它跟「批量下载」
-               抢同一块浅蓝底（2026-11-04 老板定：这一条只留下载、删除两个实色块）。 -->
-          <a-button size="small" type="text" data-testid="library-clear-selection" @click="clearSelection">清空选择</a-button>
+          <!-- 「清空选择」清的是**已选**，不是图库数据 ⇒ 琥珀（uvp-clear-btn）：
+               比灰更有提示感（点了就白勾了），又不到删除的红那么重。
+               ⛔ 2026-11-04 前它是 type="text"（无底无边），老板当场指出「它不是按钮吗」——
+               是按钮就该有按钮的形；且一排 7 颗按钮里它不能是唯一没有颜色的那个。 -->
+          <a-button size="small" class="uvp-clear-btn" data-testid="library-clear-selection" @click="clearSelection">
+            清空选择
+          </a-button>
           <!-- 下载/导出 = 「只取数不改数」⇒ 青绿（uvp-export-btn），与「刷新」同一色相。
                ⛔ 别再写 `type="primary"`：那会跟「查询」抢重点，也会和删除的红打架。 -->
           <a-button
+            v-if="canDownload"
             size="small"
             class="uvp-export-btn"
             data-testid="library-batch-download"
@@ -108,7 +118,7 @@
                实心红是「确认删除弹窗里那一个」专用，放在常驻工具条上会变成整条唯一的高饱和块，
                反而压过下载（2026-11-04 治理时降档）。 -->
           <a-button
-            v-if="selectedIds.size"
+            v-if="canDelete && selectedIds.size"
             size="small"
             status="danger"
             data-testid="library-batch-delete"
@@ -243,7 +253,7 @@
                     选这张
                   </a-checkbox>
                   <span v-else class="library-actions-spacer" />
-                  <a-tooltip content="下载" position="top">
+                  <a-tooltip v-if="canDownload" content="下载" position="top">
                     <button
                       class="icon-btn small framed download"
                       type="button"
@@ -392,17 +402,29 @@
           </div>
 
           <div class="library-detail-actions">
-            <a-button long class="uvp-export-btn" data-testid="library-detail-download" @click="downloadOne(detail)">
+            <a-button
+              v-if="canDownload"
+              long
+              class="uvp-export-btn"
+              data-testid="library-detail-download"
+              @click="downloadOne(detail)"
+            >
               <template #icon><Download :size="15" /></template>
               下载这一张
             </a-button>
             <!-- ⛔ 这里**不能**直接 `toggleSelect` 改选中态：批量模式下勾选框才是唯一入口，
                  若抽屉里这个按钮能在浏览态就改选中，会出现"批量工具条上写着已选 1 张、
                  但页面上一个勾选框都没有"的状态 —— 用户没法看到也��撤销。 -->
-            <a-button v-if="batchMode" long data-testid="library-detail-toggle-pick" @click="toggleSelect(detail.id)">
+            <a-button
+              v-if="batchMode"
+              long
+              class="uvp-select-btn"
+              data-testid="library-detail-toggle-pick"
+              @click="toggleSelect(detail.id)"
+            >
               {{ selectedIds.has(detail.id) ? "从批量中移除" : "加入批量下载" }}
             </a-button>
-            <a-button v-else long data-testid="library-detail-enter-batch" @click="enterBatchMode">
+            <a-button v-else long class="uvp-select-btn" data-testid="library-detail-enter-batch" @click="enterBatchMode">
               <template #icon><CheckSquare :size="15" /></template>
               加入批量选择
             </a-button>
@@ -427,6 +449,8 @@ import {
   formatCapturedAt,
   formatSnapshotMd5,
   formatSnapshotSize,
+  mayDeleteSnapshotLibrary,
+  mayDownloadSnapshotLibrary,
   mayViewSnapshotLibrary,
   normalizeSnapshotQuery,
   snapshotArchiveUrl,
@@ -462,8 +486,22 @@ const route = useRoute();
 const router = useRouter();
 const userStore = useUserStoreHook();
 
-// 权限码与菜单可见性、两个接口的 casbin 授权**同码**，三处必须一致。
+/**
+ * 三档权限，与菜单 140509 / 140620 / 140621 的 permission 列逐字对应。
+ *
+ * ⛔ 必须是**三个独立开关**（2026-11-04 之前整页只借 device:snapshot 一个码）：
+ * 审核类账号只该看，不该下载原图、更不该能删；而删除是永久删磁盘文件，
+ * 一旦和查看绑在一起就没法只给少数人。
+ */
 const canView = computed(() => mayViewSnapshotLibrary(userStore.account.permissions));
+const canDownload = computed(() => mayDownloadSnapshotLibrary(userStore.account.permissions));
+const canDelete = computed(() => mayDeleteSnapshotLibrary(userStore.account.permissions));
+
+/**
+ * 批量模式只服务两个动作：打包下载、批量删除。
+ * 两个都没有就不要再露出「批量选择」—— 勾了一堆却什么也做不了。
+ */
+const canBatch = computed(() => canDownload.value || canDelete.value);
 
 const filters = reactive(snapshotFiltersFromRoute(route.query));
 const rows = ref<SnapshotLibraryItem[]>([]);
@@ -644,7 +682,8 @@ async function deleteSelected() {
 }
 
 function requestDeleteSelected() {
-  if (deleting.value || !selectedIds.value.size) return;
+  // 按钮已按 canDelete 隐藏；这里是第二道闸 —— 快捷键/脚本/后续新增入口都不能绕过。
+  if (!canDelete.value || deleting.value || !selectedIds.value.size) return;
   const count = selectedIds.value.size;
   Modal.confirm({
     title: "批量删除抓拍图",
@@ -680,6 +719,7 @@ function triggerNativeDownload(url: string, fileName: string) {
 }
 
 function downloadOne(item: SnapshotLibraryItem) {
+  if (!canDownload.value) return;
   const url = imageUrlFor(item);
   if (!url) return;
   triggerNativeDownload(url, snapshotDownloadName(item));
@@ -714,6 +754,7 @@ function archiveStamp() {
  *   （后端 `queryTokenAllowlist` 为此单独放行了这个精确路径）。
  */
 async function downloadSelected() {
+  if (!canDownload.value) return;
   const targets = rows.value.filter(item => selectedIds.value.has(item.id));
   if (!targets.length || downloading.value) return;
   const ids = targets.map(item => item.id);
@@ -920,8 +961,12 @@ onMounted(() => {
 
 /* ⛔ 这里曾有两段 `.library-selection-action.arco-btn-secondary` / `.library-batch-toggle.arco-btn-primary`
    的配色副本（把「批量选择」染成品牌浅蓝、「退出批量选择」染成实心蓝）。
-   2026-11-04 治理时删除：配色一律由 `styles/uvp-buttons.scss` 出，
-   进入批量模式后的「退出」改用语义类 `uvp-btn-neutral`（中性灰），不再自造一档。 */
+   2026-11-04 治理时删除：配色一律由 `styles/uvp-buttons.scss` 出。
+   同日后半场（老板：每个按钮颜色都不一样）改挂语义类，一屏 7 颗各占一个色相：
+     批量选择/加入选择 = uvp-select-btn（紫）  查询 = primary（蓝实心）
+     重置 = uvp-btn-neutral（灰）              全选本页 = uvp-sky-btn（天蓝）
+     清空选择 = uvp-clear-btn（琥珀）          下载 = uvp-export-btn（青绿，见下）
+     删除 = status="danger"（软红） */
 .library-session {
   display: flex;
   flex-wrap: wrap;

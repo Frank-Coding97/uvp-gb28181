@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia } from "pinia";
 import { ref } from "vue";
@@ -1607,5 +1609,40 @@ describe("通道配置工作区的草稿隔离", () => {
     expect((wrapper.vm as any).dirtyCount).toBe(0);
     wrapper.unmount();
     confirm.mockRestore();
+  });
+});
+
+/**
+ * 底部三颗动作的配色分层（2026-11-04 老板：「这些按钮也需要配色丰富一点」）。
+ *
+ * ⛔ 用源码断言而不是 mount 后读 class：配色写在 `<style scoped>` 里，
+ *    happy-dom 不做层叠计算，拿不到计算色；能锁住的只有「挂没挂类 / 取没取 token」。
+ */
+describe("底部动作条的配色分层", () => {
+  const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/device-mgmt/DeviceConfigDrawer.vue"), "utf8");
+
+  it("还原 / 读取 / 下发各挂一个语义修饰类，六组三颗全覆盖", () => {
+    // 六组：预览窗下 actionbar、嵌入操作条、视频头、空卡、编码卡、底部 footer。
+    // ⛔ 少挂一处就会出现「同一个弹窗里两组按钮长得不一样」，比不配色更难看。
+    expect(source.match(/class="dcg-btn is-reset"/g)?.length).toBe(6);
+    expect(source.match(/class="dcg-btn is-read"/g)?.length).toBe(6);
+    expect(source.match(/class="dcg-btn is-primary"/g)?.length).toBe(6);
+  });
+
+  it("两种新配色从真源 token 取，不写死 hex", () => {
+    const block = (name: string) =>
+      source.match(new RegExp(`\\.dcg-btn\\.arco-btn\\.${name}:not\\(:disabled\\)\\s*\\{([\\s\\S]*?)\\n\\}`))?.[1] ?? "";
+    const reset = block("is-reset");
+    const read = block("is-read");
+    // 还原 = 琥珀（与「清空已选」同族）；读取 = 青绿（与全站「刷新」同色相）。
+    expect(reset).toContain("var(--uvp-btn-clear-text)");
+    expect(reset).toContain("var(--uvp-btn-clear-bg)");
+    expect(read).toContain("var(--uvp-refresh-btn-text)");
+    expect(read).toContain("var(--uvp-refresh-btn-bg)");
+    expect(reset).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+    expect(read).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+    // ⛔ hover 必须补：基类 `.dcg-btn:hover:not(:disabled)` 是 0,5,0，
+    //    少这条，鼠标一上去就被刷回 `--uvp-brand`，只有静止态是彩色。
+    for (const text of [reset, read]) expect(text).toContain("&:hover");
   });
 });

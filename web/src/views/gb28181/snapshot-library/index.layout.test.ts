@@ -28,10 +28,14 @@ const tokensSource = readFileSync(resolve(process.cwd(), "src/style/var/uvp-ui-t
 
 describe("image library page shell", () => {
   it("gates the whole page behind the snapshot permission", () => {
-    // 菜单可见性与接口授权都绑在 device:snapshot，页面本身也必须门禁：
-    // 少这一层，越权用户手输 URL 就能看到别人的图（后端也会拦，但页面会先报一堆 403）。
+    // 菜单可见性与接口授权都绑在 gb28181:snapshot:view（菜单 140509 自带的那个码），
+    // 页面本身也必须门禁：少这一层，越权用户手输 URL 就能看到别人的图
+    // （后端也会拦，但页面会先报一堆 403）。
     expect(pageSource).toContain("mayViewSnapshotLibrary(userStore.account.permissions)");
     expect(pageSource).toContain('v-if="!canView"');
+    // 下载/删除必须是各自独立的开关，不能复用查看权。
+    expect(pageSource).toContain("mayDownloadSnapshotLibrary(userStore.account.permissions)");
+    expect(pageSource).toContain("mayDeleteSnapshotLibrary(userStore.account.permissions)");
   });
 
   it("loads images through the token-aware helper only", () => {
@@ -317,16 +321,23 @@ describe("image library download and batch actions", () => {
     // 2026-11-04 治理（老板：颜色太单调）：删掉页面里两段配色副本
     // （`.library-selection-action.arco-btn-secondary` 浅蓝闲置态、
     //   `.library-batch-toggle.arco-btn-primary` 实心激活态）。
-    // 现在：闲置 = 次级（真源浅蓝）；进入批量模式后挂 `uvp-btn-neutral`（中性灰，语义=退出）；
-    // 下载类 = `uvp-export-btn`（青绿）；工具栏删除 = 软红（不带 type="primary"）。
-    expect(pageSource).toContain("{ 'uvp-btn-neutral': batchMode }");
+    // 同日下半场（老板：每个按钮颜色都不一样）再进一步：一屏 7 颗各占一个色相，
+    // 全部走真源语义类，页面里一个色值都不许写：
+    expect(pageSource).toMatch(/class="uvp-select-btn"[^>]*data-testid="library-batch-toggle"/);
+    expect(pageSource).toMatch(/class="uvp-btn-neutral"[^>]*data-testid="library-reset"/);
+    expect(pageSource).toMatch(/class="uvp-sky-btn"[^>]*data-testid="library-select-all"/);
+    expect(pageSource).toMatch(/class="uvp-clear-btn"[^>]*data-testid="library-clear-selection"/);
+    expect(pageSource).toMatch(/class="uvp-export-btn"[^>]*data-testid="library-detail-download"/);
+    expect(pageSource).toMatch(/class="uvp-export-btn"[\s\S]{0,80}library-batch-download/);
     // ⛔ 判据只认 `class="…"` 里的真实用法，不能写 `not.toContain("library-selection-action")`：
     //    解释这次改动的注释里就写着这个类名，会把门禁自己判红（本仓踩过的老坑）。
     expect(pageSource).not.toMatch(/class="[^"]*library-selection-action/);
-    expect(pageSource).toMatch(/class="uvp-export-btn"[^>]*data-testid="library-detail-download"/);
-    expect(pageSource).toMatch(/class="uvp-export-btn"[\s\S]{0,80}library-batch-download/);
+    // ⛔ 「清空选择」不许退回 `type="text"`：按钮就得有按钮的形（老板原话「它不是按钮吗」）。
+    expect(pageSource).not.toMatch(/type="text"[^>]*library-clear-selection/);
     // ⛔ 工具栏里的删除不许升成实心红：实心红是「确认删除弹窗里那一个」专用。
-    expect(pageSource).toMatch(/<a-button\s+v-if="selectedIds\.size"\s+size="small"\s+status="danger"/);
+    // v-if 在 2026-11-04 多了 canDelete 前置（删除权单独拆出来了），
+    // 但「有选中才出现」这条契约不变。
+    expect(pageSource).toMatch(/<a-button\s+v-if="canDelete && selectedIds\.size"\s+size="small"\s+status="danger"/);
     expect(pageSource).not.toMatch(/type="primary"\s+status="danger"/);
   });
 

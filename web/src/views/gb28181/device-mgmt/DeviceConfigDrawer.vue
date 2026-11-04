@@ -2094,7 +2094,7 @@ onBeforeUnmount(() => {
             <a-button
               html-type="button"
               type="outline"
-              class="dcg-btn"
+              class="dcg-btn is-reset"
               data-testid="dcg-reset"
               :disabled="activeLoading || activeApplying || !activeDirtyCount"
               @click="resetActiveGroup"
@@ -2104,7 +2104,7 @@ onBeforeUnmount(() => {
             <a-button
               html-type="button"
               type="outline"
-              class="dcg-btn"
+              class="dcg-btn is-read"
               data-testid="dcg-read"
               :disabled="activeLoading || !canRead || !online || !activeIsReady"
               @click="readActiveGroup"
@@ -2219,7 +2219,7 @@ onBeforeUnmount(() => {
               <a-button
                 html-type="button"
                 type="outline"
-                class="dcg-btn"
+                class="dcg-btn is-reset"
                 data-testid="dcg-reset"
                 title="还原为最近回读值"
                 :disabled="activeLoading || activeApplying || !activeDirtyCount"
@@ -2230,7 +2230,7 @@ onBeforeUnmount(() => {
               <a-button
                 html-type="button"
                 type="outline"
-                class="dcg-btn"
+                class="dcg-btn is-read"
                 data-testid="dcg-read"
                 :disabled="activeLoading || activeApplying || !canRead || !online"
                 @click="readActiveGroup"
@@ -2291,7 +2291,7 @@ onBeforeUnmount(() => {
                     <a-button
                       html-type="button"
                       type="outline"
-                      class="dcg-btn"
+                      class="dcg-btn is-reset"
                       data-testid="dcg-reset"
                       title="还原为最近回读值"
                       :disabled="activeLoading || activeApplying || !activeDirtyCount"
@@ -2302,7 +2302,7 @@ onBeforeUnmount(() => {
                     <a-button
                       html-type="button"
                       type="outline"
-                      class="dcg-btn"
+                      class="dcg-btn is-read"
                       data-testid="dcg-read"
                       :disabled="activeLoading || activeApplying || !canRead || !online"
                       @click="readActiveGroup"
@@ -2346,7 +2346,7 @@ onBeforeUnmount(() => {
                       <a-button
                         html-type="button"
                         type="outline"
-                        class="dcg-btn"
+                        class="dcg-btn is-reset"
                         data-testid="dcg-reset"
                         title="还原为最近回读值"
                         :disabled="activeLoading || activeApplying || !activeDirtyCount"
@@ -2357,7 +2357,7 @@ onBeforeUnmount(() => {
                       <a-button
                         html-type="button"
                         type="outline"
-                        class="dcg-btn"
+                        class="dcg-btn is-read"
                         data-testid="dcg-read"
                         :disabled="activeLoading || activeApplying || !canRead || !online"
                         @click="readActiveGroup"
@@ -2864,7 +2864,7 @@ onBeforeUnmount(() => {
                   <a-button
                     html-type="button"
                     type="outline"
-                    class="dcg-btn"
+                    class="dcg-btn is-reset"
                     data-testid="dcg-reset"
                     title="还原为最近回读值"
                     :disabled="activeLoading || activeApplying || !activeDirtyCount"
@@ -2875,7 +2875,7 @@ onBeforeUnmount(() => {
                   <a-button
                     html-type="button"
                     type="outline"
-                    class="dcg-btn"
+                    class="dcg-btn is-read"
                     data-testid="dcg-read"
                     :disabled="activeLoading || activeApplying || !canRead || !online"
                     @click="readActiveGroup"
@@ -3048,7 +3048,7 @@ onBeforeUnmount(() => {
           <a-button
             html-type="button"
             type="outline"
-            class="dcg-btn"
+            class="dcg-btn is-reset"
             data-testid="dcg-reset"
             :title="footerHint('reset')"
             :disabled="activeLoading || activeApplying || !activeDirtyCount"
@@ -3060,7 +3060,7 @@ onBeforeUnmount(() => {
           <a-button
             html-type="button"
             type="outline"
-            class="dcg-btn"
+            class="dcg-btn is-read"
             data-testid="dcg-read"
             :title="footerHint('read')"
             :loading="activeLoading"
@@ -3632,6 +3632,55 @@ onBeforeUnmount(() => {
   &.is-primary:active:not(:disabled) {
     background: var(--uvp-solid-active-bg);
     border-color: var(--uvp-solid-active-bg);
+  }
+}
+
+/* 2026-11-04 老板：「通道配置弹窗上的这些按钮也需要配色丰富一点」。
+ *
+ * 三颗动作原来「还原」「读取」共用同一个灰白面（只靠图标和文案区分），下发是实心蓝。
+ * 现在按**语义**分色（不是按好看分色）：
+ *   还原 = 放下本地改动，对设备一个字节都不发         → 琥珀（与「清空已选」同族）
+ *   读取 = 只把设备的值重新取一份，不改任何数据       → 青绿（全站「刷新 / 读取」同一色相）
+ *   下发 = 真正写进设备                              → 蓝实心（仍是本弹窗唯一主操作）
+ *
+ * ⛔ 这里**不挂** `uvp-refresh-btn` 这类真源语义类：`.dcg-btn.arco-btn[type="button"]`
+ *    是 0,3,0，组件 scoped 又晚于全局注入 ⇒ 真源那套 0,2,0 压不回来。
+ *    改用真源的 **token**（`--uvp-btn-*` / `--uvp-refresh-btn-*`）取色：
+ *    将来真源调色自动跟随，也不会在本组件里留下第二份硬编码色值。
+ * ⛔ hover / active 必须一起写：基类的 `.dcg-btn:hover:not(:disabled)` 是 0,5,0，
+ *    少了它，鼠标一上去就被刷回 `--uvp-brand` 蓝，只有静止态是彩色的。
+ * ⛔ `:not(:disabled)` 不能省：禁用态要保持灰面（`.dcg-btn:disabled` 那条），
+ *    否则「还没回读 / 没改动」时三颗会亮成三个彩色块，比灰面更像能点。
+ */
+.dcg-btn.arco-btn.is-reset:not(:disabled) {
+  color: var(--uvp-btn-clear-text);
+  background: var(--uvp-btn-clear-bg);
+  border-color: var(--uvp-btn-clear-border);
+
+  &:hover {
+    color: var(--uvp-btn-clear-text);
+    background: var(--uvp-btn-clear-bg-hover);
+    border-color: var(--uvp-btn-clear-border);
+  }
+
+  &:active {
+    background: var(--uvp-btn-clear-bg-active);
+  }
+}
+
+.dcg-btn.arco-btn.is-read:not(:disabled) {
+  color: var(--uvp-refresh-btn-text);
+  background: var(--uvp-refresh-btn-bg);
+  border-color: var(--uvp-refresh-btn-border);
+
+  &:hover {
+    color: var(--uvp-refresh-btn-text);
+    background: var(--uvp-refresh-btn-hover-bg);
+    border-color: var(--uvp-refresh-btn-border);
+  }
+
+  &:active {
+    background: var(--uvp-refresh-btn-active-bg);
   }
 }
 
