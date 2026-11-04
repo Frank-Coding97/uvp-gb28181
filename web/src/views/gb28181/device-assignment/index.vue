@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch, type Component } from "vue";
 import { Message } from "@arco-design/web-vue";
 import { useDebounceFn } from "@vueuse/core";
 import { useRouter } from "vue-router";
@@ -65,7 +65,7 @@ const filteredDeptTree = computed(() => {
 });
 const selectedDeptId = ref<number | undefined>(undefined);
 const mainView = ref<"assignment" | "sharing">("assignment");
-const guideExpanded = ref(true);
+const guideExpanded = ref(false);
 const summary = ref({
   allCount: 0,
   assignedCount: 0,
@@ -102,10 +102,10 @@ const onSelectDept = (keys: Array<string | number>) => {
 
 // ---- 分配状态 Tab ----
 const assignmentFilter = ref<AssignmentFilter>("all");
-const assignmentTabs: Array<{ value: AssignmentFilter; label: string }> = [
-  { value: "all", label: "全部" },
-  { value: "unassigned", label: "未分配" },
-  { value: "assigned", label: "已分配" }
+const assignmentTabs: Array<{ value: AssignmentFilter; label: string; icon: Component }> = [
+  { value: "all", label: "全部", icon: Monitor },
+  { value: "unassigned", label: "未分配", icon: CircleAlert },
+  { value: "assigned", label: "已分配", icon: CheckCircle2 }
 ];
 
 const switchAssignment = (value: AssignmentFilter) => {
@@ -443,7 +443,7 @@ onMounted(() => {
                 </div>
               </div>
             </div>
-            <section class="workbench-guide" :class="{ 'is-collapsed': !guideExpanded }" aria-label="设备权限工作流程">
+            <section class="workbench-guide" aria-label="设备权限工作流程">
               <div class="workbench-guide__head">
                 <div class="workbench-guide__title-wrap">
                   <span class="workbench-guide__icon"><Info :size="15" /></span>
@@ -487,9 +487,11 @@ onMounted(() => {
               <template #fields>
                 <div class="segmented workbench-views" role="tablist" aria-label="权限视图">
                   <button type="button" :class="{ active: mainView === 'assignment' }" @click="mainView = 'assignment'">
+                    <ListChecks :size="13" :stroke-width="2" />
                     设备归属
                   </button>
                   <button type="button" :class="{ active: mainView === 'sharing' }" @click="mainView = 'sharing'">
+                    <Share2 :size="13" :stroke-width="2" />
                     共享授权
                   </button>
                 </div>
@@ -501,6 +503,7 @@ onMounted(() => {
                     :class="{ active: assignmentFilter === tab.value }"
                     @click="switchAssignment(tab.value)"
                   >
+                    <component :is="tab.icon" :size="13" :stroke-width="2" />
                     {{ tab.label }}
                   </button>
                 </div>

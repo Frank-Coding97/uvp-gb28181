@@ -38,6 +38,17 @@ describe("permission workbench page shell", () => {
     expect(content).toContain("guideExpanded");
   });
 
+  it("collapses the guide by default and puts an icon on every segmented button", () => {
+    const content = source();
+    expect(content).toContain("const guideExpanded = ref(false)");
+    expect(content).toContain(':is="tab.icon"');
+    expect(content).toContain('<ListChecks :size="13"');
+    expect(content).toContain('<Share2 :size="13"');
+    expect(content).toContain("icon: Monitor");
+    expect(content).toContain("icon: CircleAlert");
+    expect(content).toContain("icon: CheckCircle2");
+  });
+
   it("uses semantic icons and distinct styles for summary cards", () => {
     const content = source();
     expect(content).toContain("summary-strip__item--all");

@@ -444,6 +444,11 @@ body[arco-theme="dark"] .arco-switch[disabled].arco-switch-checked {
   box-shadow: var(--uvp-search-secondary-btn-shadow);
 
   button {
+    /* ⭐ 允许按钮内放图标：图标与文案横排居中（无图标时与纯文字布局等价） */
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+    justify-content: center;
     min-width: 52px;
     height: 30px;
     padding: 0 12px;
@@ -458,6 +463,10 @@ body[arco-theme="dark"] .arco-switch[disabled].arco-switch-checked {
     transition:
       color 0.2s ease,
       background 0.2s ease;
+
+    svg {
+      flex: 0 0 auto;
+    }
 
     &.active {
       font-weight: 620;
