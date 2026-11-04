@@ -150,7 +150,7 @@
         </a-descriptions-item>
         <a-descriptions-item label="响应数据">
           <pre v-if="currentLog.responseData" class="log-detail-block">{{ currentLog.responseData }}</pre>
-          <span v-else class="log-detail-empty">无（当前未记录响应数据）</span>
+          <span v-else class="log-detail-empty">无（仅增删改类操作记录响应）</span>
         </a-descriptions-item>
         <a-descriptions-item label="错误信息" v-if="currentLog.errorMsg">
           <pre class="log-detail-block log-detail-block--error">{{ currentLog.errorMsg }}</pre>
@@ -393,6 +393,7 @@ onMounted(() => {
 }
 
 .log-detail-block {
+  max-height: 320px;
   padding: 10px 12px;
   margin: 0;
   overflow: auto;

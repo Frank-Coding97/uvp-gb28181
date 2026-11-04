@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 	"uvplatform.com/uvp-gb28181/app/global/consts"
 	"uvplatform.com/uvp-gb28181/app/models"
@@ -199,11 +200,13 @@ func buildOperationLogRecord(c *gin.Context, startTime time.Time, requestBody, r
 		IP:          c.ClientIP(),
 		UserAgent:   c.Request.UserAgent(),
 		RequestData: operationLogRequestData(c, requestBody),
-		//ResponseData: sanitizeResponseData(responseBody),
-		StatusCode: c.Writer.Status(),
-		Duration:   duration,
-		ErrorMsg:   getErrorMessage(c, responseBody),
-		Location:   getLocationByIP(c.ClientIP()),
+		// 只记写操作的响应体（增删改），查询类不记:列表响应动辄上百 KB,
+		// 逐请求落库会把审计表撑爆,而排查价值集中在"我改了什么、返回什么"。
+		ResponseData: operationLogResponseData(c, responseBody),
+		StatusCode:   c.Writer.Status(),
+		Duration:     duration,
+		ErrorMsg:     getErrorMessage(c, responseBody),
+		Location:     getLocationByIP(c.ClientIP()),
 	}
 
 	return log
@@ -312,6 +315,48 @@ func sanitizeQueryString(raw string) string {
 		return encoded[:10000] + "...(truncated)"
 	}
 	return encoded
+}
+
+const maxAuditResponseBytes = 4 << 10
+
+// operationLogResponseData 记录写操作的响应体。
+// 查询类（GET/HEAD 等）一律不记:列表响应动辄上百 KB,逐条落库会迅速把
+// 审计表撑爆,而"我改了什么、接口回了什么"才是需要回溯的部分。
+// 内容按原样保存（不做字段脱敏,便于排查);MarkSensitiveOperation 标记的端点
+// 响应从不进入捕获缓冲,这里再兜一层,确保证书/密钥类载荷不会绕过。
+func operationLogResponseData(c *gin.Context, responseBody []byte) string {
+	if len(responseBody) == 0 {
+		return ""
+	}
+	switch c.Request.Method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+	default:
+		return ""
+	}
+	if _, sensitive := c.Get(sensitiveOperationContextKey); sensitive {
+		return ""
+	}
+	return truncateAuditText(responseBody, maxAuditResponseBytes)
+}
+
+// truncateAuditText 按字节上限截断，且不切断多字节字符；二进制响应不落库。
+func truncateAuditText(body []byte, limit int) string {
+	truncated := len(body) > limit
+	if truncated {
+		body = body[:limit]
+		// UTF-8 单个字符最多 4 字节，回退几次即可落在字符边界
+		for i := 0; i < 4 && len(body) > 0 && !utf8.Valid(body); i++ {
+			body = body[:len(body)-1]
+		}
+	}
+	if !utf8.Valid(body) {
+		return "[非文本响应，未记录]"
+	}
+	text := string(body)
+	if truncated {
+		text += "...(truncated)"
+	}
+	return text
 }
 
 // getOperationModule 获取操作模块。
