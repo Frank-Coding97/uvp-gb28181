@@ -38,8 +38,14 @@ describe("一键清理", () => {
     expect(source).toContain('data-testid="sysjobresults-clear-all"');
     expect(source).toContain("<span>一键清理</span>");
     expect(source).toContain("v-hasPerm=\"['system:sysjobresults:clear']\"");
-    // 破坏性动作走实测基准：primary + status="warning"（同告警管理页 alarm-clear-all-btn）
-    expect(source).toMatch(/status="warning"/);
+    // 危险操作走按钮真源的软红：status="danger"，且不能是 primary
+    // （一个操作区最多 1 个 primary，查询已占；旧告警页的 primary+warning 是建真源前的写法）
+    // ⛔ 切片必须在起点之后找结束标签：从文件开头 indexOf("</a-button>") 会拿到查询按钮那个
+    const from = source.indexOf('data-testid="sysjobresults-clear-all"');
+    const clearBtn = source.slice(from, source.indexOf("</a-button>", from));
+    expect(clearBtn).toContain('status="danger"');
+    expect(clearBtn).not.toContain('type="primary"');
+    expect(clearBtn).not.toContain('status="warning"');
   });
 
   it("点击一键清理必须先弹确认框，且文案说明是「全部」", () => {

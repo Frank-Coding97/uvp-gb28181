@@ -33,13 +33,13 @@
             <span>重置</span>
           </a-button>
           <!--
-            一键清理：破坏性动作，位置/样式照告警管理页 alarm-management/index.vue 的
-            「一键清理」基准（搜索区 actions 末尾、primary + status="warning"、Eraser 图标）。
+            一键清理：工具栏上的**危险**操作 ⇒ 按按钮真源（styles/uvp-buttons.scss 语义表）
+            用 status="danger" 软红；⛔ 不能加 type="primary" —— 一个操作区最多 1 个 primary，
+            查询已经占了，且 primary 会把它变成实心蓝/橙（旧告警页是建真源之前的写法）。
           -->
           <a-button
             data-testid="sysjobresults-clear-all"
-            type="primary"
-            status="warning"
+            status="danger"
             :loading="clearing"
             :disabled="clearing"
             v-hasPerm="['system:sysjobresults:clear']"
