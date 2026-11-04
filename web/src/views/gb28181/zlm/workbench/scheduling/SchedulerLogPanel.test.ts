@@ -265,6 +265,20 @@ describe("SchedulerLogPanel", () => {
     expect(source).not.toContain(".log-filters");
   });
 
+  it("keeps the pager on the shared list-page contract", () => {
+    const source = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/zlm/workbench/scheduling/SchedulerLogPanel.vue"),
+      "utf8"
+    );
+    const pager = /<a-pagination[\s\S]*?\/>/.exec(source)?.[0] ?? "";
+    expect(pager).not.toBe("");
+    for (const flag of ["show-total", "show-page-size", "show-jumper"]) expect(pager).toContain(flag);
+    // ⛔ 总数文案交给 Arco（「共 N 条」），页面不得再拼业务名词后缀
+    expect(source).not.toContain("条调度日志");
+    expect(source).not.toMatch(/<span>\s*共\s*\{\{/);
+    expect(source).toMatch(/\.log-pagination\s*\{[^}]*justify-content:\s*flex-end;/s);
+  });
+
   it("keeps scrolling inside the scheduler log table body", () => {
     const source = readFileSync(
       resolve(process.cwd(), "src/views/gb28181/zlm/workbench/scheduling/SchedulerLogPanel.vue"),

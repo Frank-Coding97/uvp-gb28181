@@ -445,13 +445,16 @@ defineExpose({ refresh });
         >
       </a-table>
     </section>
+    <!-- 分页条口径与其它列表页一致：三开关全开、总数由 Arco 自带的 show-total
+         渲染成「共 N 条」，⛔ 不要手写带业务名词后缀的总数文案。 -->
     <div v-if="active && sampleAvailable && logs.length" class="log-pagination uvp-pagination-bar">
-      <span>共 {{ logs.length }} 条调度日志</span
-      ><a-pagination
+      <a-pagination
         :current="page"
         :page-size="pageSize"
         :total="logs.length"
+        show-total
         show-page-size
+        show-jumper
         :page-size-options="[10, 20, 50, 100]"
         @change="changePage"
         @page-size-change="changePageSize"
@@ -631,9 +634,10 @@ defineExpose({ refresh });
 .log-pagination {
   display: flex;
   flex: none;
+  flex-wrap: wrap;
   gap: 16px;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   margin-top: 12px;
   font-size: var(--zlm-fs-caption);
   color: var(--zlm-text-3);
