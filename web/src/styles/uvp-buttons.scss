@@ -9,7 +9,8 @@
 //                        其余约 370 个默认按钮全是"白底 + 灰字"，整屏只有一两个亮点。
 // 三条硬规则（违反即门禁变红，见 src/styles/uvp-buttons.test.ts）：
 //   ⛔ 尺寸只有三档：lg 40 / md 34 / sm 28。Arco 的 32(default) 与 24(mini) 一律归并。
-//   ⛔ 颜色只从本文件的 6 个语义里选：primary / secondary / neutral / danger / stop / create。
+//   ⛔ 颜色只从本文件的语义里选：primary / secondary / neutral / danger / stop / create /
+//      refresh / export / select / clear / sky。**页面里禁止自己调色**（2026-11-04 扩到 11 档）。
 //   ⛔ 页面里**禁止**再写 `.arco-btn { height / padding / border-radius / font-size }`。
 // 语义与用法：
 //   type="primary"                     主操作（提交/保存/确定）。**一屏最多一个**。
@@ -19,6 +20,9 @@
 //   status="danger" + type="primary"    确认弹窗的「确认删除」→ 实心红。
 //   class="uvp-create-btn"             列表页「新增」→ 绿实心（定义在 arco-overrides.scss）。
 //   class="uvp-stop-btn"               中断进行中的动作（停止录像/取消任务）→ 琥珀软底。
+//   class="uvp-select-btn"             选择类（批量选择/全选/加入选择）→ 紫软底。
+//   class="uvp-clear-btn"              清空已选（放下勾选，不删数据）→ 琥珀软底（比 stop 更黄）。
+//   class="uvp-sky-btn"                扩大范围（全选本页）→ 天蓝软底。
 //   type="text"                        表格行内/轻量动作 → 透明底，hover 才出浅底。
 //   class="uvp-page-action-btn"        页面头部 CTA → 40px 档（定义在 arco-overrides.scss）。
 // ⚠️ 加载顺序：main.ts 里必须排在 `@arco-themes/vue-gi-demo/css/arco.css` **之后**，
@@ -91,10 +95,30 @@
 //    `[class]` 恒为真（挂了类的元素必有 class 属性）却能把特异性抬到 0,2,0，
 //    与 Arco 打平后再靠加载顺序取胜，且不用 !important。
 .arco-btn-primary:where(
-    :not(.arco-btn-status-danger, .uvp-create-btn, .uvp-refresh-btn, .uvp-export-btn, .uvp-stop-btn, .uvp-btn-neutral)
+    :not(
+      .arco-btn-status-danger,
+      .uvp-create-btn,
+      .uvp-refresh-btn,
+      .uvp-export-btn,
+      .uvp-stop-btn,
+      .uvp-btn-neutral,
+      .uvp-select-btn,
+      .uvp-clear-btn,
+      .uvp-sky-btn
+    )
   ),
 .arco-btn-primary[class]:where(
-    :not(.arco-btn-status-danger, .uvp-create-btn, .uvp-refresh-btn, .uvp-export-btn, .uvp-stop-btn, .uvp-btn-neutral)
+    :not(
+      .arco-btn-status-danger,
+      .uvp-create-btn,
+      .uvp-refresh-btn,
+      .uvp-export-btn,
+      .uvp-stop-btn,
+      .uvp-btn-neutral,
+      .uvp-select-btn,
+      .uvp-clear-btn,
+      .uvp-sky-btn
+    )
   ) {
   color: var(--uvp-btn-primary-text);
   background: var(--uvp-btn-primary-bg);
@@ -126,7 +150,10 @@
       .uvp-stop-btn,
       .uvp-btn-primary,
       .uvp-btn-secondary,
-      .uvp-btn-neutral
+      .uvp-btn-neutral,
+      .uvp-select-btn,
+      .uvp-clear-btn,
+      .uvp-sky-btn
     )
   ),
 .arco-btn-secondary[class]:where(
@@ -137,7 +164,10 @@
       .uvp-stop-btn,
       .uvp-btn-primary,
       .uvp-btn-secondary,
-      .uvp-btn-neutral
+      .uvp-btn-neutral,
+      .uvp-select-btn,
+      .uvp-clear-btn,
+      .uvp-sky-btn
     )
   ),
 .arco-btn-outline:where(
@@ -148,7 +178,10 @@
       .uvp-stop-btn,
       .uvp-btn-primary,
       .uvp-btn-secondary,
-      .uvp-btn-neutral
+      .uvp-btn-neutral,
+      .uvp-select-btn,
+      .uvp-clear-btn,
+      .uvp-sky-btn
     )
   ),
 .arco-btn-outline[class]:where(
@@ -159,7 +192,10 @@
       .uvp-stop-btn,
       .uvp-btn-primary,
       .uvp-btn-secondary,
-      .uvp-btn-neutral
+      .uvp-btn-neutral,
+      .uvp-select-btn,
+      .uvp-clear-btn,
+      .uvp-sky-btn
     )
   ),
 .arco-btn:where(
@@ -173,7 +209,10 @@
       .uvp-stop-btn,
       .uvp-btn-primary,
       .uvp-btn-secondary,
-      .uvp-btn-neutral
+      .uvp-btn-neutral,
+      .uvp-select-btn,
+      .uvp-clear-btn,
+      .uvp-sky-btn
     )
   ),
 .arco-btn[class]:where(
@@ -187,7 +226,10 @@
       .uvp-stop-btn,
       .uvp-btn-primary,
       .uvp-btn-secondary,
-      .uvp-btn-neutral
+      .uvp-btn-neutral,
+      .uvp-select-btn,
+      .uvp-clear-btn,
+      .uvp-sky-btn
     )
   ) {
   color: var(--uvp-btn-secondary-text);
@@ -297,6 +339,78 @@
     color: var(--uvp-btn-stop-text);
     background: var(--uvp-btn-stop-bg-hover);
     border-color: var(--uvp-btn-stop-border);
+  }
+}
+
+// ── 6.5 选择 / 清空 / 全选（2026-11-04 新增）──────────────────────────────────
+// 起因：老板要「每个按钮颜色都不一样」。图像库一屏 7 颗按钮里，「批量选择」
+//   「全选本页」「清空选择」原来只能借次级浅蓝 / 中性灰 / 纯文字三档，
+//   结果三颗长得差不多，看不出各自干什么。
+// 口径：一个**动作族**一个色相，族与族之间必须跨色相，不许同色深浅凑数：
+//   紫  = 选择（把图圈进「待处理集合」）
+//   琥珀= 清空已选（放下勾选，不删任何数据）；⚠️ 比 stop 的琥珀更黄，两处不同屏
+//   天蓝= 扩大范围（全选本页）
+// ⛔ 三条都必须写 `[class]` 变体：`<a-button>` 恒带 type="button"，命中 Arco 的
+//    `.arco-btn-secondary[type='button']`（0,2,0），只写裸类名（0,1,0）会被它反超。
+// ⛔ 它们同时已加进第 2 / 3 节的排除列表 —— 少了那一步，次级那条 `border` 简写
+//    会和这里的 border-color 打架（简写谁赢看注入顺序，容易时对时错）。
+.uvp-select-btn,
+.uvp-select-btn[class] {
+  color: var(--uvp-btn-select-text);
+  background: var(--uvp-btn-select-bg);
+  border: 1px solid var(--uvp-btn-select-border);
+  box-shadow: none;
+
+  &:hover:not(.arco-btn-loading, .arco-btn-disabled, [disabled]) {
+    color: var(--uvp-btn-select-text);
+    background: var(--uvp-btn-select-bg-hover);
+    border-color: var(--uvp-btn-select-border);
+  }
+
+  &:active:not(.arco-btn-loading, .arco-btn-disabled, [disabled]) {
+    color: var(--uvp-btn-select-text);
+    background: var(--uvp-btn-select-bg-active);
+    border-color: var(--uvp-btn-select-border);
+  }
+}
+
+.uvp-clear-btn,
+.uvp-clear-btn[class] {
+  color: var(--uvp-btn-clear-text);
+  background: var(--uvp-btn-clear-bg);
+  border: 1px solid var(--uvp-btn-clear-border);
+  box-shadow: none;
+
+  &:hover:not(.arco-btn-loading, .arco-btn-disabled, [disabled]) {
+    color: var(--uvp-btn-clear-text);
+    background: var(--uvp-btn-clear-bg-hover);
+    border-color: var(--uvp-btn-clear-border);
+  }
+
+  &:active:not(.arco-btn-loading, .arco-btn-disabled, [disabled]) {
+    color: var(--uvp-btn-clear-text);
+    background: var(--uvp-btn-clear-bg-active);
+    border-color: var(--uvp-btn-clear-border);
+  }
+}
+
+.uvp-sky-btn,
+.uvp-sky-btn[class] {
+  color: var(--uvp-btn-sky-text);
+  background: var(--uvp-btn-sky-bg);
+  border: 1px solid var(--uvp-btn-sky-border);
+  box-shadow: none;
+
+  &:hover:not(.arco-btn-loading, .arco-btn-disabled, [disabled]) {
+    color: var(--uvp-btn-sky-text);
+    background: var(--uvp-btn-sky-bg-hover);
+    border-color: var(--uvp-btn-sky-border);
+  }
+
+  &:active:not(.arco-btn-loading, .arco-btn-disabled, [disabled]) {
+    color: var(--uvp-btn-sky-text);
+    background: var(--uvp-btn-sky-bg-active);
+    border-color: var(--uvp-btn-sky-border);
   }
 }
 
@@ -411,12 +525,24 @@
 //   uvp-btn-neutral    取消 / 关闭（中性灰）
 //   uvp-refresh-btn    刷新（青绿，见上）
 //   uvp-export-btn     下载 / 导出（青绿，见上）
+//   uvp-select-btn     选择类（紫，见 6.5）
+//   uvp-clear-btn      清空已选（琥珀，见 6.5）
+//   uvp-sky-btn        全选本页（天蓝，见 6.5）
 // ⚠️ `.uvp-page-action-btn` 是 40px 档，必须排除，否则会被压回 34px。
+// ⛔⛔ 排除的还有**图标键三族**（`.icon-btn` / `.icon-button` / `.tree-icon-button`）：
+//    它们是方形定尺的另一物种（26/28px、只有图标没有文案），只借语义类的**配色**，
+//    不能借文字按钮的三档几何。踩过：设备卡片那排 28px 圆钮里的「刷新通道目录」，
+//    挂上 uvp-refresh-btn 后被这里的 `min-width: 72px` 撑成 72×28 的胶囊
+//    （height 被页面 `.icon-btn.small` 的 0,3,0 拉回 28px，min-width 无人抗衡 ⇒ 只横向变形）。
+//    新增图标键样式时务必把类名补进这个列表。
 button.uvp-btn-primary,
 button.uvp-btn-secondary,
 button.uvp-btn-neutral,
-button.uvp-refresh-btn:where(:not(.uvp-page-action-btn)),
-button.uvp-export-btn:where(:not(.uvp-page-action-btn)) {
+button.uvp-refresh-btn:where(:not(.uvp-page-action-btn, .icon-btn, .icon-button, .tree-icon-button)),
+button.uvp-export-btn:where(:not(.uvp-page-action-btn, .icon-btn, .icon-button, .tree-icon-button)),
+button.uvp-select-btn:where(:not(.uvp-page-action-btn, .icon-btn, .icon-button, .tree-icon-button)),
+button.uvp-clear-btn:where(:not(.uvp-page-action-btn, .icon-btn, .icon-button, .tree-icon-button)),
+button.uvp-sky-btn:where(:not(.uvp-page-action-btn, .icon-btn, .icon-button, .tree-icon-button)) {
   box-sizing: border-box;
   display: inline-flex;
   gap: 6px;
@@ -503,6 +629,52 @@ button.uvp-btn-neutral {
 
   &:active:not([disabled]) {
     background: var(--uvp-btn-neutral-bg-active);
+  }
+}
+
+// 原生入口（选择 / 清空 / 全选）：配色与 6.5 节完全同源，只是多了 [disabled] 判据。
+button.uvp-select-btn {
+  color: var(--uvp-btn-select-text);
+  background: var(--uvp-btn-select-bg);
+  border-color: var(--uvp-btn-select-border);
+
+  &:hover:not([disabled]) {
+    color: var(--uvp-btn-select-text);
+    background: var(--uvp-btn-select-bg-hover);
+  }
+
+  &:active:not([disabled]) {
+    background: var(--uvp-btn-select-bg-active);
+  }
+}
+
+button.uvp-clear-btn {
+  color: var(--uvp-btn-clear-text);
+  background: var(--uvp-btn-clear-bg);
+  border-color: var(--uvp-btn-clear-border);
+
+  &:hover:not([disabled]) {
+    color: var(--uvp-btn-clear-text);
+    background: var(--uvp-btn-clear-bg-hover);
+  }
+
+  &:active:not([disabled]) {
+    background: var(--uvp-btn-clear-bg-active);
+  }
+}
+
+button.uvp-sky-btn {
+  color: var(--uvp-btn-sky-text);
+  background: var(--uvp-btn-sky-bg);
+  border-color: var(--uvp-btn-sky-border);
+
+  &:hover:not([disabled]) {
+    color: var(--uvp-btn-sky-text);
+    background: var(--uvp-btn-sky-bg-hover);
+  }
+
+  &:active:not([disabled]) {
+    background: var(--uvp-btn-sky-bg-active);
   }
 }
 

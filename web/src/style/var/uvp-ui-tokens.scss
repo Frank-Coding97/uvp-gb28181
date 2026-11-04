@@ -207,6 +207,36 @@
   --uvp-btn-stop-border: #fed7aa;
   --uvp-btn-stop-text: #b45309;
 
+  /* 选择类操作（批量选择 / 全选本页 / 加入选择）：紫。
+     ⛔ 2026-11-04 新增：老板要求「每个按钮颜色都不一样」，而原体系里
+        「选择」这种**开关型**动作只能借次级浅蓝或中性灰，一屏上会跟「重置」撞色。
+     色相选紫的理由：它既不表示"取数"（青绿）也不表示"破坏"（红），
+     在一屏蓝/青绿/红/灰之间正好补上唯一缺的冷色位。 */
+  --uvp-btn-select-bg: #ede9fe;
+  --uvp-btn-select-bg-hover: #e4dffa;
+  --uvp-btn-select-bg-active: #dad3f6;
+  --uvp-btn-select-border: #ddd6fe;
+  --uvp-btn-select-text: #6d28d9;
+
+  /* 清空已选（uvp-clear-btn）：琥珀。
+     ⛔ 与 `--uvp-btn-stop-*` **刻意不同值**：stop 是"中断进行中的任务"，
+        clear 是"把已勾的放掉"，两者语义不同、将来深浅可能各自调整，不能共用 token。
+     比 stop 更黄一档（#fef3c7 vs #fff7ed），是为了让同一工具条上的
+     琥珀（清空）与软红（删除）之间还隔着一层暖色，不至于看成同一色系。 */
+  --uvp-btn-clear-bg: #fef3c7;
+  --uvp-btn-clear-bg-hover: #fde9a8;
+  --uvp-btn-clear-bg-active: #fbe08a;
+  --uvp-btn-clear-border: #fcd34d;
+  --uvp-btn-clear-text: #92400e;
+
+  /* 天蓝（uvp-sky-btn）：全选本页这类"扩大范围"的辅助动作。
+     ⛔ 与青绿（取数）必须能一眼分开：青绿偏绿、天蓝偏蓝，且底比青绿更浅一档。 */
+  --uvp-btn-sky-bg: #e0f2fe;
+  --uvp-btn-sky-bg-hover: #cfebfd;
+  --uvp-btn-sky-bg-active: #bfe3fc;
+  --uvp-btn-sky-border: #7dd3fc;
+  --uvp-btn-sky-text: #0369a1;
+
   /* 新增：绿实心（uvp-create-btn） */
   --uvp-btn-success-bg: #16845f;
   --uvp-btn-success-bg-hover: #0f6f4f;
@@ -364,6 +394,24 @@ body[arco-theme="dark"] {
   --uvp-btn-stop-bg-hover: rgb(251 191 36 / 22%);
   --uvp-btn-stop-border: rgb(251 191 36 / 34%);
   --uvp-btn-stop-text: #fcd34d;
+
+  /* 暗色：容器底是深色，软底一律走 `rgb(x / α)` 叠加而不是实色 ——
+     实色浅底在暗色下会变成一块发光的白斑（见 uvp-buttons.scss 第 7 节注释）。 */
+  --uvp-btn-select-bg: rgb(167 139 250 / 16%);
+  --uvp-btn-select-bg-hover: rgb(167 139 250 / 24%);
+  --uvp-btn-select-bg-active: rgb(167 139 250 / 32%);
+  --uvp-btn-select-border: rgb(167 139 250 / 38%);
+  --uvp-btn-select-text: #c4b5fd;
+  --uvp-btn-clear-bg: rgb(251 191 36 / 16%);
+  --uvp-btn-clear-bg-hover: rgb(251 191 36 / 24%);
+  --uvp-btn-clear-bg-active: rgb(251 191 36 / 32%);
+  --uvp-btn-clear-border: rgb(251 191 36 / 40%);
+  --uvp-btn-clear-text: #fcd34d;
+  --uvp-btn-sky-bg: rgb(56 189 248 / 14%);
+  --uvp-btn-sky-bg-hover: rgb(56 189 248 / 22%);
+  --uvp-btn-sky-bg-active: rgb(56 189 248 / 30%);
+  --uvp-btn-sky-border: rgb(56 189 248 / 38%);
+  --uvp-btn-sky-text: #7dd3fc;
   --uvp-btn-success-bg: #16845f;
   --uvp-btn-success-bg-hover: #0f6f4f;
   --uvp-btn-success-text: #ffffff;

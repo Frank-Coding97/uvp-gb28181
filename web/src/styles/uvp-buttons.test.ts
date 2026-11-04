@@ -45,6 +45,30 @@ function stripComments(source: string) {
     .replace(/(^|\s)\/\/[^\n]*/g, "$1");
 }
 
+/**
+ * 原生 `<button>` 的语义类几何入口（第 8 节）。
+ * 它必须排除两类「不是文字按钮」的东西：
+ *   ① `.uvp-page-action-btn` —— 40px 页头档，不排除会被压回 34px；
+ *   ② 图标键三族 —— 26/28px 方形定尺，只有图标没有文案。
+ *      ⛔ 2026-11-04 踩过：设备卡片那排圆钮里的「刷新通道目录」挂着 uvp-refresh-btn，
+ *      被 `min-width: 72px` 撑成 72×28 胶囊（高度被页面 0,3,0 拉回 28，只有横向变形）。
+ */
+const ICON_KEY_CLASSES = [".icon-btn", ".icon-button", ".tree-icon-button"];
+const NATIVE_SEMANTIC_CLASSES = ["uvp-refresh-btn", "uvp-export-btn", "uvp-select-btn", "uvp-clear-btn", "uvp-sky-btn"];
+
+/** 取出 `button.X:where(:not(...))` 括号里的排除列表。 */
+function nativeExclusionList(cls: string) {
+  return BUTTONS.match(new RegExp(`button\\.${cls}:where\\(:not\\(([^)]*)\\)\\)`))?.[1] ?? "";
+}
+
+function expectNativeSemanticEntry(cls: string) {
+  const list = nativeExclusionList(cls);
+  expect(list, `button.${cls} 缺原生 <button> 的几何入口`).not.toBe("");
+  for (const must of [".uvp-page-action-btn", ...ICON_KEY_CLASSES]) {
+    expect(list, `button.${cls} 的排除列表漏了 ${must}`).toContain(must);
+  }
+}
+
 describe("按钮尺寸只有三档", () => {
   it("token 定义三档高度，且与真源的用法一致", () => {
     // ⛔ 改这些数字等于全站按钮尺寸变更，必须同时改文档与所有档位类；
@@ -69,7 +93,10 @@ describe("按钮尺寸只有三档", () => {
   it('全仓模板里没有 a-button 使用 size="mini"', () => {
     const offenders: string[] = [];
     for (const file of VUE_FILES) {
-      const source = stripComments(readFileSync(file, "utf8"));
+      const raw = readFileSync(file, "utf8");
+      // 廉价预筛：没有这个字面量的文件不必跑剥注释（全仓扫描原本顶到 5s 默认超时）。
+      if (!raw.includes('size="mini"')) continue;
+      const source = stripComments(raw);
       for (const match of source.matchAll(/<a-button\b[^>]*>/g)) {
         if (match[0].includes('size="mini"')) {
           offenders.push(`${relative(ROOT, file)}:${source.slice(0, match.index).split("\n").length}`);
@@ -77,7 +104,7 @@ describe("按钮尺寸只有三档", () => {
       }
     }
     expect(offenders.join("\n")).toBe("");
-  });
+  }, 20000);
 });
 
 describe("语义色只有六级，且都从 token 取值", () => {
@@ -197,7 +224,42 @@ describe("单一真源不许被第二套规则覆盖", () => {
       expect(rule, `${block} 的排除列表漏了 .uvp-export-btn`).toContain(".uvp-export-btn");
     }
     // 原生 <button> 也要能用同一套语义（几何 + 配色）。
-    expect(BUTTONS).toMatch(/button\.uvp-export-btn:where\(:not\(\.uvp-page-action-btn\)\)/);
+    expectNativeSemanticEntry("uvp-export-btn");
+  });
+
+  it("选择 / 清空 / 全选三个新色相各自独立，且都已并进排除列表", () => {
+    // 2026-11-04 老板：「我想让每个按钮颜色都不一样」。
+    // 口径 = 一个动作族一个色相，族与族之间必须**跨色相**，不许同色深浅凑数。
+    const tones: Array<[cls: string, prefix: string]> = [
+      [".uvp-select-btn", "select"],
+      [".uvp-clear-btn", "clear"],
+      [".uvp-sky-btn", "sky"]
+    ];
+    for (const [cls, prefix] of tones) {
+      expect(hasRuleBlock(BUTTONS, cls, `background: var(--uvp-btn-${prefix}-bg)`), `${cls} 没走 --uvp-btn-${prefix}-bg`).toBe(
+        true
+      );
+      expect(hasRuleBlock(BUTTONS, cls, `color: var(--uvp-btn-${prefix}-text)`), `${cls} 没走 --uvp-btn-${prefix}-text`).toBe(
+        true
+      );
+      // 三条彩色规则（primary / secondary / outline）都要排除它，否则
+      // `<a-button class="…">` 会先被次级浅蓝染一遍，再靠书写顺序赌胜负。
+      for (const block of [".arco-btn-primary", ".arco-btn-secondary", ".arco-btn-outline"]) {
+        const rule = BUTTONS.match(new RegExp(`\\${block}:where\\(([\\s\\S]*?)\\)`))?.[1] ?? "";
+        expect(rule, `${block} 的排除列表漏了 ${cls}`).toContain(cls);
+      }
+      // 原生 <button> 也必须能用同一套语义（几何 + 配色），且不压 40px 档、不撑图标键。
+      const name = cls.slice(1);
+      expectNativeSemanticEntry(name);
+      // 暗色段必须跟着定义：只给浅色值 ⇒ 暗色下是一块发光的浅斑。
+      const definedTimes = TOKENS.match(new RegExp(`--uvp-btn-${prefix}-bg:`, "g"))?.length ?? 0;
+      expect(definedTimes, `--uvp-btn-${prefix}-bg 只在浅色段定义，暗色没跟上`).toBeGreaterThanOrEqual(2);
+    }
+    // ⛔ 三档底色必须是三个不同的值：抄成同一个就等于「又是同色」，白改一场。
+    const values = ["select", "clear", "sky"].map(name =>
+      TOKENS.match(new RegExp(`--uvp-btn-${name}-bg:\\s*([^;]+);`))?.[1].trim()
+    );
+    expect(new Set(values).size).toBe(3);
   });
 
   it("原生 <button> 也有语义类入口（全仓 240+ 个原生按钮的唯一入口）", () => {
@@ -206,9 +268,31 @@ describe("单一真源不许被第二套规则覆盖", () => {
     for (const cls of ["uvp-btn-primary", "uvp-btn-secondary", "uvp-btn-neutral"]) {
       expect(BUTTONS).toMatch(new RegExp(`^button\\.${cls}\\s*\\{`, "m"));
     }
-    // 刷新类要能作用于原生按钮，同时必须排除 40px 档的 page-action（否则被压回 34px）。
-    expect(BUTTONS).toMatch(/button\.uvp-refresh-btn:where\(:not\(\.uvp-page-action-btn\)\)/);
+    // 刷新类要能作用于原生按钮，同时必须排除 40px 档的 page-action（否则被压回 34px）
+    // 与图标键三族（否则 28px 圆钮被 min-width 撑成胶囊）。
+    expectNativeSemanticEntry("uvp-refresh-btn");
   });
+
+  it("图标键挂语义类时只借配色：排除列表必须覆盖全仓的图标键类名", () => {
+    // 反向防回归：全仓 `<button class="…icon… uvp-xxx-btn">` 的图标类名，
+    // 必须都在第 8 节的 `:not()` 列表里 —— 否则那个图标键会横向变宽。
+    // 新增一种图标键样式时，这条会直接报出「把 .foo 补进排除列表」，不用等肉眼发现。
+    // ⚠️ 先做廉价的 raw 预筛再 stripComments：全仓 250+ 个 .vue、index.vue 单文件 330KB，
+    //    每个都跑三遍正则剥注释会顶到 5s 默认超时（实测过一次超时）。
+    const seen = new Set<string>();
+    for (const file of VUE_FILES) {
+      const raw = readFileSync(file, "utf8");
+      if (!/<button\b[^>]*class="[^"]*icon/i.test(raw)) continue;
+      for (const match of stripComments(raw).matchAll(/<button\b[^>]*\bclass="([^"]*)"[^>]*>/g)) {
+        const classes = match[1].split(/\s+/).filter(Boolean);
+        if (!classes.some(c => NATIVE_SEMANTIC_CLASSES.includes(c))) continue;
+        for (const cls of classes.filter(c => /icon/i.test(c))) seen.add(`.${cls}`);
+      }
+    }
+    const missing = [...seen].filter(cls => !ICON_KEY_CLASSES.includes(cls));
+    expect(missing.join(", "), "这些图标键类名没进 uvp-buttons.scss 第 8 节的排除列表").toBe("");
+    expect(seen.size, "一个图标键都没扫到，扫描规则可能失效了").toBeGreaterThan(0);
+  }, 20000);
 });
 
 describe("语义变体不被主按钮规则误伤", () => {
