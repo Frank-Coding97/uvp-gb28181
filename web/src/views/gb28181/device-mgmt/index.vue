@@ -3808,7 +3808,9 @@ onUnmounted(() => {
         </template>
       </s-layout-search>
 
-      <aside class="catalog-pane">
+      <!-- 收起后加 inert：面板只剩 12px 宽，里面的目录行/输入框仍能被 Tab 聚焦，
+           会形成一个"焦点跑到看不见的地方"的黑洞。 -->
+      <aside class="catalog-pane" :inert="catalogCollapsed || undefined">
         <!-- 地图视角换「可定位通道树」：地图只认有坐标的通道，摆一棵设备目录树等于
              让人一路点到"没有点位"的枪机上。列表/卡片视角仍用原目录树。 -->
         <MapChannelTree
