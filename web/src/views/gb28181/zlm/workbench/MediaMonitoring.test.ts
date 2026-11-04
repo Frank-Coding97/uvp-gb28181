@@ -126,6 +126,15 @@ describe("media monitoring workbench", () => {
     expect(hasRuleBlock(panel, ".session-refresh-btn", "min-width: 128px")).toBe(true);
   });
 
+  it("keeps the scope out of the filter row hint", () => {
+    // 范围已经由筛选栏里的节点下拉表达，右侧再补一句「当前范围：全部节点」是重复噪音。
+    for (const file of ["StreamPanel.vue", "NetworkSessionPanel.vue"]) {
+      const panel = readFileSync(resolve(root, "workbench/monitoring", file), "utf8");
+      expect(panel, file).not.toContain("当前范围：");
+      expect(panel, file).not.toContain("scope-note");
+    }
+  });
+
   it("keeps the vertical scrollbar on the table body instead of the outer panel", () => {
     const page = readFileSync(resolve(root, "workbench/MediaMonitoring.vue"), "utf8");
     // 页面区必须是确定高度的弹性列，否则下面的表格拿不到高度、只好撑高整页

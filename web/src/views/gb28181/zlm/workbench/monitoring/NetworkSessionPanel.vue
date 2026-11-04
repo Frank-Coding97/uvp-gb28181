@@ -297,9 +297,6 @@ defineExpose({ refresh: requestRefresh });
             ><template #icon><icon-refresh /></template>{{ refreshButtonLabel }}</a-button
           ></template
         >
-        <template #extra
-          ><span class="scope-note">当前范围：{{ scopeLabel }}</span></template
-        >
       </s-layout-search>
 
       <div v-if="loading && !networkData" class="monitoring-state" role="status"><a-spin />正在加载网络会话…</div>
@@ -505,10 +502,6 @@ defineExpose({ refresh: requestRefresh });
 }
 .media-filter-stream {
   width: 190px;
-}
-.scope-note {
-  font-size: var(--zlm-fs-caption);
-  color: var(--zlm-text-3);
 }
 .monitoring-state {
   display: flex;
