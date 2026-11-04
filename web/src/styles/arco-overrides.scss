@@ -336,11 +336,17 @@ body[arco-theme="dark"] .arco-switch[disabled].arco-switch-checked {
 //    只允许覆盖档位，不要再写裸 px（旧的 40px/10px 曾与工具栏 34px/8px 并存，看着像两套系统）。
 .uvp-page-action-btn {
   box-sizing: border-box;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
   min-width: var(--uvp-btn-min-w-md);
   height: var(--uvp-btn-h-lg);
   padding-inline: var(--uvp-btn-pad-md);
   font-size: var(--uvp-btn-fs-md);
   font-weight: var(--uvp-btn-weight);
+  white-space: nowrap;
+  cursor: pointer;
   border-radius: var(--uvp-btn-radius);
 }
 
@@ -473,8 +479,13 @@ button[disabled]:not(.arco-btn) {
 }
 
 // 按钮(btn-primary / btn-ghost)
-.btn-primary,
-.btn-ghost {
+// ⛔⛔ 语义类优先（2026-11-04）：本文件在按钮真源 `uvp-buttons.scss` **之后**加载，
+//    同特异性（都是 0,1,0）时这里会反超 ⇒ 页面里 `class="btn-ghost uvp-refresh-btn"`
+//    的刷新键被刷回白底（设备列表页头部就是这么白着的）。
+//    几何上也要让出 40px 档，否则 `.uvp-page-action-btn` 的高度被这里的 32px 压掉。
+//    口径：只要挂了体系语义类，几何与配色都归真源，本文件不管。
+.btn-primary:where(:not(.uvp-page-action-btn)),
+.btn-ghost:where(:not(.uvp-page-action-btn)) {
   display: inline-flex;
   gap: 6px;
   align-items: center;
@@ -490,7 +501,7 @@ button[disabled]:not(.arco-btn) {
   }
 }
 
-.btn-primary {
+.btn-primary:where(:not(.uvp-create-btn, .uvp-btn-primary, .uvp-refresh-btn, .uvp-stop-btn)) {
   font-weight: 600;
   color: var(--uvp-solid-text);
   cursor: pointer;
@@ -548,7 +559,7 @@ body[arco-theme="dark"] {
   }
 }
 
-.btn-ghost {
+.btn-ghost:where(:not(.uvp-refresh-btn, .uvp-create-btn, .uvp-btn-primary, .uvp-btn-secondary, .uvp-btn-neutral)) {
   color: var(--uvp-text-secondary);
   cursor: pointer;
   background: var(--uvp-search-secondary-btn-bg);

@@ -102,6 +102,11 @@
 
 ⛔ 例外：`components/play-console/**` 与 `PlayConsoleLinked.vue` 是深色控制台，按钮自成一套深色观感，本轮**未接管**；要改需连同控制台的深色 token 一起做。
 
+⛔⛔ **页面里的老类 `.btn-ghost` / `.btn-primary` 与体系语义类同特异性（都是 0,1,0），而 `arco-overrides.scss` 在真源之后加载 ⇒ 会反超**。
+症状：`class="btn-ghost uvp-refresh-btn"` 的刷新键白着不变色（设备列表页头部）。
+已用 `:where(:not(…))` 让这两个老类**主动让位**：只要挂了 `uvp-refresh-btn` / `uvp-create-btn` / `uvp-btn-primary|secondary|neutral`，几何与配色全归真源。
+新页面请**不要再写 `.btn-ghost`**，直接写 `<button class="uvp-btn-secondary">`。
+
 ### 3.2 判断"该不该实心"
 
 按**操作区**（一个搜索面板 / 一个弹窗 / 一行工具条）算，不是按页面算：
