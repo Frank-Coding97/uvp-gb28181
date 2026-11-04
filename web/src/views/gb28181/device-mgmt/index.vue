@@ -171,6 +171,34 @@ function initialViewMode(): ViewMode {
   }
 }
 const viewMode = ref<ViewMode>(initialViewMode());
+/**
+ * ⛔ 窄容器下不要把操作列固定到右侧（2026-11-04 老板反馈"表格模式怎么没有流传输模式"）。
+ * 操作列要放下 7 个动作就得 400px，固定在右侧时等于永久吃掉这么多可视宽度；
+ * 容器一窄，中间的「流传输模式 / 播放码流」等列就被压在固定列底下，横滚也像"没这列"。
+ * 所以按容器宽度决定固定与否：够宽才固定，窄了就让整行正常横滚。
+ */
+const tableViewRef = ref<HTMLElement | null>(null);
+const tableViewWidth = ref(0);
+const stickTableActions = computed(() => tableViewWidth.value >= 900);
+let tableViewResizeObserver: ResizeObserver | null = null;
+watch(
+  tableViewRef,
+  el => {
+    tableViewResizeObserver?.disconnect();
+    tableViewResizeObserver = null;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    tableViewResizeObserver = new ResizeObserver(entries => {
+      const width = entries[0]?.contentRect.width ?? 0;
+      if (width > 0) tableViewWidth.value = Math.round(width);
+    });
+    tableViewResizeObserver.observe(el);
+  },
+  { flush: "post" }
+);
+onUnmounted(() => {
+  tableViewResizeObserver?.disconnect();
+  tableViewResizeObserver = null;
+});
 const router = useRouter();
 const route = useRoute();
 const returnSnapshot = consumeDeviceMgmtReturnSnapshot(typeof route.query.returnKey === "string" ? route.query.returnKey : null);
@@ -3921,7 +3949,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div v-if="viewMode === 'list'" class="view-body table-view">
+        <div v-if="viewMode === 'list'" ref="tableViewRef" class="view-body table-view">
           <a-table
             v-if="assetKind === 'channel'"
             v-model:selected-keys="selectedRowKeys"
@@ -4095,7 +4123,7 @@ onUnmounted(() => {
                    旧值 350 只够 6 个：任一通道「直播中」时多出「停止」，该行比列宽多出 38px，
                    会把「删除」顶出列外被表格右缘裁掉。列宽改动后同步维护 :scroll.x
                    (上面通道表的 scroll.x = Σ列宽 2090 + 勾选列 40 = 2130)。 -->
-              <a-table-column title="操作" :width="400" align="center" fixed="right">
+              <a-table-column title="操作" :width="400" align="center" :fixed="stickTableActions ? 'right' : ''">
                 <template #cell="{ record }">
                   <div class="uvp-table-actions">
                     <a-link
@@ -4257,7 +4285,7 @@ onUnmounted(() => {
                   ><span :class="{ warn: !record.online }">{{ dateTime(record.keepaliveTime) }}</span></template
                 >
               </a-table-column>
-              <a-table-column title="操作" :width="420" align="center" fixed="right">
+              <a-table-column title="操作" :width="420" align="center" :fixed="stickTableActions ? 'right' : ''">
                 <template #cell="{ record }">
                   <div class="uvp-table-actions" data-guide="row-actions">
                     <a-link class="uvp-table-action uvp-table-action--preview" @click="showDeviceChannels(record)">

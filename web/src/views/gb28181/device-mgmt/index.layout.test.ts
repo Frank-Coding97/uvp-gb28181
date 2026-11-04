@@ -147,6 +147,17 @@ describe("device management toolbar layout", () => {
     }
   });
 
+  it("only pins the action column when the table viewport is wide enough", () => {
+    // ⛔ 固定列会「永久吃掉」一块可视宽度：操作列要 400/420px，容器一窄，
+    //   中间的「流传输模式 / 播放码流」等列就被压在固定列底下，横滚也像"没这列"
+    //   （2026-11-04 老板反馈"表格模式怎么没有流传输模式的选择，卡片上就有"）。
+    //   所以固定与否必须跟着容器宽度走，不许写死 fixed="right"。
+    expect(source).not.toMatch(/title="操作"[^>]*fixed="right"/);
+    expect(source.match(/:fixed="stickTableActions \? 'right' : ''"/g)).toHaveLength(2);
+    expect(source).toContain("const stickTableActions = computed(() => tableViewWidth.value >= 900)");
+    expect(source).toContain('ref="tableViewRef"');
+  });
+
   it("keeps the double-click drilldown free of any floating hint", () => {
     // 2026-10-05 老板要求去掉设备列表上跟随光标的「双击进入通道」浮层。
     // 双击下钻本身保留(onDeviceDblclick 仍在),这里钉住"不要再挂回来"。
