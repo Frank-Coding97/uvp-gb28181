@@ -43,10 +43,13 @@
   --uvp-secondary-action-hover-bg: #e8eef5;
   --uvp-secondary-action-border: #cbd5e1;
   --uvp-secondary-action-text: #334155;
-  --uvp-refresh-btn-bg: #e8f7f5;
-  --uvp-refresh-btn-hover-bg: #d7f1ee;
-  --uvp-refresh-btn-active-bg: #c7e9e5;
-  --uvp-refresh-btn-border: #b7e3df;
+
+  /* 刷新：青绿底青绿字。同样在 2026-11-04 加深一档，
+     原来 #e8f7f5 在白底上等于没上色。 */
+  --uvp-refresh-btn-bg: #cfeee7;
+  --uvp-refresh-btn-hover-bg: #b9e6dc;
+  --uvp-refresh-btn-active-bg: #a4dcd0;
+  --uvp-refresh-btn-border: #96d5c7;
   --uvp-refresh-btn-text: #0f766e;
 
   /* ═══════════════════ 实心面（白字压在上面）专用 token ═══════════════════
@@ -170,14 +173,17 @@
   --uvp-btn-primary-shadow: 0 10px 20px -16px rgb(37 99 235 / 70%);
   --uvp-btn-primary-shadow-hover: 0 14px 24px -18px rgb(29 78 216 / 72%);
 
-  /* 次级操作：浅蓝底蓝字（不再是一片纯白） */
-  --uvp-btn-secondary-bg: #f2f7ff;
-  --uvp-btn-secondary-bg-hover: #e6f0ff;
-  --uvp-btn-secondary-bg-active: #dbe8ff;
-  --uvp-btn-secondary-border: #cfe0f7;
-  --uvp-btn-secondary-border-hover: #a8c8f0;
+  /* 次级操作：蓝底蓝字。
+     ⛔ 2026-11-04 二次加深：原来 #f2f7ff 与页面白底几乎同色，肉眼看仍是「白按钮」，
+        老板的原话是「我想所有按钮都上色」。现取 #e3eefe（与白底 ΔE 足够区分），
+        文字与边框同色系，#1d4ed8 压在上面对比度 5.6:1 仍达标。 */
+  --uvp-btn-secondary-bg: #e3eefe;
+  --uvp-btn-secondary-bg-hover: #d4e5fc;
+  --uvp-btn-secondary-bg-active: #c5dbfa;
+  --uvp-btn-secondary-border: #b9d3f3;
+  --uvp-btn-secondary-border-hover: #93bced;
   --uvp-btn-secondary-text: #1d4ed8;
-  --uvp-btn-secondary-shadow: 0 1px 2px rgb(37 99 235 / 6%);
+  --uvp-btn-secondary-shadow: 0 1px 2px rgb(37 99 235 / 10%);
 
   /* 中性操作：取消 / 关闭 / 重置 */
   --uvp-btn-neutral-bg: #f1f5f9;
@@ -335,11 +341,11 @@ body[arco-theme="dark"] {
   --uvp-btn-primary-border: transparent;
   --uvp-btn-primary-shadow: none;
   --uvp-btn-primary-shadow-hover: none;
-  --uvp-btn-secondary-bg: rgb(96 165 250 / 12%);
-  --uvp-btn-secondary-bg-hover: rgb(96 165 250 / 20%);
-  --uvp-btn-secondary-bg-active: rgb(96 165 250 / 26%);
-  --uvp-btn-secondary-border: rgb(96 165 250 / 32%);
-  --uvp-btn-secondary-border-hover: rgb(96 165 250 / 52%);
+  --uvp-btn-secondary-bg: rgb(96 165 250 / 18%);
+  --uvp-btn-secondary-bg-hover: rgb(96 165 250 / 28%);
+  --uvp-btn-secondary-bg-active: rgb(96 165 250 / 36%);
+  --uvp-btn-secondary-border: rgb(96 165 250 / 44%);
+  --uvp-btn-secondary-border-hover: rgb(96 165 250 / 64%);
   --uvp-btn-secondary-text: #93c5fd;
   --uvp-btn-secondary-shadow: none;
   --uvp-btn-neutral-bg: #1b2a3a;

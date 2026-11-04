@@ -210,7 +210,145 @@
   }
 }
 
-// ── 6. 交互细节 ──────────────────────────────────────────────────────────────
+// ── 7. 刷新 / 工具动作（青绿）────────────────────────────────────────────────
+// 刷新是"重新拉一次数据"，既不是提交也不是删除，给它独立的青绿色相：
+// 整行按钮里一眼能认出"这个是刷新"，又不会抢走主按钮的位置。
+// ⚠️ 2026-11-04 从 arco-overrides.scss 迁入本真源（那儿靠 !important 硬压，
+//    与"六级语义从一处出"冲突）。迁入后去掉 !important，靠文件内顺序取胜。
+.uvp-refresh-btn {
+  color: var(--uvp-refresh-btn-text);
+  background: var(--uvp-refresh-btn-bg);
+  border-color: var(--uvp-refresh-btn-border);
+  box-shadow: none;
+
+  &:hover:not(.arco-btn-loading, .arco-btn-disabled, [disabled]) {
+    color: var(--uvp-refresh-btn-text);
+    background: var(--uvp-refresh-btn-hover-bg);
+    border-color: var(--uvp-refresh-btn-border);
+  }
+
+  &:active:not(.arco-btn-loading, .arco-btn-disabled, [disabled]) {
+    color: var(--uvp-refresh-btn-text);
+    background: var(--uvp-refresh-btn-active-bg);
+    border-color: var(--uvp-refresh-btn-border);
+  }
+}
+
+// 行内的「刷新」文字链（表格上方、面板角落），只染字不改底。
+.uvp-refresh-link {
+  color: var(--uvp-refresh-btn-text);
+
+  &:hover,
+  &:focus-visible {
+    color: var(--uvp-refresh-btn-text);
+    background: var(--uvp-refresh-btn-hover-bg);
+  }
+}
+
+// ── 8. 原生 <button>：语义类同时接管几何与配色 ───────────────────────────────
+// ⛔⛔ 全仓 240+ 个原生 <button> 根本不经过 .arco-btn，是「只有重点按钮有颜色」
+//     最大的盲区 —— 仪表盘页头的「刷新」之前就是白底黑字，上一轮统一按钮体系
+//     完全没管到它（那套规则只作用于 .arco-btn）。
+// 口径：原生按钮只要挂上下面任一语义类，几何与配色就和 a-button 完全一致。
+//   uvp-btn-primary    主操作（蓝实心）
+//   uvp-btn-secondary  次级操作（蓝底蓝字）
+//   uvp-btn-neutral    取消 / 关闭（中性灰）
+//   uvp-refresh-btn    刷新（青绿，见上）
+// ⚠️ `.uvp-page-action-btn` 是 40px 档，必须排除，否则会被压回 34px。
+button.uvp-btn-primary,
+button.uvp-btn-secondary,
+button.uvp-btn-neutral,
+button.uvp-refresh-btn:where(:not(.uvp-page-action-btn)) {
+  box-sizing: border-box;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--uvp-btn-min-w-md);
+  height: var(--uvp-btn-h-md);
+  padding: 0 var(--uvp-btn-pad-md);
+  font-family: inherit;
+  font-size: var(--uvp-btn-fs-md);
+  font-weight: var(--uvp-btn-weight);
+  line-height: 1;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: var(--uvp-btn-radius);
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+
+  &:hover:not([disabled]) {
+    transform: translateY(-1px);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--uvp-btn-secondary-text);
+    outline-offset: 2px;
+  }
+
+  &[disabled] {
+    cursor: not-allowed;
+    box-shadow: none;
+    opacity: var(--uvp-btn-disabled-opacity);
+    transform: none;
+  }
+}
+
+button.uvp-btn-primary {
+  color: var(--uvp-btn-primary-text);
+  background: var(--uvp-btn-primary-bg);
+  border-color: var(--uvp-btn-primary-border);
+  box-shadow: var(--uvp-btn-primary-shadow);
+
+  &:hover:not([disabled]) {
+    color: var(--uvp-btn-primary-text);
+    background: var(--uvp-btn-primary-bg-hover);
+    box-shadow: var(--uvp-btn-primary-shadow-hover);
+  }
+
+  &:active:not([disabled]) {
+    background: var(--uvp-btn-primary-bg-active);
+  }
+}
+
+button.uvp-btn-secondary {
+  color: var(--uvp-btn-secondary-text);
+  background: var(--uvp-btn-secondary-bg);
+  border-color: var(--uvp-btn-secondary-border);
+  box-shadow: var(--uvp-btn-secondary-shadow);
+
+  &:hover:not([disabled]) {
+    color: var(--uvp-btn-secondary-text);
+    background: var(--uvp-btn-secondary-bg-hover);
+    border-color: var(--uvp-btn-secondary-border-hover);
+  }
+
+  &:active:not([disabled]) {
+    background: var(--uvp-btn-secondary-bg-active);
+  }
+}
+
+button.uvp-btn-neutral {
+  color: var(--uvp-btn-neutral-text);
+  background: var(--uvp-btn-neutral-bg);
+  border-color: var(--uvp-btn-neutral-border);
+  box-shadow: none;
+
+  &:hover:not([disabled]) {
+    color: var(--uvp-btn-neutral-text);
+    background: var(--uvp-btn-neutral-bg-hover);
+  }
+
+  &:active:not([disabled]) {
+    background: var(--uvp-btn-neutral-bg-active);
+  }
+}
+
+// ── 9. 交互细节 ──────────────────────────────────────────────────────────────
 // 悬停只做 1px 上浮，且 loading / disabled / 文字按钮不参与（轻微位移已够，不做缩放）。
 // 同样用 `:where()` 压成 0 特异性，页面里想关掉位移只要写一条普通规则即可。
 .arco-btn:where(:not(.arco-btn-text, .arco-btn-loading, .arco-btn-disabled)):hover {

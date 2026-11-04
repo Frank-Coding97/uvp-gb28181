@@ -82,7 +82,34 @@
 <a-button type="text" size="small">复制</a-button>
 ```
 
-## 5. 禁止事项（门禁会红）
+## 5. 原生 `<button>`（全项目最容易漏的一半）
+
+全仓还有 **240+ 个原生 `<button>`**，它们**完全不经过 `.arco-btn`** —— 上面所有 `.arco-btn-*` 规则对它们无效。2026-11-04 之前仪表盘页头的"刷新"就是原生 button + 页面本地 `.secondary`（白底黑字），统一按钮体系跑完它还是白的。
+
+**口径：原生按钮挂同样的语义类，就拿到同样的几何（34px）+ 配色。**
+
+| 语义 | 原生 button 写法 |
+|---|---|
+| 主操作 | `class="uvp-btn-primary"` |
+| 次级操作 | `class="uvp-btn-secondary"` |
+| 取消 / 关闭 | `class="uvp-btn-neutral"` |
+| 刷新 | `class="uvp-refresh-btn"` |
+
+```vue
+<!-- 仪表盘页头（2026-11-04 起的基准写法） -->
+<button class="uvp-refresh-btn" :disabled="refreshing" @click="refreshData">刷新</button>
+<button class="uvp-btn-primary" @click="startEditing">编辑仪表盘</button>
+
+<!-- 编辑态：三档分明 -->
+<button class="uvp-btn-secondary" @click="resetLayout">恢复默认</button>
+<button class="uvp-btn-neutral" @click="cancelEditing">取消</button>
+<button class="uvp-btn-primary" @click="saveLayout">保存布局</button>
+```
+
+⛔ **禁止**在页面 scoped 样式里再给这些按钮写 `height / padding / border-radius / background / color` —— 一旦写了就是第二套观感（`home.layout.test.ts` 会红）。
+⛔ 40px 档的 `uvp-page-action-btn` 不要和上面几个原生类一起用（会被压回 34px）。
+
+## 6. 禁止事项（门禁会红）
 
 1. ⛔ 页面 / 组件里写 `.arco-btn { height | padding | border-radius | font-size | background | color }`。
 2. ⛔ `<a-button size="mini">`。
@@ -90,13 +117,15 @@
 4. ⛔ 在 `uvp-ui-language.scss` / `arco-overrides.scss` 里重新定义按钮配色（唯一真源之外的第二套）。
 5. ⛔ 用 `:not(.a):not(.b):not(.c)` 串排除条件 —— CSS 选择器 Level 4 里 `:not()` 的特异性会累加，会把规则抬到压过弹窗 footer 的层级。**用 `:where(:not(…))`**。
 6. ⛔ 给"取消"用 `type="primary"`；给"删除"用普通 primary（必须带 `status="danger"`）。
+7. ⛔ 彩色语义的底色调回"接近白"（`#f2f7ff` 那种）。门禁按 chroma ≥ 20、luma ≤ 0.94 判，肉眼看不出色相就是不合格。
 
-## 6. 主题与对比度
+## 7. 主题与对比度
 
 - 按钮配色 token 全部**两套主题各写一遍**（`--uvp-btn-*`），不做 `var()` 别名——别名会在计算值阶段被钉死在亮色。
 - 白字压实心底色只走 `--uvp-btn-primary-bg` / `--uvp-btn-danger-solid-bg`，**不要**直接拿 `--uvp-brand` 当底色（暗色下它是浅蓝，白字对比度只有 2:1）。
+- 次级/刷新的底色必须"看得出是颜色"：亮色下 `--uvp-btn-secondary-bg = #e3eefe`、`--uvp-refresh-btn-bg = #cfeee7`。
 
-## 7. 改了按钮之后怎么验
+## 8. 改了按钮之后怎么验
 
 ```bash
 cd web
@@ -108,8 +137,9 @@ npx vitest run src/styles                              # 暗色主按钮契约
 视觉确认（必须）：打开一个列表页 + 一个弹窗 + 深色主题，检查
 ① 同排按钮等高；② 主按钮一屏只有一个；③ 次级按钮是浅蓝底而不是纯白；④ 弹窗"取消"是灰色。
 
-## 8. 已知遗留
+## 9. 已知遗留
 
+- ⭐ **原生 `<button>` 尚未全量接管**：2026-11-04 只把仪表盘页头（`views/home/home.vue`）接进体系，其余仍是各页 scoped 自造类（白底/灰底）。这是"还有按钮没上色"的**唯一剩余来源**；改法见第 5 节，挂类 + 删掉页面里的几何/配色即可。
 - `views/gb28181/device-mgmt/DeviceConfigDrawer.vue` 的 `dcg-btn` 系列有自己一套 scoped 按钮视觉（6 个 apply 键）。它们特异性更高，暂未被统一真源接管；改造时需同步删掉那份 scoped 定义。
 - `views/gb28181/components/play-console/*` 播放控制台是深色容器，按钮视觉在 scoped 里自成一套。统一真源的几何（34px）已生效，配色仍是控制台自己的。
 - `views/gb28181/device-mgmt/ChannelLocationPicker.vue` 有 2 条弹窗皮肤契约红（未挂 `modal-class`），与按钮体系无关，属既有问题。

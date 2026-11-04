@@ -96,20 +96,28 @@ describe("editable realtime dashboard layout", () => {
     expect(source).toContain("getHomeDashboardSummary");
   });
 
-  it("reuses the shared primary button treatment for dashboard editing actions", () => {
+  it("reuses the shared button system for every dashboard header action", () => {
+    // 契约不变（页头动作必须复用共享主按钮处理），只是真源从 home.vue 自己的
+    // `.primary` 换成了全局语义类 `uvp-btn-primary`（web/src/styles/uvp-buttons.scss）。
     expect(source).toMatch(
-      /<button\s+v-if="!editing"\s+class="btn-primary primary"\s+:disabled="!canEditLayout"[^>]*>[\s\S]*?编辑仪表盘[\s\S]*?<\/button>/s
+      /<button\s+v-if="!editing"\s+class="uvp-btn-primary"\s+:disabled="!canEditLayout"[^>]*>[\s\S]*?编辑仪表盘[\s\S]*?<\/button>/s
     );
     expect(source).toMatch(
-      /<button\s+class="btn-primary primary"\s+:disabled="saving \|\| !canSaveLayout"[^>]*>[\s\S]*?保存布局[\s\S]*?<\/button>/s
+      /<button\s+class="uvp-btn-primary"\s+:disabled="saving \|\| !canSaveLayout"[^>]*>[\s\S]*?保存布局[\s\S]*?<\/button>/s
     );
-    // ⚠️ 校正既有红（2026-10-11）：源码早已从 `#fff + --uvp-brand` 换成实心底色语义 token
-    //    `--uvp-solid-text` / `--uvp-solid-bg`（暗色下 `--uvp-brand` 是文字色，白字压上去对比度不足），
-    //    此处断言未同步。与本次权限改造无关，仅因同文件一并修正。
-    expect(source).toMatch(
-      /\.primary\s*\{[^}]*color:\s*var\(--uvp-solid-text\);[^}]*background:\s*var\(--uvp-solid-bg\);[^}]*border:\s*0;/s
-    );
-    expect(source).toMatch(/\.actions\s+\.primary\s*\{[^}]*font-weight:\s*600;/s);
+    // ⛔ 2026-11-04 补：刷新是上一轮唯一"没上色"的按钮（原来挂本地 .secondary = 白底黑字），
+    //    必须挂青绿语义类；取消走中性、恢复默认走次级，四层语义各就各位。
+    expect(source).toMatch(/<button\s+class="uvp-refresh-btn"\s+:disabled="refreshing"[^>]*>[\s\S]*?刷新[\s\S]*?<\/button>/s);
+    expect(source).toContain('class="uvp-btn-secondary" @click="resetLayout"');
+    expect(source).toContain('class="uvp-btn-neutral" @click="cancelEditing"');
+    // 页头不许再自持几何与配色，否则又会分叉出第二套观感。
+    // （小屏媒体查询里把可点区抬到 min-height:40px 是触屏可达性，不算第二套，放行。）
+    const actionsButtonBlocks = [...source.matchAll(/\.actions\s+button\s*\{([^}]*)\}/g)].map(m => m[1]);
+    for (const block of actionsButtonBlocks) {
+      expect(block).not.toMatch(/(^|[\s;])(height|padding|border-radius|background|color)\s*:/);
+    }
+    expect(source).not.toMatch(/^\s*\.secondary\s*\{/m);
+    expect(source).not.toMatch(/^\s*\.primary\s*\{/m);
   });
 
   it("keeps system theme tokens", () => {

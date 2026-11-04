@@ -99,6 +99,34 @@ describe("语义色只有六级，且都从 token 取值", () => {
     expect(BUTTONS).not.toMatch(/background:\s*#fff(?:fff)?\s*;/i);
   });
 
+  it("彩色语义的底色必须真的看得出颜色（不能又调回接近白）", () => {
+    // ⛔⛔ 2026-11-04 二次返工的原因：#f2f7ff 在白卡片上肉眼和白色没差别，
+    //    老板的原话是「所有的按钮我都想上色」。只把「白」换成「浅到看不见」等于没改。
+    // 判据两条一起用：
+    //   ① chroma = max(R,G,B) - min(R,G,B) ≥ 20 —— 肉眼能分辨出色相；
+    //   ② luma   = 相对亮度 ≤ 0.94 —— 比纯白明显压暗，白底上能看出一块色。
+    const pick = (name: string) => TOKENS.match(new RegExp(`${name}:\\s*#([0-9a-f]{6})`, "i"))?.[1];
+    const analyze = (hex: string) => {
+      const [r, g, b] = [0, 2, 4].map(i => Number.parseInt(hex.slice(i, i + 2), 16));
+      const srgb = [r, g, b].map(v => {
+        const c = v / 255;
+        return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      });
+      return {
+        chroma: Math.max(r, g, b) - Math.min(r, g, b),
+        luma: 0.2126 * srgb[0] + 0.7152 * srgb[1] + 0.0722 * srgb[2]
+      };
+    };
+
+    for (const name of ["--uvp-btn-secondary-bg", "--uvp-refresh-btn-bg"]) {
+      const hex = pick(name);
+      expect(hex, `${name} 没找到十六进制值`).toBeTruthy();
+      const { chroma, luma } = analyze(hex!);
+      expect(chroma, `${name} 的色相太弱（chroma=${chroma}），看起来仍是白按钮`).toBeGreaterThanOrEqual(20);
+      expect(luma, `${name} 太亮（luma=${luma.toFixed(3)}），白底上分辨不出来`).toBeLessThanOrEqual(0.94);
+    }
+  });
+
   it("每次改主题都要给全：亮色定义的按钮 token，暗色必须也有", () => {
     const tokensOf = (block: string) => new Set(block.match(/--uvp-btn-[a-z0-9-]+(?=\s*:)/g) ?? []);
     const lightStart = TOKENS.indexOf(":root {");
@@ -151,6 +179,22 @@ describe("单一真源不许被第二套规则覆盖", () => {
     expect(rule).toContain("border-radius: var(--uvp-btn-radius)");
     expect(rule).not.toMatch(/height:\s*\d+px/);
     expect(rule).not.toMatch(/border-radius:\s*\d+px/);
+  });
+
+  it("刷新语义只定义在真源，arco-overrides 不留第二份", () => {
+    // 2026-11-04 从 arco-overrides 迁入：那边是 `!important` 硬压，与「语义从一处出」冲突。
+    expect(hasRuleBlock(BUTTONS, ".uvp-refresh-btn", "background: var(--uvp-refresh-btn-bg)")).toBe(true);
+    expect(OVERRIDES).not.toMatch(/\.uvp-refresh-btn\s*\{/);
+  });
+
+  it("原生 <button> 也有语义类入口（全仓 240+ 个原生按钮的唯一入口）", () => {
+    // ⛔ 仪表盘页头的刷新之前就是原生 button + 本地 `.secondary`（白底黑字），
+    //    上一轮统一按钮体系完全没管到它 —— 因为那套规则只作用于 `.arco-btn`。
+    for (const cls of ["uvp-btn-primary", "uvp-btn-secondary", "uvp-btn-neutral"]) {
+      expect(BUTTONS).toMatch(new RegExp(`^button\\.${cls}\\s*\\{`, "m"));
+    }
+    // 刷新类要能作用于原生按钮，同时必须排除 40px 档的 page-action（否则被压回 34px）。
+    expect(BUTTONS).toMatch(/button\.uvp-refresh-btn:where\(:not\(\.uvp-page-action-btn\)\)/);
   });
 });
 

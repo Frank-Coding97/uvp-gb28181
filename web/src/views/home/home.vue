@@ -10,16 +10,18 @@
       </div>
       <div class="actions">
         <span class="live"><i />实时数据 · {{ updatedText }}</span>
-        <button class="secondary" :disabled="refreshing" @click="refreshData">
+        <button class="uvp-refresh-btn" :disabled="refreshing" @click="refreshData">
           <RefreshCw :size="15" :class="{ spin: refreshing }" />刷新
         </button>
-        <button v-if="!editing" class="btn-primary primary" :disabled="!canEditLayout" @click="startEditing">
+        <button v-if="!editing" class="uvp-btn-primary" :disabled="!canEditLayout" @click="startEditing">
           <Pencil :size="15" />编辑仪表盘
         </button>
         <template v-if="editing">
-          <button :disabled="!canResetLayout" class="secondary" @click="resetLayout"><RotateCcw :size="15" />恢复默认</button>
-          <button class="secondary" @click="cancelEditing">取消</button>
-          <button class="btn-primary primary" :disabled="saving || !canSaveLayout" @click="saveLayout">
+          <button :disabled="!canResetLayout" class="uvp-btn-secondary" @click="resetLayout">
+            <RotateCcw :size="15" />恢复默认
+          </button>
+          <button class="uvp-btn-neutral" @click="cancelEditing">取消</button>
+          <button class="uvp-btn-primary" :disabled="saving || !canSaveLayout" @click="saveLayout">
             <Save :size="15" />{{ saving ? "保存中" : "保存布局" }}
           </button>
         </template>
@@ -682,29 +684,11 @@ onBeforeUnmount(() => {
   gap: 8px;
   align-items: center;
 }
-.actions button {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  height: 36px;
-  padding: 0 13px;
-  font: inherit;
-  cursor: pointer;
-  border-radius: 8px;
-}
-.secondary {
-  color: var(--uvp-text-primary);
-  background: var(--uvp-panel-bg);
-  border: 1px solid var(--uvp-panel-border);
-}
-.primary {
-  color: var(--uvp-solid-text);
-  background: var(--uvp-solid-bg);
-  border: 0;
-}
-.actions .primary {
-  font-weight: 600;
-}
+
+// ⛔ 尺寸与配色一律走全局语义类（uvp-btn-primary / -secondary / -neutral /
+//    uvp-refresh-btn，唯一真源 web/src/styles/uvp-buttons.scss）。
+//    2026-11-04 前这里自持一套 .secondary 白底灰字 + 36px 高，
+//    导致仪表盘刷新按钮是全站唯一"没上色"的按钮，且比别的页面高 2px。
 .live {
   display: flex;
   gap: 7px;
