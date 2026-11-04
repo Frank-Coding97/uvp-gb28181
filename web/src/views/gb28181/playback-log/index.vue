@@ -86,14 +86,11 @@
             ><span :title="record.reasonMessage">{{ record.reasonCode || "-" }}</span></template
           >
           <template #actions="{ record }">
-            <a-button
-              type="text"
-              size="small"
-              class="uvp-table-action uvp-table-action--detail"
-              title="查看详情"
-              @click="openDetail(record)"
-              ><template #icon><Eye :size="16" /></template
-            ></a-button>
+            <div class="uvp-table-actions">
+              <a-link class="uvp-table-action uvp-table-action--detail" title="查看详情" @click="openDetail(record)">
+                <template #icon><Eye :size="13" /></template><span>详情</span>
+              </a-link>
+            </div>
           </template>
           <template #empty><a-empty description="暂无播放日志" /></template>
         </a-table>
@@ -223,7 +220,9 @@ const columns = [
   { title: "客户端状态", slotName: "clientState", width: 132 },
   { title: "当前阶段", slotName: "currentStage", width: 120 },
   { title: "原因码", slotName: "reason", width: 180 },
-  { title: "", slotName: "actions", width: 60, fixed: "right" }
+  // 操作列要带表头 + 图标配文字：`align="center"` 是必须的 ——
+  // `.uvp-table-actions` 只在自己盒子内居中，单元格左对齐会让整组贴左（同固件库操作列）。
+  { title: "操作", slotName: "actions", width: 104, align: "center", fixed: "right" }
 ];
 
 const filters = reactive<PlaybackLogFilters>({});
