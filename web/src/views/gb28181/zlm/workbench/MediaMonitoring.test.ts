@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { createStreamFilters, overviewAsRuntime, sameNodeTargets } from "./monitoring/monitoringState";
 
-import { hasRuleBlock } from "@/test/source-assert";
+import { hasMarkup, hasRuleBlock } from "@/test/source-assert";
 
 const root = resolve(process.cwd(), "src/views/gb28181/zlm");
 
@@ -104,6 +104,27 @@ describe("media monitoring workbench", () => {
     expect(streamPanel).not.toContain("openSnapshot");
     expect(streamPanel).not.toContain("openPreview");
     expect(streamPanel).not.toContain('class="row-actions"');
+  });
+
+  it("keeps the vertical scrollbar on the table body instead of the outer panel", () => {
+    const page = readFileSync(resolve(root, "workbench/MediaMonitoring.vue"), "utf8");
+    // 页面区必须是确定高度的弹性列，否则下面的表格拿不到高度、只好撑高整页
+    expect(hasRuleBlock(page, ".media-monitoring-view", "display: flex", "height: 100%", "min-height: 0")).toBe(true);
+    // 桌面断点关掉面板自己的滚动：弹性列算出来是小数（423.2 vs 423），
+    // Chrome 会把 scrollHeight 向上取整、凭空画一条几乎满高的竖滚动条。
+    expect(hasRuleBlock(page, ".media-monitoring-shell :deep(.media-workspace-shell__panel)", "overflow: hidden")).toBe(true);
+
+    const panels = [
+      { file: "NetworkSessionPanel.vue", container: ".session-table-panel" },
+      { file: "StreamPanel.vue", container: ".stream-table-panel" }
+    ];
+    for (const { file, container } of panels) {
+      const panel = readFileSync(resolve(root, "workbench/monitoring", file), "utf8");
+      expect(hasMarkup(panel, `:scroll="{ y: '100%' }"`), file).toBe(true);
+      // ⛔ Arco 只给 a-table 根节点写行内 height:100%，下层容器不钉住就会按内容收边
+      expect(hasRuleBlock(panel, `${container} :deep(.arco-table-container)`, "height: 100%", "min-height: 0"), file).toBe(true);
+      expect(hasRuleBlock(panel, container, "display: flex", "flex: 1", "min-height: 0"), file).toBe(true);
+    }
   });
 
   it("keeps the recording status select at the system filter width", () => {

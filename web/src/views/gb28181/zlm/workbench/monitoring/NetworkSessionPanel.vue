@@ -478,6 +478,16 @@ defineExpose({ refresh });
   border-radius: var(--uvp-panel-radius);
   box-shadow: var(--uvp-panel-shadow);
 }
+
+/* ⛔⛔ Arco 只给 a-table **根节点**写行内 `height:100%`（scroll.y 是字符串时），
+   下层的 `.arco-table-container` 仍是 `height:auto` ⇒ 它只按「表头 + 表体内容」收边，
+   表格盒子提前收尾、下面空一大片，表体也拿不到剩余高度（实测：面板 283px、
+   容器只有 165px）。所以必须把容器这一层也钉成 100%，表体的 `max-height:100%`
+   才解得开、行数多时才会在表体里滚。 */
+.session-table-panel :deep(.arco-table-container) {
+  height: 100%;
+  min-height: 0;
+}
 .session-empty {
   display: flex;
   flex-direction: column;

@@ -33,6 +33,7 @@ function refreshAll() {
 
 <template>
   <MediaWorkspaceShell
+    class="media-monitoring-shell"
     :title="workspace.definition.title"
     description="按节点范围巡检在线媒体与网络会话，定位异常并安全处置。"
     :views="views.filter(view => workspace.allowedViews.value.includes(view.key))"
@@ -124,5 +125,16 @@ function refreshAll() {
   width: 100%;
   height: 100%;
   min-height: 0;
+}
+
+/* ⛔⛔ 面板区（shell 的 main）不能留 `overflow: auto`：弹性列算出来的高度是**小数**
+   （实测内容 423.2px、可视 423px），Chrome 的 scrollHeight 向上取整成 424 ⇒ 判定「可滚动」
+   ⇒ 右侧凭空多一条几乎满高的竖滚动条，而实际一个像素都滚不动。
+   本页三个面板都是「表体自己滚」的结构，外层本来就不该滚，所以直接关掉。
+   ⚠️ 只在桌面断点生效：窄屏（≤768px）shell 会切成整页滚动，那里必须留给页面。 */
+@media (width >= 769px) {
+  .media-monitoring-shell :deep(.media-workspace-shell__panel) {
+    overflow: hidden;
+  }
 }
 </style>

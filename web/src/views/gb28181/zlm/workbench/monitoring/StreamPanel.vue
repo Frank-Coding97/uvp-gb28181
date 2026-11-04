@@ -656,6 +656,14 @@ defineExpose({ refresh: requestRefresh });
   border-radius: var(--uvp-panel-radius);
   box-shadow: var(--uvp-panel-shadow);
 }
+
+/* ⛔⛔ 同 NetworkSessionPanel：Arco 只给 a-table 根节点写行内 `height:100%`，
+   下层 `.arco-table-container` 是 `height:auto` ⇒ 它按内容收边、表体拿不到剩余高度。
+   这一层必须钉成 100%。 */
+.stream-table-panel :deep(.arco-table-container) {
+  height: 100%;
+  min-height: 0;
+}
 .identity-link {
   display: inline-flex;
   gap: 8px;
