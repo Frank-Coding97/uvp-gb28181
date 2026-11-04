@@ -75,6 +75,19 @@ describe("OpenAPI client detail information architecture", () => {
     expect(detailSource).not.toContain('class="uvp-system-panel openapi-detail__panel" :bordered="false" title="调用记录"');
   });
 
+  it("shows only one refresh action on the call-records tab", () => {
+    /**
+     * ⛔ 契约（老板 2026-11-04 实拍截图要求「把第一行的干掉」）：
+     *   调用记录页原来有两个「刷新」——摘要卡头部一颗（refresh 整个详情）＋筛选栏一颗
+     *   （refresh 调用记录）。但 `load()` 末尾本来就有
+     *   `if (activeTab === "logs") void loadAudits()`，两者效果完全重叠，一屏两个刷新纯属噪音。
+     *   头那颗必须带 `v-if="activeTab !== 'logs'"`：配置能力页没有别的刷新入口，那边要保留。
+     */
+    expect(detailSource).toMatch(/v-if="activeTab !== 'logs'"[\s\S]{0,120}uvp-refresh-btn/);
+    // 反向：不许再出现「无条件的头部刷新」（`v-if` 一旦被删就该红）
+    expect(detailSource).not.toMatch(/<a-button class="uvp-refresh-btn" :loading="loading" @click="load"/);
+  });
+
   it("keeps outer capability panels stable and delegates vertical scrolling to the capability table", () => {
     expect(workbenchSource).toMatch(/\.capability-workbench__body\s*{[^}]*height: clamp\(480px/s);
     expect(workbenchSource).toMatch(/\.capability-workbench__list\s*{[^}]*overflow: hidden/s);

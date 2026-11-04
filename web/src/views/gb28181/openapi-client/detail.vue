@@ -428,8 +428,13 @@ function formatTime(value?: string | null) {
                     <span>已授权 {{ grantedCount }} / {{ availableScopes.length }} 项</span>
                   </div>
                 </div>
-                <!-- 「刷新」只重取不改数据，走刷新语义（与列表页那颗一致，原先是裸灰按钮） -->
-                <a-button class="uvp-refresh-btn" :loading="loading" @click="load"
+                <!--
+                  ⛔ 调用记录页不显示这颗（老板 2026-11-04 要求）：
+                  该 tab 的筛选栏自带一颗「刷新」，而且 `load()` 末尾本来就有
+                  `if (activeTab === "logs") void loadAudits()` —— 两个按钮效果完全重叠，
+                  一屏两个刷新纯属噪音。配置能力页没有别的刷新入口，所以只在那里保留。
+                -->
+                <a-button v-if="activeTab !== 'logs'" class="uvp-refresh-btn" :loading="loading" @click="load"
                   ><template #icon><RefreshCw :size="15" /></template>刷新</a-button
                 >
               </div>
