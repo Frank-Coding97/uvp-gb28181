@@ -628,13 +628,19 @@ const editDeviceForm = ref<{
   name: string;
   zlmNodeId: number;
   protocolOverride: ProtocolOverride;
+  password: string;
 }>({
   deviceId: "",
   alias: "",
   name: "",
   zlmNodeId: 0,
-  protocolOverride: "auto"
+  protocolOverride: "auto",
+  password: ""
 });
+// 该设备当前是否已配独立密码（由接口的 hasPassword 回显，明文永不下发）。
+const editHasPassword = ref(false);
+// 勾选「清除」= 保存时显式传空串，让设备回落统一接入密码。
+const editPasswordCleared = ref(false);
 const editingDevice = ref(false);
 const editingDeviceId = ref("");
 const zlmNodes = ref<ZLMNode[]>([]);
@@ -3114,8 +3120,11 @@ function openEditDeviceModal(record: DeviceVO) {
     alias: record.alias || "",
     name: record.name || "",
     zlmNodeId: record.zlmNodeId || 0,
-    protocolOverride: originalProtocolOverride
+    protocolOverride: originalProtocolOverride,
+    password: ""
   };
+  editHasPassword.value = Boolean(record.hasPassword);
+  editPasswordCleared.value = false;
   editingDeviceId.value = record.deviceId;
   editDeviceVisible.value = true;
   loadZLMNodeOptions();
@@ -3229,7 +3238,9 @@ async function handleEditChannel() {
 
 function cancelEditDevice() {
   editDeviceVisible.value = false;
-  editDeviceForm.value = { deviceId: "", alias: "", name: "", zlmNodeId: 0, protocolOverride: "auto" };
+  editDeviceForm.value = { deviceId: "", alias: "", name: "", zlmNodeId: 0, protocolOverride: "auto", password: "" };
+  editHasPassword.value = false;
+  editPasswordCleared.value = false;
   editingDeviceId.value = "";
   zlmNodesError.value = "";
   originalProtocolOverride = "auto";
@@ -3251,15 +3262,23 @@ async function handleEditDevice() {
   try {
     const zlmNodeUpdate =
       editDeviceForm.value.zlmNodeId === originalZLMNodeID ? {} : { zlmNodeId: editDeviceForm.value.zlmNodeId };
+    // 密码三态：勾了「清除」→ 传空串（回落统一密码）；填了新值 → 设置独立密码；留空且未勾选 → 不传（保持不变）。
+    const nextPassword = editDeviceForm.value.password.trim();
+    const passwordUpdate: { password?: string } = editPasswordCleared.value
+      ? { password: "" }
+      : nextPassword
+        ? { password: nextPassword }
+        : {};
     const res = await updateDevice(editingDeviceId.value, {
       alias: editDeviceForm.value.alias,
       protocolOverride: editDeviceForm.value.protocolOverride,
-      ...zlmNodeUpdate
+      ...zlmNodeUpdate,
+      ...passwordUpdate
     });
     if (res.code === 0) {
       originalProtocolOverride = protocolOverrideAfterSave(originalProtocolOverride, editDeviceForm.value.protocolOverride, true);
       originalZLMNodeID = editDeviceForm.value.zlmNodeId;
-      Message.success("设备信息已更新");
+      Message.success(passwordUpdate.password !== undefined ? "设备信息已更新，设备重新注册后新密码才生效" : "设备信息已更新");
       void directoryPanelRef.value?.refresh();
       if (selectedDevice.value?.deviceId === editingDeviceId.value) {
         const updated = await getDevice(selectedDevice.value.id);
@@ -5434,7 +5453,10 @@ onUnmounted(() => {
           <a-input v-model="createDeviceForm.name" placeholder="选填,方便识别" allow-clear />
         </a-form-item>
         <a-form-item field="password" label="设备密码">
-          <a-input-password v-model="createDeviceForm.password" placeholder="选填,用于一设备一密码场景" allow-clear />
+          <a-input-password v-model="createDeviceForm.password" placeholder="选填，留空则沿用平台统一接入密码" allow-clear />
+          <template #extra>
+            <span class="form-hint">填写后该设备只能用此密码注册，平台统一接入密码对它失效。</span>
+          </template>
         </a-form-item>
       </a-form>
       <template #footer>
@@ -5468,6 +5490,22 @@ onUnmounted(() => {
           <a-input v-model="editDeviceForm.alias" placeholder="选填,给设备起一个好记的名字" allow-clear />
           <template #extra>
             <span class="form-hint">优先展示,不会被设备重新注册覆盖</span>
+          </template>
+        </a-form-item>
+        <a-form-item field="password" label="设备密码">
+          <div class="device-password-field">
+            <a-input-password
+              v-model="editDeviceForm.password"
+              :disabled="editPasswordCleared"
+              :placeholder="editHasPassword ? '已设置独立密码，留空表示不修改' : '未设置，沿用平台统一接入密码'"
+              allow-clear
+            />
+            <a-checkbox v-if="editHasPassword" v-model="editPasswordCleared">清除</a-checkbox>
+          </div>
+          <template #extra>
+            <span class="form-hint">
+              设置后该设备只能用此密码注册，平台统一接入密码对它失效；需在设备端同步改密码并重新注册。
+            </span>
           </template>
         </a-form-item>
         <a-form-item field="zlmNodeId" label="ZLM 节点">
@@ -8960,6 +8998,18 @@ onUnmounted(() => {
 }
 .form-hint-error {
   color: var(--uvp-danger);
+}
+
+/* 密码输入 + 「清除」勾选同一行：勾选后输入框禁用，语义是"把这个设备的独立密码删掉" */
+.device-password-field {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+}
+.device-password-field > :first-child {
+  flex: 1;
+  min-width: 0;
 }
 
 /* 通道坐标三路来源的标注（目录 / 实时 / 人工），列表与详情卡共用 */

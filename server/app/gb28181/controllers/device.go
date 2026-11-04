@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 
@@ -30,12 +32,19 @@ func NewDeviceController() *DeviceController {
 type deviceVO struct {
 	*gbmodels.GbDevice
 	Online bool `json:"online"` // 从 keepalive_time 事实派生,比 status 缓存更实时
+	// HasPassword 该设备是否配了独立密码。密码明文永不出接口(json:"-"),
+	// 前端只能凭这个布尔值决定编辑框显示「已设置」还是「沿用统一接入密码」。
+	HasPassword bool `json:"hasPassword"`
 }
 
 // toVO 构造 VO,在线态按设备 keepalive_interval + 全局容忍/宽限派生
 func toVO(d *gbmodels.GbDevice) deviceVO {
 	dev := gbconfig.Load().Device
-	return deviceVO{GbDevice: d, Online: d.IsOnlineByFact(dev.KeepaliveTimeoutCount, dev.KeepaliveGraceSeconds)}
+	return deviceVO{
+		GbDevice:    d,
+		Online:      d.IsOnlineByFact(dev.KeepaliveTimeoutCount, dev.KeepaliveGraceSeconds),
+		HasPassword: strings.TrimSpace(d.Password) != "",
+	}
 }
 
 // List 设备列表(分页)
@@ -102,6 +111,8 @@ func (dc *DeviceController) Update(c *gin.Context) {
 		Firmware         *string `json:"firmware"`
 		ProtocolOverride *string `json:"protocolOverride"`
 		ZLMNodeID        *int64  `json:"zlmNodeId"`
+		// Password 三态:不传=不变;空串=清除(回落统一接入密码);非空=设为该设备的独立密码。
+		Password *string `json:"password"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		dc.FailAndAbort(c, "请求体不合法", err)
@@ -159,6 +170,15 @@ func (dc *DeviceController) Update(c *gin.Context) {
 		updates["effective_version_source"] = string(resolution.Source)
 		updates["effective_version_at"] = &now
 	}
+	if body.Password != nil {
+		password := strings.TrimSpace(*body.Password)
+		if reason := validateDevicePassword(password); reason != "" {
+			app.Response.Fail(c, reason, http.StatusUnprocessableEntity)
+			return
+		}
+		// 空串 = 清除独立密码,设备回落统一接入密码。
+		updates["password"] = password
+	}
 	if body.ZLMNodeID != nil {
 		if *body.ZLMNodeID < 0 {
 			app.Response.Fail(c, "ZLM 节点 ID 不合法", http.StatusUnprocessableEntity)
@@ -195,6 +215,29 @@ func (dc *DeviceController) Update(c *gin.Context) {
 	}
 
 	dc.Success(c, gin.H{"deviceId": deviceID})
+}
+
+// validateDevicePassword 校验设备独立密码。空串表示「不设独立密码 / 清除」,合法。
+//
+// 规则与设备端配置界面的常见限制对齐:1~64 字符,不允许空白与控制字符。
+// 带空格的密码在设备端基本录不进去,而 digest 会原样参与计算 ⇒ 100% 注册失败;
+// 与其让用户掉进这个坑,不如落库前拒掉。
+func validateDevicePassword(password string) string {
+	if password == "" {
+		return ""
+	}
+	if utf8.RuneCountInString(password) > 64 {
+		return "设备密码不能超过 64 个字符"
+	}
+	for _, r := range password {
+		if unicode.IsSpace(r) {
+			return "设备密码不能包含空格或制表符"
+		}
+		if unicode.IsControl(r) {
+			return "设备密码不能包含控制字符"
+		}
+	}
+	return ""
 }
 
 // ListChannels 列出某设备的通道(供前端拉通道树二级)

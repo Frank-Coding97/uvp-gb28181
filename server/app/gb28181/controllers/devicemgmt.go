@@ -180,7 +180,9 @@ func (dc *DeviceMgmtController) nextPTZSN() int {
 // channelStats 单个 channel 的派生聚合
 type deviceVOExtra struct {
 	*gbmodels.GbDevice
-	Online             bool                    `json:"online"`
+	Online bool `json:"online"`
+	// HasPassword 该设备是否配了独立密码；明文密码永不出接口，前端只凭此值回显状态。
+	HasPassword        bool                    `json:"hasPassword"`
 	ChannelCount       int64                   `json:"channelCount"`
 	ChannelOnlineCount int64                   `json:"channelOnlineCount"`
 	OnlineRate         float64                 `json:"onlineRate"`
@@ -461,6 +463,7 @@ func (dc *DeviceMgmtController) ListDevices(c *gin.Context) {
 		vos = append(vos, deviceVOExtra{
 			GbDevice:           &d,
 			Online:             d.Status == gbmodels.DeviceStatusOnline,
+			HasPassword:        strings.TrimSpace(d.Password) != "",
 			ChannelCount:       stats.total,
 			ChannelOnlineCount: stats.online,
 			OnlineRate:         stats.rate(),
@@ -575,6 +578,7 @@ func (dc *DeviceMgmtController) GetDevice(c *gin.Context) {
 	dc.Success(c, deviceVOExtra{
 		GbDevice:           &d,
 		Online:             d.Status == gbmodels.DeviceStatusOnline,
+		HasPassword:        strings.TrimSpace(d.Password) != "",
 		ChannelCount:       stats.total,
 		ChannelOnlineCount: stats.online,
 		OnlineRate:         stats.rate(),

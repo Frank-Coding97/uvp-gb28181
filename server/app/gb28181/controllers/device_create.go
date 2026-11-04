@@ -52,6 +52,13 @@ func (dc *DeviceMgmtController) CreateDevice(c *gin.Context) {
 		return
 	}
 
+	// 校验设备独立密码(留空 = 该设备沿用平台统一接入密码)
+	body.Password = strings.TrimSpace(body.Password)
+	if reason := validateDevicePassword(body.Password); reason != "" {
+		dc.FailAndAbort(c, reason, nil)
+		return
+	}
+
 	// 检查是否已存在
 	var existing gbmodels.GbDevice
 	res := db.WithContext(c.Request.Context()).Where("device_id = ?", body.DeviceID).Limit(1).Find(&existing)

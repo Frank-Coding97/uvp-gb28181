@@ -129,6 +129,8 @@ export interface DeviceVO {
   effectiveVersionAt?: string | null;
   /** Preferred ZLM node; 0 lets the cluster scheduler decide. */
   zlmNodeId?: number;
+  /** 是否配了设备独立密码（已设置时该设备只能用此密码注册，统一接入密码对它失效）。 */
+  hasPassword?: boolean;
   ownerDeptId: number;
   ownerDeptName?: string;
   videoCapability?: VideoCapabilitySummary;
@@ -860,6 +862,8 @@ export const updateDevice = (
     firmware?: string;
     protocolOverride?: ProtocolOverride;
     zlmNodeId?: number;
+    /** 三态：不传=不变；""=清除独立密码（回落统一接入密码）；非空=设为该设备的独立密码。 */
+    password?: string;
   }
 ) =>
   http.request<BaseResult<Partial<DeviceVO> & { deviceId: string }>>("patch", baseUrlApi(`gb28181/device/${deviceId}`), { data });

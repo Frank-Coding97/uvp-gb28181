@@ -14,6 +14,7 @@ import (
 	siplib "github.com/emiago/sipgo/sip"
 
 	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	"uvplatform.com/uvp-gb28181/app/gb28181/device"
 	"uvplatform.com/uvp-gb28181/app/gb28181/handler"
 	"uvplatform.com/uvp-gb28181/app/gb28181/metrics"
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
@@ -467,6 +468,8 @@ func NewServer(cfg gbconfig.Config, options ...ServerOption) (*Server, error) {
 func (s *Server) registerHandlers() {
 	regHandler := handler.NewRegisterHandler(s.cfg)
 	regHandler.SetSecurity(s.security)
+	// 一设备一密码:设备行配了独立密码时 REGISTER 只认它,否则回落统一接入密码。
+	regHandler.SetDevicePasswordResolver(device.ResolveRegisterCredential)
 	regHandler.SetDiagnosticSink(gbtrace.DiagnosisSinkFromRuntime(s.trace))
 	msgHandler := handler.NewMessageHandler(s.cfg)
 

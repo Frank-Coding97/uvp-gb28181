@@ -177,6 +177,37 @@ func defaultOwnerDeptIDWithDB(ctx context.Context, db *gorm.DB) (uint, error) {
 	return deptID, nil
 }
 
+// RegisterCredential 描述一次 REGISTER 鉴权应当使用的密码。
+type RegisterCredential struct {
+	// Password 用于计算 digest 的明文密码。
+	Password string
+	// DeviceScoped 为 true 表示密码取自设备行的独立密码(一设备一密码),
+	// 平台「统一接入密码」对这台设备不再生效。
+	DeviceScoped bool
+	// DeviceID 命中设备行时回填。用于日志区分「设备没建档」与「建档了但没配独立密码」。
+	DeviceID string
+}
+
+// ResolveRegisterCredential 解析本次 REGISTER 该用哪个密码:
+//   - 设备行存在且配了独立密码 → 返回它(DeviceScoped=true),调用方不得再用统一密码兜底;
+//   - 设备没建档 / 独立密码留空 → 返回零值凭据,调用方回落平台统一接入密码。
+//
+// 查询错误原样返回,由调用方决定降级(统一密码兜底 + 告警日志),不在这一层吞掉。
+func ResolveRegisterCredential(ctx context.Context, deviceID string) (RegisterCredential, error) {
+	existing, err := gbmodels.FindByDeviceID(ctx, deviceID)
+	if err != nil {
+		return RegisterCredential{}, err
+	}
+	if existing == nil {
+		return RegisterCredential{}, nil
+	}
+	password := strings.TrimSpace(existing.Password)
+	if password == "" {
+		return RegisterCredential{DeviceID: deviceID}, nil
+	}
+	return RegisterCredential{Password: password, DeviceScoped: true, DeviceID: deviceID}, nil
+}
+
 // HandleUnregister 处理注销(Expires=0):即时置离线(事实上停止心跳 + 缓存翻转)
 func HandleUnregister(ctx context.Context, deviceID string) error {
 	if err := gbmodels.MarkOfflineWithReason(ctx, deviceID, gbmodels.DeviceEventUnregisterOffline, gbmodels.DeviceEventSourceUnregister); err != nil {

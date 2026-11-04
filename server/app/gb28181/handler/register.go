@@ -42,6 +42,8 @@ type RegisterHandler struct {
 	now               func() time.Time
 	handleRegister    func(context.Context, device.RegisterInfo, int) (bool, error)
 	handleUnregister  func(context.Context, string) error
+	// devicePassword 解析设备行上的独立密码(一设备一密码)。nil 时退化为只用统一接入密码。
+	devicePassword func(context.Context, string) (device.RegisterCredential, error)
 }
 
 // RegisterSecurity keeps authentication protection independent from the SIP
@@ -83,6 +85,9 @@ func NewRegisterHandler(cfg gbconfig.Config) *RegisterHandler {
 		interval = 60
 	}
 	sink := diagnosis.DiagnosticSink(diagnosis.NoopSink{})
+	// devicePassword 不在构造函数里默认注入:它要查库,而 handler 的单测没有 DB。
+	// 生产由 sip.Server.registerHandlers 注入 device.ResolveRegisterCredential;
+	// 未注入时退化为「只用平台统一接入密码」。
 	handler := &RegisterHandler{
 		cfg: cfg, keepaliveInterval: interval, platformVersion: platformXGBVersion(cfg),
 		security: newStandaloneRegisterSecurity(), diagnosticSink: sink, now: time.Now,
@@ -121,6 +126,49 @@ func (h *RegisterHandler) SetDeviceInfoTrigger(t DeviceInfoTrigger) {
 // SetSubscriptionWaker 注入设备恢复在线后的订阅唤醒器。
 func (h *RegisterHandler) SetSubscriptionWaker(w SubscriptionWaker) {
 	h.subscriptionWaker = w
+}
+
+// SetDevicePasswordResolver 注入「设备独立密码」查询(一设备一密码)。
+// 不注入时只用平台统一接入密码;注入后,设备行配了独立密码就只认该密码。
+func (h *RegisterHandler) SetDevicePasswordResolver(fn func(context.Context, string) (device.RegisterCredential, error)) {
+	if fn != nil {
+		h.devicePassword = fn
+	}
+}
+
+// resolveRegisterCredential 决定本次 REGISTER 用哪个密码校验 digest。
+//
+// 优先级是「设备独占」而不是「设备优先、统一兜底」:设备行配了独立密码,
+// 平台统一接入密码对这台设备立即失效 —— 否则单独设的设备密码形同虚设,
+// 知道统一密码的人仍能顶替任一设备注册。
+//
+// 只有「设备没建档 / 独立密码留空」才回落统一接入密码。查询失败也回落,
+// 因为 DB 抖动时把全场设备挡在门外比降级更糟,但必须留一条可排查的告警。
+func (h *RegisterHandler) resolveRegisterCredential(ctx context.Context, deviceID string, logger *zap.Logger, callID, cseq string) device.RegisterCredential {
+	fallback := device.RegisterCredential{Password: h.cfg.SIP.Password}
+	if h.devicePassword == nil {
+		return fallback
+	}
+	credential, err := h.devicePassword(ctx, deviceID)
+	if err != nil {
+		logger.Warn("GB28181 设备独立密码查询失败,回落统一接入密码",
+			zap.String("event", "gb28181.register.device_password_lookup_failed"),
+			zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+			logging.Error(err))
+		return fallback
+	}
+	if !credential.DeviceScoped {
+		return fallback
+	}
+	return credential
+}
+
+// credentialSource 返回日志用的密码来源标识(不回传密码本身)。
+func credentialSource(credential device.RegisterCredential) string {
+	if credential.DeviceScoped {
+		return "device"
+	}
+	return "platform"
 }
 
 // SetRecorder 注入指标 Recorder(可选,nil 时所有埋点 no-op)
@@ -269,11 +317,13 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		Opaque:    cred.Opaque,
 		QOP:       splitQOP(cred.QOP),
 	}
+	// 密码来源:设备配了独立密码就只认它,否则用平台统一接入密码(见 resolveRegisterCredential)。
+	credential := h.resolveRegisterCredential(ctx, deviceID, logger, callID, cseq)
 	expected, err := digest.Digest(&chal, digest.Options{
 		Method:   string(req.Method),
 		URI:      cred.URI,
 		Username: cred.Username,
-		Password: h.cfg.SIP.Password,
+		Password: credential.Password,
 		Count:    cred.Nc,
 		Cnonce:   cred.Cnonce,
 	})
@@ -281,7 +331,10 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		h.recordSecurity(req, deviceID, gbsecurity.ReasonDigestFailure)
 		logger.Warn("GB28181 注册鉴权失败",
 			zap.String("event", "gb28181.register.digest_failed"),
-			zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq))
+			zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+			// credential_source 是这条日志的关键分叉:device = 该设备配了独立密码,
+			// 要改的是设备端密码;platform = 用的是统一接入密码,要改的是平台 SIP 配置。
+			zap.String("credential_source", credentialSource(credential)))
 		status, _ := h.respondChallenge(req, tx)
 		h.recordEnd(req, status, false)
 		h.failAndEmitRegister(req, deviceID, cred.Nonce, diagnosis.CodeDigestFailure, status)
@@ -303,7 +356,7 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		}
 		return
 	}
-	logger.Info("GB28181 注册鉴权通过", zap.String("event", "gb28181.register.authentication_succeeded"), zap.String("stage", "authentication"), zap.String("outcome", "succeeded"), zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq))
+	logger.Info("GB28181 注册鉴权通过", zap.String("event", "gb28181.register.authentication_succeeded"), zap.String("stage", "authentication"), zap.String("outcome", "succeeded"), zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq), zap.String("credential_source", credentialSource(credential)))
 
 	// 附录 I「协议版本标识」:设备应在 REGISTER 里声明自己支持的协议版本,双方据此在后续
 	// 交互中「版本更高一方避免发送对方不能识别的消息」。
