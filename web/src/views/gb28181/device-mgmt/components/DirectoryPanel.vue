@@ -211,8 +211,10 @@ function choose(node: DirectoryNode) {
 }
 
 function nodeTitle(node: DirectoryNode) {
-  const detail = node.code ? `${node.name} (${node.code})` : node.name;
-  return node.depth >= 3 ? `${detail}。目录层级较深，建议后续整理。` : detail;
+  // 悬浮提示只给「名称 (编码)」。⛔ 不要再按 depth 追加「目录层级较深」之类的建议：
+  // 设备叶子挂在行政区划叶子下，depth = 区域层级 + 1，20 位国标编码天然四五层，
+  // 每台设备都会命中，提示既不指向问题也不告诉用户做什么，纯噪音。
+  return node.code ? `${node.name} (${node.code})` : node.name;
 }
 
 async function refresh(view: DirectoryView = props.modelValue.view) {
