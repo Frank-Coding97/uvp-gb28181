@@ -5057,7 +5057,7 @@ onUnmounted(() => {
                       :show-text="false"
                     />
                   </span>
-                  <span class="sub">{{ onlineRatePercent(deviceDetail.onlineRate) }}%</span>
+                  <span class="seg-rate-value">{{ onlineRatePercent(deviceDetail.onlineRate) }}%</span>
                 </span>
               </div>
             </div>
@@ -8380,20 +8380,35 @@ onUnmounted(() => {
 
 /* 在线率条 = `a-progress`(`size="small"` + `:show-text="false"`),轨道与填充色都是框架的,
    这里只限宽、并让它跟右侧百分号**居中对齐** ——
-   进度条没有文字基线,跟着 `.v` 的 `align-items: baseline` 会被抬到字上方。 */
+   进度条没有文字基线,跟着 `.v` 的 `align-items: baseline` 会被抬到字上方。
+
+   ⛔ 2026-11-04 改口径(原「通道这块好小」):原先是死宽 160px + 6px 高,在 760px 抽屉里
+   只占行宽的 1/4,右侧大片留白,看着像没做完的一块。改成**吃掉整行剩余宽度**(flex:1)
+   + 轨道加高到 8px,并把百分号从小灰字提成正文色的表格数字(等宽,数值变化不抖)。 */
 .seg-rate {
-  display: inline-block;
-  width: 160px;
-  max-width: min(160px, 42vw);
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .seg-rate :deep(.arco-progress-line) {
-  height: 6px;
+  height: 8px;
   background: var(--uvp-border-subtle);
 }
 .seg-rate :deep(.arco-progress-line-bar) {
   background: var(--uvp-success);
 }
+.seg-rate-value {
+  flex: none;
+  min-width: 44px;
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--uvp-text-primary);
+  text-align: right;
+}
 .seg-rows .seg-rate-row {
+  flex-wrap: nowrap;
+  gap: 10px;
   align-items: center;
 }
 

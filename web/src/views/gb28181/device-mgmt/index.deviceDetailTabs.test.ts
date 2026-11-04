@@ -71,8 +71,10 @@ describe("device detail drawer segments", () => {
     expect(source).toContain(".device-readonly {");
     expect(source).toContain("gap: 18px;");
     expect(source).toContain("font-size: 17px;");
-    expect(source).toContain("width: 160px;");
-    expect(source).toContain("height: 6px;");
+    // 在线率条 2026-11-04 改口径：原先是死宽 160px + 6px 高，在 760px 抽屉里只占行宽 1/4，
+    // 看着像没做完的一块。现在吃掉整行剩余宽度 + 8px 高。
+    expect(source).toMatch(/\.seg-rate \{[\s\S]{0,160}?flex: 1 1 auto;[\s\S]{0,80}?min-width: 0;/);
+    expect(source).toContain("height: 8px;");
     expect(source).toContain("background: var(--uvp-success);");
   });
 
