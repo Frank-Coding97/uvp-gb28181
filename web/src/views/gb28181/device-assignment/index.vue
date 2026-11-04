@@ -545,7 +545,7 @@ onMounted(() => {
               :loading="rowsLoading"
               :pagination="tablePagination"
               row-key="id"
-              :scroll="{ x: 900, y: '85%' }"
+              :scroll="{ x: 890, y: '85%' }"
               :row-selection="canAssign || canShare ? { type: 'checkbox', showCheckedAll: true } : undefined"
               class="uvp-data-table device-data-table"
               @select="onTableSelect"
@@ -554,7 +554,7 @@ onMounted(() => {
               @page-size-change="onPageSizeChange"
             >
               <template #columns>
-                <a-table-column title="设备" :width="300">
+                <a-table-column title="设备" :width="220">
                   <template #cell="{ record }">
                     <div class="device-cell">
                       <a-tooltip :content="record.name || '-'" position="top">
@@ -566,24 +566,24 @@ onMounted(() => {
                     </div>
                   </template>
                 </a-table-column>
-                <a-table-column title="状态" :width="100" align="center">
+                <a-table-column title="状态" :width="140" align="center">
                   <template #cell="{ record }">
                     <a-tag :color="record.online ? 'green' : 'gray'" size="small">
                       {{ deviceStatusLabel(!!record.online) }}
                     </a-tag>
                   </template>
                 </a-table-column>
-                <a-table-column title="归属部门" :width="160">
+                <a-table-column title="归属部门" :width="180">
                   <template #cell="{ record }">
                     <span class="text-ellipsis">{{ deptNameText(record) }}</span>
                   </template>
                 </a-table-column>
-                <a-table-column title="通道数" :width="100" align="center">
+                <a-table-column title="通道数" :width="140" align="center">
                   <template #cell="{ record }">
                     <span class="channel-text">{{ record.channelOnlineCount }}/{{ record.channelCount }}</span>
                   </template>
                 </a-table-column>
-                <a-table-column title="操作" :width="190" align="center" fixed="right" cell-class="operation-column">
+                <a-table-column title="操作" :width="210" align="center" fixed="right" cell-class="operation-column">
                   <template #cell="{ record }">
                     <div class="device-operation-actions">
                       <a-link

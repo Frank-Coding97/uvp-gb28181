@@ -16,6 +16,13 @@ describe("device assignment department tree", () => {
     expect(source).toMatch(/\.right-box\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?overflow:\s*hidden;/);
   });
 
+  it("keeps the five column widths inside a balanced band", () => {
+    const widths = Array.from(source.matchAll(/<a-table-column[^>]*:width="(\d+)"/g)).map(m => Number(m[1]));
+
+    expect(widths).toHaveLength(5);
+    expect(Math.max(...widths) / Math.min(...widths)).toBeLessThanOrEqual(1.6);
+  });
+
   it("merges device name and device code into one two-line cell", () => {
     expect(source).toContain('title="设备"');
     expect(source).not.toContain('title="设备编号"');

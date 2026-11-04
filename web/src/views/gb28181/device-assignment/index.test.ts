@@ -62,7 +62,7 @@ describe("permission workbench page shell", () => {
 
   it("keeps the operation column fixed with identifiable action icons", () => {
     const content = source();
-    expect(content).toContain('title="操作" :width="190" align="center" fixed="right"');
+    expect(content).toMatch(/<a-table-column title="操作"[^>]*fixed="right"/);
     expect(content).toContain("device-operation-actions");
     expect(content).toContain('<UserRoundCog :size="13"');
     expect(content).toContain('<Share2 :size="13"');
