@@ -404,15 +404,71 @@ defineExpose({
   color: var(--color-text-3);
 }
 
+/* ⛔ 分类栏不套 Arco 的菜单皮肤：
+ *   Arco 给每个 `.arco-menu-item` 铺了 `--color-menu-light-bg`，暗色下那是**中性深灰**，
+ *   压在 #162231 蓝调卡片上会显成一排发暖的褐灰块；选中项又用 `--color-fill-2` 灰底，
+ *   跟右侧蓝色卡片完全不是一个色系（老板 2026-11-04 截图指出「配色不对」）。
+ *   这里改成和平台左侧主导航同一口径：默认透明、hover 灰蓝、选中浅蓝渐变 + 蓝字 + 左竖条。
+ *   ⛔ 选中底色必须用半透明渐变（--uvp-sidebar-active-bg），
+ *      不能拿 --uvp-brand 直接当 background —— 暗色下它是浅蓝，会糊成一块发白的实心片。 */
 .capability-workbench__groups :deep(.arco-menu) {
+  padding: 0 4px;
   background: transparent;
 }
 
+.capability-workbench__groups :deep(.arco-menu-inner) {
+  padding: 0;
+}
+
 .capability-workbench__groups :deep(.arco-menu-item) {
+  position: relative;
   display: flex;
   gap: 8px;
   align-items: center;
   justify-content: space-between;
+  height: 34px;
+  padding: 0 10px 0 12px;
+  margin-bottom: 2px;
+  font-size: 13px;
+  line-height: 34px;
+  color: var(--color-text-2);
+  background: transparent;
+  border-radius: 8px;
+}
+
+.capability-workbench__groups :deep(.arco-menu-item:hover) {
+  color: var(--color-text-1);
+
+  /* ⛔ 不用 --uvp-sidebar-hover-bg：它是「白 42% 半透明」，只适合在 #f3f7fb 侧边栏上，
+     落到本页纯白卡片上等于没上色。这里按品牌色稀释，两套主题都能看见。 */
+  background: color-mix(in srgb, var(--uvp-brand) 7%, transparent);
+}
+
+.capability-workbench__groups :deep(.arco-menu-item.arco-menu-selected) {
+  font-weight: 600;
+  color: var(--uvp-brand);
+  background: var(--uvp-sidebar-active-bg);
+  box-shadow: var(--uvp-sidebar-active-shadow);
+}
+
+.capability-workbench__groups :deep(.arco-menu-item.arco-menu-selected)::before {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 0;
+  width: 3px;
+  content: "";
+  background: var(--uvp-sidebar-active-line);
+  border-radius: 0 3px 3px 0;
+}
+
+.capability-workbench__groups :deep(.arco-menu-item.arco-menu-selected:hover) {
+  background: var(--uvp-sidebar-active-bg);
+}
+
+.capability-workbench__groups :deep(.arco-menu-item.arco-menu-selected .capability-workbench__group-count) {
+  color: var(--uvp-brand);
+  opacity: 0.72;
 }
 
 .capability-workbench__group-name {
