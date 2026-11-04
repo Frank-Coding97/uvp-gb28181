@@ -179,7 +179,42 @@ export function snapshotContentImageUrl(
   return `${prefix}${path}${separator}token=${encodeURIComponent(token)}`;
 }
 
-/** 字节数转人类可读。抓拍图典型 100KB~3MB，所以 B 档也要保留（0 字节的脏行要看得见）。 */
+/**
+ * 图像库**批量下载（打包成一个 zip）**接口的站内路径。
+ * ⛔ 与后端 `models.SnapshotArchiveAPIPath` 逐字对应，改一处必须改两处。
+ */
+export const SNAPSHOT_ARCHIVE_PATH = "/api/gb28181/device-mgmt/snapshots/archive";
+
+/**
+ * 批量下载地址。
+ *
+ * ⭐ 由后端打包，不是前端逐张触发 `<a download>`：浏览器会把连续多次下载判成弹窗批量拦截，
+ * 表现是"提示下了 20 张、下载目录里只有 8 个"；也不能前端 fetch 每张再拼 zip
+ * （200 张原图要全攒在标签页内存里）。
+ *
+ * ⛔ `preflight` 那一档只回 JSON 不打包：`<a download>` 拿不到失败状态 ——
+ * 后端回 400 时浏览器会把那段 JSON 当文件存下来，用户以为下到了 zip。
+ * 所以调用方先用它问一句"这 N 张能打包吗"，确认后才真触发下载。
+ *
+ * ⛔ 去重 + 丢非法 id：重复 id 只会让 URL 变长（后端还要再去重一次）；
+ * 而 `0` / 负数在后端会被忽略，前端先滤掉能让"已选 3 张、包里 2 张"这种对不上的情况少一层歧义。
+ */
+export function snapshotArchiveUrl(
+  ids: readonly number[],
+  accessToken: string | null | undefined,
+  baseUrl = "",
+  options: { preflight?: boolean } = {}
+): string {
+  const unique = Array.from(new Set(ids.filter(id => Number.isFinite(id) && id > 0)));
+  if (!unique.length) return "";
+  const params = new URLSearchParams({ ids: unique.join(",") });
+  if (options.preflight) params.set("preflight", "1");
+  return snapshotContentImageUrl(`${SNAPSHOT_ARCHIVE_PATH}?${params.toString()}`, accessToken, baseUrl);
+}
+
+/**
+ * 文件大小格式化。抓拍图典型 100KB~3MB，所以 B 档也要保留（0 字节的脏行要看得见）。
+ */
 export function formatSnapshotSize(bytes: unknown): string {
   const value = typeof bytes === "number" && Number.isFinite(bytes) ? bytes : 0;
   if (value <= 0) return "0 B";

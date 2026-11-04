@@ -101,23 +101,41 @@ describe("image library download and batch actions", () => {
     // ⛔ 下载必须和 <img> 一样经过 imageUrlFor：`<a>` 同样带不了 Authorization 头，
     // 直接把 item.url 绑到 href 上的表现是「点了没反应 / 下载下来一个 401 页面」，
     // 而且**不报错**，只有看下载目录里那个几百字节的文件才发现。
-    expect(pageSource).toContain("triggerNativeDownload(imageUrlFor(item), snapshotDownloadName(item))");
+    // 单张下载（卡片/详情抽屉那个按钮）仍走逐张这条路；批量那条已改成后端打 zip。
+    const downloadOne = /function downloadOne\([\s\S]*?\n\}/.exec(pageSource)?.[0] ?? "";
+    expect(downloadOne).toContain("imageUrlFor(item)");
+    expect(downloadOne).toContain("snapshotDownloadName(item)");
     expect(pageSource).not.toContain("anchor.href = item.url");
-    expect(pageSource).toContain("snapshotDownloadName(item)");
   });
 
-  it("never downloads through fetch/blob so bulk runs cannot exhaust memory", () => {
-    // ⛔ fetch + createObjectURL 会把整张图攒在内存里：批量十几张时可能把标签页打崩，
-    // 而"下载按钮点下去页面白了"很难联想到内存问题。
+  it("never buffers the download in memory", () => {
+    // ⛔ 批量下载改成后端打包 zip 之后，前端**仍然**不许拿 blob：
+    // 一个几百 MB 的压缩包攒进标签页内存照样能把页面打崩，
+    // 而"点了下载页面白了"很难联想到内存问题。
     expect(pageSource).not.toContain("createObjectURL");
-    expect(pageSource).not.toContain("fetch(");
+    expect(pageSource).not.toContain("response.blob()");
   });
 
-  it("spaces bulk downloads out so the browser does not block them", () => {
-    // ⛔ 连续同步点击 N 次会被浏览器判成非用户触发，只有第一张真下载；
-    // 剩下的被静默拦掉，表现为"选了 8 张只下来 1 张"。
-    expect(pageSource).toContain("window.setTimeout(resolve, 250)");
-    expect(pageSource).toContain("if (index < targets.length - 1)");
+  it("downloads the selection as one server-side zip instead of poking N anchors", () => {
+    // 老板 2026-11-04 改的口径：选 20 张应该下来**一个** zip，不是 20 个文件。
+    // ⛔ 逐张触发 `<a download>` 的老做法被浏览器判成弹窗批量拦截，
+    // 表现是"提示已发起 20 张、下载目录里只有 8 个"，所以这里反向钉住：
+    // 不许再有"循环 + 延时"的批量下载形态。
+    expect(pageSource).toContain("async function downloadSelected()");
+    expect(pageSource).toContain("snapshotArchiveUrl(ids, accessToken.value, getBaseUrl()");
+    expect(pageSource).not.toContain("window.setTimeout(resolve, 250)");
+    // 说明文案必须与新行为一致，否则用户会以为下的是一堆散图。
+    expect(pageSource).toContain("合并成一个 zip 包下载");
+    expect(pageSource).not.toContain("逐张下载");
+  });
+
+  it("preflights the archive before triggering the download", () => {
+    // ⛔ `<a download>` 拿不到失败状态：后端回 400 时浏览器会把那段 JSON 当文件存下来，
+    // 用户以为下到了 zip 却打不开。所以必须有一次 preflight 请求先把失败拦在前面。
+    expect(pageSource).toContain("preflight: true");
+    expect(pageSource).toContain("data?.count");
+    // ⛔ 少了几张要说出来：用户对着列表数张数，包里少了会以为是系统丢图。
+    expect(pageSource).toContain("skipped");
   });
 
   it("scopes bulk selection to the current page instead of the whole result set", () => {
@@ -285,21 +303,26 @@ describe("image library download and batch actions", () => {
     // ⛔ `type="default"` 在 Arco 里**不存在** ⇒ 渲染成浏览器原生 <button>：
     // 实测拿到 `2px outset` 灰白描边 + `rgb(107,107,107)` 底色，
     // 在深色页面上是一块突兀的白边按钮（老板截图反馈「批量选择按钮样式存在问题」）。
-    // 批量选择入口闲置时使用淡蓝次级样式，激活后再使用实心品牌主色。
-    expect(pageSource).toContain("batchMode ? 'primary' : 'secondary'");
     expect(pageSource).not.toContain('type="default"');
     expect(pageSource).not.toMatch(/<a-button\b[^>]*\btype="error"/s);
     expect(pageSource).toContain('status="danger"');
   });
 
-  it("uses a soft brand tint for the idle batch toggle and a solid color when active", () => {
-    const idle = cssBlock(pageSource, ".library-selection-action.arco-btn-secondary");
-    expect(idle).toContain("color: var(--uvp-brand)");
-    expect(idle).toContain("background: var(--uvp-brand-soft)");
-    expect(idle).toContain("border-color: color-mix(in srgb, var(--uvp-brand) 32%, var(--uvp-search-secondary-btn-border))");
-    const active = cssBlock(pageSource, ".library-batch-toggle.arco-btn-primary");
-    expect(active).toContain("color: var(--uvp-solid-text)");
-    expect(active).toContain("background: var(--uvp-solid-bg)");
+  it("按钮配色一律交给真源，页面不再自留副本", () => {
+    // 2026-11-04 治理（老板：颜色太单调）：删掉页面里两段配色副本
+    // （`.library-selection-action.arco-btn-secondary` 浅蓝闲置态、
+    //   `.library-batch-toggle.arco-btn-primary` 实心激活态）。
+    // 现在：闲置 = 次级（真源浅蓝）；进入批量模式后挂 `uvp-btn-neutral`（中性灰，语义=退出）；
+    // 下载类 = `uvp-export-btn`（青绿）；工具栏删除 = 软红（不带 type="primary"）。
+    expect(pageSource).toContain("{ 'uvp-btn-neutral': batchMode }");
+    // ⛔ 判据只认 `class="…"` 里的真实用法，不能写 `not.toContain("library-selection-action")`：
+    //    解释这次改动的注释里就写着这个类名，会把门禁自己判红（本仓踩过的老坑）。
+    expect(pageSource).not.toMatch(/class="[^"]*library-selection-action/);
+    expect(pageSource).toMatch(/class="uvp-export-btn"[^>]*data-testid="library-detail-download"/);
+    expect(pageSource).toMatch(/class="uvp-export-btn"[\s\S]{0,80}library-batch-download/);
+    // ⛔ 工具栏里的删除不许升成实心红：实心红是「确认删除弹窗里那一个」专用。
+    expect(pageSource).toMatch(/<a-button\s+v-if="selectedIds\.size"\s+size="small"\s+status="danger"/);
+    expect(pageSource).not.toMatch(/type="primary"\s+status="danger"/);
   });
 
   it("uses the shared modal confirmation pattern for destructive batch deletion", () => {

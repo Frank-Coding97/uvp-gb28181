@@ -85,6 +85,21 @@ const SnapshotLibraryRoutePath = "/snapshots/:id/content"
 // 这条的凭证是 **JWT + 权限码**，按库里的行 id 取图，图在就能取，刷新页面/重启后端都不影响。
 const SnapshotLibraryAPIPath = "/api/gb28181/device-mgmt" + SnapshotLibraryRoutePath
 
+// SnapshotArchiveRoutePath 是图像库**批量下载（打成 zip）**接口在路由组内的相对路径。
+//
+// ⛔ 单独开一条路径而不是给列表接口加 `?zip=1`：列表接口是 GET + 分页元数据，
+// 批量打包是 GET + 二进制流，两者的响应形态、超时预算、限流口径都不一样；
+// 合在一条上会让「翻页很慢」和「打包很慢」变成同一个告警。
+//
+// ⛔ 与 `SnapshotLibraryRoutePath`（`/snapshots/:id/content`）在同一层共存了静态段
+// `archive` 与参数段 `:id` —— gin v1.11 已允许这种混排（实测注册不 panic），
+// 且两段深度不同（`/archive` 两段、`/:id/content` 三段），不会互相吃掉。
+// ⚠️ 换 gin 大版本前请复跑 `TestSnapshotArchiveRouteCoexistsWithContentRoute`。
+const SnapshotArchiveRoutePath = "/snapshots/archive"
+
+// SnapshotArchiveAPIPath 是图像库批量下载接口的**全路径**（迁移 / 路由 / 测试三处同名）。
+const SnapshotArchiveAPIPath = "/api/gb28181/device-mgmt" + SnapshotArchiveRoutePath
+
 // SnapshotListRoutePath 是图像库**列表**接口在路由组内的相对路径（挂在 `/api/gb28181/device-mgmt` 组下）。
 //
 // ⛔ 与 [SnapshotLibraryRoutePath] 是两条不同层的路径（`/snapshots` 与 `/snapshots/:id/content`），

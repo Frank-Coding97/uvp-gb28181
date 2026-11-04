@@ -45,12 +45,10 @@
                  它是"这次要看多少张"的前置开关，属于查询条件的一部分；
                  放工具条上则要等勾了选才出现，而勾选框本身又只在批量模式显示 ——
                  鸡生蛋，用户根本找不到从哪进入批量模式。 -->
-            <a-button
-              :type="batchMode ? 'primary' : 'secondary'"
-              class="library-selection-action library-batch-toggle"
-              data-testid="library-batch-toggle"
-              @click="toggleBatchMode"
-            >
+            <!-- 进入批量模式后这颗变成「退出批量选择」⇒ 语义是**放弃当前上下文**（⑤），
+                 用中性灰。⛔ 原来是 `:type` 在 primary/secondary 之间切，一进批量模式
+                 就跟「查询」撞成两个蓝实心，主次全乱（2026-11-04 治理时改正）。 -->
+            <a-button :class="{ 'uvp-btn-neutral': batchMode }" data-testid="library-batch-toggle" @click="toggleBatchMode">
               <template #icon><CheckSquare :size="15" /></template>
               {{ batchMode ? "退出批量选择" : "批量选择" }}
             </a-button>
@@ -85,27 +83,33 @@
              勾选一个自己都拉不到的集合等于骗人。范围限定在「本页」。 -->
         <div v-if="batchMode" class="library-batch" data-testid="library-batch-bar">
           <span class="library-batch-count">已选 {{ selectedIds.size }} 张</span>
-          <a-button
-            size="small"
-            type="secondary"
-            class="library-selection-action"
-            data-testid="library-select-all"
-            @click="toggleSelectAll"
-          >
+          <a-button size="small" type="secondary" data-testid="library-select-all" @click="toggleSelectAll">
             {{ allSelected ? "取消本页全选" : "全选本页" }}
           </a-button>
-          <a-button size="small" data-testid="library-clear-selection" @click="clearSelection">清空</a-button>
-          <a-button size="small" data-testid="library-batch-download" :disabled="downloading" @click="downloadSelected">
+          <!-- 「清空」清的是**已选**，不是图库数据；改文字按钮，避免它跟「批量下载」
+               抢同一块浅蓝底（2026-11-04 老板定：这一条只留下载、删除两个实色块）。 -->
+          <a-button size="small" type="text" data-testid="library-clear-selection" @click="clearSelection">清空选择</a-button>
+          <!-- 下载/导出 = 「只取数不改数」⇒ 青绿（uvp-export-btn），与「刷新」同一色相。
+               ⛔ 别再写 `type="primary"`：那会跟「查询」抢重点，也会和删除的红打架。 -->
+          <a-button
+            size="small"
+            class="uvp-export-btn"
+            data-testid="library-batch-download"
+            :disabled="downloading"
+            @click="downloadSelected"
+          >
             <template #icon><Download :size="14" /></template>
-            {{ downloading ? "正在下载…" : "批量下载" }}
+            {{ downloading ? "正在打包…" : "批量下载" }}
           </a-button>
           <!-- ⛔ 这句说明刻意写短：原句太长会在窄屏把后面的分页器挤到换行，
                而"会不会自动合成压缩包"这种问题用半透明小字反而更难读。 -->
-          <span class="library-batch-note">逐张下载，不合成压缩包</span>
+          <span class="library-batch-note">合并成一个 zip 包下载</span>
+          <!-- ⛔ 工具栏里的删除用**软红**（`status="danger"` 就够），不要 `type="primary"`：
+               实心红是「确认删除弹窗里那一个」专用，放在常驻工具条上会变成整条唯一的高饱和块，
+               反而压过下载（2026-11-04 治理时降档）。 -->
           <a-button
             v-if="selectedIds.size"
             size="small"
-            type="primary"
             status="danger"
             data-testid="library-batch-delete"
             :loading="deleting"
@@ -241,7 +245,7 @@
                   <span v-else class="library-actions-spacer" />
                   <a-tooltip content="下载" position="top">
                     <button
-                      class="icon-btn small framed primary"
+                      class="icon-btn small framed download"
                       type="button"
                       aria-label="下载"
                       :data-testid="`library-download-${item.id}`"
@@ -388,7 +392,7 @@
           </div>
 
           <div class="library-detail-actions">
-            <a-button long data-testid="library-detail-download" @click="downloadOne(detail)">
+            <a-button long class="uvp-export-btn" data-testid="library-detail-download" @click="downloadOne(detail)">
               <template #icon><Download :size="15" /></template>
               下载这一张
             </a-button>
@@ -425,6 +429,7 @@ import {
   formatSnapshotSize,
   mayViewSnapshotLibrary,
   normalizeSnapshotQuery,
+  snapshotArchiveUrl,
   snapshotChannelCode,
   snapshotChannelLabel,
   snapshotChannelReportedName,
@@ -659,12 +664,10 @@ function clearSelection() {
 /**
  * 浏览器原生下载。
  *
- * ⛔ 走 `<a download>` 而不是 fetch + blob：后者要在内存里攒下整张图，
- * 批量下载十几张时会把标签页内存吃满并可能让页面卡死。
- * ⛔ 必须带 token：取图接口在鉴权组里，而 `<a>` 同样带不了 Authorization 头，
- * 所以地址得经过 imageUrlFor（补 `?token=`）。
- * ⛔ 延时逐个触发：浏览器会把连续多次的下载当成弹窗拦掉，
- * 一次性点 N 个只会成功第一个。间隔一点才能让 N 张都落到下载目录。
+ * ⛔ 走 `<a download>` 而不是 fetch + blob：后者要在内存里攒下整份响应，
+ * 一个几百 MB 的压缩包会把标签页内存吃满并可能让页面卡死。
+ * ⛔ 必须带 token：下载接口在鉴权组里，而 `<a>` 同样带不了 Authorization 头，
+ * 所以地址得经过 snapshotArchiveUrl / imageUrlFor（补 `?token=`）。
  */
 function triggerNativeDownload(url: string, fileName: string) {
   const anchor = document.createElement("a");
@@ -682,24 +685,59 @@ function downloadOne(item: SnapshotLibraryItem) {
   triggerNativeDownload(url, snapshotDownloadName(item));
 }
 
+/** 压缩包默认文件名里的时间戳（服务端会用自己的 Content-Disposition 覆盖，这里只是兜底）。 */
+function archiveStamp() {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const now = new Date();
+  return (
+    `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
+    `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+  );
+}
+
+/**
+ * 批量下载：由后端把选中的图打成**一个 zip**（老板 2026-11-04 决定）。
+ *
+ * ⛔ 为什么不再逐张触发下载：浏览器会把连续多次 `<a download>` 判成弹窗批量拦截，
+ * 表现是"提示已发起 20 张下载、下载目录里只有 8 个"；就算间隔 250ms 也仍有被拦的概率，
+ * 而且用户拿到的是一堆散文件、名字还被浏览器加上 `(1)(2)` 后缀。
+ *
+ * ⛔ 为什么要先发一次 preflight 请求：`<a download>` **拿不到失败状态** ——
+ * 后端回 400 时浏览器会把那段 JSON 当文件存下来，用户以为下到了 zip 却打不开。
+ * 这一步只回 `{count, skipped, bytes}`，确认有图可打包之后才真正触发下载。
+ *
+ * ⛔ 不用 fetch 拿 zip 再转 blob：那等于把整包攒在标签页内存里（见 triggerNativeDownload）。
+ */
 async function downloadSelected() {
   const targets = rows.value.filter(item => selectedIds.value.has(item.id));
-  if (!targets.length) return;
+  if (!targets.length || downloading.value) return;
+  const ids = targets.map(item => item.id);
   downloading.value = true;
   try {
-    for (const [index, item] of targets.entries()) {
-      triggerNativeDownload(imageUrlFor(item), snapshotDownloadName(item));
-      // 间隔 250ms：低于这个间隔浏览器会把后续下载判成"非用户触发"直接拦掉。
-      if (index < targets.length - 1) await new Promise(resolve => window.setTimeout(resolve, 250));
+    const response = await fetch(snapshotArchiveUrl(ids, accessToken.value, getBaseUrl(), { preflight: true }), {
+      headers: { Accept: "application/json" }
+    });
+    const payload = await response.json().catch(() => null);
+    const count = Number(payload?.data?.count ?? 0);
+    if (!response.ok || count <= 0) {
+      // 用后端那句话（"选中的图片文件都不在服务器上"/"一次最多打包下载 200 张"）：
+      // 比前端自造一句"下载失败"更能说明该做什么。
+      Message.error(payload?.message || "打包下载失败，请稍后重试");
+      return;
     }
-    Message.success(downloadingMessage(targets.length));
+    const skipped = Number(payload?.data?.skipped ?? 0);
+    triggerNativeDownload(snapshotArchiveUrl(ids, accessToken.value, getBaseUrl()), `抓拍图-${archiveStamp()}.zip`);
+    // ⛔ 少了几张必须说出来：用户对着列表数张数，包里少了会以为是系统丢图。
+    if (skipped > 0) {
+      Message.warning(`有 ${skipped} 张图片文件不在服务器上，未打进压缩包`);
+    } else {
+      Message.success(`已开始下载 ${count} 张图片的压缩包`);
+    }
+  } catch {
+    Message.error("打包下载失败，请检查网络后重试");
   } finally {
     downloading.value = false;
   }
-}
-
-function downloadingMessage(count: number) {
-  return `已发起 ${count} 张图片的下载，请查看浏览器下载列表`;
 }
 
 /**
@@ -874,26 +912,11 @@ onMounted(() => {
 .library-notice {
   margin: 0;
 }
-.library-selection-action.arco-btn-secondary {
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
-  border-color: color-mix(in srgb, var(--uvp-brand) 32%, var(--uvp-search-secondary-btn-border));
-  box-shadow: var(--uvp-search-secondary-btn-shadow);
-}
-.library-selection-action.arco-btn-secondary:hover {
-  color: var(--uvp-brand-strong);
-  background: color-mix(in srgb, var(--uvp-brand) 20%, var(--uvp-search-secondary-btn-bg));
-  border-color: color-mix(in srgb, var(--uvp-brand) 48%, var(--uvp-search-secondary-btn-border));
-}
-.library-batch-toggle.arco-btn-primary {
-  color: var(--uvp-solid-text);
-  background: var(--uvp-solid-bg);
-  border-color: var(--uvp-solid-bg);
-}
-.library-batch-toggle.arco-btn-primary:hover {
-  background: var(--uvp-solid-hover-bg);
-  border-color: var(--uvp-solid-hover-bg);
-}
+
+/* ⛔ 这里曾有两段 `.library-selection-action.arco-btn-secondary` / `.library-batch-toggle.arco-btn-primary`
+   的配色副本（把「批量选择」染成品牌浅蓝、「退出批量选择」染成实心蓝）。
+   2026-11-04 治理时删除：配色一律由 `styles/uvp-buttons.scss` 出，
+   进入批量模式后的「退出」改用语义类 `uvp-btn-neutral`（中性灰），不再自造一档。 */
 .library-session {
   display: flex;
   flex-wrap: wrap;
@@ -1116,15 +1139,19 @@ onMounted(() => {
   color: var(--uvp-brand);
   border-color: color-mix(in srgb, var(--uvp-brand) 28%, var(--uvp-search-secondary-btn-border));
 }
-.library-card-actions .icon-btn.primary {
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
-  border-color: color-mix(in srgb, var(--uvp-brand) 24%, transparent);
+
+/* 卡片上的「下载」= 取数语义，跟正文里的下载按钮同一色（青绿）；
+   「详情」保持中性（只读、不改任何东西）。两者的区别要一眼看得出：
+   以前下载是「品牌蓝浅底」、详情是「近白灰底」，缩到 28px 时几乎一样。 */
+.library-card-actions .icon-btn.download {
+  color: var(--uvp-refresh-btn-text);
+  background: var(--uvp-refresh-btn-bg);
+  border-color: var(--uvp-refresh-btn-border);
 }
-.library-card-actions .icon-btn.primary:hover {
-  color: var(--uvp-solid-text);
-  background: var(--uvp-solid-bg);
-  border-color: var(--uvp-solid-border);
+.library-card-actions .icon-btn.download:hover {
+  color: var(--uvp-refresh-btn-text);
+  background: var(--uvp-refresh-btn-hover-bg);
+  border-color: var(--uvp-refresh-btn-border);
 }
 .library-card-actions .icon-btn:focus-visible {
   outline: 2px solid var(--uvp-brand);

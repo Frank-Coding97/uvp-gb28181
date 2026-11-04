@@ -965,6 +965,13 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			// 不是一条 —— gin 允许两者共存(GET 同方法不同深度),但少注册一条的表现是
 			// "页面打得开、列表永远空"(404 被前端当成空数组),而不是报错。
 			dmgmt.GET(gbmodels.SnapshotListRoutePath, deviceMgmtController.ListSnapshots)
+			// 图像库**批量下载**：把选中的图打成**一个 zip** 流式返回（老板 2026-11-04 要求）。
+			// ⛔ 为什么不是前端逐张下载：浏览器会把连续多次 `<a download>` 当弹窗批量拦截，
+			//    表现是"提示下了 20 张、目录里只有 8 个"；也不能让前端 fetch 每张再拼包
+			//    （200 张原图要全攒在标签页内存里）。
+			// ⛔ 与 `/snapshots/:id/content` 在同一层混排了静态段 `archive` 与参数段 `:id`：
+			//    gin v1.11 允许（注册不 panic），两段深度也不同，不会互相吃掉。
+			dmgmt.GET(gbmodels.SnapshotArchiveRoutePath, deviceMgmtController.ArchiveSnapshots)
 			// 图像库**批量删除**：与列表同一条路径、不同方法。
 			// ⛔ 用同一个常量而不是手写字面量：删接口的 sys_api 授权走全路径
 			// (SnapshotListAPIPath)，与列表共用 ⇒ 不用新增一条授权记录。

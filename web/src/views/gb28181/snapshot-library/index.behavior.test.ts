@@ -178,9 +178,19 @@ describe("snapshot library page", () => {
       downloads.push({ href: this.getAttribute("href"), download: this.getAttribute("download") });
     });
     downloads = [];
+    // 批量下载会先发一次 preflight（只回 JSON）再触发 `<a>`：
+    // ⛔ 这一步必须桩掉，否则 happy-dom 会真的发网络请求，测试变成"看机器能不能上网"。
+    fetchMock = vi.fn(async () => preflightResponse({ code: 0, message: "", data: { count: 0, skipped: 0, bytes: 0 } }));
+    vi.stubGlobal("fetch", fetchMock);
   });
 
   let downloads: Array<{ href: string | null; download: string | null }> = [];
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  /** preflight 的响应桩：只实现页面真正读的那三样（ok / json / status）。 */
+  function preflightResponse(payload: unknown, ok = true, status = 200) {
+    return { ok, status, json: async () => payload } as unknown as Response;
+  }
 
   it("leaves one search box and drops the quick-range and code-filter affordances", async () => {
     // ⛔ 老板 2026-10-06：去掉「快捷时间」与「按编码精确查询」。
@@ -273,43 +283,93 @@ describe("snapshot library page", () => {
     wrapper.unmount();
   });
 
-  it("downloads every picked image instead of silently skipping all but the first", async () => {
-    // ⛔ 浏览器会把连续同步点击判成非用户触发而拦掉，表现为"选了3张只下来1张"。
-    // 实现里逐张间隔 250ms，所以这里必须驱动定时器 —— flushPromises 只排空
-    // 微任务队列，不会让真实 setTimeout 回调跑起来。
-    vi.useFakeTimers();
-    try {
-      gbApi.listSnapshotLibrary.mockResolvedValue(listResult([row(1), row(2), row(3)]));
-      const wrapper = mountPage();
-      await flushPromises();
+  it("packs every picked image into one zip request instead of N downloads", async () => {
+    // 老板 2026-11-04 的口径：选 2 张下来**一个** zip，不是 2 个文件。
+    // ⛔ 逐张触发 `<a download>` 的老做法会被浏览器判成弹窗批量拦截，
+    // 表现为"选了 3 张只下来 1 张"，所以这里钉住"只触发一次锚点"。
+    gbApi.listSnapshotLibrary.mockResolvedValue(listResult([row(1), row(2), row(3)]));
+    const wrapper = mountPage();
+    await flushPromises();
 
-      // ⛔ 勾选框只在批量模式渲染（老板 2026-10-06），必须先进去再勾。
-      await wrapper.find('[data-testid="library-batch-toggle"]').trigger("click");
-      await flushPromises();
-      await wrapper.find('[data-testid="library-pick-1"]').setValue(true);
-      await wrapper.find('[data-testid="library-pick-3"]').setValue(true);
-      await flushPromises();
+    // ⛔ 勾选框只在批量模式渲染（老板 2026-10-06），必须先进去再勾。
+    await wrapper.find('[data-testid="library-batch-toggle"]').trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-testid="library-pick-1"]').setValue(true);
+    await wrapper.find('[data-testid="library-pick-3"]').setValue(true);
+    await flushPromises();
 
-      const bar = wrapper.find('[data-testid="library-batch-bar"]');
-      expect(bar.exists()).toBe(true);
-      expect(bar.text()).toContain("已选 2 张");
+    const bar = wrapper.find('[data-testid="library-batch-bar"]');
+    expect(bar.exists()).toBe(true);
+    expect(bar.text()).toContain("已选 2 张");
 
-      wrapper.find('[data-testid="library-batch-download"]').trigger("click");
-      // 放掉逐张之间的间隔：最后一张后面本来就不排程。
-      for (let i = 0; i < 6; i++) {
-        await vi.advanceTimersByTimeAsync(250);
-      }
-      await flushPromises();
+    fetchMock.mockResolvedValueOnce(preflightResponse({ code: 0, message: "", data: { count: 2, skipped: 0, bytes: 2048 } }));
+    await wrapper.find('[data-testid="library-batch-download"]').trigger("click");
+    await flushPromises();
 
-      expect(downloads.map(item => item.download)).toEqual(["gate-1.jpg", "gate-3.jpg"]);
-      wrapper.unmount();
-    } finally {
-      vi.useRealTimers();
-    }
+    // 第一次请求是 preflight：只问"这 2 张能打包吗"，不带 ids 之外的参数暴露给下载。
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const probeUrl = String(fetchMock.mock.calls[0][0]);
+    expect(probeUrl).toContain("/api/gb28181/device-mgmt/snapshots/archive?");
+    expect(probeUrl).toContain("ids=1%2C3");
+    expect(probeUrl).toContain("preflight=1");
+    expect(probeUrl).toContain("token=tok-1");
+
+    // 真正的下载只触发一次，且**不带** preflight（那一次只回 JSON）。
+    expect(downloads).toHaveLength(1);
+    expect(downloads[0].href).toContain("ids=1%2C3");
+    expect(downloads[0].href).not.toContain("preflight");
+    expect(downloads[0].download).toMatch(/^抓拍图-\d{8}-\d{6}\.zip$/);
+    expect(messages.success).toHaveBeenCalledWith(expect.stringContaining("2 张"));
+    wrapper.unmount();
   });
 
-  it("adds up only what it can actually fetch when bulk downloading", async () => {
+  it("reports the images that could not be packed instead of pretending the pack is complete", async () => {
+    // ⛔ 库行还在、磁盘文件没了是运营常态（手工清过目录）。这时照常出包，
+    // 但**必须说出来**：用户对着列表数张数，包里少了会以为是系统丢图。
+    gbApi.listSnapshotLibrary.mockResolvedValue(listResult([row(1)]));
+    const wrapper = mountPage();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="library-batch-toggle"]').trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-testid="library-pick-1"]').setValue(true);
+    await flushPromises();
+
+    fetchMock.mockResolvedValueOnce(preflightResponse({ code: 0, message: "", data: { count: 1, skipped: 2, bytes: 1024 } }));
+    await wrapper.find('[data-testid="library-batch-download"]').trigger("click");
+    await flushPromises();
+
+    expect(downloads).toHaveLength(1);
+    expect(messages.warning).toHaveBeenCalledWith(expect.stringContaining("2 张"));
+    wrapper.unmount();
+  });
+
+  it("never triggers the download when the preflight refuses", async () => {
+    // ⭐ 这就是 preflight 存在的理由：`<a download>` 拿不到失败状态 ——
+    // 后端回 400 时浏览器会把那段 JSON 当文件存下来，用户以为下到了 zip 却打不开。
+    gbApi.listSnapshotLibrary.mockResolvedValue(listResult([row(1)]));
+    const wrapper = mountPage();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="library-batch-toggle"]').trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-testid="library-pick-1"]').setValue(true);
+    await flushPromises();
+
+    fetchMock.mockResolvedValueOnce(
+      preflightResponse({ code: 400, message: "选中的图片文件都不在服务器上", data: null }, false, 400)
+    );
+    await wrapper.find('[data-testid="library-batch-download"]').trigger("click");
+    await flushPromises();
+
+    expect(downloads).toHaveLength(0, "预检不通过时不许触发下载（否则会下一个装着错误信息的文件）");
+    expect(messages.error).toHaveBeenCalledWith(expect.stringContaining("不在服务器上"));
+    wrapper.unmount();
+  });
+
+  it("asks the backend only for the images the current page actually selected", async () => {
     // ⛔ 前端只拿到当前页：勾一个自己都拉不到的集合等于骗人。
+    // total=998 只说明"匹配很多"，不能变成"已选998张"的假象，也不能进 ids。
     gbApi.listSnapshotLibrary.mockResolvedValue(listResult([row(1), row(2)], 998));
     const wrapper = mountPage();
     await flushPromises();
@@ -317,12 +377,14 @@ describe("snapshot library page", () => {
     await wrapper.find('[data-testid="library-batch-toggle"]').trigger("click");
     await flushPromises();
     await wrapper.find('[data-testid="library-pick-1"]').setValue(true);
+    await flushPromises();
+
+    fetchMock.mockResolvedValueOnce(preflightResponse({ code: 0, message: "", data: { count: 1, skipped: 0, bytes: 1024 } }));
     await wrapper.find('[data-testid="library-batch-download"]').trigger("click");
     await flushPromises();
 
-    // 只下本页这张，total=998 不能变成"已选998张"的假象。
+    expect(String(fetchMock.mock.calls[0][0])).toContain("ids=1");
     expect(downloads).toHaveLength(1);
-    expect(messages.success).toHaveBeenCalledWith(expect.stringContaining("1 张"));
     wrapper.unmount();
   });
 
@@ -446,18 +508,24 @@ describe("snapshot library page", () => {
     const button = (testId: string) =>
       wrapper.findAllComponents({ name: "a-button" }).find(button => button.attributes("data-testid") === testId);
 
-    expect(button("library-batch-toggle")?.props("type")).toBe("secondary");
-    expect(button("library-batch-toggle")?.classes()).toContain("library-selection-action");
+    // 闲置态：不写 type ⇒ 真源的次级色（浅蓝）。
+    expect(button("library-batch-toggle")?.props("type")).not.toBe("primary");
+    expect(button("library-batch-toggle")?.classes()).not.toContain("uvp-btn-neutral");
     await wrapper.find('[data-testid="library-batch-toggle"]').trigger("click");
-    expect(button("library-batch-toggle")?.props("type")).toBe("primary");
+    // 进入批量模式 → 文案变「退出批量选择」，语义是**放弃当前上下文** ⇒ 中性灰。
+    // ⛔ 2026-11-04 治理（老板：颜色太单调）：原来是实心蓝，跟「查询」撞成两个重点。
+    expect(button("library-batch-toggle")?.classes()).toContain("uvp-btn-neutral");
+    expect(button("library-batch-toggle")?.props("type")).not.toBe("primary");
     expect(button("library-select-all")?.props("type")).toBe("secondary");
-    expect(button("library-select-all")?.classes()).toContain("library-selection-action");
-    // ⛔ 2026-11-04 起「批量下载」是次要动作（次要 / 导出类统一用 secondary 浅蓝底），
-    //    主操作只留给「保存/提交」这一级；此处原先断言 primary，属于「满屏都是重点」的那类写法。
-    expect(button("library-batch-download")?.props("type")).toBe("secondary");
+    // 「清空」只清已选，是轻动作 ⇒ 文字按钮，不跟下载/删除抢实色块。
+    expect(button("library-clear-selection")?.props("type")).toBe("text");
+    // 下载/导出 = 只取数不改数 ⇒ 青绿（uvp-export-btn），与「刷新」同色相。
+    expect(button("library-batch-download")?.classes()).toContain("uvp-export-btn");
+    expect(button("library-batch-download")?.props("type")).not.toBe("primary");
     await wrapper.find('[data-testid="library-pick-1"]').setValue(true);
-    // 危险操作仍然要突出：primary + status=danger = 实心红（见 uvp-buttons.scss）。
-    expect(button("library-batch-delete")?.props()).toMatchObject({ type: "primary", status: "danger" });
+    // 工具栏删除用**软红**（只给 status="danger"）；实心红是确认弹窗专用。
+    expect(button("library-batch-delete")?.props()).toMatchObject({ status: "danger" });
+    expect(button("library-batch-delete")?.props("type")).not.toBe("primary");
     wrapper.unmount();
   });
 

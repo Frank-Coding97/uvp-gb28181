@@ -8,6 +8,7 @@ import {
   mayViewSnapshotLibrary,
   normalizeSnapshotQuery,
   resolveSnapshotSource,
+  snapshotArchiveUrl,
   snapshotChannelCode,
   snapshotChannelLabel,
   snapshotChannelReportedName,
@@ -154,6 +155,35 @@ describe("content image url", () => {
   it("returns an empty string for a missing url so the caller can branch on it", () => {
     expect(snapshotContentImageUrl(null, "t")).toBe("");
     expect(snapshotContentImageUrl("   ", "t")).toBe("");
+  });
+});
+
+describe("archive download url", () => {
+  const path = "/api/gb28181/device-mgmt/snapshots/archive";
+
+  it("packs every selected id into one url so the browser gets a single zip", () => {
+    // ⭐ 老板 2026-11-04 的口径：选 20 张下来**一个** zip，不是 20 个文件。
+    expect(snapshotArchiveUrl([3, 1, 2], "t")).toBe(`${path}?ids=3%2C1%2C2&token=t`);
+  });
+
+  it("dedupes and drops ids that the backend would ignore anyway", () => {
+    // 重复 id 只会让 URL 变长（后端还要再去重一次）；0 / 负数 / NaN 后端会跳过，
+    // 前端先滤掉能让"已选 3 张、包里 2 张"少一层歧义。
+    expect(snapshotArchiveUrl([5, 5, 0, -1, Number.NaN], "t")).toBe(`${path}?ids=5&token=t`);
+  });
+
+  it("adds the preflight flag on the probe that decides whether to download at all", () => {
+    // ⛔ `<a download>` 拿不到失败状态（后端回 400 时浏览器会把 JSON 当文件存下来），
+    // 所以先问一句"能打包吗"这一步是必需的，不是可选优化。
+    expect(snapshotArchiveUrl([7], "t", "", { preflight: true })).toBe(`${path}?ids=7&preflight=1&token=t`);
+  });
+
+  it("returns an empty string when nothing is selected so the caller can branch on it", () => {
+    expect(snapshotArchiveUrl([], "t")).toBe("");
+  });
+
+  it("goes through the same base-url and token rules as the image url", () => {
+    expect(snapshotArchiveUrl([1], "a+b", "/uvp")).toBe(`/uvp${path}?ids=1&token=a%2Bb`);
   });
 });
 
