@@ -37,10 +37,23 @@
             <span>{{ expand ? "收起" : "展开" }}</span>
           </a-button>
 
-          <a-button type="outline" status="danger" @click="onBatchDelete" v-hasPerm="['system:menu:delete']">
-            <template #icon><icon-delete /></template>
-            <span>批量删除</span>
-          </a-button>
+          <a-popconfirm
+            type="warning"
+            ok-text="确认删除"
+            cancel-text="取消"
+            :ok-button-props="{ status: 'danger' }"
+            :disabled="!selectedKeys.length"
+            @ok="onBatchDelete"
+          >
+            <template #content>
+              <div class="uvp-confirm-title">批量删除菜单？</div>
+              <div class="uvp-confirm-desc">注意：该操作为硬删除且会删除子级数据及关联的API数据，删除后不可恢复。</div>
+            </template>
+            <a-button type="outline" status="danger" :disabled="!selectedKeys.length" v-hasPerm="['system:menu:delete']">
+              <template #icon><icon-delete /></template>
+              <span>批量删除</span>
+            </a-button>
+          </a-popconfirm>
         </template>
       </s-layout-search>
       <!-- 修改表格数据源为displayMenuList -->
@@ -163,7 +176,12 @@
                     <template #icon><icon-edit /></template>
                     <span>修改</span>
                   </a-link>
-                  <a-popconfirm type="warning" content="确定删除该项吗?" @ok="onDelete(record)" :ok-button-props="{ status: 'danger' }">
+                  <a-popconfirm
+                    type="warning"
+                    content="确定删除该项吗?"
+                    @ok="onDelete(record)"
+                    :ok-button-props="{ status: 'danger' }"
+                  >
                     <a-link class="uvp-table-action uvp-table-action--delete" v-hasPerm="['system:menu:delete']">
                       <template #icon><icon-delete /></template>
                       <span>删除</span>
@@ -388,7 +406,6 @@ import { type MenuItem, getMenuListAPI, addMenuAPI, updateMenuAPI, deleteMenuAPI
 import useGlobalProperties from "@/hooks/useGlobalProperties";
 import { deepClone, getPascalCase } from "@/utils";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
-import { Modal } from "@arco-design/web-vue";
 import SNumberField from "@/components/s-number-field/index.vue";
 import { FileText, Folder, SquareMousePointer } from "@lucide/vue";
 const { isMobile } = useDevicesSize();
@@ -760,34 +777,18 @@ const onDelete = async (row: any) => {
   }
 };
 
-// 批量删除
-const onBatchDelete = () => {
-  if (selectedKeys.value.length === 0) {
-    arcoMessage("warning", "请选择要删除的菜单");
-    return;
+// 批量删除（确认气泡的 @ok 直连本函数；气泡文案见模板，未选中时按钮本身是禁用的）
+const onBatchDelete = async () => {
+  if (selectedKeys.value.length === 0) return;
+  try {
+    await deleteMenusAPI(selectedKeys.value);
+    selectedKeys.value = [];
+    getMenuList();
+    arcoMessage("success", "批量删除成功");
+  } catch (error) {
+    console.error(error);
+    arcoMessage("error", "批量删除失败");
   }
-
-  Modal.confirm({
-    title: "批量删除菜单",
-    content: "注意：该操作为硬删除且会删除子级数据及关联的API数据",
-    okText: "确认删除",
-    cancelText: "取消",
-    modalClass: "uvp-system-dialog",
-    okButtonProps: {
-      status: "danger"
-    },
-    onOk: async () => {
-      try {
-        await deleteMenusAPI(selectedKeys.value);
-        selectedKeys.value = [];
-        getMenuList();
-        arcoMessage("success", "批量删除成功");
-      } catch (error) {
-        console.error(error);
-        arcoMessage("error", "批量删除失败");
-      }
-    }
-  });
 };
 
 // API权限分配相关状态

@@ -38,7 +38,12 @@
             <template #icon><icon-export /></template>
             <span>导出</span>
           </a-button>
-          <a-popconfirm type="warning" content="确定删除选中的日志吗?" @ok="onDeleteSelected" :ok-button-props="{ status: 'danger' }">
+          <a-popconfirm
+            type="warning"
+            content="确定删除选中的日志吗?"
+            @ok="onDeleteSelected"
+            :ok-button-props="{ status: 'danger' }"
+          >
             <a-button status="danger" v-hasPerm="['system:log:delete']">
               <template #icon><icon-delete /></template>
               <span>删除</span>

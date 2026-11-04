@@ -79,7 +79,12 @@
                     <span>同步</span>
                   </a-link>
                 </a-popconfirm>
-                <a-popconfirm type="warning" content="确定删除该生成配置吗?" @ok="onDelete(record)" :ok-button-props="{ status: 'danger' }">
+                <a-popconfirm
+                  type="warning"
+                  content="确定删除该生成配置吗?"
+                  @ok="onDelete(record)"
+                  :ok-button-props="{ status: 'danger' }"
+                >
                   <a-link class="uvp-table-action uvp-table-action--delete" v-hasPerm="['system:codegen:delete']">
                     <IconDelete />
                     <span>删除</span>

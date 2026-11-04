@@ -1664,6 +1664,24 @@ body[arco-theme="dark"] .uvp-system-form {
   padding: 0 !important;
 }
 
+/* 气泡里的「标题 + 后果说明」两行结构。
+ * ⛔ 从弹窗（Modal.warning）改成气泡时，原来 title / content 两段文案**必须都留下**：
+ *   批量删除、一键清空这类操作的全部风险信息都写在第二段里（"删除后不可恢复"、"会连带
+ *   删除子级数据"）。只留标题等于把警告删掉，用户点得更快、错得也更狠。
+ * 宽度给下限，否则「即将删除 12 个区域及其下全部设备与通道」会被挤成很多行。 */
+.arco-trigger-popup .arco-popconfirm-popup-content .uvp-confirm-title {
+  font-weight: 600;
+  color: var(--uvp-text-primary);
+}
+
+.arco-trigger-popup .arco-popconfirm-popup-content .uvp-confirm-desc {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+  color: var(--uvp-text-secondary);
+}
+
 /* 箭头是旋转 45° 的方块，必须与面板同底色 + 同描边，否则接缝处露出 Arco 的灰底、断一条线。
  * ⚠️ 只覆盖 `border-color`，不写 `border` —— 朝向面板那两条边由 Trigger 的
  *   `[trigger-placement] .arco-trigger-arrow { border-top/right: none }`（无 !important）裁掉，

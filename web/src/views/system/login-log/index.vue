@@ -93,20 +93,9 @@ async function load() {
   }
 }
 
-function requestDelete() {
-  if (!canDelete.value || !selectedRowKeys.value.length || deleting.value) return;
-  Modal.warning({
-    title: "删除登录日志",
-    content: `将删除选中的 ${selectedRowKeys.value.length} 条登录日志，删除后不可恢复。`,
-    okText: "删除",
-    cancelText: "取消",
-    hideCancel: false,
-    escToClose: true,
-    okButtonProps: { status: "danger" },
-    onOk: () => performDelete()
-  });
-}
-
+// ⛔ 2026-11-04 起全站删除统一用 `a-popconfirm` 气泡确认（模板里带两行文案），
+//    原来这里的 requestDelete / requestClear 两个 Modal.warning 包装已删除，
+//    气泡的 @ok 直连 performDelete / performClear。解锁账号不是删除，仍走 Modal.warning。
 async function performDelete() {
   deleting.value = true;
   const ids = [...selectedRowKeys.value];
@@ -120,20 +109,6 @@ async function performDelete() {
   } finally {
     deleting.value = false;
   }
-}
-
-function requestClear() {
-  if (!canClear.value || clearing.value) return;
-  Modal.warning({
-    title: "清空登录日志",
-    content: "将清空当前数据库中已有的全部登录日志，删除后不可恢复。",
-    okText: "清空",
-    cancelText: "取消",
-    hideCancel: false,
-    escToClose: true,
-    okButtonProps: { status: "danger" },
-    onOk: () => performClear()
-  });
 }
 
 async function performClear() {
@@ -245,8 +220,6 @@ defineExpose({
   handlePageChange,
   handlePageSizeChange,
   viewDetail,
-  requestDelete,
-  requestClear,
   requestUnlock,
   performDelete,
   performClear,
@@ -288,9 +261,22 @@ defineExpose({
           <a-button @click="reset"
             ><template #icon><RotateCcw :size="16" /></template>重置</a-button
           >
-          <a-button :disabled="!canClear" class="login-log-clear-button" status="danger" :loading="clearing" @click="requestClear"
-            ><template #icon><Eraser :size="16" /></template>清空日志</a-button
+          <a-popconfirm
+            type="warning"
+            ok-text="清空"
+            cancel-text="取消"
+            :ok-button-props="{ status: 'danger' }"
+            :disabled="!canClear || clearing"
+            @ok="performClear"
           >
+            <template #content>
+              <div class="uvp-confirm-title">清空登录日志？</div>
+              <div class="uvp-confirm-desc">将清空当前数据库中已有的全部登录日志，删除后不可恢复。</div>
+            </template>
+            <a-button :disabled="!canClear" class="login-log-clear-button" status="danger" :loading="clearing"
+              ><template #icon><Eraser :size="16" /></template>清空日志</a-button
+            >
+          </a-popconfirm>
         </template>
       </s-layout-search>
 
@@ -302,9 +288,22 @@ defineExpose({
       <div v-if="canDelete && selectedRowKeys.length" class="login-log-batch-bar">
         <span
           >已选 <strong>{{ selectedRowKeys.length }}</strong> 条</span
-        ><a-button status="danger" :loading="deleting" @click="requestDelete"
-          ><template #icon><Trash2 :size="14" /></template>删除</a-button
+        ><a-popconfirm
+          type="warning"
+          ok-text="删除"
+          cancel-text="取消"
+          :ok-button-props="{ status: 'danger' }"
+          :disabled="deleting || !selectedRowKeys.length"
+          @ok="performDelete"
         >
+          <template #content>
+            <div class="uvp-confirm-title">删除登录日志？</div>
+            <div class="uvp-confirm-desc">将删除选中的 {{ selectedRowKeys.length }} 条登录日志，删除后不可恢复。</div>
+          </template>
+          <a-button status="danger" :loading="deleting"
+            ><template #icon><Trash2 :size="14" /></template>删除</a-button
+          >
+        </a-popconfirm>
       </div>
       <div v-if="!error" class="login-log-table-wrap">
         <a-table

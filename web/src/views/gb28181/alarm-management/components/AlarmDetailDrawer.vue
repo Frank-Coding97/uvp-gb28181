@@ -38,16 +38,23 @@
               <span>来源</span><strong>{{ displayAlarmEntityName(detail.channel, detail.sourceCode || "未知来源") }}</strong
               ><code>{{ detail.sourceCode || "—" }}</code>
             </div>
-            <a-button
-              data-testid="detail-delete"
-              status="danger"
-              :loading="deleting"
+            <a-popconfirm
+              type="warning"
+              ok-text="删除"
+              cancel-text="取消"
+              :ok-button-props="{ status: 'danger' }"
               :disabled="deleting || !canDelete"
-              @click="emit('delete', detail)"
+              @ok="emit('delete', detail)"
             >
-              <template #icon><Trash2 :size="14" /></template>
-              物理删除
-            </a-button>
+              <template #content>
+                <div class="uvp-confirm-title">物理删除告警？</div>
+                <div class="uvp-confirm-desc">将物理删除当前告警记录，删除后不可恢复。</div>
+              </template>
+              <a-button data-testid="detail-delete" status="danger" :loading="deleting" :disabled="deleting || !canDelete">
+                <template #icon><Trash2 :size="14" /></template>
+                物理删除
+              </a-button>
+            </a-popconfirm>
           </section>
 
           <section class="alarm-detail-section" aria-labelledby="alarm-detail-event">

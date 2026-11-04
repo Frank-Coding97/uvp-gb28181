@@ -120,7 +120,11 @@
                   <template #icon><icon-edit /></template>
                   <span>编辑</span>
                 </a-link>
-                <a-popconfirm content="确定要删除这条数据吗？" @ok="handleDelete(record.id)" :ok-button-props="{ status: 'danger' }">
+                <a-popconfirm
+                  content="确定要删除这条数据吗？"
+                  @ok="handleDelete(record.id)"
+                  :ok-button-props="{ status: 'danger' }"
+                >
                   <a-link class="uvp-table-action uvp-table-action--delete" v-hasPerm="['system:sysjobs:delete']">
                     <template #icon><icon-delete /></template>
                     <span>删除</span>

@@ -39,6 +39,15 @@ const stubs = {
   "a-descriptions": { template: "<dl><slot /></dl>" },
   "a-descriptions-item": { props: ["label"], template: "<div><dt>{{ label }}</dt><dd><slot /></dd></div>" },
   "a-alert": { template: "<div><slot /></div>" },
+  // ⛔ 2026-11-04 起删除改成 a-popconfirm 气泡确认，点一下按钮**不再**等于删除：
+  //    必须再点气泡里的「删除」。这个 stub 把气泡的 ok 按钮暴露成 `popconfirm-ok`，
+  //    用来钉住「按钮 → 气泡 → 确认」这条链路，同时验证 disabled 会转发到气泡上。
+  "a-popconfirm": {
+    emits: ["ok"],
+    props: ["disabled", "okText", "cancelText", "okButtonProps"],
+    template:
+      "<span><slot /><button data-testid='popconfirm-ok' :disabled='disabled' @click='$emit(`ok`)'>{{ okText }}</button></span>"
+  },
   "a-button": {
     emits: ["click"],
     template: "<button :data-testid='$attrs[`data-testid`]' @click='$emit(`click`)'><slot /></button>"
@@ -113,20 +122,24 @@ describe("AlarmDetailDrawer", () => {
     expect(wrapper.text()).not.toContain("第一条");
   });
 
-  it("emits the same single-delete intent only when delete permission is present", async () => {
+  it("emits the same single-delete intent only after the confirm bubble is accepted", async () => {
     const withoutPermission = mountDrawer();
     await flushPromises();
     // ⭐ 权限改造（2026-10-11）：无删除权限时按钮保留可见但置灰。
-    //    注意 `a-button` 在测试里是 stub，会无条件转发 click，所以这里只钉 DOM 契约（`disabled` 属性）；
-    //    "点不动" 由 Arco 组件自身保证，另有 `requestSingleDelete` 的权限早退做双保险。
+    //   2026-11-04 起删除走气泡，disabled 同时转发到气泡本身（不可打开），这里一并钉住。
     expect(withoutPermission.get("[data-testid='detail-delete']").attributes("disabled")).toBeDefined();
+    expect(withoutPermission.get("[data-testid='popconfirm-ok']").attributes("disabled")).toBeDefined();
 
     const wrapper = mount(AlarmDetailDrawer, {
       props: { visible: true, alarmId: "9007199254740993", canDelete: true },
       global: { stubs }
     });
     await flushPromises();
+    // 点触发按钮本身不应产生删除意图（否则等于没确认）
     await wrapper.get("[data-testid='detail-delete']").trigger("click");
+    expect(wrapper.emitted("delete")).toBeUndefined();
+
+    await wrapper.get("[data-testid='popconfirm-ok']").trigger("click");
     expect(wrapper.emitted("delete")?.[0]?.[0]).toEqual(detail());
   });
 });

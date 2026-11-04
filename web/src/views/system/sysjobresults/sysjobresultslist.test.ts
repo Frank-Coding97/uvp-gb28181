@@ -48,34 +48,39 @@ describe("一键清理", () => {
     expect(clearBtn).not.toContain('status="warning"');
   });
 
-  it("点击一键清理必须先弹确认框，且文案说明是「全部」", () => {
-    const clearFn = source.slice(source.indexOf("const requestClearAll"));
-    expect(clearFn).toContain("Modal.warning(");
-    expect(clearFn).toContain("全部定时任务执行日志");
-    expect(clearFn).toContain('okButtonProps: { status: "danger" }');
+  it("点击一键清理必须先过确认气泡，且文案说明是「全部」", () => {
+    // ⛔ 2026-11-04 反转：全站删除统一改用 a-popconfirm 气泡（老板拍板），
+    //    原来的「必须 Modal.warning」断言作废，改钉气泡这一侧。
+    const from = source.indexOf('data-testid="sysjobresults-clear-all"');
+    const popconfirm = source.slice(source.lastIndexOf("<a-popconfirm", from), from);
+    expect(popconfirm).toContain("<a-popconfirm");
+    expect(popconfirm).toContain("全部定时任务执行日志");
+    expect(popconfirm).toContain(":ok-button-props=\"{ status: 'danger' }\"");
     // 确认之后才真正调接口
-    expect(clearFn).toContain("onOk: () => performClearAll()");
+    expect(popconfirm).toContain('@ok="performClearAll"');
     expect(source).toContain("await clearData()");
+    // 不许再退回弹窗形态
+    expect(source).not.toContain("Modal.warning(");
   });
 });
 
 describe("单条删除", () => {
   /**
-   * ⛔ 不能用 a-popconfirm 气泡：日志页误删代价高，且气泡贴单元格、容易在移动端误触。
-   * 全仓删除类操作统一 Modal.warning（橙色警示图标 + danger 主按钮）。
+   * ⛔ 2026-11-04 反转：这里原本钉的是「必须 Modal.warning、不许用气泡」，
+   * 理由是日志页误删代价高。老板要求全站删除统一成气泡，于是改钉气泡一侧；
+   * 误删防护改由「气泡里必须写明后果（不可恢复）」+ 危险按钮承担。
    */
-  it("删除改成弹窗确认，不再用气泡", () => {
-    // ⛔ 断言必须带 `<` 前缀：注释里"不再用 a-popconfirm"这句本身含关键词，裸 toContain 会自伤
-    expect(source).not.toMatch(/<a-popconfirm[\s>]/);
-    const deleteFn = source.slice(source.indexOf("const requestDelete"));
-    expect(deleteFn).toContain("Modal.warning(");
-    expect(deleteFn).toContain("不可恢复");
-    expect(deleteFn).toContain('okButtonProps: { status: "danger" }');
+  it("删除走确认气泡，并写明后果与危险按钮", () => {
+    expect(source).toMatch(/<a-popconfirm[\s>]/);
+    const deleteBlock = source.slice(source.indexOf("<a-popconfirm"), source.indexOf("<script"));
+    expect(deleteBlock).toContain("不可恢复");
+    expect(deleteBlock).toContain(":ok-button-props=\"{ status: 'danger' }\"");
+    expect(source).not.toContain("Modal.warning(");
   });
 
   it("删除按钮仍在操作列内、逐行单独删除", () => {
     const actionCell = source.slice(source.indexOf('title="操作"'));
-    expect(actionCell).toContain('@click="requestDelete(record)"');
+    expect(actionCell).toContain('@ok="handleDelete(record.id)"');
     expect(actionCell).toContain("<span>删除</span>");
   });
 });

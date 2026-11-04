@@ -104,6 +104,15 @@ const stubs = {
   "a-tooltip": { template: "<span><slot /></span>" },
   "a-empty": { props: ["description"], template: "<div>{{ description }}</div>" },
   "a-alert": { template: "<div><slot /></div>" },
+  // ⛔ 2026-11-04 起删除改成 a-popconfirm 气泡：点按钮只打开气泡，必须再点气泡里的
+  //    ok 才算确认。stub 把 ok 暴露成 `.popconfirm-ok`，并用 `v-bind='$attrs'` 保住
+  //    模板上打的 `data-testid`（每个气泡一个），测试据此精确点到某一个确认框。
+  "a-popconfirm": {
+    emits: ["ok"],
+    props: ["disabled", "okText", "cancelText", "okButtonProps"],
+    template:
+      "<span v-bind='$attrs'><span class='popconfirm-content'><slot name='content' /></span><slot /><button class='popconfirm-ok' :disabled='disabled' @click='$emit(`ok`)'>{{ okText }}</button></span>"
+  },
   AlarmDetailDrawer: {
     props: ["visible"],
     template: "<div data-testid='alarm-detail-drawer-stub' :data-visible='visible' />"
@@ -209,8 +218,10 @@ describe("AlarmManagement", () => {
     expect(wrapper.find(".alarm-batch-bar").exists()).toBe(true);
 
     await wrapper.get("[data-testid='batch-delete']").trigger("click");
-    expect(modal.warning).toHaveBeenCalledTimes(1);
-    await modal.warning.mock.calls[0][0].onOk();
+    // 点「批量删除」只打开气泡，确认后才真正删除
+    expect(alarmApi.batchDeleteAlarms).not.toHaveBeenCalled();
+    expect(wrapper.get("[data-testid='batch-delete-confirm']").text()).toContain("不可恢复");
+    await wrapper.get("[data-testid='batch-delete-confirm'] .popconfirm-ok").trigger("click");
     await flushPromises();
     expect(alarmApi.batchDeleteAlarms).toHaveBeenCalledWith(["9007199254740993"]);
     expect(messages.success).toHaveBeenCalledWith("已物理删除 1 条告警");
@@ -221,8 +232,8 @@ describe("AlarmManagement", () => {
     const wrapper = mountPage();
     await flushPromises();
     await wrapper.get("[data-testid='alarm-clear-all']").trigger("click");
-    expect(modal.warning).toHaveBeenCalledTimes(1);
-    await modal.warning.mock.calls[0][0].onOk();
+    expect(alarmApi.clearAllAlarms).not.toHaveBeenCalled();
+    await wrapper.get("[data-testid='clear-all-confirm'] .popconfirm-ok").trigger("click");
     await flushPromises();
     expect(alarmApi.clearAllAlarms).toHaveBeenCalledTimes(1);
     expect(messages.success).toHaveBeenCalledWith("已清空 41 条告警");
@@ -235,14 +246,17 @@ describe("AlarmManagement", () => {
 
     expect(wrapper.find("[data-testid='alarm-clear-all']").exists()).toBe(true);
     expect(wrapper.get("[data-testid='alarm-table']").attributes("data-has-row-selection")).toBe("false");
-    // ⭐ 权限改造：没有 alarm:delete 时行内「删除」链接保留可见但置灰；点它也弹不出确认框。
+    // ⭐ 权限改造：没有 alarm:delete 时行内「删除」链接保留可见但置灰，气泡也不可打开。
     const deleteEntry = wrapper.get("[data-testid='single-delete-9007199254740993']");
     expect(deleteEntry.attributes("disabled")).toBeDefined();
-    await deleteEntry.trigger("click");
-    expect(modal.warning).not.toHaveBeenCalled();
+    expect(
+      wrapper.get("[data-testid='single-delete-confirm-9007199254740993'] .popconfirm-ok").attributes("disabled")
+    ).toBeDefined();
+    await wrapper.get("[data-testid='single-delete-confirm-9007199254740993'] .popconfirm-ok").trigger("click");
+    expect(alarmApi.deleteAlarm).not.toHaveBeenCalled();
 
     await wrapper.get("[data-testid='alarm-clear-all']").trigger("click");
-    await modal.warning.mock.calls[0][0].onOk();
+    await wrapper.get("[data-testid='clear-all-confirm'] .popconfirm-ok").trigger("click");
     await flushPromises();
     expect(alarmApi.clearAllAlarms).toHaveBeenCalledTimes(1);
     expect(alarmApi.deleteAlarm).not.toHaveBeenCalled();
@@ -320,11 +334,12 @@ describe("AlarmManagement", () => {
   it("single delete requires permission, warns physical deletion and locks duplicate requests", async () => {
     const viewOnly = mountPage();
     await flushPromises();
-    // ⭐ 权限改造：无 alarm:delete 时删除链接保留可见但置灰；点它不会发起物理删除。
+    // ⭐ 权限改造：无 alarm:delete 时删除链接保留可见但置灰，且气泡本身不可打开。
     const viewOnlyEntry = viewOnly.get("[data-testid='single-delete-9007199254740993']");
     expect(viewOnlyEntry.attributes("disabled")).toBeDefined();
-    await viewOnlyEntry.trigger("click");
-    expect(modal.warning).not.toHaveBeenCalled();
+    expect(
+      viewOnly.get("[data-testid='single-delete-confirm-9007199254740993'] .popconfirm-ok").attributes("disabled")
+    ).toBeDefined();
 
     account.permissions = ["gb28181:alarm:view", "gb28181:alarm:delete"];
     let resolveDelete!: (value: unknown) => void;
@@ -333,21 +348,23 @@ describe("AlarmManagement", () => {
     await flushPromises();
     const button = wrapper.get("[data-testid='single-delete-9007199254740993']");
     await button.trigger("click");
-    expect(modal.warning).toHaveBeenCalledTimes(1);
-    const options = modal.warning.mock.calls[0][0];
-    expect(options.okText).toBe("删除");
-    expect(String(options.content)).toContain("物理删除");
-    expect(String(options.content)).toContain("不可恢复");
-    expect(String(options.content)).toContain("一号机房");
-    expect(String(options.content)).toContain("东门");
-    expect(options.escToClose).toBe(true);
+    // 点触发按钮 ≠ 删除：必须先过气泡确认
+    expect(alarmApi.deleteAlarm).not.toHaveBeenCalled();
 
-    const deleting = options.onOk();
-    await button.trigger("click");
-    expect(modal.warning).toHaveBeenCalledTimes(1);
+    const bubble = wrapper.get("[data-testid='single-delete-confirm-9007199254740993']");
+    const copy = bubble.text();
+    expect(copy).toContain("物理删除");
+    expect(copy).toContain("不可恢复");
+    expect(copy).toContain("一号机房");
+    expect(copy).toContain("东门");
+
+    await bubble.get(".popconfirm-ok").trigger("click");
     expect(alarmApi.deleteAlarm).toHaveBeenCalledTimes(1);
+    // 删除进行中再点一次确认，不能重复下发
+    await bubble.get(".popconfirm-ok").trigger("click");
+    expect(alarmApi.deleteAlarm).toHaveBeenCalledTimes(1);
+
     resolveDelete({ code: 0, message: "ok", data: { deletedIds: ["9007199254740993"], deletedCount: 1 } });
-    await deleting;
     await flushPromises();
     expect(alarmApi.deleteAlarm).toHaveBeenCalledWith("9007199254740993");
     expect(messages.success).toHaveBeenCalledWith("已物理删除 1 条告警");
@@ -358,10 +375,9 @@ describe("AlarmManagement", () => {
     const wrapper = mountPage();
     await flushPromises();
     await wrapper.get("[data-testid='single-delete-9007199254740993']").trigger("click");
-    expect(modal.warning).toHaveBeenCalledTimes(1);
 
     account.permissions = ["gb28181:alarm:view"];
-    await modal.warning.mock.calls[0][0].onOk();
+    await wrapper.get("[data-testid='single-delete-confirm-9007199254740993'] .popconfirm-ok").trigger("click");
     await flushPromises();
 
     expect(alarmApi.deleteAlarm).not.toHaveBeenCalled();
@@ -380,7 +396,7 @@ describe("AlarmManagement", () => {
     const wrapper = mountPage();
     await flushPromises();
     await wrapper.get("[data-testid='single-delete-9007199254740993']").trigger("click");
-    await modal.warning.mock.calls[0][0].onOk();
+    await wrapper.get("[data-testid='single-delete-confirm-9007199254740993'] .popconfirm-ok").trigger("click");
     await flushPromises();
     expect(wrapper.get("[data-testid='alarm-table']").attributes("data-count")).toBe("1");
     expect(messages.error).toHaveBeenCalledWith("告警已发生变化，未删除任何记录");
@@ -398,7 +414,7 @@ describe("AlarmManagement", () => {
     await wrapper.get("[data-testid='page-three']").trigger("click");
     await flushPromises();
     await wrapper.get("[data-testid='single-delete-9007199254740993']").trigger("click");
-    await modal.warning.mock.calls[0][0].onOk();
+    await wrapper.get("[data-testid='single-delete-confirm-9007199254740993'] .popconfirm-ok").trigger("click");
     await flushPromises();
     expect(alarmApi.listAlarms).toHaveBeenLastCalledWith({ page: 2, pageSize: 10 });
   });

@@ -86,7 +86,12 @@
                   <template #icon><icon-edit /></template>
                   修改
                 </a-link>
-                <a-popconfirm type="warning" content="确定删除该角色吗?" @ok="onDelete(record)" :ok-button-props="{ status: 'danger' }">
+                <a-popconfirm
+                  type="warning"
+                  content="确定删除该角色吗?"
+                  @ok="onDelete(record)"
+                  :ok-button-props="{ status: 'danger' }"
+                >
                   <a-link class="uvp-table-action uvp-table-action--delete" v-hasPerm="['system:role:delete']">
                     <template #icon><icon-delete /></template>
                     删除

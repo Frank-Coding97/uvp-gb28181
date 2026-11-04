@@ -115,7 +115,12 @@
                         <template #icon><icon-edit /></template>
                         <span>修改</span>
                       </a-link>
-                      <a-popconfirm type="warning" content="确定删除该账号吗?" @ok="onDelete(record)" :ok-button-props="{ status: 'danger' }">
+                      <a-popconfirm
+                        type="warning"
+                        content="确定删除该账号吗?"
+                        @ok="onDelete(record)"
+                        :ok-button-props="{ status: 'danger' }"
+                      >
                         <a-link class="uvp-table-action uvp-table-action--delete" v-hasPerm="['system:account:delete']">
                           <template #icon><icon-delete /></template>
                           <span>删除</span>

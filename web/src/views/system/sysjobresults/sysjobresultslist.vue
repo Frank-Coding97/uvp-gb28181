@@ -37,17 +37,29 @@
             用 status="danger" 软红；⛔ 不能加 type="primary" —— 一个操作区最多 1 个 primary，
             查询已经占了，且 primary 会把它变成实心蓝/橙（旧告警页是建真源之前的写法）。
           -->
-          <a-button
-            data-testid="sysjobresults-clear-all"
-            status="danger"
-            :loading="clearing"
+          <a-popconfirm
+            type="warning"
+            ok-text="清空"
+            cancel-text="取消"
+            :ok-button-props="{ status: 'danger' }"
             :disabled="clearing"
-            v-hasPerm="['system:sysjobresults:clear']"
-            @click="requestClearAll"
+            @ok="performClearAll"
           >
-            <template #icon><Eraser :size="15" /></template>
-            <span>一键清理</span>
-          </a-button>
+            <template #content>
+              <div class="uvp-confirm-title">一键清理定时任务日志？</div>
+              <div class="uvp-confirm-desc">将清空全部定时任务执行日志（不受当前筛选条件影响），删除后不可恢复。</div>
+            </template>
+            <a-button
+              data-testid="sysjobresults-clear-all"
+              status="danger"
+              :loading="clearing"
+              :disabled="clearing"
+              v-hasPerm="['system:sysjobresults:clear']"
+            >
+              <template #icon><Eraser :size="15" /></template>
+              <span>一键清理</span>
+            </a-button>
+          </a-popconfirm>
         </template>
       </s-layout-search>
 
@@ -89,14 +101,22 @@
           <a-table-column title="操作" :width="96" align="center" :fixed="isMobile ? '' : 'right'">
             <template #cell="{ record }">
               <div class="uvp-table-actions">
-                <a-link
-                  class="uvp-table-action uvp-table-action--delete"
-                  v-hasPerm="['system:sysjobresults:delete']"
-                  @click="requestDelete(record)"
+                <a-popconfirm
+                  type="warning"
+                  ok-text="删除"
+                  cancel-text="取消"
+                  :ok-button-props="{ status: 'danger' }"
+                  @ok="handleDelete(record.id)"
                 >
-                  <template #icon><icon-delete /></template>
-                  <span>删除</span>
-                </a-link>
+                  <template #content>
+                    <div class="uvp-confirm-title">删除日志记录？</div>
+                    <div class="uvp-confirm-desc">将物理删除这条定时任务日志，删除后不可恢复。</div>
+                  </template>
+                  <a-link class="uvp-table-action uvp-table-action--delete" v-hasPerm="['system:sysjobresults:delete']">
+                    <template #icon><icon-delete /></template>
+                    <span>删除</span>
+                  </a-link>
+                </a-popconfirm>
               </div>
             </template>
           </a-table-column>
@@ -109,7 +129,7 @@
 <script setup lang="ts">
 import { reactive, computed, ref, onMounted, watch } from "vue";
 import { useRoute } from "vue-router";
-import { Modal, Message } from "@arco-design/web-vue";
+import { Message } from "@arco-design/web-vue";
 import { Eraser } from "lucide-vue-next";
 import { useSysJobResultsPluginHook } from "@/hooks/useSysJobResults";
 import { formatTime } from "@/globals";
@@ -184,25 +204,10 @@ const handleReset = () => {
 };
 
 /**
- * 单条删除确认弹窗。
- * ⛔ 用 Modal.warning（不是 Modal.confirm）：本仓删除类操作统一带橙色警示图标 +
- *   danger 主按钮，与设备列表 / 固件仓库的删除确认「逐字对齐」；confirm 没有图标。
- * ⛔ 不再用 a-popconfirm 气泡：气泡样式贴单元格、误触即执行，日志页误删代价高。
+ * 删除数据（确认气泡的 @ok 直连这里）。
+ * ⛔ 2026-11-04 起全站删除统一用 `a-popconfirm` 气泡确认，不再弹 Modal 对话框；
+ *   原来的 Modal.warning 已删。气泡里的两行文案（标题 + 后果）写在模板 slot 里。
  */
-const requestDelete = (record: { id: number }) => {
-  Modal.warning({
-    title: "删除日志记录",
-    content: "将物理删除这条定时任务日志，删除后不可恢复。",
-    okText: "删除",
-    cancelText: "取消",
-    hideCancel: false,
-    escToClose: true,
-    okButtonProps: { status: "danger" },
-    onOk: () => handleDelete(record.id)
-  });
-};
-
-// 删除数据
 const handleDelete = async (id: number) => {
   try {
     await deleteData(id);
@@ -215,24 +220,10 @@ const handleDelete = async (id: number) => {
 };
 
 /**
- * 一键清理（清空全部日志）。
- * ⛔ 与单条删除共用一套弹窗形态，但文案要说清「全部」——这个按钮不受页面筛选条件影响。
+ * 一键清理（清空全部日志），确认气泡的 @ok 直连这里。
+ * ⛔ 文案必须说清「全部」——这个按钮不受页面筛选条件影响。
  * 成功后回到第一页重拉，避免停在已清空的末页。
  */
-const requestClearAll = () => {
-  if (clearing.value) return;
-  Modal.warning({
-    title: "一键清理定时任务日志",
-    content: "将清空全部定时任务执行日志（不受当前筛选条件影响），删除后不可恢复。",
-    okText: "清空",
-    cancelText: "取消",
-    hideCancel: false,
-    escToClose: true,
-    okButtonProps: { status: "danger" },
-    onOk: () => performClearAll()
-  });
-};
-
 const performClearAll = async () => {
   if (clearing.value) return;
   clearing.value = true;

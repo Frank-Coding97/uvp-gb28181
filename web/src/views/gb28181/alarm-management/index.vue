@@ -48,18 +48,31 @@
               <template #icon><RotateCcw :size="15" /></template>
               重置
             </a-button>
-            <a-button
-              data-testid="alarm-clear-all"
-              class="alarm-clear-all-btn"
-              type="primary"
-              status="warning"
-              :loading="clearDeleting"
+            <a-popconfirm
+              data-testid="clear-all-confirm"
+              type="warning"
+              ok-text="清空"
+              cancel-text="取消"
+              :ok-button-props="{ status: 'danger' }"
               :disabled="clearDeleting || !canClear"
-              @click="requestClearAll"
+              @ok="performClearAll"
             >
-              <template #icon><Eraser :size="15" /></template>
-              一键清理
-            </a-button>
+              <template #content>
+                <div class="uvp-confirm-title">一键清理告警？</div>
+                <div class="uvp-confirm-desc">将清除您数据权限范围内的所有告警记录，删除后不可恢复。</div>
+              </template>
+              <a-button
+                data-testid="alarm-clear-all"
+                class="alarm-clear-all-btn"
+                type="primary"
+                status="warning"
+                :loading="clearDeleting"
+                :disabled="clearDeleting || !canClear"
+              >
+                <template #icon><Eraser :size="15" /></template>
+                一键清理
+              </a-button>
+            </a-popconfirm>
           </template>
         </s-layout-search>
 
@@ -68,16 +81,29 @@
             >已选 <strong>{{ selectedRowKeys.length }}</strong> 条</span
           >
           <div class="alarm-batch-bar__ops">
-            <a-button
-              data-testid="batch-delete"
-              status="danger"
-              :loading="batchDeleting"
+            <a-popconfirm
+              data-testid="batch-delete-confirm"
+              type="warning"
+              ok-text="删除"
+              cancel-text="取消"
+              :ok-button-props="{ status: 'danger' }"
               :disabled="batchDeleting || !canDelete"
-              @click="requestBatchDelete"
+              @ok="performBatchDelete"
             >
-              <template #icon><Trash2 :size="14" /></template>
-              批量删除
-            </a-button>
+              <template #content>
+                <div class="uvp-confirm-title">批量删除告警？</div>
+                <div class="uvp-confirm-desc">将物理删除选中的 {{ selectedRowKeys.length }} 条告警记录，删除后不可恢复。</div>
+              </template>
+              <a-button
+                data-testid="batch-delete"
+                status="danger"
+                :loading="batchDeleting"
+                :disabled="batchDeleting || !canDelete"
+              >
+                <template #icon><Trash2 :size="14" /></template>
+                批量删除
+              </a-button>
+            </a-popconfirm>
             <a-button data-testid="batch-cancel" @click="selectedRowKeys = []">取消选择</a-button>
           </div>
         </div>
@@ -152,23 +178,40 @@
                       <template #icon><Eye :size="13" /></template>
                       <span>详情</span>
                     </a-link>
-                    <a-tooltip content="物理删除告警，不可恢复">
-                      <a-link
-                        class="uvp-table-action uvp-table-action--delete"
-                        :data-testid="`single-delete-${record.id}`"
-                        :loading="deletingIds.has(record.id)"
-                        :disabled="deletingIds.has(record.id) || !canDelete"
-                        role="button"
-                        tabindex="0"
-                        :aria-label="`物理删除告警 ${record.id}`"
-                        @click="requestSingleDelete(record)"
-                        @keydown.enter.prevent="requestSingleDelete(record)"
-                        @keydown.space.prevent="requestSingleDelete(record)"
-                      >
-                        <template #icon><Trash2 :size="13" /></template>
-                        <span>删除</span>
-                      </a-link>
-                    </a-tooltip>
+                    <a-popconfirm
+                      :data-testid="`single-delete-confirm-${record.id}`"
+                      type="warning"
+                      ok-text="删除"
+                      cancel-text="取消"
+                      :ok-button-props="{ status: 'danger' }"
+                      :disabled="deletingIds.has(record.id) || !canDelete"
+                      @ok="performSingleDelete(record.id)"
+                    >
+                      <template #content>
+                        <div class="uvp-confirm-title">物理删除告警？</div>
+                        <div class="uvp-confirm-desc">
+                          将物理删除 {{ displayAlarmEntityName(record.device) }} /
+                          {{ displayAlarmEntityName(record.channel, record.sourceCode || "未知来源") }} 在
+                          {{ formatDateTime(record.alarmTime) }} 的告警记录，删除后不可恢复。
+                        </div>
+                      </template>
+                      <a-tooltip content="物理删除告警，不可恢复">
+                        <a-link
+                          class="uvp-table-action uvp-table-action--delete"
+                          :data-testid="`single-delete-${record.id}`"
+                          :loading="deletingIds.has(record.id)"
+                          :disabled="deletingIds.has(record.id) || !canDelete"
+                          role="button"
+                          tabindex="0"
+                          :aria-label="`物理删除告警 ${record.id}`"
+                          @keydown.enter.prevent="openDeleteConfirm"
+                          @keydown.space.prevent="openDeleteConfirm"
+                        >
+                          <template #icon><Trash2 :size="13" /></template>
+                          <span>删除</span>
+                        </a-link>
+                      </a-tooltip>
+                    </a-popconfirm>
                   </div>
                 </template>
               </a-table-column>
@@ -186,7 +229,7 @@
       :alarm-id="detailAlarmId"
       :can-delete="canDelete"
       :deleting="detailAlarmId ? deletingIds.has(detailAlarmId) : false"
-      @delete="requestSingleDelete"
+      @delete="performSingleDelete($event.id)"
     />
   </div>
 </template>
@@ -194,7 +237,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { Eraser, Eye, RotateCcw, Search, Trash2 } from "@lucide/vue";
-import { Modal } from "@arco-design/web-vue";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import useGlobalProperties from "@/hooks/useGlobalProperties";
 import { useUserStoreHook } from "@/store/modules/user";
@@ -336,20 +378,9 @@ function openDetail(id: string) {
   detailVisible.value = true;
 }
 
-function requestSingleDelete(alarm: AlarmListItem) {
-  if (!canDelete.value || deletingIds.value.has(alarm.id)) return;
-  const deviceName = displayAlarmEntityName(alarm.device);
-  const sourceName = displayAlarmEntityName(alarm.channel, alarm.sourceCode || "未知来源");
-  Modal.warning({
-    title: "物理删除告警",
-    content: `将物理删除 ${deviceName} / ${sourceName} 在 ${formatDateTime(alarm.alarmTime)} 的告警记录，删除后不可恢复。`,
-    okText: "删除",
-    cancelText: "取消",
-    hideCancel: false,
-    escToClose: true,
-    okButtonProps: { status: "danger" },
-    onOk: () => performSingleDelete(alarm.id)
-  });
+/** 键盘操作删除：只把动作转成一次点击，交给气泡触发器，绝不直接执行删除。 */
+function openDeleteConfirm(event: KeyboardEvent) {
+  (event.currentTarget as HTMLElement | null)?.click();
 }
 
 async function performSingleDelete(id: string) {
@@ -374,20 +405,6 @@ async function performSingleDelete(id: string) {
   }
 }
 
-function requestBatchDelete() {
-  if (!canDelete.value || !selectedRowKeys.value.length || batchDeleting.value) return;
-  Modal.warning({
-    title: "批量删除告警",
-    content: `将物理删除选中的 ${selectedRowKeys.value.length} 条告警记录，删除后不可恢复。`,
-    okText: "删除",
-    cancelText: "取消",
-    hideCancel: false,
-    escToClose: true,
-    okButtonProps: { status: "danger" },
-    onOk: () => performBatchDelete()
-  });
-}
-
 async function performBatchDelete() {
   if (!canDelete.value || batchDeleting.value) return;
   batchDeleting.value = true;
@@ -404,20 +421,6 @@ async function performBatchDelete() {
   } finally {
     batchDeleting.value = false;
   }
-}
-
-function requestClearAll() {
-  if (!canClear.value || clearDeleting.value) return;
-  Modal.warning({
-    title: "一键清理告警",
-    content: "将清除您数据权限范围内的所有告警记录，删除后不可恢复。",
-    okText: "清空",
-    cancelText: "取消",
-    hideCancel: false,
-    escToClose: true,
-    okButtonProps: { status: "danger" },
-    onOk: () => performClearAll()
-  });
 }
 
 async function performClearAll() {
