@@ -274,4 +274,40 @@ describe("播放控制台共享设备配置控件", () => {
       [[{ weekDayNum: 1, segments: [{ start: "00:00:00", stop: "23:59:59" }] }]]
     ]);
   });
+
+  /**
+   * 2026-11-05 老板以为时间轴能拖选 —— 根源是轴上写着「点这里新增时段」但那行字**没绑点击**，
+   * 手型光标 + 看着能点的空白区，点了什么都不发生。这三条钉住"点了到底有没有反应"。
+   */
+  it("点时间轴空白处真的能新增一段全天时段", async () => {
+    const wrapper = mount(DeviceConfigWeekPlan, {
+      props: { modelValue: [] },
+      global: { stubs: componentStubs }
+    });
+
+    await wrapper.get("[data-testid='dcw-track-2']").trigger("click");
+    expect(wrapper.emitted("update:modelValue")).toEqual([
+      [[{ weekDayNum: 2, segments: [{ start: "00:00:00", stop: "23:59:59" }] }]]
+    ]);
+  });
+
+  it("点已有色块只定位到输入框，不顺手再新增一段", async () => {
+    const wrapper = mount(DeviceConfigWeekPlan, {
+      props: { modelValue: [{ weekDayNum: 1, segments: [{ start: "08:00:00", stop: "18:00:00" }] }] },
+      global: { stubs: componentStubs }
+    });
+
+    await wrapper.get("[data-testid='dcw-block-1-0']").trigger("click");
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+  });
+
+  it("禁用时点时间轴不会偷偷改计划", async () => {
+    const wrapper = mount(DeviceConfigWeekPlan, {
+      props: { modelValue: [], disabled: true },
+      global: { stubs: componentStubs }
+    });
+
+    await wrapper.get("[data-testid='dcw-track-1']").trigger("click");
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+  });
 });

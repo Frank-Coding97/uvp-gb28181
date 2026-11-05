@@ -21,6 +21,13 @@
  *    现在这一刻在不在录。轴是**给人扫的**，输入框是**给人改的**，两者都要，不是二选一。
  * ⛔ 时间轴这一版**不做拖拽**：拖拽要处理碰撞、吸附、最小粒度，成本翻倍，而现场多数是
  *    "复制一份改两处"。点空白处新增一段（全天）、点色块把焦点跳到对应的起止输入框，够用。
+ *
+ * ⛔⛔ **轴只做「看」和「定位」，时间只能在下面输入框里改** —— 但轴长得像可拖的进度条，
+ *    2026-11-05 老板第一眼就以为能拖选。所以三件事必须同时成立，少一件就又变成"看起来能点、
+ *    点了没反应"：
+ *    ① 点空白真的能新增（原来只有一行「点这里新增时段」的小字，**没绑 click**，纯说谎）；
+ *    ② 点色块真的跳到输入框（有 `focusSegment`，且不许拖拽光标）；
+ *    ③ 页脚把"时间从这里输"讲明白，别让人自己去猜。
  */
 import { computed } from "vue";
 import { CalendarPlus, Plus, Trash2 } from "@lucide/vue";
@@ -120,7 +127,15 @@ function toggleDay(weekDayNum: number, enabled: boolean) {
   commit(next);
 }
 
+/**
+ * 给这天加一段（全天）。轴上的空白点击与「+时段」按钮都走这里。
+ *
+ * ⛔ 空白区必须**真的能点**。上一版这块只有一行「点这里新增时段」的静态文字，
+ *    鼠标变手型、看着像按钮，点了什么都不会发生 —— 这比不写这行字更糟。
+ * ⛔ 点色块定位时要 `stop`，否则"定位 + 新加一段"会一起发生。
+ */
 function addSegment(weekDayNum: number) {
+  if (props.disabled) return;
   const next = viewDays.value.map(day => ({ ...day, segments: [...day.segments] }));
   const target = next.find(day => day.weekDayNum === weekDayNum);
   if (!target) return;
@@ -220,15 +235,21 @@ const coverageText = computed(() => {
         </a-button>
         <span class="dcw-label">周{{ WEEKDAY_LABELS[day.weekDayNum - 1] }}</span>
 
-        <div class="dcw-track">
+        <div
+          class="dcw-track"
+          :class="{ 'is-readonly': disabled }"
+          :title="disabled ? '' : '点空白处新增一段全天时段（时间到下方输入框改）'"
+          :data-testid="`dcw-track-${day.weekDayNum}`"
+          @click="addSegment(day.weekDayNum)"
+        >
           <span
             v-for="(segment, index) in day.segments"
             :key="index"
             class="dcw-block"
             :style="segmentStyle(segment)"
-            :title="`${segmentLabel(segment)}，点击定位到输入框`"
+            :title="`${segmentLabel(segment)}，点击定位到下方的起止输入框`"
             :data-testid="`dcw-block-${day.weekDayNum}-${index}`"
-            @click="focusSegment(day.weekDayNum, index)"
+            @click.stop="focusSegment(day.weekDayNum, index)"
           >
             <em>{{ segmentLabel(segment) }}</em>
           </span>
@@ -293,7 +314,11 @@ const coverageText = computed(() => {
       <span class="dcw-foot-sep">·</span>
       <span>{{ coverageText }}</span>
       <span class="dcw-foot-sep">·</span>
-      <span>关掉某天表示该天没有录像计划（整条不下发），时刻按 HH:MM:SS 下发</span>
+      <span>时间在下方起止框里按 HH:MM:SS 填写</span>
+      <span class="dcw-foot-sep">·</span>
+      <span>时间轴只用来定位和看覆盖，不能拖动</span>
+      <span class="dcw-foot-sep">·</span>
+      <span>关掉某天表示该天没有录像计划（整条不下发）</span>
     </p>
   </div>
 </template>
@@ -413,8 +438,25 @@ const coverageText = computed(() => {
   position: relative;
   height: 20px;
   overflow: hidden;
+
+  /* ⛔ 手型是**"点一下加一段"**的意思，不是"可拖拽"：这一版轴的空白区绑了 click
+     （见 addSegment），色块绑的是"定位到输入框"。两者都不是拖。 */
+  cursor: pointer;
   background: var(--uvp-shell-muted);
   border-radius: 4px;
+  transition: background 0.12s;
+
+  &:hover {
+    background: var(--uvp-brand-soft, rgb(59 130 246 / 10%));
+  }
+
+  &.is-readonly {
+    cursor: not-allowed;
+
+    &:hover {
+      background: var(--uvp-shell-muted);
+    }
+  }
 }
 
 .dcw-block {
