@@ -226,3 +226,75 @@ test("apply.sh 版本不匹配时拒绝执行且不改文件", () => {
 
   rmSync(root, { recursive: true, force: true });
 });
+
+// ---------------------------------------------------------------- Windows ----
+
+/** 造带现场数据的 Windows 发行目录：中文名前端资源、运行时上传件、nginx 渲染产物。 */
+function windowsFixture() {
+  const base = fixture();
+  write(base.from, "bin/uvp-server.exe", "old-server\n");
+  write(base.to, "bin/uvp-server.exe", "new-server\n");
+  write(base.from, "updater/uvp-updater.exe", "old-helper\n");
+  write(base.to, "updater/uvp-updater.exe", "new-helper\n");
+  write(base.from, "uvp-gb28181-ctl.ps1", "# ctl\n");
+  write(base.to, "uvp-gb28181-ctl.ps1", "# ctl\n");
+  // 中文名的前端资源：zip 必须按 UTF-8 存，否则 Windows 解出来是乱码文件名
+  write(base.to, "resource/public/static/插件-abc123.js", "cn asset\n");
+  // 运行时数据：只在旧版有 ⇒ 绝不能进删除清单
+  write(base.from, "resource/public/uploads/2026-09-01/user.jpg", "user data\n");
+  write(base.from, "resource/public/gb-channel-snapshot/2026-07/cam.jpg", "snapshot\n");
+  write(base.from, "resource/baseline/__pycache__/generate.cpython-312.pyc", "bytecode\n");
+  // 构建期渲染产物：两版都不同，但不该进包
+  write(base.from, "vendor/nginx/conf/nginx.conf", "pid C:/build-16/run/nginx.pid;\n");
+  write(base.to, "vendor/nginx/conf/nginx.conf", "pid C:/build-17/run/nginx.pid;\n");
+  return base;
+}
+
+test("现场运行时数据与构建期产物都不参与增量", () => {
+  const { from, to } = windowsFixture();
+  const diff = diffReleases(from, to);
+  const all = [...diff.add, ...diff.modify, ...diff.remove];
+  assert.ok(all.every((rel) => !rel.startsWith("resource/public/uploads/")));
+  assert.ok(all.every((rel) => !rel.startsWith("resource/public/gb-channel-snapshot/")));
+  assert.ok(all.every((rel) => !rel.includes("__pycache__")));
+  assert.ok(all.every((rel) => rel !== "vendor/nginx/conf/nginx.conf"));
+  assert.equal(diff.protectedDropped.length, 3);
+});
+
+test("Windows 平台产出 zip，脚本带 BOM 且文件名按 UTF-8 存储", () => {
+  const { root, from, to } = windowsFixture();
+  const outDir = path.join(root, "out");
+  const result = buildUpdatePackage({ fromDir: from, toDir: to, platform: "windows-amd64", outDir });
+
+  assert.ok(result.archive.endsWith(".zip"), "Windows 包必须是 zip");
+  assert.equal(result.stem, "uvp-gb28181-update-windows-amd64-1.1.16-to-1.1.17");
+  assert.equal(readFileSync(`${result.archive}.sha256`, "utf8").split(/\s+/)[0], result.sha256);
+
+  // 结构自洽：CRC 全对才能通过 unzip -t
+  execFileSync("unzip", ["-t", result.archive], { stdio: "pipe" });
+
+  // ⛔ 不用 unzip -Z1 验中文名：macOS 的 Info-ZIP 在非终端环境会把 UTF-8 名字降级成乱码，
+  //   测出来的是它的显示问题，不是包的问题。直接查原始字节 —— 名字必须是 UTF-8 编码。
+  //   ⚠️ macOS 文件系统存 NFD，所以按 NFD 形态找；两者都是同一串 UTF-8 字节序列。
+  const raw = readFileSync(result.archive);
+  const has = (name) => raw.includes(Buffer.from(name, "utf8"));
+  assert.ok(has("插件-abc123.js"), "中文文件名必须按 UTF-8 存入 zip");
+  assert.ok(has("apply.ps1"));
+  assert.ok(has("apply.cmd"));
+  assert.ok(has("updater/uvp-updater.exe.new"), "助手必须是旁挂 .new");
+
+  // PowerShell 5.1 读无 BOM 的 .ps1 会按系统代码页（简中=GBK）解码 ⇒ 中文乱码甚至语法错
+  const psBytes = readFileSync(path.join(result.staging, "apply.ps1"));
+  assert.deepEqual([...psBytes.subarray(0, 3)], [0xef, 0xbb, 0xbf], "apply.ps1 必须带 UTF-8 BOM");
+  const psText = psBytes.toString("utf8");
+  assert.match(psText, /\$FromVersion\s*=\s*'1\.1\.16'/);
+  assert.match(psText, /\$ToVersion\s*=\s*'1\.1\.17'/);
+  assert.ok(!psText.includes("__FROM_VERSION__"));
+
+  // apply.cmd 是双击入口：CRLF 换行 + 绕过执行策略，否则客户机点开一闪而过
+  const cmd = readFileSync(path.join(result.staging, "apply.cmd"), "utf8");
+  assert.ok(cmd.includes("-ExecutionPolicy Bypass"));
+  assert.ok(cmd.includes("\r\n"));
+
+  rmSync(root, { recursive: true, force: true });
+});
