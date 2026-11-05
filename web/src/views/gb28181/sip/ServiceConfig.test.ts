@@ -1130,6 +1130,7 @@ describe("ServiceConfig edit mode", () => {
     expect(api.fetchSaveAlarmMessagesConfig).toHaveBeenCalledOnce();
     expect(wrapper.text()).toContain("是否存储报警消息");
     expect(wrapper.find("[data-field='saveAlarmMessages']").attributes("data-tooltip")).toContain("关闭后仍接收和解析报警通知");
+    expect(wrapper.find("[data-field='saveAlarmMessages']").attributes("data-tooltip")).toContain("默认关闭");
     const alarmSwitch = wrapper
       .findAll("label")
       .find(label => label.text().includes("是否存储报警消息"))

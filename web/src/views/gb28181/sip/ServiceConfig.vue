@@ -866,7 +866,7 @@ onMounted(async () => {
                 <a-form-item
                   field="saveAlarmMessages"
                   label="是否存储报警消息"
-                  tooltip="开启后将设备报警通知写入报警管理；关闭后仍接收和解析报警通知，但不写入报警记录。默认开启。"
+                  tooltip="开启后将设备报警通知写入报警管理；关闭后仍接收和解析报警通知，但不写入报警记录。默认关闭。"
                 >
                   <a-switch
                     v-model="draft.saveAlarmMessages"
