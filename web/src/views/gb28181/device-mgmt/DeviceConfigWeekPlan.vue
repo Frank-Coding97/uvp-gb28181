@@ -12,6 +12,8 @@
  * 2. ⛔ 时段保留到**秒**。协议里 `StartSec` / `StopSec` 都是必选整数；
  *    界面只让填到分钟，就等于每次下发把设备上原有的秒清零 ——
  *    静默改写，而且回读对账还会显示"一致"（因为比的是平台发出去的值）。
+ *    ⚠️ 唯一的例外是**用户亲手拖过的那一段**：拖拽吸附 15 分钟，秒会归零。
+ *    没被拖的段必须原样保留 —— 不许在任何批量路径里顺手 normalize 秒。
  * 3. 新建时段给 `00:00:00 ~ 23:59:59`（全天）：这是安防场景最常见的计划，
  *    而不是随手的 `00:00~00:00` 空区间 —— 那种默认值一发出去就是"零长时段"。
  *
@@ -19,19 +21,27 @@
  *
  * ⛔ 原来 7 行 × 每段两个输入框，只能"读数字"：一眼看不出哪天没排、哪天压了两段、
  *    现在这一刻在不在录。轴是**给人扫的**，输入框是**给人改的**，两者都要，不是二选一。
- * ⛔ 时间轴这一版**不做拖拽**：拖拽要处理碰撞、吸附、最小粒度，成本翻倍，而现场多数是
- *    "复制一份改两处"。点空白处新增一段（全天）、点色块把焦点跳到对应的起止输入框，够用。
+ * ⛔ **时间轴是可拖的**（2026-11-05 老板要求）：拖色块中间 = 平移，拖左右两端 = 改起止，
+ *    吸附 15 分钟；点空白 = 新增一段全天；单击（没有位移）= 把焦点送到对应的起止输入框。
+ *    几何算法全部在 `deviceConfigWeekPlanDrag.ts`（纯函数、可单测），组件只负责把 clientX
+ *    换算成"位移了多少分钟"—— 拖拽里最容易错的吸附/边界/最短时长一律不写在组件里。
  *
- * ⛔⛔ **轴只做「看」和「定位」，时间只能在下面输入框里改** —— 但轴长得像可拖的进度条，
- *    2026-11-05 老板第一眼就以为能拖选。所以三件事必须同时成立，少一件就又变成"看起来能点、
- *    点了没反应"：
+ * ⛔⛔ 三件事必须同时成立，少一件就又变成"看起来能拖、拖了没反应"：
  *    ① 点空白真的能新增（原来只有一行「点这里新增时段」的小字，**没绑 click**，纯说谎）；
- *    ② 点色块真的跳到输入框（有 `focusSegment`，且不许拖拽光标）；
- *    ③ 页脚把"时间从这里输"讲明白，别让人自己去猜。
+ *    ② 拖动真的改值（松手才 commit，拖动中只更新预览；`origin` 是按下那刻的快照，不许叠加）；
+ *    ③ 页脚把"吸附 15 分钟、秒级回输入框改"讲明白，别让人自己试出来。
  */
-import { computed } from "vue";
+import { computed, onBeforeUnmount, ref } from "vue";
 import { CalendarPlus, Plus, Trash2 } from "@lucide/vue";
 import { WEEKDAY_LABELS, type ConfigScheduleDay } from "./deviceConfigGroups";
+import {
+  DAY_MINUTES,
+  applyDrag,
+  parseMinutes,
+  percentOfMinutes,
+  type DragMode,
+  type WeekPlanSegment
+} from "./deviceConfigWeekPlanDrag";
 
 const props = withDefaults(
   defineProps<{
@@ -85,11 +95,8 @@ const nowPercent = computed(() => {
 
 /** `HH:MM:SS` → 一天里的百分比。格式不认识时按 0 处理，让色块退化成一个点而不是崩掉。 */
 function percentOf(time: string | undefined): number {
-  const match = /^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/.exec((time ?? "").trim());
-  if (!match) return 0;
-  const seconds = Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3] ?? 0);
-  if (!Number.isFinite(seconds)) return 0;
-  return Math.min(100, Math.max(0, (seconds / 86400) * 100));
+  const minutes = parseMinutes(time);
+  return minutes === null ? 0 : percentOfMinutes(minutes);
 }
 
 /**
@@ -160,11 +167,129 @@ function setSegment(weekDayNum: number, index: number, edge: "start" | "stop", r
   commit(next);
 }
 
+/* ─────────────────────── 拖拽（粗调）─────────────────────── */
+
 /**
- * 点色块 → 把焦点送到该段的"开始"输入框。
+ * 拖拽进行中的状态。
  *
- * ⛔ 不是"点色块就开始拖拽"，也不是"点色块弹一个时间选择器"：前者这一版不做，
- *    后者会让人以为改的是别处。跳到那条输入框，改哪儿一目了然，键盘接着就能打。
+ * ⛔ `origin` 必须是**按下那一刻的整天快照**：位移始终相对它算。若每帧拿"当前值 + 本次位移"
+ *    叠加，吸附会把位移越抹越大，松手时能偏出好几个小时（典型"拖 10 分钟跳到 2 小时"）。
+ */
+type DragState = {
+  weekDayNum: number;
+  index: number;
+  mode: DragMode;
+  origin: WeekPlanSegment[];
+  startX: number;
+  trackWidth: number;
+  moved: boolean;
+};
+
+/** 起手到松手之间小于这个像素数，算"没拖"，仍是一次点击。 */
+const DRAG_THRESHOLD_PX = 3;
+
+const drag = ref<DragState | null>(null);
+/** 拖动中的预览，按周几存；松手才落成正式值。 */
+const preview = ref<Record<number, WeekPlanSegment[]>>({});
+/** 松手那一下浏览器还会补一个 click，要吞掉，否则焦点被抢进输入框。 */
+let suppressClickUntil = 0;
+
+/** 渲染用的段：拖动中的那一段走预览值，其余照旧。 */
+function segmentsFor(day: ConfigScheduleDay): WeekPlanSegment[] {
+  return preview.value[day.weekDayNum] ?? day.segments;
+}
+
+function startDrag(event: MouseEvent, weekDayNum: number, index: number, mode: DragMode) {
+  if (props.disabled) return;
+  const element = event.currentTarget as HTMLElement | null;
+  const track = element?.closest(".dcw-track") as HTMLElement | null;
+  const trackWidth = track?.getBoundingClientRect().width ?? 0;
+  // 拿不到宽度（元素还没布局 / 测试环境）就只能当点击处理，不能瞎算比例。
+  if (!trackWidth) return;
+  const day = viewDays.value.find(item => item.weekDayNum === weekDayNum);
+  if (!day) return;
+
+  drag.value = {
+    weekDayNum,
+    index,
+    mode,
+    origin: day.segments.map(segment => ({ ...segment })),
+    startX: event.clientX,
+    trackWidth,
+    moved: false
+  };
+  element?.setPointerCapture?.((event as PointerEvent).pointerId);
+  window.addEventListener("pointermove", onDragMove);
+  window.addEventListener("pointerup", endDrag);
+  window.addEventListener("pointercancel", endDrag);
+  event.preventDefault();
+}
+
+function onDragMove(event: PointerEvent) {
+  const state = drag.value;
+  if (!state) return;
+  const deltaX = event.clientX - state.startX;
+  if (!state.moved && Math.abs(deltaX) < DRAG_THRESHOLD_PX) return;
+  state.moved = true;
+  preview.value = {
+    ...preview.value,
+    [state.weekDayNum]: applyDrag(state.origin, state.index, state.mode, (deltaX / state.trackWidth) * DAY_MINUTES)
+  };
+}
+
+function endDrag() {
+  const state = drag.value;
+  drag.value = null;
+  window.removeEventListener("pointermove", onDragMove);
+  window.removeEventListener("pointerup", endDrag);
+  window.removeEventListener("pointercancel", endDrag);
+  if (!state) return;
+
+  const next = preview.value[state.weekDayNum];
+  const rest = { ...preview.value };
+  delete rest[state.weekDayNum];
+  preview.value = rest;
+
+  // 没动过（纯点击）不提交：否则"点色块定位"会被记成一次改动，平白点亮下发按钮。
+  if (!state.moved || !next) return;
+  suppressClickUntil = Date.now() + 250;
+  commitDay(state.weekDayNum, next);
+}
+
+/** 把某一天的段合并回整周并提交（其余 6 天原样带走）。 */
+function commitDay(weekDayNum: number, segments: WeekPlanSegment[]) {
+  commit(
+    viewDays.value.map(day => ({
+      weekDayNum: day.weekDayNum,
+      segments: (day.weekDayNum === weekDayNum ? segments : day.segments).map(segment => ({ ...segment }))
+    }))
+  );
+}
+
+/** 色块点击：拖动刚结束时忽略，平时把焦点送到起止输入框。 */
+function onBlockClick(weekDayNum: number, index: number) {
+  if (Date.now() < suppressClickUntil) return;
+  focusSegment(weekDayNum, index);
+}
+
+/** 空白点击：拖动刚结束时忽略，平时加一段全天。 */
+function onTrackClick(weekDayNum: number) {
+  if (Date.now() < suppressClickUntil) return;
+  addSegment(weekDayNum);
+}
+
+onBeforeUnmount(() => {
+  window.removeEventListener("pointermove", onDragMove);
+  window.removeEventListener("pointerup", endDrag);
+  window.removeEventListener("pointercancel", endDrag);
+});
+
+/**
+ * 单击色块（**没有位移**）→ 把焦点送到该段的"开始"输入框。
+ *
+ * ⛔ 同一个色块上现在并存两种手势：位移超过 3px 算拖动（见 `startDrag`），
+ *    没超过才算单击。所以这里必须先看 `suppressClickUntil` —— 拖完那一下浏览器还会补个
+ *    click，不吞掉就会"刚拖完，光标被抢进输入框"。
  */
 function focusSegment(weekDayNum: number, index: number) {
   const node = document.querySelector<HTMLInputElement>(`[data-testid="dcw-start-${weekDayNum}-${index}"] input`);
@@ -238,20 +363,34 @@ const coverageText = computed(() => {
         <div
           class="dcw-track"
           :class="{ 'is-readonly': disabled }"
-          :title="disabled ? '' : '点空白处新增一段全天时段（时间到下方输入框改）'"
+          :title="disabled ? '' : '点空白处新增一段；拖动色块中间平移、拖两端改起止（吸附 15 分钟）'"
           :data-testid="`dcw-track-${day.weekDayNum}`"
-          @click="addSegment(day.weekDayNum)"
+          @click="onTrackClick(day.weekDayNum)"
         >
           <span
-            v-for="(segment, index) in day.segments"
+            v-for="(segment, index) in segmentsFor(day)"
             :key="index"
             class="dcw-block"
+            :class="{ 'is-dragging': drag?.weekDayNum === day.weekDayNum && drag?.index === index }"
             :style="segmentStyle(segment)"
-            :title="`${segmentLabel(segment)}，点击定位到下方的起止输入框`"
+            :title="`${segmentLabel(segment)}：拖中间平移，拖两端改起止，单击定位到输入框`"
             :data-testid="`dcw-block-${day.weekDayNum}-${index}`"
-            @click.stop="focusSegment(day.weekDayNum, index)"
+            @pointerdown.stop="startDrag($event, day.weekDayNum, index, 'move')"
+            @click.stop="onBlockClick(day.weekDayNum, index)"
           >
+            <span
+              class="dcw-handle is-start"
+              aria-hidden="true"
+              :data-testid="`dcw-handle-start-${day.weekDayNum}-${index}`"
+              @pointerdown.stop="startDrag($event, day.weekDayNum, index, 'start')"
+            />
             <em>{{ segmentLabel(segment) }}</em>
+            <span
+              class="dcw-handle is-stop"
+              aria-hidden="true"
+              :data-testid="`dcw-handle-stop-${day.weekDayNum}-${index}`"
+              @pointerdown.stop="startDrag($event, day.weekDayNum, index, 'stop')"
+            />
           </span>
           <span v-if="!day.segments.length" class="dcw-track-empty">点这里新增时段</span>
           <span v-if="day.weekDayNum === todayWeekDay" class="dcw-now" :style="{ left: `${nowPercent}%` }" title="当前时刻" />
@@ -314,9 +453,9 @@ const coverageText = computed(() => {
       <span class="dcw-foot-sep">·</span>
       <span>{{ coverageText }}</span>
       <span class="dcw-foot-sep">·</span>
-      <span>时间在下方起止框里按 HH:MM:SS 填写</span>
+      <span>拖色块中间平移、拖两端改起止（吸附 15 分钟）</span>
       <span class="dcw-foot-sep">·</span>
-      <span>时间轴只用来定位和看覆盖，不能拖动</span>
+      <span>秒级时间在下方起止框里按 HH:MM:SS 填写</span>
       <span class="dcw-foot-sep">·</span>
       <span>关掉某天表示该天没有录像计划（整条不下发）</span>
     </p>
@@ -439,9 +578,12 @@ const coverageText = computed(() => {
   height: 20px;
   overflow: hidden;
 
-  /* ⛔ 手型是**"点一下加一段"**的意思，不是"可拖拽"：这一版轴的空白区绑了 click
-     （见 addSegment），色块绑的是"定位到输入框"。两者都不是拖。 */
+  /* ⛔ 两种光标是两件事：空白区的手型 =「点一下加一段」（见 addSegment），
+     色块自己的 grab / ew-resize =「能拖」。混着用就又回到"看着能拖其实不能"。
+     ⛔ 触摸拖动要自己吃掉手势，否则浏览器先滚页面，色块跟到一半就丢事件。 */
+  touch-action: none;
   cursor: pointer;
+  user-select: none;
   background: var(--uvp-shell-muted);
   border-radius: 4px;
   transition: background 0.12s;
@@ -467,7 +609,10 @@ const coverageText = computed(() => {
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  cursor: pointer;
+  touch-action: none;
+
+  /* 整块 = 平移（grab）。左右两端另有 ew-resize 手柄，见 `.dcw-handle`。 */
+  cursor: grab;
 
   /* 实心块 + 白字：两套主题下都用 --uvp-solid-*，别拿 --uvp-brand 当底色。 */
   background: var(--uvp-solid-bg);
@@ -481,11 +626,69 @@ const coverageText = computed(() => {
     font-style: normal;
     color: var(--uvp-solid-text);
     white-space: nowrap;
+    pointer-events: none;
   }
 
   &:hover {
     filter: brightness(1.12);
   }
+
+  &.is-dragging {
+    z-index: 2;
+    cursor: grabbing;
+
+    /* 拖动中要压在"现在"那条红线上，否则红线会从色块中间穿过去，看着像断成两段。 */
+    outline: 1px solid var(--uvp-solid-text);
+    outline-offset: -1px;
+  }
+}
+
+/**
+ * 左右调边手柄。
+ *
+ * ⛔ 手柄平时**不显形**（只占 6px 的热区 + 一个 ew-resize 光标）：段很窄时两条白杠会把
+ *    `08:00-18:00` 这类标签挤没。hover 时才亮出两条细杠，告诉人这里能拖。
+ */
+.dcw-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  touch-action: none;
+  cursor: ew-resize;
+
+  &.is-start {
+    left: 0;
+  }
+
+  &.is-stop {
+    right: 0;
+  }
+
+  &::after {
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    width: 2px;
+    content: "";
+    background: var(--uvp-solid-text);
+    border-radius: 1px;
+    opacity: 0;
+    transition: opacity 0.12s;
+  }
+
+  &.is-start::after {
+    left: 2px;
+  }
+
+  &.is-stop::after {
+    right: 2px;
+  }
+}
+
+.dcw-block:hover .dcw-handle::after,
+.dcw-block.is-dragging .dcw-handle::after {
+  opacity: 0.6;
 }
 
 .dcw-track-empty {

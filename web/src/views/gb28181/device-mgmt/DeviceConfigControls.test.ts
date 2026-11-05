@@ -310,4 +310,83 @@ describe("播放控制台共享设备配置控件", () => {
     await wrapper.get("[data-testid='dcw-track-1']").trigger("click");
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
   });
+
+  /**
+   * 拖拽的算法在 `deviceConfigWeekPlanDrag.test.ts` 里逐条钉过；这里钉的是**接线**：
+   * pointerdown → pointermove → pointerup 三下之后，值到底有没有出去、有没有出去两次。
+   *
+   * ⛔ 必须直接 mount 组件本体，不能套一层 `defineComponent` 包装 —— 事件会被包装层的
+   *    `onUpdate:modelValue` 接走，`wrapper.emitted()` 一条都看不到（踩过）。
+   */
+  function mountDraggable(modelValue: { weekDayNum: number; segments: { start: string; stop: string }[] }[]) {
+    const model = ref(modelValue);
+    const wrapper = mount(DeviceConfigWeekPlan, {
+      props: {
+        modelValue: model.value,
+        "onUpdate:modelValue": (next: typeof modelValue) => {
+          model.value = next;
+        }
+      },
+      global: { stubs: componentStubs }
+    });
+    // happy-dom 里元素没有布局，宽度一律 0；这里按 1px = 1 分钟（全天 1440px）铺出来。
+    const track = wrapper.get("[data-testid='dcw-track-1']").element as HTMLElement;
+    Object.defineProperty(track, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        width: 1440,
+        height: 20,
+        top: 0,
+        left: 0,
+        right: 1440,
+        bottom: 20,
+        x: 0,
+        y: 0,
+        toJSON: () => ({})
+      })
+    });
+    return { wrapper };
+  }
+
+  it("拖动色块中间：松手才落值，且按 15 分钟吸附", async () => {
+    const { wrapper } = mountDraggable([{ weekDayNum: 1, segments: [{ start: "08:00:00", stop: "10:00:00" }] }]);
+
+    const block = wrapper.get("[data-testid='dcw-block-1-0']").element as HTMLElement;
+    block.dispatchEvent(new MouseEvent("pointerdown", { clientX: 10, bubbles: true }));
+    window.dispatchEvent(new MouseEvent("pointermove", { clientX: 105 }));
+    // 拖动中只更新预览，不许往父组件写 —— 否则每一步都点亮一次"待下发"
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+
+    window.dispatchEvent(new MouseEvent("pointerup", { clientX: 105 }));
+    // 95 分钟吸附到 90 分钟：08:00 → 09:30
+    expect(wrapper.emitted("update:modelValue")).toEqual([
+      [[{ weekDayNum: 1, segments: [{ start: "09:30:00", stop: "11:30:00" }] }]]
+    ]);
+    wrapper.unmount();
+  });
+
+  it("拖右端手柄只改结束时间，起点那几秒原样留着", async () => {
+    const { wrapper } = mountDraggable([{ weekDayNum: 1, segments: [{ start: "08:00:30", stop: "10:00:00" }] }]);
+
+    const handle = wrapper.get("[data-testid='dcw-handle-stop-1-0']").element as HTMLElement;
+    handle.dispatchEvent(new MouseEvent("pointerdown", { clientX: 600, bubbles: true }));
+    window.dispatchEvent(new MouseEvent("pointermove", { clientX: 630 }));
+    window.dispatchEvent(new MouseEvent("pointerup", { clientX: 630 }));
+
+    expect(wrapper.emitted("update:modelValue")).toEqual([
+      [[{ weekDayNum: 1, segments: [{ start: "08:00:30", stop: "10:30:00" }] }]]
+    ]);
+    wrapper.unmount();
+  });
+
+  it("没有位移就松手算单击：不提交，也不新增时段", async () => {
+    const { wrapper } = mountDraggable([{ weekDayNum: 1, segments: [{ start: "08:00:00", stop: "10:00:00" }] }]);
+
+    const block = wrapper.get("[data-testid='dcw-block-1-0']").element as HTMLElement;
+    block.dispatchEvent(new MouseEvent("pointerdown", { clientX: 100, bubbles: true }));
+    window.dispatchEvent(new MouseEvent("pointerup", { clientX: 101 }));
+
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+    wrapper.unmount();
+  });
 });
