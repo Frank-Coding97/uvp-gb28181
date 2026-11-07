@@ -407,7 +407,16 @@ func databaseIdentitySQL(dialect migration.Dialect) string {
 		//   no such function: DATABASE，而它在 -migrate-up 的第一个查询就执行。
 		return "SELECT 'uvp.db' AS database_name, 'sqlite' AS database_version"
 	default:
-		return "SELECT DATABASE() AS database_name, VERSION() AS database_version"
+		// ⛔ 这里必须套一层 CAST，不能写裸的 `SELECT DATABASE() AS database_name, ...`。
+		//   PolarDB-X（开源版 v2.4.2 / 5.4.19）把以 DATABASE() 开头的 SELECT 当成
+		//   特殊语句短路：只返回一列、列名固定为 `DATABASE()`，**AS 别名被整体丢弃**，
+		//   后面的 VERSION() 直接消失（实测 192.168.10.220）。GORM 按
+		//   `column:database_name` 匹配不到列，报
+		//   `unsupported Scan, storing driver.Value type []uint8 into type *databaseIdentity`，
+		//   看上去像驱动类型不兼容，实际是列名没了。
+		//   套 CAST 之后它被当成普通表达式，别名与两列都正常返回；
+		//   对 MySQL 8 语义完全等价（parseargs_test 断言仍要求含 "DATABASE()"）。
+		return "SELECT CAST(DATABASE() AS CHAR) AS database_name, CAST(VERSION() AS CHAR) AS database_version"
 	}
 }
 
