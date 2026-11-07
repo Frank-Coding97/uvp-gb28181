@@ -568,11 +568,129 @@ class SQLiteProfile(Profile):
         return super().default_clause(col, ctype)
 
 
+class DamengProfile(Profile):
+    """达梦 DM8 方言。
+
+    达梦是 Oracle 血统，不是 PG / MySQL 兼容模式：标识符用双引号、自增用
+    IDENTITY、索引是 schema 级对象（必须独立 CREATE INDEX，不能内联进
+    CREATE TABLE）。所以渲染路径与 PostgreSQL 同形，差别只在类型与自增写法。
+    """
+
+    name = "dameng"
+    emits_comments = True
+
+    # ⛔⛔ VARCHAR(n) 的 n 在达梦默认是**字节**（LENGTH_IN_CHAR=0），而本基线的
+    #   列宽是从 Go 模型按 MySQL 的「字符数」语义抄来的。实测（192.168.10.52
+    #   的 DM8，CHARSET=GB18030、LENGTH_IN_CHAR=0）：VARCHAR(255) 存到第 127 个
+    #   汉字就报「列[name]长度超出定义」，第 128 个直接失败 —— 容量刚好腰斩。
+    #   放大 3 倍后两种字符集都够：GB18030 汉字 2 字节、UTF-8 汉字 3 字节。
+    #   LENGTH_IN_CHAR=1 的实例上只是上限更宽，VARCHAR 变长存储不占额外空间。
+    LENGTH_FACTOR = 3
+
+    def quote(self, name: str) -> str:
+        """与 GORM 的达梦 dialector 对齐：它总是给标识符加双引号。
+
+        基线若用裸名，建出来的是**大写**对象（达梦对未加引号的标识符做
+        case folding），而 GORM 发出去的是小写带引号 —— 两套名字对不上，
+        症状是「脚本导入成功、表也在，但应用说表不存在」。
+        """
+        return '"' + name.replace('"', '""') + '"'
+
+    def map_type(self, col, ctype, auto_increment):
+        base, args = ctype.base, ctype.args
+        identity = " IDENTITY(1,1)" if auto_increment else ""
+        if col.get("boolean"):
+            # 达梦没有独立的 BOOLEAN 列类型（BIT 的语义在跨版本上不一致），
+            # 用 TINYINT 存 0/1：GORM 的 bool 字段读它就是 0/1 → true/false。
+            return "TINYINT"
+        if base == "tinyint":
+            return "TINYINT" + identity
+        if base in {"smallint", "mediumint"}:
+            return "SMALLINT" + identity
+        if base in {"int", "integer"}:
+            return "INT" + identity
+        if base == "bigint":
+            return "BIGINT" + identity
+        if base in {"decimal", "numeric"}:
+            return "DECIMAL(" + ",".join(args) + ")" if args else "DECIMAL(20,6)"
+        if base in {"double", "double precision"}:
+            return "DOUBLE"
+        if base in {"float", "real"}:
+            return "REAL"
+        if base == "date":
+            return "DATE"
+        if base == "time":
+            return "TIME"
+        if base == "year":
+            return "SMALLINT"
+        if base in {"datetime", "timestamp"}:
+            return "TIMESTAMP(" + (args[0] if args else "6") + ")"
+        if base in {"varchar", "char"}:
+            length = int(args[0]) if args and args[0].isdigit() else (1 if base == "char" else 255)
+            # 上限 32767 是达梦 VARCHAR 的字数/字节数上限附近，放大后别越界。
+            scaled = min(length * self.LENGTH_FACTOR, 32000)
+            # ⛔⛔ char **不能**照着译成 CHAR：达梦是 Oracle 血统，CHAR 定长空格填充，
+            #   而且读回来**带填充**（实测 CHAR(192) 存 'abcdef' → LENGTH 仍是 192，
+            #   日志打出来是 'abcdef' + 186 个空格）。MySQL 的 CHAR 取值会剥掉尾空格，
+            #   这套代码就是按「读回来没有填充」写的 —— 直接搬 CHAR 会让所有
+            #   ``dbValue != computedValue`` 的字符串比较静默判不等：
+            #     · sys_openapi_runtime_state.snapshot_hash（CHAR(192) vs 内存里 64 字符）
+            #       → 每次发布都报 active state snapshot hash mismatch 并整事务回滚；
+            #     · sys_openapi_node_runtime.current_boot_nonce（CHAR(96) vs 32 字符）
+            #       → 探测确认永远认为「换了个新 nonce」。
+            #   这些列在 Go 侧都当变长字符串用，从没有定宽语义，所以统一出 VARCHAR。
+            return "VARCHAR(" + str(scaled) + ")"
+        if base in {"text", "tinytext", "mediumtext", "longtext"}:
+            return "TEXT"
+        if base == "json":
+            # 达梦无 JSON 列类型；TEXT 是 CLOB 的别名，容量 2^31。
+            return "TEXT"
+        if base in BLOB_BASES:
+            return "BLOB"
+        if base == "bit":
+            return "TINYINT"
+        if base in {"enum", "set"}:
+            return "VARCHAR(255)"
+        raise ValueError(f"达梦无映射: {ctype.raw}")
+
+    def table_comment_statements(self, table: dict) -> list[str]:
+        """达梦与 PostgreSQL 一样用独立的 COMMENT ON 语句。"""
+        q = self.quote
+        name = table["name"]
+        out: list[str] = []
+        if table.get("comment"):
+            out.append(f"COMMENT ON TABLE {q(name)} IS {self.comment_literal(table['comment'])};")
+        for col in table["columns"]:
+            if col.get("comment"):
+                out.append(
+                    f"COMMENT ON COLUMN {q(name)}.{q(col['name'])} IS "
+                    f"{self.comment_literal(col['comment'])};"
+                )
+        return out
+
+    def translate_check(self, clause: str) -> str:
+        """MySQL CHECK 表达式 → 达梦。
+
+        两处必转：
+        * ``_utf8mb4'x'`` / ``_ascii'x'`` 字符集字面量前缀，达梦不认；
+        * ``length(x)`` —— MySQL 的是**字节**数，达梦同名函数是**字符**数。
+          直接照抄会让「json 列不超过 32768」这类约束在中文内容上放宽三倍，
+          所以译成 ``lengthb``。``char_length`` 两边同义，保持不动。
+        * 反引号标识符 → 双引号。
+        ``regexp_like`` 达梦原生支持，保持原样。
+        """
+        text = re.sub(r"_(?:utf8mb4|utf8|ascii|binary|latin1|ucs2|utf16|utf32|gbk)(?=')", "", clause)
+        text = re.sub(r"(?<![A-Za-z0-9_])length\s*\(", "lengthb(", text, flags=re.I)
+        text = re.sub(r"`([^`]+)`", r'"\1"', text)
+        return text
+
+
 PROFILES: dict[str, Profile] = {
     "mysql": MySQLProfile(),
     "postgresql": PostgresProfile(),
     "sqlserver": SQLServerProfile(),
     "sqlite": SQLiteProfile(),
+    "dameng": DamengProfile(),
 }
 
 
@@ -814,7 +932,11 @@ def index_columns(profile: Profile, columns: list[dict]) -> tuple[list[str], lis
 # works on MySQL/SQL Server but collides elsewhere -- and with
 # "CREATE INDEX IF NOT EXISTS" the collision is silent, leaving the later tables
 # without their index (and, for unique indexes, without their uniqueness).
-SCHEMA_WIDE_INDEX_NAMES = {"postgresql", "sqlite"}
+# 这些方言的索引名必须在**整个 schema 内**唯一，不能像 MySQL 那样按表各自
+# 命名。达梦的索引是 schema 级对象（Oracle 血统），两张表各有一个
+# idx_device_id 会直接报「索引名已存在」，于是第二张表少一个索引 ——
+# 而脚本其余部分全部成功，属于最难发现的静默缺失。
+SCHEMA_WIDE_INDEX_NAMES = {"postgresql", "sqlite", "dameng"}
 PG_IDENTIFIER_LIMIT = 63
 
 
@@ -830,7 +952,14 @@ def resolve_index_names(dialect: str, tables: list[dict]) -> dict[tuple[str, str
     for table in tables:
         for entry in table["uniques"] + table["indexes"]:
             name = entry["name"]
-            if counts[name] == 1 and name not in used:
+            # ⛔ 达梦的约束名与索引名共享同一个命名空间：先 CREATE INDEX "x"，
+            #   再 ALTER TABLE ADD CONSTRAINT "x" 会报「数据库对象[x]已存在」
+            #   （实测于 192.168.10.52 的 DM8）。基线里正好有一对撞名的 ——
+            #   MySQL 为外键自动建的索引 fk_openapi_authority_generation 与
+            #   同名外键。所以达梦的索引/唯一约束名一律加表名前缀，从根上避开，
+            #   而不是逐个打补丁。
+            force_prefix = dialect == "dameng"
+            if not force_prefix and counts[name] == 1 and name not in used:
                 used.add(name)
                 mapping[(table["name"], name)] = name
                 continue
@@ -1014,7 +1143,7 @@ def render_table(profile: Profile, table: dict,
                 f"-- NOTE: {unique['name']} 的 {', '.join(dropped)} 使用前缀索引，"
                 f"该方言无等价语法，已从唯一约束中移除。"
             )
-        body.append(f"  CONSTRAINT {named(unique)} UNIQUE ({', '.join(cols)})")
+        body.append(f"  CONSTRAINT {profile.quote(named(unique))} UNIQUE ({', '.join(cols)})")
     for check in table.get("checks", []):
         body.append(profile.render_check(table, check))
     lines.append(",\n".join(body))
@@ -1029,7 +1158,7 @@ def render_table(profile: Profile, table: dict,
                 f"-- NOTE: {index['name']} 的 {', '.join(dropped)} 使用前缀索引，"
                 f"该方言无等价语法，已从索引中移除。"
             )
-        lines.append(f"CREATE INDEX {named(index)} ON {prefix} ({', '.join(cols)});")
+        lines.append(f"CREATE INDEX {profile.quote(named(index))} ON {prefix} ({', '.join(cols)});")
     return "\n".join(lines)
 
 
@@ -1108,7 +1237,7 @@ def render_seed(profile: Profile, table: dict, rows: list[dict], batch: int = 20
         statements.append(
             f"INSERT INTO {profile.quote(name)} ({header}) VALUES\n" + ",\n".join(values) + ";"
         )
-    if profile.name == "sqlserver":
+    if profile.name in {"sqlserver", "dameng"}:
         # IDENTITY 列默认拒绝显式值。基线种子全部用显式 id（跨方言一致），
         # 所以必须整段包在 SET IDENTITY_INSERT 里，否则第一次插入就报
         # "Cannot insert explicit value for identity column"。
@@ -1184,6 +1313,29 @@ def build_document(dialect: str, ir: dict, seeds: dict[str, list[dict]],
         out.append("--   * 字符串字面量与默认值一律带 N 前缀；文本/json 映射 NVARCHAR(MAX)。")
         out.append("")
         out.append("SET NOCOUNT ON;")
+    elif dialect == "dameng":
+        out.append("-- UVP-GB28181 达梦 DM8 release initialization script")
+        if model_derived_note:
+            out.append(model_derived_note)
+        out.append("-- Generated from the development schema by")
+        out.append("-- server/resource/database/baseline/generate_sql.py. Do not edit by hand.")
+        out.append(f"-- Schema fingerprint: {fingerprint}")
+        out.append("-- Contains production table structures and release baseline data only.")
+        out.append("")
+        out.append("-- 方言差异（由 profile 消化，阅读时注意）：")
+        out.append("--   * 标识符一律双引号 + 原名小写，与 GORM 达梦 dialector 的引用方式一致。")
+        out.append("--     达梦对未加引号的标识符做大写折叠，裸名会建出另一套名字。")
+        out.append("--   * 自增主键渲染成 IDENTITY(1,1)；种子带显式 id，整段包在")
+        out.append("--     SET IDENTITY_INSERT ... ON/OFF 之间。")
+        out.append("--   * VARCHAR(n) 的 n 在达梦默认按**字节**算（LENGTH_IN_CHAR=0），")
+        out.append("--     故已按 3 倍放大，保证中文不会撞「长度超出定义」。")
+        out.append("--   * 索引是 schema 级对象，名字已全局去重。")
+        out.append("--   * MySQL 的 ON UPDATE CURRENT_TIMESTAMP 已丢弃：达梦无等价 DDL，")
+        out.append("--     该语义由应用层维护 updated_at 承担。")
+        out.append("")
+        out.append("-- 建库参数要求（在建实例时定死，事后不可改）：")
+        out.append("--   CASE_SENSITIVE=N  —— 大小写不敏感，裸 SQL 与带引号名才能互认")
+        out.append("--   LENGTH_IN_CHAR=1  —— 有则更好；没有也已按字节语义放大过列宽")
     else:
         out.append("-- UVP-GB28181 SQLite standalone baseline.")
         if model_derived_note:
@@ -1265,6 +1417,7 @@ OUTPUTS = {
     "mysql": DATABASE_DIR / "uvp-gb28181.sql",
     "postgresql": DATABASE_DIR / "postgresql_converted.sql",
     "sqlserver": DATABASE_DIR / "sqlserver_converted.sql",
+    "dameng": DATABASE_DIR / "dameng_converted.sql",
 }
 
 # These tables form the durable OpenAPI capability publication projection.

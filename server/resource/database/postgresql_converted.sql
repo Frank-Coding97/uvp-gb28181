@@ -15,10 +15,10 @@ CREATE TABLE "gb_alarm_binding" (
   "source" VARCHAR(16) NOT NULL DEFAULT 'manual',
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
-  CONSTRAINT uk_alarm_binding_channel UNIQUE ("device_id", "channel_code")
+  CONSTRAINT "uk_alarm_binding_channel" UNIQUE ("device_id", "channel_code")
 );
-CREATE INDEX idx_alarm_binding_device ON "gb_alarm_binding" ("device_id");
-CREATE INDEX idx_alarm_binding_resource ON "gb_alarm_binding" ("alarm_resource_id");
+CREATE INDEX "idx_alarm_binding_device" ON "gb_alarm_binding" ("device_id");
+CREATE INDEX "idx_alarm_binding_resource" ON "gb_alarm_binding" ("alarm_resource_id");
 
 DROP TABLE IF EXISTS "gb_alarm_event";
 CREATE TABLE "gb_alarm_event" (
@@ -43,12 +43,12 @@ CREATE TABLE "gb_alarm_event" (
   "received_at" TIMESTAMP NOT NULL,
   "created_at" TIMESTAMP,
   "updated_at" TIMESTAMP,
-  CONSTRAINT uk_dedupe_key UNIQUE ("dedupe_key")
+  CONSTRAINT "uk_dedupe_key" UNIQUE ("dedupe_key")
 );
-CREATE INDEX idx_alarm_device_time ON "gb_alarm_event" ("device_id", "alarm_time");
-CREATE INDEX idx_alarm_time ON "gb_alarm_event" ("alarm_time");
-CREATE INDEX gb_alarm_event__idx_channel_id ON "gb_alarm_event" ("channel_id");
-CREATE INDEX idx_received_at ON "gb_alarm_event" ("received_at");
+CREATE INDEX "idx_alarm_device_time" ON "gb_alarm_event" ("device_id", "alarm_time");
+CREATE INDEX "idx_alarm_time" ON "gb_alarm_event" ("alarm_time");
+CREATE INDEX "gb_alarm_event__idx_channel_id" ON "gb_alarm_event" ("channel_id");
+CREATE INDEX "idx_received_at" ON "gb_alarm_event" ("received_at");
 
 DROP TABLE IF EXISTS "gb_alarm_resource";
 CREATE TABLE "gb_alarm_resource" (
@@ -65,13 +65,13 @@ CREATE TABLE "gb_alarm_resource" (
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
   "deleted_at" TIMESTAMP(3),
-  CONSTRAINT uk_alarm_resource_code UNIQUE ("owner_dept_id", "device_code", "alarm_code")
+  CONSTRAINT "uk_alarm_resource_code" UNIQUE ("owner_dept_id", "device_code", "alarm_code")
 );
-CREATE INDEX idx_alarm_resource_alarm_code ON "gb_alarm_resource" ("alarm_code");
-CREATE INDEX idx_alarm_resource_deleted_at ON "gb_alarm_resource" ("deleted_at");
-CREATE INDEX idx_alarm_resource_device ON "gb_alarm_resource" ("owner_dept_id", "device_code");
-CREATE INDEX idx_alarm_resource_device_id ON "gb_alarm_resource" ("device_id");
-CREATE INDEX idx_alarm_resource_type ON "gb_alarm_resource" ("resource_type");
+CREATE INDEX "idx_alarm_resource_alarm_code" ON "gb_alarm_resource" ("alarm_code");
+CREATE INDEX "idx_alarm_resource_deleted_at" ON "gb_alarm_resource" ("deleted_at");
+CREATE INDEX "idx_alarm_resource_device" ON "gb_alarm_resource" ("owner_dept_id", "device_code");
+CREATE INDEX "idx_alarm_resource_device_id" ON "gb_alarm_resource" ("device_id");
+CREATE INDEX "idx_alarm_resource_type" ON "gb_alarm_resource" ("resource_type");
 
 DROP TABLE IF EXISTS "gb_alarm_resource_parent";
 CREATE TABLE "gb_alarm_resource_parent" (
@@ -79,10 +79,10 @@ CREATE TABLE "gb_alarm_resource_parent" (
   "alarm_resource_id" BIGINT NOT NULL,
   "parent_code" VARCHAR(20) NOT NULL,
   "created_at" TIMESTAMP(3) NOT NULL,
-  CONSTRAINT uk_alarm_resource_parent UNIQUE ("alarm_resource_id", "parent_code")
+  CONSTRAINT "uk_alarm_resource_parent" UNIQUE ("alarm_resource_id", "parent_code")
 );
-CREATE INDEX idx_alarm_parent_code ON "gb_alarm_resource_parent" ("parent_code");
-CREATE INDEX idx_alarm_parent_resource ON "gb_alarm_resource_parent" ("alarm_resource_id");
+CREATE INDEX "idx_alarm_parent_code" ON "gb_alarm_resource_parent" ("parent_code");
+CREATE INDEX "idx_alarm_parent_resource" ON "gb_alarm_resource_parent" ("alarm_resource_id");
 
 DROP TABLE IF EXISTS "gb_anomaly_record";
 CREATE TABLE "gb_anomaly_record" (
@@ -109,8 +109,8 @@ COMMENT ON COLUMN "gb_anomaly_record"."source_device_id" IS '来源下级平台/
 COMMENT ON COLUMN "gb_anomaly_record"."resolved" IS '0=待处理 1=已处理';
 COMMENT ON COLUMN "gb_anomaly_record"."resolved_action" IS '动作摘要';
 COMMENT ON COLUMN "gb_anomaly_record"."owner_dept_id" IS '所属部门ID';
-CREATE INDEX idx_node ON "gb_anomaly_record" ("catalog_node_id");
-CREATE INDEX idx_owner_dept_resolved ON "gb_anomaly_record" ("owner_dept_id", "resolved", "created_at");
+CREATE INDEX "idx_node" ON "gb_anomaly_record" ("catalog_node_id");
+CREATE INDEX "idx_owner_dept_resolved" ON "gb_anomaly_record" ("owner_dept_id", "resolved", "created_at");
 
 DROP TABLE IF EXISTS "gb_cascade_alarm_delivery";
 CREATE TABLE "gb_cascade_alarm_delivery" (
@@ -133,10 +133,10 @@ CREATE TABLE "gb_cascade_alarm_delivery" (
   "sent_at" TIMESTAMP(3),
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
-  CONSTRAINT uk_cascade_alarm_delivery_key UNIQUE ("delivery_key")
+  CONSTRAINT "uk_cascade_alarm_delivery_key" UNIQUE ("delivery_key")
 );
-CREATE INDEX idx_cascade_alarm_delivery_due ON "gb_cascade_alarm_delivery" ("platform_id", "state", "next_attempt_at");
-CREATE INDEX idx_cascade_alarm_delivery_lease ON "gb_cascade_alarm_delivery" ("lease_until");
+CREATE INDEX "idx_cascade_alarm_delivery_due" ON "gb_cascade_alarm_delivery" ("platform_id", "state", "next_attempt_at");
+CREATE INDEX "idx_cascade_alarm_delivery_lease" ON "gb_cascade_alarm_delivery" ("lease_until");
 
 DROP TABLE IF EXISTS "gb_cascade_business_binding";
 CREATE TABLE "gb_cascade_business_binding" (
@@ -144,7 +144,7 @@ CREATE TABLE "gb_cascade_business_binding" (
   "platform_id" BIGINT NOT NULL,
   "source_channel_id" BIGINT NOT NULL,
   "node_code" VARCHAR(20) NOT NULL,
-  CONSTRAINT uk_cascade_business_binding_channel UNIQUE ("platform_id", "source_channel_id")
+  CONSTRAINT "uk_cascade_business_binding_channel" UNIQUE ("platform_id", "source_channel_id")
 );
 
 DROP TABLE IF EXISTS "gb_cascade_business_node";
@@ -156,7 +156,7 @@ CREATE TABLE "gb_cascade_business_node" (
   "kind" VARCHAR(16) NOT NULL,
   "parent_code" VARCHAR(20) NOT NULL DEFAULT '',
   "sort" INTEGER NOT NULL DEFAULT 0,
-  CONSTRAINT uk_cascade_business_node_code UNIQUE ("platform_id", "code")
+  CONSTRAINT "uk_cascade_business_node_code" UNIQUE ("platform_id", "code")
 );
 
 DROP TABLE IF EXISTS "gb_cascade_channel_projection";
@@ -174,12 +174,12 @@ CREATE TABLE "gb_cascade_channel_projection" (
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
   "deleted_at" TIMESTAMP(3),
-  CONSTRAINT uk_cascade_channel_published UNIQUE ("platform_id", "published_channel_id"),
-  CONSTRAINT uk_cascade_channel_source UNIQUE ("platform_id", "source_channel_id")
+  CONSTRAINT "uk_cascade_channel_published" UNIQUE ("platform_id", "published_channel_id"),
+  CONSTRAINT "uk_cascade_channel_source" UNIQUE ("platform_id", "source_channel_id")
 );
-CREATE INDEX idx_cascade_channel_deleted_at ON "gb_cascade_channel_projection" ("deleted_at");
-CREATE INDEX idx_cascade_channel_device_projection ON "gb_cascade_channel_projection" ("device_projection_id");
-CREATE INDEX idx_cascade_channel_platform_active ON "gb_cascade_channel_projection" ("platform_id", "active");
+CREATE INDEX "idx_cascade_channel_deleted_at" ON "gb_cascade_channel_projection" ("deleted_at");
+CREATE INDEX "idx_cascade_channel_device_projection" ON "gb_cascade_channel_projection" ("device_projection_id");
+CREATE INDEX "idx_cascade_channel_platform_active" ON "gb_cascade_channel_projection" ("platform_id", "active");
 
 DROP TABLE IF EXISTS "gb_cascade_device_projection";
 CREATE TABLE "gb_cascade_device_projection" (
@@ -200,11 +200,11 @@ CREATE TABLE "gb_cascade_device_projection" (
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
   "deleted_at" TIMESTAMP(3),
-  CONSTRAINT uk_cascade_device_published UNIQUE ("platform_id", "published_device_id"),
-  CONSTRAINT uk_cascade_device_source UNIQUE ("platform_id", "source_device_id")
+  CONSTRAINT "uk_cascade_device_published" UNIQUE ("platform_id", "published_device_id"),
+  CONSTRAINT "uk_cascade_device_source" UNIQUE ("platform_id", "source_device_id")
 );
-CREATE INDEX idx_cascade_device_deleted_at ON "gb_cascade_device_projection" ("deleted_at");
-CREATE INDEX idx_cascade_device_platform_active ON "gb_cascade_device_projection" ("platform_id", "active");
+CREATE INDEX "idx_cascade_device_deleted_at" ON "gb_cascade_device_projection" ("deleted_at");
+CREATE INDEX "idx_cascade_device_platform_active" ON "gb_cascade_device_projection" ("platform_id", "active");
 
 DROP TABLE IF EXISTS "gb_cascade_media_session";
 CREATE TABLE "gb_cascade_media_session" (
@@ -239,11 +239,11 @@ CREATE TABLE "gb_cascade_media_session" (
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
   "session_kind" VARCHAR(16) NOT NULL DEFAULT 'video',
-  CONSTRAINT uk_cascade_media_dialog UNIQUE ("dialog_key")
+  CONSTRAINT "uk_cascade_media_dialog" UNIQUE ("dialog_key")
 );
-CREATE INDEX idx_cascade_media_call_id ON "gb_cascade_media_session" ("call_id");
-CREATE INDEX idx_cascade_media_kind_state ON "gb_cascade_media_session" ("session_kind", "state");
-CREATE INDEX idx_cascade_media_platform_state ON "gb_cascade_media_session" ("platform_id", "state");
+CREATE INDEX "idx_cascade_media_call_id" ON "gb_cascade_media_session" ("call_id");
+CREATE INDEX "idx_cascade_media_kind_state" ON "gb_cascade_media_session" ("session_kind", "state");
+CREATE INDEX "idx_cascade_media_platform_state" ON "gb_cascade_media_session" ("platform_id", "state");
 
 DROP TABLE IF EXISTS "gb_cascade_platform";
 CREATE TABLE "gb_cascade_platform" (
@@ -299,11 +299,11 @@ CREATE TABLE "gb_cascade_platform" (
   "device_control_enabled" BOOLEAN NOT NULL DEFAULT false,
   "maintenance_enabled" BOOLEAN NOT NULL DEFAULT false,
   "upgrade_enabled" BOOLEAN NOT NULL DEFAULT false,
-  CONSTRAINT uk_cascade_platform_connection UNIQUE ("local_device_id", "local_domain", "upstream_server_id", "host", "port", "transport"),
-  CONSTRAINT uk_cascade_platform_name UNIQUE ("name")
+  CONSTRAINT "uk_cascade_platform_connection" UNIQUE ("local_device_id", "local_domain", "upstream_server_id", "host", "port", "transport"),
+  CONSTRAINT "uk_cascade_platform_name" UNIQUE ("name")
 );
-CREATE INDEX idx_cascade_platform_deleted_at ON "gb_cascade_platform" ("deleted_at");
-CREATE INDEX idx_cascade_platform_enabled ON "gb_cascade_platform" ("enabled");
+CREATE INDEX "idx_cascade_platform_deleted_at" ON "gb_cascade_platform" ("deleted_at");
+CREATE INDEX "idx_cascade_platform_enabled" ON "gb_cascade_platform" ("enabled");
 
 DROP TABLE IF EXISTS "gb_cascade_snapshot_session";
 CREATE TABLE "gb_cascade_snapshot_session" (
@@ -327,12 +327,12 @@ CREATE TABLE "gb_cascade_snapshot_session" (
   "downstream_session_id" VARCHAR(128),
   "upload_token" VARCHAR(64),
   "upstream_upload_url" TEXT,
-  CONSTRAINT uk_cascade_snapshot_downstream UNIQUE ("downstream_session_id"),
-  CONSTRAINT uk_cascade_snapshot_request UNIQUE ("platform_id", "request_key"),
-  CONSTRAINT uk_cascade_snapshot_session UNIQUE ("platform_id", "upstream_session_id"),
-  CONSTRAINT uk_cascade_snapshot_upload UNIQUE ("upload_token")
+  CONSTRAINT "uk_cascade_snapshot_downstream" UNIQUE ("downstream_session_id"),
+  CONSTRAINT "uk_cascade_snapshot_request" UNIQUE ("platform_id", "request_key"),
+  CONSTRAINT "uk_cascade_snapshot_session" UNIQUE ("platform_id", "upstream_session_id"),
+  CONSTRAINT "uk_cascade_snapshot_upload" UNIQUE ("upload_token")
 );
-CREATE INDEX idx_cascade_snapshot_expiry ON "gb_cascade_snapshot_session" ("platform_id", "expires_at");
+CREATE INDEX "idx_cascade_snapshot_expiry" ON "gb_cascade_snapshot_session" ("platform_id", "expires_at");
 
 DROP TABLE IF EXISTS "gb_catalog_node";
 CREATE TABLE "gb_catalog_node" (
@@ -375,15 +375,15 @@ COMMENT ON COLUMN "gb_catalog_node"."anomaly" IS 'Q1:1=识别失败被兜底';
 COMMENT ON COLUMN "gb_catalog_node"."anomaly_reason" IS '兜底原因';
 COMMENT ON COLUMN "gb_catalog_node"."raw_code" IS '兜底前原始编码';
 COMMENT ON COLUMN "gb_catalog_node"."owner_dept_id" IS '所属部门ID';
-CREATE INDEX idx_catalog_alarm_resource ON "gb_catalog_node" ("alarm_resource_id");
-CREATE INDEX idx_code ON "gb_catalog_node" ("code");
-CREATE INDEX gb_catalog_node__idx_deleted_at ON "gb_catalog_node" ("deleted_at");
-CREATE INDEX idx_owner_dept_anomaly ON "gb_catalog_node" ("owner_dept_id", "anomaly");
-CREATE INDEX idx_owner_dept_civil_code ON "gb_catalog_node" ("owner_dept_id", "civil_code");
-CREATE INDEX idx_owner_dept_parent ON "gb_catalog_node" ("owner_dept_id", "parent_id");
-CREATE INDEX idx_owner_dept_path ON "gb_catalog_node" ("owner_dept_id", left("path", 128));
-CREATE INDEX idx_owner_dept_type ON "gb_catalog_node" ("owner_dept_id", "node_type");
-CREATE INDEX idx_owner_source_type_code ON "gb_catalog_node" ("owner_dept_id", "source_device_id", "node_type", "code");
+CREATE INDEX "idx_catalog_alarm_resource" ON "gb_catalog_node" ("alarm_resource_id");
+CREATE INDEX "idx_code" ON "gb_catalog_node" ("code");
+CREATE INDEX "gb_catalog_node__idx_deleted_at" ON "gb_catalog_node" ("deleted_at");
+CREATE INDEX "idx_owner_dept_anomaly" ON "gb_catalog_node" ("owner_dept_id", "anomaly");
+CREATE INDEX "idx_owner_dept_civil_code" ON "gb_catalog_node" ("owner_dept_id", "civil_code");
+CREATE INDEX "idx_owner_dept_parent" ON "gb_catalog_node" ("owner_dept_id", "parent_id");
+CREATE INDEX "idx_owner_dept_path" ON "gb_catalog_node" ("owner_dept_id", left("path", 128));
+CREATE INDEX "idx_owner_dept_type" ON "gb_catalog_node" ("owner_dept_id", "node_type");
+CREATE INDEX "idx_owner_source_type_code" ON "gb_catalog_node" ("owner_dept_id", "source_device_id", "node_type", "code");
 
 DROP TABLE IF EXISTS "gb_channel";
 CREATE TABLE "gb_channel" (
@@ -434,7 +434,7 @@ CREATE TABLE "gb_channel" (
   "status_event" VARCHAR(8) NOT NULL DEFAULT '',
   "stream_identification" VARCHAR(32) NOT NULL DEFAULT '',
   "current_stream_identification" VARCHAR(32),
-  CONSTRAINT uk_device_channel UNIQUE ("device_id", "channel_id")
+  CONSTRAINT "uk_device_channel" UNIQUE ("device_id", "channel_id")
 );
 COMMENT ON TABLE "gb_channel" IS 'GB28181国标通道表';
 COMMENT ON COLUMN "gb_channel"."channel_id" IS '通道国标编码';
@@ -477,11 +477,11 @@ COMMENT ON COLUMN "gb_channel"."capabilities" IS '通道能力 {audio,h265,night
 COMMENT ON COLUMN "gb_channel"."snapshot_url" IS '通道最新快照 URL(相对路径,如 /uploads/gb-channel-snapshot/2026-07/xxx_yyy.jpg)';
 COMMENT ON COLUMN "gb_channel"."snapshot_at" IS '通道最新快照抓拍时间';
 COMMENT ON COLUMN "gb_channel"."owner_dept_id" IS '所属部门ID';
-CREATE INDEX gb_channel__idx_deleted_at ON "gb_channel" ("deleted_at");
-CREATE INDEX idx_device_id ON "gb_channel" ("device_id");
-CREATE INDEX gb_channel__idx_owner_dept_deleted ON "gb_channel" ("owner_dept_id", "deleted_at");
-CREATE INDEX idx_stream_id ON "gb_channel" ("stream_id");
-CREATE INDEX idx_stream_transport ON "gb_channel" ("stream_transport");
+CREATE INDEX "gb_channel__idx_deleted_at" ON "gb_channel" ("deleted_at");
+CREATE INDEX "idx_device_id" ON "gb_channel" ("device_id");
+CREATE INDEX "gb_channel__idx_owner_dept_deleted" ON "gb_channel" ("owner_dept_id", "deleted_at");
+CREATE INDEX "idx_stream_id" ON "gb_channel" ("stream_id");
+CREATE INDEX "idx_stream_transport" ON "gb_channel" ("stream_transport");
 
 DROP TABLE IF EXISTS "gb_channel_favorite_group";
 CREATE TABLE "gb_channel_favorite_group" (
@@ -490,9 +490,9 @@ CREATE TABLE "gb_channel_favorite_group" (
   "name" VARCHAR(64) NOT NULL,
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
-  CONSTRAINT uk_gb_channel_favorite_group_owner_name UNIQUE ("owner_user_id", "name")
+  CONSTRAINT "uk_gb_channel_favorite_group_owner_name" UNIQUE ("owner_user_id", "name")
 );
-CREATE INDEX idx_gb_channel_favorite_group_owner ON "gb_channel_favorite_group" ("owner_user_id");
+CREATE INDEX "idx_gb_channel_favorite_group_owner" ON "gb_channel_favorite_group" ("owner_user_id");
 
 DROP TABLE IF EXISTS "gb_channel_favorite_item";
 CREATE TABLE "gb_channel_favorite_item" (
@@ -504,9 +504,9 @@ CREATE TABLE "gb_channel_favorite_item" (
   "channel_name" VARCHAR(255) NOT NULL DEFAULT '',
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
-  CONSTRAINT uk_gb_channel_favorite_item_code UNIQUE ("group_id", "device_code", "channel_code")
+  CONSTRAINT "uk_gb_channel_favorite_item_code" UNIQUE ("group_id", "device_code", "channel_code")
 );
-CREATE INDEX idx_gb_channel_favorite_item_group ON "gb_channel_favorite_item" ("group_id");
+CREATE INDEX "idx_gb_channel_favorite_item_group" ON "gb_channel_favorite_item" ("group_id");
 
 DROP TABLE IF EXISTS "gb_channel_mount";
 CREATE TABLE "gb_channel_mount" (
@@ -520,7 +520,7 @@ CREATE TABLE "gb_channel_mount" (
   "created_at" TIMESTAMP,
   "updated_at" TIMESTAMP,
   "owner_dept_id" INTEGER NOT NULL DEFAULT 0,
-  CONSTRAINT uk_channel_parent UNIQUE ("channel_id", "parent_node_id")
+  CONSTRAINT "uk_channel_parent" UNIQUE ("channel_id", "parent_node_id")
 );
 COMMENT ON TABLE "gb_channel_mount" IS '通道与目录树节点的 N:N 挂载关系';
 COMMENT ON COLUMN "gb_channel_mount"."channel_id" IS '物理通道';
@@ -529,8 +529,8 @@ COMMENT ON COLUMN "gb_channel_mount"."display_name" IS '挂载点别名,NULL=继
 COMMENT ON COLUMN "gb_channel_mount"."is_primary" IS '1=主挂载,每个 channel 必有且仅有一个';
 COMMENT ON COLUMN "gb_channel_mount"."mount_source" IS 'catalog/manual';
 COMMENT ON COLUMN "gb_channel_mount"."owner_dept_id" IS '所属部门ID';
-CREATE INDEX idx_owner_dept ON "gb_channel_mount" ("owner_dept_id");
-CREATE INDEX idx_parent_sort ON "gb_channel_mount" ("parent_node_id", "sort_order");
+CREATE INDEX "idx_owner_dept" ON "gb_channel_mount" ("owner_dept_id");
+CREATE INDEX "idx_parent_sort" ON "gb_channel_mount" ("parent_node_id", "sort_order");
 
 DROP TABLE IF EXISTS "gb_channel_snapshot";
 CREATE TABLE "gb_channel_snapshot" (
@@ -549,11 +549,11 @@ CREATE TABLE "gb_channel_snapshot" (
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
   "deleted_at" TIMESTAMP(3),
-  CONSTRAINT uk_channel_snapshot_file UNIQUE ("channel_code", "file_name")
+  CONSTRAINT "uk_channel_snapshot_file" UNIQUE ("channel_code", "file_name")
 );
-CREATE INDEX idx_channel_snapshot_captured ON "gb_channel_snapshot" ("captured_at");
-CREATE INDEX idx_channel_snapshot_channel_time ON "gb_channel_snapshot" ("channel_id", "captured_at");
-CREATE INDEX idx_channel_snapshot_session ON "gb_channel_snapshot" ("session_id");
+CREATE INDEX "idx_channel_snapshot_captured" ON "gb_channel_snapshot" ("captured_at");
+CREATE INDEX "idx_channel_snapshot_channel_time" ON "gb_channel_snapshot" ("channel_id", "captured_at");
+CREATE INDEX "idx_channel_snapshot_session" ON "gb_channel_snapshot" ("session_id");
 
 DROP TABLE IF EXISTS "gb_custom_group";
 CREATE TABLE "gb_custom_group" (
@@ -566,10 +566,10 @@ CREATE TABLE "gb_custom_group" (
   "created_by" BIGINT NOT NULL,
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
-  CONSTRAINT uk_custom_group_sibling_name UNIQUE ("owner_dept_id", "parent_id", "name")
+  CONSTRAINT "uk_custom_group_sibling_name" UNIQUE ("owner_dept_id", "parent_id", "name")
 );
-CREATE INDEX idx_custom_group_dept_path ON "gb_custom_group" ("owner_dept_id", left("path", 191));
-CREATE INDEX idx_custom_group_parent ON "gb_custom_group" ("parent_id");
+CREATE INDEX "idx_custom_group_dept_path" ON "gb_custom_group" ("owner_dept_id", left("path", 191));
+CREATE INDEX "idx_custom_group_parent" ON "gb_custom_group" ("parent_id");
 
 DROP TABLE IF EXISTS "gb_custom_group_device";
 CREATE TABLE "gb_custom_group_device" (
@@ -578,10 +578,10 @@ CREATE TABLE "gb_custom_group_device" (
   "device_id" BIGINT NOT NULL,
   "created_by" BIGINT NOT NULL,
   "created_at" TIMESTAMP(3) NOT NULL,
-  CONSTRAINT uk_custom_group_device UNIQUE ("group_id", "device_id")
+  CONSTRAINT "uk_custom_group_device" UNIQUE ("group_id", "device_id")
 );
-CREATE INDEX idx_custom_group_device_device ON "gb_custom_group_device" ("device_id");
-CREATE INDEX idx_custom_group_device_group ON "gb_custom_group_device" ("group_id");
+CREATE INDEX "idx_custom_group_device_device" ON "gb_custom_group_device" ("device_id");
+CREATE INDEX "idx_custom_group_device_group" ON "gb_custom_group_device" ("group_id");
 
 DROP TABLE IF EXISTS "gb_dashboard_layout";
 CREATE TABLE "gb_dashboard_layout" (
@@ -593,9 +593,9 @@ CREATE TABLE "gb_dashboard_layout" (
   "layout_json" TEXT NOT NULL,
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
-  CONSTRAINT uk_dashboard_layout_user_key UNIQUE ("user_id", "dashboard_key")
+  CONSTRAINT "uk_dashboard_layout_user_key" UNIQUE ("user_id", "dashboard_key")
 );
-CREATE INDEX idx_dashboard_layout_updated ON "gb_dashboard_layout" ("updated_at");
+CREATE INDEX "idx_dashboard_layout_updated" ON "gb_dashboard_layout" ("updated_at");
 
 DROP TABLE IF EXISTS "gb_device";
 CREATE TABLE "gb_device" (
@@ -638,7 +638,7 @@ CREATE TABLE "gb_device" (
   "reported_charset" VARCHAR(32) NOT NULL DEFAULT '',
   "wire_charset" VARCHAR(32) NOT NULL DEFAULT '',
   "reported_charset_at" TIMESTAMP(3),
-  CONSTRAINT uk_device_id UNIQUE ("device_id"),
+  CONSTRAINT "uk_device_id" UNIQUE ("device_id"),
   CONSTRAINT "ck_gb_device_cleanup_completed_epoch" CHECK ((("cleanup_completed_epoch" > 0) and ("cleanup_completed_epoch" <= "access_epoch"))),
   CONSTRAINT "gb_device_chk_1" CHECK (("access_epoch" > 0))
 );
@@ -675,11 +675,11 @@ COMMENT ON COLUMN "gb_device"."zlm_node_id" IS '首选 ZLM 节点,0 表示自动
 COMMENT ON COLUMN "gb_device"."reported_charset" IS '最近一次上报报文声明的字符集';
 COMMENT ON COLUMN "gb_device"."wire_charset" IS '最近一次上报报文实际判定字符集';
 COMMENT ON COLUMN "gb_device"."reported_charset_at" IS '当前字符集事实的确认时间';
-CREATE INDEX gb_device__idx_deleted_at ON "gb_device" ("deleted_at");
-CREATE INDEX idx_gb_device_zlm_node ON "gb_device" ("zlm_node_id");
-CREATE INDEX gb_device__idx_owner_dept_deleted ON "gb_device" ("owner_dept_id", "deleted_at");
-CREATE INDEX idx_status_keepalive ON "gb_device" ("status", "keepalive_time");
-CREATE INDEX idx_subscribe_capability ON "gb_device" ("subscribe_capability", "subscribe_last_test");
+CREATE INDEX "gb_device__idx_deleted_at" ON "gb_device" ("deleted_at");
+CREATE INDEX "idx_gb_device_zlm_node" ON "gb_device" ("zlm_node_id");
+CREATE INDEX "gb_device__idx_owner_dept_deleted" ON "gb_device" ("owner_dept_id", "deleted_at");
+CREATE INDEX "idx_status_keepalive" ON "gb_device" ("status", "keepalive_time");
+CREATE INDEX "idx_subscribe_capability" ON "gb_device" ("subscribe_capability", "subscribe_last_test");
 
 DROP TABLE IF EXISTS "gb_device_config";
 CREATE TABLE "gb_device_config" (
@@ -695,9 +695,9 @@ CREATE TABLE "gb_device_config" (
   "raw_summary" TEXT,
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
-  CONSTRAINT uk_device_config_target UNIQUE ("device_id", "target_code", "config_type")
+  CONSTRAINT "uk_device_config_target" UNIQUE ("device_id", "target_code", "config_type")
 );
-CREATE INDEX idx_device_config_device ON "gb_device_config" ("device_id", "observed_at");
+CREATE INDEX "idx_device_config_device" ON "gb_device_config" ("device_id", "observed_at");
 
 DROP TABLE IF EXISTS "gb_device_control_state";
 CREATE TABLE "gb_device_control_state" (
@@ -722,10 +722,10 @@ CREATE TABLE "gb_device_control_state" (
   "raw_summary" TEXT,
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
-  CONSTRAINT uk_control_state_target UNIQUE ("device_id", "target_scope", "target_code")
+  CONSTRAINT "uk_control_state_target" UNIQUE ("device_id", "target_scope", "target_code")
 );
-CREATE INDEX idx_control_state_channel ON "gb_device_control_state" ("channel_id");
-CREATE INDEX idx_control_state_device_target ON "gb_device_control_state" ("device_id", "target_scope", "target_code");
+CREATE INDEX "idx_control_state_channel" ON "gb_device_control_state" ("channel_id");
+CREATE INDEX "idx_control_state_device_target" ON "gb_device_control_state" ("device_id", "target_scope", "target_code");
 
 DROP TABLE IF EXISTS "gb_device_firmware_upgrade";
 CREATE TABLE "gb_device_firmware_upgrade" (
@@ -769,18 +769,18 @@ CREATE TABLE "gb_device_firmware_upgrade" (
   "cascade_business_result" VARCHAR(16),
   "cascade_business_delivered" BOOLEAN NOT NULL DEFAULT false,
   "cascade_final_delivered" BOOLEAN NOT NULL DEFAULT false,
-  CONSTRAINT uk_firmware_upgrade_cascade_request UNIQUE ("cascade_request_key"),
-  CONSTRAINT uk_firmware_upgrade_cascade_session UNIQUE ("cascade_session_key"),
-  CONSTRAINT uk_firmware_upgrade_device_idempotency UNIQUE ("device_id", "idempotency_key"),
-  CONSTRAINT uk_firmware_upgrade_device_session UNIQUE ("device_id", "session_id"),
-  CONSTRAINT uk_firmware_upgrade_operation UNIQUE ("operation_id"),
-  CONSTRAINT uk_firmware_upgrade_sn UNIQUE ("sn")
+  CONSTRAINT "uk_firmware_upgrade_cascade_request" UNIQUE ("cascade_request_key"),
+  CONSTRAINT "uk_firmware_upgrade_cascade_session" UNIQUE ("cascade_session_key"),
+  CONSTRAINT "uk_firmware_upgrade_device_idempotency" UNIQUE ("device_id", "idempotency_key"),
+  CONSTRAINT "uk_firmware_upgrade_device_session" UNIQUE ("device_id", "session_id"),
+  CONSTRAINT "uk_firmware_upgrade_operation" UNIQUE ("operation_id"),
+  CONSTRAINT "uk_firmware_upgrade_sn" UNIQUE ("sn")
 );
-CREATE INDEX idx_firmware_upgrade_deadline ON "gb_device_firmware_upgrade" ("deadline_at");
-CREATE INDEX idx_firmware_upgrade_device_session ON "gb_device_firmware_upgrade" ("device_code", "session_id");
-CREATE INDEX idx_firmware_upgrade_device_sn ON "gb_device_firmware_upgrade" ("device_code", "sn");
-CREATE INDEX idx_firmware_upgrade_device_status ON "gb_device_firmware_upgrade" ("device_id", "status");
-CREATE INDEX idx_firmware_upgrade_device_time ON "gb_device_firmware_upgrade" ("device_id", "created_at");
+CREATE INDEX "idx_firmware_upgrade_deadline" ON "gb_device_firmware_upgrade" ("deadline_at");
+CREATE INDEX "idx_firmware_upgrade_device_session" ON "gb_device_firmware_upgrade" ("device_code", "session_id");
+CREATE INDEX "idx_firmware_upgrade_device_sn" ON "gb_device_firmware_upgrade" ("device_code", "sn");
+CREATE INDEX "idx_firmware_upgrade_device_status" ON "gb_device_firmware_upgrade" ("device_id", "status");
+CREATE INDEX "idx_firmware_upgrade_device_time" ON "gb_device_firmware_upgrade" ("device_id", "created_at");
 
 DROP TABLE IF EXISTS "gb_device_grant";
 CREATE TABLE "gb_device_grant" (
@@ -792,16 +792,16 @@ CREATE TABLE "gb_device_grant" (
   "created_at" TIMESTAMP,
   "updated_at" TIMESTAMP,
   "deleted_at" TIMESTAMP,
-  CONSTRAINT uk_device_target UNIQUE ("device_id", "target_type", "target_id")
+  CONSTRAINT "uk_device_target" UNIQUE ("device_id", "target_type", "target_id")
 );
 COMMENT ON TABLE "gb_device_grant" IS '设备共享授权表(设备级可见性共享)';
 COMMENT ON COLUMN "gb_device_grant"."device_id" IS '设备ID(gb_device.id)';
 COMMENT ON COLUMN "gb_device_grant"."target_type" IS '共享目标类型 dept/user';
 COMMENT ON COLUMN "gb_device_grant"."target_id" IS '部门ID或用户ID';
 COMMENT ON COLUMN "gb_device_grant"."created_by" IS '操作人';
-CREATE INDEX gb_device_grant__idx_deleted_at ON "gb_device_grant" ("deleted_at");
-CREATE INDEX idx_device ON "gb_device_grant" ("device_id");
-CREATE INDEX idx_target ON "gb_device_grant" ("target_type", "target_id");
+CREATE INDEX "gb_device_grant__idx_deleted_at" ON "gb_device_grant" ("deleted_at");
+CREATE INDEX "idx_device" ON "gb_device_grant" ("device_id");
+CREATE INDEX "idx_target" ON "gb_device_grant" ("target_type", "target_id");
 
 DROP TABLE IF EXISTS "gb_device_operation_intent";
 CREATE TABLE "gb_device_operation_intent" (
@@ -828,7 +828,7 @@ CREATE TABLE "gb_device_operation_intent" (
   CONSTRAINT "ck_device_intent_rtp_size" CHECK ((("rtp_steps_json" is null) or (octet_length("rtp_steps_json") between 1 and 32768))),
   CONSTRAINT "ck_device_intent_sip_size" CHECK ((("sip_steps_json" is null) or (octet_length("sip_steps_json") between 1 and 32768)))
 );
-CREATE INDEX ix_device_intent_recovery ON "gb_device_operation_intent" ("device_pk", "device_epoch", "state", "operation_id");
+CREATE INDEX "ix_device_intent_recovery" ON "gb_device_operation_intent" ("device_pk", "device_epoch", "state", "operation_id");
 
 DROP TABLE IF EXISTS "gb_device_status_event";
 CREATE TABLE "gb_device_status_event" (
@@ -858,10 +858,10 @@ COMMENT ON COLUMN "gb_device_status_event"."from_status" IS 'previous online sta
 COMMENT ON COLUMN "gb_device_status_event"."to_status" IS 'resulting online status';
 COMMENT ON COLUMN "gb_device_status_event"."occurred_at" IS 'business event time';
 COMMENT ON COLUMN "gb_device_status_event"."source" IS 'register/unregister/keepalive/offline_scanner';
-CREATE INDEX gb_device_status_event__idx_deleted_at ON "gb_device_status_event" ("deleted_at");
-CREATE INDEX idx_device_code ON "gb_device_status_event" ("device_code");
-CREATE INDEX idx_device_occurred ON "gb_device_status_event" ("device_id", "occurred_at", "id");
-CREATE INDEX idx_event_type_occurred ON "gb_device_status_event" ("event_type", "occurred_at");
+CREATE INDEX "gb_device_status_event__idx_deleted_at" ON "gb_device_status_event" ("deleted_at");
+CREATE INDEX "idx_device_code" ON "gb_device_status_event" ("device_code");
+CREATE INDEX "idx_device_occurred" ON "gb_device_status_event" ("device_id", "occurred_at", "id");
+CREATE INDEX "idx_event_type_occurred" ON "gb_device_status_event" ("event_type", "occurred_at");
 
 DROP TABLE IF EXISTS "gb_device_storage_card";
 CREATE TABLE "gb_device_storage_card" (
@@ -881,9 +881,9 @@ CREATE TABLE "gb_device_storage_card" (
   "raw_summary" TEXT,
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
-  CONSTRAINT uk_storage_card_target UNIQUE ("device_id", "target_code", "card_id")
+  CONSTRAINT "uk_storage_card_target" UNIQUE ("device_id", "target_code", "card_id")
 );
-CREATE INDEX idx_storage_card_device ON "gb_device_storage_card" ("device_id", "observed_at");
+CREATE INDEX "idx_storage_card_device" ON "gb_device_storage_card" ("device_id", "observed_at");
 
 DROP TABLE IF EXISTS "gb_device_subscription";
 CREATE TABLE "gb_device_subscription" (
@@ -908,10 +908,10 @@ CREATE TABLE "gb_device_subscription" (
   "last_error" TEXT,
   "created_at" TIMESTAMP,
   "updated_at" TIMESTAMP,
-  CONSTRAINT uk_device_subscription_kind UNIQUE ("device_id", "kind")
+  CONSTRAINT "uk_device_subscription_kind" UNIQUE ("device_id", "kind")
 );
-CREATE INDEX idx_subscription_call_id ON "gb_device_subscription" ("call_id");
-CREATE INDEX idx_subscription_due ON "gb_device_subscription" ("enabled", "next_action_at");
+CREATE INDEX "idx_subscription_call_id" ON "gb_device_subscription" ("call_id");
+CREATE INDEX "idx_subscription_due" ON "gb_device_subscription" ("enabled", "next_action_at");
 
 DROP TABLE IF EXISTS "gb_device_target_track";
 CREATE TABLE "gb_device_target_track" (
@@ -936,10 +936,10 @@ CREATE TABLE "gb_device_target_track" (
   "raw_summary" TEXT,
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
-  CONSTRAINT uk_target_track_target UNIQUE ("device_id", "target_code")
+  CONSTRAINT "uk_target_track_target" UNIQUE ("device_id", "target_code")
 );
-CREATE INDEX idx_target_track_channel ON "gb_device_target_track" ("channel_id");
-CREATE INDEX idx_target_track_device ON "gb_device_target_track" ("device_id", "commanded_at");
+CREATE INDEX "idx_target_track_channel" ON "gb_device_target_track" ("channel_id");
+CREATE INDEX "idx_target_track_device" ON "gb_device_target_track" ("device_id", "commanded_at");
 
 DROP TABLE IF EXISTS "gb_device_traffic_daily";
 CREATE TABLE "gb_device_traffic_daily" (
@@ -956,10 +956,10 @@ CREATE TABLE "gb_device_traffic_daily" (
   "downstream_sessions" BIGINT NOT NULL DEFAULT 0,
   "created_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT uk_traffic_daily_scope UNIQUE ("stat_date", "device_code", "channel_code")
+  CONSTRAINT "uk_traffic_daily_scope" UNIQUE ("stat_date", "device_code", "channel_code")
 );
-CREATE INDEX idx_traffic_daily_device ON "gb_device_traffic_daily" ("device_code");
-CREATE INDEX idx_traffic_daily_owner_dept ON "gb_device_traffic_daily" ("owner_dept_id");
+CREATE INDEX "idx_traffic_daily_device" ON "gb_device_traffic_daily" ("device_code");
+CREATE INDEX "idx_traffic_daily_owner_dept" ON "gb_device_traffic_daily" ("owner_dept_id");
 
 DROP TABLE IF EXISTS "gb_device_traffic_gap";
 CREATE TABLE "gb_device_traffic_gap" (
@@ -973,8 +973,8 @@ CREATE TABLE "gb_device_traffic_gap" (
   "created_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX idx_traffic_gap_node_state ON "gb_device_traffic_gap" ("node_id", "reason", "state");
-CREATE INDEX idx_traffic_gap_started ON "gb_device_traffic_gap" ("started_at");
+CREATE INDEX "idx_traffic_gap_node_state" ON "gb_device_traffic_gap" ("node_id", "reason", "state");
+CREATE INDEX "idx_traffic_gap_started" ON "gb_device_traffic_gap" ("started_at");
 
 DROP TABLE IF EXISTS "gb_device_traffic_hourly";
 CREATE TABLE "gb_device_traffic_hourly" (
@@ -991,10 +991,10 @@ CREATE TABLE "gb_device_traffic_hourly" (
   "downstream_sessions" BIGINT NOT NULL DEFAULT 0,
   "created_at" TIMESTAMP(3),
   "updated_at" TIMESTAMP(3),
-  CONSTRAINT uk_traffic_hourly_scope UNIQUE ("stat_hour", "device_code", "channel_code")
+  CONSTRAINT "uk_traffic_hourly_scope" UNIQUE ("stat_hour", "device_code", "channel_code")
 );
-CREATE INDEX idx_traffic_hourly_device ON "gb_device_traffic_hourly" ("device_code", "stat_hour");
-CREATE INDEX idx_traffic_hourly_owner_dept ON "gb_device_traffic_hourly" ("owner_dept_id");
+CREATE INDEX "idx_traffic_hourly_device" ON "gb_device_traffic_hourly" ("device_code", "stat_hour");
+CREATE INDEX "idx_traffic_hourly_owner_dept" ON "gb_device_traffic_hourly" ("owner_dept_id");
 
 DROP TABLE IF EXISTS "gb_device_traffic_session";
 CREATE TABLE "gb_device_traffic_session" (
@@ -1023,14 +1023,14 @@ CREATE TABLE "gb_device_traffic_session" (
   "unattributed_reason" VARCHAR(255) NOT NULL DEFAULT '',
   "created_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT uk_traffic_session_business UNIQUE ("business_key")
+  CONSTRAINT "uk_traffic_session_business" UNIQUE ("business_key")
 );
-CREATE INDEX idx_traffic_session_channel_started ON "gb_device_traffic_session" ("channel_code", "started_at");
-CREATE INDEX idx_traffic_session_device_started ON "gb_device_traffic_session" ("device_code", "channel_code", "started_at");
-CREATE INDEX idx_traffic_session_direction ON "gb_device_traffic_session" ("direction");
-CREATE INDEX idx_traffic_session_node_state ON "gb_device_traffic_session" ("node_id", "state");
-CREATE INDEX idx_traffic_session_owner_dept ON "gb_device_traffic_session" ("owner_dept_id");
-CREATE INDEX idx_traffic_session_zlm ON "gb_device_traffic_session" ("zlm_session_id");
+CREATE INDEX "idx_traffic_session_channel_started" ON "gb_device_traffic_session" ("channel_code", "started_at");
+CREATE INDEX "idx_traffic_session_device_started" ON "gb_device_traffic_session" ("device_code", "channel_code", "started_at");
+CREATE INDEX "idx_traffic_session_direction" ON "gb_device_traffic_session" ("direction");
+CREATE INDEX "idx_traffic_session_node_state" ON "gb_device_traffic_session" ("node_id", "state");
+CREATE INDEX "idx_traffic_session_owner_dept" ON "gb_device_traffic_session" ("owner_dept_id");
+CREATE INDEX "idx_traffic_session_zlm" ON "gb_device_traffic_session" ("zlm_session_id");
 
 DROP TABLE IF EXISTS "gb_device_video_param";
 CREATE TABLE "gb_device_video_param" (
@@ -1050,9 +1050,9 @@ CREATE TABLE "gb_device_video_param" (
   "raw_summary" TEXT,
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
-  CONSTRAINT uk_video_param_target UNIQUE ("device_id", "target_code", "stream_number")
+  CONSTRAINT "uk_video_param_target" UNIQUE ("device_id", "target_code", "stream_number")
 );
-CREATE INDEX idx_video_param_device ON "gb_device_video_param" ("device_id", "observed_at");
+CREATE INDEX "idx_video_param_device" ON "gb_device_video_param" ("device_id", "observed_at");
 
 DROP TABLE IF EXISTS "gb_firmware_repository";
 CREATE TABLE "gb_firmware_repository" (
@@ -1073,11 +1073,11 @@ CREATE TABLE "gb_firmware_repository" (
   "created_at" TIMESTAMP(6) NOT NULL,
   "updated_at" TIMESTAMP(6) NOT NULL,
   "remark" TEXT,
-  CONSTRAINT firmware_id UNIQUE ("firmware_id")
+  CONSTRAINT "firmware_id" UNIQUE ("firmware_id")
 );
-CREATE INDEX idx_dept_status ON "gb_firmware_repository" ("dept_id", "status");
-CREATE INDEX idx_file_hash ON "gb_firmware_repository" ("file_hash");
-CREATE INDEX idx_manu_model ON "gb_firmware_repository" ("manufacturer", "version");
+CREATE INDEX "idx_dept_status" ON "gb_firmware_repository" ("dept_id", "status");
+CREATE INDEX "idx_file_hash" ON "gb_firmware_repository" ("file_hash");
+CREATE INDEX "idx_manu_model" ON "gb_firmware_repository" ("manufacturer", "version");
 
 DROP TABLE IF EXISTS "gb_mobile_position_history";
 CREATE TABLE "gb_mobile_position_history" (
@@ -1095,9 +1095,9 @@ CREATE TABLE "gb_mobile_position_history" (
   "created_at" TIMESTAMP,
   "updated_at" TIMESTAMP
 );
-CREATE INDEX idx_position_history_channel_time ON "gb_mobile_position_history" ("channel_id", "event_time");
-CREATE INDEX idx_position_history_device_source_time ON "gb_mobile_position_history" ("device_id", "source_code", "event_time");
-CREATE INDEX idx_position_history_received_at ON "gb_mobile_position_history" ("received_at");
+CREATE INDEX "idx_position_history_channel_time" ON "gb_mobile_position_history" ("channel_id", "event_time");
+CREATE INDEX "idx_position_history_device_source_time" ON "gb_mobile_position_history" ("device_id", "source_code", "event_time");
+CREATE INDEX "idx_position_history_received_at" ON "gb_mobile_position_history" ("received_at");
 
 DROP TABLE IF EXISTS "gb_mobile_position_latest";
 CREATE TABLE "gb_mobile_position_latest" (
@@ -1114,10 +1114,10 @@ CREATE TABLE "gb_mobile_position_latest" (
   "altitude" DOUBLE PRECISION,
   "created_at" TIMESTAMP,
   "updated_at" TIMESTAMP,
-  CONSTRAINT uk_position_device_source UNIQUE ("device_id", "source_code")
+  CONSTRAINT "uk_position_device_source" UNIQUE ("device_id", "source_code")
 );
-CREATE INDEX gb_mobile_position_latest__idx_channel_id ON "gb_mobile_position_latest" ("channel_id");
-CREATE INDEX idx_event_time ON "gb_mobile_position_latest" ("event_time");
+CREATE INDEX "gb_mobile_position_latest__idx_channel_id" ON "gb_mobile_position_latest" ("channel_id");
+CREATE INDEX "idx_event_time" ON "gb_mobile_position_latest" ("event_time");
 
 DROP TABLE IF EXISTS "gb_openapi_play_grant";
 CREATE TABLE "gb_openapi_play_grant" (
@@ -1148,9 +1148,9 @@ CREATE TABLE "gb_openapi_play_grant" (
   CONSTRAINT "ck_openapi_grant_epochs" CHECK ((("client_epoch" > 0) and ("scope_epoch" > 0) and ("device_epoch" > 0))),
   CONSTRAINT "ck_openapi_grant_state" CHECK (("state" in ('pending','issued','bound','revoked','expired','failed')))
 );
-CREATE INDEX idx_openapi_grant_client_state ON "gb_openapi_play_grant" ("client_id", "state");
-CREATE INDEX idx_openapi_grant_expires ON "gb_openapi_play_grant" ("expires_at");
-CREATE INDEX idx_openapi_grant_node_boot ON "gb_openapi_play_grant" ("node_uuid", "boot_nonce");
+CREATE INDEX "idx_openapi_grant_client_state" ON "gb_openapi_play_grant" ("client_id", "state");
+CREATE INDEX "idx_openapi_grant_expires" ON "gb_openapi_play_grant" ("expires_at");
+CREATE INDEX "idx_openapi_grant_node_boot" ON "gb_openapi_play_grant" ("node_uuid", "boot_nonce");
 
 DROP TABLE IF EXISTS "gb_openapi_viewer";
 CREATE TABLE "gb_openapi_viewer" (
@@ -1171,15 +1171,15 @@ CREATE TABLE "gb_openapi_viewer" (
   "last_error_class" VARCHAR(64) NOT NULL DEFAULT '',
   "created_at" TIMESTAMP(6) NOT NULL,
   "updated_at" TIMESTAMP(6) NOT NULL,
-  CONSTRAINT uk_openapi_viewer_grant UNIQUE ("grant_id"),
-  CONSTRAINT uk_openapi_viewer_identity UNIQUE ("node_uuid", "boot_nonce", "identifier"),
+  CONSTRAINT "uk_openapi_viewer_grant" UNIQUE ("grant_id"),
+  CONSTRAINT "uk_openapi_viewer_identity" UNIQUE ("node_uuid", "boot_nonce", "identifier"),
   CONSTRAINT "ck_openapi_viewer_attempts" CHECK (("attempts" >= 0)),
   CONSTRAINT "ck_openapi_viewer_identity" CHECK ((("node_uuid" <> '') and ("boot_nonce" <> '') and (char_length("boot_nonce") = 32) and ("identifier" <> ''))),
   CONSTRAINT "ck_openapi_viewer_media_binding" CHECK ((("schema" <> '') and ("vhost" <> '') and ("app" <> '') and ("stream" <> '') and ("media_generation" > 0))),
   CONSTRAINT "ck_openapi_viewer_media_generation" CHECK (("media_generation" > 0)),
   CONSTRAINT "ck_openapi_viewer_state" CHECK (("state" in ('pending','active','revoke_pending','closed')))
 );
-CREATE INDEX idx_openapi_viewer_state_retry ON "gb_openapi_viewer" ("state", "retry_at");
+CREATE INDEX "idx_openapi_viewer_state_retry" ON "gb_openapi_viewer" ("state", "retry_at");
 
 DROP TABLE IF EXISTS "gb_play_attempt";
 CREATE TABLE "gb_play_attempt" (
@@ -1210,13 +1210,13 @@ CREATE TABLE "gb_play_attempt" (
   "client_error_at" TIMESTAMP(3),
   "client_error_code" VARCHAR(64) NOT NULL DEFAULT '',
   "last_event_at" TIMESTAMP(3),
-  CONSTRAINT uk_play_attempt_correlation UNIQUE ("correlation_id")
+  CONSTRAINT "uk_play_attempt_correlation" UNIQUE ("correlation_id")
 );
-CREATE INDEX idx_play_attempt_device_started ON "gb_play_attempt" ("device_code", "started_at");
-CREATE INDEX idx_play_attempt_lifecycle_started ON "gb_play_attempt" ("lifecycle_state", "started_at");
-CREATE INDEX idx_play_attempt_outcome_started ON "gb_play_attempt" ("outcome", "started_at");
-CREATE INDEX idx_play_attempt_stream_node ON "gb_play_attempt" ("stream_id", "node_id");
-CREATE INDEX idx_play_attempt_user_started ON "gb_play_attempt" ("user_id", "started_at");
+CREATE INDEX "idx_play_attempt_device_started" ON "gb_play_attempt" ("device_code", "started_at");
+CREATE INDEX "idx_play_attempt_lifecycle_started" ON "gb_play_attempt" ("lifecycle_state", "started_at");
+CREATE INDEX "idx_play_attempt_outcome_started" ON "gb_play_attempt" ("outcome", "started_at");
+CREATE INDEX "idx_play_attempt_stream_node" ON "gb_play_attempt" ("stream_id", "node_id");
+CREATE INDEX "idx_play_attempt_user_started" ON "gb_play_attempt" ("user_id", "started_at");
 
 DROP TABLE IF EXISTS "gb_play_lifecycle_event";
 CREATE TABLE "gb_play_lifecycle_event" (
@@ -1242,14 +1242,14 @@ CREATE TABLE "gb_play_lifecycle_event" (
   "reason_message" VARCHAR(256) NOT NULL DEFAULT '',
   "metadata_json" JSONB,
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT uk_play_lifecycle_event_id UNIQUE ("event_id"),
-  CONSTRAINT uk_play_lifecycle_sequence UNIQUE ("lifecycle_id", "sequence")
+  CONSTRAINT "uk_play_lifecycle_event_id" UNIQUE ("event_id"),
+  CONSTRAINT "uk_play_lifecycle_sequence" UNIQUE ("lifecycle_id", "sequence")
 );
-CREATE INDEX idx_play_lifecycle_event_at ON "gb_play_lifecycle_event" ("event_at");
-CREATE INDEX idx_play_lifecycle_event_device_at ON "gb_play_lifecycle_event" ("device_code", "event_at");
-CREATE INDEX idx_play_lifecycle_event_lifecycle_sequence ON "gb_play_lifecycle_event" ("lifecycle_id", "sequence");
-CREATE INDEX idx_play_lifecycle_event_stage ON "gb_play_lifecycle_event" ("stage", "fact_state");
-CREATE INDEX idx_play_lifecycle_event_stream_node ON "gb_play_lifecycle_event" ("stream_id", "node_id");
+CREATE INDEX "idx_play_lifecycle_event_at" ON "gb_play_lifecycle_event" ("event_at");
+CREATE INDEX "idx_play_lifecycle_event_device_at" ON "gb_play_lifecycle_event" ("device_code", "event_at");
+CREATE INDEX "idx_play_lifecycle_event_lifecycle_sequence" ON "gb_play_lifecycle_event" ("lifecycle_id", "sequence");
+CREATE INDEX "idx_play_lifecycle_event_stage" ON "gb_play_lifecycle_event" ("stage", "fact_state");
+CREATE INDEX "idx_play_lifecycle_event_stream_node" ON "gb_play_lifecycle_event" ("stream_id", "node_id");
 
 DROP TABLE IF EXISTS "gb_playback_scheme";
 CREATE TABLE "gb_playback_scheme" (
@@ -1263,10 +1263,10 @@ CREATE TABLE "gb_playback_scheme" (
   "updated_by" BIGINT NOT NULL,
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
-  CONSTRAINT uk_playback_scheme_owner_name UNIQUE ("owner_user_id", "name")
+  CONSTRAINT "uk_playback_scheme_owner_name" UNIQUE ("owner_user_id", "name")
 );
-CREATE INDEX idx_playback_scheme_dept ON "gb_playback_scheme" ("owner_dept_id");
-CREATE INDEX idx_playback_scheme_owner_updated ON "gb_playback_scheme" ("owner_user_id", "updated_at");
+CREATE INDEX "idx_playback_scheme_dept" ON "gb_playback_scheme" ("owner_dept_id");
+CREATE INDEX "idx_playback_scheme_owner_updated" ON "gb_playback_scheme" ("owner_user_id", "updated_at");
 
 DROP TABLE IF EXISTS "gb_playback_scheme_slot";
 CREATE TABLE "gb_playback_scheme_slot" (
@@ -1278,9 +1278,9 @@ CREATE TABLE "gb_playback_scheme_slot" (
   "device_name_snapshot" VARCHAR(255) NOT NULL,
   "channel_name_snapshot" VARCHAR(255) NOT NULL,
   "created_at" TIMESTAMP(3) NOT NULL,
-  CONSTRAINT uk_playback_scheme_slot UNIQUE ("scheme_id", "slot_index")
+  CONSTRAINT "uk_playback_scheme_slot" UNIQUE ("scheme_id", "slot_index")
 );
-CREATE INDEX idx_playback_scheme_slot_scheme ON "gb_playback_scheme_slot" ("scheme_id");
+CREATE INDEX "idx_playback_scheme_slot_scheme" ON "gb_playback_scheme_slot" ("scheme_id");
 
 DROP TABLE IF EXISTS "gb_ptz_cruise_track";
 CREATE TABLE "gb_ptz_cruise_track" (
@@ -1296,9 +1296,9 @@ CREATE TABLE "gb_ptz_cruise_track" (
   "device_time" TIMESTAMP(3),
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
-  CONSTRAINT uk_ptz_cruise_channel_track UNIQUE ("channel_id", "track_id")
+  CONSTRAINT "uk_ptz_cruise_channel_track" UNIQUE ("channel_id", "track_id")
 );
-CREATE INDEX idx_ptz_cruise_device ON "gb_ptz_cruise_track" ("device_id");
+CREATE INDEX "idx_ptz_cruise_device" ON "gb_ptz_cruise_track" ("device_id");
 
 DROP TABLE IF EXISTS "gb_ptz_home_position";
 CREATE TABLE "gb_ptz_home_position" (
@@ -1319,9 +1319,9 @@ CREATE TABLE "gb_ptz_home_position" (
   "raw_summary" TEXT,
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
-  CONSTRAINT uk_ptz_home_position_channel UNIQUE ("channel_id")
+  CONSTRAINT "uk_ptz_home_position_channel" UNIQUE ("channel_id")
 );
-CREATE INDEX idx_ptz_home_position_device ON "gb_ptz_home_position" ("device_id");
+CREATE INDEX "idx_ptz_home_position_device" ON "gb_ptz_home_position" ("device_id");
 
 DROP TABLE IF EXISTS "gb_ptz_operation";
 CREATE TABLE "gb_ptz_operation" (
@@ -1370,21 +1370,21 @@ CREATE TABLE "gb_ptz_operation" (
   "scope_key" VARCHAR(64),
   "device_epoch" BIGINT,
   "device_intent_id" CHAR(32),
-  CONSTRAINT uk_ptz_device_intent UNIQUE ("device_intent_id"),
-  CONSTRAINT uk_ptz_operation_id UNIQUE ("operation_id"),
-  CONSTRAINT uk_ptz_operation_idempotency UNIQUE ("channel_id", "idempotency_key")
+  CONSTRAINT "uk_ptz_device_intent" UNIQUE ("device_intent_id"),
+  CONSTRAINT "uk_ptz_operation_id" UNIQUE ("operation_id"),
+  CONSTRAINT "uk_ptz_operation_idempotency" UNIQUE ("channel_id", "idempotency_key")
 );
-CREATE INDEX idx_ptz_operation_call_id ON "gb_ptz_operation" ("call_id");
-CREATE INDEX idx_ptz_operation_channel_cmd_id ON "gb_ptz_operation" ("channel_id", "cmd_type", "id");
-CREATE INDEX idx_ptz_operation_channel_time ON "gb_ptz_operation" ("channel_id", "created_at");
-CREATE INDEX idx_ptz_operation_device_scope_time ON "gb_ptz_operation" ("device_id", "scope_key", "created_at");
-CREATE INDEX idx_ptz_operation_device_sn ON "gb_ptz_operation" ("device_id", "sn");
-CREATE INDEX idx_ptz_operation_status_deadline ON "gb_ptz_operation" ("status", "deadline_at");
-CREATE INDEX idx_ptz_operation_status_next_attempt ON "gb_ptz_operation" ("status", "next_attempt_at");
-CREATE INDEX idx_ptz_operation_status_queue_deadline ON "gb_ptz_operation" ("status", "queue_deadline_at");
-CREATE INDEX idx_ptz_operation_status_time ON "gb_ptz_operation" ("status", "created_at");
-CREATE INDEX idx_ptz_operation_status_transport_deadline ON "gb_ptz_operation" ("status", "transport_deadline_at");
-CREATE INDEX idx_ptz_operation_target ON "gb_ptz_operation" ("device_code", "target_scope", "target_code", "status");
+CREATE INDEX "idx_ptz_operation_call_id" ON "gb_ptz_operation" ("call_id");
+CREATE INDEX "idx_ptz_operation_channel_cmd_id" ON "gb_ptz_operation" ("channel_id", "cmd_type", "id");
+CREATE INDEX "idx_ptz_operation_channel_time" ON "gb_ptz_operation" ("channel_id", "created_at");
+CREATE INDEX "idx_ptz_operation_device_scope_time" ON "gb_ptz_operation" ("device_id", "scope_key", "created_at");
+CREATE INDEX "idx_ptz_operation_device_sn" ON "gb_ptz_operation" ("device_id", "sn");
+CREATE INDEX "idx_ptz_operation_status_deadline" ON "gb_ptz_operation" ("status", "deadline_at");
+CREATE INDEX "idx_ptz_operation_status_next_attempt" ON "gb_ptz_operation" ("status", "next_attempt_at");
+CREATE INDEX "idx_ptz_operation_status_queue_deadline" ON "gb_ptz_operation" ("status", "queue_deadline_at");
+CREATE INDEX "idx_ptz_operation_status_time" ON "gb_ptz_operation" ("status", "created_at");
+CREATE INDEX "idx_ptz_operation_status_transport_deadline" ON "gb_ptz_operation" ("status", "transport_deadline_at");
+CREATE INDEX "idx_ptz_operation_target" ON "gb_ptz_operation" ("device_code", "target_scope", "target_code", "status");
 
 DROP TABLE IF EXISTS "gb_ptz_operation_attempt";
 CREATE TABLE "gb_ptz_operation_attempt" (
@@ -1408,10 +1408,10 @@ CREATE TABLE "gb_ptz_operation_attempt" (
   "local_quiesced_at" TIMESTAMP(6),
   "retired_by_process_id" CHAR(32),
   "retired_at" TIMESTAMP(3),
-  CONSTRAINT uk_ptz_operation_attempt UNIQUE ("operation_id", "attempt_no"),
+  CONSTRAINT "uk_ptz_operation_attempt" UNIQUE ("operation_id", "attempt_no"),
   CONSTRAINT "ck_ptz_attempt_retirement" CHECK (((("retired_by_process_id" is null) and ("retired_at" is null)) or (("retired_by_process_id" is not null) and ("retired_at" is not null) and ("owner_process_id" is not null) and ("owner_run_id" is not null) and ("retired_by_process_id" <> "owner_process_id") and ("local_quiesced_at" is null))))
 );
-CREATE INDEX idx_ptz_attempt_status_lease ON "gb_ptz_operation_attempt" ("status", "lease_until");
+CREATE INDEX "idx_ptz_attempt_status_lease" ON "gb_ptz_operation_attempt" ("status", "lease_until");
 
 DROP TABLE IF EXISTS "gb_ptz_preset";
 CREATE TABLE "gb_ptz_preset" (
@@ -1424,9 +1424,9 @@ CREATE TABLE "gb_ptz_preset" (
   "last_operation_id" VARCHAR(64),
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
-  CONSTRAINT uk_ptz_preset_channel_number UNIQUE ("channel_id", "preset_id")
+  CONSTRAINT "uk_ptz_preset_channel_number" UNIQUE ("channel_id", "preset_id")
 );
-CREATE INDEX idx_ptz_preset_device ON "gb_ptz_preset" ("device_id");
+CREATE INDEX "idx_ptz_preset_device" ON "gb_ptz_preset" ("device_id");
 
 DROP TABLE IF EXISTS "gb_ptz_state";
 CREATE TABLE "gb_ptz_state" (
@@ -1448,10 +1448,10 @@ CREATE TABLE "gb_ptz_state" (
   "raw_summary" TEXT,
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
-  CONSTRAINT uk_ptz_state_channel UNIQUE ("channel_id")
+  CONSTRAINT "uk_ptz_state_channel" UNIQUE ("channel_id")
 );
-CREATE INDEX idx_ptz_state_device ON "gb_ptz_state" ("device_id");
-CREATE INDEX idx_ptz_state_received ON "gb_ptz_state" ("received_at");
+CREATE INDEX "idx_ptz_state_device" ON "gb_ptz_state" ("device_id");
+CREATE INDEX "idx_ptz_state_received" ON "gb_ptz_state" ("received_at");
 
 DROP TABLE IF EXISTS "gb_record_cache_task";
 CREATE TABLE "gb_record_cache_task" (
@@ -1492,7 +1492,7 @@ CREATE TABLE "gb_record_cache_task" (
   "created_at" TIMESTAMP,
   "updated_at" TIMESTAMP,
   "segments" TEXT NOT NULL,
-  CONSTRAINT uk_record_cache_task_id UNIQUE ("task_id")
+  CONSTRAINT "uk_record_cache_task_id" UNIQUE ("task_id")
 );
 COMMENT ON TABLE "gb_record_cache_task" IS '设备录像缓存任务（拉流缓存到服务器）';
 COMMENT ON COLUMN "gb_record_cache_task"."record_key" IS '录像段标识（续播分片要复用同一个）';
@@ -1500,10 +1500,10 @@ COMMENT ON COLUMN "gb_record_cache_task"."session_id" IS '回放会话 ID（形�
 COMMENT ON COLUMN "gb_record_cache_task"."cursor_at" IS '分段续播游标（下一分片会话的起始时间）';
 COMMENT ON COLUMN "gb_record_cache_task"."favorite" IS '收藏标记（收藏后不参与保留期自动清理）';
 COMMENT ON COLUMN "gb_record_cache_task"."segments" IS '分片产出清单（JSON 数组）';
-CREATE INDEX idx_record_cache_task_channel_state ON "gb_record_cache_task" ("channel_id", "state");
-CREATE INDEX idx_record_cache_task_dept_state ON "gb_record_cache_task" ("owner_dept_id", "state");
-CREATE INDEX idx_record_cache_task_expires ON "gb_record_cache_task" ("expires_at");
-CREATE INDEX idx_record_cache_task_state_created ON "gb_record_cache_task" ("state", "created_at");
+CREATE INDEX "idx_record_cache_task_channel_state" ON "gb_record_cache_task" ("channel_id", "state");
+CREATE INDEX "idx_record_cache_task_dept_state" ON "gb_record_cache_task" ("owner_dept_id", "state");
+CREATE INDEX "idx_record_cache_task_expires" ON "gb_record_cache_task" ("expires_at");
+CREATE INDEX "idx_record_cache_task_state_created" ON "gb_record_cache_task" ("state", "created_at");
 
 DROP TABLE IF EXISTS "gb_recording_file";
 CREATE TABLE "gb_recording_file" (
@@ -1536,7 +1536,7 @@ CREATE TABLE "gb_recording_file" (
   "missing_at" TIMESTAMP,
   "reconcile_miss_count" INTEGER NOT NULL DEFAULT 0,
   "updated_at" TIMESTAMP,
-  CONSTRAINT uk_recording_file_key UNIQUE ("file_key")
+  CONSTRAINT "uk_recording_file_key" UNIQUE ("file_key")
 );
 COMMENT ON TABLE "gb_recording_file" IS '云端录像文件索引';
 COMMENT ON COLUMN "gb_recording_file"."channel_code" IS '通道国标编码快照';
@@ -1550,10 +1550,10 @@ COMMENT ON COLUMN "gb_recording_file"."last_seen_at" IS '最近确认存在时�
 COMMENT ON COLUMN "gb_recording_file"."missing_at" IS '确认缺失时间';
 COMMENT ON COLUMN "gb_recording_file"."reconcile_miss_count" IS '连续对账未发现次数';
 COMMENT ON COLUMN "gb_recording_file"."updated_at" IS '索引更新时间';
-CREATE INDEX idx_recording_file_channel_start ON "gb_recording_file" ("channel_id", "start_time");
-CREATE INDEX idx_recording_file_date_tuple ON "gb_recording_file" ("node_id", "vhost", "app", "stream", "record_date");
-CREATE INDEX idx_recording_file_device_start ON "gb_recording_file" ("device_id", "start_time");
-CREATE INDEX idx_recording_file_missing ON "gb_recording_file" ("missing_at", "reconcile_miss_count");
+CREATE INDEX "idx_recording_file_channel_start" ON "gb_recording_file" ("channel_id", "start_time");
+CREATE INDEX "idx_recording_file_date_tuple" ON "gb_recording_file" ("node_id", "vhost", "app", "stream", "record_date");
+CREATE INDEX "idx_recording_file_device_start" ON "gb_recording_file" ("device_id", "start_time");
+CREATE INDEX "idx_recording_file_missing" ON "gb_recording_file" ("missing_at", "reconcile_miss_count");
 
 DROP TABLE IF EXISTS "gb_recording_plan";
 CREATE TABLE "gb_recording_plan" (
@@ -1570,7 +1570,7 @@ CREATE TABLE "gb_recording_plan" (
   "deleted_at" TIMESTAMP(3)
 );
 COMMENT ON TABLE "gb_recording_plan" IS '录像计划';
-CREATE INDEX idx_recording_plan_dept_deleted ON "gb_recording_plan" ("owner_dept_id", "deleted_at");
+CREATE INDEX "idx_recording_plan_dept_deleted" ON "gb_recording_plan" ("owner_dept_id", "deleted_at");
 
 DROP TABLE IF EXISTS "gb_recording_plan_binding";
 CREATE TABLE "gb_recording_plan_binding" (
@@ -1582,11 +1582,11 @@ CREATE TABLE "gb_recording_plan_binding" (
   "assigned_at" TIMESTAMP(3) NOT NULL,
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
-  CONSTRAINT uk_recording_plan_binding_channel UNIQUE ("channel_id")
+  CONSTRAINT "uk_recording_plan_binding_channel" UNIQUE ("channel_id")
 );
 COMMENT ON TABLE "gb_recording_plan_binding" IS '录像计划通道绑定';
-CREATE INDEX idx_recording_plan_binding_dept ON "gb_recording_plan_binding" ("owner_dept_id");
-CREATE INDEX idx_recording_plan_binding_plan ON "gb_recording_plan_binding" ("plan_id");
+CREATE INDEX "idx_recording_plan_binding_dept" ON "gb_recording_plan_binding" ("owner_dept_id");
+CREATE INDEX "idx_recording_plan_binding_plan" ON "gb_recording_plan_binding" ("plan_id");
 
 DROP TABLE IF EXISTS "gb_recording_plan_channel_state";
 CREATE TABLE "gb_recording_plan_channel_state" (
@@ -1618,9 +1618,9 @@ CREATE TABLE "gb_recording_plan_channel_state" (
   PRIMARY KEY ("channel_id")
 );
 COMMENT ON TABLE "gb_recording_plan_channel_state" IS '录像计划通道执行状态';
-CREATE INDEX idx_recording_plan_state_plan_actual ON "gb_recording_plan_channel_state" ("plan_id", "actual_state");
-CREATE INDEX idx_recording_plan_state_reconcile ON "gb_recording_plan_channel_state" ("reconcile_at", "channel_id");
-CREATE INDEX idx_recording_plan_state_retry ON "gb_recording_plan_channel_state" ("next_retry_at", "channel_id");
+CREATE INDEX "idx_recording_plan_state_plan_actual" ON "gb_recording_plan_channel_state" ("plan_id", "actual_state");
+CREATE INDEX "idx_recording_plan_state_reconcile" ON "gb_recording_plan_channel_state" ("reconcile_at", "channel_id");
+CREATE INDEX "idx_recording_plan_state_retry" ON "gb_recording_plan_channel_state" ("next_retry_at", "channel_id");
 
 DROP TABLE IF EXISTS "gb_recording_plan_execution";
 CREATE TABLE "gb_recording_plan_execution" (
@@ -1645,8 +1645,8 @@ CREATE TABLE "gb_recording_plan_execution" (
   "created_at" TIMESTAMP(3) NOT NULL
 );
 COMMENT ON TABLE "gb_recording_plan_execution" IS '录像计划执行流水';
-CREATE INDEX idx_recording_plan_execution_channel ON "gb_recording_plan_execution" ("channel_id", "started_at");
-CREATE INDEX idx_recording_plan_execution_plan ON "gb_recording_plan_execution" ("plan_id", "started_at");
+CREATE INDEX "idx_recording_plan_execution_channel" ON "gb_recording_plan_execution" ("channel_id", "started_at");
+CREATE INDEX "idx_recording_plan_execution_plan" ON "gb_recording_plan_execution" ("plan_id", "started_at");
 
 DROP TABLE IF EXISTS "gb_recording_plan_gap";
 CREATE TABLE "gb_recording_plan_gap" (
@@ -1664,8 +1664,8 @@ CREATE TABLE "gb_recording_plan_gap" (
   "updated_at" TIMESTAMP(3) NOT NULL
 );
 COMMENT ON TABLE "gb_recording_plan_gap" IS '录像计划缺口';
-CREATE INDEX idx_recording_plan_gap_channel ON "gb_recording_plan_gap" ("channel_id", "started_at");
-CREATE INDEX idx_recording_plan_gap_plan ON "gb_recording_plan_gap" ("plan_id", "started_at");
+CREATE INDEX "idx_recording_plan_gap_channel" ON "gb_recording_plan_gap" ("channel_id", "started_at");
+CREATE INDEX "idx_recording_plan_gap_plan" ON "gb_recording_plan_gap" ("plan_id", "started_at");
 
 DROP TABLE IF EXISTS "gb_recording_plan_period";
 CREATE TABLE "gb_recording_plan_period" (
@@ -1678,7 +1678,7 @@ CREATE TABLE "gb_recording_plan_period" (
   "updated_at" TIMESTAMP(3) NOT NULL
 );
 COMMENT ON TABLE "gb_recording_plan_period" IS '录像计划每周半小时时段';
-CREATE INDEX idx_recording_plan_period_plan_weekday ON "gb_recording_plan_period" ("plan_id", "weekday");
+CREATE INDEX "idx_recording_plan_period_plan_weekday" ON "gb_recording_plan_period" ("plan_id", "weekday");
 
 DROP TABLE IF EXISTS "gb_recording_reconcile_state";
 CREATE TABLE "gb_recording_reconcile_state" (
@@ -1721,10 +1721,10 @@ CREATE TABLE "gb_recording_session" (
   "last_error" VARCHAR(500) NOT NULL DEFAULT '',
   "created_at" TIMESTAMP,
   "updated_at" TIMESTAMP,
-  CONSTRAINT uk_recording_session_media UNIQUE ("node_id", "vhost", "app", "stream")
+  CONSTRAINT "uk_recording_session_media" UNIQUE ("node_id", "vhost", "app", "stream")
 );
 COMMENT ON TABLE "gb_recording_session" IS '云端录像会话历史';
-CREATE INDEX idx_recording_session_channel_state ON "gb_recording_session" ("channel_id", "state");
+CREATE INDEX "idx_recording_session_channel_state" ON "gb_recording_session" ("channel_id", "state");
 
 DROP TABLE IF EXISTS "gb_sip_config";
 CREATE TABLE "gb_sip_config" (
@@ -1766,9 +1766,9 @@ CREATE TABLE "gb_sip_metric_flush" (
   "id" BIGSERIAL PRIMARY KEY,
   "flush_id" VARCHAR(64) NOT NULL,
   "created_at" TIMESTAMP(3) NOT NULL,
-  CONSTRAINT uk_sip_metric_flush_id UNIQUE ("flush_id")
+  CONSTRAINT "uk_sip_metric_flush_id" UNIQUE ("flush_id")
 );
-CREATE INDEX idx_sip_metric_flush_created ON "gb_sip_metric_flush" ("created_at");
+CREATE INDEX "idx_sip_metric_flush_created" ON "gb_sip_metric_flush" ("created_at");
 
 DROP TABLE IF EXISTS "gb_sip_metric_gap";
 CREATE TABLE "gb_sip_metric_gap" (
@@ -1779,7 +1779,7 @@ CREATE TABLE "gb_sip_metric_gap" (
   "dropped_count" BIGINT NOT NULL DEFAULT 0,
   "created_at" TIMESTAMP(3) NOT NULL
 );
-CREATE INDEX idx_sip_metric_gap_window ON "gb_sip_metric_gap" ("started_at", "ended_at");
+CREATE INDEX "idx_sip_metric_gap_window" ON "gb_sip_metric_gap" ("started_at", "ended_at");
 
 DROP TABLE IF EXISTS "gb_sip_metric_minute";
 CREATE TABLE "gb_sip_metric_minute" (
@@ -1793,9 +1793,9 @@ CREATE TABLE "gb_sip_metric_minute" (
   "transaction_failure" BIGINT NOT NULL DEFAULT 0,
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
-  CONSTRAINT uk_sip_metric_minute_bucket UNIQUE ("bucket_start", "method", "direction")
+  CONSTRAINT "uk_sip_metric_minute_bucket" UNIQUE ("bucket_start", "method", "direction")
 );
-CREATE INDEX idx_sip_metric_minute_bucket ON "gb_sip_metric_minute" ("bucket_start");
+CREATE INDEX "idx_sip_metric_minute_bucket" ON "gb_sip_metric_minute" ("bucket_start");
 
 DROP TABLE IF EXISTS "gb_sip_security_access_rule";
 CREATE TABLE "gb_sip_security_access_rule" (
@@ -1810,9 +1810,9 @@ CREATE TABLE "gb_sip_security_access_rule" (
   "created_by" VARCHAR(64) NOT NULL DEFAULT '',
   "created_at" TIMESTAMP NOT NULL,
   "updated_at" TIMESTAMP NOT NULL,
-  CONSTRAINT uk_gb_sip_security_access_rule_match UNIQUE ("list_type", "match_type", "match_value")
+  CONSTRAINT "uk_gb_sip_security_access_rule_match" UNIQUE ("list_type", "match_type", "match_value")
 );
-CREATE INDEX idx_gb_sip_security_access_rule_list_status ON "gb_sip_security_access_rule" ("list_type", "status");
+CREATE INDEX "idx_gb_sip_security_access_rule_list_status" ON "gb_sip_security_access_rule" ("list_type", "status");
 
 DROP TABLE IF EXISTS "gb_sip_security_audit";
 CREATE TABLE "gb_sip_security_audit" (
@@ -1824,7 +1824,7 @@ CREATE TABLE "gb_sip_security_audit" (
   "decision_id" VARCHAR(64) NOT NULL DEFAULT '',
   "created_at" TIMESTAMP NOT NULL
 );
-CREATE INDEX idx_gb_sip_security_audit_time ON "gb_sip_security_audit" ("created_at");
+CREATE INDEX "idx_gb_sip_security_audit_time" ON "gb_sip_security_audit" ("created_at");
 
 DROP TABLE IF EXISTS "gb_sip_security_ban";
 CREATE TABLE "gb_sip_security_ban" (
@@ -1853,11 +1853,11 @@ CREATE TABLE "gb_sip_security_ban" (
   "firewall_applied_at" TIMESTAMP,
   "blocked_count_after_ban" BIGINT NOT NULL DEFAULT 0,
   "last_blocked_at" TIMESTAMP,
-  CONSTRAINT uk_gb_sip_security_ban_decision UNIQUE ("decision_id")
+  CONSTRAINT "uk_gb_sip_security_ban_decision" UNIQUE ("decision_id")
 );
-CREATE INDEX idx_gb_sip_security_ban_attribution_status ON "gb_sip_security_ban" ("risk_scope", "device_id", "status");
-CREATE INDEX idx_gb_sip_security_ban_expiry ON "gb_sip_security_ban" ("expires_at");
-CREATE INDEX idx_gb_sip_security_ban_source_status ON "gb_sip_security_ban" ("source_ip", "status");
+CREATE INDEX "idx_gb_sip_security_ban_attribution_status" ON "gb_sip_security_ban" ("risk_scope", "device_id", "status");
+CREATE INDEX "idx_gb_sip_security_ban_expiry" ON "gb_sip_security_ban" ("expires_at");
+CREATE INDEX "idx_gb_sip_security_ban_source_status" ON "gb_sip_security_ban" ("source_ip", "status");
 
 DROP TABLE IF EXISTS "gb_sip_security_event";
 CREATE TABLE "gb_sip_security_event" (
@@ -1877,11 +1877,11 @@ CREATE TABLE "gb_sip_security_event" (
   "first_seen_at" TIMESTAMP NOT NULL,
   "last_seen_at" TIMESTAMP NOT NULL,
   "sample_event_id" VARCHAR(64) NOT NULL DEFAULT '',
-  CONSTRAINT uk_gb_sip_security_event UNIQUE ("bucket_at", "source_ip", "device_id", "risk_scope", "transport", "method", "reason", "action")
+  CONSTRAINT "uk_gb_sip_security_event" UNIQUE ("bucket_at", "source_ip", "device_id", "risk_scope", "transport", "method", "reason", "action")
 );
-CREATE INDEX idx_gb_sip_security_event_attribution_time ON "gb_sip_security_event" ("risk_scope", "device_id", "last_seen_at");
-CREATE INDEX idx_gb_sip_security_event_reason_time ON "gb_sip_security_event" ("reason", "last_seen_at");
-CREATE INDEX idx_gb_sip_security_event_source_time ON "gb_sip_security_event" ("source_ip", "last_seen_at");
+CREATE INDEX "idx_gb_sip_security_event_attribution_time" ON "gb_sip_security_event" ("risk_scope", "device_id", "last_seen_at");
+CREATE INDEX "idx_gb_sip_security_event_reason_time" ON "gb_sip_security_event" ("reason", "last_seen_at");
+CREATE INDEX "idx_gb_sip_security_event_source_time" ON "gb_sip_security_event" ("source_ip", "last_seen_at");
 
 DROP TABLE IF EXISTS "gb_sip_security_policy";
 CREATE TABLE "gb_sip_security_policy" (
@@ -1899,7 +1899,7 @@ CREATE TABLE "gb_sip_security_policy" (
   "allowlist_text" VARCHAR(4096) NOT NULL,
   "updated_by" BIGINT NOT NULL DEFAULT 0,
   "updated_at" TIMESTAMP NOT NULL,
-  CONSTRAINT uk_gb_sip_security_policy_scope UNIQUE ("scope_key")
+  CONSTRAINT "uk_gb_sip_security_policy_scope" UNIQUE ("scope_key")
 );
 
 DROP TABLE IF EXISTS "gb_sip_trace_capture";
@@ -1916,12 +1916,12 @@ CREATE TABLE "gb_sip_trace_capture" (
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
   PRIMARY KEY ("id"),
-  CONSTRAINT uk_sip_trace_capture_active UNIQUE ("active_key")
+  CONSTRAINT "uk_sip_trace_capture_active" UNIQUE ("active_key")
 );
-CREATE INDEX idx_sip_trace_capture_created_by ON "gb_sip_trace_capture" ("created_by");
-CREATE INDEX idx_sip_trace_capture_device_code ON "gb_sip_trace_capture" ("device_code");
-CREATE INDEX idx_sip_trace_capture_device_started ON "gb_sip_trace_capture" ("device_id", "started_at");
-CREATE INDEX idx_sip_trace_capture_planned_end ON "gb_sip_trace_capture" ("planned_end_at");
+CREATE INDEX "idx_sip_trace_capture_created_by" ON "gb_sip_trace_capture" ("created_by");
+CREATE INDEX "idx_sip_trace_capture_device_code" ON "gb_sip_trace_capture" ("device_code");
+CREATE INDEX "idx_sip_trace_capture_device_started" ON "gb_sip_trace_capture" ("device_id", "started_at");
+CREATE INDEX "idx_sip_trace_capture_planned_end" ON "gb_sip_trace_capture" ("planned_end_at");
 
 DROP TABLE IF EXISTS "gb_sip_trace_message";
 CREATE TABLE "gb_sip_trace_message" (
@@ -1954,10 +1954,10 @@ CREATE TABLE "gb_sip_trace_message" (
   "business_confidence" VARCHAR(16) NOT NULL DEFAULT 'none',
   PRIMARY KEY ("event_id")
 );
-CREATE INDEX idx_gb_sip_trace_business_occurred ON "gb_sip_trace_message" ("business_code", "occurred_at");
-CREATE INDEX idx_gb_sip_trace_call_occurred ON "gb_sip_trace_message" ("call_id", "occurred_at", "event_id");
-CREATE INDEX idx_gb_sip_trace_device_occurred ON "gb_sip_trace_message" ("device_id", "occurred_at", "event_id");
-CREATE INDEX idx_gb_sip_trace_occurred_event ON "gb_sip_trace_message" ("occurred_at", "event_id");
+CREATE INDEX "idx_gb_sip_trace_business_occurred" ON "gb_sip_trace_message" ("business_code", "occurred_at");
+CREATE INDEX "idx_gb_sip_trace_call_occurred" ON "gb_sip_trace_message" ("call_id", "occurred_at", "event_id");
+CREATE INDEX "idx_gb_sip_trace_device_occurred" ON "gb_sip_trace_message" ("device_id", "occurred_at", "event_id");
+CREATE INDEX "idx_gb_sip_trace_occurred_event" ON "gb_sip_trace_message" ("occurred_at", "event_id");
 
 DROP TABLE IF EXISTS "gb_sip_trace_session_diagnosis";
 CREATE TABLE "gb_sip_trace_session_diagnosis" (
@@ -1978,11 +1978,11 @@ CREATE TABLE "gb_sip_trace_session_diagnosis" (
   "status_code" SMALLINT NOT NULL DEFAULT 0,
   "stream_id" VARCHAR(255) NOT NULL DEFAULT '',
   "resolved_at" TIMESTAMP(6),
-  CONSTRAINT uk_sip_trace_diagnosis_session UNIQUE ("session_day", "category", "correlation_key")
+  CONSTRAINT "uk_sip_trace_diagnosis_session" UNIQUE ("session_day", "category", "correlation_key")
 );
-CREATE INDEX idx_sip_trace_diagnosis_call_cseq ON "gb_sip_trace_session_diagnosis" ("call_id", "cseq");
-CREATE INDEX idx_sip_trace_diagnosis_category_state_observed ON "gb_sip_trace_session_diagnosis" ("session_day", "category", "state", "observed_at");
-CREATE INDEX idx_sip_trace_diagnosis_device_observed ON "gb_sip_trace_session_diagnosis" ("device_id", "observed_at");
+CREATE INDEX "idx_sip_trace_diagnosis_call_cseq" ON "gb_sip_trace_session_diagnosis" ("call_id", "cseq");
+CREATE INDEX "idx_sip_trace_diagnosis_category_state_observed" ON "gb_sip_trace_session_diagnosis" ("session_day", "category", "state", "observed_at");
+CREATE INDEX "idx_sip_trace_diagnosis_device_observed" ON "gb_sip_trace_session_diagnosis" ("device_id", "observed_at");
 
 DROP TABLE IF EXISTS "gb_talk_session";
 CREATE TABLE "gb_talk_session" (
@@ -2029,21 +2029,21 @@ CREATE TABLE "gb_talk_session" (
   "ended_at" TIMESTAMP,
   "created_at" TIMESTAMP,
   "updated_at" TIMESTAMP,
-  CONSTRAINT uk_talk_session_lease UNIQUE ("lease_key"),
-  CONSTRAINT uk_talk_session_recv_key UNIQUE ("recv_key"),
-  CONSTRAINT uk_talk_session_session_id UNIQUE ("session_id"),
-  CONSTRAINT uk_talk_session_source_key UNIQUE ("source_key"),
-  CONSTRAINT uk_talk_session_ssrc_key UNIQUE ("ssrc_key")
+  CONSTRAINT "uk_talk_session_lease" UNIQUE ("lease_key"),
+  CONSTRAINT "uk_talk_session_recv_key" UNIQUE ("recv_key"),
+  CONSTRAINT "uk_talk_session_session_id" UNIQUE ("session_id"),
+  CONSTRAINT "uk_talk_session_source_key" UNIQUE ("source_key"),
+  CONSTRAINT "uk_talk_session_ssrc_key" UNIQUE ("ssrc_key")
 );
 COMMENT ON TABLE "gb_talk_session" IS 'GB28181 语音对讲会话历史';
-CREATE INDEX idx_talk_session_broadcast_match ON "gb_talk_session" ("device_id", "target_id", "state");
-CREATE INDEX idx_talk_session_broadcast_sn ON "gb_talk_session" ("broadcast_sn");
-CREATE INDEX idx_talk_session_call_id ON "gb_talk_session" ("call_id");
-CREATE INDEX idx_talk_session_channel_created ON "gb_talk_session" ("channel_id", "created_at");
-CREATE INDEX idx_talk_session_openapi_idempotency ON "gb_talk_session" ("openapi_client_id", "openapi_idempotency_key");
-CREATE INDEX idx_talk_session_recv ON "gb_talk_session" ("node_id", "recv_stream");
-CREATE INDEX idx_talk_session_source ON "gb_talk_session" ("node_id", "app", "source_stream");
-CREATE INDEX idx_talk_session_state_expires ON "gb_talk_session" ("state", "expires_at");
+CREATE INDEX "idx_talk_session_broadcast_match" ON "gb_talk_session" ("device_id", "target_id", "state");
+CREATE INDEX "idx_talk_session_broadcast_sn" ON "gb_talk_session" ("broadcast_sn");
+CREATE INDEX "idx_talk_session_call_id" ON "gb_talk_session" ("call_id");
+CREATE INDEX "idx_talk_session_channel_created" ON "gb_talk_session" ("channel_id", "created_at");
+CREATE INDEX "idx_talk_session_openapi_idempotency" ON "gb_talk_session" ("openapi_client_id", "openapi_idempotency_key");
+CREATE INDEX "idx_talk_session_recv" ON "gb_talk_session" ("node_id", "recv_stream");
+CREATE INDEX "idx_talk_session_source" ON "gb_talk_session" ("node_id", "app", "source_stream");
+CREATE INDEX "idx_talk_session_state_expires" ON "gb_talk_session" ("state", "expires_at");
 
 DROP TABLE IF EXISTS "gb_zlm_managed_resource";
 CREATE TABLE "gb_zlm_managed_resource" (
@@ -2062,11 +2062,11 @@ CREATE TABLE "gb_zlm_managed_resource" (
   "last_observed_at" TIMESTAMP(3),
   "tombstoned_at" TIMESTAMP(3),
   "updated_at" TIMESTAMP(3) NOT NULL,
-  CONSTRAINT uk_gb_zlm_managed_resource_identity UNIQUE ("node_id", "resource_type", "resource_key", "schema", "vhost", "app", "stream")
+  CONSTRAINT "uk_gb_zlm_managed_resource_identity" UNIQUE ("node_id", "resource_type", "resource_key", "schema", "vhost", "app", "stream")
 );
 COMMENT ON TABLE "gb_zlm_managed_resource" IS 'ZLM管理资源来源账本';
-CREATE INDEX idx_gb_zlm_managed_resource_observed ON "gb_zlm_managed_resource" ("node_id", "last_observed_at");
-CREATE INDEX idx_gb_zlm_managed_resource_tombstone ON "gb_zlm_managed_resource" ("node_id", "tombstoned_at");
+CREATE INDEX "idx_gb_zlm_managed_resource_observed" ON "gb_zlm_managed_resource" ("node_id", "last_observed_at");
+CREATE INDEX "idx_gb_zlm_managed_resource_tombstone" ON "gb_zlm_managed_resource" ("node_id", "tombstoned_at");
 
 DROP TABLE IF EXISTS "meta_node";
 CREATE TABLE "meta_node" (
@@ -2101,11 +2101,11 @@ CREATE TABLE "meta_node" (
   "runtime_identity_status" VARCHAR(16) NOT NULL DEFAULT 'unknown',
   "hook_ip" VARCHAR(45) NOT NULL DEFAULT '',
   "receive_host" VARCHAR(255) NOT NULL DEFAULT '',
-  CONSTRAINT uk_media_server_uuid UNIQUE ("media_server_uuid")
+  CONSTRAINT "uk_media_server_uuid" UNIQUE ("media_server_uuid")
 );
 COMMENT ON TABLE "meta_node" IS 'ZLM 媒体节点表';
-CREATE INDEX idx_enabled ON "meta_node" ("enabled");
-CREATE INDEX idx_state ON "meta_node" ("state");
+CREATE INDEX "idx_enabled" ON "meta_node" ("enabled");
+CREATE INDEX "idx_state" ON "meta_node" ("state");
 
 DROP TABLE IF EXISTS "meta_node_retired";
 CREATE TABLE "meta_node_retired" (
@@ -2121,10 +2121,10 @@ CREATE TABLE "meta_node_retired" (
   "last_attempt_at" TIMESTAMP(6),
   "retired_at" TIMESTAMP(6) NOT NULL,
   "updated_at" TIMESTAMP(6) NOT NULL,
-  CONSTRAINT uk_retired_media_server_uuid UNIQUE ("media_server_uuid")
+  CONSTRAINT "uk_retired_media_server_uuid" UNIQUE ("media_server_uuid")
 );
 COMMENT ON TABLE "meta_node_retired" IS '已退休媒体节点:仅保留撤销对端 hook 所需的凭据';
-CREATE INDEX idx_retired_unprovision_state ON "meta_node_retired" ("unprovision_state");
+CREATE INDEX "idx_retired_unprovision_state" ON "meta_node_retired" ("unprovision_state");
 
 DROP TABLE IF EXISTS "scheduler_log";
 CREATE TABLE "scheduler_log" (
@@ -2139,7 +2139,7 @@ CREATE TABLE "scheduler_log" (
   "error_message" VARCHAR(255) NOT NULL DEFAULT ''
 );
 COMMENT ON TABLE "scheduler_log" IS 'ZLM 调度日志(异步写,7d 保留)';
-CREATE INDEX idx_happened_at ON "scheduler_log" ("happened_at");
+CREATE INDEX "idx_happened_at" ON "scheduler_log" ("happened_at");
 
 DROP TABLE IF EXISTS "scheduler_setting";
 CREATE TABLE "scheduler_setting" (
@@ -2180,7 +2180,7 @@ COMMENT ON COLUMN "sys_affix"."suffix" IS '文件后缀';
 COMMENT ON COLUMN "sys_affix"."thumbnail_path" IS '缩略图路径';
 COMMENT ON COLUMN "sys_affix"."thumbnail_name" IS '缩略图名称';
 COMMENT ON COLUMN "sys_affix"."thumbnail_url" IS '缩略图URL';
-CREATE INDEX idx_sys_affix_file_md5 ON "sys_affix" ("file_md5");
+CREATE INDEX "idx_sys_affix_file_md5" ON "sys_affix" ("file_md5");
 
 DROP TABLE IF EXISTS "sys_affix_chunk";
 CREATE TABLE "sys_affix_chunk" (
@@ -2210,8 +2210,8 @@ COMMENT ON COLUMN "sys_affix_chunk"."chunk_index" IS '当前分片序号';
 COMMENT ON COLUMN "sys_affix_chunk"."chunk_path" IS '分片文件路径';
 COMMENT ON COLUMN "sys_affix_chunk"."status" IS '0-上传中 1-已合并 2-已取消';
 COMMENT ON COLUMN "sys_affix_chunk"."created_by" IS '创建者ID';
-CREATE INDEX idx_file_md5 ON "sys_affix_chunk" ("file_md5");
-CREATE INDEX idx_upload_id ON "sys_affix_chunk" ("upload_id");
+CREATE INDEX "idx_file_md5" ON "sys_affix_chunk" ("file_md5");
+CREATE INDEX "idx_upload_id" ON "sys_affix_chunk" ("upload_id");
 
 DROP TABLE IF EXISTS "sys_api";
 CREATE TABLE "sys_api" (
@@ -2240,8 +2240,8 @@ CREATE TABLE "sys_casbin_rule" (
   "v3" VARCHAR(100),
   "v4" VARCHAR(100),
   "v5" VARCHAR(100),
-  CONSTRAINT idx_casbin_rule UNIQUE ("ptype", "v0", "v1", "v2", "v3", "v4", "v5"),
-  CONSTRAINT idx_sys_casbin_rule UNIQUE ("ptype", "v0", "v1", "v2", "v3", "v4", "v5")
+  CONSTRAINT "idx_casbin_rule" UNIQUE ("ptype", "v0", "v1", "v2", "v3", "v4", "v5"),
+  CONSTRAINT "idx_sys_casbin_rule" UNIQUE ("ptype", "v0", "v1", "v2", "v3", "v4", "v5")
 );
 
 DROP TABLE IF EXISTS "sys_civil_code";
@@ -2261,8 +2261,8 @@ COMMENT ON COLUMN "sys_civil_code"."code" IS '6 位 GB/T 2260 行政区码';
 COMMENT ON COLUMN "sys_civil_code"."name" IS '完整名称';
 COMMENT ON COLUMN "sys_civil_code"."level" IS '1=省 2=市 3=区县';
 COMMENT ON COLUMN "sys_civil_code"."pinyin" IS '拼音(Cmd+K 搜索)';
-CREATE INDEX idx_parent_code ON "sys_civil_code" ("parent_code", "level");
-CREATE INDEX idx_pinyin ON "sys_civil_code" ("pinyin");
+CREATE INDEX "idx_parent_code" ON "sys_civil_code" ("parent_code", "level");
+CREATE INDEX "idx_pinyin" ON "sys_civil_code" ("pinyin");
 
 DROP TABLE IF EXISTS "sys_department";
 CREATE TABLE "sys_department" (
@@ -2433,10 +2433,10 @@ COMMENT ON COLUMN "sys_job_results"."end_time" IS '结束时间';
 COMMENT ON COLUMN "sys_job_results"."duration" IS '执行时长(纳秒)';
 COMMENT ON COLUMN "sys_job_results"."retry_count" IS '重试次数';
 COMMENT ON COLUMN "sys_job_results"."created_at" IS '记录创建时间';
-CREATE INDEX sys_job_results__idx_created_at ON "sys_job_results" ("created_at");
-CREATE INDEX idx_job_id ON "sys_job_results" ("job_id");
-CREATE INDEX idx_start_time ON "sys_job_results" ("start_time");
-CREATE INDEX sys_job_results__idx_status ON "sys_job_results" ("status");
+CREATE INDEX "sys_job_results__idx_created_at" ON "sys_job_results" ("created_at");
+CREATE INDEX "idx_job_id" ON "sys_job_results" ("job_id");
+CREATE INDEX "idx_start_time" ON "sys_job_results" ("start_time");
+CREATE INDEX "sys_job_results__idx_status" ON "sys_job_results" ("status");
 
 DROP TABLE IF EXISTS "sys_jobs";
 CREATE TABLE "sys_jobs" (
@@ -2479,10 +2479,10 @@ COMMENT ON COLUMN "sys_jobs"."parallel_num" IS '并行数';
 COMMENT ON COLUMN "sys_jobs"."running_count" IS '当前运行中的任务数';
 COMMENT ON COLUMN "sys_jobs"."created_at" IS '创建时间';
 COMMENT ON COLUMN "sys_jobs"."updated_at" IS '更新时间';
-CREATE INDEX sys_jobs__idx_created_at ON "sys_jobs" ("created_at");
-CREATE INDEX idx_executor_name ON "sys_jobs" ("executor_name");
-CREATE INDEX idx_group ON "sys_jobs" ("group");
-CREATE INDEX sys_jobs__idx_status ON "sys_jobs" ("status");
+CREATE INDEX "sys_jobs__idx_created_at" ON "sys_jobs" ("created_at");
+CREATE INDEX "idx_executor_name" ON "sys_jobs" ("executor_name");
+CREATE INDEX "idx_group" ON "sys_jobs" ("group");
+CREATE INDEX "sys_jobs__idx_status" ON "sys_jobs" ("status");
 
 DROP TABLE IF EXISTS "sys_login_logs";
 CREATE TABLE "sys_login_logs" (
@@ -2501,12 +2501,12 @@ CREATE TABLE "sys_login_logs" (
   "deleted_at" TIMESTAMP
 );
 COMMENT ON TABLE "sys_login_logs" IS '后台登录审计日志';
-CREATE INDEX idx_login_logs_created_at ON "sys_login_logs" ("created_at");
-CREATE INDEX idx_login_logs_failure_reason ON "sys_login_logs" ("failure_reason");
-CREATE INDEX idx_login_logs_ip ON "sys_login_logs" ("ip");
-CREATE INDEX idx_login_logs_result ON "sys_login_logs" ("result");
-CREATE INDEX idx_login_logs_user_id ON "sys_login_logs" ("user_id");
-CREATE INDEX idx_login_logs_username ON "sys_login_logs" ("username");
+CREATE INDEX "idx_login_logs_created_at" ON "sys_login_logs" ("created_at");
+CREATE INDEX "idx_login_logs_failure_reason" ON "sys_login_logs" ("failure_reason");
+CREATE INDEX "idx_login_logs_ip" ON "sys_login_logs" ("ip");
+CREATE INDEX "idx_login_logs_result" ON "sys_login_logs" ("result");
+CREATE INDEX "idx_login_logs_user_id" ON "sys_login_logs" ("user_id");
+CREATE INDEX "idx_login_logs_username" ON "sys_login_logs" ("username");
 
 DROP TABLE IF EXISTS "sys_menu";
 CREATE TABLE "sys_menu" (
@@ -2558,9 +2558,9 @@ COMMENT ON COLUMN "sys_menu"."is_link" IS '是否外链';
 COMMENT ON COLUMN "sys_menu"."permission" IS '权限标识';
 COMMENT ON COLUMN "sys_menu"."created_at" IS '创建时间';
 COMMENT ON COLUMN "sys_menu"."updated_at" IS '更新时间';
-CREATE INDEX idx_parent_id ON "sys_menu" ("parent_id");
-CREATE INDEX idx_sort ON "sys_menu" ("sort");
-CREATE INDEX idx_type ON "sys_menu" ("type");
+CREATE INDEX "idx_parent_id" ON "sys_menu" ("parent_id");
+CREATE INDEX "idx_sort" ON "sys_menu" ("sort");
+CREATE INDEX "idx_type" ON "sys_menu" ("type");
 
 DROP TABLE IF EXISTS "sys_menu_api";
 CREATE TABLE "sys_menu_api" (
@@ -2584,10 +2584,10 @@ CREATE TABLE "sys_openapi_audit" (
   "latency_ms" BIGINT NOT NULL DEFAULT 0,
   "created_at" TIMESTAMP(6) NOT NULL,
   "completed_at" TIMESTAMP(6),
-  CONSTRAINT uk_openapi_audit_request UNIQUE ("request_id")
+  CONSTRAINT "uk_openapi_audit_request" UNIQUE ("request_id")
 );
-CREATE INDEX idx_openapi_audit_client_time ON "sys_openapi_audit" ("client_id", "created_at");
-CREATE INDEX idx_openapi_audit_time ON "sys_openapi_audit" ("created_at");
+CREATE INDEX "idx_openapi_audit_client_time" ON "sys_openapi_audit" ("client_id", "created_at");
+CREATE INDEX "idx_openapi_audit_time" ON "sys_openapi_audit" ("created_at");
 
 DROP TABLE IF EXISTS "sys_openapi_client";
 CREATE TABLE "sys_openapi_client" (
@@ -2614,11 +2614,11 @@ CREATE TABLE "sys_openapi_client" (
   "updated_by" BIGINT NOT NULL,
   "created_at" TIMESTAMP(6) NOT NULL,
   "updated_at" TIMESTAMP(6) NOT NULL,
-  CONSTRAINT uk_openapi_ak UNIQUE ("ak"),
+  CONSTRAINT "uk_openapi_ak" UNIQUE ("ak"),
   CONSTRAINT "ck_openapi_client_data_scope" CHECK (("data_scope" in (3,4)))
 );
 COMMENT ON COLUMN "sys_openapi_client"."data_scope" IS '数据范围 3本部门 4本部门及以下';
-CREATE INDEX idx_openapi_client_dept ON "sys_openapi_client" ("owner_dept_id");
+CREATE INDEX "idx_openapi_client_dept" ON "sys_openapi_client" ("owner_dept_id");
 
 DROP TABLE IF EXISTS "sys_openapi_client_scope";
 CREATE TABLE "sys_openapi_client_scope" (
@@ -2650,12 +2650,12 @@ CREATE TABLE "sys_openapi_device_capture_session" (
   "state" VARCHAR(24) NOT NULL,
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
-  CONSTRAINT uk_openapi_capture_idem UNIQUE ("client_id", "idempotency_digest"),
-  CONSTRAINT uk_openapi_capture_session UNIQUE ("session_id")
+  CONSTRAINT "uk_openapi_capture_idem" UNIQUE ("client_id", "idempotency_digest"),
+  CONSTRAINT "uk_openapi_capture_session" UNIQUE ("session_id")
 );
-CREATE INDEX idx_openapi_capture_registry_session ON "sys_openapi_device_capture_session" ("registry_session_id");
-CREATE INDEX idx_openapi_capture_session_client ON "sys_openapi_device_capture_session" ("client_id", "device_id", "channel_id");
-CREATE INDEX idx_openapi_capture_state_updated ON "sys_openapi_device_capture_session" ("state", "created_at");
+CREATE INDEX "idx_openapi_capture_registry_session" ON "sys_openapi_device_capture_session" ("registry_session_id");
+CREATE INDEX "idx_openapi_capture_session_client" ON "sys_openapi_device_capture_session" ("client_id", "device_id", "channel_id");
+CREATE INDEX "idx_openapi_capture_state_updated" ON "sys_openapi_device_capture_session" ("state", "created_at");
 
 DROP TABLE IF EXISTS "sys_openapi_device_subscription";
 CREATE TABLE "sys_openapi_device_subscription" (
@@ -2669,11 +2669,11 @@ CREATE TABLE "sys_openapi_device_subscription" (
   "created_at" TIMESTAMP(3) NOT NULL,
   "updated_at" TIMESTAMP(3) NOT NULL,
   PRIMARY KEY ("id"),
-  CONSTRAINT uk_openapi_device_subscription UNIQUE ("client_id", "device_id", "kind")
+  CONSTRAINT "uk_openapi_device_subscription" UNIQUE ("client_id", "device_id", "kind")
 );
-CREATE INDEX idx_openapi_device_sub_client ON "sys_openapi_device_subscription" ("client_id");
-CREATE INDEX idx_openapi_device_sub_enabled ON "sys_openapi_device_subscription" ("enabled");
-CREATE INDEX idx_openapi_device_sub_expires ON "sys_openapi_device_subscription" ("expires_at");
+CREATE INDEX "idx_openapi_device_sub_client" ON "sys_openapi_device_subscription" ("client_id");
+CREATE INDEX "idx_openapi_device_sub_enabled" ON "sys_openapi_device_subscription" ("enabled");
+CREATE INDEX "idx_openapi_device_sub_expires" ON "sys_openapi_device_subscription" ("expires_at");
 
 DROP TABLE IF EXISTS "sys_openapi_nonce";
 CREATE TABLE "sys_openapi_nonce" (
@@ -2683,7 +2683,7 @@ CREATE TABLE "sys_openapi_nonce" (
   "expires_at" TIMESTAMP(6) NOT NULL,
   PRIMARY KEY ("client_id", "nonce")
 );
-CREATE INDEX idx_openapi_nonce_expiry ON "sys_openapi_nonce" ("expires_at");
+CREATE INDEX "idx_openapi_nonce_expiry" ON "sys_openapi_nonce" ("expires_at");
 
 DROP TABLE IF EXISTS "sys_openapi_process_authority";
 CREATE TABLE "sys_openapi_process_authority" (
@@ -2694,7 +2694,7 @@ CREATE TABLE "sys_openapi_process_authority" (
   PRIMARY KEY ("id"),
   CONSTRAINT "ck_openapi_authority_singleton" CHECK ((("id" = 1) and ("row_version" > 0)))
 );
-CREATE INDEX fk_openapi_authority_generation ON "sys_openapi_process_authority" ("domain_id", "current_generation_id");
+CREATE INDEX "fk_openapi_authority_generation" ON "sys_openapi_process_authority" ("domain_id", "current_generation_id");
 
 DROP TABLE IF EXISTS "sys_openapi_process_generation";
 CREATE TABLE "sys_openapi_process_generation" (
@@ -2702,7 +2702,7 @@ CREATE TABLE "sys_openapi_process_generation" (
   "domain_id" VARCHAR(32) NOT NULL,
   "started_at" TIMESTAMP(6) NOT NULL,
   PRIMARY KEY ("generation_id"),
-  CONSTRAINT uk_openapi_generation_domain UNIQUE ("domain_id", "generation_id"),
+  CONSTRAINT "uk_openapi_generation_domain" UNIQUE ("domain_id", "generation_id"),
   CONSTRAINT "ck_openapi_generation_identity" CHECK (((octet_length("generation_id") = 32) and (not("generation_id" ~ '[^0-9a-f]')) and ("generation_id" <> '00000000000000000000000000000000') and (octet_length("domain_id") = 32) and (not("domain_id" ~ '[^0-9a-f]')) and ("domain_id" <> '00000000000000000000000000000000')))
 );
 
@@ -2753,9 +2753,9 @@ COMMENT ON COLUMN "sys_operation_logs"."status_code" IS '响应状态码';
 COMMENT ON COLUMN "sys_operation_logs"."duration" IS '操作耗时(毫秒)';
 COMMENT ON COLUMN "sys_operation_logs"."error_msg" IS '错误信息';
 COMMENT ON COLUMN "sys_operation_logs"."location" IS '操作地点';
-CREATE INDEX idx_sys_operation_logs_created_at ON "sys_operation_logs" ("created_at");
-CREATE INDEX idx_sys_operation_logs_deleted_at ON "sys_operation_logs" ("deleted_at");
-CREATE INDEX sys_operation_logs__idx_user_id ON "sys_operation_logs" ("user_id");
+CREATE INDEX "idx_sys_operation_logs_created_at" ON "sys_operation_logs" ("created_at");
+CREATE INDEX "idx_sys_operation_logs_deleted_at" ON "sys_operation_logs" ("deleted_at");
+CREATE INDEX "sys_operation_logs__idx_user_id" ON "sys_operation_logs" ("user_id");
 
 DROP TABLE IF EXISTS "sys_param";
 CREATE TABLE "sys_param" (
@@ -2769,7 +2769,7 @@ CREATE TABLE "sys_param" (
   "updated_at" TIMESTAMP,
   "deleted_at" TIMESTAMP,
   "created_by" INTEGER DEFAULT 0,
-  CONSTRAINT idx_sys_param_code UNIQUE ("code")
+  CONSTRAINT "idx_sys_param_code" UNIQUE ("code")
 );
 COMMENT ON TABLE "sys_param" IS '系统参数配置';
 COMMENT ON COLUMN "sys_param"."name" IS '参数名称';
@@ -2777,7 +2777,7 @@ COMMENT ON COLUMN "sys_param"."code" IS '参数唯一标识';
 COMMENT ON COLUMN "sys_param"."value" IS '参数值';
 COMMENT ON COLUMN "sys_param"."status" IS '状态(0禁用/1启用)';
 COMMENT ON COLUMN "sys_param"."description" IS '描述';
-CREATE INDEX idx_sys_param_deleted_at ON "sys_param" ("deleted_at");
+CREATE INDEX "idx_sys_param_deleted_at" ON "sys_param" ("deleted_at");
 
 DROP TABLE IF EXISTS "sys_role";
 CREATE TABLE "sys_role" (
@@ -2839,9 +2839,9 @@ CREATE TABLE "sys_user_sessions" (
   PRIMARY KEY ("sid")
 );
 COMMENT ON TABLE "sys_user_sessions" IS '后台登录会话';
-CREATE INDEX idx_client_ip ON "sys_user_sessions" ("client_ip");
-CREATE INDEX idx_session_valid ON "sys_user_sessions" ("revoked_at", "session_expires_at", "login_at");
-CREATE INDEX sys_user_sessions__idx_user_id ON "sys_user_sessions" ("user_id");
+CREATE INDEX "idx_client_ip" ON "sys_user_sessions" ("client_ip");
+CREATE INDEX "idx_session_valid" ON "sys_user_sessions" ("revoked_at", "session_expires_at", "login_at");
+CREATE INDEX "sys_user_sessions__idx_user_id" ON "sys_user_sessions" ("user_id");
 
 DROP TABLE IF EXISTS "sys_users";
 CREATE TABLE "sys_users" (
@@ -2861,7 +2861,7 @@ CREATE TABLE "sys_users" (
   "deleted_at" TIMESTAMP,
   "created_by" INTEGER DEFAULT 0,
   "must_change_password" BOOLEAN NOT NULL DEFAULT false,
-  CONSTRAINT username UNIQUE ("username")
+  CONSTRAINT "username" UNIQUE ("username")
 );
 COMMENT ON COLUMN "sys_users"."username" IS '用户名';
 COMMENT ON COLUMN "sys_users"."password" IS '密码';
@@ -2898,12 +2898,12 @@ CREATE TABLE "sys_openapi_capability" (
   "created_at" TIMESTAMP(6) NOT NULL,
   "updated_at" TIMESTAMP(6) NOT NULL,
   "deleted_at" TIMESTAMP(6),
-  CONSTRAINT uk_openapi_capability_group_capability_code UNIQUE ("group_id", "code"),
-  CONSTRAINT uk_openapi_capability_scope UNIQUE ("scope")
+  CONSTRAINT "uk_openapi_capability_group_capability_code" UNIQUE ("group_id", "code"),
+  CONSTRAINT "uk_openapi_capability_scope" UNIQUE ("scope")
 );
-CREATE INDEX idx_openapi_capability_deleted ON "sys_openapi_capability" ("deleted_at");
-CREATE INDEX idx_openapi_capability_group ON "sys_openapi_capability" ("group_id");
-CREATE INDEX idx_openapi_capability_sys_api ON "sys_openapi_capability" ("sys_api_id");
+CREATE INDEX "idx_openapi_capability_deleted" ON "sys_openapi_capability" ("deleted_at");
+CREATE INDEX "idx_openapi_capability_group" ON "sys_openapi_capability" ("group_id");
+CREATE INDEX "idx_openapi_capability_sys_api" ON "sys_openapi_capability" ("sys_api_id");
 
 DROP TABLE IF EXISTS "sys_openapi_capability_group";
 CREATE TABLE "sys_openapi_capability_group" (
@@ -2919,9 +2919,9 @@ CREATE TABLE "sys_openapi_capability_group" (
   "created_at" TIMESTAMP(6) NOT NULL,
   "updated_at" TIMESTAMP(6) NOT NULL,
   "deleted_at" TIMESTAMP(6),
-  CONSTRAINT uk_openapi_capability_group_code UNIQUE ("code")
+  CONSTRAINT "uk_openapi_capability_group_code" UNIQUE ("code")
 );
-CREATE INDEX idx_openapi_capability_group_deleted ON "sys_openapi_capability_group" ("deleted_at");
+CREATE INDEX "idx_openapi_capability_group_deleted" ON "sys_openapi_capability_group" ("deleted_at");
 
 DROP TABLE IF EXISTS "sys_openapi_operation";
 CREATE TABLE "sys_openapi_operation" (
@@ -2948,12 +2948,12 @@ CREATE TABLE "sys_openapi_operation" (
   "created_at" TIMESTAMP(6) NOT NULL,
   "updated_at" TIMESTAMP(6) NOT NULL,
   "deleted_at" TIMESTAMP(6),
-  CONSTRAINT uk_openapi_operation_capability_code UNIQUE ("capability_id", "code"),
-  CONSTRAINT uk_openapi_operation_route UNIQUE ("method", "external_path")
+  CONSTRAINT "uk_openapi_operation_capability_code" UNIQUE ("capability_id", "code"),
+  CONSTRAINT "uk_openapi_operation_route" UNIQUE ("method", "external_path")
 );
-CREATE INDEX idx_openapi_operation_capability ON "sys_openapi_operation" ("capability_id");
-CREATE INDEX idx_openapi_operation_deleted ON "sys_openapi_operation" ("deleted_at");
-CREATE INDEX idx_openapi_operation_sys_api ON "sys_openapi_operation" ("sys_api_id");
+CREATE INDEX "idx_openapi_operation_capability" ON "sys_openapi_operation" ("capability_id");
+CREATE INDEX "idx_openapi_operation_deleted" ON "sys_openapi_operation" ("deleted_at");
+CREATE INDEX "idx_openapi_operation_sys_api" ON "sys_openapi_operation" ("sys_api_id");
 
 DROP TABLE IF EXISTS "sys_openapi_release";
 CREATE TABLE "sys_openapi_release" (
@@ -2971,11 +2971,11 @@ CREATE TABLE "sys_openapi_release" (
   "created_by" BIGINT NOT NULL DEFAULT 0,
   "created_at" TIMESTAMP(6) NOT NULL,
   "updated_at" TIMESTAMP(6) NOT NULL,
-  CONSTRAINT uk_openapi_release_version UNIQUE ("version")
+  CONSTRAINT "uk_openapi_release_version" UNIQUE ("version")
 );
-CREATE INDEX idx_openapi_release_parent ON "sys_openapi_release" ("parent_release_id");
-CREATE INDEX idx_openapi_release_rollback ON "sys_openapi_release" ("rollback_of_id");
-CREATE INDEX idx_openapi_release_status ON "sys_openapi_release" ("status");
+CREATE INDEX "idx_openapi_release_parent" ON "sys_openapi_release" ("parent_release_id");
+CREATE INDEX "idx_openapi_release_rollback" ON "sys_openapi_release" ("rollback_of_id");
+CREATE INDEX "idx_openapi_release_status" ON "sys_openapi_release" ("status");
 
 DROP TABLE IF EXISTS "sys_openapi_release_item";
 CREATE TABLE "sys_openapi_release_item" (
@@ -3003,11 +3003,11 @@ CREATE TABLE "sys_openapi_release_item" (
   "sort" INTEGER NOT NULL DEFAULT 0,
   "snapshot_json" TEXT NOT NULL,
   "created_at" TIMESTAMP(6) NOT NULL,
-  CONSTRAINT uk_openapi_release_item_route UNIQUE ("release_id", "method", "external_path")
+  CONSTRAINT "uk_openapi_release_item_route" UNIQUE ("release_id", "method", "external_path")
 );
-CREATE INDEX idx_openapi_release_item_capability ON "sys_openapi_release_item" ("capability_id");
-CREATE INDEX idx_openapi_release_item_operation ON "sys_openapi_release_item" ("operation_id");
-CREATE INDEX idx_openapi_release_item_release ON "sys_openapi_release_item" ("release_id");
+CREATE INDEX "idx_openapi_release_item_capability" ON "sys_openapi_release_item" ("capability_id");
+CREATE INDEX "idx_openapi_release_item_operation" ON "sys_openapi_release_item" ("operation_id");
+CREATE INDEX "idx_openapi_release_item_release" ON "sys_openapi_release_item" ("release_id");
 
 DROP TABLE IF EXISTS "sys_openapi_runtime_state";
 CREATE TABLE "sys_openapi_runtime_state" (
@@ -3022,7 +3022,7 @@ CREATE TABLE "sys_openapi_runtime_state" (
   "updated_at" TIMESTAMP(6) NOT NULL,
   PRIMARY KEY ("id")
 );
-CREATE INDEX idx_openapi_runtime_release ON "sys_openapi_runtime_state" ("active_release_id");
+CREATE INDEX "idx_openapi_runtime_release" ON "sys_openapi_runtime_state" ("active_release_id");
 
 -- openapi-capability-catalog:end
 

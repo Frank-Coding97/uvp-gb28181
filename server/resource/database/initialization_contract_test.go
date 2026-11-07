@@ -24,6 +24,7 @@ var releaseFiles = []string{
 	"uvp-gb28181.sql",
 	"postgresql_converted.sql",
 	"sqlserver_converted.sql",
+	"dameng_converted.sql",
 }
 
 // 建表段落契约对这三个方言都成立：MySQL 行首 CREATE TABLE、PostgreSQL 行首
@@ -909,4 +910,45 @@ func tableSection(text, table string) (string, bool) {
 		end = loc[1] + m[0]
 	}
 	return text[loc[0]:end], true
+}
+
+// damengFixedCharColumn 匹配达梦产物里的**定长** CHAR 列定义。
+// 只认行首的 `"列名" CHAR(`：`VARCHAR(` 因为前面多了 VAR 不会命中，
+// 注释与 CHECK 子句里的 char_length/CHAR_LENGTH 也不会命中（它们不以引号开关）。
+var damengFixedCharColumn = regexp.MustCompile(`(?i)^"[a-z0-9_]+"[ \t]+n?char[ \t]*\(`)
+
+// TestDamengBaselineAvoidsFixedLengthChar 钉住达梦产物「不定长」的决策。
+//
+// 为什么这条必须存在：达梦是 Oracle 血统，CHAR 定长空格填充，而且**读回带填充**
+// （实测 192.168.10.52 的 DM8：CHAR(192) 存 'abcdef'，LENGTH 仍是 192，值尾部
+// 有 186 个空格）。MySQL 的 CHAR 取值会剥离尾空格，所以这套 Go 代码是按
+// 「读回来没有填充」写的；照搬 CHAR 会让所有 `库里读出的值 != 计算值` 的裸字符串
+// 比较静默判不等，已经踩到两处：
+//   - sys_openapi_runtime_state.snapshot_hash → 每次发布报
+//     active state snapshot hash mismatch，整个事务回滚，两张表都空着；
+//   - sys_openapi_node_runtime.current_boot_nonce → 探测确认永远认为换了新 nonce。
+//
+// 这些列在 Go 侧都当变长字符串用（哈希、UUID、nonce、指纹），从来没有定宽语义，
+// 所以达梦侧统一出 VARCHAR(n)。生成器那一侧的同一条理由见
+// baseline/generate_sql.py 的 DamengProfile.map_type。
+func TestDamengBaselineAvoidsFixedLengthChar(t *testing.T) {
+	const file = "dameng_converted.sql"
+	body := string(mustRead(t, file))
+
+	var offenders []string
+	for _, line := range strings.Split(body, "\n") {
+		if damengFixedCharColumn.MatchString(strings.TrimSpace(line)) {
+			offenders = append(offenders, strings.TrimSpace(line))
+		}
+	}
+	require.NotEmptyf(t, body, "%s 是空的 —— 断言失去对象", file)
+	require.Emptyf(t, offenders,
+		"%s 里出现了定长 CHAR 列（读回会带空格填充，破坏 Go 侧裸字符串比较）: %v", file, offenders)
+
+	// 反向确认断言真的能抓到东西：拿真正会踩雷的形态喂给正则，
+	// 否则「一个都没命中」也可能是因为正则写错了（静默假绿）。
+	require.Truef(t, damengFixedCharColumn.MatchString(`"snapshot_hash" CHAR(192) NOT NULL DEFAULT '',`),
+		"正则必须能识别定长 CHAR 列定义，否则上面的空结果毫无意义")
+	require.False(t, damengFixedCharColumn.MatchString(`"snapshot_hash" VARCHAR(192) NOT NULL DEFAULT '',`),
+		"VARCHAR 不能被误判成定长 CHAR")
 }
