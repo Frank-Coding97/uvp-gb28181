@@ -108,6 +108,31 @@ func Client(sqlType string) (*gorm.DB, error) {
 	}
 }
 
+// usePrepareStmt 决定某个方言是否启用 GORM 的语句预编译缓存。
+//
+// 默认开，只有 PolarDB 默认关：
+//
+// ⛔ PolarDB-X（开源版 v2.4.2 / 5.4.19 内核）的**客户端预编译协议**（COM_STMT_PREPARE）
+// 对语句有限制 —— 启动时的数据库身份探测
+// `SELECT DATABASE() AS database_name, VERSION() AS database_version`
+// 走文本协议完全正常，一旦被 GORM 缓存成预编译语句就报
+// `Prepare does not support sql: SELECT DATABASE() ...`（实测 192.168.10.220）。
+// 服务端的 `PREPARE ... FROM '...'` 反而是通的，所以这不是 SQL 写法问题。
+//
+// 症状很误导：进程起不来，日志只有「读取数据库身份失败」，看起来像连不上库。
+//
+// 云上的 PolarDB MySQL 版是 8.0 内核，没有这个限制 —— 真要用预编译，
+// 在配置里显式写 `gormv2.polardb.preparestmt: 1` 即可覆盖默认值。
+func usePrepareStmt(sqlType string) bool {
+	enabled := consts.NormalizeDbType(sqlType) != consts.DbTypePolarDB
+	if app.ConfigYml != nil {
+		if v := strings.TrimSpace(app.ConfigYml.GetString("gormv2." + sqlType + ".preparestmt")); v != "" {
+			enabled = v == "1" || strings.EqualFold(v, "true")
+		}
+	}
+	return enabled
+}
+
 // 获取数据库驱动, 可以通过options 动态参数连接任意多个数据库
 func GetSqlDriver(sqlType string, readDbIsOpen int, dbConf ...ConfigParams) (*gorm.DB, error) {
 
@@ -121,7 +146,7 @@ func GetSqlDriver(sqlType string, readDbIsOpen int, dbConf ...ConfigParams) (*go
 	}
 	gormDb, err := gorm.Open(dbDialector, &gorm.Config{
 		SkipDefaultTransaction: true,
-		PrepareStmt:            true,
+		PrepareStmt:            usePrepareStmt(sqlType),
 		Logger:                 redefineLog(sqlType), //拦截、接管 gorm v2 自带日志
 	})
 	if err != nil {
