@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"strings"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 	"uvplatform.com/uvp-gb28181/app/models"
 	"uvplatform.com/uvp-gb28181/app/utils/common"
@@ -69,7 +68,7 @@ func (sgs *SysGenService) BatchInsert(ctx context.Context, req *models.SysGenBat
 		// 检查是否已存在相同的记录
 		var existingGen models.SysGen
 		var query string
-		switch strings.ToLower(dbType) {
+		switch metadataSQLDialect(dbType) {
 		case "mysql":
 			query = "SELECT * FROM sys_gen WHERE db_type = ? AND `database` = ? AND name = ? LIMIT 1"
 		case "postgresql":

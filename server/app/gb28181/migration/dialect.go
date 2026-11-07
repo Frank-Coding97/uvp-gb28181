@@ -2,6 +2,7 @@ package migration
 
 import (
 	"github.com/glebarez/sqlite"
+	dameng "github.com/godoes/gorm-dameng"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlserver"
@@ -21,6 +22,15 @@ const (
 	//   症状是 -migrate-up 直接失败。
 	DialectSQLite  Dialect = "sqlite"
 	DialectUnknown Dialect = ""
+
+	// DialectDM 是达梦 DM8。
+	//
+	// ⛔ 只有达梦需要这一项。人大金仓与阿里 PolarDB **刻意不设独立方言**：
+	//   它们分别由 postgres.Open / mysql.Open 建连，DialectOf 会自然判成
+	//   DialectPostgres / DialectMySQL，于是整批 -postgresql.sql / mysql
+	//   迁移集直接复用。给它们各加一套方言只会多出两批内容完全相同的
+	//   SQL 文件，将来必然漂移。
+	DialectDM Dialect = "dm"
 )
 
 // DialectOf 从 GORM dialector 判定数据库方言,未知方言返回 DialectUnknown。
@@ -38,6 +48,10 @@ func DialectOf(d gorm.Dialector) Dialect {
 		//   —— 而调用方拿到 Unknown 后的行为是"迁移文件找不到"，报错与根因无关。
 		//   （现有三个方言都是"值+指针"都写，这里跟着同一形状。）
 		return DialectSQLite
+	case *dameng.Dialector, dameng.Dialector:
+		// 同理两种形态都列。dameng.Open() 返回的是 *Dialector，
+		// 但 Dialector 的方法集是值接收者，与 sqlite 一样的坑。
+		return DialectDM
 	default:
 		return DialectUnknown
 	}

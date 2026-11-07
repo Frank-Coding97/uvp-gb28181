@@ -14,6 +14,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"uvplatform.com/uvp-gb28181/app/global/consts"
 )
 
 const maxManifestEnvelopeSize = 1 << 20
@@ -337,15 +339,12 @@ func validateDatabaseCompatibility(database DatabaseCompatibility) error {
 // NormalizeDatabaseDialect produces the identity stored in preflight and
 // signed compatibility declarations. The database configuration accepts the
 // common postgres alias, while release metadata has one canonical spelling.
+//
+// ⛔ 唯一真源在 consts.NormalizeDbType —— 这里**不再自己维护一份 switch**。
+// 历史上两份并存，结果是 app.DB() 认 "postgresql" 而 handler 认 "postgres"，
+// 同一份配置在两个模块被解析成不同库。国产库三种写法一律经那里收敛。
 func NormalizeDatabaseDialect(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "mysql", "postgresql", "sqlite", "sqlserver":
-		return strings.ToLower(strings.TrimSpace(value))
-	case "postgres":
-		return "postgresql"
-	default:
-		return ""
-	}
+	return consts.NormalizeDbType(value)
 }
 
 // AllowsAutomaticUpgrade proves that an unattended upgrade matches the exact

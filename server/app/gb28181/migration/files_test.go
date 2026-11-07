@@ -12,6 +12,7 @@ var mixedNames = []string{
 	"2026-07-20-a-postgresql.sql",
 	"2026-07-20-a-sqlserver.sql",
 	"2026-07-20-a-sqlite.sql",
+	"2026-07-20-a-dm.sql",
 	"2026-07-20-a-down.sql",
 	"2026-07-20-a.sql",
 }
@@ -34,6 +35,29 @@ func TestFilterUpFilesSQLServer(t *testing.T) {
 func TestFilterUpFilesSQLite(t *testing.T) {
 	got := FilterUpFiles(mixedNames, DialectSQLite)
 	require.Equal(t, []string{"2026-07-20-a-sqlite.sql"}, got)
+}
+
+func TestFilterUpFilesDM(t *testing.T) {
+	got := FilterUpFiles(mixedNames, DialectDM)
+	require.Equal(t, []string{"2026-07-20-a-dm.sql"}, got)
+}
+
+// MySQL 是主方言、文件名不带后缀，所以它的判据只能是「排除了别人」。
+// ⛔ 漏掉一个后缀 ⇒ 那套脚本会**同时**被当成 MySQL 脚本再执行一遍，
+// 报错是「表已存在」，而根因在文件名 —— 这条断言把「每个带后缀的方言
+// 都不许漏进 MySQL」固定下来，新增方言时它会直接红。
+func TestFilterUpFilesMySQLExcludesEverySuffixedDialect(t *testing.T) {
+	suffixes := map[Dialect]string{
+		DialectPostgres:  "-postgresql",
+		DialectSQLServer: "-sqlserver",
+		DialectSQLite:    "-sqlite",
+		DialectDM:        "-dm",
+	}
+	for d, suffix := range suffixes {
+		names := []string{"2026-07-20-a" + suffix + ".sql", "2026-07-20-plain.sql"}
+		require.Equal(t, []string{"2026-07-20-plain.sql"}, FilterUpFiles(names, DialectMySQL),
+			"方言 %s 的脚本不能被当成 MySQL 脚本重复执行", d)
+	}
 }
 
 func TestFilterUpFilesExcludesNonSQL(t *testing.T) {

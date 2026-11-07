@@ -8,6 +8,7 @@ import (
 	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/consts"
 	"uvplatform.com/uvp-gb28181/app/utils/logging"
 
 	"go.uber.org/zap"
@@ -18,15 +19,19 @@ import (
 // GormDbMysql 会让 SQLite/SQL Server/ PostgreSQL 部署在解析成功后静默丢失元数据。
 func deviceInfoDB() *gorm.DB {
 	if app.ConfigYml != nil {
-		switch strings.ToLower(strings.TrimSpace(app.ConfigYml.GetString("gormv2.usedbtype"))) {
-		case "sqlite":
+		switch consts.NormalizeDbType(app.ConfigYml.GetString("gormv2.usedbtype")) {
+		case consts.DbTypeSqlite:
 			return app.GormDbSqlite
-		case "sqlserver":
+		case consts.DbTypeSqlServer:
 			return app.GormDbSqlserver
-		case "postgresql", "postgres":
+		case consts.DbTypePostgreSql:
 			return app.GormDbPostgreSql
-		case "mysql", "":
-			return app.GormDbMysql
+		case consts.DbTypeKingbase:
+			return app.GormDbKingbase
+		case consts.DbTypePolarDB:
+			return app.GormDbPolarDB
+		case consts.DbTypeDM:
+			return app.GormDbDM
 		default:
 			return app.GormDbMysql
 		}

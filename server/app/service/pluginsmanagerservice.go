@@ -344,18 +344,9 @@ func (pms *PluginsManagerService) generateTableSQL(tableNames []string, includeD
 	var db *gorm.DB
 	var err error
 
-	switch dbType {
-	case "mysql":
-		db, err = gormhelper.GetOneMysqlClient()
-	case "postgresql":
-		db, err = gormhelper.GetOnePostgreSqlClient()
-	case "sqlserver":
-		db, err = gormhelper.GetOneSqlserverClient()
-	case "sqlite":
-		db, err = gormhelper.GetOneSqliteClient()
-	default:
-		db, err = gormhelper.GetOneMysqlClient()
-	}
+	// ⛔ 统一走 gormhelper.Client，不要在这里再展开成逐方言的 switch：
+	// 这个文件原本有 4 份一模一样的四分支 switch，加一种库就要改 4 处。
+	db, err = gormhelper.Client(dbType)
 
 	if err != nil {
 		return "", err
@@ -372,7 +363,7 @@ func (pms *PluginsManagerService) generateTableSQL(tableNames []string, includeD
 
 	// 根据数据库类型生成SQL
 	for _, tableName := range tableNames {
-		switch dbType {
+		switch metadataSQLDialect(dbType) {
 		case "mysql":
 			if err := pms.generateMySQLTableSQL(sqlDB, tableName, &sqlContent, includeData); err != nil {
 				return "", err
@@ -974,18 +965,9 @@ func (pms *PluginsManagerService) checkTablesExist(tableNames []string) ([]strin
 	var db *gorm.DB
 	var err error
 
-	switch dbType {
-	case "mysql":
-		db, err = gormhelper.GetOneMysqlClient()
-	case "postgresql":
-		db, err = gormhelper.GetOnePostgreSqlClient()
-	case "sqlserver":
-		db, err = gormhelper.GetOneSqlserverClient()
-	case "sqlite":
-		db, err = gormhelper.GetOneSqliteClient()
-	default:
-		db, err = gormhelper.GetOneMysqlClient()
-	}
+	// ⛔ 统一走 gormhelper.Client，不要在这里再展开成逐方言的 switch：
+	// 这个文件原本有 4 份一模一样的四分支 switch，加一种库就要改 4 处。
+	db, err = gormhelper.Client(dbType)
 
 	if err != nil {
 		return nil, fmt.Errorf("获取数据库连接失败: %v", err)
@@ -1000,7 +982,7 @@ func (pms *PluginsManagerService) checkTablesExist(tableNames []string) ([]strin
 	for _, tableName := range tableNames {
 		var exists bool
 
-		switch dbType {
+		switch metadataSQLDialect(dbType) {
 		case "mysql":
 			err := sqlDB.QueryRowContext(pms.logContext(),
 				"SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
@@ -1143,18 +1125,9 @@ func (pms *PluginsManagerService) importDatabase(zipReader *zip.Reader) error {
 	var db *gorm.DB
 	var err error
 
-	switch dbType {
-	case "mysql":
-		db, err = gormhelper.GetOneMysqlClient()
-	case "postgresql":
-		db, err = gormhelper.GetOnePostgreSqlClient()
-	case "sqlserver":
-		db, err = gormhelper.GetOneSqlserverClient()
-	case "sqlite":
-		db, err = gormhelper.GetOneSqliteClient()
-	default:
-		db, err = gormhelper.GetOneMysqlClient()
-	}
+	// ⛔ 统一走 gormhelper.Client，不要在这里再展开成逐方言的 switch：
+	// 这个文件原本有 4 份一模一样的四分支 switch，加一种库就要改 4 处。
+	db, err = gormhelper.Client(dbType)
 
 	if err != nil {
 		return err
@@ -1556,18 +1529,9 @@ func (pms *PluginsManagerService) dropDatabaseTables(tableNames []string) error 
 	var db *gorm.DB
 	var err error
 
-	switch dbType {
-	case "mysql":
-		db, err = gormhelper.GetOneMysqlClient()
-	case "postgresql":
-		db, err = gormhelper.GetOnePostgreSqlClient()
-	case "sqlserver":
-		db, err = gormhelper.GetOneSqlserverClient()
-	case "sqlite":
-		db, err = gormhelper.GetOneSqliteClient()
-	default:
-		db, err = gormhelper.GetOneMysqlClient()
-	}
+	// ⛔ 统一走 gormhelper.Client，不要在这里再展开成逐方言的 switch：
+	// 这个文件原本有 4 份一模一样的四分支 switch，加一种库就要改 4 处。
+	db, err = gormhelper.Client(dbType)
 
 	if err != nil {
 		return fmt.Errorf("获取数据库连接失败: %v", err)
@@ -1575,7 +1539,7 @@ func (pms *PluginsManagerService) dropDatabaseTables(tableNames []string) error 
 
 	// 删除每个表
 	for _, tableName := range tableNames {
-		switch dbType {
+		switch metadataSQLDialect(dbType) {
 		case "mysql":
 			if err := db.WithContext(pms.logContext()).Exec(fmt.Sprintf("DROP TABLE IF EXISTS `%s`", tableName)).Error; err != nil {
 				return fmt.Errorf("删除MySQL表失败 %s: %v", tableName, err)

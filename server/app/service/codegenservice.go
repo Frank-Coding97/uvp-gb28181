@@ -35,18 +35,9 @@ func (cgs *CodeGenService) GetDatabases(dbType string) ([]string, error) {
 	var db *gorm.DB
 	var err error
 
-	switch dbType {
-	case "mysql":
-		db, err = gormhelper.GetOneMysqlClient()
-	case "postgresql":
-		db, err = gormhelper.GetOnePostgreSqlClient()
-	case "sqlserver":
-		db, err = gormhelper.GetOneSqlserverClient()
-	case "sqlite":
-		db, err = gormhelper.GetOneSqliteClient()
-	default:
-		db, err = gormhelper.GetOneMysqlClient()
-	}
+	// ⛔ 统一走 gormhelper.Client，不要在这里再展开成逐方言的 switch：
+	// 这个文件原本有 4 份一模一样的四分支 switch，加一种库就要改 4 处。
+	db, err = gormhelper.Client(dbType)
 
 	if err != nil {
 		return nil, err
@@ -61,7 +52,7 @@ func (cgs *CodeGenService) GetDatabases(dbType string) ([]string, error) {
 	var databases []string
 
 	// 根据数据库类型执行不同的查询
-	switch dbType {
+	switch metadataSQLDialect(dbType) {
 	case "mysql":
 		rows, err := sqlDB.QueryContext(cgs.logContext(), "SHOW DATABASES")
 		if err != nil {
@@ -138,18 +129,9 @@ func (cgs *CodeGenService) GetTables(dbType, database string) ([]models.TableInf
 	var db *gorm.DB
 	var err error
 
-	switch dbType {
-	case "mysql":
-		db, err = gormhelper.GetOneMysqlClient()
-	case "postgresql":
-		db, err = gormhelper.GetOnePostgreSqlClient()
-	case "sqlserver":
-		db, err = gormhelper.GetOneSqlserverClient()
-	case "sqlite":
-		db, err = gormhelper.GetOneSqliteClient()
-	default:
-		db, err = gormhelper.GetOneMysqlClient()
-	}
+	// ⛔ 统一走 gormhelper.Client，不要在这里再展开成逐方言的 switch：
+	// 这个文件原本有 4 份一模一样的四分支 switch，加一种库就要改 4 处。
+	db, err = gormhelper.Client(dbType)
 
 	if err != nil {
 		return nil, err
@@ -164,7 +146,7 @@ func (cgs *CodeGenService) GetTables(dbType, database string) ([]models.TableInf
 	var tables []models.TableInfo
 
 	// 根据数据库类型执行不同的查询
-	switch dbType {
+	switch metadataSQLDialect(dbType) {
 	case "mysql":
 		rows, err := sqlDB.QueryContext(cgs.logContext(), "SELECT TABLE_NAME, TABLE_COMMENT FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ?", database)
 		if err != nil {
@@ -285,18 +267,9 @@ func (cgs *CodeGenService) GetTableColumns(database, table string) (models.Table
 	var db *gorm.DB
 	var err error
 
-	switch dbType {
-	case "mysql":
-		db, err = gormhelper.GetOneMysqlClient()
-	case "postgresql":
-		db, err = gormhelper.GetOnePostgreSqlClient()
-	case "sqlserver":
-		db, err = gormhelper.GetOneSqlserverClient()
-	case "sqlite":
-		db, err = gormhelper.GetOneSqliteClient()
-	default:
-		db, err = gormhelper.GetOneMysqlClient()
-	}
+	// ⛔ 统一走 gormhelper.Client，不要在这里再展开成逐方言的 switch：
+	// 这个文件原本有 4 份一模一样的四分支 switch，加一种库就要改 4 处。
+	db, err = gormhelper.Client(dbType)
 
 	if err != nil {
 		return nil, err
@@ -311,7 +284,7 @@ func (cgs *CodeGenService) GetTableColumns(database, table string) (models.Table
 	var columns []models.TableColumn
 
 	// 根据数据库类型执行不同的查询
-	switch dbType {
+	switch metadataSQLDialect(dbType) {
 	case "mysql":
 		rows, err := sqlDB.QueryContext(cgs.logContext(), `
 			SELECT
@@ -1605,18 +1578,9 @@ func (cgs *CodeGenService) GetTableComment(database, table string) (tableComment
 	dbType := app.ConfigYml.GetString("gormv2.usedbtype")
 	var db *gorm.DB
 
-	switch dbType {
-	case "mysql":
-		db, err = gormhelper.GetOneMysqlClient()
-	case "postgresql":
-		db, err = gormhelper.GetOnePostgreSqlClient()
-	case "sqlserver":
-		db, err = gormhelper.GetOneSqlserverClient()
-	case "sqlite":
-		db, err = gormhelper.GetOneSqliteClient()
-	default:
-		db, err = gormhelper.GetOneMysqlClient()
-	}
+	// ⛔ 统一走 gormhelper.Client，不要在这里再展开成逐方言的 switch：
+	// 这个文件原本有 4 份一模一样的四分支 switch，加一种库就要改 4 处。
+	db, err = gormhelper.Client(dbType)
 
 	if err != nil {
 		return
@@ -1629,7 +1593,7 @@ func (cgs *CodeGenService) GetTableComment(database, table string) (tableComment
 	}
 
 	// 根据数据库类型执行不同的查询
-	switch dbType {
+	switch metadataSQLDialect(dbType) {
 	case "mysql":
 		// MySQL通过information_schema.TABLES获取表注释
 		row := sqlDB.QueryRowContext(cgs.logContext(), `

@@ -10,7 +10,8 @@ import (
 
 // FilterUpFiles 从文件名列表中筛出当前方言的 up 迁移文件,字典序排列。
 // 命名约定:默认方言(MySQL)无后缀,PostgreSQL 为 -postgresql.sql,
-// SQL Server 为 -sqlserver.sql,SQLite 为 -sqlite.sql;down 文件为 <up>-down.sql。
+// SQL Server 为 -sqlserver.sql,SQLite 为 -sqlite.sql,达梦为 -dm.sql;
+// down 文件为 <up>-down.sql。
 func FilterUpFiles(names []string, d Dialect) []string {
 	var out []string
 	for _, name := range names {
@@ -37,8 +38,15 @@ func AvailableUpFiles(d Dialect) ([]string, error) {
 	return FilterUpFiles(names, d), nil
 }
 
+// otherDialectSuffixes 是「带后缀的方言」的完整清单。
+//
+// MySQL 是主方言、文件名不带后缀，所以它的判据只能是「排除了别人」——
+// 一旦这里漏一个新方言，那套脚本会**同时**被当成 MySQL 脚本执行一遍，
+// 报错是「表已存在」而根因在文件名。新增方言时必须同步这里。
+var otherDialectSuffixes = []string{"-postgresql", "-sqlserver", "-sqlite", "-dm"}
+
 func isUpFile(name string, d Dialect) bool {
-	if !strings.HasSuffix(name, ".sql") {
+	if !strings.HasSuffix(name, ".sql") || strings.HasSuffix(name, "-down.sql") {
 		return false
 	}
 	switch d {
@@ -48,11 +56,15 @@ func isUpFile(name string, d Dialect) bool {
 		return strings.HasSuffix(name, "-sqlserver.sql")
 	case DialectSQLite:
 		return strings.HasSuffix(name, "-sqlite.sql")
+	case DialectDM:
+		return strings.HasSuffix(name, "-dm.sql")
 	default: // DialectMySQL
-		if strings.Contains(name, "-postgresql") || strings.Contains(name, "-sqlserver") || strings.Contains(name, "-sqlite") {
-			return false
+		for _, suffix := range otherDialectSuffixes {
+			if strings.HasSuffix(name, suffix+".sql") {
+				return false
+			}
 		}
-		return !strings.Contains(name, "-down.sql")
+		return true
 	}
 }
 

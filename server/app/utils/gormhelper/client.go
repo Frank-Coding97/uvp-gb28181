@@ -7,8 +7,10 @@ import (
 	"strings"
 	"time"
 	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/consts"
 	"uvplatform.com/uvp-gb28181/app/global/myerrors"
 
+	dameng "github.com/godoes/gorm-dameng"
 	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
@@ -37,6 +39,73 @@ func GetOnePostgreSqlClient() (*gorm.DB, error) {
 	sqlType := "postgresql"
 	readDbIsOpen := app.ConfigYml.GetInt("gormv2." + sqlType + ".isopenreaddb")
 	return GetSqlDriver(sqlType, readDbIsOpen)
+}
+
+// 获取一个人大金仓 KingbaseES 客户端。
+//
+// 金仓在通信协议层兼容 PostgreSQL（官方文档给的 Go 示例就是
+// gorm.io/driver/postgres + 默认端口 54321），所以这里走同一个 dialector：
+// 好处是 migration.DialectOf 会把它判成 postgres，整批 -postgresql.sql
+// 迁移集直接复用，不需要第二套 SQL。
+func GetOneKingbaseClient() (*gorm.DB, error) {
+	sqlType := consts.DbTypeKingbase
+	readDbIsOpen := app.ConfigYml.GetInt("gormv2." + sqlType + ".isopenreaddb")
+	return GetSqlDriver(sqlType, readDbIsOpen)
+}
+
+// 获取一个阿里 PolarDB 客户端（MySQL 版）。
+//
+// PolarDB 的 MySQL 版走 MySQL wire protocol，官方驱动可直连，故复用
+// mysql dialector ⇒ DialectOf 判成 mysql ⇒ 复用 mysql 迁移集。
+// ⚠️ 若现场是 PolarDB for PostgreSQL 版本，走 GetOnePostgreSqlClient 那一路，
+// 不能配成 polardb，否则会用 MySQL 协议去连 PG 端口。
+func GetOnePolarDBClient() (*gorm.DB, error) {
+	sqlType := consts.DbTypePolarDB
+	readDbIsOpen := app.ConfigYml.GetInt("gormv2." + sqlType + ".isopenreaddb")
+	return GetSqlDriver(sqlType, readDbIsOpen)
+}
+
+// 获取一个达梦 DM8 客户端。
+//
+// ⛔ 达梦是三者中唯一协议不兼容现有驱动的，用社区维护的 gorm dialector
+// （基于达梦官方 Go 驱动源码二次开发，驱动已内嵌在 dm8 子包里，无 CGO）。
+// 换回达梦官方安装目录下的 gorm_v2_dialect.zip 时，只需改这一处 import
+// 与 getDbDialector 里的一个 case —— 其余代码不认具体驱动包。
+func GetOneDMClient() (*gorm.DB, error) {
+	sqlType := consts.DbTypeDM
+	readDbIsOpen := app.ConfigYml.GetInt("gormv2." + sqlType + ".isopenreaddb")
+	return GetSqlDriver(sqlType, readDbIsOpen)
+}
+
+// Client 按数据库类型取出连接，是**唯一**的类型分发入口。
+//
+// ⛔ 调用方不要再自己写 switch。历史状况：codegenservice 与
+// pluginsmanagerservice 各抄了四份完全相同的四分支 switch（合计 8 处），
+// 加一种库要改 8 个地方，漏掉一处就是「代码生成器连 MySQL、业务连达梦」
+// 这种串库故障，而且症状看起来像数据丢了。
+//
+// sqlType 为空时读 gormv2.usedbtype；未配置或未知取值回落 MySQL，
+// 保持与 app.DB() 一致的历史语义。
+func Client(sqlType string) (*gorm.DB, error) {
+	if strings.TrimSpace(sqlType) == "" {
+		sqlType = app.ConfigYml.GetString("gormv2.usedbtype")
+	}
+	switch consts.NormalizeDbType(sqlType) {
+	case consts.DbTypeSqlServer:
+		return GetOneSqlserverClient()
+	case consts.DbTypePostgreSql:
+		return GetOnePostgreSqlClient()
+	case consts.DbTypeSqlite:
+		return GetOneSqliteClient()
+	case consts.DbTypeKingbase:
+		return GetOneKingbaseClient()
+	case consts.DbTypePolarDB:
+		return GetOnePolarDBClient()
+	case consts.DbTypeDM:
+		return GetOneDMClient()
+	default:
+		return GetOneMysqlClient()
+	}
 }
 
 // 获取数据库驱动, 可以通过options 动态参数连接任意多个数据库
@@ -116,12 +185,17 @@ func getDbDialector(sqlType, readWrite string, dbConf ...ConfigParams) (gorm.Dia
 	var dbDialector gorm.Dialector
 	dsn := getDsn(sqlType, readWrite, dbConf...)
 	switch strings.ToLower(sqlType) {
-	case "mysql":
+	case "mysql", "polardb":
+		// PolarDB（MySQL 版）走 MySQL wire protocol，官方驱动直连。
 		dbDialector = mysql.Open(dsn)
 	case "sqlserver", "mssql":
 		dbDialector = sqlserver.Open(dsn)
-	case "postgres", "postgresql", "postgre":
+	case "postgres", "postgresql", "postgre", "kingbase":
+		// 金仓在协议层兼容 PostgreSQL，复用同一 dialector ⇒ DialectOf 判成
+		// postgres ⇒ 复用整批 -postgresql.sql 迁移集。
 		dbDialector = postgres.Open(dsn)
+	case "dm", "dameng":
+		dbDialector = dameng.Open(dsn)
 	default:
 		return nil, errors.New(myerrors.ErrorsDbDriverNotExists + sqlType)
 	}
@@ -181,8 +255,8 @@ func getDsn(sqlType, readWrite string, dbConf ...ConfigParams) string {
 	}
 
 	switch strings.ToLower(sqlType) {
-	case "mysql":
-		// 如果未配置时区，默认使用 Local
+	case "mysql", "polardb":
+		// PolarDB（MySQL 版）与 MySQL 同一套 DSN 语法。
 		if TimeZone == "" {
 			TimeZone = "Local"
 		}
@@ -191,12 +265,29 @@ func getDsn(sqlType, readWrite string, dbConf ...ConfigParams) string {
 	case "sqlserver", "mssql":
 		// UseRowNumberForPaging=true 这个参数会告诉GORM的驱动，在为分页生成SQL时，使用兼容旧版本（SQL Server 2008）的ROW_NUMBER()语法，而不是OFFSET...FETCH
 		return fmt.Sprintf("server=%s;port=%d;database=%s;user id=%s;password=%s;encrypt=disable;UseRowNumberForPaging=true", Host, Port, DataBase, User, Pass)
-	case "postgresql", "postgre", "postgres":
+	case "postgresql", "postgre", "postgres", "kingbase":
+		// 金仓与 PostgreSQL 同一套 libpq 连接串（端口默认 54321，由配置给）。
 		// 如果未配置时区，默认使用 Asia/Shanghai
 		if TimeZone == "" {
 			TimeZone = "Asia/Shanghai"
 		}
 		return fmt.Sprintf("host=%s port=%d dbname=%s user=%s password=%s sslmode=disable TimeZone=%s", Host, Port, DataBase, User, Pass, TimeZone)
+	case "dm", "dameng":
+		// 达梦的 DSN 与前三者完全不同：dm://user:pass@host:port?schema=X
+		//
+		// ⛔ schema 不是可选的锦上添花 —— 达梦一套实例下按模式(schema)隔离表，
+		//    登录后看到的表集合取决于当前模式。不指定时驱动会用用户的默认模式，
+		//    而「用户名即模式名」，一旦建库时的模式与登录用户不一致，
+		//    迁移会把表建到 A 模式、业务查询去 B 模式找，表现为「建表成功但查不到表」。
+		//    所以这里读不到就退回用户名，绝不留给驱动自己猜。
+		schema := app.ConfigYml.GetString("gormv2." + sqlType + "." + readWrite + ".schema")
+		if schema == "" {
+			schema = app.ConfigYml.GetString("gormv2." + sqlType + ".schema")
+		}
+		if schema == "" {
+			schema = User
+		}
+		return dameng.BuildUrl(User, Pass, Host, Port, map[string]string{"schema": schema})
 	}
 	return ""
 }

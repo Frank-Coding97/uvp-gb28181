@@ -149,9 +149,9 @@ casbin:                       # 权限模型（RBAC），策略存于数据库
     e = some(where (p.eft == allow))
     [matchers]
     m =  g(r.sub, p.sub, r.dom) && keyMatch2(r.obj, p.obj) && regexMatch(r.act, p.act) && (r.dom == p.dom || p.dom == "*")
-# 数据库连接。三个方言块结构完全一致，实际用哪个由 usedbtype 与各自的 isinitglobalgorm* 决定
+# 数据库连接。各方言块结构一致，实际用哪个由 usedbtype 与各自的 isinitglobalgorm* 决定
 gormv2: # 只针对 gorm  操作数据库有效
-  usedbtype: "mysql"   # 默认使用的数据库类型（mysql、sqlserver、postgresql）
+  usedbtype: "mysql"   # 默认使用的数据库类型（mysql、sqlserver、postgresql、kingbase、polardb、dm）
   mysql:
     isinitglobalgormmysql: 1      # 随项目启动初始化一个全局变量 gorm.Db（1=开启、0=关闭）
     slowthreshold: 30            # 慢 SQL 阈值（秒）；⚠️ 必须写裸数字(30)，禁止写 "30s" —— 代码已 GetDuration×time.Second，带单位会溢出成负数
@@ -232,6 +232,100 @@ gormv2: # 只针对 gorm  操作数据库有效
       setmaxopenconns: 128   # 最大打开连接数
       setconnmaxlifetime: 60    # 连接最大生存时间(秒)
       setconnmaxidletime: 30    # 空闲连接最大存活时间(秒)
+  # ===== 国产化数据库 =====
+  # ⚠️ 下面三段与上面的 mysql/postgresql 是**互斥**的：只把要用的那一段的
+  #    isinitglobalgorm* 置 1，其余保持 0，同时开多个升级预检会直接拒绝。
+  #
+  # 金仓 KingbaseES —— 通信协议兼容 PostgreSQL，复用 postgres 驱动与
+  # -postgresql.sql 迁移集。默认端口 54321（不是 5432）。
+  kingbase:
+    isinitglobalgormkingbase: 0   # 随项目启动初始一个全局变量 gorm.Db（1=开启、0=关闭）
+    slowthreshold: 30
+    loglevel: "warn"
+    timezone: "Asia/Shanghai"
+    write:
+      host: "127.0.0.1"
+      database: "uvp_gb28181"
+      port: 54321                # 金仓默认端口
+      user: "system"
+      pass: ""
+      setmaxidleconns: 10
+      setmaxopenconns: 128
+      setconnmaxlifetime: 60
+      setconnmaxidletime: 30
+    isopenreaddb: 0
+    read:
+      host: "127.0.0.1"
+      database: "uvp_gb28181"
+      port: 54321
+      user: "system"
+      pass: ""
+      setmaxidleconns: 10
+      setmaxopenconns: 128
+      setconnmaxlifetime: 60
+      setconnmaxidletime: 30
+  # 阿里 PolarDB（MySQL 版）—— 复用 mysql 驱动与 mysql 迁移集。
+  # ⛔ 若现场是 PolarDB for PostgreSQL 版本，**不要**配 polardb，
+  #    直接配 postgresql（协议不同，配错会在连接阶段就失败）。
+  polardb:
+    isinitglobalgormpolardb: 0
+    slowthreshold: 30
+    loglevel: "warn"
+    timezone: "Local"
+    write:
+      host: "127.0.0.1"
+      database: "uvp_gb28181"
+      port: 3306
+      user: ""
+      pass: ""
+      charset: "utf8mb4"
+      setmaxidleconns: 10
+      setmaxopenconns: 128
+      setconnmaxlifetime: 60
+      setconnmaxidletime: 30
+    isopenreaddb: 0
+    read:
+      host: "127.0.0.1"
+      database: "uvp_gb28181"
+      port: 3306
+      user: ""
+      pass: ""
+      charset: "utf8mb4"
+      setmaxidleconns: 10
+      setmaxopenconns: 128
+      setconnmaxlifetime: 60
+      setconnmaxidletime: 30
+  # 达梦 DM8 —— 协议与上面全部不同，有独立的 -dm.sql 迁移集与独立方言。
+  # ⛔ schema 必填（写在哪一层都行，section 级或 write/read 级都认）：
+  #    达梦按模式隔离表，不指定就会落到用户的默认模式；「用户名即模式名」，
+  #    建库模式与登录用户不一致时表现为「建表成功但查不到表」。
+  #    留空时代码会退回用 user 当 schema，但**强烈建议显式写**。
+  dm:
+    isinitglobalgormdm: 0
+    slowthreshold: 30
+    loglevel: "warn"
+    schema: "SYSDBA"              # 达梦模式名（相当于 PG 的 database 层级）
+    write:
+      host: "127.0.0.1"
+      port: 5236                  # 达梦默认端口
+      user: "SYSDBA"
+      pass: ""
+      schema: "SYSDBA"
+      setmaxidleconns: 10
+      setmaxopenconns: 128
+      setconnmaxlifetime: 60
+      setconnmaxidletime: 30
+    isopenreaddb: 0
+    read:
+      host: "127.0.0.1"
+      port: 5236
+      user: "SYSDBA"
+      pass: ""
+      schema: "SYSDBA"
+      setmaxidleconns: 10
+      setmaxopenconns: 128
+      setconnmaxlifetime: 60
+      setconnmaxidletime: 30
 
 # 文件上传配置
 upload:

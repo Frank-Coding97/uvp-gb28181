@@ -19,6 +19,9 @@ var (
 	GormDbSqlserver  *gorm.DB                  // sqlserver数据库连接
 	GormDbPostgreSql *gorm.DB                  // postgresql数据库连接
 	GormDbSqlite     *gorm.DB                  // sqlite数据库连接（绿色安装包默认库，单文件、零外部依赖）
+	GormDbKingbase   *gorm.DB                  // 人大金仓 KingbaseES（PG 协议，复用 postgres 驱动）
+	GormDbPolarDB    *gorm.DB                  // 阿里 PolarDB（MySQL 协议，复用 mysql 驱动）
+	GormDbDM         *gorm.DB                  // 达梦 DM8（自有协议，独立方言）
 	ZapLog           *zap.Logger               // 全局日志指针
 	CasbinV2         CasbinInterf              // casbin指针
 	Cache            CacheInterf               // 缓存指针
@@ -32,28 +35,37 @@ var (
 
 /*
  * @Description: 获取数据库连接
- * @param sqlType 数据库类型 mysql sqlserver postgresql sqlite
+ * @param sqlType 数据库类型 mysql sqlserver postgresql sqlite kingbase polardb dm
  *	不传则读配置 gormv2.usedbtype
  * @return *gorm.DB
  */
 func DB(sqlType ...string) *gorm.DB {
-	var dbType string
+	var raw string
 	if len(sqlType) > 0 {
-		dbType = sqlType[0]
+		raw = sqlType[0]
 	} else {
-		dbType = ConfigYml.GetString("gormv2.usedbtype")
+		raw = ConfigYml.GetString("gormv2.usedbtype")
 	}
+	// ⛔ 走统一的别名收敛函数，不要在本地维护第二份 switch —— 这里历史上只认
+	// "postgresql"，配成 "postgres" 会静默回落 MySQL，而 handler 那边却认，
+	// 结果是同一个进程读写两个库。
+	dbType := consts.NormalizeDbType(raw)
 	var db *gorm.DB
 	switch dbType {
-	case consts.DbTypeMySql:
-		db = GormDbMysql
 	case consts.DbTypeSqlServer:
 		db = GormDbSqlserver
 	case consts.DbTypePostgreSql:
 		db = GormDbPostgreSql
 	case consts.DbTypeSqlite:
 		db = GormDbSqlite
+	case consts.DbTypeKingbase:
+		db = GormDbKingbase
+	case consts.DbTypePolarDB:
+		db = GormDbPolarDB
+	case consts.DbTypeDM:
+		db = GormDbDM
 	default:
+		// 未配置（空串）或未知取值：保持历史行为回落 MySQL。
 		db = GormDbMysql
 	}
 	if db == nil {

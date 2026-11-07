@@ -32,6 +32,9 @@ func PreflightDatabaseDialect(config PreflightDatabaseConfig) (string, error) {
 		{dialect: "sqlserver", key: "gormv2.sqlserver.isinitglobalgormsqlserver"},
 		{dialect: "postgresql", key: "gormv2.postgresql.isinitglobalgormpostgresql"},
 		{dialect: "sqlite", key: "gormv2.sqlite.isinitglobalgormsqlite"},
+		{dialect: "kingbase", key: "gormv2.kingbase.isinitglobalgormkingbase"},
+		{dialect: "polardb", key: "gormv2.polardb.isinitglobalgormpolardb"},
+		{dialect: "dm", key: "gormv2.dm.isinitglobalgormdm"},
 	}
 	enabled := ""
 	for _, candidate := range configured {

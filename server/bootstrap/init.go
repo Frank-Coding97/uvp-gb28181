@@ -212,6 +212,24 @@ func initUpgradePreflightDB() error {
 			return err
 		}
 		app.GormDbSqlite = db
+	case "kingbase":
+		db, err := gormhelper.GetOneKingbaseClient()
+		if err != nil {
+			return err
+		}
+		app.GormDbKingbase = db
+	case "polardb":
+		db, err := gormhelper.GetOnePolarDBClient()
+		if err != nil {
+			return err
+		}
+		app.GormDbPolarDB = db
+	case "dm":
+		db, err := gormhelper.GetOneDMClient()
+		if err != nil {
+			return err
+		}
+		app.GormDbDM = db
 	default:
 		return errors.New("unsupported upgrade preflight database")
 	}
@@ -260,6 +278,29 @@ func initDB() {
 			startupFail("database", err)
 		} else {
 			app.GormDbSqlite = dbSqlite
+		}
+	}
+	// 国产化数据库（三个都是独立开关，互斥使用；同时开多个属于配置错误，
+	// 升级预检那边会直接拒绝，这里不重复校验）。
+	if app.ConfigYml.GetInt("gormv2.kingbase.isinitglobalgormkingbase") == 1 {
+		if dbKingbase, err := gormhelper.GetOneKingbaseClient(); err != nil {
+			startupFail("database", err)
+		} else {
+			app.GormDbKingbase = dbKingbase
+		}
+	}
+	if app.ConfigYml.GetInt("gormv2.polardb.isinitglobalgormpolardb") == 1 {
+		if dbPolarDB, err := gormhelper.GetOnePolarDBClient(); err != nil {
+			startupFail("database", err)
+		} else {
+			app.GormDbPolarDB = dbPolarDB
+		}
+	}
+	if app.ConfigYml.GetInt("gormv2.dm.isinitglobalgormdm") == 1 {
+		if dbDM, err := gormhelper.GetOneDMClient(); err != nil {
+			startupFail("database", err)
+		} else {
+			app.GormDbDM = dbDM
 		}
 	}
 }
