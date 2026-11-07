@@ -37,10 +37,14 @@
 #                            ⛔ 出 aarch64 包时设 linux/arm64，并把底座换成对应的
 #                               arm64 镜像（uvp/linux-builder:glibc217-arm64）——
 #                               镜像架构和 --platform 不一致会直接报 exec format error。
-#   UVP_NGINX_VERSION        默认 1.26.2
-#   UVP_OPENSSL_VERSION      默认 3.0.15（静态编入；刷新包时跟上 3.0.x 最新 LTS 小版本）
-#   UVP_PCRE2_VERSION        默认 10.44
-#   UVP_ZLIB_VERSION         默认 1.3.1
+#   UVP_NGINX_VERSION        默认 1.30.6（当前 **stable** 分支；1.31.x 是 mainline，别选）
+#                            ⚠️ nginx 的版本号永远是 1.x —— 偶数主版本=稳定、奇数=主线，
+#                               没有 2.x / 3.x。「3.x」是 OpenSSL 的版本号，别混。
+#   UVP_OPENSSL_VERSION      默认 3.5.9（静态编入；3.5 是当前 LTS，支持到 2030）
+#                            ⛔ 3.0.x 已于 2026-09 **EOL**，不再有安全修复
+#                               ⇒ 继续用 3.0.15 等于把已知漏洞打进包
+#   UVP_PCRE2_VERSION        默认 10.49
+#   UVP_ZLIB_VERSION         默认 1.4
 #   UVP_GLIBC_MAX            允许的最高 glibc 要求，默认 2.17
 #   UVP_INSIDE_BUILDER       由本脚本自己在容器里设，**不要手工设**
 #   UVP_SRCDIR               源码预置目录（离线构建时给；给了就不联网下载）
@@ -62,10 +66,10 @@ DEST="${1:-$SCRIPT_DIR/bin/nginx}"
 
 BUILDER_IMAGE="${UVP_LINUX_BUILDER_IMAGE:-uvp/linux-builder:glibc217}"
 BUILD_PLATFORM="${UVP_BUILD_PLATFORM:-linux/amd64}"
-NGINX_VERSION="${UVP_NGINX_VERSION:-1.26.2}"
-OPENSSL_VERSION="${UVP_OPENSSL_VERSION:-3.0.15}"
-PCRE2_VERSION="${UVP_PCRE2_VERSION:-10.44}"
-ZLIB_VERSION="${UVP_ZLIB_VERSION:-1.3.1}"
+NGINX_VERSION="${UVP_NGINX_VERSION:-1.30.6}"
+OPENSSL_VERSION="${UVP_OPENSSL_VERSION:-3.5.9}"
+PCRE2_VERSION="${UVP_PCRE2_VERSION:-10.49}"
+ZLIB_VERSION="${UVP_ZLIB_VERSION:-1.4}"
 GLIBC_MAX="${UVP_GLIBC_MAX:-2.17}"
 SRC_ROOT="${UVP_NGINX_WORKDIR:-/tmp/uvp-nginx-build}"
 SRC_PROVIDED="${UVP_SRCDIR:-}"
@@ -215,7 +219,7 @@ else
   fetch "openssl-${OPENSSL_VERSION}.tar.gz" \
     "https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz" \
     "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz" \
-    "https://www.openssl.org/source/old/3.0/openssl-${OPENSSL_VERSION}.tar.gz"
+    "https://www.openssl.org/source/old/${OPENSSL_VERSION%.*}/openssl-${OPENSSL_VERSION}.tar.gz"
   fetch "pcre2-${PCRE2_VERSION}.tar.gz" \
     "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${PCRE2_VERSION}/pcre2-${PCRE2_VERSION}.tar.gz" \
     "https://sourceforge.net/projects/pcre/files/pcre2/${PCRE2_VERSION}/pcre2-${PCRE2_VERSION}.tar.gz/download"
