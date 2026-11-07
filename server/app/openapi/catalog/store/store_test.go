@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -442,4 +443,48 @@ func seedCatalogStore(t *testing.T, db *gorm.DB, version string) {
 		CapabilityID: capability.ID, Code: "list", Name: "设备列表", Method: "GET", ExternalPath: "/openapi/v1/devices", AdapterKey: "device.list", AdapterContractVersion: version,
 		ResourceType: "device", RiskLevel: "read", IdempotencyMode: "none", RequestSchema: `{}`, ResponseSchema: `{}`, SysAPIPath: capability.SysAPIPath, SysAPIMethod: "GET", Status: openapimodels.CatalogStatusActive, CreatedAt: createdAt, UpdatedAt: createdAt,
 	}).Error)
+}
+
+// TestValidateRuntimeStateSnapshotToleratesPaddedHash 锁定「摘要比较两侧都 trim」的口径。
+//
+// 为什么这条必须存在：达梦、Oracle 血统的 CHAR 是**定长空格填充**，而且读回**带填充**
+// （实测 192.168.10.52 的 DM8：CHAR(192) 存 64 字符的摘要，LENGTH 仍是 192）。
+// 线上症状是每次发布都在收尾校验里报
+// `active state snapshot hash mismatch`，整个事务回滚 —— 库里的 release 与
+// runtime_state 双双是空的，看上去像「什么都没发生」，极难定位。
+//
+// 只 trim 存储侧的旧写法（state 侧 trim、release 侧不 trim）在这条链路上必然失败：
+// 内存摘要 64 字符 vs 读回 192 字符。这里把填充形态钉成「必须通过」，同时钉住
+// 空值与真不一致**仍然必须报错** —— 否则「没写过」会被当成「一致」。
+func TestValidateRuntimeStateSnapshotToleratesPaddedHash(t *testing.T) {
+	const digest = "b1579ecc3556151cf85df8012fd00022d49f9bcc54b20a41317c9b5d49c9890a"
+	releaseID := int64(7)
+	state := &openapimodels.RuntimeState{
+		ID:            1,
+		Status:        openapimodels.RuntimeCatalogReady,
+		RuntimeEpoch:  1,
+		ActiveRelease: &releaseID,
+		ActiveVersion: 3,
+		// CHAR(192) 的读回形态：64 字符摘要 + 128 个尾部空格。
+		SnapshotHash: digest + strings.Repeat(" ", 128),
+	}
+	snapshot := &ReleaseSnapshot{Release: openapimodels.Release{
+		ID: 7, Version: 3, Status: openapimodels.ReleaseStatusPublished, SnapshotHash: digest,
+	}}
+	require.NoError(t, validateRuntimeStateSnapshot(state, snapshot),
+		"定长 CHAR 读回的填充不能把同一个摘要判成不一致")
+
+	// 反向形态同样要成立：release 侧带填充、state 侧是裸值。
+	state.SnapshotHash = digest
+	snapshot.Release.SnapshotHash = digest + strings.Repeat(" ", 128)
+	require.NoError(t, validateRuntimeStateSnapshot(state, snapshot))
+
+	// 空摘要不能因为 trim 就放行 —— 那等于把「从未发布」当成「已一致」。
+	state.SnapshotHash = "   "
+	require.ErrorIs(t, validateRuntimeStateSnapshot(state, snapshot), ErrCatalogDependency)
+
+	// 真的不一致必须仍然报错。
+	state.SnapshotHash = strings.Repeat("a", 64)
+	snapshot.Release.SnapshotHash = digest
+	require.ErrorIs(t, validateRuntimeStateSnapshot(state, snapshot), ErrCatalogDependency)
 }

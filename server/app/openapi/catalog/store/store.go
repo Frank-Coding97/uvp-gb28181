@@ -218,7 +218,7 @@ func (r *Repository) LoadActive(ctx context.Context) (*ReleaseSnapshot, error) {
 	if state.ActiveVersion <= 0 || state.ActiveVersion != snapshot.Release.Version {
 		return nil, fmt.Errorf("%w: active version %d points to release version %d", ErrCatalogDependency, state.ActiveVersion, snapshot.Release.Version)
 	}
-	if strings.TrimSpace(state.SnapshotHash) == "" || !strings.EqualFold(strings.TrimSpace(state.SnapshotHash), snapshot.Release.SnapshotHash) {
+	if !sameSnapshotHash(state.SnapshotHash, snapshot.Release.SnapshotHash) {
 		return nil, fmt.Errorf("%w: active state snapshot hash mismatch", ErrCatalogDependency)
 	}
 	// Re-read the singleton pointer after loading the release and all items.
@@ -937,10 +937,26 @@ func validateRuntimeStateSnapshot(state *openapimodels.RuntimeState, snapshot *R
 	if state.ActiveVersion <= 0 || state.ActiveVersion != snapshot.Release.Version {
 		return fmt.Errorf("%w: active version %d points to release version %d", ErrCatalogDependency, state.ActiveVersion, snapshot.Release.Version)
 	}
-	if strings.TrimSpace(state.SnapshotHash) == "" || !strings.EqualFold(strings.TrimSpace(state.SnapshotHash), snapshot.Release.SnapshotHash) {
+	if !sameSnapshotHash(state.SnapshotHash, snapshot.Release.SnapshotHash) {
 		return fmt.Errorf("%w: active state snapshot hash mismatch", ErrCatalogDependency)
 	}
 	return nil
+}
+
+// sameSnapshotHash compares two snapshot digests. Both sides are trimmed, because
+// a fixed-length CHAR column hands the value back blank-padded to its declared
+// width on dialects with Oracle padding semantics (DM8, and PostgreSQL's bpchar /
+// SQL Server's NCHAR through drivers that do not strip), while the digest computed
+// in memory is not padded. Trimming only the stored side made every publication
+// fail on DM8 with "active state snapshot hash mismatch" even though both sides
+// held the same 64-character digest -- the read side was CHAR(192), so it arrived
+// with 128 trailing spaces.
+func sameSnapshotHash(left, right string) bool {
+	trimmedLeft := strings.TrimSpace(left)
+	if trimmedLeft == "" {
+		return false
+	}
+	return strings.EqualFold(trimmedLeft, strings.TrimSpace(right))
 }
 
 func runtimeIdentityFromState(state *openapimodels.RuntimeState) catalogruntime.RuntimeIdentity {

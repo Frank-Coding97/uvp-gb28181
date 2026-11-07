@@ -354,7 +354,14 @@ func runPublishCatalog() error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	// 预算给到 10 分钟:这是一次性运维动作,不在请求路径上,而它的写量是
+	// 「播种目录行 + 一版 release + 逐条 release_item」的量级。按 60s 卡会在
+	// 高延迟链路上必然失败 —— 实测 192.168.10.52 的达梦(VPN 单趟 RTT ~90ms)
+	// 每条语句均值 273ms,一百多条写就把 60s 吃穿,报出来的是
+	// context deadline exceeded,看上去像数据库有问题,其实是预算不够。
+	// 本地或同网段部署通常几秒内完成,放宽不会掩盖真实故障:真卡死时
+	// 10 分钟同样会超时,只是不再误报。
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	outcome, err := openapiroutes.PublishCatalog(ctx, db)
 	if err != nil {
