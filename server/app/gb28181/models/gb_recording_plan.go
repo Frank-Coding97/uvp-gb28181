@@ -72,7 +72,10 @@ type GbRecordingPlanBinding struct {
 func (GbRecordingPlanBinding) TableName() string { return "gb_recording_plan_binding" }
 
 type GbRecordingPlanChannelState struct {
-	ChannelID          uint       `gorm:"column:channel_id;primaryKey" json:"channelId"`
+	// ⛔ autoIncrement:false：channel_id 是业务主键，库里没有 IDENTITY。
+	//   GORM 默认把整型主键当自增、INSERT 时漏掉它 —— 达梦上直接报
+	//   「违反列[channel_id]非空约束」，MySQL 上静默插 0。
+	ChannelID          uint       `gorm:"column:channel_id;primaryKey;autoIncrement:false" json:"channelId"`
 	PlanID             *uint64    `gorm:"column:plan_id;index" json:"planId"`
 	PlanVersion        uint64     `gorm:"column:plan_version;not null;default:0" json:"planVersion"`
 	DesiredState       string     `gorm:"column:desired_state;size:24;not null" json:"desiredState"`

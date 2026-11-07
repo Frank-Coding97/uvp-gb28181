@@ -16,6 +16,7 @@ import (
 	"uvplatform.com/uvp-gb28181/app/gb28181"
 	"uvplatform.com/uvp-gb28181/app/gb28181/migration"
 	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/consts"
 	"uvplatform.com/uvp-gb28181/app/middleware"
 	"uvplatform.com/uvp-gb28181/app/openapi/processauthority"
 	openapiroutes "uvplatform.com/uvp-gb28181/app/openapi/routes"
@@ -381,6 +382,14 @@ func databaseIdentitySQL(dialect migration.Dialect) string {
 	switch dialect {
 	case migration.DialectPostgres:
 		return "SELECT current_database() AS database_name, version() AS database_version"
+	case migration.DialectDM:
+		// 达梦没有 DATABASE() / VERSION()。CUR_DATABASE() 给库名，
+		// SVR_VERSION 给「DM Database Server x64 V8」。V$INSTANCE 在 DSC
+		// 集群下有多行，ROWNUM=1 只取本节点。
+		// ⛔ 别名必须加双引号：不加引号时达梦把别名折叠成大写 DATABASE_NAME，
+		//   而 GORM 按 `column:database_name` 匹配，大小写对不上就静默扫成空串
+		//   —— 日志里表现为 database="" database_version=""，看着像连了空库。
+		return `SELECT CUR_DATABASE() AS "database_name", SVR_VERSION AS "database_version" FROM V$INSTANCE WHERE ROWNUM = 1`
 	case migration.DialectSQLServer:
 		return "SELECT DB_NAME() AS database_name, CAST(SERVERPROPERTY('ProductVersion') AS varchar(128)) AS database_version"
 	case migration.DialectSQLite:
@@ -440,20 +449,39 @@ func runMigrateDown(downFile string) error {
 // primaryDB 返回主数据库连接与方言(优先级 MySQL > PostgreSQL > SQL Server > SQLite,
 // 多库同时启用时 down 仅作用于主库)。
 func primaryDB() (*gorm.DB, migration.Dialect, error) {
-	if app.GormDbMysql != nil {
-		return app.GormDbMysql, migration.DialectMySQL, nil
+	// 先按 gormv2.usedbtype 选：bootstrap 允许同时初始化多个连接（每个库各有
+	// 自己的 isinitglobalgorm* 开关），所以「谁非 nil 就取第一个」在多连接并存时
+	// 会选错库 —— 同时配了 MySQL 与国产库时，-migrate-up 会一直作用在 MySQL 上，
+	// 国产库那边的表始终建不出来。
+	type handle struct {
+		db      *gorm.DB
+		dialect migration.Dialect
 	}
-	if app.GormDbPostgreSql != nil {
-		return app.GormDbPostgreSql, migration.DialectPostgres, nil
+	byType := map[string]handle{
+		consts.DbTypeMySql:      {app.GormDbMysql, migration.DialectMySQL},
+		consts.DbTypePostgreSql: {app.GormDbPostgreSql, migration.DialectPostgres},
+		// 金仓说 PG 协议、PolarDB 说 MySQL 协议，方言跟着对方走，
+		// 迁移文件也复用对方那一套。
+		consts.DbTypeKingbase:  {app.GormDbKingbase, migration.DialectPostgres},
+		consts.DbTypePolarDB:   {app.GormDbPolarDB, migration.DialectMySQL},
+		consts.DbTypeDM:        {app.GormDbDM, migration.DialectDM},
+		consts.DbTypeSqlServer: {app.GormDbSqlserver, migration.DialectSQLServer},
+		consts.DbTypeSqlite:    {app.GormDbSqlite, migration.DialectSQLite},
 	}
-	if app.GormDbSqlserver != nil {
-		return app.GormDbSqlserver, migration.DialectSQLServer, nil
+	if app.ConfigYml != nil {
+		configured := consts.NormalizeDbType(app.ConfigYml.GetString("gormv2.usedbtype"))
+		if h, ok := byType[configured]; ok && h.db != nil {
+			return h.db, h.dialect, nil
+		}
 	}
-	// ⛔ SQLite 必须显式列出：绿色安装包默认用它，而本函数原先只认前三个
-	//   ⇒ `-migrate-up` / `-publish-catalog` / `-migrate-down` 三条运维命令
-	//   在 SQLite 下会返回「未初始化任何数据库连接」。
-	if app.GormDbSqlite != nil {
-		return app.GormDbSqlite, migration.DialectSQLite, nil
+	// 配置没写或连接的库没初始化时，退回既有优先级顺序，保持旧行为不变。
+	for _, name := range []string{
+		consts.DbTypeMySql, consts.DbTypePostgreSql, consts.DbTypeSqlServer,
+		consts.DbTypeSqlite, consts.DbTypeKingbase, consts.DbTypePolarDB, consts.DbTypeDM,
+	} {
+		if h := byType[name]; h.db != nil {
+			return h.db, h.dialect, nil
+		}
 	}
 	return nil, migration.DialectUnknown, errors.New("未初始化任何数据库连接")
 }

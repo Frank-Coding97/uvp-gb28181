@@ -150,7 +150,12 @@ func (ReleaseItem) TableName() string { return "sys_openapi_release_item" }
 // RuntimeState is a singleton projection of the active immutable release.
 // It is intentionally not a foreign-key owner of client scopes or source APIs.
 type RuntimeState struct {
-	ID            int64      `gorm:"primaryKey" json:"id"`
+	// ⛔ autoIncrement:false 是必须的。GORM 默认把整型主键当自增，于是
+	//   INSERT 时把 id 从列清单里剔除；而本表的主键是业务固定值 1、
+	//   库里的列也没有 IDENTITY。达梦驱动会把插入改写成 MERGE INTO，
+	//   剔除 id 后直接报「违反列[id]非空约束」（实测 192.168.10.52 DM8）。
+	//   MySQL 上同样的省略在非严格模式下会静默插入 0 —— 更难发现。
+	ID            int64      `gorm:"primaryKey;autoIncrement:false" json:"id"`
 	ActiveRelease *int64     `gorm:"column:active_release_id;index:idx_openapi_runtime_release" json:"activeReleaseId,omitempty"`
 	ActiveVersion int64      `gorm:"column:active_version;not null;default:0" json:"activeVersion"`
 	SnapshotHash  string     `gorm:"column:snapshot_hash;size:64;not null;default:''" json:"snapshotHash"`

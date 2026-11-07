@@ -102,6 +102,13 @@ func init() {
 			"sqlserver":  app.GormDbSqlserver,
 			"postgresql": app.GormDbPostgreSql,
 			"sqlite":     app.GormDbSqlite,
+			// 国产库三个都要列进来：RunMigrations 只遍历 map 里的键，
+			// 没列出来的连接即使已初始化也不会被迁移 —— 症状是启动日志一切
+			// 正常，但国产库的表始终是空的。金仓/PolarDB 的方言判定会落到
+			// postgres/mysql，复用同一套迁移文件；达梦是独立方言。
+			"kingbase": app.GormDbKingbase,
+			"polardb":  app.GormDbPolarDB,
+			"dm":       app.GormDbDM,
 		}); err != nil {
 			startupFail("migration", err)
 		}

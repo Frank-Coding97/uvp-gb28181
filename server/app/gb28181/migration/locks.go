@@ -32,6 +32,12 @@ func acquireSQL(d Dialect) string {
 		return fmt.Sprintf("SELECT pg_advisory_lock(%d)", lockKey)
 	case DialectSQLServer:
 		return fmt.Sprintf("EXEC sp_getapplock @Resource = '%s', @LockMode = 'Exclusive', @LockOwner = 'Session', @LockTimeout = 30000", lockName)
+	case DialectDM:
+		// 达梦没有 GET_LOCK / pg_advisory_lock，走 Oracle 血统的 DBMS_LOCK：
+		// 模式 6 = 独占，30 秒超时，release_on_commit=0 表示会话级锁。
+		// 返回 0 才是拿到锁，其余（1 超时 / 2 死锁 / 3 参数错 / 4 已持有）都算失败
+		// —— 和 MySQL 分支一样必须校验返回值，否则「没拿到锁却继续迁移」。
+		return fmt.Sprintf("SELECT DBMS_LOCK.REQUEST(%d, 6, 30, 0) FROM DUAL", lockKey)
 	default: // DialectMySQL
 		return fmt.Sprintf("SELECT GET_LOCK('%s', 30)", lockName)
 	}
@@ -44,6 +50,8 @@ func releaseSQL(d Dialect) string {
 		return fmt.Sprintf("SELECT pg_advisory_unlock(%d)", lockKey)
 	case DialectSQLServer:
 		return fmt.Sprintf("EXEC sp_releaseapplock @Resource = '%s', @LockOwner = 'Session'", lockName)
+	case DialectDM:
+		return fmt.Sprintf("SELECT DBMS_LOCK.RELEASE(%d) FROM DUAL", lockKey)
 	default:
 		return fmt.Sprintf("SELECT RELEASE_LOCK('%s')", lockName)
 	}
@@ -74,6 +82,15 @@ func (l *dbLocker) Acquire() error {
 		}
 		if rc != 0 {
 			return fmt.Errorf("sp_getapplock 返回 %d(0=成功,1=超时,<0=错误)", rc)
+		}
+		return nil
+	case DialectDM:
+		var rc int
+		if err := l.db.Raw(acquireSQL(l.d)).Scan(&rc).Error; err != nil {
+			return err
+		}
+		if rc != 0 {
+			return fmt.Errorf("DBMS_LOCK.REQUEST 返回 %d(0=成功,1=超时,2=死锁,3=参数错,4=已持有)", rc)
 		}
 		return nil
 	default: // DialectMySQL
