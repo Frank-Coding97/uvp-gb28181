@@ -8683,6 +8683,8 @@ INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
 (140619, 687),
 (140620, 686),
 (140621, 639);
+INSERT INTO [sys_openapi_security_state] ([id], [must_auth_locked], [locked_at], [lock_version]) VALUES
+(1, 0, NULL, 0);
 SET IDENTITY_INSERT [sys_role] ON;
 INSERT INTO [sys_role] ([id], [name], [sort], [status], [description], [parent_id], [created_at], [updated_at], [deleted_at], [created_by], [data_scope], [checked_depts]) VALUES
 (1, N'系统管理员', 0, 1, N'最高权限管理员角色', 0, N'2025-09-01 17:32:12.000000', N'2025-09-30 15:53:24.000000', NULL, 1, 1, N''),
