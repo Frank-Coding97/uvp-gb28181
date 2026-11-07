@@ -318,18 +318,9 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
   min-height: 44px;
 }
 
-.online-user-page :deep(.uvp-search-panel__extra .arco-btn) {
-  color: var(--uvp-secondary-action-text) !important;
-  background: var(--uvp-secondary-action-bg) !important;
-  border-color: var(--uvp-secondary-action-border) !important;
-  box-shadow: none !important;
-}
-
-.online-user-page :deep(.uvp-search-panel__extra .arco-btn:hover) {
-  color: var(--uvp-brand-strong) !important;
-  background: var(--uvp-secondary-action-hover-bg) !important;
-  border-color: var(--uvp-brand) !important;
-}
+/* ⛔ 按钮配色只能来自 src/styles/uvp-buttons.scss 的语义类（刷新 = 青绿）。
+   这里原有两段带 !important 的 extra 槽次级配色副本，把刷新键压成灰白底、
+   hover 变蓝，亮暗两套主题都不对；页面只保留上面的几何（圆角 / 尺寸）。 */
 
 .online-user-error {
   display: flex;

@@ -152,4 +152,18 @@ describe("按钮唯一真源（全仓）", () => {
     );
     expect(offenders, "搜索面板的次级按钮已经在真源里定好了（浅蓝底蓝字），这里只该保留 40px 档位与主按钮的色阶").toEqual([]);
   });
+
+  it("页面不许给搜索面板 extra 槽的按钮再写一套配色", () => {
+    // 2026-11-07：在线用户页的「刷新」被 scoped 里带 !important 的 extra 槽配色
+    // 压成灰白底（本该是 uvp-refresh-btn 的青绿）。页面 scoped 恒晚于全局真源注入，
+    // 靠调特异性追不平 —— 只能禁止页面再定色，几何（圆角/尺寸）可以留。
+    // 共享组件自己那条「extra 槽主按钮沿用新增绿」是设计契约，不在此列。
+    const hits = scan((selector, body) => {
+      const compact = selector.replace(/\s+/g, "");
+      if (!compact.includes("uvp-search-panel__extra") || !compact.includes(".arco-btn")) return false;
+      if (compact.includes(".arco-btn-primary")) return false;
+      return /(^|[\s;])(background|background-color|color|border-color|box-shadow)\s*:/.test(body);
+    });
+    expect(hits, `extra 槽按钮的配色请交给语义类，页面里只写几何：\n${format(hits)}`).toEqual([]);
+  });
 });
