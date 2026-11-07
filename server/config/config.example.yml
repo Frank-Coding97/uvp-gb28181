@@ -295,17 +295,25 @@ gormv2: # 只针对 gorm  操作数据库有效
       setmaxopenconns: 128
       setconnmaxlifetime: 60
       setconnmaxidletime: 30
-  # 达梦 DM8 —— 协议与上面全部不同，有独立的 -dm.sql 迁移集与独立方言。
+  # 达梦 DM8 —— 协议与上面全部不同，有独立的全量基线 dameng_converted.sql 与独立方言。
   #
-  # ⛔⛔ 建库时必须用 dmdbms 的 dminit 指定这两个参数，否则平台跑不起来：
-  #   CASE_SENSITIVE=N   —— GORM 给标识符加双引号（"gb_device"）。达梦默认
-  #                         大小写敏感，引号里的小写名就是小写对象，而仓里仍有
-  #                         不带引号的裸 SQL（如 runner 的权限探测联表）会被
-  #                         折叠成大写 ⇒ 找不到表。N 时全部归一到大写，两边一致。
-  #   LENGTH_IN_CHAR=1   —— 否则 VARCHAR(n) 的 n 是**字节**，UTF-8 下一个汉字
-  #                         占 3 字节，VARCHAR(255) 只能存 85 个汉字。
-  #   例：dminit PATH=/opt/dm/data DB_NAME=UVP CASE_SENSITIVE=N LENGTH_IN_CHAR=1
-  # ⚠️ 这两项决定基线 SQL 该怎么写，改库重建代价很大，部署前就要定死。
+  # ⛔⛔ 建库时必须用 dmdbms 的 dminit 指定 CASE_SENSITIVE=N，否则平台跑不起来：
+  #   GORM 给标识符加双引号（"gb_device"）。达梦默认大小写敏感，引号里的小写名
+  #   就是小写对象，而仓里仍有不带引号的裸 SQL（如 runner 的权限探测联表）会被
+  #   折叠成大写 ⇒ 找不到表。N 时全部归一到大写，两边一致。
+  #
+  # ⚠️ LENGTH_IN_CHAR **不是 dminit 参数**（实测传了报 `Invalid parameter`），
+  #   事后改 dm.ini 会让实例起不来（`Database first startup failed`）。
+  #   所以现实做法是保持默认（VARCHAR 长度按字节），由基线生成器把长度 ×3 兜住：
+  #   GB18030 汉字 2 字节、UTF-8 汉字 3 字节，×3 后两种字符集都够。
+  #
+  #   例：dminit PATH=/opt/dm/data DB_NAME=UVP PAGE_SIZE=16 CASE_SENSITIVE=N \
+  #              SYSDBA_PWD=<口令> SYSAUDITOR_PWD=<口令>
+  #   ⛔ 两个口令都必须给，只给 SYSDBA 的会 `fail to init db`。
+  #   ⚠️ CASE_SENSITIVE 决定基线 SQL 该怎么写，改库重建代价很大，部署前就要定死。
+  #
+  # ⛔ 同一台机器同一套安装不能同时跑两个实例（共享内存名冲突，第二个实例报
+  #   `Can not create buffer pools, out of memory!`，与物理内存无关）。
   #
   # ⛔ schema 必填（写在哪一层都行，section 级或 write/read 级都认）：
   #    达梦按模式隔离表，不指定就会落到用户的默认模式；「用户名即模式名」，
