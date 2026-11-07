@@ -493,7 +493,7 @@ defineExpose({
             <a-button type="primary" @click="search"
               ><template #icon><Search :size="16" /></template>查询</a-button
             >
-            <a-button @click="reset"
+            <a-button class="uvp-btn-neutral" @click="reset"
               ><template #icon><RotateCcw :size="16" /></template>重置</a-button
             >
           </template>

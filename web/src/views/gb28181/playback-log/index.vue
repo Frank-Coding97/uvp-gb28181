@@ -28,7 +28,7 @@
           <a-button type="primary" :loading="loading" @click="query"
             ><template #icon><Search :size="15" /></template>查询</a-button
           >
-          <a-button :disabled="loading" @click="reset"
+          <a-button class="uvp-btn-neutral" :disabled="loading" @click="reset"
             ><template #icon><RotateCcw :size="15" /></template>重置</a-button
           >
           <!-- 刷新走「青绿软底」语义；且按本系统风格必须是「图标 + 文字」，

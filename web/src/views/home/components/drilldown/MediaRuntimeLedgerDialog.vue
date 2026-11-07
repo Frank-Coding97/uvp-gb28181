@@ -421,7 +421,7 @@ function changeNetworkPageSize(value: number) {
         <template #actions
           ><a-button type="primary" :loading="networkLoading" @click="queryNetworkSessions"
             ><template #icon><Search :size="14" /></template>查询</a-button
-          ><a-button :disabled="networkLoading" @click="resetNetworkSessions"
+          ><a-button class="uvp-btn-neutral" :disabled="networkLoading" @click="resetNetworkSessions"
             ><template #icon><RotateCcw :size="14" /></template>重置</a-button
           ></template
         >

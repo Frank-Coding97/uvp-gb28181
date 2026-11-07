@@ -288,7 +288,8 @@ defineExpose({ refresh: requestRefresh });
             @press-enter="queryNetwork"
         /></template>
         <template #actions
-          ><a-button type="primary" @click="queryNetwork">查询</a-button><a-button @click="resetNetwork">重置</a-button
+          ><a-button type="primary" @click="queryNetwork">查询</a-button
+          ><a-button class="uvp-btn-neutral" @click="resetNetwork">重置</a-button
           ><a-button
             class="uvp-page-action-btn uvp-refresh-btn session-refresh-btn"
             aria-label="刷新网络会话"
@@ -370,7 +371,7 @@ defineExpose({ refresh: requestRefresh });
         /></template>
         <template #actions
           ><a-button type="primary" :disabled="!viewerTarget" @click="queryViewers">查询</a-button
-          ><a-button @click="resetViewers">重置</a-button
+          ><a-button class="uvp-btn-neutral" @click="resetViewers">重置</a-button
           ><a-button
             class="uvp-page-action-btn uvp-refresh-btn session-refresh-btn"
             aria-label="刷新媒体观看者"

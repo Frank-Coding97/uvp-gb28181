@@ -373,7 +373,8 @@ defineExpose({ refresh: requestRefresh });
         >
       </template>
       <template #actions
-        ><a-button type="primary" @click="applyFilters">查询</a-button><a-button @click="clearFilters">重置</a-button
+        ><a-button type="primary" @click="applyFilters">查询</a-button
+        ><a-button class="uvp-btn-neutral" @click="clearFilters">重置</a-button
         ><a-button
           class="uvp-page-action-btn uvp-refresh-btn stream-refresh-btn"
           aria-label="刷新媒体流"

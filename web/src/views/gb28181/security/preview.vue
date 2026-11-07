@@ -1064,7 +1064,7 @@ onBeforeUnmount(() => {
           </template>
           <template #actions>
             <a-button type="primary" :loading="querying === 'events'" @click="applyEventQuery">查询</a-button>
-            <a-button :disabled="querying === 'events'" @click="resetEventSearch">重置</a-button>
+            <a-button class="uvp-btn-neutral" :disabled="querying === 'events'" @click="resetEventSearch">重置</a-button>
           </template>
         </s-layout-search>
         <a-table
@@ -1122,7 +1122,7 @@ onBeforeUnmount(() => {
           </template>
           <template #actions>
             <a-button type="primary" :loading="querying === 'bans'" @click="applyBanQuery">查询</a-button>
-            <a-button :disabled="querying === 'bans'" @click="resetBanSearch">重置</a-button>
+            <a-button class="uvp-btn-neutral" :disabled="querying === 'bans'" @click="resetBanSearch">重置</a-button>
           </template>
         </s-layout-search>
         <a-table
@@ -1219,7 +1219,7 @@ onBeforeUnmount(() => {
           </template>
           <template #actions>
             <a-button type="primary" :loading="querying === 'rules'" @click="applyRuleQuery">查询</a-button>
-            <a-button :disabled="querying === 'rules'" @click="resetRuleSearch">重置</a-button>
+            <a-button class="uvp-btn-neutral" :disabled="querying === 'rules'" @click="resetRuleSearch">重置</a-button>
           </template>
         </s-layout-search>
         <a-table

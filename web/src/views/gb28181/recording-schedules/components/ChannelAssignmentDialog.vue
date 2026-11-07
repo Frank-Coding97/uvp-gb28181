@@ -93,7 +93,7 @@
           <a-button type="primary" @click="applySearch"
             ><template #icon><Search :size="14" /></template>查询</a-button
           >
-          <a-button @click="resetSearch">重置</a-button>
+          <a-button class="uvp-btn-neutral" @click="resetSearch">重置</a-button>
         </div>
 
         <!-- 已选清空入口：仅在有勾选时出现，右侧对齐。 -->

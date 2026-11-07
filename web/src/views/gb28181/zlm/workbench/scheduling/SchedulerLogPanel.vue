@@ -351,7 +351,7 @@ defineExpose({ refresh });
         <a-button type="primary" @click="queryFilters"
           ><template #icon><icon-search /></template>查询</a-button
         >
-        <a-button @click="resetFilters"
+        <a-button class="uvp-btn-neutral" @click="resetFilters"
           ><template #icon><icon-refresh /></template>重置</a-button
         >
       </template>

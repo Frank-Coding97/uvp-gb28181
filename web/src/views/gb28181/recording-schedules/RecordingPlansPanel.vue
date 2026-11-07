@@ -63,7 +63,7 @@
             <a-button type="primary" @click="searchPlans"
               ><template #icon><Search :size="15" /></template>查询</a-button
             >
-            <a-button @click="resetPlanFilters"
+            <a-button class="uvp-btn-neutral" @click="resetPlanFilters"
               ><template #icon><RotateCcw :size="15" /></template>重置</a-button
             >
           </template>
@@ -252,7 +252,7 @@
                 <a-button type="primary" @click="searchStatus"
                   ><template #icon><Search :size="15" /></template>查询</a-button
                 >
-                <a-button @click="resetStatusFilters"
+                <a-button class="uvp-btn-neutral" @click="resetStatusFilters"
                   ><template #icon><RotateCcw :size="15" /></template>重置</a-button
                 >
               </template>
