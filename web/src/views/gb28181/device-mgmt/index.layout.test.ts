@@ -368,3 +368,26 @@ describe("row action palette", () => {
     }
   });
 });
+
+describe("offline status pill", () => {
+  // 老板 2026-11-08：设备管理页「当前设备」头部的「离线」胶囊要红色，不能是灰色。
+  // `.status-pill` 的默认态就是非 online（离线），同页「运行监控」弹窗的离线态
+  // 早就是红色（.status-event-current-status），这里把基础态对齐过去。
+  const pill = ruleBlocks(source, ".status-pill").find(block => block.includes("min-width: 60px"));
+
+  it("renders the workspace header pill from the online flag", () => {
+    expect(hasMarkup(source, '<span class="status-pill" :class="{ online: selectedDeviceContext.online }"')).toBe(true);
+  });
+
+  it("paints the default (offline) pill in danger red", () => {
+    expect(pill, ".status-pill 基础规则块不存在").toBeTruthy();
+    for (const declaration of ["color: var(--uvp-danger)", "background: var(--uvp-danger-soft)", "var(--uvp-danger-border)"]) {
+      expect(pill, `离线胶囊缺 ${declaration}（会退回灰色）`).toContain(declaration);
+    }
+  });
+
+  it("keeps the online pill cyan and the dot halo following the text colour", () => {
+    expect(hasRuleBlock(source, ".status-pill.online", "var(--uvp-brand-cyan)")).toBe(true);
+    expect(hasRuleBlock(source, ".status-pill .status-dot", "currentColor 14%")).toBe(true);
+  });
+});

@@ -6584,9 +6584,9 @@ onUnmounted(() => {
   padding: 4px 10px;
   font-size: 12px;
   font-weight: 650;
-  color: var(--uvp-text-tertiary);
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
+  color: var(--uvp-danger);
+  background: var(--uvp-danger-soft);
+  border: 1px solid var(--uvp-danger-border);
   border-radius: 999px;
 }
 .status-pill.online {
@@ -8675,6 +8675,7 @@ onUnmounted(() => {
   height: 6px;
   background: currentColor;
   border-radius: 999px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 14%, transparent);
   opacity: 0.75;
 }
 .status-pill.online .status-dot {
