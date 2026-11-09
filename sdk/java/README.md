@@ -2,7 +2,7 @@
 
 Java 客户端，封装 UVP GB28181 平台的机器对接接口（`/openapi/v1/*`）。签名、幂等键、重试、错误映射全部在 SDK 内完成，业务代码不接触这些细节。
 
-- 69 个接口，按业务域分成 8 组
+- 84 个接口，按业务域分成 8 组
 - 编译目标 Java 8（Spring Boot 3 用户请用 starter 模块，需要 Java 17）
 - 运行时依赖只有 okhttp + gson + slf4j
 
@@ -148,7 +148,10 @@ mvn test          # 签名对账 + 请求管线行为测试
 mvn install       # 产出 3 个 jar
 ```
 
-签名测试直接读取服务端的 `server/app/openapi/auth/testdata/signature-v1.json`，不复刻一份：复刻的夹具会漂移，而漂移后的夹具仍然显示绿色，直到真实请求全部 401。
+签名测试读取 `sdk/fixtures/signature-v1.json` —— 这份向量被 Java / Python / Go 三份实现共用。
+它本身是主仓 `server/app/openapi/auth/testdata/signature-v1.json` 的副本，
+`sdk/scripts/verify-parity.py` 负责副本与原件对账（在主仓内跑 `mvn test` 时也会断言一次），
+所以副本不会静默漂移，SDK 拆出去单独交付时也不用再依赖服务端源码。
 
 运行 demo：
 
