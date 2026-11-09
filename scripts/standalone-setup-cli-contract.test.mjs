@@ -98,27 +98,36 @@ function psCalls(text) {
   const joined = body
     .split('\n')
     .filter((line) => !/^\s*#/.test(line))
-    .join('\n');
+    .join('\n')
+    // ⛔ PowerShell 用反引号续行（`\n）。不合并的话，
+    //   `& $SetupExe https-repair-port --root $Root ` 的后续
+    //   --conflict / --fallback 落在下一行，按行收就漏掉。
+    .replace(/`\r?\n/g, ' ');
 
   const subs = new Set();
   const flags = new Set();
 
   // ① 直接调用：`& $SetupExe db-init --baseline …`
-  for (const m of joined.matchAll(/&\s*\$SetupExe\s+([a-z][a-z0-9-]*)/g)) subs.add(m[1]);
-
-  // ② 参数数组：`$syncArgs = @('ports-sync', '--env', …)`
-  //    ⛔ 只认「数组里含 '--flag'」的 —— 这个文件还有一堆 `@('nginx-client-body', …)`
-  //      之类的目录清单，按 "@(' 开头"盲收会把它们当成子命令（第一版就是这么错的）。
-  //    ⛔ 匹配 `[^()]*`：这些数组里没有嵌套括号，遇到嵌套就跳过，宁漏不误报。
-  for (const m of joined.matchAll(/@\(([^()]*)\)/g)) {
-    const inner = m[1];
-    if (!/'--/.test(inner)) continue;
-    const first = inner.match(/'([a-z][a-z0-9-]*)'/);
-    if (first) subs.add(first[1]);
+  //    ⛔ flag 只在这一类行里收，不收全文 —— 见下面 ② 的教训。
+  for (const line of joined.split('\n')) {
+    if (!line.includes('$SetupExe')) continue;
+    for (const m of line.matchAll(/\$SetupExe\s+([a-z][a-z0-9-]*)/g)) subs.add(m[1]);
+    collectFlags(line, flags);
   }
 
-  // flag 有加引号的（`'--env'`）也有不加的（`--root $Root`）—— 两种都要收。
-  for (const m of joined.matchAll(/(?:'|\s)--([a-z][a-z0-9-]*)/g)) flags.add(m[1]);
+  // ② 参数数组：`$syncArgs = @('ports-sync', '--env', …)`
+  //    ⛔⛔ 必须限定「赋给 $xxxArgs 变量的数组」。本文件还有别的 @(...) 里带 '--flag'，
+  //      最典型是升级助手那组：@('register', '--config-dir', '--registration', …)。
+  //      按"数组里含 '--"盲收会把它当成 uvp-setup 的子命令 `register`，
+  //      并把它那几个 flag 算进 uvp-setup 的白名单校验
+  //      ⇒ 两条**假红**（2026-11-09 跑出来的，跟端口改动无关）。
+  //    ⛔ 匹配 `[^()]*`：这些数组里没有嵌套括号，遇到嵌套就跳过，宁漏不误报。
+  for (const m of joined.matchAll(/\$(\w*[Aa]rgs)\s*=\s*@\(([^()]*)\)/g)) {
+    const inner = m[2];
+    const first = inner.match(/'([a-z][a-z0-9-]*)'/);
+    if (first) subs.add(first[1]);
+    collectFlags(inner, flags);
+  }
 
   return { subs, flags };
 }
