@@ -133,6 +133,19 @@ const selectedMenu = computed(() => {
 }
 .layout_side {
   height: calc(100% - 60px);
+
+  /* ⛔⛔ 侧栏只允许 a-scrollbar 这一层滚动：Arco 的 `.arco-layout-sider-children`
+     与 `.arco-menu-inner` 都自带 `overflow:auto`，任意一层判定「内容高出几个像素」
+     就会在 a-scrollbar 的 4px 自绘滑块旁边多画一条 6px 原生滚动条（双滚动条）。
+     详见 layout/components/Aside/index.vue 同名注释。 */
+  :deep(.arco-layout-sider-children) {
+    overflow: hidden;
+  }
+
+  :deep(.arco-menu-inner) {
+    overflow: visible;
+  }
+
   .scrollbar {
     height: 100%;
   }

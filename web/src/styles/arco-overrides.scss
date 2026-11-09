@@ -753,3 +753,13 @@ body[arco-theme="dark"] {
     }
   }
 }
+
+/* ⛔⛔ Arco LayoutSider 的 `.arco-layout-sider-children` 自带 `height:100%; overflow:auto`。
+   侧栏里凡是改用 a-scrollbar 接管滚动的场景，这一层只要判定「内容高出几个像素」
+   （flex 小数高度、Logo 高度变化、菜单项增减都会触发）就会在自己右边缘再画一条 6px
+   原生滚动条，紧挨着 a-scrollbar 的 4px 自绘滑块 ⇒ 侧栏「双滚动条」。
+   三个侧栏组件（Aside / layout-mixing / drawer-aside）已各自收敛，这里给后续新增的侧栏兜底：
+   只要 children 的直接子元素是 a-scrollbar，就不许它自己滚。 */
+.arco-layout-sider-children:has(> .arco-scrollbar) {
+  overflow: hidden;
+}

@@ -46,6 +46,17 @@ const handleCancel = () => {
 .layout_side {
   flex: 1;
   overflow: hidden;
+
+  /* ⛔⛔ 侧栏只允许 a-scrollbar 这一层滚动（双滚动条坑：Arco 的 sider-children
+     与 menu-inner 都自带 overflow:auto）。详见 layout/components/Aside/index.vue。 */
+  :deep(.arco-layout-sider-children) {
+    overflow: hidden;
+  }
+
+  :deep(.arco-menu-inner) {
+    overflow: visible;
+  }
+
   .scrollbar {
     height: 100%;
   }
