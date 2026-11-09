@@ -65,6 +65,14 @@ mkdir -p "$PKG"/{images,tools,config,docker}
 cp "$DEPLOY_DIR/install.sh"        "$PKG/install.sh"
 cp "$DEPLOY_DIR/compose.yml"       "$PKG/compose.yml"
 cp "$DEPLOY_DIR/.env.example"      "$PKG/.env.example"
+# ⛔⛔ .env.example 的 UVP_VERSION 只是仓库里的占位符，必须改写成**本包真实版本**。
+#    漏了这一步的后果：1.1.19 的包里写的还是 1.1.4，客户按样例建 .env 就去拉
+#    不存在的旧镜像，报 `manifest unknown` / `pull access denied`，
+#    而且镜像 `uvp-gb28181-backend:1.1.4` 若恰好在本机存在，会静默起成旧版。
+#    ⛔ 用 awk 重写而不是 `sed -i`：BSD sed 的 -i 必须带后缀参数，跨平台会炸。
+awk -v v="$VERSION" '/^UVP_VERSION=/ { print "UVP_VERSION=" v; next } { print }' \
+  "$PKG/.env.example" > "$PKG/.env.example.tmp"
+mv "$PKG/.env.example.tmp" "$PKG/.env.example"
 cp "$STANDALONE_DIR/make-config.py" "$PKG/tools/make-config.py"
 cp "$REPO_ROOT/server/config/config.example.yml" "$PKG/config/config.example.yml"
 cp "$DEPLOY_DIR/docker"/*.Dockerfile "$DEPLOY_DIR/docker"/*.sh "$PKG/docker/"
@@ -109,6 +117,10 @@ chmod 0755 "$PKG/updater/uvp-updater" "$PKG/tools/uvp-compose-upgrade-install.sh
 chmod 0755 "$PKG"/tools/make-config.py
 chmod 0644 "$PKG"/compose.yml "$PKG"/.env.example "$PKG"/config/config.example.yml
 chmod 0755 "$PKG"/docker/*.sh
+
+# 自检：包内样例的版本必须与包名一致（否则回到"样例写死旧版本"的老坑）
+grep -qx "UVP_VERSION=${VERSION}" "$PKG/.env.example" \
+  || fail "包内 .env.example 的 UVP_VERSION 不是 ${VERSION}（上面那步 awk 注入没生效）"
 
 # ⛔ 包内不能有软链接与绝对路径条目：解压到客户机上时它们会指向不存在的东西，
 #    而安装脚本是按"包内自包含"来写的。

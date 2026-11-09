@@ -227,18 +227,23 @@ fi
 #    漏检的后果是 ZLM 启动 1 秒就自杀（UDP 绑定失败），日志只有一行
 #    "bind: address already in use"，而现场根本不知道要去查 100 个 RTP 端口。
 #
-# ⛔⛔⛔ 判据是「有没有人在**监听**」，**不是**「能不能 bind」。
-#    这条踩得很惨：`net.ipv4.ip_local_port_range` 默认 32768-60999，
-#    **把 51000-51064 和 53000-53064 整段都包在里面** —— 任何一条出站连接
-#    （比如某个进程连着本机 Redis/MySQL）都会临时占用段内一个端口，
-#    这时 bind 会 EADDRINUSE，但那不是"端口被服务占着"，几秒后就释放。
-#    实测：220 上查 54000 段，54006/54012/54024 报占用，ss 一看全是
-#    `ESTAB ... :54006 ... :6379` 这种出站连接。
-#    只查 5 个端口时撞上的概率低，扩到 65 个端口后概率放大十几倍 ⇒
-#    安装会被一条临时连接莫名拦下，现场完全无法理解。
-#    ⇒ 用 ss 枚举 LISTEN/UNCONN 状态，只认**真占着端口**的服务。
+# ⛔⛔⛔ 两类占用必须**分开判**：①「有人在监听」②「被本机出站连接占着」。
+#    `net.ipv4.ip_local_port_range` 默认 32768-60999，**把 51000-51064 与
+#    53000-53064 整段都包在里面** —— 本机任何一条出站连接（某进程连着本机
+#    Redis/MySQL 最常见）都会随机占用段内一个端口。这类占用多数几秒就释放，
+#    所以最初只认 LISTEN、把它当"假冲突"放过（怕安装被一条临时连接莫名拦下）。
+#
+#    ⛔ 但 2026-11-09 实测被它打脸：220 上 53004 被一条**常驻**的
+#    `java → 127.0.0.1:6379` 连接占着（连接池不断开，几分钟都不放），
+#    预检报"130 个端口空闲"，装到启动阶段 ZLM 直接
+#    `Listen on :: 53004 failed: address already in use` 然后无限重启，
+#    安装停在「zlm unhealthy」—— 现场只能看到 ZLM 说端口被占，
+#    而 ss -ltn 里查不到任何人（那是 ESTAB，不是 LISTEN）。
+#
+#    ⇒ 两类**都拦**（装完才发现最难查），但报错文案与出路分开给：
+#      监听占用 = 必须换段；出站占用 = 可等几十秒重试 / 换段 / 预留端口。
 SEG_END=$((HTTPS_PORT + 64))
-log "预检端口占用（整段 ${HTTPS_PORT}-${SEG_END}，按 ss 监听状态判定；ss 不可用时回退逐个试绑）"
+log "预检端口占用（整段 ${HTTPS_PORT}-${SEG_END}：监听状态 + 出站连接占用；ss 不可用时回退逐个试绑）"
 "$PY" - "$HTTPS_PORT" "$SEG_END" "$HTTP_PORT" "$BACKEND_PORT" "$REDIS_PORT" "$ZLM_HTTP_PORT" "$SIP_PORT" <<'PORTS_PY'
 import socket
 import subprocess
@@ -253,11 +258,8 @@ for port in wanted:
         seen.add(port)
         ports.append(port)
 
-busy = []
-
-
-def listened(*flags):
-    """ss 里处于监听/绑定状态的本地端口集合；ss 不可用或解析失败返回 None。"""
+def ss_ports(*flags):
+    """ss 输出里的本地端口集合；ss 不可用或解析失败返回 None。"""
     try:
         result = subprocess.run(
             ["ss", "-H", "-n", *flags],
@@ -280,15 +282,19 @@ def listened(*flags):
     return found
 
 
-tcp_listening = listened("-ltn")
-udp_listening = listened("-lun")
+tcp_listening = ss_ports("-ltn")
+udp_listening = ss_ports("-lun")
+# ESTAB 的**本地**端口（第 4 列）；这些是出站连接的源端口，ss -ltn 里看不见。
+tcp_established = ss_ports("-tn", "state", "established")
 
 if tcp_listening is not None and udp_listening is not None:
-    busy = [f"TCP {p}" for p in ports if p in tcp_listening]
-    busy += [f"UDP {p}" for p in ports if p in udp_listening]
+    busy_listen = [f"TCP {p}" for p in ports if p in tcp_listening]
+    busy_listen += [f"UDP {p}" for p in ports if p in udp_listening]
+    held = (tcp_established or set()) - tcp_listening - udp_listening
+    busy_outbound = [p for p in ports if p in held]
 else:
-    # 没有 ss（极简镜像 / 裁剪过的系统）才回退到试绑。
-    # ⛔ 这条分支会有上面说的"临时连接误报"，但总比完全不检查好。
+    # 没有 ss（极简镜像 / 裁剪过的系统）才回退到试绑；此时两种占用混在一起报。
+    busy_listen, busy_outbound = [], []
     for port in ports:
         for proto, kind in ((socket.SOCK_STREAM, "TCP"), (socket.SOCK_DGRAM, "UDP")):
             s = socket.socket(socket.AF_INET, proto)
@@ -296,15 +302,52 @@ else:
             try:
                 s.bind(("0.0.0.0", port))
             except OSError:
-                busy.append(f"{kind} {port}")
+                busy_listen.append(f"{kind} {port}")
             finally:
                 s.close()
 
-if busy:
-    print("以下端口已被占用： " + ", ".join(busy), file=sys.stderr)
-    print("换整段：./install.sh --port-base <段基址>；查占用：ss -ltnp", file=sys.stderr)
+if busy_listen:
+    print("以下端口已被**服务监听**占用： " + ", ".join(busy_listen), file=sys.stderr)
+    print("换整段：./install.sh --port-base <段基址>；查是谁：ss -ltnp", file=sys.stderr)
     sys.exit(1)
+
+if busy_outbound:
+    print(
+        "以下端口正被**本机出站连接**占着（ESTAB，ss -ltn 里看不到）："
+        + ", ".join(str(p) for p in busy_outbound),
+        file=sys.stderr,
+    )
+    print("为什么必须拦住：ZLM 起来第一秒就要 bind 这些端口，撞上就", file=sys.stderr)
+    print("`address already in use` 并无限重启，安装停在「zlm unhealthy」。", file=sys.stderr)
+    print("三条出路：", file=sys.stderr)
+    print("  ① 等 30 秒用原命令重试 —— 连接池空出来就过了（最常见）", file=sys.stderr)
+    print("  ② 换一段：./install.sh --port-base <段基址>", file=sys.stderr)
+    print("  ③ 把整段从系统临时端口范围里挖出来（永久生效，生产机推荐）：", file=sys.stderr)
+    print(
+        f"       echo 'net.ipv4.ip_local_reserved_ports = {start}-{end}'"
+        " | sudo tee /etc/sysctl.d/99-uvp-ports.conf",
+        file=sys.stderr,
+    )
+    print("       sudo sysctl --system   # 已被那条连接占着的端口要等它自己断开", file=sys.stderr)
+    sys.exit(1)
+
 print(f"  {len(ports)} 个端口空闲")
+
+# 段落在系统临时端口范围内 ⇒ 提示预留。不影响本次安装，但机器跑久了
+# 出站连接会随机占段内端口，重启后偶发「ZLM 起不来」。
+try:
+    with open("/proc/sys/net/ipv4/ip_local_port_range") as fh:
+        lo, hi = (int(x) for x in fh.read().split())
+    if not (end < lo or start > hi):
+        print(f"  ⚠️ 该段 {start}-{end} 与系统临时端口范围 {lo}-{hi} 重叠：")
+        print("     本机出站连接会随机占用段内端口，重启后偶发「ZLM 起不来」。")
+        print("     生产机建议整段预留（之后内核不再分配它们给临时连接）：")
+        print(
+            f"       echo 'net.ipv4.ip_local_reserved_ports = {start}-{end}'"
+            " | sudo tee /etc/sysctl.d/99-uvp-ports.conf && sudo sysctl --system"
+        )
+except Exception:
+    pass
 PORTS_PY
 
 # ============================================================ 目录布局 ====
