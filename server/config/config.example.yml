@@ -394,6 +394,16 @@ scheduler:
 gb28181:
   enabled: true              # 是否启用国标 SIP 服务;关闭后 HTTP 依然运行,SIP 相关路由返 503
   sip_command_timeout_sec: 10 # 出站 SIP 命令默认等待时间，范围 1-300 秒
+  # SIP UDP socket 的内核接收缓冲(KB)，默认 4096 = 4MB，可容纳约 5000 个 SIP 报文。
+  # 这里只放「运行时参数」；平台的 IP/端口/编码/密码仍以引导页写入的 gb_sip_config 为准。
+  # ⛔ Linux 上受 net.core.rmem_max 限制：申请值超过该上限会被内核静默截断
+  #    （不报错、日志无异常，但丢包照旧）。启动日志出现 gb28181.sip.recvbuffer_limited
+  #    就说明要执行 sysctl -w net.core.rmem_max=4194304 后重启。
+  #    千级以上设备同时注册（例如平台重启后全量重连）时，Linux 默认的 208KB 会直接丢包，
+  #    表现为「设备注册超时，但平台日志里连请求都看不到」。
+  # ⛔ Windows 无此上限，SetReadBuffer 直接生效，不需要改系统参数。
+  sip:
+    recvbuffer_kb: 4096
   # SIP 原始报文诊断模块。默认关闭；日志写入当前业务数据库。
   trace:
     enabled: false                                        # 关闭后不再落库，历史表保留

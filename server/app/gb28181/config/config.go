@@ -25,6 +25,7 @@ const (
 	OnlineOnHeartbeatConfigKey                = "gb28181.device.online_on_heartbeat"
 	SaveAlarmMessagesConfigKey                = "gb28181.alarm.save_messages"
 	SIPCommandTimeoutSecConfigKey             = "gb28181.sip_command_timeout_sec"
+	SIPUDPRecvBufferKBConfigKey               = "gb28181.sip.recvbuffer_kb"
 	PreallocationModeConfigKey                = "gb28181.device.preallocation_mode"
 	IgnoreChannelOfflineStatusNotifyConfigKey = "gb28181.catalog.ignore_channel_offline_status_notify"
 	DefaultChannelStreamTransportConfigKey    = "gb28181.catalog.default_channel_stream_transport"
@@ -66,6 +67,13 @@ const (
 	DefaultSIPTraceRetentionDays         = 7
 	MinSIPTraceRetentionDays             = 1
 	MaxSIPTraceRetentionDays             = 365
+
+	// DefaultSIPUDPRecvBufferKB / MaxSIPUDPRecvBufferKB 约束 SIP UDP socket 的
+	// 内核接收缓冲区。Linux 默认 net.core.rmem_default 只有 208KB ≈ 300 个 SIP
+	// 报文，千级设备同时注册时内核会直接丢包（实测 220 上累计 RcvbufErrors 5 万+）。
+	// 4MB 可容纳约 5000 个注册报文；上限 64MB 仅为防止配置写成天文数字。
+	DefaultSIPUDPRecvBufferKB = 4096
+	MaxSIPUDPRecvBufferKB     = 65536
 
 	MaxRecordQueryTimeoutSec           = 300
 	MaxRecordQueryRangeHours           = 168
@@ -412,6 +420,21 @@ func SIPTraceRetentionDaysFrom(c valueSource) int {
 		return DefaultSIPTraceRetentionDays
 	}
 	return days
+}
+
+// SIPUDPRecvBufferKBFrom 解析 SIP UDP 接收缓冲配置(KB)。
+//
+// 越界一律回落默认值而不是截断：这个值直接决定内核丢不丢注册包，
+// 配错时"用一个看起来合理的值"比"静默按上限跑"更容易排查。
+func SIPUDPRecvBufferKBFrom(c valueSource) int {
+	if c == nil || c.Get(SIPUDPRecvBufferKBConfigKey) == nil {
+		return DefaultSIPUDPRecvBufferKB
+	}
+	kb := c.GetInt(SIPUDPRecvBufferKBConfigKey)
+	if kb <= 0 || kb > MaxSIPUDPRecvBufferKB {
+		return DefaultSIPUDPRecvBufferKB
+	}
+	return kb
 }
 
 func SIPTraceRetentionDays() int {
@@ -765,6 +788,10 @@ type SIPConfig struct {
 	ServerID         string   // 平台国标编码(20 位)
 	Password         string   // 统一接入密码
 	XGBVersion       string   // 平台 REGISTER 响应声明的 X-GB-Ver,为空时默认 3.0
+	// UDPRecvBufferKB 是 SIP UDP socket 的内核接收缓冲区大小(KB)。
+	// 不配=默认 4096(4MB)。见 sip/server.go 的 serveUDP 注释:
+	// 默认 208KB 只能装约 300 个注册报文，千级以上设备同时注册会被内核丢包。
+	UDPRecvBufferKB int
 }
 
 // DeviceConfig 设备相关配置
@@ -819,14 +846,15 @@ func loadFrom(c valueSource) (Config, error) {
 	cfg := Config{
 		Enabled: c.GetBool("gb28181.enabled"),
 		SIP: SIPConfig{
-			ListenIP:    listenIP,
-			AdvertiseIP: advertiseIP,
-			Port:        c.GetInt("gb28181.sip.port"),
-			Transport:   c.GetStringSlice("gb28181.sip.transport"),
-			Domain:      c.GetString("gb28181.sip.domain"),
-			ServerID:    c.GetString("gb28181.sip.serverid"),
-			Password:    c.GetString("gb28181.sip.password"),
-			XGBVersion:  c.GetString("gb28181.sip.x_gb_ver"),
+			ListenIP:        listenIP,
+			AdvertiseIP:     advertiseIP,
+			Port:            c.GetInt("gb28181.sip.port"),
+			Transport:       c.GetStringSlice("gb28181.sip.transport"),
+			Domain:          c.GetString("gb28181.sip.domain"),
+			ServerID:        c.GetString("gb28181.sip.serverid"),
+			Password:        c.GetString("gb28181.sip.password"),
+			XGBVersion:      c.GetString("gb28181.sip.x_gb_ver"),
+			UDPRecvBufferKB: SIPUDPRecvBufferKBFrom(c),
 		},
 		Trace: TraceConfig{
 			Enabled:          c.GetBool("gb28181.trace.enabled"),

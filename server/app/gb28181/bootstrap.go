@@ -720,6 +720,10 @@ func loadSIPConfigFromDB(base gbconfig.Config) (gbconfig.Config, bool, error) {
 		ServerID:         row.ServerID,
 		Password:         row.Password,
 		XGBVersion:       base.SIP.XGBVersion,
+		// UDPRecvBufferKB 是纯运行时元参数（不是设备/平台身份数据），
+		// 权威源仍在 YAML。这里必须显式带过来 —— 上面是整体赋值，
+		// 漏掉就会被静默清零，然后 SetReadBuffer 回落到 208KB 默认值。
+		UDPRecvBufferKB: base.SIP.UDPRecvBufferKB,
 	}
 	// Deprecated single-node playback paths still read cfg.ZLM.PlaybackHost /
 	// SDPIP; carry the persisted platform defaults into that runtime too.

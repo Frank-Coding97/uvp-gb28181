@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -897,7 +899,13 @@ func (s *Server) Start() error {
 			logger.Info("GB28181 SIP 监听启动",
 				zap.String("event", "gb28181.sip.listener_started"),
 				zap.String("transport", t), zap.String("address", addr))
-			if err := s.srv.ListenAndServe(ctx, t, addr); err != nil && ctx.Err() == nil {
+			var err error
+			if sipTransportIsUDP(t) {
+				err = s.serveUDP(ctx, t, addr, logger)
+			} else {
+				err = s.srv.ListenAndServe(ctx, t, addr)
+			}
+			if err != nil && ctx.Err() == nil {
 				logger.Error("GB28181 SIP 监听失败",
 					zap.String("event", "gb28181.sip.listener_failed"),
 					zap.String("transport", t), zap.String("address", addr), logging.Error(err))
@@ -908,6 +916,108 @@ func (s *Server) Start() error {
 		})
 	}
 	return nil
+}
+
+// sipTransportIsUDP 判断配置里的 transport 是否属于 UDP 族。
+//
+// 配置里可能写 UDP / udp / udp4 / udp6（大小写与后缀都不统一），必须归一化后判断：
+// 判错会把 UDP 走到 TCP 分支上，监听直接失败。
+func sipTransportIsUDP(t string) bool {
+	switch strings.ToLower(strings.TrimSpace(t)) {
+	case "udp", "udp4", "udp6":
+		return true
+	}
+	return false
+}
+
+// serveUDP 自建 UDP socket 后再交给 sipgo，绕开 ListenAndServe。
+//
+// 唯一目的是能在交给 SIP 栈**之前**调 SetReadBuffer —— sipgo 内部建 socket 时
+// 不给调用方任何干预机会。
+//
+// ⛔ 为什么必须设：Linux 的 net.core.rmem_default 只有 208KB，约等于 300 个
+// SIP 报文。千级以上设备同时注册时，请求到达速度远快于处理速度，内核把超出
+// 缓冲的报文**直接丢弃且不通知任何人** —— 现象是"设备注册超时，平台日志里
+// 连请求都看不到"，2026-11-09 在 220 上千路压测实测 RcvbufErrors 累计 5 万+。
+// 提到 4MB 后可容纳约 5000 个报文，万级突发才接得住。
+//
+// ⛔ 不要改回 s.srv.ListenAndServe 走 UDP：那样缓冲又回到 208KB，而且不会有
+// 任何报错提示你回退了。sip/server_test.go 的 TestSIPUDPRecvBufferApplied
+// 会盯着这条路径。
+func (s *Server) serveUDP(ctx context.Context, network, addr string, logger *zap.Logger) error {
+	laddr, err := net.ResolveUDPAddr(network, addr)
+	if err != nil {
+		return fmt.Errorf("解析 SIP UDP 监听地址失败: %w", err)
+	}
+	conn, err := net.ListenUDP(network, laddr)
+	if err != nil {
+		return fmt.Errorf("SIP UDP 监听失败: %w", err)
+	}
+
+	targetBytes := s.cfg.SIP.UDPRecvBufferKB << 10
+	if targetBytes <= 0 {
+		targetBytes = gbconfig.DefaultSIPUDPRecvBufferKB << 10
+	}
+	if err := conn.SetReadBuffer(targetBytes); err != nil {
+		logger.Warn("SIP UDP 接收缓冲设置失败,将退回系统默认值",
+			zap.String("event", "gb28181.sip.recvbuffer_set_failed"),
+			zap.Int("target_bytes", targetBytes), logging.Error(err))
+	}
+	if warn := sipRecvBufferLimitWarning(targetBytes); warn != "" {
+		logger.Warn(warn,
+			zap.String("event", "gb28181.sip.recvbuffer_limited"),
+			zap.Int("target_bytes", targetBytes))
+	} else {
+		logger.Info("GB28181 SIP UDP 接收缓冲已设置",
+			zap.String("event", "gb28181.sip.recvbuffer_ready"),
+			zap.Int("target_bytes", targetBytes),
+			zap.String("local", conn.LocalAddr().String()))
+	}
+
+	// ctx 取消后必须主动关闭 socket：ServeUDP 阻塞在读上，
+	// 不关连接的话 StopContext 会一直等下去，优雅关闭直接卡死。
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.Close()
+		case <-done:
+		}
+	}()
+
+	return s.srv.ServeUDP(conn)
+}
+
+// sipRecvBufferLimitWarning 读 Linux 的 net.core.rmem_max，判断申请的缓冲能否落地。
+//
+// 内核的规则是：setsockopt 申请值先被裁到 rmem_max，再翻倍成实际 sk_rcvbuf。
+// 所以申请值一旦超过 rmem_max 就被**静默截断**——程序不报错、日志没异常，
+// 但丢包照旧。这里把它变成一条可读的 WARN，避免"改了没生效"的悬案。
+//
+// 非 Linux（没有该文件）直接放行：Windows/macOS 没有这个上限，绿色包在
+// Windows 上 SetReadBuffer 会直接生效。
+func sipRecvBufferLimitWarning(targetBytes int) string {
+	raw, err := os.ReadFile("/proc/sys/net/core/rmem_max")
+	if err != nil {
+		return ""
+	}
+	limit, convErr := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if convErr != nil {
+		return ""
+	}
+	return recvBufferLimitWarning(targetBytes, limit)
+}
+
+// recvBufferLimitWarning 是 sipRecvBufferLimitWarning 的纯函数部分，便于单测。
+func recvBufferLimitWarning(targetBytes, limitBytes int) string {
+	if limitBytes <= 0 || targetBytes <= limitBytes {
+		return ""
+	}
+	return fmt.Sprintf(
+		"SIP UDP 接收缓冲受 net.core.rmem_max 限制(申请 %d 字节,系统上限 %d 字节);"+
+			"千级以上设备同时注册会丢包,请执行 sysctl -w net.core.rmem_max=%d 后重启",
+		targetBytes, limitBytes, targetBytes)
 }
 
 // QuiesceRequests 停止新业务事务入场,并等待已接纳的 middleware/handler 返回。
