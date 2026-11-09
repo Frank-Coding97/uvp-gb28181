@@ -50,6 +50,12 @@ type SDPExtensionConfig struct {
 	Enabled bool `json:"enabled"`
 }
 
+// DeviceTimeSyncConfig 控制 SIP 成功应答是否附带 Date 头（设备据此校时）。
+// 默认关闭：开它会实际修改现场设备的系统时间。
+type DeviceTimeSyncConfig struct {
+	Enabled bool `json:"enabled"`
+}
+
 type SyncChannelsOnOnlineConfig struct {
 	Enabled bool `json:"enabled"`
 }
@@ -117,6 +123,7 @@ type ServiceConfig struct {
 	PositionHistory                  PositionHistoryConfig                  `json:"positionHistory"`
 	CloudRecordingRetention          CloudRecordingRetentionConfig          `json:"cloudRecordingRetention"`
 	SDPExtension                     SDPExtensionConfig                     `json:"sdpExtension"`
+	DeviceTimeSync                   DeviceTimeSyncConfig                   `json:"deviceTimeSync"`
 	SyncChannelsOnOnline             SyncChannelsOnOnlineConfig             `json:"syncChannelsOnOnline"`
 	OnlineOnHeartbeat                OnlineOnHeartbeatConfig                `json:"onlineOnHeartbeat"`
 	SaveAlarmMessages                SaveAlarmMessagesConfig                `json:"saveAlarmMessages"`
@@ -179,6 +186,7 @@ func (sc *ServiceConfigController) currentServiceConfig() ServiceConfig {
 	return ServiceConfig{
 		PositionHistory: position, CloudRecordingRetention: CloudRecordingRetentionConfig{RetentionDays: cloud},
 		SDPExtension:         SDPExtensionConfig{Enabled: gbconfig.SDPExtensionEnabled()},
+		DeviceTimeSync:       DeviceTimeSyncConfig{Enabled: gbconfig.DeviceTimeSyncEnabled()},
 		SyncChannelsOnOnline: SyncChannelsOnOnlineConfig{Enabled: gbconfig.SyncChannelsOnOnline()}, OnlineOnHeartbeat: OnlineOnHeartbeatConfig{Enabled: gbconfig.OnlineOnHeartbeat()},
 		SaveAlarmMessages: SaveAlarmMessagesConfig{Enabled: gbconfig.SaveAlarmMessages()}, SIPCommandTimeout: SIPCommandTimeoutConfig{TimeoutSec: gbconfig.SIPCommandTimeoutSec()},
 		PreallocationMode: PreallocationModeConfig{Enabled: gbconfig.PreallocationMode()}, IgnoreChannelOfflineStatusNotify: IgnoreChannelOfflineStatusNotifyConfig{Enabled: gbconfig.IgnoreChannelOfflineStatusNotify()},
@@ -301,6 +309,7 @@ func applyServiceConfig(v ServiceConfig) {
 	app.ConfigYml.Set(positionHistoryRetentionDaysConfigKey, v.PositionHistory.RetentionDays)
 	app.ConfigYml.Set(cloudRecordingRetentionDaysConfigKey, v.CloudRecordingRetention.RetentionDays)
 	app.ConfigYml.Set(gbconfig.SDPExtensionConfigKey, v.SDPExtension.Enabled)
+	app.ConfigYml.Set(gbconfig.DeviceTimeSyncEnabledConfigKey, v.DeviceTimeSync.Enabled)
 	app.ConfigYml.Set(gbconfig.SyncChannelsOnOnlineConfigKey, v.SyncChannelsOnOnline.Enabled)
 	app.ConfigYml.Set(gbconfig.OnlineOnHeartbeatConfigKey, v.OnlineOnHeartbeat.Enabled)
 	app.ConfigYml.Set(gbconfig.SaveAlarmMessagesConfigKey, v.SaveAlarmMessages.Enabled)

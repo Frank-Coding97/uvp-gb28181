@@ -385,7 +385,8 @@ describe("ServiceConfig edit mode", () => {
     await flushPromises();
 
     // 设备接入入口由平台统一管理，不属于用户可配置项。
-    expect(wrapper.findAll("[data-tooltip]")).toHaveLength(31);
+    expect(wrapper.findAll("[data-tooltip]")).toHaveLength(32);
+    expect(wrapper.find("[data-field='deviceTimeSync']").attributes("data-tooltip")).toContain("默认关闭");
     expect(wrapper.find("[data-field='saveMobilePositionHistory']").attributes("data-tooltip")).toBe(
       "关闭后仍更新设备和通道的最新位置，不再新增轨迹点。"
     );
@@ -816,6 +817,22 @@ describe("ServiceConfig edit mode", () => {
     await flushPromises();
 
     expect(api.updateSDPExtensionConfig).toHaveBeenCalledWith(true);
+  });
+
+  it("keeps the device time sync switch off by default and saves it through the aggregate config", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(wrapper.find("[data-field='deviceTimeSync']").attributes("data-tooltip")).toContain("默认关闭");
+    const timeSyncSwitch = wrapper.find("[data-field='deviceTimeSync'] button");
+    expect(timeSyncSwitch.text()).toBe("false");
+
+    await timeSyncSwitch.trigger("click");
+    const saveButton = wrapper.findAll("button").find(button => button.text().includes("保存配置"))!;
+    await saveButton.trigger("click");
+    await flushPromises();
+
+    expect(api.updateServiceConfig).toHaveBeenLastCalledWith(expect.objectContaining({ deviceTimeSync: { enabled: true } }));
   });
 
   it("presents and saves the PTZ default speed as a 1-10 level slider", async () => {

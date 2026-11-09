@@ -515,9 +515,9 @@ func (s *Server) registerHandlers() {
 	}
 
 	s.regH = regHandler
-	s.srv.OnRegister(regHandler.Handle)
+	s.srv.OnRegister(s.decorateDeviceTimeSync(regHandler.Handle))
 	s.msgH = msgHandler
-	s.srv.OnMessage(func(req *siplib.Request, tx siplib.ServerTransaction) {
+	s.srv.OnMessage(s.decorateDeviceTimeSync(func(req *siplib.Request, tx siplib.ServerTransaction) {
 		s.cascadeMessageMu.RLock()
 		hook := s.cascadeMessage
 		s.cascadeMessageMu.RUnlock()
@@ -525,16 +525,26 @@ func (s *Server) registerHandlers() {
 			return
 		}
 		msgHandler.Handle(req, tx)
-	})
-	s.notifyH = handler.NewNotifyHandler(nil)
-	s.srv.OnNotify(s.notifyH.Handle)
-	s.srv.OnSubscribe(s.dispatchCascadeSubscription)
-	s.srv.OnInvite(s.dispatchCascadeDialog(s.handleBroadcastInvite))
-	s.srv.OnAck(s.dispatchCascadeDialog(s.handleBroadcastAck))
-	s.srv.OnBye(s.dispatchCascadeDialog(s.handleBye))
-	s.srv.OnInfo(s.dispatchCascadeDialog(func(req *siplib.Request, tx siplib.ServerTransaction) {
-		_ = tx.Respond(siplib.NewResponseFromRequest(req, 481, "Dialog Does Not Exist", nil))
 	}))
+	s.notifyH = handler.NewNotifyHandler(nil)
+	s.srv.OnNotify(s.decorateDeviceTimeSync(s.notifyH.Handle))
+	s.srv.OnSubscribe(s.decorateDeviceTimeSync(s.dispatchCascadeSubscription))
+	s.srv.OnInvite(s.decorateDeviceTimeSync(s.dispatchCascadeDialog(s.handleBroadcastInvite)))
+	s.srv.OnAck(s.decorateDeviceTimeSync(s.dispatchCascadeDialog(s.handleBroadcastAck)))
+	s.srv.OnBye(s.decorateDeviceTimeSync(s.dispatchCascadeDialog(s.handleBye)))
+	s.srv.OnInfo(s.decorateDeviceTimeSync(s.dispatchCascadeDialog(func(req *siplib.Request, tx siplib.ServerTransaction) {
+		_ = tx.Respond(siplib.NewResponseFromRequest(req, 481, "Dialog Does Not Exist", nil))
+	})))
+}
+
+// decorateDeviceTimeSync 给设备/上级的请求处理包一层事务，使成功应答可以带上
+// Date 头（设备据此校时）。是否生效由国标配置的
+// gb28181.sip.device_time_sync.enabled 决定，默认关闭；关闭时 newDeviceTimeSyncTx
+// 原样返回事务，报文与历史版本完全一致。
+func (s *Server) decorateDeviceTimeSync(fn func(*siplib.Request, siplib.ServerTransaction)) func(*siplib.Request, siplib.ServerTransaction) {
+	return func(req *siplib.Request, tx siplib.ServerTransaction) {
+		fn(req, newDeviceTimeSyncTx(tx, gbconfig.DeviceTimeSyncEnabled()))
+	}
 }
 
 func (s *Server) handleBroadcastInvite(req *siplib.Request, tx siplib.ServerTransaction) {

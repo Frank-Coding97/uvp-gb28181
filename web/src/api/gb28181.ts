@@ -1893,6 +1893,7 @@ export interface ServiceConfigAggregate {
   positionHistory: { enabled: boolean; retentionDays: number };
   cloudRecordingRetention: { retentionDays: number };
   sdpExtension: { enabled: boolean };
+  deviceTimeSync: { enabled: boolean };
   syncChannelsOnOnline: { enabled: boolean };
   onlineOnHeartbeat: { enabled: boolean };
   saveAlarmMessages: { enabled: boolean };

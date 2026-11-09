@@ -16,7 +16,7 @@ describe("static service config draft", () => {
     expect(draft.defaultChannelAudioEnabled).toBe(true);
     expect(draft.cloudRecordingRetentionDays).toBe(7);
 
-    expect(staticServiceConfigLabels).toHaveLength(16);
+    expect(staticServiceConfigLabels).toHaveLength(17);
     expect(staticServiceConfigLabels).not.toContain("扫码配网地址");
     expect(staticServiceConfigLabels).not.toContain("抓拍回传地址");
     expect(draft).not.toHaveProperty("qrProvisionBaseUrl");
@@ -26,6 +26,8 @@ describe("static service config draft", () => {
     expect(staticServiceConfigLabels).toContain("全局订阅项目");
     expect(staticServiceConfigLabels).toContain("全局通道开启音频");
     expect(staticServiceConfigLabels).toContain("扩展 SDP 兼容模式");
+    expect(staticServiceConfigLabels).toContain("设备校时");
+    expect(draft.deviceTimeSync).toBe(false);
     expect(staticServiceConfigLabels).toContain("云台默认速度");
     expect(staticServiceConfigLabels).toContain("忽略通道离线/异常通知");
     expect(staticServiceConfigLabels).toContain("心跳恢复设备在线状态");

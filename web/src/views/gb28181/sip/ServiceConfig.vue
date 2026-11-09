@@ -89,6 +89,7 @@ const cloudRecordingRetentionReady = ref(false);
 const savedPositionHistoryEnabled = ref(true);
 const savedPositionHistoryRetentionDays = ref(7);
 const savedSDPExtensionEnabled = ref(false);
+const savedDeviceTimeSync = ref(false);
 const savedPTZDefaultSpeed = ref(6);
 const savedDefaultChannelStreamTransport = ref<"UDP" | "TCP-Active" | "TCP-Passive">("TCP-Passive");
 const savedDefaultPlaybackProtocol = ref<PlaybackProtocol>("ws-flv");
@@ -144,6 +145,7 @@ const positionHistoryChanged = computed(
     draft.positionHistoryRetentionDays !== savedPositionHistoryRetentionDays.value
 );
 const sdpExtensionChanged = computed(() => draft.sdpExtension !== savedSDPExtensionEnabled.value);
+const deviceTimeSyncChanged = computed(() => draft.deviceTimeSync !== savedDeviceTimeSync.value);
 const ptzDefaultSpeedChanged = computed(() => draft.ptzSpeed !== savedPTZDefaultSpeed.value);
 const defaultChannelStreamTransportChanged = computed(
   () => draft.defaultChannelStreamTransport !== savedDefaultChannelStreamTransport.value
@@ -214,6 +216,7 @@ const hasChanges = computed(
   () =>
     positionHistoryChanged.value ||
     sdpExtensionChanged.value ||
+    deviceTimeSyncChanged.value ||
     ptzDefaultSpeedChanged.value ||
     defaultChannelStreamTransportChanged.value ||
     defaultPlaybackProtocolChanged.value ||
@@ -315,6 +318,7 @@ function resetDraft() {
   draft.positionHistoryRetentionDays = savedPositionHistoryRetentionDays.value;
   draft.recordCacheTailToleranceSec = savedRecordCacheTailToleranceSec.value;
   draft.sdpExtension = savedSDPExtensionEnabled.value;
+  draft.deviceTimeSync = savedDeviceTimeSync.value;
   draft.ptzSpeed = savedPTZDefaultSpeed.value;
   draft.defaultChannelStreamTransport = savedDefaultChannelStreamTransport.value;
   draft.playback.defaultProtocol = savedDefaultPlaybackProtocol.value;
@@ -376,6 +380,7 @@ async function saveConfig() {
       cloudRecordingRetention: { retentionDays: draft.cloudRecordingRetentionDays },
       recordCacheTailToleranceSec: draft.recordCacheTailToleranceSec,
       sdpExtension: { enabled: draft.sdpExtension },
+      deviceTimeSync: { enabled: draft.deviceTimeSync },
       syncChannelsOnOnline: { enabled: draft.syncChannelsOnOnline },
       onlineOnHeartbeat: { enabled: draft.onlineOnHeartbeat },
       saveAlarmMessages: { enabled: draft.saveAlarmMessages },
@@ -415,6 +420,7 @@ async function saveConfig() {
     draft.cloudRecordingRetentionDays = v.cloudRecordingRetention.retentionDays ?? 7;
     draft.recordCacheTailToleranceSec = v.recordCacheTailToleranceSec ?? 2;
     draft.sdpExtension = v.sdpExtension.enabled;
+    draft.deviceTimeSync = v.deviceTimeSync?.enabled ?? false;
     draft.syncChannelsOnOnline = v.syncChannelsOnOnline.enabled;
     draft.onlineOnHeartbeat = v.onlineOnHeartbeat.enabled;
     draft.saveAlarmMessages = v.saveAlarmMessages.enabled;
@@ -436,6 +442,7 @@ async function saveConfig() {
     savedCloudRecordingRetentionDays.value = v.cloudRecordingRetention.retentionDays ?? 7;
     savedRecordCacheTailToleranceSec.value = v.recordCacheTailToleranceSec ?? 2;
     savedSDPExtensionEnabled.value = v.sdpExtension.enabled;
+    savedDeviceTimeSync.value = v.deviceTimeSync?.enabled ?? false;
     savedPTZDefaultSpeed.value = v.ptzDefaultSpeed.level;
     savedDefaultChannelStreamTransport.value = v.defaultChannelStreamTransport.transport;
     savedDefaultPlaybackProtocol.value = v.defaultPlaybackProtocol.protocol;
@@ -495,6 +502,8 @@ async function loadServiceConfig() {
     savedRecordCacheTailToleranceSec.value = v.recordCacheTailToleranceSec ?? 2;
     draft.sdpExtension = v.sdpExtension.enabled;
     savedSDPExtensionEnabled.value = v.sdpExtension.enabled;
+    draft.deviceTimeSync = v.deviceTimeSync?.enabled ?? false;
+    savedDeviceTimeSync.value = v.deviceTimeSync?.enabled ?? false;
     draft.ptzSpeed = v.ptzDefaultSpeed.level;
     savedPTZDefaultSpeed.value = v.ptzDefaultSpeed.level;
     draft.defaultChannelStreamTransport = v.defaultChannelStreamTransport.transport;
@@ -682,6 +691,18 @@ onMounted(async () => {
                     :loading="sdpExtensionLoading || sdpExtensionSaving"
                     :disabled="sdpExtensionLoading || sdpExtensionSaving || !sdpExtensionReady"
                   >
+                    <template #checked>开启</template>
+                    <template #unchecked>关闭</template>
+                  </a-switch>
+                </a-form-item>
+              </a-col>
+              <a-col :span="isMobile ? 24 : 12">
+                <a-form-item
+                  field="deviceTimeSync"
+                  label="设备校时"
+                  tooltip="开启后平台在注册、心跳的成功应答里带上当前时间（Date 头），设备据此校准自己的时钟；默认关闭，因为开它会实际修改现场设备的系统时间，可能影响录像时间轴与报警时间。"
+                >
+                  <a-switch v-model="draft.deviceTimeSync" :loading="aggregateSaving" :disabled="!configReady || aggregateSaving">
                     <template #checked>开启</template>
                     <template #unchecked>关闭</template>
                   </a-switch>

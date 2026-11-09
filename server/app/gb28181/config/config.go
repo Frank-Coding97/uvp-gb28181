@@ -25,6 +25,7 @@ const (
 	OnlineOnHeartbeatConfigKey                = "gb28181.device.online_on_heartbeat"
 	SaveAlarmMessagesConfigKey                = "gb28181.alarm.save_messages"
 	SIPCommandTimeoutSecConfigKey             = "gb28181.sip_command_timeout_sec"
+	DeviceTimeSyncEnabledConfigKey            = "gb28181.sip.device_time_sync.enabled"
 	SIPUDPRecvBufferKBConfigKey               = "gb28181.sip.recvbuffer_kb"
 	PreallocationModeConfigKey                = "gb28181.device.preallocation_mode"
 	IgnoreChannelOfflineStatusNotifyConfigKey = "gb28181.catalog.ignore_channel_offline_status_notify"
@@ -520,6 +521,22 @@ func SIPCommandTimeoutSec() int {
 
 func SIPCommandTimeout() time.Duration {
 	return time.Duration(SIPCommandTimeoutSec()) * time.Second
+}
+
+// DeviceTimeSyncEnabledFrom 返回是否在 SIP 成功应答里附带 Date 头，供设备校时。
+//
+// 国标校时没有独立命令：设备靠注册/心跳应答里的 Date 头与本地时钟比对，超过自身
+// 阈值就**改自己的系统时间**。平台一开这个头，等于把"改设备时间"的开关交给现场，
+// 而设备时间被改动会影响录像时间轴、报警时间等，因此：
+//   - 默认关闭（缺省或不认识该键一律视为关闭），关闭时行为与历史版本完全一致；
+//   - 只有显式写入 true 才下发，属加法变更，回退只需关开关、无需重启。
+func DeviceTimeSyncEnabledFrom(c valueSource) bool {
+	return c != nil && c.Get(DeviceTimeSyncEnabledConfigKey) != nil && c.GetBool(DeviceTimeSyncEnabledConfigKey)
+}
+
+// DeviceTimeSyncEnabled 每次应答现读配置，保存后立即生效。
+func DeviceTimeSyncEnabled() bool {
+	return DeviceTimeSyncEnabledFrom(app.ConfigYml)
 }
 
 // PreallocationModeFrom returns whether REGISTER may only update devices that

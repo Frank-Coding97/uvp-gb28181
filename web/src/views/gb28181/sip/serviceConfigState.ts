@@ -7,6 +7,7 @@ export interface StaticServiceConfigDraft {
   saveMobilePositionHistory: boolean;
   positionHistoryRetentionDays: number;
   sdpExtension: boolean;
+  deviceTimeSync: boolean;
   ptzSpeed: number;
   syncChannelsOnOnline: boolean;
   sipLogEnabled: boolean;
@@ -38,6 +39,7 @@ export const staticServiceConfigLabels = [
   "保存移动位置历史轨迹",
   "位置历史保留天数（天）",
   "扩展 SDP 兼容模式",
+  "设备校时",
   "云台默认速度",
   "设备上线时同步通道",
   "是否开启SIP日志",
@@ -99,6 +101,7 @@ export function createStaticServiceConfigDraft(): StaticServiceConfigDraft {
     saveMobilePositionHistory: false,
     positionHistoryRetentionDays: 7,
     sdpExtension: false,
+    deviceTimeSync: false,
     ptzSpeed: 6,
     syncChannelsOnOnline: true,
     sipLogEnabled: false,
