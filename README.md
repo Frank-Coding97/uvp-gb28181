@@ -65,7 +65,8 @@ UVP 是 **Unified Video Platform** 的缩写，中文全称为 **统一视频接
 **独立仓库**，不在本仓：Java / Python / Go 客户端、Postman 与 Apifox 集合、签名规范、契约副本都在那边，
 客户对接时只需要那一个仓库。
 
-- 仓库：<https://github.com/Frank-Coding97/uvp-gb28181-openapi>
+- GitHub：<https://github.com/Frank-Coding97/uvp-gb28181-openapi>
+- Gitee：<https://gitee.com/Frank-Coding/uvp-gb28181-openapi>（国内访问更快，内容与 GitHub 一致）
 
 ## 目录
 
