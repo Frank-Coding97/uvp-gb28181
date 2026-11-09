@@ -25,10 +25,14 @@
 
 UVP 是 **Unified Video Platform** 的缩写，中文全称为 **统一视频接入平台**。UVP-GB28181 是一套面向安防视频联网场景的统一视频接入与管理平台。项目采用 Go、Vue 3 和 TypeScript 构建，并集成 ZLMediaKit 提供媒体处理能力，目标是让国标设备接入更容易部署、更便于运维，也更容易定位问题。
 
-- 官网：<https://www.uvplatform.com/>
-- 当前版本：`1.1.13`（见根目录 `VERSION`）
+- 官网：<https://uvplatform.com/>
+- 当前版本：以根目录 [`VERSION`](VERSION) 为唯一来源（上方 Release 徽章自动同步最新版本）
 - 许可证：MIT
 - 代码托管：[GitHub](https://github.com/Frank-Coding97/uvp-gb28181) · [Gitee](https://gitee.com/Frank-Coding/uvp-gb28181)
+
+<p align="center">
+  <img src="docs/screenshots/dashboard-dark.jpg" alt="UVP-GB28181 管理端仪表盘：实时 SIP 事务量、点播成功率、设备与通道在线率、协议事务分布" width="100%">
+</p>
 
 ## 在线体验
 
@@ -42,7 +46,7 @@ UVP 是 **Unified Video Platform** 的缩写，中文全称为 **统一视频接
 
 > ⚠️ 演示环境是公开的共享实例，数据会定期重置，**请不要录入真实设备、真实凭据或任何敏感信息**。
 
-产品介绍、各端下载入口、部署手册和更新日志都在官网：<https://www.uvplatform.com/>
+产品介绍、各端下载入口、部署手册和更新日志都在官网：<https://uvplatform.com/>
 
 手上没有国标摄像机也能试：配合下面的 [配套模拟器](#配套模拟器)，把手机注册到演示平台，就能走通注册 → 点播 → 回放的完整链路。
 
@@ -250,7 +254,7 @@ cd uvp-gb28181-*
 tar -xzf uvp-gb28181-docker-linux-amd64-<版本>.tar.gz
 cd uvp-gb28181-docker-linux-amd64-<版本>
 sudo ./install.sh                          # 离线：docker load 本地镜像
-sudo ./install.sh --online --registry <你的镜像仓库>/uvp --version 1.1.12
+sudo ./install.sh --online --registry <你的镜像仓库>/uvp --version <版本号>
 sudo ./install.sh --port-base 53000        # 端口段冲突时整段平移
 ```
 
