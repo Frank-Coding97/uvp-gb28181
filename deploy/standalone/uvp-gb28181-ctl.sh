@@ -2574,6 +2574,41 @@ sync_ports_into_config() {
 }
 
 
+# sync_process_authority_dir 把进程授权锁目录钉到**当前**安装根。
+#
+# ⛔⛔ 为什么非做不可：`config.yml` 的 `processauthority.state_dir` 是**写死的绝对路径**，
+#   而绿色包的升级方式正是「解到新目录再起」（或切 current 软链指向 releases/<task_id>）。
+#   路径还指着旧目录时，后端在**第一道闸门**就退出，日志只有：
+#       ERROR startup … phase=process_authority reason=state_unavailable
+#   —— `AcquireLocalLock` 里每条失败分支都返回同一个 error，光看日志推不出"路径失效"，
+#   而端口同步（5 处）和 ZLM 同步（18 处）都只报"已同步"，看起来一切正常。
+#   2026-11-09 在 220 上做 1.1.13→1.1.17 换目录升级时实测踩到，卡了两轮才定位。
+#
+# ⛔ 判据刻意收窄成「**非空 且 ≠ 目标**才写」，另三种情况一律不动：
+#   · 空值   = 出厂状态，后端走用户级默认目录（~/.local/state/…），换安装目录不受影响；
+#             那里可能已经有一把旧锁，此时硬塞安装根 = 新建锁 = 新 domainID
+#             ⇒ 与库里绑定的旧 domain 冲突（database_domain_mismatch），比原故障更难救。
+#   · 相等   = 已经是对的，别每次启动都重写文件（白白改 mtime、干扰现场比对）。
+#   · 读不到 = 段/键缺失（包不完整），config-set 会拒写 —— 只告警，不阻断启动。
+#
+# ⛔ 目标用 `$ROOT` 而不是 `$ACTIVE_ROOT`：data/ 永远固定在安装根，
+#   切 current 软链时锁文件必须留在原地（inode 变了就等于"锁被换过"，见 local_lock.go）。
+sync_process_authority_dir() {
+  local target="$ROOT/data/process-authority" current=""
+  current="$(read_conf_scalar processauthority state_dir)" || current=""
+  [ -n "$current" ] || return 0
+  [ "$current" != "$target" ] || return 0
+  if "$SETUP_BIN" config-set --yml "$CONF" --section processauthority \
+       --key state_dir --value "$target" >/dev/null 2>&1; then
+    det "进程授权目录已改指当前安装根（原值 ${current}）"
+  else
+    log "⚠️  进程授权目录仍指向 ${current}，而当前安装根是 ${ROOT}"
+    det "后端会以 phase=process_authority reason=state_unavailable 直接退出"
+    det "手工修：sed -i 's|${current}|${target}|' ${CONF}"
+  fi
+}
+
+
 # ============================================ 忘记登录口令 ⇒ 还原出厂口令 ====
 #
 # 场景：客户装完包、首次登录时把 admin 的口令改成了自己的，后来忘了。
@@ -2665,6 +2700,9 @@ case "${1:-start}" in
     # ⛔ 端口必须先同步进 config.yml 再起服务：Redis 读 --port 参数、
     #   后端读 config.yml，两处不同源就是「Redis 起来了但后端连不上」。
     sync_ports_into_config
+    # ⛔⛔ 进程授权锁目录也必须指回**当前**安装根：换目录升级后它仍指着旧目录时，
+    #   后端启动即退出且日志零信息（见函数注释）。必须排在 start_backend 之前。
+    sync_process_authority_dir
     # ⛔⛔ ZLM secret 必须对齐，且必须在**后端启动之前**：
     #   不对齐时平台调 ZLM 全被拒（-100 Please login first），
     #   后端启动会「成功」但录像缓存/点播/录像查询/hook 全部装配失败，
