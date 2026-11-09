@@ -66,9 +66,77 @@ func TestGetDsnPolarDBIsMySQLShaped(t *testing.T) {
 
 	got := getDsn("polardb", "write")
 	// multiStatements=true 不能丢：迁移 runner 一次 Exec 整个 .sql 文件。
+	// transaction_isolation 也不能丢：MySQL 服务端默认 REPEATABLE-READ，
+	// 会在并发写路径上产生间隙锁死锁（见 DefaultMySQLTransactionIsolation）。
 	require.Equal(t,
-		"uvp:Pl@123@tcp(10.0.0.6:3306)/uvp_gb28181?charset=utf8mb4&parseTime=true&loc=Local&multiStatements=true",
+		"uvp:Pl@123@tcp(10.0.0.6:3306)/uvp_gb28181?charset=utf8mb4&parseTime=true&loc=Local&multiStatements=true&transaction_isolation=%27READ-COMMITTED%27",
 		got)
+}
+
+// TestMySQLDsnCarriesTransactionIsolation 锁住 MySQL DSN 上的隔离级别参数。
+//
+// 这条不是「字符串里有就行」的形式检查：参数名写错、引号漏了，驱动都会
+// 静默不生效（参数只是被当成未知变量拼进 SET，拼出非法 SQL 时报错也可能
+// 被连接重试吞掉）。真正的落地验证在 TestMySQLIsolationLevelTakesEffect，
+// 那里会开真连接读回 @@transaction_isolation。
+//
+// ⛔ 默认值必须是 READ-COMMITTED：MySQL 服务端默认 REPEATABLE-READ，
+// 而本仓的 check-then-act 写路径在 RR 下会因间隙锁死锁。2026-11-09 万级
+// 压测实测死锁 6311 条、通道覆盖率仅 8.4%，就是这一条配置缺失造成的。
+func TestMySQLDsnCarriesTransactionIsolation(t *testing.T) {
+	useDSNConfig(t, map[string]interface{}{
+		"gormv2.mysql.write.host":     "10.0.0.7",
+		"gormv2.mysql.write.port":     3306,
+		"gormv2.mysql.write.database": "uvp_gb28181",
+		"gormv2.mysql.write.user":     "uvp",
+		"gormv2.mysql.write.pass":     "My@123",
+		"gormv2.mysql.write.charset":  "utf8mb4",
+	})
+
+	got := getDsn("mysql", "write")
+	require.Contains(t, got, "transaction_isolation=%27READ-COMMITTED%27",
+		"未配置时必须默认下发 READ-COMMITTED")
+}
+
+// TestMySQLIsolationOverridable 确认配置能覆盖默认值（现场若确有需要回退 RR 的场景）。
+func TestMySQLIsolationOverridable(t *testing.T) {
+	useDSNConfig(t, map[string]interface{}{
+		"gormv2.mysql.write.host":           "10.0.0.7",
+		"gormv2.mysql.write.port":           3306,
+		"gormv2.mysql.write.database":       "uvp_gb28181",
+		"gormv2.mysql.write.user":           "uvp",
+		"gormv2.mysql.write.pass":           "My@123",
+		"gormv2.mysql.write.charset":        "utf8mb4",
+		"gormv2.mysql.transactionisolation": "repeatable-read", // 大小写不敏感
+	})
+
+	require.Contains(t, getDsn("mysql", "write"), "transaction_isolation=%27REPEATABLE-READ%27")
+}
+
+// TestMySQLIsolationRejectsIllegalValue 确认非法值回落默认，且**绝不会**进入 DSN。
+//
+// ⛔ 这条是安全断言：隔离级别会被拼进 `SET transaction_isolation = '...'`，
+// 驱动不做转义，所以任何不在白名单里的值都必须被丢掉，否则就是注入面。
+func TestMySQLIsolationRejectsIllegalValue(t *testing.T) {
+	for _, bad := range []string{
+		"READ-COMMITTED' ; DROP TABLE sys_users; --",
+		"SERIALIZABLE'",
+		"bogus",
+	} {
+		useDSNConfig(t, map[string]interface{}{
+			"gormv2.mysql.write.host":           "10.0.0.7",
+			"gormv2.mysql.write.port":           3306,
+			"gormv2.mysql.write.database":       "uvp_gb28181",
+			"gormv2.mysql.write.user":           "uvp",
+			"gormv2.mysql.write.pass":           "My@123",
+			"gormv2.mysql.write.charset":        "utf8mb4",
+			"gormv2.mysql.transactionisolation": bad,
+		})
+
+		got := getDsn("mysql", "write")
+		require.Contains(t, got, "transaction_isolation=%27READ-COMMITTED%27", "非法值 %q 必须回落默认", bad)
+		require.NotContains(t, got, "DROP TABLE", "非法值绝不能进入 DSN")
+	}
 }
 
 func TestGetDsnDMCarriesSchema(t *testing.T) {

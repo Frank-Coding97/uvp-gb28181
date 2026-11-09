@@ -114,3 +114,39 @@ func TestWakeDevice_AppliesGlobalDefaultsWithoutOverridingDeviceSettings(t *test
 	require.True(t, ptz.Enabled)
 	require.Equal(t, "PTZPosition", ptz.Event)
 }
+
+// TestApplyGlobalDefaultsIsIdempotent 守住批量 upsert 的幂等性。
+//
+// ⛔ 这个函数原来是「按 kind 循环：查 → 没有就插」，2026-11-09 改成一条
+// 批量 INSERT + 唯一键判重（check-then-act 在 MySQL RR 下会加间隙锁死锁，
+// 万级压测实测 6311 条）。改成批量后一旦 OnConflict 语义写错，
+// 重复唤醒就会把订阅行插成多份，进而重复下发订阅、重复告警。
+func TestApplyGlobalDefaultsIsIdempotent(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	app.ConfigYml = &schedulerTestConfig{values: map[string]interface{}{
+		gbconfig.GlobalSubscriptionItemsConfigKey: []string{"catalog", "alarm", "ptz_precise_position"},
+	}}
+
+	svc, db, device := newServiceTest(t, &fakeSender{})
+
+	for round := 1; round <= 3; round++ {
+		require.NoError(t, svc.ApplyGlobalDefaults(context.Background(), device.ID), "第 %d 次调用不该失败", round)
+
+		var total int64
+		require.NoError(t, db.Model(&gbmodels.GbDeviceSubscription{}).
+			Where("device_id = ?", device.ID).Count(&total).Error)
+		require.Equal(t, int64(3), total, "第 %d 次调用后每个 kind 应只有一行", round)
+	}
+
+	// 每个 kind 恰好一行（唯一键 device_id+kind 生效）
+	var rows []gbmodels.GbDeviceSubscription
+	require.NoError(t, db.Where("device_id = ?", device.ID).Find(&rows).Error)
+	seen := make(map[gbmodels.SubscriptionKind]int, len(rows))
+	for _, r := range rows {
+		seen[r.Kind]++
+	}
+	for kind, n := range seen {
+		require.Equal(t, 1, n, "kind %s 出现了 %d 行", kind, n)
+	}
+}

@@ -157,6 +157,11 @@ gormv2: # 只针对 gorm  操作数据库有效
     slowthreshold: 30            # 慢 SQL 阈值（秒）；⚠️ 必须写裸数字(30)，禁止写 "30s" —— 代码已 GetDuration×time.Second，带单位会溢出成负数
     loglevel: "warn"             # SQL 日志级别：silent/error/warn/info；未配置或未知值=warn。info 会打印每条 SQL，生产勿开
     timezone: "Local"            # 时区配置，写入 DSN 的 parseTime/loc；例如: Local, Asia/Shanghai, UTC 等
+    transactionisolation: "READ-COMMITTED"
+    # 连接隔离级别，可选 READ-UNCOMMITTED / READ-COMMITTED / REPEATABLE-READ / SERIALIZABLE，
+    # 非法值回落 READ-COMMITTED。⛔ 别轻易改回 MySQL 默认的 REPEATABLE-READ：
+    # RR 下对不存在的行做等值查询会加间隙锁，本仓的「先查再插」写路径（通道挂载、设备订阅）
+    # 在万级并发注册时会互相锁死，实测死锁 6000+ 条、通道同步覆盖率掉到 8%。
     write:                       # 写库(主库)连接参数，始终生效
       host: "127.0.0.1"          # 数据库地址
       database: "uvp_gb28181"    # 库名

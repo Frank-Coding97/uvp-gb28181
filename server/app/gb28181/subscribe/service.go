@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
 	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
@@ -82,19 +83,30 @@ func renewalAt(now time.Time, expires int) time.Time {
 }
 
 func (s *Service) findOrCreate(ctx context.Context, deviceID uint, kind gbmodels.SubscriptionKind) (*gbmodels.GbDeviceSubscription, error) {
-	var sub gbmodels.GbDeviceSubscription
-	result := s.db.WithContext(ctx).Where("device_id = ? AND kind = ?", deviceID, kind).Limit(1).Find(&sub)
-	if result.Error != nil {
-		return nil, result.Error
+	// ⛔ 不要退回「先查再插」：MySQL REPEATABLE-READ 下对不存在的行做等值查询
+	// 会加间隙锁，万级并发注册时会和别的设备互相死锁（2026-11-09 实测
+	// gb_channel_mount 死锁 6311 条）。这里把判重交给唯一键
+	// uk_device_subscription_kind(device_id, kind)，用单条语句完成。
+	sub := newSubscription(deviceID, kind)
+	res := s.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&sub)
+	if res.Error != nil {
+		return nil, res.Error
 	}
-	if result.RowsAffected > 0 {
+	if res.RowsAffected > 0 {
 		return &sub, nil
 	}
-	sub = newSubscription(deviceID, kind)
-	if err := s.db.WithContext(ctx).Create(&sub).Error; err != nil {
+
+	// 已存在，读回现有行（不再新建）。
+	var existed gbmodels.GbDeviceSubscription
+	if err := s.db.WithContext(ctx).
+		Where("device_id = ? AND kind = ?", deviceID, kind).
+		Limit(1).Find(&existed).Error; err != nil {
 		return nil, err
 	}
-	return &sub, nil
+	if existed.ID == 0 {
+		return nil, fmt.Errorf("订阅记录插入冲突但读取不到: device=%d kind=%s", deviceID, kind)
+	}
+	return &existed, nil
 }
 
 func newSubscription(deviceID uint, kind gbmodels.SubscriptionKind) gbmodels.GbDeviceSubscription {
@@ -110,36 +122,44 @@ func newSubscription(deviceID uint, kind gbmodels.SubscriptionKind) gbmodels.GbD
 
 // ApplyGlobalDefaults creates enabled subscription rows only when a device has
 // no device-level setting for that kind. Explicit device settings always win.
+//
+// ⛔ 这里原来是「按 kind 循环：查一次 → 没有就插一次」。两条问题：
+//  1. check-then-act 在 MySQL REPEATABLE-READ 下对不存在的行加间隙锁，
+//     万级并发注册时与其他设备互相死锁（2026-11-09 实测死锁 6311 条）；
+//  2. 每台设备要走 N 次数据库往返，而注册热路径上这点开销会被放大 10000 倍。
+//
+// 现在合并成一次批量插入、由唯一键 uk_device_subscription_kind 判重：
+// 已存在的行（设备级显式设置）自动跳过，语义与之前完全一致。
 func (s *Service) ApplyGlobalDefaults(ctx context.Context, deviceID uint) error {
 	if s == nil || s.db == nil || deviceID == 0 {
 		return nil
 	}
-	for _, item := range gbconfig.GlobalSubscriptionItems() {
+	items := gbconfig.GlobalSubscriptionItems()
+	if len(items) == 0 {
+		return nil
+	}
+
+	now := s.now()
+	rows := make([]gbmodels.GbDeviceSubscription, 0, len(items))
+	for _, item := range items {
 		kind := gbmodels.SubscriptionKind(item)
 		if !kind.Valid() {
 			continue
 		}
-		unlock := s.lock(deviceID, kind)
-		var existing gbmodels.GbDeviceSubscription
-		result := s.db.WithContext(ctx).Where("device_id = ? AND kind = ?", deviceID, kind).Limit(1).Find(&existing)
-		if result.Error != nil {
-			unlock()
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			now := s.now()
-			sub := newSubscription(deviceID, kind)
-			sub.Enabled = true
-			sub.Status = gbmodels.SubscriptionStatusPending
-			sub.NextActionAt = &now
-			if err := s.db.WithContext(ctx).Create(&sub).Error; err != nil {
-				unlock()
-				return err
-			}
-		}
-		unlock()
+		sub := newSubscription(deviceID, kind)
+		sub.Enabled = true
+		sub.Status = gbmodels.SubscriptionStatusPending
+		sub.NextActionAt = &now
+		rows = append(rows, sub)
 	}
-	return nil
+	if len(rows) == 0 {
+		return nil
+	}
+
+	// DoNothing：命中既有行时保持原样 —— 设备级显式配置永远优先于全局默认。
+	return s.db.WithContext(ctx).
+		Clauses(clause.OnConflict{DoNothing: true}).
+		CreateInBatches(&rows, len(rows)).Error
 }
 
 func (s *Service) Enable(ctx context.Context, device *gbmodels.GbDevice, kind gbmodels.SubscriptionKind) (*gbmodels.GbDeviceSubscription, error) {

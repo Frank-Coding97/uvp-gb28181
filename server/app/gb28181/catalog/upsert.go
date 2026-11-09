@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
@@ -346,40 +347,32 @@ func collapseDuplicateSourceChannelNodes(db *gorm.DB, keep *gbmodels.GbCatalogNo
 	return db.Delete(&duplicates).Error
 }
 
-// ensurePrimaryMount 保证主挂载存在
+// ensurePrimaryMount 保证主挂载存在。
+//
+// ⛔⛔ 这个函数曾经是「先 SELECT 这一行在不在，不在就 INSERT」，2026-11-09
+// 万级压测证明那种写法在高并发下必炸：
+//
+//   - MySQL 默认隔离级别 REPEATABLE-READ 下，对**不存在的行**做等值查询会加
+//     间隙锁（gap lock）。10000 台设备同时上报目录时，所有事务都锁在同一段
+//     尾间隙上，再各自申请 insert intention lock ⇒ 互相等待 ⇒ 死锁。
+//   - 实测：`gb_channel_mount` insert 死锁 6311 条（15 秒新增 1563），慢查询
+//     p50 38 秒，128 条连接全被锁等待占死，通道覆盖率只有 836/10002 = 8.4%
+//     —— 表现是「设备在线但页面看不到摄像头」。
+//   - InnoDB 死锁快照里两个事务插的是**不同的行**，却都持着 supremum 的 X 锁，
+//     是典型的间隙锁死锁，不是数据冲突。
+//
+// 现在的写法：把判重交给数据库的唯一键 uk_channel_parent，用一条 INSERT 完成。
+// 即使配成 RC 之外的隔离级别也不会再产生「查询加锁」这一类死锁。
 func ensurePrimaryMount(ctx context.Context, db *gorm.DB, ownerDeptID, channelID, parentNodeID uint, displayName string) error {
-	var existed gbmodels.GbChannelMount
-	res := db.WithContext(ctx).Where("owner_dept_id = ? AND channel_id = ? AND parent_node_id = ?", ownerDeptID, channelID, parentNodeID).Limit(1).Find(&existed)
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected > 0 {
-		// 已存在不动(避免 is_primary 抖动);若该 channel 没有任何主挂载,把这个标主
-		var primaryCount int64
-		if err := db.WithContext(ctx).Model(&gbmodels.GbChannelMount{}).
-			Where("owner_dept_id = ? AND channel_id = ? AND is_primary = ?", ownerDeptID, channelID, true).
-			Count(&primaryCount).Error; err != nil {
-			return err
-		}
-		if primaryCount == 0 {
-			updates := map[string]any{"is_primary": true}
-			if ownerDeptID != 0 && existed.OwnerDeptID == 0 {
-				updates["owner_dept_id"] = ownerDeptID
-			}
-			return db.WithContext(ctx).Model(&existed).Updates(updates).Error
-		}
-		if ownerDeptID != 0 && existed.OwnerDeptID == 0 {
-			return db.WithContext(ctx).Model(&existed).Update("owner_dept_id", ownerDeptID).Error
-		}
-		return nil
-	}
-	// 新建挂载:若当前 channel 还没有主挂载,这一个就是主的
+	// 该 channel 是否已有主挂载，决定这次插入要不要标主。
+	// 这是 COUNT 聚合而不是「查某一行存不存在」，不会对特定行加锁。
 	var primaryCount int64
 	if err := db.WithContext(ctx).Model(&gbmodels.GbChannelMount{}).
 		Where("owner_dept_id = ? AND channel_id = ? AND is_primary = ?", ownerDeptID, channelID, true).
 		Count(&primaryCount).Error; err != nil {
 		return err
 	}
+
 	m := &gbmodels.GbChannelMount{
 		OwnerDeptID:  ownerDeptID,
 		ChannelID:    channelID,
@@ -388,7 +381,39 @@ func ensurePrimaryMount(ctx context.Context, db *gorm.DB, ownerDeptID, channelID
 		IsPrimary:    primaryCount == 0,
 		MountSource:  gbmodels.MountSourceCatalog,
 	}
-	return db.WithContext(ctx).Create(m).Error
+	// DoNothing 让冲突由唯一键判定：MySQL 生成 ON DUPLICATE KEY UPDATE，
+	// SQLite 生成 ON CONFLICT DO NOTHING，两边都是单条语句、无间隙锁读。
+	res := db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(m)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected > 0 {
+		return nil // 新建成功
+	}
+
+	// 已存在：保持原语义「已存在不动(避免 is_primary 抖动)，只在没有主挂载时补标主」。
+	var existed gbmodels.GbChannelMount
+	if err := db.WithContext(ctx).
+		Where("owner_dept_id = ? AND channel_id = ? AND parent_node_id = ?", ownerDeptID, channelID, parentNodeID).
+		Limit(1).Find(&existed).Error; err != nil {
+		return err
+	}
+	if existed.ID == 0 {
+		// 冲突来自唯一键上的另一行(同 channel+parent 但 owner_dept 不同)，
+		// 按原语义不处理，避免把别人的挂载改掉。
+		return nil
+	}
+	if primaryCount == 0 {
+		updates := map[string]any{"is_primary": true}
+		if ownerDeptID != 0 && existed.OwnerDeptID == 0 {
+			updates["owner_dept_id"] = ownerDeptID
+		}
+		return db.WithContext(ctx).Model(&existed).Updates(updates).Error
+	}
+	if ownerDeptID != 0 && existed.OwnerDeptID == 0 {
+		return db.WithContext(ctx).Model(&existed).Update("owner_dept_id", ownerDeptID).Error
+	}
+	return nil
 }
 
 // removeStaleCatalogMounts 清理同一来源通道已经失效的 Catalog 挂载。
