@@ -7,7 +7,10 @@
 
 顺带做地址体检：这个仓库要交给客户，真机地址和内网 IP 不能跟着源码一起发出去。
 
-    python3 sdk/scripts/verify-parity.py                # 夹具对账 + Python + Go
+还会重跑一次 HTTP 集合生成器并逐字节比对：契约改了却忘了重新生成，
+集合就会拿着旧路径去调，客户会以为平台有问题。
+
+    python3 sdk/scripts/verify-parity.py                # 全集（不含 Java）
     python3 sdk/scripts/verify-parity.py --with-java    # 再加 Java（需要 mvn）
     python3 sdk/scripts/verify-parity.py --fixture-only # 只查副本有没有漂移（CI 最快档）
 
@@ -22,12 +25,20 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 
 SDK_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO_ROOT = os.path.dirname(SDK_ROOT)
 FIXTURE = os.path.join(SDK_ROOT, "fixtures", "signature-v1.json")
+HTTP_DIR = os.path.join(SDK_ROOT, "http")
 SERVER_ORIGINAL = os.path.join(
     REPO_ROOT, "server", "app", "openapi", "auth", "testdata", "signature-v1.json")
+
+HTTP_ARTIFACTS = [
+    "uvp-openapi.postman_collection.json",
+    "uvp-openapi.postman_environment.json",
+    "uvp-openapi.apifox.json",
+]
 
 
 def run(label: str, command: list[str], cwd: str | None = None) -> bool:
@@ -66,6 +77,44 @@ def check_fixture_copy() -> bool:
     return True
 
 
+def check_http_collection_fresh(python: str) -> bool:
+    """重跑生成器到临时目录，与仓库里的产物逐字节比对。
+
+    只比「有没有被重新生成过」是不够的 —— 契约改一个路径，集合不会报错，
+    只会一直拿旧地址去调。字节比对能立刻发现。
+    """
+    generator = os.path.join(SDK_ROOT, "scripts", "gen-http-collection.py")
+    with tempfile.TemporaryDirectory() as scratch:
+        result = subprocess.run([python, generator, "--out", scratch],
+                                capture_output=True, text=True)
+        if result.returncode != 0:
+            print("✗ 生成器执行失败\n%s" % (result.stdout + result.stderr).rstrip(),
+                  file=sys.stderr)
+            return False
+
+        def digest(path: str) -> str:
+            with open(path, "rb") as handle:
+                return hashlib.sha256(handle.read()).hexdigest()
+
+        stale = []
+        for name in HTTP_ARTIFACTS:
+            fresh = os.path.join(scratch, name)
+            shipped = os.path.join(HTTP_DIR, name)
+            if not os.path.isfile(shipped):
+                stale.append("%s（缺文件）" % name)
+                continue
+            if digest(fresh) != digest(shipped):
+                stale.append("%s（内容过期）" % name)
+
+        if stale:
+            print("✗ HTTP 集合与契约不同步：%s\n"
+                  "  修复: python3 sdk/scripts/gen-http-collection.py"
+                  % "、".join(stale), file=sys.stderr)
+            return False
+    print("✓ HTTP 集合与契约同步（%d 个产物）" % len(HTTP_ARTIFACTS))
+    return True
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fixture-only", action="store_true", help="只对账夹具，不跑语言自测")
@@ -79,6 +128,16 @@ def main() -> int:
     python = shutil.which("python3") or sys.executable
     ok = run("地址体检（对外交付不许出现真实平台/内网 IP）",
              [python, os.path.join(SDK_ROOT, "scripts", "check-no-endpoints.py")]) and ok
+    ok = check_http_collection_fresh(python) and ok
+
+    node = shutil.which("node")
+    if node is None:
+        print("\n! 未找到 node，跳过 Postman/Apifox 脚本验签（CI 里必须跑）", file=sys.stderr)
+        ok = False
+    else:
+        ok = run("Postman/Apifox 脚本验签",
+                 [node, os.path.join(SDK_ROOT, "scripts", "verify-http-collection.js")]) and ok
+
     ok = run("Python 自测", [python, os.path.join(SDK_ROOT, "python", "selftest.py")]) and ok
 
     go = shutil.which("go")

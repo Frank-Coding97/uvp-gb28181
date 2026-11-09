@@ -1,0 +1,3262 @@
+{
+  "info": {
+    "_postman_id": "f8294574-c7af-5bdf-89d3-7c144e529557",
+    "name": "UVP OpenAPI v1",
+    "description": "UVP 平台对外 OpenAPI v1 调试集合（84 个接口）。\n\n**导入后先填 4 个变量**（集合 → Variables）：\n\n| 变量 | 说明 |\n| --- | --- |\n| `baseUrl` | `http://<平台IP>:51002`。51000 是前端页面，**不转发** `/openapi/v1` |\n| `accessKey` | 形如 `uvp_` + 32 位小写十六进制 |\n| `secretKey` | 创建 AK 时一次性返回的 SK（base64url，无填充） |\n| `audience` | 服务器 `config.yml` 的 `openapi.audience`，页面上看不到 |\n\n另外 `deviceId` / `channelId` / `sessionId` 等路径变量给了合法占位值，\n换成你自己的即可。\n\n签名由集合级 pre-request 脚本自动完成，**不需要手填任何 X-UVP-\\* 头**。\n脚本报错会在响应区直接显示原因，比 401 好排查。\n\n⚠️ 填了真实 SK 之后不要再把这个集合分享/提交到仓库。",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "01 设备",
+      "item": [
+        {
+          "name": "List devices owned by the authenticated machine client",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices?page=1&pageSize=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "`listDevices` · scope `device:list` · risk `read` · 幂等 `none`\n\nList devices owned by the authenticated machine client\n\n**Query 参数**（按需加，空值会被平台拒绝的不要留空）\n- `page`（integer，默认: 1，可选）Positive one-based page number; defaults to 1 when omitted; an explicit empty value is rejected.\n- `pageSize`（integer，默认: 20，可选）Positive page size, at most 100; defaults to 20 when omitted; an explicit empty value is rejected.\n- `keyword`（string，可选）Valid UTF-8 search text, limited to 100 Unicode characters; an empty value is valid.\n- `status`（string，取值: online / offline / unknown，可选）Optional device or channel status filter; an explicit empty value is rejected.\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "Get one device owned by the authenticated machine client",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}"
+              ]
+            },
+            "description": "`getDevice` · scope `device:detail` · risk `read` · 幂等 `none`\n\nGet one device owned by the authenticated machine client\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "Get the status of one owned device",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "status"
+              ]
+            },
+            "description": "`getDeviceStatus` · scope `device:status` · risk `read` · 幂等 `none`\n\nGet the status of one owned device\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "List the client-owned subscriptions of one device",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/subscriptions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "subscriptions"
+              ]
+            },
+            "description": "`deviceSubscriptionList` · scope `device:subscription:list` · risk `read` · 幂等 `none`\n\nList the client-owned subscriptions of one device\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "Create a client-owned subscription to persisted device events",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/subscriptions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "subscriptions"
+              ]
+            },
+            "description": "`deviceSubscriptionCreate` · scope `device:subscription:create` · risk `control` · 幂等 `none`\n\nCreate a client-owned subscription to persisted device events\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n\n**请求体字段**\n- `kind`（string，取值: alarm / device_status / mobile_position，必填）\n- `expiresSeconds`（integer，范围: 60~86400，可选）\n- `intervalSeconds`（integer，范围: 0~86400，可选）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"kind\": \"alarm\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Read a subscription owned by the authenticated client",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/subscriptions/{{subscriptionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "subscriptions",
+                "{{subscriptionId}}"
+              ]
+            },
+            "description": "`deviceSubscriptionRead` · scope `device:subscription:read` · risk `read` · 幂等 `none`\n\nRead a subscription owned by the authenticated client\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `subscriptionId` ← 变量 `{{subscriptionId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel this client's logical event subscription",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/subscriptions/{{subscriptionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "subscriptions",
+                "{{subscriptionId}}"
+              ]
+            },
+            "description": "`deviceSubscriptionCancel` · scope `device:subscription:cancel` · risk `control` · 幂等 `none`\n\nCancel this client's logical event subscription\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `subscriptionId` ← 变量 `{{subscriptionId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Renew an active device event subscription",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/subscriptions/{{subscriptionId}}/renew",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "subscriptions",
+                "{{subscriptionId}}",
+                "renew"
+              ]
+            },
+            "description": "`deviceSubscriptionRenew` · scope `device:subscription:renew` · risk `control` · 幂等 `none`\n\nRenew an active device event subscription\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `subscriptionId` ← 变量 `{{subscriptionId}}`\n\n**请求体**：`{}`（空对象，但不能省略）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Continue reading persisted events with a signed opaque cursor",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/subscriptions/{{subscriptionId}}/events?pageSize=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "subscriptions",
+                "{{subscriptionId}}",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "`deviceEventsRead` · scope `device:events:read` · risk `read` · 幂等 `none`\n\nContinue reading persisted events with a signed opaque cursor\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `subscriptionId` ← 变量 `{{subscriptionId}}`\n\n**Query 参数**（按需加，空值会被平台拒绝的不要留空）\n- `cursor`（string，可选）Opaque cursor returned by the previous page; omit it to start from the beginning.\n- `pageSize`（integer，默认: 20，可选）Positive page size, at most 100; defaults to 20 when omitted; an explicit empty value is rejected.\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "Read the latest platform-collected positions for a device",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/positions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "positions"
+              ]
+            },
+            "description": "`devicePositionRead` · scope `device:position:read` · risk `read` · 幂等 `none`\n\nRead the latest platform-collected positions for a device\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "Continue reading persisted mobile position history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/positions/history?pageSize=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "positions",
+                "history"
+              ],
+              "query": [
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "`devicePositionHistoryRead` · scope `device:position:history:read` · risk `read` · 幂等 `none`\n\nContinue reading persisted mobile position history\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n\n**Query 参数**（按需加，空值会被平台拒绝的不要留空）\n- `cursor`（string，可选）Opaque cursor returned by the previous page; omit it to start from the beginning.\n- `pageSize`（integer，默认: 20，可选）Positive page size, at most 100; defaults to 20 when omitted; an explicit empty value is rejected.\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "设备重启",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/maintenance/reboot",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "maintenance",
+                "reboot"
+              ]
+            },
+            "description": "`deviceMaintenanceReboot` · scope `device:maintenance:reboot` · risk `destructive` · 幂等 `required`\n\n设备重启\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n\n**请求体字段**\n- `confirmed`（boolean，取值: True，必填）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"confirmed\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "设备维护操作记录",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/maintenance/operations?page=1&pageSize=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "maintenance",
+                "operations"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "`deviceMaintenanceOperationList` · scope `device:maintenance:operation:list` · risk `read` · 幂等 `none`\n\n设备维护操作记录\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n\n**Query 参数**（按需加，空值会被平台拒绝的不要留空）\n- `page`（integer，默认: 1，可选）Positive one-based page number; defaults to 1 when omitted; an explicit empty value is rejected.\n- `pageSize`（integer，默认: 20，可选）Positive page size, at most 100; defaults to 20 when omitted; an explicit empty value is rejected.\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "维护操作状态",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/maintenance/operations/{{operationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "maintenance",
+                "operations",
+                "{{operationId}}"
+              ]
+            },
+            "description": "`deviceMaintenanceOperationRead` · scope `device:maintenance:operation:read` · risk `read` · 幂等 `none`\n\n维护操作状态\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `operationId` ← 变量 `{{operationId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "手动刷新设备目录",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/catalog/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "catalog",
+                "refresh"
+              ]
+            },
+            "description": "`refreshDeviceCatalog` · scope `device:catalog:refresh` · risk `control` · 幂等 `none`\n\n手动刷新设备目录\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "读取目录刷新进度",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/catalog/refresh/{{operationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "catalog",
+                "refresh",
+                "{{operationId}}"
+              ]
+            },
+            "description": "`getDeviceCatalogRefreshProgress` · scope `device:catalog:refresh:read` · risk `read` · 幂等 `none`\n\n读取目录刷新进度\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `operationId` ← 变量 `{{operationId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "设备固件升级历史",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/firmware-upgrades",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "firmware-upgrades"
+              ]
+            },
+            "description": "`deviceFirmwareUpgradeList` · scope `device:firmware-upgrade:list` · risk `read` · 幂等 `none`\n\n设备固件升级历史\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "设备固件升级",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/firmware-upgrades",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "firmware-upgrades"
+              ]
+            },
+            "description": "`deviceFirmwareUpgradeCreate` · scope `device:firmware-upgrade:execute` · risk `destructive` · 幂等 `required`\n\n设备固件升级\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n\n**请求体字段**\n- `confirmed`（boolean，取值: True，必填）\n- `firmwareId`（string，最长: 64，必填）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"confirmed\": true,\n  \"firmwareId\": \"string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "设备固件升级结果",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/firmware-upgrades/{{operationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "firmware-upgrades",
+                "{{operationId}}"
+              ]
+            },
+            "description": "`deviceFirmwareUpgradeRead` · scope `device:firmware-upgrade:read` · risk `read` · 幂等 `none`\n\n设备固件升级结果\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `operationId` ← 变量 `{{operationId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "02 通道",
+      "item": [
+        {
+          "name": "List channels of one owned device",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels?page=1&pageSize=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "`listChannels` · scope `channel:list` · risk `read` · 幂等 `none`\n\nList channels of one owned device\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n\n**Query 参数**（按需加，空值会被平台拒绝的不要留空）\n- `page`（integer，默认: 1，可选）Positive one-based page number; defaults to 1 when omitted; an explicit empty value is rejected.\n- `pageSize`（integer，默认: 20，可选）Positive page size, at most 100; defaults to 20 when omitted; an explicit empty value is rejected.\n- `keyword`（string，可选）Valid UTF-8 search text, limited to 100 Unicode characters; an empty value is valid.\n- `status`（string，取值: online / offline / unknown，可选）Optional device or channel status filter; an explicit empty value is rejected.\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "Get one channel of one owned device",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}"
+              ]
+            },
+            "description": "`getChannel` · scope `channel:detail` · risk `read` · 幂等 `none`\n\nGet one channel of one owned device\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "Get the status of one owned channel",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "status"
+              ]
+            },
+            "description": "`getChannelStatus` · scope `channel:status` · risk `read` · 幂等 `none`\n\nGet the status of one owned channel\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "Get explicitly reported control capabilities for one owned channel",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/control-capabilities",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "control-capabilities"
+              ]
+            },
+            "description": "`getChannelControlCapabilities` · scope `channel:capabilities` · risk `read` · 幂等 `none`\n\nGet explicitly reported control capabilities for one owned channel\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "Read cached storage card status for one owned channel",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/storage-cards",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "storage-cards"
+              ]
+            },
+            "description": "`getChannelStorageCards` · scope `channel:storage-cards` · risk `read` · 幂等 `none`\n\nRead cached storage card status for one owned channel\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "Read the latest target-track intent and reported capability",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/target-track",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "target-track"
+              ]
+            },
+            "description": "`getTargetTrackIntent` · scope `channel:target-track:read` · risk `read` · 幂等 `none`\n\nRead the latest target-track intent and reported capability\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "存储卡格式化",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/storage-cards/format",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "storage-cards",
+                "format"
+              ]
+            },
+            "description": "`channelStorageCardFormat` · scope `channel:storage-card:format` · risk `destructive` · 幂等 `required`\n\n存储卡格式化\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**请求体字段**\n- `confirmed`（boolean，取值: True，必填）\n- `cardIndex`（integer，最小: 0，必填）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"confirmed\": true,\n  \"cardIndex\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "通道目录挂载位置",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/mounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "mounts"
+              ]
+            },
+            "description": "`channelMountList` · scope `channel:mounts:read` · risk `read` · 幂等 `none`\n\n通道目录挂载位置\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "03 云台 PTZ",
+      "item": [
+        {
+          "name": "List PTZ presets for one owned channel",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/ptz/presets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "ptz",
+                "presets"
+              ]
+            },
+            "description": "`listPTZPresets` · scope `ptz:preset:list` · risk `read` · 幂等 `none`\n\nList PTZ presets for one owned channel\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "Save a PTZ preset on one owned channel",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/ptz/presets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "ptz",
+                "presets"
+              ]
+            },
+            "description": "`savePTZPreset` · scope `ptz:preset:save` · risk `control` · 幂等 `required`\n\nSave a PTZ preset on one owned channel\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**请求体字段**\n- `presetId`（integer，格式: int32，范围: 1~255，必填）\n- `name`（string，最长: 255，可选）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"presetId\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Call a PTZ preset on one owned channel",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/ptz/presets/{{presetId}}/call",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "ptz",
+                "presets",
+                "{{presetId}}",
+                "call"
+              ]
+            },
+            "description": "`callPTZPreset` · scope `ptz:preset:call` · risk `control` · 幂等 `required`\n\nCall a PTZ preset on one owned channel\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n- `presetId` ← 变量 `{{presetId}}`\n\n**请求体**：`{}`（空对象，但不能省略）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete a PTZ preset on one owned channel",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/ptz/presets/{{presetId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "ptz",
+                "presets",
+                "{{presetId}}"
+              ]
+            },
+            "description": "`deletePTZPreset` · scope `ptz:preset:delete` · risk `control` · 幂等 `required`\n\nDelete a PTZ preset on one owned channel\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n- `presetId` ← 变量 `{{presetId}}`\n\n**请求体**：`{}`（空对象，但不能省略）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get one PTZ operation for the same owned channel",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/ptz/operations/{{operationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "ptz",
+                "operations",
+                "{{operationId}}"
+              ]
+            },
+            "description": "`getPTZOperation` · scope `ptz:operation:read` · risk `read` · 幂等 `none`\n\nGet one PTZ operation for the same owned channel\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n- `operationId` ← 变量 `{{operationId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "Read the latest cached precise PTZ status and observation time",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/ptz/precise-status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "ptz",
+                "precise-status"
+              ]
+            },
+            "description": "`getPrecisePTZStatus` · scope `channel:precise-status` · risk `read` · 幂等 `none`\n\nRead the latest cached precise PTZ status and observation time\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "Read cached PTZ cruise tracks and freshness",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/ptz/cruise/tracks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "ptz",
+                "cruise",
+                "tracks"
+              ]
+            },
+            "description": "`listPTZCruiseTracks` · scope `ptz:cruise:read` · risk `read` · 幂等 `none`\n\nRead cached PTZ cruise tracks and freshness\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "Create a PTZ cruise track with an ordered batch of device controls",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/ptz/cruise/tracks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "ptz",
+                "cruise",
+                "tracks"
+              ]
+            },
+            "description": "`createPTZCruiseTrack` · scope `ptz:cruise:track:create` · risk `control` · 幂等 `required`\n\nCreate a PTZ cruise track with an ordered batch of device controls\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**请求体字段**\n- `trackId`（integer，范围: 0~255，必填）\n- `name`（string，最长: 255，可选）\n- `speed`（integer，范围: 0~4095，可选）\n- `dwellSec`（integer，范围: 0~4095，可选）\n- `stops`（array，必填）\n- `replaceExisting`（boolean，可选）\n- `confirmed`（boolean，可选）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"trackId\": 0,\n  \"stops\": [\n    {\n      \"presetId\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Read one cached PTZ cruise track and its freshness",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/ptz/cruise/tracks/{{trackId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "ptz",
+                "cruise",
+                "tracks",
+                "{{trackId}}"
+              ]
+            },
+            "description": "`getPTZCruiseTrack` · scope `ptz:cruise:track:read` · risk `read` · 幂等 `none`\n\nRead one cached PTZ cruise track and its freshness\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n- `trackId` ← 变量 `{{trackId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "Move a PTZ head or lens on one owned channel",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/ptz/move",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "ptz",
+                "move"
+              ]
+            },
+            "description": "`movePTZ` · scope `ptz:move` · risk `control` · 幂等 `required`\n\nMove a PTZ head or lens on one owned channel\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**请求体字段**\n- `action`（string，取值: stop / left / right / up / down / left_up / right_up / left_down / right_down / zoom_in / zoom_out / focus_far / focus_near / iris_open / iris_close / lens_stop，必填）\n- `speed`（integer，范围: 0~255，必填）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"stop\",\n  \"speed\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Send precise PTZ coordinates to a supported GB/T 28181-2022 device",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/ptz/precise",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "ptz",
+                "precise"
+              ]
+            },
+            "description": "`controlPrecisePTZ` · scope `ptz:precise` · risk `control` · 幂等 `required`\n\nSend precise PTZ coordinates to a supported GB/T 28181-2022 device\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**请求体字段**\n- `pan`（number，范围: -360~360，可选）\n- `tilt`（number，范围: -180~180，可选）\n- `zoom`（number，范围: 0~100000，可选）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Control supported scan or cruise-point functions on one channel",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/ptz/extended",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "ptz",
+                "extended"
+              ]
+            },
+            "description": "`controlExtendedPTZ` · scope `ptz:extended` · risk `control` · 幂等 `required`\n\nControl supported scan or cruise-point functions on one channel\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**请求体字段**\n- `action`（string，取值: scan_start / scan_stop / scan_set_left / scan_set_right / scan_set_speed / cruise_add_stop / cruise_delete_stop / cruise_set_speed / cruise_set_dwell，必填）\n- `id`（integer，范围: 0~255，必填）\n- `presetId`（integer，范围: 0~255，可选）\n- `value`（integer，范围: 1~4095，可选）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"scan_start\",\n  \"id\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Turn a channel wiper on or off",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/ptz/wiper",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "ptz",
+                "wiper"
+              ]
+            },
+            "description": "`controlPTZWiper` · scope `ptz:wiper` · risk `control` · 幂等 `required`\n\nTurn a channel wiper on or off\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**请求体字段**\n- `action`（string，取值: True / False，必填）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Read cached home-position state and verification source",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/ptz/home-position",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "ptz",
+                "home-position"
+              ]
+            },
+            "description": "`getPTZHomePosition` · scope `ptz:home-position:read` · risk `read` · 幂等 `none`\n\nRead cached home-position state and verification source\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "Set or disable a channel home position",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/ptz/home-position",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "ptz",
+                "home-position"
+              ]
+            },
+            "description": "`setPTZHomePosition` · scope `ptz:home-position:set` · risk `control` · 幂等 `required`\n\nSet or disable a channel home position\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**请求体字段**\n- `enabled`（boolean，必填）\n- `resetTime`（integer，范围: 10~3600，可选）\n- `presetId`（integer，范围: 0~255，可选）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Start, stop, or delete a cruise path on one owned channel",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/ptz/cruise/control",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "ptz",
+                "cruise",
+                "control"
+              ]
+            },
+            "description": "`controlPTZCruise` · scope `ptz:cruise:control` · risk `control` · 幂等 `required`\n\nStart, stop, or delete a cruise path on one owned channel\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**请求体字段**\n- `action`（string，取值: start / stop / delete，必填）\n- `trackId`（integer，范围: 0~255，必填）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"start\",\n  \"trackId\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Send a target-tracking command to a supporting GB/T 28181-2022 device",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/ptz/target-track",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "ptz",
+                "target-track"
+              ]
+            },
+            "description": "`setPTZTargetTrack` · scope `ptz:target-track` · risk `control` · 幂等 `required`\n\nSend a target-tracking command to a supporting GB/T 28181-2022 device\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**请求体字段**\n- `mode`（string，取值: auto / manual / stop，必填）\n- `deviceId2`（string，可选）\n- `area`（object，可选）Coordinates are relative to the panoramic video window.\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mode\": \"auto\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "04 设备配置",
+      "item": [
+        {
+          "name": "Query supported device configuration blocks",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/device-configs/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "device-configs",
+                "refresh"
+              ]
+            },
+            "description": "`deviceConfigRefresh` · scope `device:config:refresh` · risk `read` · 幂等 `required`\n\nQuery supported device configuration blocks\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**请求体字段**\n- `configTypes`（array，可选）Omit to query profile-specific defaults; GB/T 28181-2016 defaults to BasicParam, while 2022 defaults to implemented channel-level types. Request BasicParam separately on 2022 devices.\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Read the latest stored device configuration snapshot",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/device-configs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "device-configs"
+              ]
+            },
+            "description": "`deviceConfigRead` · scope `device:config:read` · risk `read` · 幂等 `none`\n\nRead the latest stored device configuration snapshot\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "Apply validated configuration blocks to a device",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/device-configs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "device-configs"
+              ]
+            },
+            "description": "`deviceConfigApply` · scope `device:config:apply` · risk `control` · 幂等 `required`\n\nApply validated configuration blocks to a device\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**请求体字段**\n- `blocks`（object，必填）Only writable configuration blocks are accepted. VideoParamOpt is read-only; snapShot is managed by the capture-session API.\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"blocks\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Query GB/T 28181-2022 video stream parameters",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/video-params/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "video-params",
+                "refresh"
+              ]
+            },
+            "description": "`videoParamsRefresh` · scope `channel:video-params:refresh` · risk `read` · 幂等 `required`\n\nQuery GB/T 28181-2022 video stream parameters\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**请求体**：`{}`（空对象，但不能省略）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Read the latest stored GB/T 28181-2022 video parameters",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/video-params",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "video-params"
+              ]
+            },
+            "description": "`videoParamsRead` · scope `channel:video-params:read` · risk `read` · 幂等 `none`\n\nRead the latest stored GB/T 28181-2022 video parameters\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "Apply GB/T 28181-2022 video stream parameters",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/video-params",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "video-params"
+              ]
+            },
+            "description": "`videoParamsApply` · scope `channel:video-params:apply` · risk `control` · 幂等 `required`\n\nApply GB/T 28181-2022 video stream parameters\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**请求体字段**\n- `items`（array，必填）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"streamNumber\": 0,\n      \"videoFormat\": \"1\",\n      \"resolution\": \"\",\n      \"frameRate\": \"\",\n      \"bitRateType\": \"1\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Read a configuration operation owned by the authenticated client",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/config-operations/{{operationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "config-operations",
+                "{{operationId}}"
+              ]
+            },
+            "description": "`deviceConfigOperationRead` · scope `device:config:operation:read` · risk `read` · 幂等 `none`\n\nRead a configuration operation owned by the authenticated client\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n- `operationId` ← 变量 `{{operationId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "05 直播",
+      "item": [
+        {
+          "name": "Start or reuse live playback for one owned channel",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/live",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "live"
+              ]
+            },
+            "description": "`startLivePlayback` · scope `play:live` · risk `control` · 幂等 `none`\n\nStart or reuse live playback for one owned channel\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Stop the live stream this client opened for one channel",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/live",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "live"
+              ]
+            },
+            "description": "`stopLivePlayback` · scope `play:live:stop` · risk `media` · 幂等 `none`\n\nStop the live stream this client opened for one channel\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "06 录像与回放",
+      "item": [
+        {
+          "name": "启动设备录像",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/recording/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "recording",
+                "start"
+              ]
+            },
+            "description": "`channelRecordingStart` · scope `device:recording:start` · risk `control` · 幂等 `required`\n\n启动设备录像\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**请求体**：`{}`（空对象，但不能省略）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "停止设备录像",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/recording/stop",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "recording",
+                "stop"
+              ]
+            },
+            "description": "`channelRecordingStop` · scope `device:recording:stop` · risk `control` · 幂等 `required`\n\n停止设备录像\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**请求体**：`{}`（空对象，但不能省略）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "通道 24 小时在线时序",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/timeline",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "timeline"
+              ]
+            },
+            "description": "`channelTimeline` · scope `channel:timeline:read` · risk `read` · 幂等 `none`\n\n通道 24 小时在线时序\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "读取录像检索参数",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/recordings/options",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "recordings",
+                "options"
+              ]
+            },
+            "description": "`deviceRecordQueryOptions` · scope `device:record-query:options` · risk `read` · 幂等 `none`\n\n读取录像检索参数\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "检索设备录像",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/recordings/search?pageSize=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "recordings",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "`deviceRecordQuery` · scope `device:record-query` · risk `read` · 幂等 `optional`\n\n检索设备录像\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**Query 参数**（按需加，空值会被平台拒绝的不要留空）\n- `cursor`（string，可选）Opaque cursor returned by the previous page; omit it to start from the beginning.\n- `pageSize`（integer，默认: 20，可选）Positive page size, at most 100; defaults to 20 when omitted; an explicit empty value is rejected.\n\n**请求体字段**\n- `startTime`（string，格式: date-time，必填）\n- `endTime`（string，格式: date-time，必填）\n- `type`（string，取值: all / manual / alarm，可选）\n- `secrecy`（integer，范围: 0~5，可选）\n- `recorderId`（string，最长: 20，可选）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"startTime\": \"2026-01-01T00:00:00Z\",\n  \"endTime\": \"2026-01-01T00:00:00Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "创建设备录像回放",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/playback-sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "playback-sessions"
+              ]
+            },
+            "description": "`devicePlaybackCreate` · scope `device:playback-create` · risk `media` · 幂等 `required`\n\n创建设备录像回放\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**请求体字段**\n- `recordKey`（string，必填）\n- `playFrom`（string，格式: date-time，必填）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"recordKey\": \"string\",\n  \"playFrom\": \"2026-01-01T00:00:00Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "读取设备回放会话",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/playback-sessions/{{sessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "playback-sessions",
+                "{{sessionId}}"
+              ]
+            },
+            "description": "`devicePlaybackRead` · scope `device:playback-read` · risk `read` · 幂等 `none`\n\n读取设备回放会话\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n- `sessionId` ← 变量 `{{sessionId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "控制设备录像回放",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/playback-sessions/{{sessionId}}/actions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "playback-sessions",
+                "{{sessionId}}",
+                "actions"
+              ]
+            },
+            "description": "`devicePlaybackAction` · scope `device:playback-action` · risk `control` · 幂等 `required`\n\n控制设备录像回放\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n- `sessionId` ← 变量 `{{sessionId}}`\n\n**请求体字段**\n- `action`（string，取值: pause / resume / seek / scale，必填）\n- `positionSeconds`（number，最小: 0，可选）\n- `scale`（number，可选）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"pause\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "结束设备录像回放",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/playback-sessions/{{sessionId}}/stop",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "playback-sessions",
+                "{{sessionId}}",
+                "stop"
+              ]
+            },
+            "description": "`devicePlaybackStop` · scope `device:playback-stop` · risk `control` · 幂等 `required`\n\n结束设备录像回放\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n- `sessionId` ← 变量 `{{sessionId}}`\n\n**请求体**：`{}`（空对象，但不能省略）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "创建设备录像下载",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/download-sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "download-sessions"
+              ]
+            },
+            "description": "`deviceDownloadCreate` · scope `device:download-create` · risk `media` · 幂等 `required`\n\n创建设备录像下载\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**请求体字段**\n- `recordKey`（string，必填）\n- `playFrom`（string，格式: date-time，必填）\n- `downloadSpeed`（integer，取值: 1 / 2 / 4 / 8，必填）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"recordKey\": \"string\",\n  \"playFrom\": \"2026-01-01T00:00:00Z\",\n  \"downloadSpeed\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "读取设备录像下载",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/download-sessions/{{sessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "download-sessions",
+                "{{sessionId}}"
+              ]
+            },
+            "description": "`deviceDownloadRead` · scope `device:download-read` · risk `read` · 幂等 `none`\n\n读取设备录像下载\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n- `sessionId` ← 变量 `{{sessionId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "取消设备录像下载",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/download-sessions/{{sessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "download-sessions",
+                "{{sessionId}}"
+              ]
+            },
+            "description": "`deviceDownloadCancel` · scope `device:download-cancel` · risk `control` · 幂等 `required`\n\n取消设备录像下载\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n- `sessionId` ← 变量 `{{sessionId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "07 图像与截图",
+      "item": [
+        {
+          "name": "设备抓图",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/snapshot-sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "snapshot-sessions"
+              ]
+            },
+            "description": "`createChannelSnapshotSession` · scope `channel:snapshot:create` · risk `control` · 幂等 `required`\n\n设备抓图\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**请求体字段**\n- `snapNum`（integer，范围: 1~10，必填）\n- `interval`（integer，范围: 1~3600，必填）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"snapNum\": 1,\n  \"interval\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "读取抓图会话",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/snapshot-sessions/{{sessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "snapshot-sessions",
+                "{{sessionId}}"
+              ]
+            },
+            "description": "`getChannelSnapshotSession` · scope `channel:snapshot:read` · risk `read` · 幂等 `none`\n\n读取抓图会话\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n- `sessionId` ← 变量 `{{sessionId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "读取抓图图像内容",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/snapshot-sessions/{{sessionId}}/images/{{fileName}}/content",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "snapshot-sessions",
+                "{{sessionId}}",
+                "images",
+                "{{fileName}}",
+                "content"
+              ]
+            },
+            "description": "`getChannelSnapshotImageContent` · scope `channel:snapshot:image:read` · risk `read` · 幂等 `none`\n\n读取抓图图像内容\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n- `sessionId` ← 变量 `{{sessionId}}`\n- `fileName` ← 变量 `{{fileName}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "通道抓拍图列表",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/snapshot-library?page=1&pageSize=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "snapshot-library"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "`listChannelSnapshotLibrary` · scope `channel:snapshot:library:read` · risk `read` · 幂等 `none`\n\n通道抓拍图列表\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**Query 参数**（按需加，空值会被平台拒绝的不要留空）\n- `page`（integer，默认: 1，可选）Positive one-based page number; defaults to 1 when omitted; an explicit empty value is rejected.\n- `pageSize`（integer，默认: 20，可选）Positive page size, at most 100; defaults to 20 when omitted; an explicit empty value is rejected.\n- `from`（string，可选）Inclusive lower bound on the capture time, RFC3339 with an explicit offset; an explicit empty value is rejected.\n- `to`（string，可选）Inclusive upper bound on the capture time, RFC3339 with an explicit offset; must not precede `from`; an explicit empty value is rejected.\n- `source`（string，取值: device / zlm / browser，可选）Optional capture source filter; an explicit empty value is rejected.\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "批量删除抓拍图",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/snapshot-library",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "snapshot-library"
+              ]
+            },
+            "description": "`deleteChannelSnapshotLibrary` · scope `channel:snapshot:library:delete` · risk `destructive` · 幂等 `optional`\n\n批量删除抓拍图\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**请求体字段**\n- `ids`（array，必填）\n- `confirmed`（boolean，取值: True，必填）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [\n    1\n  ],\n  \"confirmed\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "读取抓拍图内容",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/snapshot-library/{{snapshotId}}/content",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "snapshot-library",
+                "{{snapshotId}}",
+                "content"
+              ]
+            },
+            "description": "`getChannelSnapshotLibraryImageContent` · scope `channel:snapshot:library:image:read` · risk `read` · 幂等 `none`\n\n读取抓拍图内容\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n- `snapshotId` ← 变量 `{{snapshotId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "08 对讲与广播",
+      "item": [
+        {
+          "name": "Create device talk session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/talk-sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "talk-sessions"
+              ]
+            },
+            "description": "`deviceTalkCreate` · scope `device:talk:create` · risk `media` · 幂等 `required`\n\nCreate device talk session\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**请求体**：`{}`（空对象，但不能省略）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Read device talk session",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/talk-sessions/{{sessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "talk-sessions",
+                "{{sessionId}}"
+              ]
+            },
+            "description": "`deviceTalkRead` · scope `device:talk:read` · risk `read` · 幂等 `none`\n\nRead device talk session\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n- `sessionId` ← 变量 `{{sessionId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "End device talk session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/talk-sessions/{{sessionId}}/end",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "talk-sessions",
+                "{{sessionId}}",
+                "end"
+              ]
+            },
+            "description": "`deviceTalkEnd` · scope `device:talk:end` · risk `control` · 幂等 `none`\n\nEnd device talk session\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n- `sessionId` ← 变量 `{{sessionId}}`\n\n**请求体**：`{}`（空对象，但不能省略）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create device broadcast session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/broadcast-sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "broadcast-sessions"
+              ]
+            },
+            "description": "`deviceBroadcastCreate` · scope `device:broadcast:create` · risk `media` · 幂等 `required`\n\nCreate device broadcast session\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**请求体**：`{}`（空对象，但不能省略）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Read device broadcast session",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/broadcast-sessions/{{sessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "broadcast-sessions",
+                "{{sessionId}}"
+              ]
+            },
+            "description": "`deviceBroadcastRead` · scope `device:broadcast:read` · risk `read` · 幂等 `none`\n\nRead device broadcast session\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n- `sessionId` ← 变量 `{{sessionId}}`\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "End device broadcast session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/broadcast-sessions/{{sessionId}}/end",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "broadcast-sessions",
+                "{{sessionId}}",
+                "end"
+              ]
+            },
+            "description": "`deviceBroadcastEnd` · scope `device:broadcast:end` · risk `control` · 幂等 `none`\n\nEnd device broadcast session\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n- `sessionId` ← 变量 `{{sessionId}}`\n\n**请求体**：`{}`（空对象，但不能省略）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Submit device talk media offer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/talk-sessions/{{sessionId}}/media",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "talk-sessions",
+                "{{sessionId}}",
+                "media"
+              ]
+            },
+            "description": "`deviceTalkMedia` · scope `device:talk:media` · risk `media` · 幂等 `none`\n\nSubmit device talk media offer\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n- `sessionId` ← 变量 `{{sessionId}}`\n\n**请求体字段**\n- `sdp`（string，最长: 60000，必填）SDP offer\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sdp\": \"string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Submit device broadcast media offer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/broadcast-sessions/{{sessionId}}/media",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "broadcast-sessions",
+                "{{sessionId}}",
+                "media"
+              ]
+            },
+            "description": "`deviceBroadcastMedia` · scope `device:broadcast:media` · risk `media` · 幂等 `none`\n\nSubmit device broadcast media offer\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n- `sessionId` ← 变量 `{{sessionId}}`\n\n**请求体字段**\n- `sdp`（string，最长: 60000，必填）SDP offer\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sdp\": \"string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "09 报警与布防",
+      "item": [
+        {
+          "name": "List persisted alarms for one owned device",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/alarms?page=1&pageSize=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "alarms"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "`listDeviceAlarms` · scope `device:alarms` · risk `read` · 幂等 `none`\n\nList persisted alarms for one owned device\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n\n**Query 参数**（按需加，空值会被平台拒绝的不要留空）\n- `page`（integer，默认: 1，可选）Positive one-based page number; defaults to 1 when omitted; an explicit empty value is rejected.\n- `pageSize`（integer，默认: 20，可选）Positive page size, at most 100; defaults to 20 when omitted; an explicit empty value is rejected.\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "Continue reading device status events with an opaque cursor",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/status-events?pageSize=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "status-events"
+              ],
+              "query": [
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "`listDeviceStatusEvents` · scope `device:status-events` · risk `read` · 幂等 `none`\n\nContinue reading device status events with an opaque cursor\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n\n**Query 参数**（按需加，空值会被平台拒绝的不要留空）\n- `cursor`（string，可选）Opaque cursor returned by the previous page; omit it to start from the beginning.\n- `pageSize`（integer，默认: 20，可选）Positive page size, at most 100; defaults to 20 when omitted; an explicit empty value is rejected.\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。"
+          },
+          "response": []
+        },
+        {
+          "name": "设备报警布防",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/alarms/guard",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "alarms",
+                "guard"
+              ]
+            },
+            "description": "`channelAlarmGuardSet` · scope `device:alarm:guard:set` · risk `control` · 幂等 `required`\n\n设备报警布防\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**请求体**：`{}`（空对象，但不能省略）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "设备报警撤防",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/alarms/guard/reset",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "alarms",
+                "guard",
+                "reset"
+              ]
+            },
+            "description": "`channelAlarmGuardReset` · scope `device:alarm:guard:reset` · risk `control` · 幂等 `required`\n\n设备报警撤防\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**请求体**：`{}`（空对象，但不能省略）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "设备报警复位",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "00000000-0000-4000-8000-000000000001",
+                "description": "占位值，脚本会自动换成新 UUID；要测重放就把它改成固定字符串"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/openapi/v1/devices/{{deviceId}}/channels/{{channelId}}/alarms/reset",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "openapi",
+                "v1",
+                "devices",
+                "{{deviceId}}",
+                "channels",
+                "{{channelId}}",
+                "alarms",
+                "reset"
+              ]
+            },
+            "description": "`channelAlarmReset` · scope `device:alarm:reset` · risk `control` · 幂等 `required`\n\n设备报警复位\n\n**路径变量**\n- `deviceId` ← 变量 `{{deviceId}}`\n- `channelId` ← 变量 `{{channelId}}`\n\n**请求体字段**\n- `alarmMethod`（string，可选）\n- `alarmType`（string，可选）\n\n签名头由集合的 pre-request 脚本自动写入，不要在请求里手填。",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "/*",
+          " * UVP OpenAPI v1 请求签名器（collection 级 pre-request 脚本）",
+          " *",
+          " * 由 sdk/scripts/gen-http-collection.py 生成，请勿手改 —— 改生成器再重跑。",
+          " * 规范来源：api/openapi-v1.yaml 的 x-uvp-signature-contract",
+          " *",
+          " * 它只做三件事，但这三件恰恰是手写最容易错的地方：",
+          " *   1. 拼出 11 行 canonical（少拼一行也算得出签名，但平台一律返回 401）",
+          " *   2. 用 SK 的**字节**（base64url 解码后，不是这段文字）算 HMAC-SHA256",
+          " *   3. 把 query 重写成规范要求的 RFC3986 形式，保证\"签的就是发的\"",
+          " *",
+          " * 需要 4 个变量：baseUrl / accessKey / secretKey / audience",
+          " * audience 不在任何页面上，只能由运维从服务器 config.yml 的 openapi.audience 取。",
+          " */",
+          "(function () {",
+          "  'use strict';",
+          "",
+          "  var HEX = CryptoJS.enc.Hex;",
+          "",
+          "  /* 与生成器常量同源，构建时被替换；用来区分\"占位值\"和\"用户手填的固定 key\" */",
+          "  var IDEMPOTENCY_PLACEHOLDER = '00000000-0000-4000-8000-000000000001';",
+          "",
+          "  function fail(message) {",
+          "    throw new Error('[UVP 签名] ' + message);",
+          "  }",
+          "",
+          "  function variable(name, hint) {",
+          "    var value = pm.variables.get(name);",
+          "    if (value === undefined || value === null || String(value).trim() === '') {",
+          "      fail('缺少变量 ' + name + '。' + hint);",
+          "    }",
+          "    return String(value).trim();",
+          "  }",
+          "",
+          "  /* RFC3986：unreserved 之外全部百分号编码；空格是 %20，不是 + */",
+          "  function rfc3986(value) {",
+          "    return encodeURIComponent(String(value)).replace(/[!'()*]/g, function (ch) {",
+          "      return '%' + ch.charCodeAt(0).toString(16).toUpperCase();",
+          "    });",
+          "  }",
+          "",
+          "  /* base64url（可能无填充）-> hex。SK 是 32 字节，HMAC 的 key 是解码后的字节 */",
+          "  function secretKeyHex(secretKey) {",
+          "    var text = String(secretKey).replace(/-/g, '+').replace(/_/g, '/');",
+          "    while (text.length % 4 !== 0) {",
+          "      text += '=';",
+          "    }",
+          "    var hex;",
+          "    try {",
+          "      hex = CryptoJS.enc.Base64.parse(text).toString(HEX);",
+          "    } catch (e) {",
+          "      fail('secretKey 不是合法的 base64url：' + e.message);",
+          "    }",
+          "    if (hex.length !== 64) {",
+          "      fail('secretKey 解码后是 ' + (hex.length / 2) + ' 字节，规范要求 32 字节（base64url 无填充）');",
+          "    }",
+          "    return hex;",
+          "  }",
+          "",
+          "  function requestPath() {",
+          "    var url = pm.request.url;",
+          "    var path = '';",
+          "    if (typeof url.getPath === 'function') {",
+          "      path = url.getPath();",
+          "    }",
+          "    if (!path && url.path) {",
+          "      path = url.path.length !== undefined ? '/' + url.path.join('/') : String(url.path);",
+          "    }",
+          "    if (!path) {",
+          "      fail('取不到请求路径');",
+          "    }",
+          "    if (path.charAt(0) !== '/') {",
+          "      path = '/' + path;",
+          "    }",
+          "    if (path.indexOf('{{') >= 0 || /\\{[A-Za-z]/.test(path)) {",
+          "      fail('路径里还有未替换的变量（' + path + '）。请在集合变量里填好 deviceId / channelId 等值');",
+          "    }",
+          "    return path;",
+          "  }",
+          "",
+          "  function rawQueryString() {",
+          "    var url = pm.request.url;",
+          "    if (typeof url.getQueryString === 'function') {",
+          "      var query = url.getQueryString();",
+          "      if (query !== undefined && query !== null && query !== '') {",
+          "        return String(query);",
+          "      }",
+          "    }",
+          "    var text = String(url);",
+          "    var start = text.indexOf('?');",
+          "    if (start < 0) {",
+          "      return '';",
+          "    }",
+          "    var rest = text.slice(start + 1);",
+          "    var hash = rest.indexOf('#');",
+          "    return hash < 0 ? rest : rest.slice(0, hash);",
+          "  }",
+          "",
+          "  /* 解码一次 -> RFC3986 重编码 -> 按 key、value 排序。与服务端 canonicalQuery 同义 */",
+          "  function canonicalQuery(raw) {",
+          "    if (!raw) {",
+          "      return '';",
+          "    }",
+          "    var pairs = [];",
+          "    var seen = {};",
+          "    var parts = raw.split('&');",
+          "    for (var i = 0; i < parts.length; i++) {",
+          "      var part = parts[i];",
+          "      if (part === '') {",
+          "        fail('query 里有空的 & 分隔符：' + raw);",
+          "      }",
+          "      if (part.indexOf('+') >= 0) {",
+          "        fail('query 里出现了 +，平台会直接拒绝；空格请写成 %20：' + part);",
+          "      }",
+          "      var eq = part.indexOf('=');",
+          "      if (eq < 0) {",
+          "        fail('query 参数缺少 = 号：' + part);",
+          "      }",
+          "      var key;",
+          "      var value;",
+          "      try {",
+          "        key = decodeURIComponent(part.slice(0, eq));",
+          "        value = decodeURIComponent(part.slice(eq + 1));",
+          "      } catch (e) {",
+          "        fail('query 里有非法的百分号编码：' + part);",
+          "      }",
+          "      if (key === '') {",
+          "        fail('query 参数名不能为空：' + part);",
+          "      }",
+          "      var encodedKey = rfc3986(key);",
+          "      if (seen[encodedKey]) {",
+          "        fail('query 参数重复，平台会拒绝：' + encodedKey);",
+          "      }",
+          "      seen[encodedKey] = true;",
+          "      pairs.push([encodedKey, rfc3986(value)]);",
+          "    }",
+          "    pairs.sort(function (a, b) {",
+          "      if (a[0] !== b[0]) {",
+          "        return a[0] < b[0] ? -1 : 1;",
+          "      }",
+          "      if (a[1] !== b[1]) {",
+          "        return a[1] < b[1] ? -1 : 1;",
+          "      }",
+          "      return 0;",
+          "    });",
+          "    var encoded = [];",
+          "    for (var j = 0; j < pairs.length; j++) {",
+          "      encoded.push(pairs[j][0] + '=' + pairs[j][1]);",
+          "    }",
+          "    return encoded.join('&');",
+          "  }",
+          "",
+          "  function requestBody() {",
+          "    var body = pm.request.body;",
+          "    if (!body) {",
+          "      return '';",
+          "    }",
+          "    if (body.mode === 'raw') {",
+          "      return body.raw === undefined || body.raw === null ? '' : String(body.raw);",
+          "    }",
+          "    if (!body.mode) {",
+          "      return '';",
+          "    }",
+          "    fail('平台只接受 application/json 原始请求体（Body → raw → JSON），当前模式是 ' + body.mode);",
+          "  }",
+          "",
+          "  function setHeader(key, value) {",
+          "    pm.request.headers.upsert({ key: key, value: value });",
+          "  }",
+          "",
+          "  function removeHeader(key) {",
+          "    if (typeof pm.request.headers.remove === 'function') {",
+          "      pm.request.headers.remove(key);",
+          "    }",
+          "  }",
+          "",
+          "  /*",
+          "   * 幂等键：请求里显式填了非占位值就用（重放测试需要同一个 key），",
+          "   * 占位值 / 空值 / 模板变量则自动生成一个新的。",
+          "   * 完全没有这个头 = 该接口不需要幂等，canonical 第 10 行留空。",
+          "   */",
+          "  function idempotencyKey() {",
+          "    var existing = pm.request.headers.get('Idempotency-Key');",
+          "    if (existing === undefined || existing === null) {",
+          "      return '';",
+          "    }",
+          "    var text = String(existing).trim();",
+          "    if (text !== '' && text !== IDEMPOTENCY_PLACEHOLDER && text.indexOf('{{') < 0) {",
+          "      return text;",
+          "    }",
+          "    var generated = CryptoJS.lib.WordArray.random(16).toString(HEX);",
+          "    setHeader('Idempotency-Key', generated);",
+          "    return generated;",
+          "  }",
+          "",
+          "  var accessKey = variable('accessKey', '形如 uvp_ + 32 位小写十六进制');",
+          "  var secretKey = variable('secretKey', '创建 AK 时一次性返回的 SK（base64url 无填充）');",
+          "  var audience = variable('audience', '服务器 config.yml 的 openapi.audience，页面上看不到');",
+          "  var baseUrl = variable('baseUrl', '形如 http://<平台IP>:51002，51000 是前端页面不转发 OpenAPI');",
+          "",
+          "  var method = String(pm.request.method || '').toUpperCase();",
+          "  if (!method) {",
+          "    fail('取不到请求方法');",
+          "  }",
+          "",
+          "  var path = requestPath();",
+          "  var query = canonicalQuery(rawQueryString());",
+          "  var body = requestBody();",
+          "",
+          "  var contentType = '';",
+          "  if (method === 'GET' || method === 'HEAD') {",
+          "    if (body !== '') {",
+          "      fail('GET/HEAD 不能带请求体，平台会拒绝');",
+          "    }",
+          "    removeHeader('Content-Type');",
+          "  } else {",
+          "    /* 必须恰好 application/json：带 ;charset=utf-8 会在验签前被判 400 */",
+          "    contentType = 'application/json';",
+          "    setHeader('Content-Type', 'application/json');",
+          "  }",
+          "",
+          "  var bodyHash = CryptoJS.SHA256(CryptoJS.enc.Utf8.parse(body)).toString(HEX);",
+          "  var timestamp = String(Math.floor(Date.now() / 1000));",
+          "  var nonce = CryptoJS.lib.WordArray.random(16).toString(HEX);",
+          "  var idempotency = idempotencyKey();",
+          "",
+          "  var canonical = [",
+          "    'UVP-HMAC-SHA256/1',",
+          "    accessKey,",
+          "    timestamp,",
+          "    nonce,",
+          "    method,",
+          "    path,",
+          "    query,",
+          "    contentType,",
+          "    bodyHash,",
+          "    idempotency,",
+          "    audience",
+          "  ].join('\\n');",
+          "",
+          "  var signature = CryptoJS.HmacSHA256(",
+          "    CryptoJS.enc.Utf8.parse(canonical),",
+          "    HEX.parse(secretKeyHex(secretKey))",
+          "  ).toString(HEX);",
+          "",
+          "  setHeader('X-UVP-Sign-Version', '1');",
+          "  setHeader('X-UVP-Access-Key', accessKey);",
+          "  setHeader('X-UVP-Timestamp', timestamp);",
+          "  setHeader('X-UVP-Nonce', nonce);",
+          "  setHeader('X-UVP-Signature', signature);",
+          "",
+          "  /* 把 query 换成规范形式，否则 ! ' ( ) * 这六个字符会被客户端编成别的样子 */",
+          "  if (typeof pm.request.url.update === 'function') {",
+          "    try {",
+          "      pm.request.url.update(",
+          "        String(baseUrl).replace(/\\/+$/, '') + path + (query ? '?' + query : '')",
+          "      );",
+          "    } catch (e) {",
+          "      /* 个别客户端不接受整串更新；差异只会落在那六个字符上 */",
+          "    }",
+          "  }",
+          "",
+          "  /* 只在本次运行内可见，不写进环境文件，排障时可在控制台打印 */",
+          "  pm.variables.set('uvp_canonical', canonical);",
+          "  pm.variables.set('uvp_signature', signature);",
+          "})();",
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:51002"
+    },
+    {
+      "key": "accessKey",
+      "value": "uvp_000102030405060708090a0b0c0d0e0f"
+    },
+    {
+      "key": "secretKey",
+      "value": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "key": "audience",
+      "value": "uvp-openapi-test-audience-v1"
+    },
+    {
+      "key": "deviceId",
+      "value": "34020000001320000001"
+    },
+    {
+      "key": "channelId",
+      "value": "34020000001320000002"
+    },
+    {
+      "key": "sessionId",
+      "value": "00000000-0000-4000-8000-000000000000"
+    },
+    {
+      "key": "subscriptionId",
+      "value": "00000000-0000-4000-8000-000000000000"
+    },
+    {
+      "key": "operationId",
+      "value": "00000000-0000-4000-8000-000000000000"
+    },
+    {
+      "key": "snapshotId",
+      "value": "1"
+    },
+    {
+      "key": "fileName",
+      "value": "snapshot.jpg"
+    },
+    {
+      "key": "trackId",
+      "value": "1"
+    },
+    {
+      "key": "presetId",
+      "value": "1"
+    }
+  ]
+}

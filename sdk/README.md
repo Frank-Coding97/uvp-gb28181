@@ -7,6 +7,7 @@ UVP GB28181 平台对外开放接口（`/openapi/v1/*`）的客户端与示例�
 | Java / Spring Boot | [`java/`](java/) | 完整 SDK（签名、重试、错误映射、幂等键）+ starter + 可运行 demo |
 | Python | [`python/`](python/) | **零依赖**客户端（只用标准库）+ 示例，单文件可直接抄 |
 | Go | [`go/`](go/) | 标准库参考实现 + 示例，`go run` 就能跑 |
+| 先不写代码 | [`http/`](http/) | Postman / Apifox 集合，84 个接口全带上，签名自动算 |
 | 任意语言 | 本文「签名规范」一节 | 自己实现只要对齐这一页，务必用 [`fixtures/`](fixtures/) 自证 |
 
 本文路径都相对本仓库根目录。
@@ -258,6 +259,7 @@ python3 scripts/verify-parity.py --with-java # 再加 Java
 - 接口契约：`api/openapi-v1.yaml`（OpenAPI 3.0.3，84 个操作）。可以拿它自己生成其他语言客户端。
 - 签名向量：[`fixtures/signature-v1.json`](fixtures/signature-v1.json)，来源与同步方式见 [`fixtures/SOURCE.md`](fixtures/SOURCE.md)。
 - 多语言一致性：`scripts/verify-parity.py`。任何一门语言的签名实现改动后都必须跑，且结果必须全绿。
+- HTTP 集合：[`http/`](http/)，由契约生成，不要手改。
 
 ---
 
@@ -278,8 +280,14 @@ python3 scripts/verify-parity.py --with-java # 再加 Java
 python3 scripts/sync-fixture.py                      # 重新同步向量（主仓内执行）
 python3 java/codegen/import_models.py                # 重建模型
 python3 java/codegen/generate_apis.py                # 重建 API 类
-python3 scripts/verify-parity.py --with-java         # 三语言对账
+python3 scripts/gen-http-collection.py               # 重建 Postman / Apifox 集合
+python3 scripts/verify-parity.py --with-java         # 三语言 + 集合对账
 ```
+
+**改 `http/` 里的东西**：那三个 JSON 是生成出来的，手改会在下次重新生成时丢掉。
+改 `scripts/gen-http-collection.py` 再重跑。集合里的签名脚本同样如此——
+它被执行时能不能算对，由 `scripts/verify-http-collection.js` 拿真实夹具向量验，
+不是"看起来对"就算了。
 
 **新增一门语言**：放 `<语言>/` 目录，必须自带读 `fixtures/signature-v1.json` 的自测，
 并接进 `verify-parity.py`。没有自测的示例等于没有示例。
