@@ -879,6 +879,7 @@ PORT_ZLM_RTP_RANGE="$(pkg_port_or_die UVP_ZLM_RTP_RANGE ZLM_RTP_RANGE)" || exit 
   printf '# [uvp-ports]\n'
   printf '# [uvp-ports] · 不用手写 UVP_USER_SET_ 标记：程序会对比上次落盘值，\n'
   printf '# [uvp-ports]   发现你改过就自动记住，并在文件顶部补上标记行。\n'
+  printf '# [uvp-ports] · 全新包**第一次启动前**就能改（解压 → 改 → start），不必先跑一次。\n'
   printf '# [uvp-ports] · UVP_ZLM_RTP_RANGE 与 UVP_ZLM_RTP_PROXY_PORT 必须同一个起点；\n'
   printf '# [uvp-ports]   只改其中一个，程序会按你改的那个自动拉齐另一个。\n'
   printf '# [uvp-ports] · SIP 端口**不在本文件**（登录后引导页录入、存数据库），\n'

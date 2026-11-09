@@ -859,9 +859,55 @@ port_baseline_get() {
   sed -n "s/^$1=//p" "$PORT_BASELINE_FILE" 2>/dev/null | tail -1
 }
 
+# _is_fresh_install 判断「这一个包**从没启动过**」。
+#
+# ⛔⛔ 为什么必须单独判它（2026-11-09 在 220 上照官网教程实机演练时踩到）：
+#   全新解压的包里**没有** config/.port-baseline，于是下面的判据 ② 恒不成立 ⇒
+#   客户在**第一次启动之前**改掉 config.env 里的端口，脚本完全不采纳，
+#   静默回退到出厂默认段。实测：把整段改成 53000 再 start，预检报的仍是 51008，
+#   全程零提示 —— 客户只能断定「改了没用」。
+#
+#   根因不是判据写错，而是「无基线」被当成了**同一种状态**：它既可能是
+#   老包升级（config.env 里全是上一版的旧默认值，绝不能采纳），
+#   也可能是全新装机（config.env 里就是现场要的值，必须采纳）。
+#   ⇒ 用「只有真正启动过才会生成」的两个产物把两者分开：
+#       data/uvp.db（建库产物）、logs/backend.log（后端首启产物）
+#   两者都不存在 ⇒ 这个包没跑过 ⇒ 判据 ③ 生效。
+# ⛔ 不看目录是否为空：解压工具会建出空的 data/ logs/，那不代表跑过。
+#
+# ⛔⛔ 结果**必须缓存**（$_FRESH_INSTALL）：本函数会在两个时刻被调用 ——
+#   ① 脚本加载时（read_port_env 判断端口要不要采纳）；
+#   ② 启动阶段 sync_ports_into_config 给端口打 UVP_USER_SET_ 标记时。
+#   而这两者之间 ensure_database 已经把 data/uvp.db 建出来了 ⇒ 不缓存的话 ②
+#   会判成「不是全新安装」⇒ **一个标记都不打** ⇒ 下次启动时值 == 基线、判据 ②
+#   不成立 ⇒ 端口自己退回出厂默认段。2026-11-09 真机就是这么崩的
+#   （首启端口对、重启变回 51000），所以别把它"优化"成每次现算。
+_is_fresh_install() {
+  if [ -n "${_FRESH_INSTALL:-}" ]; then
+    [ "$_FRESH_INSTALL" = "1" ]
+    return
+  fi
+  if [ -n "${ROOT:-}" ] \
+     && [ ! -f "${ROOT}/data/uvp.db" ] \
+     && [ ! -f "${ROOT}/logs/backend.log" ]; then
+    _FRESH_INSTALL=1
+  else
+    _FRESH_INSTALL=0
+  fi
+  [ "$_FRESH_INSTALL" = "1" ]
+}
+
+# ⛔⛔ 必须在**顶层**（父 shell）先算一次并缓存：
+#   read_port_env 的调用点全是 `HTTP_PORT="${UVP_HTTP_PORT:-$(read_port_env …)}"`
+#   ⇒ 它跑在**子 shell** 里，函数内算出的 _FRESH_INSTALL 传不回父 shell。
+#   父 shell 先算好，后面每个子 shell fork 时都能继承到，结论才一致。
+#   （2026-11-09 实测：不加这一行，启动阶段再问就答"不是全新"，标记全漏打。）
+_is_fresh_install || true
+
 # port_is_user_set 判断某个端口键是不是「用户显式设置过」的。判据任一成立即可：
 #   ① `UVP_USER_SET_<KEY>=1` 标记（历史上手写过，或程序自动补过）；
-#   ② 文件里的值 **≠** 上次落盘基线 ⇒ 说明两次启动之间有人改过它。
+#   ② 文件里的值 **≠** 上次落盘基线 ⇒ 说明两次启动之间有人改过它；
+#   ③ **全新安装**（本包从没启动过、也没有基线）⇒ config.env 里的值就是现场意图。
 #
 # ⛔⛔ 为什么加 ②（2026-10-20，老板要"所有端口都能改，尤其 ZLM 那些"）：
 #   老实现只认 ① ⇒ 客户改一个端口要写**两行**（值 + 标记），漏写标记就静默失效，
@@ -870,6 +916,10 @@ port_baseline_get() {
 #
 # ⛔ ② 不会破坏"升级后跟随新端口规划"：老包根本没有基线文件，② 恒不成立，
 #   与既有语义逐字一致。升级上来的第一次启动仍按本包默认值走。
+#
+# ⚠️ ③ 是 2026-11-09 补的，专门堵 ② 的盲区：② 把「无基线」一律当升级，
+#   连全新装机的第一次启动也一起误伤了（客户装机前改端口 = 改了没用）。
+#   ③ 只认两个"跑过才会生成"的产物，因此**不会**让老包升级被误判成新装。
 port_is_user_set() {
   local key="$1" val marker base
   [ -f "$ENV_FILE" ] || return 1
@@ -881,6 +931,13 @@ port_is_user_set() {
   fi
   base="$(port_baseline_get "$key")"
   if [ -n "$base" ] && [ "$base" != "$val" ]; then
+    return 0
+  fi
+  # ③ 全新安装：没有基线可依，config.env 里的值就是现场要的值。
+  #   ⚠️ 代价：这些值会在首次启动时被写成 UVP_USER_SET_ 标记，从而在后续升级里
+  #   一直保留 —— 对现场恰恰是好事（端口不该在升级后自己变），并且基线文件丢了
+  #   也不会退回默认段。
+  if [ -z "$base" ] && _is_fresh_install; then
     return 0
   fi
   return 1
@@ -1109,16 +1166,38 @@ check_ports_free() {
   has_ss || cannot_judge=1
 
   # ---- 逐个检查单端口 ----
+  # 本机「已被出站连接当成本地端口」的集合（一次性抓，避免 RTP 段里循环调 ss）。
+  # ⛔ 这类占用在 `ss -lnt` 里看不到（不是 LISTEN），但 bind 一定失败 ——
+  #   2026-11-09 实测就是它把 ZLM 的 53004 顶掉的（详见 ip_local_port_range 注释）。
+  local _nl_ports=" "
+  if has_ss; then
+    _nl_ports=" $(nonlisten_local_ports | tr '\n' ' ')"
+  fi
+  _nl_busy() {
+    case "$_nl_ports" in *" $1 "*) return 0 ;; *) return 1 ;; esac
+  }
+
   # $1=默认端口 $2=协议 tcp|udp $3=用途 $4=可覆盖的变量名
   # ⛔ 用**实际生效值**而不是默认值：用户改过 config.env 或传了环境变量时，
   #   查默认值等于查了一个没在用的端口 —— 检测形同虚设。
   _check_one() {
-    local eff="${!4:-$1}" holder
-    holder="$(port_holder "$eff" "$2")" || return 0
-    busy_count=$(( busy_count + 1 ))
-    busy="${busy}
+    local eff="${!4:-$1}" holder rc=0
+    # ⛔⛔ 必须写成 `|| rc=$?`，不能写成 `; rc=$?` —— 赋值语句的退出码就是命令替换的
+    #   退出码，而 port_holder「端口空闲」时返回 1 ⇒ 在 set -e 下**整脚本静默退出**
+    #   （2026-11-09 实测：start 卡在「阶段 1/3 环境检查」，一行错误都没有）。
+    holder="$(port_holder "$eff" "$2")" || rc=$?
+    if [ "$rc" -eq 0 ]; then
+      busy_count=$(( busy_count + 1 ))
+      busy="${busy}
   ${eff}/$2  $3
       └─ 已被占用：${holder}"
+    elif [ "$rc" -eq 1 ] && _nl_busy "$eff"; then
+      busy_count=$(( busy_count + 1 ))
+      busy="${busy}
+  ${eff}/$2  $3
+      └─ 已被占用：本机一条**出站连接**正把它当源端口用
+         （看不到监听进程，但同样绑不上；等那条连接断开会自己好，重试无意义）"
+    fi
   }
 
   # 顺序与 PORTS.md 的规划段一致（51000-51064 连续无空洞；51064 SIP 由引导页自检）
@@ -1149,14 +1228,25 @@ check_ports_free() {
   # ---- RTP 动态段：整段都要查（UDP/TCP 成对占用）----
   # ⛔ 只查起点是不够的：段内任一端口被占，ZLM 都会在 bind 那一个时退出。
   #   （实测就栽在这类"段中间被占"上。）
-  local from="${ZLM_RTP_RANGE%-*}" to="${ZLM_RTP_RANGE#*-}" i proto holder
+  local from="${ZLM_RTP_RANGE%-*}" to="${ZLM_RTP_RANGE#*-}" i proto holder rc
   for (( i = from; i <= to; i++ )); do
     for proto in tcp udp; do
-      holder="$(port_holder "$i" "$proto")" || continue
-      busy_count=$(( busy_count + 1 ))
-      busy="${busy}
+      # ⛔ 每轮必须重置 rc：`|| rc=$?` 只在**失败**时赋值，成功那轮会沿用上一轮的值
+      #   ⇒ 460 轮里只要有一轮判成"空闲"，后面被占用的端口就再也报不出来。
+      # ⛔ 同 _check_one：`; rc=$?` 会在端口空闲时把整个脚本带走（见上面的注释）。
+      rc=0
+      holder="$(port_holder "$i" "$proto")" || rc=$?
+      if [ "$rc" -eq 0 ]; then
+        busy_count=$(( busy_count + 1 ))
+        busy="${busy}
   ${i}/${proto}  ZLM RTP 动态段
       └─ 已被占用：${holder}"
+      elif [ "$rc" -eq 1 ] && _nl_busy "$i"; then
+        busy_count=$(( busy_count + 1 ))
+        busy="${busy}
+  ${i}/${proto}  ZLM RTP 动态段
+      └─ 已被占用：本机一条**出站连接**正把它当源端口用（看不到监听进程，但同样绑不上）"
+      fi
     done
   done
 
@@ -1164,6 +1254,9 @@ check_ports_free() {
     log "端口预检失败：${busy_count} 个端口已被占用"
     printf '%s\n' "$busy" >&2
     printf '\n处理办法（按推荐顺序）：\n' >&2
+    printf '  0) 若上面写的是「出站连接正把它当源端口」——**没有进程在监听**，\n' >&2
+    printf '     停不掉也等不到，只能让内核别再把它分给连接（见下面的「临时端口」说明），\n' >&2
+    printf '     或者直接换到别的端口段。\n' >&2
     printf '  1) 停掉占用者 —— 若那不是本系统，说明机器上还有另一套服务在用这些端口。\n' >&2
     printf '  2) 换端口 —— 编辑 config.env 里的对应键，常用键名：\n' >&2
     printf '     UVP_HTTPS_PORT / UVP_HTTP_PORT / UVP_ZLM_HTTP_PORT / UVP_ZLM_RTSP_PORT ...\n' >&2
@@ -1172,6 +1265,16 @@ check_ports_free() {
     printf '\n  ⚠️ 为什么必须在启动前发现：若端口被别人占着而我们照常启动，\n' >&2
     printf '     nginx 会连到**别人的服务**上，而 status 仍报「运行中」——\n' >&2
     printf '     客户看到的是别的系统的页面，全程却没有任何报错。\n' >&2
+    # 端口落在临时范围时，把"为什么停不掉"讲透 —— 这几乎必然是上面的第 0 条。
+    local _eph_f
+    _eph_f="$(ip_local_port_range)"
+    if [ -n "$_eph_f" ]; then
+      local _lo="${_eph_f% *}" _hi="${_eph_f#* }"
+      printf '\n  ℹ️ 本机临时端口范围是 %s-%s。落在里面的端口会被内核临时分给出站连接，\n' "$_lo" "$_hi" >&2
+      printf '     这类占用**没有进程可停**，重试也不会好。处置：\n' >&2
+      printf '       sudo sysctl -w net.ipv4.ip_local_reserved_ports="<本包端口段>"\n' >&2
+      printf '     或整段换到 %s 以下（如 24000 段），改 config/config.env 那 16 个键。\n' "$_lo" >&2
+    fi
     fail "端口被占用，未启动任何服务"
   fi
   # ⛔ 段尾只到 RTP 段尾 —— SIP（默认 51064）**不在本预检内**：它的端口值由
@@ -1188,6 +1291,27 @@ check_ports_free() {
   #   就成了「52001-51063」这种倒挂区间，报出来的范围毫无意义。
   local _bounds _min _max
   _bounds="$(port_range_bounds)"; _min="${_bounds% *}"; _max="${_bounds#* }"
+
+  # ---- 与系统临时端口范围重叠：不是错误，但必须说清 ----
+  # ⛔ 为什么不能沉默（2026-11-09 在 220 上实测）：默认段 51000-51064 整段落在
+  #   ip_local_port_range 里 ⇒ 出站连接会随机把它当源端口，症状是「偶发 bind 失败、
+  #   重启有时就好、复现极难」。这条警告让人在**第一次**出事前就知道原因。
+  local _eph
+  _eph="$(ip_local_port_range)"
+  if [ -n "$_eph" ]; then
+    local _lo="${_eph% *}" _hi="${_eph#* }"
+    if [ "$_min" -le "$_hi" ] && [ "$_max" -ge "$_lo" ]; then
+      log "⚠️  端口段 ${_min}-${_max} 与系统临时端口范围 ${_lo}-${_hi} 重叠"
+      det "    Linux 会把这段端口临时分给**出站连接**做源端口（连 Redis / MySQL / DNS 都算）。"
+      det "    被占的那一刻 ss 里看不到监听，但 ZLM / nginx 就是绑不上 —— 偶发、重试无效。"
+      det "    ① 不动现有端口，把它们从临时池里预留出来（推荐，重启不丢）："
+      det "       sudo sysctl -w net.ipv4.ip_local_reserved_ports=\"${_min}-${_max}\""
+      det "       持久化：echo 'net.ipv4.ip_local_reserved_ports = ${_min}-${_max}' | sudo tee -a /etc/sysctl.d/99-uvp-ports.conf"
+      det "    ② 或整段换到 ${_lo} 以下（如 24000 段）：改 config/config.env 里那 16 个键"
+      det "    详见 deploy/standalone/PORTS.md「临时端口范围」一节。"
+    fi
+  fi
+
   ok "端口预检通过（${_min}-${_max} 无冲突）"
 }
 
@@ -1288,6 +1412,34 @@ port_holder() {
   #   ⇒ 提示文本直接内插，不走 printf 的占位符。
   printf '某个进程（看名字：sudo ss %s -p | grep %s）' "$flag" "$port"
   return 0
+}
+
+# ---- 系统临时端口范围（内核会把这段端口临时分给出站连接当源端口）----
+#
+# ⛔⛔ 为什么必须知道它（2026-11-09 在 220 上实测，连试两次都复现）：
+#   Linux 默认 net.ipv4.ip_local_port_range = 32768 60999，而本包的规划段
+#   51000-51064 **整段落在里面** ⇒ 本机任何一条出站连接（连 Redis、MySQL、
+#   DNS、NTP…）都可能把它当成**源端口**。这种占用在 `ss -lnt` 里**看不到监听**，
+#   于是端口预检全绿，可是 bind 一定失败。
+#   实测现场：53004 被一条「本地 53004 → 220:6379」的 ESTAB 连接占着，
+#   ZLM 报 `Listen on :: 53004 failed`，重试无效（那条连接一直在）。
+#   ⇒ 预检必须把「非监听占用」也查出来；整段落在临时范围里时还要给出处置办法。
+ip_local_port_range() {
+  local lo hi
+  [ -r /proc/sys/net/ipv4/ip_local_port_range ] || return 0
+  read -r lo hi < /proc/sys/net/ipv4/ip_local_port_range 2>/dev/null || return 0
+  case "${lo}${hi}" in ''|*[!0-9]*) return 0 ;; esac
+  printf '%s %s' "$lo" "$hi"
+}
+
+# nonlisten_local_ports 列出「正被非监听连接当成本地端口」的端口号（每行一个）。
+# ⛔ 只收 ESTAB：TIME_WAIT 在有 SO_REUSEADDR 时照样能 bind，报出来是假警报，
+#   会把现场引去追一个根本不存在的问题。
+nonlisten_local_ports() {
+  has_ss || return 0
+  { ss -tan 2>/dev/null; ss -uan 2>/dev/null; } \
+    | awk 'NR>1 && $1=="ESTAB" { n=split($4,a,":"); if (n>=2) print a[n] }' \
+    | sort -u
 }
 # ------------------------------------------------------ 外部命令能力探测 ----
 
@@ -2427,15 +2579,33 @@ start_zlm() {
         #   这两种的处置完全不同（前者要换端口，后者要查库），混为一谈会误导排障。
         if port_in_use_by_other "$ZLM_HTTP_PORT"; then
           fail "ZLM 端口 ${ZLM_HTTP_PORT} 已被**其他进程**占用（多半是另一套 ZLM），
-   本包的 ZLM 无法bind 而退出。处理：停掉占用者，或用 UVP_ZLM_HTTP_PORT 换一个端口。"
+   本包的 ZLM 无法 bind 而退出。处理：停掉占用者，或用 UVP_ZLM_HTTP_PORT 换一个端口。"
+        fi
+        # ⛔⛔ 出站连接占用（2026-11-09 在 220 上实测，连续两次复现）：
+        #   端口落在系统临时范围里时，本机一条出站连接就能把它当**源端口**拿走。
+        #   此时 ss 里没有监听，上面 port_in_use_by_other 判不出来，但 bind 一样失败，
+        #   而且重试无意义（那条连接一直在）。不说清的话，现场只会看到一条
+        #   already in use，然后去 `ss -p` 找一个**根本不存在**的进程。
+        if nonlisten_local_ports | grep -qx "$ZLM_HTTP_PORT"; then
+          local _eph_z; _eph_z="$(ip_local_port_range)"
+          fail "ZLM 端口 ${ZLM_HTTP_PORT} 被**本机的一条出站连接**占用（不是别的程序在监听）。
+   内核把它临时分给了某个 TCP/UDP 连接的源端口 —— 这是它落在临时端口范围
+   （${_eph_z:-未知}）里的代价：没有进程可停，重试也不会好。
+   处理（二选一）：
+     · 让内核别再把它分出去（立即生效）：
+         sudo sysctl -w net.ipv4.ip_local_reserved_ports=\"${ZLM_HTTP_PORT}\"
+     · 换端口：改 config/config.env 里的 UVP_ZLM_*_PORT，再 restart。"
         fi
         # ⛔ 不要在这里断言"就是缺 ffmpeg 库"——那是众多可能之一，写死会把排障带偏
         #   （客户 2026-10-12 就被这句误导成"缺依赖"）。指向上面那行具体错误即可。
+        # ⛔⛔ 这段消息**不能出现反引号**：它在双引号里，反引号会被当命令替换执行。
+        #   2026-11-09 实测打出过「端口: No such file or directory」+「error: command
+        #   not found」，把真正的错误提示冲掉了。
         fail "ZLM 启动失败（详见 ${ZLM_LOG}）。
    处理：看上面「关键错误行」——
-     · `Listen on :: <端口> failed: address already in use` ⇒ 该端口被别的程序占了，
+     · 「Listen on :: <端口> failed: address already in use」⇒ 该端口被别的程序占了，
        停掉占用者，或用 UVP_ZLM_*_PORT 换一个端口后重试；
-     · `error while loading shared libraries: xxx` ⇒ 这才是缺运行时库。"
+     · 「error while loading shared libraries: xxx」⇒ 这才是缺运行时库。"
       fi
     fi
     sleep 0.2

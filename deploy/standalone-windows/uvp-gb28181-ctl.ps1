@@ -258,17 +258,37 @@ function Read-EnvFileMap {
     return $map
 }
 
+# Test-FreshInstall 判断「这个包**从没启动过**」。
+#
+# ⛔⛔ 为什么必须单独判（2026-11-09，与 Linux 版是同一个洞）：
+#   全新解压的包里没有 config\.port-baseline，于是判据 ② 恒不成立 ⇒
+#   客户在**第一次启动之前**改掉的端口完全不生效，静默回退到出厂默认段
+#   （Linux 版实测：改成 53000 段后 start 仍报 51008，全程零提示）。
+#   根因是「无基线」被当成同一种状态：它既可能是老包升级（config.env 里全是
+#   上一版的旧默认值，绝不能采纳），也可能是全新装机（就是现场要的值，必须采纳）。
+#   ⇒ 用「只有真正启动过才会生成」的两个产物区分：
+#       data\uvp.db（建库产物）、logs\backend.log（后端首启产物）
+function Test-FreshInstall {
+    if (Test-Path -LiteralPath $DbPath) { return $false }
+    if (Test-Path -LiteralPath (Join-Path $LogsDir 'backend.log')) { return $false }
+    return $true
+}
+
 # Resolve-Port：环境变量 > config.env（用户设过的）> 默认值。
 #
 # 「用户设过」的判据（任一成立）：
 #   ① `UVP_USER_SET_<KEY>=1` 标记 —— 历史机制，一旦写上就永久生效；
-#   ② 文件里的值 **≠** config\.port-baseline 里记的上次落盘值。
+#   ② 文件里的值 **≠** config\.port-baseline 里记的上次落盘值；
+#   ③ **全新安装**（包从没启动过、也没有基线）—— config.env 里就是现场意图。
 #
 # ⛔ 为什么必须看标记/基线：老包写进去的旧默认值不能当成「用户设的」，
 #   否则升级包以后客户会莫名停在旧端口规划上（Linux 版为此踩过两次）。
 # ⭐ 2026-10-20 加 ②（与 Linux 版同一套）：客户改端口只需改值，
 #   不用再记"还要补一行 UVP_USER_SET_…=1"，漏写就静默失效并被覆盖。
 #   老包没有 .port-baseline ⇒ ② 恒不成立 ⇒ 升级语义与之前完全一致。
+# ⚠️ ③ 是 2026-11-09 补的（与 Linux 版同一处）：② 把「无基线」一律当升级，
+#   连全新装机的第一次启动也误伤了。③ 只认"跑过才会生成"的产物，
+#   因此不会让老包升级被误判成新装。
 function Resolve-Port {
     param([string]$Name, [hashtable]$EnvMap, [ref]$UserSetKeys, [hashtable]$Baseline)
     $envKey = $PortEnvKeys[$Name]
@@ -283,6 +303,11 @@ function Resolve-Port {
     }
     if ($Baseline -and $Baseline.ContainsKey($envKey) -and $EnvMap.ContainsKey($envKey) -and
         $Baseline[$envKey] -ne $EnvMap[$envKey]) {
+        $UserSetKeys.Value += $envKey
+        return [int]$EnvMap[$envKey]
+    }
+    # ③ 全新安装：没有基线可依，config.env 里的值就是现场要的值。
+    if ($Baseline.Count -eq 0 -and $EnvMap.ContainsKey($envKey) -and (Test-FreshInstall)) {
         $UserSetKeys.Value += $envKey
         return [int]$EnvMap[$envKey]
     }
@@ -302,6 +327,11 @@ function Resolve-RtpRange {
     }
     if ($Baseline -and $Baseline.ContainsKey($ZlmRtpRangeKey) -and $EnvMap.ContainsKey($ZlmRtpRangeKey) -and
         $Baseline[$ZlmRtpRangeKey] -ne $EnvMap[$ZlmRtpRangeKey]) {
+        $UserSetKeys.Value += $ZlmRtpRangeKey
+        return $EnvMap[$ZlmRtpRangeKey]
+    }
+    # ③ 全新安装：段值同样要采纳（否则改了 RTP 段等于没改）。
+    if ($Baseline.Count -eq 0 -and $EnvMap.ContainsKey($ZlmRtpRangeKey) -and (Test-FreshInstall)) {
         $UserSetKeys.Value += $ZlmRtpRangeKey
         return $EnvMap[$ZlmRtpRangeKey]
     }
