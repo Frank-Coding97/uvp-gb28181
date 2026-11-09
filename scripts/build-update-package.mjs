@@ -4,9 +4,9 @@
  *
  * 输入两个已解包的完整发行目录（旧版 / 新版），输出一个只含**变化文件**的升级包：
  *
- *   Linux ：uvp-gb28181-update-<平台>-<旧>-to-<新>.tar.gz
- *   Windows：uvp-gb28181-update-<平台>-<旧>-to-<新>.zip
- *   └── uvp-gb28181-update-<平台>-<旧>-to-<新>/
+ *   Linux ：uvp-<旧>-to-<新>-<平台>.incremental.tar.gz
+ *   Windows：uvp-<旧>-to-<新>-<平台>.incremental.zip
+ *   └── uvp-<旧>-to-<新>-<平台>.incremental/
  *       ├── apply.sh / apply.ps1 + apply.cmd   目标机上执行：校验 → 停服 → 备份 → 落文件 → 删旧 → 起服
  *       ├── manifest.json   人读的清单（版本、逐文件 sha256、动作）
  *       ├── files.sha256    sha256sum -c / Get-FileHash 消费的清单
@@ -496,7 +496,10 @@ export function buildUpdatePackage(options) {
   }
   if (diff.toFiles.length === 0) throw new Error(`${toDir} 里没有任何文件`);
 
-  const stem = `uvp-gb28181-update-${platform}-${diff.from.version}-to-${diff.to.version}`;
+  // ⛔⛔ 包名是官网下载清单的硬契约：`tests/releases.test.mjs` 断言增量包必须匹配
+  //   `*.incremental.(tar.gz|zip)`（Windows 只能是 zip）。以前叫 `uvp-gb28181-update-…`，
+  //   进 releases.json 会直接判红，只能上传到服务器后手工 mv 改名（2026-11-09 踩过）。
+  const stem = `uvp-${diff.from.version}-to-${diff.to.version}-${platform}.incremental`;
   const outDir = resolve(options.outDir);
   mkdirSync(outDir, { recursive: true });
   const staging = join(outDir, stem);

@@ -119,7 +119,7 @@ test("生成的包结构完整且校验值自洽", () => {
   assert.equal(manifest.from_version, "1.1.16");
   assert.equal(manifest.to_version, "1.1.17");
   assert.deepEqual(manifest.excluded_top_dirs, ["config", "data", "logs", "run"]);
-  assert.equal(result.stem, "uvp-gb28181-update-linux-amd64-1.1.16-to-1.1.17");
+  assert.equal(result.stem, "uvp-1.1.16-to-1.1.17-linux-amd64.incremental");
 
   // payload 里绝不能出现 config / data / logs
   const payloadFiles = collectFiles(path.join(result.staging, "payload")).files;
@@ -157,8 +157,8 @@ test("apply.sh 在模拟安装根上完成升级，且不动配置与数据", ()
   // 解开增量包
   const unpack = path.join(root, "unpack");
   mkdirSync(unpack, { recursive: true });
-  execFileSync("tar", ["-xzf", path.join(outDir, "uvp-gb28181-update-linux-amd64-1.1.16-to-1.1.17.tar.gz"), "-C", unpack]);
-  const pkg = path.join(unpack, "uvp-gb28181-update-linux-amd64-1.1.16-to-1.1.17");
+  execFileSync("tar", ["-xzf", path.join(outDir, "uvp-1.1.16-to-1.1.17-linux-amd64.incremental.tar.gz"), "-C", unpack]);
+  const pkg = path.join(unpack, "uvp-1.1.16-to-1.1.17-linux-amd64.incremental");
 
   // 造一个"现场安装根"：旧版文件 + 现场特有的配置与数据
   const installRoot = path.join(root, "site");
@@ -205,8 +205,8 @@ test("apply.sh 版本不匹配时拒绝执行且不改文件", () => {
 
   const unpack = path.join(root, "unpack");
   mkdirSync(unpack, { recursive: true });
-  execFileSync("tar", ["-xzf", path.join(outDir, "uvp-gb28181-update-linux-amd64-1.1.16-to-1.1.17.tar.gz"), "-C", unpack]);
-  const pkg = path.join(unpack, "uvp-gb28181-update-linux-amd64-1.1.16-to-1.1.17");
+  execFileSync("tar", ["-xzf", path.join(outDir, "uvp-1.1.16-to-1.1.17-linux-amd64.incremental.tar.gz"), "-C", unpack]);
+  const pkg = path.join(unpack, "uvp-1.1.16-to-1.1.17-linux-amd64.incremental");
 
   const installRoot = path.join(root, "site");
   execFileSync("cp", ["-R", `${from}/.`, installRoot]);
@@ -267,7 +267,7 @@ test("Windows 平台产出 zip，脚本带 BOM 且文件名按 UTF-8 存储", ()
   const result = buildUpdatePackage({ fromDir: from, toDir: to, platform: "windows-amd64", outDir });
 
   assert.ok(result.archive.endsWith(".zip"), "Windows 包必须是 zip");
-  assert.equal(result.stem, "uvp-gb28181-update-windows-amd64-1.1.16-to-1.1.17");
+  assert.equal(result.stem, "uvp-1.1.16-to-1.1.17-windows-amd64.incremental");
   assert.equal(readFileSync(`${result.archive}.sha256`, "utf8").split(/\s+/)[0], result.sha256);
 
   // 结构自洽：CRC 全对才能通过 unzip -t
