@@ -89,7 +89,7 @@ cd java && mvn install -DskipTests
 ```yaml
 uvp:
   openapi:
-    base-url: http://192.168.1.220:51002   # 后端端口，不是 51000
+    base-url: http://<平台IP>:51002   # 后端端口，不是 51000
     access-key: ${UVP_ACCESS_KEY:}
     secret-key: ${UVP_SECRET_KEY:}
     audience: ${UVP_AUDIENCE:}             # 必须等于平台 config.yml 的 openapi.audience
@@ -129,7 +129,7 @@ try (UvpClient uvp = new UvpClient(
 零第三方依赖，只要 Python 3.8+。`python/uvp_openapi.py` 可以整个拷进你的项目。
 
 ```bash
-export UVP_BASE_URL=http://192.168.1.220:51002
+export UVP_BASE_URL=http://<平台IP>:51002
 export UVP_ACCESS_KEY=uvp_xxxxxxxx
 export UVP_SECRET_KEY=xxxxxxxx        # base64url，32 字节
 export UVP_AUDIENCE=uvp-xxxxxxxx
@@ -266,6 +266,11 @@ python3 scripts/verify-parity.py --with-java # 再加 Java
 **改签名逻辑时**：三份实现（Java `HmacSigner`、Python `uvp_openapi.canonical`、Go `uvp.Canonical`）
 必须同步改，然后 `python3 scripts/verify-parity.py --with-java` 必须全绿。
 只改一门语言是最典型的错误——客户换语言接入就会 401，而且在 Java 那边完全看不出来。
+
+**对外交付前**：`python3 scripts/check-no-endpoints.py` 必须干净。
+这个仓库会连源码一起交给客户，真机地址、联调平台 IP、客户内网地址都不能出现在
+文档或注释里（`verify-parity.py` 每次都会先跑这一项）。内网 Nexus 这类确实要给客户的
+地址走脚本里的白名单，并写清理由。
 
 **契约变了（主仓 `api/openapi-v1.yaml`）**：
 

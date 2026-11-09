@@ -19,7 +19,7 @@ Java 客户端，封装 UVP GB28181 平台的机器对接接口（`/openapi/v1/*
 ```yaml
 uvp:
   openapi:
-    base-url: http://192.168.1.220:8280
+    base-url: http://<平台IP>:8280
     access-key: ${UVP_ACCESS_KEY:}
     secret-key: ${UVP_SECRET_KEY:}
     audience: uvp-dev-local        # 必须等于平台 config.yml 里的 openapi.audience
@@ -156,7 +156,7 @@ mvn install       # 产出 3 个 jar
 运行 demo：
 
 ```bash
-export UVP_BASE_URL=http://192.168.1.220:51002   # 绿色包的后端端口，不是 51000
+export UVP_BASE_URL=http://<平台IP>:51002   # 绿色包的后端端口，不是 51000
 export UVP_ACCESS_KEY=uvp_xxx
 export UVP_SECRET_KEY=xxx
 export UVP_AUDIENCE=uvp-xxxxxxxxxxxxxxxx   # 平台 config.yml 的 openapi.audience
@@ -176,7 +176,7 @@ curl 'http://localhost:8088/demo/devices'
 
 ```bash
 cd sdk/java
-export UVP_IT_BASE_URL=http://124.236.76.233:51002
+export UVP_IT_BASE_URL=http://<平台IP>:51002
 export UVP_IT_AK=uvp_xxx
 export UVP_IT_SK=xxx
 export UVP_IT_AUDIENCE=uvp-xxx

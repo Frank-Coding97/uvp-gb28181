@@ -44,7 +44,7 @@ func NewClient(baseURL, accessKey, secretKey, audience string) (*Client, error) 
 		return nil, fmt.Errorf("secret key 必须解码成 32 字节: %w", err)
 	}
 	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
-		return nil, fmt.Errorf("baseURL 形如 http://192.168.1.220:51002")
+		return nil, fmt.Errorf("baseURL 形如 http://<平台IP>:51002")
 	}
 	return &Client{
 		BaseURL:   strings.TrimSuffix(baseURL, "/"),

@@ -368,7 +368,7 @@ class UvpClient:
                  audience: str, timeout: float = 15.0) -> None:
         parts = urlsplit(base_url)
         if parts.scheme not in ("http", "https") or not parts.hostname:
-            raise ValueError("base_url 形如 http://192.168.1.220:51002")
+            raise ValueError("base_url 形如 http://<平台IP>:51002")
         self._scheme = parts.scheme
         self._host = parts.hostname
         self._port = parts.port

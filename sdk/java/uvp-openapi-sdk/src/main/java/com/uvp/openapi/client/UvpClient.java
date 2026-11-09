@@ -21,7 +21,7 @@ import okhttp3.OkHttpClient;
  *
  * <pre>{@code
  * UvpClient client = new UvpClient(UvpClientConfig.of(
- *         "http://192.168.1.220:8280", accessKey, secretKey, audience));
+ *         "http://<平台IP>:8280", accessKey, secretKey, audience));
  *
  * DeviceListResponse devices = client.devices().listDevices(1, 50, null, "online");
  * }</pre>

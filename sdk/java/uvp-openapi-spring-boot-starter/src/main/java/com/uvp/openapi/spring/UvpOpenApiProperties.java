@@ -9,7 +9,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * <pre>{@code
  * uvp:
  *   openapi:
- *     base-url: http://192.168.1.220:8280
+ *     base-url: http://<平台IP>:8280
  *     access-key: ${UVP_ACCESS_KEY:}
  *     secret-key: ${UVP_SECRET_KEY:}
  *     audience: uvp-prod-site-a

@@ -5,6 +5,8 @@
 真正容易出事的不是某一门语言写错，而是**只有一门语言被改对了**：
 例如有人调了 Java 的 canonical，Python 和 Go 还停在旧逻辑，客户换语言接入就开始报 401。
 
+顺带做地址体检：这个仓库要交给客户，真机地址和内网 IP 不能跟着源码一起发出去。
+
     python3 sdk/scripts/verify-parity.py                # 夹具对账 + Python + Go
     python3 sdk/scripts/verify-parity.py --with-java    # 再加 Java（需要 mvn）
     python3 sdk/scripts/verify-parity.py --fixture-only # 只查副本有没有漂移（CI 最快档）
@@ -75,6 +77,8 @@ def main() -> int:
         return 0 if ok else 1
 
     python = shutil.which("python3") or sys.executable
+    ok = run("地址体检（对外交付不许出现真实平台/内网 IP）",
+             [python, os.path.join(SDK_ROOT, "scripts", "check-no-endpoints.py")]) and ok
     ok = run("Python 自测", [python, os.path.join(SDK_ROOT, "python", "selftest.py")]) and ok
 
     go = shutil.which("go")

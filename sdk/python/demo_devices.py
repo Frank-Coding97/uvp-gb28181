@@ -11,7 +11,7 @@
    它参与签名，填错不会提示，只会稳定 401。
 3. 本机时钟与平台差不能超过 300 秒。
 
-    export UVP_BASE_URL=http://192.168.1.220:51002
+    export UVP_BASE_URL=http://<平台IP>:51002
     export UVP_ACCESS_KEY=uvp_xxxxxxxx
     export UVP_SECRET_KEY=xxxxxxxx
     export UVP_AUDIENCE=uvp-xxxxxxxx
