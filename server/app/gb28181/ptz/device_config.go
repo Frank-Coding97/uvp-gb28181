@@ -87,12 +87,22 @@ func (s *Service) ReadDeviceConfigs(ctx context.Context, target Target, configTy
 
 // DeviceConfigBackgroundQueueWindow 是后台批量配置读取的排队窗口。
 //
-// ⛔ 交互式读取必须保持 5 秒（见 [defaultQueueWindow]），这里只放宽后台任务：
-// 一台 67 通道的设备同步完目录会一次性排 68 条 ConfigDownload，而 SIP 发送槽位
-// 全局只有 16 个、每条还要等设备回 200 OK（实测约 2 秒）—— 5 秒窗口吸收不了，
-// 现场表现就是"34 条成功、96 条排队超时"，看着像设备不配合，其实是平台自己
-// 把还没轮到发的指令判死了。
-const DeviceConfigBackgroundQueueWindow = 60 * time.Second
+// ⛔ 交互式读取必须保持 5 秒（见 [defaultQueueWindow]），这里只放宽后台任务。
+//
+// 取值依据是**调度侧吞吐**，不是拍脑袋：一条指令占一个发送槽位、等设备 200 OK
+// 实测约 2 秒，所以在途槽位数 `defaultSchedulerCapacity` 决定吞吐（capacity/2 条/秒）。
+//
+//	window > backlog / (capacity/2)
+//
+// 2026-11-09 万级压测：10002 台首次注册一次性排 20006 条（每台 BasicParam +
+// 每通道 VideoParamOpt），capacity=128 ⇒ 约 64 条/秒 ⇒ 全量发完约 5 分钟。
+// 窗口若仍按 60 秒，86% 的指令会在队列里被判 `PTZ_QUEUE_TIMEOUT` —— 现场表现是
+// "设备配置一条都没刷出来"，而设备其实完全配合。取 10 分钟留一倍余量。
+//
+// ⚠️ 调大窗口**不会**让指令发得更早：只影响"排到窗口结束仍没轮到"是否直接判死。
+// 真实消化速度永远由调度槽位决定，槽位不够就加 `defaultSchedulerCapacity`。
+// ⚠️ 交互式操作（用户在页面上等结果）不受影响，仍是 5 秒。
+const DeviceConfigBackgroundQueueWindow = 10 * time.Minute
 
 // ReadDeviceConfigsBackground 与 ReadDeviceConfigs 等价，但使用后台排队窗口。
 // 只给"没有人在等结果"的批量任务用（设备能力刷新等）。

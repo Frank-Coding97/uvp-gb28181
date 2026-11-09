@@ -38,6 +38,21 @@ const (
 	// capabilityMaxFollowUpRound 是一次触发最多跑几轮（首轮 + 补轮）。
 	// 触发密集时靠它兜底，避免后台任务被反复续命。
 	capabilityMaxFollowUpRound = 3
+
+	// capabilityWorkerWait 是"等一个下行并发槽位"的最长等待。
+	//
+	// ⛔ 原来是无超时的 `r.workers <- struct{}{}`：槽位里的活一旦卡住
+	// （数据库慢、发送队列堵），4 个槽位占满后所有后续设备的刷新全部挂在这行上
+	// 永久阻塞，而设备级 running 标又不会释放 ⇒ 后续触发全被判"已在刷新"直接丢弃。
+	// 2026-11-09 万级压测的表现就是这样：10002 台里只有前 38 台真正读到了配置，
+	// 剩下 99.6% 静默消失，一条告警都没有。
+	capabilityWorkerWait = 30 * time.Second
+
+	// capabilityRefreshBudget 是一次设备刷新（含补轮）的整体预算。
+	//
+	// 兜底作用：无论内部哪一步卡住，到点必须放手并释放 running 标，
+	// 让下一批 Catalog 完成时还能重新触发。⛔ 不能设成"永久"。
+	capabilityRefreshBudget = 5 * time.Minute
 )
 
 // CapabilityRefresher 在一批 Catalog 完整入库后刷新设备能力。
@@ -89,20 +104,31 @@ func (r *deviceCapabilityRefresher) Refresh(ctx context.Context, deviceCode stri
 	if !r.begin(deviceCode) {
 		return
 	}
-	app.BackgroundWork.Go(func() {
+	// ⛔ 预算必须从本轮触发开始算，且覆盖所有补轮：卡住的活不能永远占着 running 标。
+	budget, cancel := context.WithTimeout(scope, capabilityRefreshBudget)
+	admitted := app.BackgroundWork.Go(func() {
+		defer cancel()
 		defer r.finish(deviceCode)
 		for round := 0; ; round++ {
-			r.refreshDevice(scope, deviceCode, roundKey(key, round), round)
+			r.refreshDevice(budget, deviceCode, roundKey(key, round), round)
 			if !r.consumePending(deviceCode) || round+1 >= capabilityMaxFollowUpRound {
 				return
 			}
 			// 分页 Catalog 的最后几批可能刚落地，等一拍再补一轮；
 			// 这一轮会被 FreshVideoParamChannels 滤成"只补没读到的通道"。
-			if !sleepContext(scope, capabilitySettleDelay) {
+			if !sleepContext(budget, capabilitySettleDelay) {
 				return
 			}
 		}
 	})
+	if !admitted {
+		// 停机中（BackgroundWork 已关闭准入）：fn 根本不会执行，
+		// 不会走到上面的 defer ⇒ 必须在这里手动释放，否则该设备永远被判"正在刷新"。
+		// ⛔ 这里**不能**调 finish：finish 见到 pending 会重新触发 Refresh，
+		// 而准入已关 ⇒ 再次 admitted=false ⇒ 无限递归。
+		cancel()
+		r.release(deviceCode)
+	}
 }
 
 func roundKey(key string, round int) string {
@@ -144,6 +170,14 @@ func (r *deviceCapabilityRefresher) finish(deviceCode string) {
 	if again {
 		r.Refresh(context.Background(), deviceCode, 0)
 	}
+}
+
+// release 只清状态、不触发补轮。给"任务压根没被准入"的路径用。
+func (r *deviceCapabilityRefresher) release(deviceCode string) {
+	r.mu.Lock()
+	delete(r.running, deviceCode)
+	delete(r.pending, deviceCode)
+	r.mu.Unlock()
 }
 
 func (r *deviceCapabilityRefresher) refreshDevice(scope context.Context, deviceCode, key string, round int) {
@@ -189,10 +223,21 @@ func (r *deviceCapabilityRefresher) refreshDevice(scope context.Context, deviceC
 		}
 		var wg sync.WaitGroup
 		for _, channel := range pending[start:end] {
-			r.workers <- struct{}{}
+			// ⛔ 必须带超时：无超时的话 4 个槽位一旦被卡住，
+			// 后面所有设备都永久挂在这行且 running 标不释放（见 capabilityWorkerWait 注释）。
+			if !acquireWorker(scope, r.workers, capabilityWorkerWait) {
+				app.Log(scope).Named("gb28181.capability").Warn("等不到下行并发槽位，本轮跳过剩余通道",
+					zap.String("event", "gb28181.capability.worker_wait_timeout"),
+					zap.String("device_id", deviceCode),
+					zap.String("reason_code", "capability_worker_wait_timeout"),
+					zap.Duration("waited", capabilityWorkerWait),
+					zap.String("likely_cause", "下行发送槽位被占满或某个配置读取长时间未返回；本轮放弃，等下一次 Catalog 完成再补"))
+				wg.Wait()
+				return
+			}
 			ch := channel
 			wg.Add(1)
-			app.BackgroundWork.Go(func() {
+			admitted := app.BackgroundWork.Go(func() {
 				defer func() { <-r.workers; wg.Done() }()
 				target := base
 				target.ChannelID, target.ChannelCode = ch.ID, ch.ChannelID
@@ -203,11 +248,35 @@ func (r *deviceCapabilityRefresher) refreshDevice(scope context.Context, deviceC
 					app.Log(scope).Named("gb28181.capability").Warn("VideoParamOpt 能力查询未排队", zap.String("device_id", deviceCode), zap.String("channel_id", ch.ChannelID), zap.Error(err))
 				}
 			})
+			if !admitted {
+				// 停机中：fn 不会执行 ⇒ 手动归还槽位，否则 wg.Wait() 会永久挂住。
+				<-r.workers
+				wg.Done()
+			}
 		}
 		wg.Wait()
 		if end < len(pending) && !sleepContext(scope, capabilityEnqueueInterval) {
 			return
 		}
+	}
+}
+
+// acquireWorker 在超时内抢一个下行并发槽位；ctx 取消/超时即返回 false。
+func acquireWorker(ctx context.Context, workers chan struct{}, wait time.Duration) bool {
+	select {
+	case workers <- struct{}{}:
+		return true
+	default:
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case workers <- struct{}{}:
+		return true
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return false
 	}
 }
 
