@@ -30,6 +30,10 @@ func (z *loggingCleanupZLM) OpenRtpServerWithSSRC(context.Context, zlm.OpenRtpSe
 	return nil, errors.New("unused")
 }
 
+func (z *loggingCleanupZLM) ConnectRtpServer(context.Context, zlm.ConnectRtpServerRequest) error {
+	return errors.New("unused")
+}
+
 func (z *loggingCleanupZLM) IsMediaOnline(context.Context, string, string) (bool, error) {
 	return false, nil
 }

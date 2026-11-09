@@ -38,12 +38,15 @@ func FormatRealtimeSSRC(domain string, sequence uint16) (string, error) {
 
 // PlayParams 实时点播 SDP 构造参数
 type PlayParams struct {
-	ServerID             string // 平台国标编码(o= 行)
-	RecvIP               string // 收流 IP(ZLM 地址)
-	RecvPort             int    // 收流端口(ZLM RTP 端口)
-	SSRC                 string // 媒体流 SSRC
-	TCPMode              bool   // true=TCP被动收流, false=UDP
-	Extended             bool   // true=为兼容部分设备声明额外视频负载类型
+	ServerID string // 平台国标编码(o= 行)
+	RecvIP   string // 收流 IP(ZLM 地址)
+	RecvPort int    // 收流端口(ZLM RTP 端口)
+	SSRC     string // 媒体流 SSRC
+	TCPMode  bool   // true=TCP收流(RTCP/RTP/AVP), false=UDP
+	// TCPActive 只在 TCPMode 为 true 时有意义:true=平台作主动方,offer 写
+	// a=setup:active,设备须被动等待、由平台回连;false=平台监听(a=setup:passive)。
+	TCPActive            bool
+	Extended             bool // true=为兼容部分设备声明额外视频负载类型
 	StreamIdentification string
 }
 
@@ -71,7 +74,13 @@ func BuildPlaySDP(p PlayParams) string {
 	b.WriteString("t=0 0\r\n")
 	writeVideoMediaDescription(&b, p.RecvPort, proto, p.Extended)
 	if p.TCPMode {
-		b.WriteString("a=setup:passive\r\n")
+		if p.TCPActive {
+			// 平台主动方:设备按 a=setup:active 的对端语义被动等待,平台稍后
+			// 回连对端应答 SDP 里的媒体地址。
+			b.WriteString("a=setup:active\r\n")
+		} else {
+			b.WriteString("a=setup:passive\r\n")
+		}
 		b.WriteString("a=connection:new\r\n")
 	}
 	if p.StreamIdentification != "" && ValidStreamIdentification(p.StreamIdentification) {

@@ -111,6 +111,27 @@ func TestBuildPlaySDP_TCP(t *testing.T) {
 	}
 }
 
+// TestBuildPlaySDP_TCPActive TCP 主动模式:平台作主动方,设备被动等待。
+func TestBuildPlaySDP_TCPActive(t *testing.T) {
+	sdp := BuildPlaySDP(PlayParams{ServerID: "x", RecvIP: "1.2.3.4", RecvPort: 40000, SSRC: "0200000001", TCPMode: true, TCPActive: true})
+	for _, want := range []string{
+		"m=video 40000 TCP/RTP/AVP",
+		"a=setup:active",
+		"a=connection:new",
+	} {
+		if !strings.Contains(sdp, want) {
+			t.Errorf("TCP 主动模式应含 %q\n完整SDP:\n%s", want, sdp)
+		}
+	}
+	if strings.Contains(sdp, "a=setup:passive") {
+		t.Fatalf("TCP 主动模式不能同时声明 passive(设备会以为等平台连):\n%s", sdp)
+	}
+	// TCPActive 只在 TCP 下有意义;UDP 下不得冒出 setup 属性。
+	if udp := BuildPlaySDP(PlayParams{ServerID: "x", RecvIP: "1.2.3.4", RecvPort: 40000, SSRC: "0200000001", TCPActive: true}); strings.Contains(udp, "a=setup:") {
+		t.Fatalf("UDP 模式不应带 setup 属性:\n%s", udp)
+	}
+}
+
 func TestBuildPlaySDPExtendedCompatibility(t *testing.T) {
 	got := BuildPlaySDP(PlayParams{
 		ServerID: "34020000002000000001", RecvIP: "192.0.2.10", RecvPort: 40000,

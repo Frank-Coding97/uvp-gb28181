@@ -233,7 +233,7 @@ func (c *Client) OpenRtpServerWithSSRC(ctx context.Context, request OpenRtpServe
 	params := map[string]string{
 		"stream_id":   request.StreamID,
 		"port":        strconv.Itoa(request.Port),
-		"tcp_mode":    strconv.Itoa(request.TCPMode),   // 0=UDP 1=TCP被动
+		"tcp_mode":    strconv.Itoa(request.TCPMode),   // 0=UDP 1=TCP被动 2=TCP主动
 		"only_track":  strconv.Itoa(request.OnlyTrack), // 0=音视频 2=仅视频
 		"re_use_port": "0",
 	}
@@ -259,6 +259,47 @@ func (c *Client) OpenRtpServerWithSSRC(ctx context.Context, request OpenRtpServe
 		return nil, fmt.Errorf("openRtpServer code=%d msg=%s", r.Code, r.Msg)
 	}
 	return &OpenRtpServerResult{Port: r.Port}, nil
+}
+
+// ConnectRtpServerRequest 描述 TCP 主动模式的出站连接:由 ZLM 主动连到设备
+// 的媒体监听端口,收流走这条 TCP 连接。
+type ConnectRtpServerRequest struct {
+	StreamID string
+	VHost    string
+	App      string
+	DestHost string
+	DestPort int
+}
+
+// ConnectRtpServer 让已以 tcp_mode=2(主动)打开的收流端回连设备。
+// ZLM 的 `connectRtpServer` 只有在 TCP 主动模式下才可用,其它模式返回 -1
+// ("仅支持tcp主动模式"),这部分错误原样透出,由上层判为点播失败。
+func (c *Client) ConnectRtpServer(ctx context.Context, request ConnectRtpServerRequest) error {
+	if request.StreamID == "" {
+		return fmt.Errorf("connectRtpServer stream_id 不能为空")
+	}
+	if request.DestHost == "" || request.DestPort <= 0 {
+		return fmt.Errorf("connectRtpServer 目标地址非法: %s:%d", request.DestHost, request.DestPort)
+	}
+	var r baseResp
+	params := map[string]string{
+		"stream_id": request.StreamID,
+		"dst_url":   request.DestHost,
+		"dst_port":  strconv.Itoa(request.DestPort),
+	}
+	if request.VHost != "" {
+		params["vhost"] = request.VHost
+	}
+	if request.App != "" {
+		params["app"] = request.App
+	}
+	if err := c.call(ctx, "connectRtpServer", params, &r); err != nil {
+		return err
+	}
+	if r.Code != 0 {
+		return fmt.Errorf("connectRtpServer code=%d msg=%s", r.Code, r.Msg)
+	}
+	return nil
 }
 
 // CloseRtpServer 关闭 RTP 收流端口

@@ -30,6 +30,7 @@ import (
 // ZLM ZLM 客户端能力(便于测试 mock)
 type ZLM interface {
 	OpenRtpServerWithSSRC(ctx context.Context, request zlm.OpenRtpServerRequest) (*zlm.OpenRtpServerResult, error)
+	ConnectRtpServer(ctx context.Context, request zlm.ConnectRtpServerRequest) error
 	CloseRtpServer(ctx context.Context, streamID string) error
 	IsMediaOnline(ctx context.Context, app, stream string) (bool, error)
 }
@@ -670,12 +671,14 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 	// 运维看到它无动作可做(C04 判据②)。校验失败走 failed 事件,信息不会丢。
 	app.Log(playCtx).Named("play").Debug("点播设备与通道校验通过", zap.String("event", "gb28181.play.validation_succeeded"), zap.String("stage", "validation"), zap.String("outcome", "succeeded"), zap.String("device_id", deviceID), zap.String("channel_id", channelID))
 
-	// 平台点播仅实现 UDP 与 TCP 被动收流(ZLM tcp_mode 0/1,SDP 仅生成 passive
-	// setup)。TCP-Active 若静默按 UDP 处理,设备按主动模式协商必然失败,
-	// 必须在发起前显式拒绝而不是静默回退。
-	if ch.StreamTransport == "TCP-Active" {
-		return nil, fmt.Errorf("通道流传输模式为 TCP-Active,平台点播暂不支持,请改为 UDP 或 TCP-Passive")
-	}
+	// 通道流传输模式决定 SDP 的 a=setup 与 ZLM 的收流模式:
+	//   UDP          → a=setup 不出现,ZLM tcp_mode=0
+	//   TCP-Passive  → a=setup:passive,ZLM tcp_mode=1(平台监听,设备回连)
+	//   TCP-Active   → a=setup:active,ZLM tcp_mode=2(平台回连设备,见 connectTCPActivePeer)
+	// 三者都不能静默降级:配置与报文不一致时设备按自己理解的模式协商,
+	// 表现为"信令全通、画面一直没有"。
+	tcpActive := strings.EqualFold(ch.StreamTransport, "TCP-Active")
+	tcpPassive := strings.EqualFold(ch.StreamTransport, "TCP-Passive")
 	if req.IsQualified() {
 		// This is the first qualification gate: the device/channel snapshot
 		// is known, but no reuse probe or media side effect has happened yet.
@@ -846,6 +849,12 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 			if mode == LiveModeFixed {
 				return nil, fmt.Errorf("固定播放地址不支持单端口收流，请选择多端口节点")
 			}
+			if tcpActive {
+				// 单端口复用是「一个常驻监听 + 按 SSRC 分流」,没有出站连接
+				// 能力,物理上做不了 TCP 主动收流。这里必须说清楚是节点模式
+				// 不匹配,而不是让用户以为通道配置写错了。
+				return nil, fmt.Errorf("TCP-Active 通道要求多端口收流的媒体节点,节点 %d 为单端口模式", selectedNode.ID)
+			}
 			receiver, receiverErr := sharedReceiver(client)
 			if receiverErr != nil {
 				return nil, receiverErr
@@ -894,10 +903,12 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 	if ch.AudioEnabled {
 		onlyTrack = 0 // ZLM: 0=音视频
 	}
-	tcpPassive := ch.StreamTransport == "TCP-Passive"
 	tcpMode := 0
-	if tcpPassive {
-		tcpMode = 1
+	switch {
+	case tcpActive:
+		tcpMode = 2 // ZLM: TCP 主动(平台回连设备)
+	case tcpPassive:
+		tcpMode = 1 // ZLM: TCP 被动(平台监听)
 	}
 	recvPort := rtpFallback
 	if pickedNode == nil || pickedNode.EffectiveRTPReceiveMode() != "single" {
@@ -927,7 +938,8 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 		RecvIP:               recvHost,
 		RecvPort:             recvPort,
 		SSRC:                 ssrc,
-		TCPMode:              tcpPassive,
+		TCPMode:              tcpActive || tcpPassive,
+		TCPActive:            tcpActive,
 		Extended:             gbconfig.SDPExtensionEnabled(),
 		StreamIdentification: ch.StreamIdentification,
 	})
@@ -1013,6 +1025,17 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 		}
 	}
 
+	// TCP-Active:offer 里已写 a=setup:active,设备按被动等待,必须由平台
+	// 连过去收流。回连目标只能从对端应答 SDP 的 m=video 端口取——用配置端口
+	// 或信令端口都是猜的,猜错的表现就是 INVITE 成功、画面永远不出现。
+	if tcpActive {
+		if connectErr := s.connectTCPActivePeer(playCtx, client, streamID, dev, outcome); connectErr != nil {
+			// 设备侧会话已建立(200 OK + ACK),必须发 BYE 收掉,否则设备会
+			// 一直占着这路会话,和 P-014 的"90 秒内该通道全部超时"同源。
+			return s.rollbackFailedStart(playCtx, req, result, liveRef, client, connectErr, true, &releaseSSRC)
+		}
+	}
+
 	// 7. WaitReady:the hook only wakes the waiter. The exact generation and
 	// target node must still own the stream and report the media online.
 	readyCtx := playCtx
@@ -1067,6 +1090,50 @@ func (s *Service) startDirectTransaction(ctx context.Context, req Request) (*Res
 	return result, nil
 }
 
+// tcpActiveConnectTimeout 限制回连设备的等待时间。ZLM 自身的 connect 超时是
+// 5s,这里给到 8s,让"连接被拒"能先以 ZLM 的错误码返回,而不是被我们的
+// context 抢先截断成一个看不出原因的 deadline exceeded。
+const tcpActiveConnectTimeout = 8 * time.Second
+
+// connectTCPActivePeer 让 ZLM 以 TCP 主动方身份回连设备并开始收流。
+//
+// 回连目标只能来自对端应答 SDP:平台 offer 里的 a=setup:active 只表达"我要
+// 主动连",并不告诉任何人设备在哪个端口等;设备监听端口是它自己分配的,写死
+// 配置端口或复用信令端口都是猜。应答里地址为空/0.0.0.0 时才退回信令来源地址。
+func (s *Service) connectTCPActivePeer(ctx context.Context, client ZLM, streamID string, dev *gbmodels.GbDevice, outcome uac.InviteOutcome) error {
+	target, ok := sdp.ParseAnswerMediaTarget(outcome.AnswerSDP)
+	if !ok || target.Port <= 0 {
+		return fmt.Errorf("TCP-Active 点播失败: 设备应答 SDP 未给出可回连的视频端口")
+	}
+	if target.WantsConnectionFromPeer() {
+		// 设备也声明要自己连平台:双方都当主动方,谁都不会去 connect。
+		// 这只能靠改配置解决,必须把原因说给人看,不能报成"超时"。
+		return fmt.Errorf("TCP-Active 点播失败: 设备应答声明 a=setup:active(要求由设备连平台),与通道的 TCP-Active 配置冲突,请把该通道改为 TCP-Passive")
+	}
+	host := target.IP
+	if host == "" && dev != nil {
+		host = strings.TrimSpace(dev.IP)
+	}
+	if host == "" {
+		return fmt.Errorf("TCP-Active 点播失败: 无法确定设备媒体地址(应答未声明且无信令来源地址)")
+	}
+	connectCtx, cancel := context.WithTimeout(detachedContext(ctx), tcpActiveConnectTimeout)
+	defer cancel()
+	if err := client.ConnectRtpServer(connectCtx, zlm.ConnectRtpServerRequest{
+		StreamID: streamID, DestHost: host, DestPort: target.Port,
+	}); err != nil {
+		return fmt.Errorf("TCP-Active 点播失败: 回连设备 %s 被拒: %w", net.JoinHostPort(host, strconv.Itoa(target.Port)), err)
+	}
+	app.Log(ctx).Named("play").Info("TCP-Active 已回连设备收流",
+		zap.String("event", "gb28181.play.tcp_active_connected"),
+		zap.String("stage", "media_connect"),
+		zap.String("outcome", "succeeded"),
+		zap.String("stream_id", streamID),
+		zap.String("peer_addr", net.JoinHostPort(host, strconv.Itoa(target.Port))),
+		zap.String("answer_setup", target.Setup))
+	return nil
+}
+
 func playFailureReason(err error) string {
 	switch {
 	case errors.Is(err, ErrDeviceNotFound):
@@ -1100,6 +1167,10 @@ func classifyLifecycleFailure(err error) (LifecycleStage, string, string) {
 		}
 		return StageInvite, EventInviteRejected, ReasonInviteRejected
 	case strings.Contains(err.Error(), "RTP"), strings.Contains(err.Error(), "收流端口"):
+		return StageRTP, EventRTPAllocationFailed, ReasonRTPAllocationFailed
+	case strings.Contains(err.Error(), "TCP-Active 点播失败"):
+		// 收流端已建好、信令也已协商成功,卡在"连不上设备媒体端口"这一步,
+		// 归到收流阶段而不是参数校验,否则排查方向会被带偏。
 		return StageRTP, EventRTPAllocationFailed, ReasonRTPAllocationFailed
 	case strings.Contains(err.Error(), "节点"):
 		return StageNode, EventNodeSelectionFailed, ReasonNodeUnavailable

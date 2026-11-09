@@ -54,6 +54,16 @@ type mockZLM struct {
 	online        atomic.Bool
 	onlineCalls   atomic.Int32
 	onlineErr     error
+	// connectCalls / lastConnect* 供 TCP-Active 用例断言"回了哪个地址的哪个端口"
+	connectCalls atomic.Int32
+	lastConnect  atomic.Value // zlm.ConnectRtpServerRequest
+	connectErr   error
+}
+
+func (m *mockZLM) ConnectRtpServer(ctx context.Context, request zlm.ConnectRtpServerRequest) error {
+	m.connectCalls.Add(1)
+	m.lastConnect.Store(request)
+	return m.connectErr
 }
 
 func (m *mockZLM) OpenRtpServerWithSSRC(ctx context.Context, request zlm.OpenRtpServerRequest) (*zlm.OpenRtpServerResult, error) {

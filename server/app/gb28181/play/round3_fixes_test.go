@@ -16,29 +16,39 @@ import (
 )
 
 // cross-review round-3 修复回归:
-// #1 TCP-Active 显式拒绝 / #2 stale RTP 关闭失败保 SSRC / #3 总超时覆盖前置阶段
+// #1 TCP-Active 不得静默降级 / #2 stale RTP 关闭失败保 SSRC / #3 总超时覆盖前置阶段
 
-func TestStartRejectsTCPActiveTransport(t *testing.T) {
-	withFixedAddressPlaybackSettings(t, true, false)
+// ⚠️ 口径变更（2026-11-09）：本用例原先断言「TCP-Active 一律显式拒绝」。
+// 客户验收要求补齐主动收流后，拒绝不再是合同 —— 但**原意保留**：
+// TCP-Active 绝不能按 UDP/被动静默处理。现在断言改为「必须真的按主动模式走」：
+// offer 写 a=setup:active、ZLM 用 tcp_mode=2、并按对端应答回连一次。
+func TestStartTcpActiveNeverFallsBackToPassive(t *testing.T) {
+	withFixedAddressPlaybackSettings(t, false, false)
 	z := &mockZLM{port: 40000}
 	z.online.Store(true)
-	inviter := &mockInviter{}
+	inviter := &mockInviter{outcome: uac.InviteOutcome{
+		RequestID: "req-tcp-active", RequestSent: true, FinalStatus: 200,
+		AckSucceeded: true, AnswerSDP: answerSDPWithMedia("192.168.10.203", 30000, "passive"),
+	}}
 	ch := aChannel()
 	ch.StreamTransport = "TCP-Active"
-	service := NewWithScheduler(testCfg(), fixedTestPicker{mediaNode: nil}, fixedTestRegistry{},
-		stream.NewLocationMap(), inviter, uac.NewSessionManager(), stream.NewNotifier(),
-		fakeDevices{onlineDevice()}, &fakeChannels{c: ch},
-		WithNodeClientFactory(func(*node.Node) ZLM { return z }))
+	service, _, _ := newFixedSvc(t, z, inviter, onlineDevice(), ch)
 
-	_, err := service.EnsureLive(context.Background(), Request{
-		DeviceID: onlineDevice().DeviceID, ChannelID: ch.ChannelID,
-		Trigger: "on_stream_not_found",
-	})
-	if err == nil || !strings.Contains(err.Error(), "TCP-Active") {
-		t.Fatalf("error=%v, want explicit TCP-Active rejection", err)
+	_, err := service.Start(context.Background(), onlineDevice().DeviceID, ch.ChannelID)
+	if err != nil {
+		t.Fatalf("TCP-Active 应走主动收流;err=%v", err)
 	}
-	if z.openCalls.Load() != 0 {
-		t.Fatalf("TCP-Active must be rejected before RTP open, open=%d", z.openCalls.Load())
+	if got := z.lastTCPMode.Load(); got != 2 {
+		t.Fatalf("TCP-Active 必须以 tcp_mode=2 开收流端, got=%d", got)
+	}
+	if !strings.Contains(inviter.lastBody, "a=setup:active") {
+		t.Fatalf("offer 必须声明 a=setup:active:\n%s", inviter.lastBody)
+	}
+	if strings.Contains(inviter.lastBody, "a=setup:passive") {
+		t.Fatalf("TCP-Active 不能同时声明 passive:\n%s", inviter.lastBody)
+	}
+	if z.connectCalls.Load() != 1 {
+		t.Fatalf("必须回连一次设备媒体端口, connect=%d", z.connectCalls.Load())
 	}
 }
 
