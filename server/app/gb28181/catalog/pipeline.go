@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -25,13 +27,75 @@ import (
 // - anomaly 编码 -> 兜底 virtual_org + 写审计
 type Pipeline struct {
 	db *gorm.DB
+
+	// slots 是入库并发闸门，容量 = defaultIngestConcurrency。
+	//
+	// ⛔⛔ 为什么必须有它：ingest 内部是**逐条 item 各开一个事务**（见
+	// ingestOne），每个事务都要独占一条 DB 连接。一台设备一次 Catalog
+	// 应答动辄几十条通道 ⇒ 单个 Ingest 就要连着申请几十次连接。
+	// 实测 2026-11-09 万级压测：128 台设备同时回目录，把 maxopenconns=128
+	// 的连接池瞬间打满，128 条事务悬挂在 gb_catalog_node 上不提交不释放
+	// ⇒ 全平台 DB 饥饿（注册/云台/后台任务全部 context deadline exceeded），
+	// 而且**永不恢复**，只能 KILL 连接或重启服务。
+	// 闸门把同时在跑的事务批次数压到 16，连接占用恒 ≤ 16，留足余量。
+	slots    chan struct{}
+	slotsOne sync.Once
 }
+
+// defaultIngestConcurrency 同时运行的入库批次上限。
+//
+// 取值依据：单批最坏 ~60 条通道 × 单条 ~30ms ≈ 2s，16 并发下 128 批
+// 约 8 轮 ≈ 16s 消化完，既不会拖垮连接池，也不会让目录同步慢到超时。
+const defaultIngestConcurrency = 16
+
+// IngestBatchTimeout 单批入库的总预算。
+//
+// ⛔⛔ 必须显式给 deadline：上游 ctx 来自 SIP 消息处理，**没有超时**。
+// 没有 deadline 就意味着任何一次卡住都没有东西能把它拉回来 ——
+// 实测那次悬挂了 8 分钟以上，中间所有 DB 操作跟着一起死。
+const IngestBatchTimeout = 60 * time.Second
+
+// ingestSlotWaitTimeout 排队等入库槽位的上限。
+//
+// 闸门满载时如果只是傻等，而上游 ctx 又没有 deadline，就会退化成
+// 无限堆积。超过这个时间直接放弃本次入库（上层记 Warn），
+// 让 SIP 处理协程尽快释放 —— 宁可这一轮目录没同步上，也不能把消息通道堵死。
+const ingestSlotWaitTimeout = 30 * time.Second
 
 var ErrOwnerDeptRequired = errors.New("catalog: owner dept required")
 
 // New 构造 Pipeline
 func New(db *gorm.DB) *Pipeline {
-	return &Pipeline{db: db}
+	return &Pipeline{db: db, slots: make(chan struct{}, defaultIngestConcurrency)}
+}
+
+// gate 返回并发闸门；兼容用结构体字面量构造的 Pipeline（测试/历史代码）。
+func (p *Pipeline) gate() chan struct{} {
+	p.slotsOne.Do(func() {
+		if p.slots == nil {
+			p.slots = make(chan struct{}, defaultIngestConcurrency)
+		}
+	})
+	return p.slots
+}
+
+// acquire 抢占一个入库槽位，并派生出带 deadline 的 ctx。
+// 返回的 release 必须调用（通常 defer）。
+func (p *Pipeline) acquire(ctx context.Context) (context.Context, func(), error) {
+	gate := p.gate()
+	waitCtx, cancelWait := context.WithTimeout(ctx, ingestSlotWaitTimeout)
+	defer cancelWait()
+	select {
+	case gate <- struct{}{}:
+	case <-waitCtx.Done():
+		return ctx, func() {}, fmt.Errorf("catalog: 入库并发闸门排队超时: %w", waitCtx.Err())
+	}
+	bounded, cancel := context.WithTimeout(ctx, IngestBatchTimeout)
+	release := func() {
+		cancel()
+		<-gate
+	}
+	return bounded, release, nil
 }
 
 // Ingest 全量入库一批 CatalogItem(manscdp 解析后调用)
@@ -49,6 +113,12 @@ func (p *Pipeline) ingest(ctx context.Context, sender Sender, items []CatalogIte
 	if len(items) == 0 {
 		return nil
 	}
+	// 过闸门 + 兜底 deadline：见 slots / IngestBatchTimeout 的注释。
+	ctx, release, acquireErr := p.acquire(ctx)
+	if acquireErr != nil {
+		return acquireErr
+	}
+	defer release()
 	if sender.OwnerDeptID == 0 {
 		sender.OwnerDeptID = p.resolveOwnerDeptID(ctx, sender)
 	}
