@@ -67,6 +67,23 @@ describe("useUpgradeNotice", () => {
     wrapper.unmount();
   });
 
+  it("页面保持打开时及时读取后台发现的新版本", async () => {
+    vi.useFakeTimers();
+    try {
+      const wrapper = await mountHost();
+      expect((wrapper.vm as any).latestVersion).toBe("1.2.0");
+      api.getNotice.mockResolvedValue({ data: notice({ latestVersion: "1.3.0" }) });
+
+      await vi.advanceTimersByTimeAsync(2 * 60 * 1000);
+
+      expect(api.getNotice).toHaveBeenCalledTimes(2);
+      expect((wrapper.vm as any).latestVersion).toBe("1.3.0");
+      wrapper.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("忽略过的版本不再点亮", async () => {
     api.getNotice.mockResolvedValue({ data: notice({ ignored: true }) });
     const wrapper = await mountHost();

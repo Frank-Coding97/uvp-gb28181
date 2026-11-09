@@ -51,6 +51,21 @@ func TestCapabilityCatalogReusesSysAPITitlesAndGroups(t *testing.T) {
 	require.NotContains(t, seenScopes, "play:live:apply")
 }
 
+func TestSharedInternalAssetsAgreeOnSysAPIGroup(t *testing.T) {
+	groups := make(map[string]string)
+	for _, definition := range capabilityDefinitions {
+		key := definition.internalPath + "\x00" + definition.sysAPIMethod
+		group := expectedSysAPIGroup(definition)
+		if previous, exists := groups[key]; exists {
+			t.Run(definition.scope, func(t *testing.T) {
+				require.Equal(t, previous, group, "shared internal asset %s %s", definition.sysAPIMethod, definition.internalPath)
+			})
+			continue
+		}
+		groups[key] = group
+	}
+}
+
 // Publishing a release must not change what the platform says it can do. The
 // release reader and the legacy static registry are two implementations of the
 // same code-owned capability surface, so a freshly published release has to read back

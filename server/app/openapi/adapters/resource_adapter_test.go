@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -27,6 +28,8 @@ const (
 	adapterOtherDevice = "34020000002000000012"
 	adapterRootChannel = "37011200001310000010"
 )
+
+var adapterFixtureTime = time.Date(2026, 11, 9, 12, 30, 0, 0, time.UTC)
 
 type resourceReaderStub struct {
 	listDevices      func(context.Context, resource.DepartmentScope, resource.DeviceListOptions) (resource.DevicePage, error)
@@ -126,12 +129,17 @@ func newDeviceChannelAdapterService(t *testing.T) *resource.Service {
 		{DeviceID: adapterDeviceID, Name: "child-device", Status: gbmodels.DeviceStatusOnline, OwnerDeptID: 11},
 		{DeviceID: adapterOtherDevice, Name: "other-device", Status: gbmodels.DeviceStatusOnline, OwnerDeptID: 20},
 	} {
+		device.CreatedAt, device.UpdatedAt = adapterFixtureTime, adapterFixtureTime
+		device.Firmware, device.Transport = "v3.2", "TCP"
 		require.NoError(t, db.Create(&device).Error)
 	}
 	for _, channel := range []gbmodels.GbChannel{
 		{DeviceID: adapterRootDevice, ChannelID: adapterRootChannel, Name: "root-channel", Status: gbmodels.ChannelStatusOnline, OwnerDeptID: rootID},
 		{DeviceID: adapterDeviceID, ChannelID: adapterChannelID, Name: "child-channel", Status: gbmodels.ChannelStatusOnline, OwnerDeptID: 11, PTZType: 1},
 	} {
+		channel.CreatedAt, channel.UpdatedAt = adapterFixtureTime, adapterFixtureTime
+		channel.Owner, channel.StreamNumberList, channel.StreamTransport = "园区", "0/1", "TCP-Active"
+		channel.Longitude, channel.Latitude = 117.25, 31.75
 		require.NoError(t, db.Create(&channel).Error)
 	}
 	return resource.New(db)
@@ -149,6 +157,8 @@ func TestDeviceChannelAdaptersPreserveTrustedScopeAndStableIdentifiers(t *testin
 					DeviceID: adapterDeviceID,
 					Name:     "child-device",
 					Status:   "online",
+					Firmware: "v3.2", Transport: "TCP", IP: "192.0.2.10", Port: 5060,
+					ChannelCount: 3, OnlineChannelCount: 2,
 				}},
 				Page: 2, PageSize: 25, Total: 1,
 			}, nil
@@ -169,7 +179,7 @@ func TestDeviceChannelAdaptersPreserveTrustedScopeAndStableIdentifiers(t *testin
 
 	body, err := json.Marshal(page)
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"items":[{"deviceId":"34020000002000000011","name":"child-device","alias":"","manufacturer":"","model":"","status":"online"}],"page":2,"pageSize":25,"total":1}`, string(body))
+	assert.JSONEq(t, `{"items":[{"deviceId":"34020000002000000011","name":"child-device","alias":"","manufacturer":"","model":"","status":"online","firmware":"v3.2","transport":"TCP","ip":"192.0.2.10","port":5060,"registerTime":null,"registerExpireAt":null,"keepaliveTime":null,"keepaliveInterval":0,"expires":0,"offlineAt":null,"channelCount":3,"onlineChannelCount":2,"reportedVersion":"","effectiveVersion":"","effectiveVersionSource":"","effectiveVersionAt":null,"protocolOverride":"","subscribeCapability":"","subscribeLastTest":null,"subscribeExpiresAt":null,"reportedCharset":"","wireCharset":"","reportedCharsetAt":null,"createdAt":null,"updatedAt":null}],"page":2,"pageSize":25,"total":1}`, string(body))
 
 	assert.Equal(t, DeviceListAdapterKey, adapter.Key())
 	assert.Equal(t, http.StatusOK, HTTPStatus(nil))
@@ -335,10 +345,15 @@ func TestDeviceChannelAdaptersCloseTheActualScopedResourceReadLoop(t *testing.T)
 	require.NoError(t, err)
 	page, ok := data.(resource.DevicePage)
 	require.True(t, ok)
-	require.Equal(t, []resource.Device{
-		{DeviceID: adapterRootDevice, Name: "root-device", Status: "online"},
-		{DeviceID: adapterDeviceID, Name: "child-device", Status: "online"},
-	}, page.Items)
+	expectedDevices := []resource.Device{
+		{DeviceID: adapterRootDevice, Name: "root-device", Status: "online", Firmware: "v3.2", Transport: "TCP", KeepaliveInterval: 60, ChannelCount: 1, OnlineChannelCount: 1, EffectiveVersion: "2016", EffectiveVersionSource: "default", ProtocolOverride: "auto", SubscribeCapability: "unknown", CreatedAt: &adapterFixtureTime, UpdatedAt: &adapterFixtureTime},
+		{DeviceID: adapterDeviceID, Name: "child-device", Status: "online", Firmware: "v3.2", Transport: "TCP", KeepaliveInterval: 60, ChannelCount: 1, OnlineChannelCount: 1, EffectiveVersion: "2016", EffectiveVersionSource: "default", ProtocolOverride: "auto", SubscribeCapability: "unknown", CreatedAt: &adapterFixtureTime, UpdatedAt: &adapterFixtureTime},
+	}
+	expectedDevicesJSON, err := json.Marshal(expectedDevices)
+	require.NoError(t, err)
+	actualDevicesJSON, err := json.Marshal(page.Items)
+	require.NoError(t, err)
+	require.JSONEq(t, string(expectedDevicesJSON), string(actualDevicesJSON))
 
 	channelAdapter := resourceAdapterFor(t, service, ChannelDetailAdapterKey)
 	data, err = channelAdapter.Execute(context.Background(), catalogruntime.Invocation{
@@ -347,10 +362,14 @@ func TestDeviceChannelAdaptersCloseTheActualScopedResourceReadLoop(t *testing.T)
 	require.NoError(t, err)
 	channel, ok := data.(resource.Channel)
 	require.True(t, ok)
-	require.Equal(t, resource.Channel{DeviceID: adapterDeviceID, ChannelID: adapterChannelID, Name: "child-channel", Status: "online", PTZType: 1}, channel)
+	require.Equal(t, adapterDeviceID, channel.DeviceID)
+	require.Equal(t, adapterChannelID, channel.ChannelID)
+	require.Equal(t, "child-channel", channel.Name)
+	require.Equal(t, "online", channel.Status)
+	require.EqualValues(t, 1, channel.PTZType)
 	channelJSON, err := json.Marshal(channel)
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"deviceId":"34020000002000000011","channelId":"37011200001310000011","name":"child-channel","alias":"","manufacturer":"","model":"","status":"online","ptzType":1}`, string(channelJSON))
+	assert.JSONEq(t, `{"deviceId":"34020000002000000011","channelId":"37011200001310000011","name":"child-channel","alias":"","manufacturer":"","model":"","status":"online","ptzType":1,"owner":"园区","civilCode":"","parentId":"","roomType":0,"supplyLightType":0,"directionType":0,"resolution":"","positionType":0,"useType":0,"photoelectricImagingType":"","capturePositionType":"","streamNumberList":"0/1","ipAddress":"","port":0,"longitude":117.25,"latitude":31.75,"positionSource":"","positionUpdatedAt":null,"statusEvent":"","streamId":"","onDemandLive":true,"streamTransport":"TCP-Active","audioEnabled":true,"recordingMode":"off","cloudRecordingEnabled":false,"cloudRecordingState":"disabled","cloudRecordingError":"","cloudRecordingUpdatedAt":null,"snapshotAt":null,"createdAt":"2026-11-09T12:30:00Z","updatedAt":"2026-11-09T12:30:00Z"}`, string(channelJSON))
 
 	_, err = resourceAdapterFor(t, service, DeviceDetailAdapterKey).Dispatch(context.Background(), Request{ResourceScope: access, DeviceID: adapterOtherDevice})
 	require.ErrorIs(t, err, ErrNotFound)

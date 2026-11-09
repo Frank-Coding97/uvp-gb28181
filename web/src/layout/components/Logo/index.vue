@@ -84,7 +84,7 @@ import LogoSvg from "@/components/s-logo/index.vue";
 import { useUpgradeNotice } from "@/hooks/useUpgradeNotice";
 
 /**
- * 新版本徽标：后台每 6 小时查一次官方源，这里只读缓存。
+ * 新版本徽标：后台每 15 分钟查一次官方源，这里只读缓存。
  * 只有「确实有更新且没被忽略」时才渲染（见模板里的 pending 判定），
  * 点开是更新卡片（照 Sub2API 的形态）。
  */

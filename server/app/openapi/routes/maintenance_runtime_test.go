@@ -21,7 +21,7 @@ func TestMaintenanceRuntimeExposesFailClosedForwardersAndRebindsService(t *testi
 	runtime, err := NewMaintenanceRuntime(newCatalogRuntimeTestDB(t))
 	require.NoError(t, err)
 	forwarders := runtime.Forwarders()
-	require.Len(t, forwarders, 8)
+	require.Len(t, forwarders, 15)
 
 	registry := catalogruntime.NewAdapterRegistry()
 	for key, adapter := range forwarders {

@@ -71,10 +71,10 @@ func NewDeviceConfigAdapterRegistrations(service DeviceConfigService) []catalogr
 	definitions := []deviceConfigAdapter{
 		{key: DeviceConfigRefreshAdapterKey, scope: DeviceConfigRefreshScope, method: "POST", operation: refreshDeviceConfig, service: service},
 		{key: DeviceConfigReadAdapterKey, scope: DeviceConfigReadScope, method: "GET", operation: readDeviceConfig, service: service},
-		{key: DeviceConfigApplyAdapterKey, scope: DeviceConfigApplyScope, method: "PUT", operation: applyDeviceConfig, service: service},
+		{key: DeviceConfigApplyAdapterKey, scope: DeviceConfigApplyScope, method: "POST", operation: applyDeviceConfig, service: service},
 		{key: VideoParamsRefreshAdapterKey, scope: VideoParamsRefreshScope, method: "POST", operation: refreshVideoParams, service: service},
 		{key: VideoParamsReadAdapterKey, scope: VideoParamsReadScope, method: "GET", operation: readVideoParams, service: service},
-		{key: VideoParamsApplyAdapterKey, scope: VideoParamsApplyScope, method: "PUT", operation: applyVideoParams, service: service},
+		{key: VideoParamsApplyAdapterKey, scope: VideoParamsApplyScope, method: "POST", operation: applyVideoParams, service: service},
 		{key: DeviceConfigOperationReadAdapterKey, scope: DeviceConfigOperationReadScope, method: "GET", operation: readDeviceConfigOperation, service: service},
 	}
 	registrations := make([]catalogruntime.AdapterRegistration, 0, len(definitions))

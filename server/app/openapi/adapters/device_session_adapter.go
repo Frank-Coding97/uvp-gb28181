@@ -73,7 +73,7 @@ func newDeviceSessionAdapters(service DeviceSessionService) []*deviceSessionAdap
 		&deviceSessionAdapter{key: CaptureImageAdapterKey, scope: CaptureImageReadScope, method: "GET", operation: captureImageRead, service: service},
 		&deviceSessionAdapter{key: LibraryReadAdapterKey, scope: LibraryReadScope, method: "GET", operation: libraryList, service: service},
 		&deviceSessionAdapter{key: LibraryImageAdapterKey, scope: LibraryImageReadScope, method: "GET", operation: libraryImageRead, service: service},
-		&deviceSessionAdapter{key: LibraryDeleteAdapterKey, scope: LibraryDeleteScope, method: "DELETE", operation: libraryDelete, service: service},
+		&deviceSessionAdapter{key: LibraryDeleteAdapterKey, scope: LibraryDeleteScope, method: "POST", operation: libraryDelete, service: service},
 	}
 }
 

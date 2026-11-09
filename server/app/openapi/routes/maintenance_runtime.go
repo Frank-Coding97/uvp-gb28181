@@ -29,6 +29,9 @@ func (runtime *MaintenanceRuntime) Forwarders() map[string]catalogruntime.Adapte
 	for _, registration := range adapters.NewMaintenanceAdapterRegistrations(nil, nil, nil) {
 		keys = append(keys, registration.Key)
 	}
+	for _, registration := range adapters.NewChannelRefreshAdapterRegistrations(nil, nil, nil) {
+		keys = append(keys, registration.Key)
+	}
 	return runtime.bindings.Forwarders(keys)
 }
 
@@ -40,6 +43,10 @@ func (runtime *MaintenanceRuntime) Replace(service adapters.MaintenanceExecutor)
 		adapters.NewGormMaintenanceResolver(runtime.db), service,
 		adapters.NewGormMaintenanceOperationReader(runtime.db),
 	)
+	registrations = append(registrations, adapters.NewChannelRefreshAdapterRegistrations(
+		adapters.NewGormMaintenanceResolver(runtime.db), service,
+		adapters.NewGormMaintenanceOperationReader(runtime.db),
+	)...)
 	return runtime.bindings.Bind(registrations)
 }
 

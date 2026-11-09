@@ -58,34 +58,110 @@ type Service struct {
 func New(db *gorm.DB) *Service { return &Service{db: db} }
 
 type Device struct {
-	DeviceID     string `json:"deviceId"`
-	Name         string `json:"name"`
-	Alias        string `json:"alias"`
-	Manufacturer string `json:"manufacturer"`
-	Model        string `json:"model"`
-	Status       string `json:"status"`
+	DeviceID               string     `json:"deviceId"`
+	Name                   string     `json:"name"`
+	Alias                  string     `json:"alias"`
+	Manufacturer           string     `json:"manufacturer"`
+	Model                  string     `json:"model"`
+	Status                 string     `json:"status"`
+	Firmware               string     `json:"firmware"`
+	Transport              string     `json:"transport"`
+	IP                     string     `json:"ip"`
+	Port                   int        `json:"port"`
+	RegisterTime           *time.Time `json:"registerTime"`
+	RegisterExpireAt       *time.Time `json:"registerExpireAt"`
+	KeepaliveTime          *time.Time `json:"keepaliveTime"`
+	KeepaliveInterval      int        `json:"keepaliveInterval"`
+	Expires                int        `json:"expires"`
+	OfflineAt              *time.Time `json:"offlineAt"`
+	ChannelCount           int64      `json:"channelCount"`
+	OnlineChannelCount     int64      `json:"onlineChannelCount"`
+	ReportedVersion        string     `json:"reportedVersion"`
+	EffectiveVersion       string     `json:"effectiveVersion"`
+	EffectiveVersionSource string     `json:"effectiveVersionSource"`
+	EffectiveVersionAt     *time.Time `json:"effectiveVersionAt"`
+	ProtocolOverride       string     `json:"protocolOverride"`
+	SubscribeCapability    string     `json:"subscribeCapability"`
+	SubscribeLastTest      *time.Time `json:"subscribeLastTest"`
+	SubscribeExpiresAt     *time.Time `json:"subscribeExpiresAt"`
+	ReportedCharset        string     `json:"reportedCharset"`
+	WireCharset            string     `json:"wireCharset"`
+	ReportedCharsetAt      *time.Time `json:"reportedCharsetAt"`
+	CreatedAt              *time.Time `json:"createdAt"`
+	UpdatedAt              *time.Time `json:"updatedAt"`
 }
 
 type Channel struct {
-	DeviceID     string `json:"deviceId"`
-	ChannelID    string `json:"channelId"`
-	Name         string `json:"name"`
-	Alias        string `json:"alias"`
-	Manufacturer string `json:"manufacturer"`
-	Model        string `json:"model"`
-	Status       string `json:"status"`
-	PTZType      int8   `json:"ptzType"`
+	DeviceID                 string     `json:"deviceId"`
+	ChannelID                string     `json:"channelId"`
+	Name                     string     `json:"name"`
+	Alias                    string     `json:"alias"`
+	Manufacturer             string     `json:"manufacturer"`
+	Model                    string     `json:"model"`
+	Status                   string     `json:"status"`
+	PTZType                  int8       `json:"ptzType"`
+	Owner                    string     `json:"owner"`
+	CivilCode                string     `json:"civilCode"`
+	ParentID                 string     `json:"parentId"`
+	RoomType                 int8       `json:"roomType"`
+	SupplyLightType          int8       `json:"supplyLightType"`
+	DirectionType            int8       `json:"directionType"`
+	Resolution               string     `json:"resolution"`
+	PositionType             int8       `json:"positionType"`
+	UseType                  int8       `json:"useType"`
+	PhotoelectricImagingType string     `json:"photoelectricImagingType"`
+	CapturePositionType      string     `json:"capturePositionType"`
+	StreamNumberList         string     `json:"streamNumberList"`
+	IPAddress                string     `json:"ipAddress"`
+	Port                     int        `json:"port"`
+	Longitude                float64    `json:"longitude"`
+	Latitude                 float64    `json:"latitude"`
+	PositionSource           string     `json:"positionSource"`
+	PositionUpdatedAt        *time.Time `json:"positionUpdatedAt"`
+	StatusEvent              string     `json:"statusEvent"`
+	StreamID                 string     `json:"streamId"`
+	OnDemandLive             bool       `json:"onDemandLive"`
+	StreamTransport          string     `json:"streamTransport"`
+	AudioEnabled             bool       `json:"audioEnabled"`
+	RecordingMode            string     `json:"recordingMode"`
+	CloudRecordingEnabled    bool       `json:"cloudRecordingEnabled"`
+	CloudRecordingState      string     `json:"cloudRecordingState"`
+	CloudRecordingError      string     `json:"cloudRecordingError"`
+	CloudRecordingUpdatedAt  *time.Time `json:"cloudRecordingUpdatedAt"`
+	SnapshotAt               *time.Time `json:"snapshotAt"`
+	CreatedAt                *time.Time `json:"createdAt"`
+	UpdatedAt                *time.Time `json:"updatedAt"`
 }
 
 type DeviceStatus struct {
-	DeviceID string `json:"deviceId"`
-	Status   string `json:"status"`
+	DeviceID          string     `json:"deviceId"`
+	Status            string     `json:"status"`
+	Online            *bool      `json:"online"`
+	RegisterTime      *time.Time `json:"registerTime"`
+	RegisterExpireAt  *time.Time `json:"registerExpireAt"`
+	KeepaliveTime     *time.Time `json:"keepaliveTime"`
+	KeepaliveInterval int        `json:"keepaliveInterval"`
+	Expires           int        `json:"expires"`
+	OfflineAt         *time.Time `json:"offlineAt"`
+	ProtocolVersion   string     `json:"protocolVersion"`
 }
 
 type ChannelStatus struct {
-	DeviceID  string `json:"deviceId"`
-	ChannelID string `json:"channelId"`
-	Status    string `json:"status"`
+	DeviceID                string     `json:"deviceId"`
+	ChannelID               string     `json:"channelId"`
+	Status                  string     `json:"status"`
+	Online                  *bool      `json:"online"`
+	StatusEvent             string     `json:"statusEvent"`
+	StreamID                string     `json:"streamId"`
+	OnDemandLive            bool       `json:"onDemandLive"`
+	StreamTransport         string     `json:"streamTransport"`
+	AudioEnabled            bool       `json:"audioEnabled"`
+	RecordingMode           string     `json:"recordingMode"`
+	CloudRecordingEnabled   bool       `json:"cloudRecordingEnabled"`
+	CloudRecordingState     string     `json:"cloudRecordingState"`
+	CloudRecordingError     string     `json:"cloudRecordingError"`
+	CloudRecordingUpdatedAt *time.Time `json:"cloudRecordingUpdatedAt"`
+	SnapshotAt              *time.Time `json:"snapshotAt"`
 }
 
 type StorageCard struct {
@@ -119,37 +195,97 @@ type ChannelPage struct {
 }
 
 type DeviceListOptions struct {
-	Page     int
-	PageSize int
-	Keyword  string
-	Status   string
+	Manufacturer, Model, Transport, ProtocolVersion, Sort, Order string
+	Page                                                         int
+	PageSize                                                     int
+	Keyword                                                      string
+	Status                                                       string
 }
 
 type ChannelListOptions struct {
-	Page     int
-	PageSize int
-	Keyword  string
-	Status   string
+	Manufacturer, Model, StreamTransport, Sort, Order string
+	PTZType                                           *int8
+	AudioEnabled                                      *bool
+	Page                                              int
+	PageSize                                          int
+	Keyword                                           string
+	Status                                            string
 }
 
 type deviceRow struct {
-	DeviceID     string
-	Name         string
-	Alias        string
-	Manufacturer string
-	Model        string
-	Status       *int8
+	DeviceID               string
+	Name                   string
+	Alias                  string
+	Manufacturer           string
+	Model                  string
+	Status                 *int8
+	Firmware               string
+	Transport              string
+	IP                     string
+	Port                   int
+	RegisterTime           *time.Time
+	RegisterExpireAt       *time.Time
+	KeepaliveTime          *time.Time
+	KeepaliveInterval      int
+	Expires                int
+	OfflineAt              *time.Time
+	ChannelCount           int64
+	OnlineChannelCount     int64
+	ReportedVersion        string
+	EffectiveVersion       string
+	EffectiveVersionSource string
+	EffectiveVersionAt     *time.Time
+	ProtocolOverride       string
+	SubscribeCapability    string
+	SubscribeLastTest      *time.Time
+	SubscribeExpiresAt     *time.Time
+	ReportedCharset        string
+	WireCharset            string
+	ReportedCharsetAt      *time.Time
+	CreatedAt              *time.Time
+	UpdatedAt              *time.Time
 }
 
 type channelRow struct {
-	DeviceID     string
-	ChannelID    string
-	Name         string
-	Alias        string
-	Manufacturer string
-	Model        string
-	Status       *int8
-	PTZType      int8
+	DeviceID                 string
+	ChannelID                string
+	Name                     string
+	Alias                    string
+	Manufacturer             string
+	Model                    string
+	Status                   *int8
+	PTZType                  int8
+	Owner                    string
+	CivilCode                string
+	ParentID                 string
+	RoomType                 int8
+	SupplyLightType          int8
+	DirectionType            int8
+	Resolution               string
+	PositionType             int8
+	UseType                  int8
+	PhotoelectricImagingType string
+	CapturePositionType      string
+	StreamNumberList         string
+	IPAddress                string
+	Port                     int
+	Longitude                float64
+	Latitude                 float64
+	PositionSource           string
+	PositionUpdatedAt        *time.Time
+	StatusEvent              string
+	StreamID                 string
+	OnDemandLive             bool
+	StreamTransport          string
+	AudioEnabled             bool
+	RecordingMode            string
+	CloudRecordingEnabled    bool
+	CloudRecordingState      string
+	CloudRecordingError      string
+	CloudRecordingUpdatedAt  *time.Time
+	SnapshotAt               *time.Time
+	CreatedAt                *time.Time
+	UpdatedAt                *time.Time
 }
 
 func (s *Service) ListDevices(ctx context.Context, ownerDeptID uint, options DeviceListOptions) (DevicePage, error) {
@@ -173,9 +309,10 @@ func (s *Service) ListDevicesInScope(ctx context.Context, scope DepartmentScope,
 	if err := query.Session(&gorm.Session{}).Count(&total).Error; err != nil {
 		return DevicePage{}, err
 	}
+	query = s.withDeviceCounts(ctx, query, departmentIDs)
 	rows := make([]deviceRow, 0)
-	if err := query.Select("d.device_id, d.name, d.alias, d.manufacturer, d.model, d.status").
-		Order("d.device_id ASC").
+	if err := query.Select(deviceSelectColumns).
+		Order(resourceOrder(options.Sort, options.Order, deviceSortColumns, "d.device_id")).
 		Offset((options.Page - 1) * options.PageSize).
 		Limit(options.PageSize).
 		Find(&rows).Error; err != nil {
@@ -204,9 +341,10 @@ func (s *Service) GetDeviceInScope(ctx context.Context, scope DepartmentScope, d
 	if err != nil {
 		return Device{}, err
 	}
+	query = s.withDeviceCounts(ctx, query, departmentIDs)
 	rows := make([]deviceRow, 0, 1)
 	if err := query.Where("d.device_id = ?", deviceID).
-		Select("d.device_id, d.name, d.alias, d.manufacturer, d.model, d.status").
+		Select(deviceSelectColumns).
 		Find(&rows).Error; err != nil {
 		return Device{}, err
 	}
@@ -225,7 +363,7 @@ func (s *Service) GetDeviceStatusInScope(ctx context.Context, scope DepartmentSc
 	if err != nil {
 		return DeviceStatus{}, err
 	}
-	return DeviceStatus{DeviceID: device.DeviceID, Status: device.Status}, nil
+	return DeviceStatus{DeviceID: device.DeviceID, Status: device.Status, Online: resourceOnline(device.Status), RegisterTime: device.RegisterTime, RegisterExpireAt: device.RegisterExpireAt, KeepaliveTime: device.KeepaliveTime, KeepaliveInterval: device.KeepaliveInterval, Expires: device.Expires, OfflineAt: device.OfflineAt, ProtocolVersion: device.EffectiveVersion}, nil
 }
 
 func (s *Service) ListChannels(ctx context.Context, ownerDeptID uint, deviceID string, options ChannelListOptions) (ChannelPage, error) {
@@ -256,8 +394,8 @@ func (s *Service) ListChannelsInScope(ctx context.Context, scope DepartmentScope
 		return ChannelPage{}, err
 	}
 	rows := make([]channelRow, 0)
-	if err := query.Select("c.device_id, c.channel_id, c.name, c.alias, c.manufacturer, c.model, c.status, c.ptz_type").
-		Order("c.channel_id ASC").
+	if err := query.Select(channelSelectColumns).
+		Order(resourceOrder(options.Sort, options.Order, channelSortColumns, "c.channel_id")).
 		Offset((options.Page - 1) * options.PageSize).
 		Limit(options.PageSize).
 		Find(&rows).Error; err != nil {
@@ -288,7 +426,7 @@ func (s *Service) GetChannelInScope(ctx context.Context, scope DepartmentScope, 
 	}
 	rows := make([]channelRow, 0, 1)
 	if err := query.Where("c.channel_id = ?", channelID).
-		Select("c.device_id, c.channel_id, c.name, c.alias, c.manufacturer, c.model, c.status, c.ptz_type").
+		Select(channelSelectColumns).
 		Find(&rows).Error; err != nil {
 		return Channel{}, err
 	}
@@ -307,7 +445,7 @@ func (s *Service) GetChannelStatusInScope(ctx context.Context, scope DepartmentS
 	if err != nil {
 		return ChannelStatus{}, err
 	}
-	return ChannelStatus{DeviceID: channel.DeviceID, ChannelID: channel.ChannelID, Status: channel.Status}, nil
+	return ChannelStatus{DeviceID: channel.DeviceID, ChannelID: channel.ChannelID, Status: channel.Status, Online: resourceOnline(channel.Status), StatusEvent: channel.StatusEvent, StreamID: channel.StreamID, OnDemandLive: channel.OnDemandLive, StreamTransport: channel.StreamTransport, AudioEnabled: channel.AudioEnabled, RecordingMode: channel.RecordingMode, CloudRecordingEnabled: channel.CloudRecordingEnabled, CloudRecordingState: channel.CloudRecordingState, CloudRecordingError: channel.CloudRecordingError, CloudRecordingUpdatedAt: channel.CloudRecordingUpdatedAt, SnapshotAt: channel.SnapshotAt}, nil
 }
 
 func (s *Service) GetChannelControlCapabilitiesInScope(ctx context.Context, scope DepartmentScope, deviceID, channelID string) (manscdp.ControlCapabilities, error) {
@@ -442,6 +580,11 @@ func (s *Service) deviceQuery(ctx context.Context, departmentIDs []uint, options
 		keyword := "%" + options.Keyword + "%"
 		query = query.Where("(d.device_id LIKE ? OR d.name LIKE ? OR d.alias LIKE ? OR d.manufacturer LIKE ? OR d.model LIKE ?)", keyword, keyword, keyword, keyword, keyword)
 	}
+	for column, value := range map[string]string{"d.manufacturer": options.Manufacturer, "d.model": options.Model, "d.transport": options.Transport, "d.effective_version": options.ProtocolVersion} {
+		if value != "" {
+			query = query.Where(column+" = ?", value)
+		}
+	}
 	return applyStatusFilter(query, "d.status", options.Status), nil
 }
 
@@ -463,6 +606,17 @@ func (s *Service) channelQuery(ctx context.Context, departmentIDs []uint, device
 		keyword := "%" + options.Keyword + "%"
 		query = query.Where("(c.channel_id LIKE ? OR c.name LIKE ? OR c.alias LIKE ? OR c.manufacturer LIKE ? OR c.model LIKE ?)", keyword, keyword, keyword, keyword, keyword)
 	}
+	for column, value := range map[string]string{"c.manufacturer": options.Manufacturer, "c.model": options.Model, "c.stream_transport": options.StreamTransport} {
+		if value != "" {
+			query = query.Where(column+" = ?", value)
+		}
+	}
+	if options.PTZType != nil {
+		query = query.Where("c.ptz_type = ?", *options.PTZType)
+	}
+	if options.AudioEnabled != nil {
+		query = query.Where("c.audio_enabled = ?", *options.AudioEnabled)
+	}
 	return applyStatusFilter(query, "c.status", options.Status), nil
 }
 
@@ -482,6 +636,9 @@ func applyStatusFilter(query *gorm.DB, column, status string) *gorm.DB {
 }
 
 func normalizeDeviceOptions(options DeviceListOptions) (DeviceListOptions, error) {
+	if !validFilterText(options.Manufacturer, options.Model) || !validResourceSort(options.Sort, options.Order, deviceSortColumns) || options.Transport != "" && options.Transport != "UDP" && options.Transport != "TCP" || options.ProtocolVersion != "" && options.ProtocolVersion != "2016" && options.ProtocolVersion != "2022" {
+		return DeviceListOptions{}, ErrInvalidListOptions
+	}
 	if options.Page < 0 || options.PageSize < 0 || options.PageSize > 100 || options.Status != "" && !validStatus(options.Status) || utf8.RuneCountInString(options.Keyword) > 100 || !utf8.ValidString(options.Keyword) {
 		return DeviceListOptions{}, ErrInvalidListOptions
 	}
@@ -498,6 +655,9 @@ func normalizeDeviceOptions(options DeviceListOptions) (DeviceListOptions, error
 }
 
 func normalizeChannelOptions(options ChannelListOptions) (ChannelListOptions, error) {
+	if !validFilterText(options.Manufacturer, options.Model) || !validResourceSort(options.Sort, options.Order, channelSortColumns) || options.PTZType != nil && (*options.PTZType < 0 || *options.PTZType > 7) || options.StreamTransport != "" && !validStreamTransport(options.StreamTransport) {
+		return ChannelListOptions{}, ErrInvalidListOptions
+	}
 	if options.Page < 0 || options.PageSize < 0 || options.PageSize > 100 || options.Status != "" && !validStatus(options.Status) || utf8.RuneCountInString(options.Keyword) > 100 || !utf8.ValidString(options.Keyword) {
 		return ChannelListOptions{}, ErrInvalidListOptions
 	}
@@ -538,11 +698,83 @@ func validGBCode(value string) bool {
 }
 
 func deviceFromRow(row deviceRow) Device {
-	return Device{DeviceID: row.DeviceID, Name: row.Name, Alias: row.Alias, Manufacturer: row.Manufacturer, Model: row.Model, Status: normalizedStatus(row.Status)}
+	return Device{
+		DeviceID:               row.DeviceID,
+		Name:                   row.Name,
+		Alias:                  row.Alias,
+		Manufacturer:           row.Manufacturer,
+		Model:                  row.Model,
+		Status:                 normalizedStatus(row.Status),
+		Firmware:               row.Firmware,
+		Transport:              row.Transport,
+		IP:                     row.IP,
+		Port:                   row.Port,
+		RegisterTime:           knownResourceTime(row.RegisterTime),
+		RegisterExpireAt:       knownResourceTime(row.RegisterExpireAt),
+		KeepaliveTime:          knownResourceTime(row.KeepaliveTime),
+		KeepaliveInterval:      row.KeepaliveInterval,
+		Expires:                row.Expires,
+		OfflineAt:              knownResourceTime(row.OfflineAt),
+		ChannelCount:           row.ChannelCount,
+		OnlineChannelCount:     row.OnlineChannelCount,
+		ReportedVersion:        row.ReportedVersion,
+		EffectiveVersion:       row.EffectiveVersion,
+		EffectiveVersionSource: row.EffectiveVersionSource,
+		EffectiveVersionAt:     knownResourceTime(row.EffectiveVersionAt),
+		ProtocolOverride:       row.ProtocolOverride,
+		SubscribeCapability:    row.SubscribeCapability,
+		SubscribeLastTest:      knownResourceTime(row.SubscribeLastTest),
+		SubscribeExpiresAt:     knownResourceTime(row.SubscribeExpiresAt),
+		ReportedCharset:        row.ReportedCharset,
+		WireCharset:            row.WireCharset,
+		ReportedCharsetAt:      knownResourceTime(row.ReportedCharsetAt),
+		CreatedAt:              knownResourceTime(row.CreatedAt),
+		UpdatedAt:              knownResourceTime(row.UpdatedAt),
+	}
 }
 
 func channelFromRow(row channelRow) Channel {
-	return Channel{DeviceID: row.DeviceID, ChannelID: row.ChannelID, Name: row.Name, Alias: row.Alias, Manufacturer: row.Manufacturer, Model: row.Model, Status: normalizedStatus(row.Status), PTZType: row.PTZType}
+	return Channel{
+		DeviceID:                 row.DeviceID,
+		ChannelID:                row.ChannelID,
+		Name:                     row.Name,
+		Alias:                    row.Alias,
+		Manufacturer:             row.Manufacturer,
+		Model:                    row.Model,
+		Status:                   normalizedStatus(row.Status),
+		PTZType:                  row.PTZType,
+		Owner:                    row.Owner,
+		CivilCode:                row.CivilCode,
+		ParentID:                 row.ParentID,
+		RoomType:                 row.RoomType,
+		SupplyLightType:          row.SupplyLightType,
+		DirectionType:            row.DirectionType,
+		Resolution:               row.Resolution,
+		PositionType:             row.PositionType,
+		UseType:                  row.UseType,
+		PhotoelectricImagingType: row.PhotoelectricImagingType,
+		CapturePositionType:      row.CapturePositionType,
+		StreamNumberList:         row.StreamNumberList,
+		IPAddress:                row.IPAddress,
+		Port:                     row.Port,
+		Longitude:                row.Longitude,
+		Latitude:                 row.Latitude,
+		PositionSource:           row.PositionSource,
+		PositionUpdatedAt:        knownResourceTime(row.PositionUpdatedAt),
+		StatusEvent:              row.StatusEvent,
+		StreamID:                 row.StreamID,
+		OnDemandLive:             row.OnDemandLive,
+		StreamTransport:          row.StreamTransport,
+		AudioEnabled:             row.AudioEnabled,
+		RecordingMode:            row.RecordingMode,
+		CloudRecordingEnabled:    row.CloudRecordingEnabled,
+		CloudRecordingState:      row.CloudRecordingState,
+		CloudRecordingError:      row.CloudRecordingError,
+		CloudRecordingUpdatedAt:  knownResourceTime(row.CloudRecordingUpdatedAt),
+		SnapshotAt:               knownResourceTime(row.SnapshotAt),
+		CreatedAt:                knownResourceTime(row.CreatedAt),
+		UpdatedAt:                knownResourceTime(row.UpdatedAt),
+	}
 }
 
 func normalizedStatus(status *int8) string {
@@ -557,4 +789,28 @@ func normalizedStatus(status *int8) string {
 	default:
 		return "unknown"
 	}
+}
+
+const deviceSelectColumns = "d.device_id, d.name, d.alias, d.manufacturer, d.model, d.status, d.firmware, d.transport, d.ip, d.port, d.register_time, d.register_expire_at, d.keepalive_time, d.keepalive_interval, d.expires, d.offline_at, COALESCE(channel_counts.channel_count, 0) AS channel_count, COALESCE(channel_counts.online_channel_count, 0) AS online_channel_count, d.reported_version, d.effective_version, d.effective_version_source, d.effective_version_at, d.protocol_override, d.subscribe_capability, d.subscribe_last_test, d.subscribe_expires_at, d.reported_charset, d.wire_charset, d.reported_charset_at, d.created_at, d.updated_at"
+
+const channelSelectColumns = "c.device_id, c.channel_id, c.name, c.alias, c.manufacturer, c.model, c.status, c.ptz_type, c.owner, c.civil_code, c.parent_id, c.room_type, c.supply_light_type, c.direction_type, c.resolution, c.position_type, c.use_type, c.photoelectric_imaging_type, c.capture_position_type, c.stream_number_list, c.ip_address, c.port, c.longitude, c.latitude, c.position_source, c.position_updated_at, c.status_event, c.stream_id, c.on_demand_live, c.stream_transport, c.audio_enabled, c.recording_mode, c.cloud_recording_enabled, c.cloud_recording_state, c.cloud_recording_error, c.cloud_recording_updated_at, c.snapshot_at, c.created_at, c.updated_at"
+
+// Unknown dates are JSON null instead of invented zero timestamps.
+func knownResourceTime(value *time.Time) *time.Time {
+	if value == nil || value.IsZero() {
+		return nil
+	}
+	return value
+}
+
+func (s *Service) withDeviceCounts(ctx context.Context, query *gorm.DB, departmentIDs []uint) *gorm.DB {
+	// The aggregate uses the same ownership, deletion and duplicate-identity
+	// rules as channelQuery. Joining it keeps list cost independent of page size.
+	counts := s.db.WithContext(ctx).Table("gb_channel AS counted").
+		Select("counted.device_id, counted.owner_dept_id, COUNT(*) AS channel_count, SUM(CASE WHEN counted.status = 1 THEN 1 ELSE 0 END) AS online_channel_count").
+		Where("counted.owner_dept_id IN ? AND counted.deleted_at IS NULL", departmentIDs).
+		Where("NOT EXISTS (SELECT 1 FROM gb_channel AS c2 WHERE c2.device_id = counted.device_id AND c2.channel_id = counted.channel_id AND c2.deleted_at IS NULL AND c2.id <> counted.id)").
+		Group("counted.device_id, counted.owner_dept_id")
+
+	return query.Joins("LEFT JOIN (?) AS channel_counts ON channel_counts.device_id = d.device_id AND channel_counts.owner_dept_id = d.owner_dept_id", counts)
 }

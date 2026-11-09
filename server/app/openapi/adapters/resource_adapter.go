@@ -173,17 +173,21 @@ func (adapter *resourceReadAdapter) Dispatch(ctx context.Context, request Reques
 	)
 	switch adapter.operation {
 	case deviceList:
-		data, err = adapter.reader.ListDevicesInScope(ctx, request.ResourceScope, resource.DeviceListOptions{
-			Page: request.List.Page, PageSize: request.List.PageSize, Keyword: request.List.Keyword, Status: request.List.Status,
-		})
+		options, optionsErr := deviceResourceOptions(request)
+		if optionsErr != nil {
+			return nil, optionsErr
+		}
+		data, err = adapter.reader.ListDevicesInScope(ctx, request.ResourceScope, options)
 	case deviceDetail:
 		data, err = adapter.reader.GetDeviceInScope(ctx, request.ResourceScope, request.DeviceID)
 	case deviceStatus:
 		data, err = adapter.reader.GetDeviceStatusInScope(ctx, request.ResourceScope, request.DeviceID)
 	case channelList:
-		data, err = adapter.reader.ListChannelsInScope(ctx, request.ResourceScope, request.DeviceID, resource.ChannelListOptions{
-			Page: request.List.Page, PageSize: request.List.PageSize, Keyword: request.List.Keyword, Status: request.List.Status,
-		})
+		options, optionsErr := channelResourceOptions(request)
+		if optionsErr != nil {
+			return nil, optionsErr
+		}
+		data, err = adapter.reader.ListChannelsInScope(ctx, request.ResourceScope, request.DeviceID, options)
 	case channelDetail:
 		data, err = adapter.reader.GetChannelInScope(ctx, request.ResourceScope, request.DeviceID, request.ChannelID)
 	case channelStatus:
@@ -215,7 +219,7 @@ func normalizeResourceError(err error) error {
 	switch {
 	case errors.Is(err, resource.ErrResourceNotFound):
 		return ErrNotFound
-	case errors.Is(err, resource.ErrInvalidListOptions), errors.Is(err, resource.ErrInvalidDepartmentScope):
+	case errors.Is(err, resource.ErrInvalidListOptions), errors.Is(err, resource.ErrInvalidDepartmentScope), errors.Is(err, resource.ErrInvalidUpdate):
 		return ErrInvalidRequest
 	default:
 		return ErrUnavailable

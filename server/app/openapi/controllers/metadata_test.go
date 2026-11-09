@@ -126,6 +126,12 @@ func TestOpenAPIMetadataControllersDoNotTrustRequestIDHeader(t *testing.T) {
 
 func TestOpenAPIMetadataControllersExposeWhitelistAndUniformNotFound(t *testing.T) {
 	db := newControllerTestDB(t)
+	require.NoError(t, db.Model(&gbmodels.GbDevice{}).Where("device_id = ?", "34020000002000000010").Updates(map[string]any{
+		"ip": "192.0.2.10", "port": 5060, "transport": "TCP", "effective_version": "2022", "password": "device-only-secret",
+	}).Error)
+	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Where("channel_id = ?", "37011200001310000010").Updates(map[string]any{
+		"stream_id": "live-stream-10", "audio_enabled": false, "cloud_recording_enabled": true, "cloud_recording_state": "recording",
+	}).Error)
 	svc := resource.New(db)
 	r := gin.New()
 	resolver := func(*gin.Context) (uint, bool) { return 10, true }
@@ -141,8 +147,14 @@ func TestOpenAPIMetadataControllersExposeWhitelistAndUniformNotFound(t *testing.
 	visibleData, ok := visiblePayload.Data.(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "34020000002000000010", visibleData["deviceId"])
+	assert.Subset(t, visibleData, map[string]any{
+		"ip": "192.0.2.10", "port": float64(5060), "transport": "TCP", "effectiveVersion": "2022",
+		"channelCount": float64(1), "onlineChannelCount": float64(1),
+	})
 	assert.NotContains(t, visibleData, "ownerDeptId")
-	assert.NotContains(t, visibleData, "ip")
+	assert.NotContains(t, visibleData, "id")
+	assert.NotContains(t, visibleData, "password")
+	assert.NotContains(t, visible.Body.String(), "device-only-secret")
 	assert.NotContains(t, visibleData, "snapshotUrl")
 
 	foreign := httptest.NewRecorder()
@@ -159,7 +171,12 @@ func TestOpenAPIMetadataControllersExposeWhitelistAndUniformNotFound(t *testing.
 	channelPayload := decodeControllerResponse(t, channel)
 	channelData, ok := channelPayload.Data.(map[string]any)
 	require.True(t, ok)
-	assert.NotContains(t, channelData, "streamId")
+	assert.Subset(t, channelData, map[string]any{
+		"deviceId": "34020000002000000010", "channelId": "37011200001310000010", "streamId": "live-stream-10",
+		"streamTransport": "TCP-Passive", "audioEnabled": false, "cloudRecordingEnabled": true, "cloudRecordingState": "recording",
+	})
+	assert.NotContains(t, channelData, "id")
+	assert.NotContains(t, channelData, "ownerDeptId")
 	assert.NotContains(t, channelData, "currentSsrc")
 	assert.NotContains(t, channelData, "snapshotUrl")
 }

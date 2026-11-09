@@ -38,6 +38,10 @@ const (
 	PTZOperationReadAdapterKey = "delegated.ptz.operation-read.v1"
 	PlayLiveAdapterKey         = "delegated.play.live.v1"
 	PlayLiveStopAdapterKey     = "delegated.play.live-stop.v1"
+	PlayLiveReadAdapterKey     = "delegated.play.live-read.v1"
+	PlayLiveListAdapterKey     = "delegated.play.live-list.v1"
+	LiveKeyframeAdapterKey     = "delegated.live.keyframe.v1"
+	PTZDragZoomAdapterKey      = "delegated.ptz.drag-zoom.v1"
 )
 
 // DelegatedPlaneContractVersion is separate from ResourceAdapterContractVersion
@@ -91,6 +95,8 @@ func NewDelegatedPlaneRegistrations(bindings ...map[string]catalogruntime.Adapte
 	adapters := []*delegatedPlaneAdapter{
 		{key: PlayLiveAdapterKey, plane: DelegatedPlayPlane},
 		{key: PlayLiveStopAdapterKey, plane: DelegatedPlayPlane},
+		{key: PlayLiveReadAdapterKey, plane: DelegatedPlayPlane},
+		{key: PlayLiveListAdapterKey, plane: DelegatedPlayPlane},
 		{key: PTZPresetListAdapterKey, plane: DelegatedPTZPlane},
 		{key: PTZPresetSaveAdapterKey, plane: DelegatedPTZPlane},
 		{key: PTZPresetCallAdapterKey, plane: DelegatedPTZPlane},
@@ -105,6 +111,8 @@ func NewDelegatedPlaneRegistrations(bindings ...map[string]catalogruntime.Adapte
 		{key: PTZCruiseTrackCreateAdapterKey, plane: DelegatedPTZPlane},
 		{key: PTZCruiseTrackReadAdapterKey, plane: DelegatedPTZPlane},
 		{key: PTZTargetTrackAdapterKey, plane: DelegatedPTZPlane},
+		{key: LiveKeyframeAdapterKey, plane: DelegatedPTZPlane},
+		{key: PTZDragZoomAdapterKey, plane: DelegatedPTZPlane},
 	}
 	registrations := make([]catalogruntime.AdapterRegistration, 0, len(adapters))
 	for _, adapter := range adapters {

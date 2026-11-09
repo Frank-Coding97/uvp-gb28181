@@ -173,7 +173,7 @@ func TestPublishCurrentCatalogAppliesAnOperatorEditAndStaysIdempotent(t *testing
 	// Disabling a core operation keeps its row but removes it from the draft,
 	// which is exactly the edit an operator publication has to honour.
 	require.NoError(t, db.Model(&openapimodels.Operation{}).
-		Where("external_path = ?", "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets/{presetId}").
+		Where("external_path = ?", "/openapi/v1/ptz/preset/delete").
 		Update("status", openapimodels.CatalogStatusDisabled).Error)
 
 	edited, err := PublishCurrentCatalog(context.Background(), db, SystemActorID, nil)

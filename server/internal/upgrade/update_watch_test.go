@@ -70,6 +70,38 @@ func TestUpdateWatcherRecordsNewerRelease(t *testing.T) {
 	}
 }
 
+func TestUpdateCheckIntervalKeepsReleaseNoticeTimely(t *testing.T) {
+	if DefaultUpdateCheckInterval > 15*time.Minute {
+		t.Fatalf("background release check can lag by %s", DefaultUpdateCheckInterval)
+	}
+}
+
+func TestManualCheckRefreshesPreviouslyDiscoveredRelease(t *testing.T) {
+	service, watch := newUpdateWatchFixture(t, "1.1.18")
+	watcher := &UpdateWatcher{Service: service, Store: watch, SkipInitialDelay: true}
+	watcher.CheckOnce(context.Background())
+	if got := watch.Snapshot().LatestVersion; got != "1.1.18" {
+		t.Fatalf("initial version = %q", got)
+	}
+
+	service.CheckRelease = func(context.Context) (Manifest, error) {
+		return Manifest{
+			SchemaVersion: 1, Channel: "stable", ReleaseID: "1.1.19", Version: "1.1.19", BuildID: "build-19",
+			Artifacts: []Artifact{{Deployment: service.Target.Deployment, OS: service.Target.OS, Arch: service.Target.Arch}},
+		}, nil
+	}
+	result, err := service.Check(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.HasUpdate {
+		t.Fatal("manual check did not find the newer release")
+	}
+	if got := watch.Snapshot().LatestVersion; got != "1.1.19" {
+		t.Fatalf("sidebar cache still reports %q after manual check", got)
+	}
+}
+
 func TestUpdateWatcherIgnoresSameOrOlderRelease(t *testing.T) {
 	service, watch := newUpdateWatchFixture(t, "1.1.0")
 	watcher := &UpdateWatcher{Service: service, Store: watch, SkipInitialDelay: true}

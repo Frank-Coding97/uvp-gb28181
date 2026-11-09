@@ -46,13 +46,10 @@ type PlayViewerMaintainer interface {
 }
 
 func playPattern(scope string) string {
-	switch scope {
-	case PlayLiveScope:
-		return "/openapi/v1/devices/:deviceId/channels/:channelId/live"
-	case PlayLiveStopScope:
-		return "/openapi/v1/devices/:deviceId/channels/:channelId/live"
+	if scope != PlayLiveScope && scope != PlayLiveStopScope {
+		return ""
 	}
-	return ""
+	return metadataPattern(scope)
 }
 
 func (g *Gateway) playReady() (ready bool) {

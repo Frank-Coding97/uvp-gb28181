@@ -54,5 +54,5 @@ func TestCatalogPublicationBatchesSnapshotWrites(t *testing.T) {
 	outcome, err := EnsurePublishedCatalog(context.Background(), db, SystemActorID, nil)
 	require.NoError(t, err)
 	require.Equal(t, len(CoreCatalogScopes()), outcome.ItemCount)
-	require.Equal(t, 1, writes, "snapshot must use a batch insert rather than one round trip per capability")
+	require.Equal(t, (len(CoreCatalogScopes())+99)/100, writes, "snapshot must use batches of 100 rather than one round trip per capability")
 }

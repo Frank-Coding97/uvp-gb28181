@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strings"
 	"unicode/utf8"
 
 	"uvplatform.com/uvp-gb28181/app/openapi/resource"
@@ -25,6 +24,8 @@ const (
 	PTZCruiseTrackCreateScope = "ptz:cruise:track:create"
 	PTZCruiseTrackReadScope   = "ptz:cruise:track:read"
 	PTZTargetTrackScope       = "ptz:target-track"
+	LiveKeyframeScope         = "live:keyframe"
+	PTZDragZoomScope          = "ptz:zoom:drag"
 )
 
 var (
@@ -64,7 +65,7 @@ func isPTZScope(scope string) bool {
 	switch scope {
 	case PTZPresetListScope, PTZPresetSaveScope, PTZPresetCallScope, PTZPresetDeleteScope, PTZOperationReadScope,
 		PTZMoveScope, PTZPreciseScope, PTZExtendedScope, PTZWiperScope, PTZHomePositionSetScope, PTZCruiseControlScope,
-		PTZCruiseTrackCreateScope, PTZCruiseTrackReadScope, PTZTargetTrackScope:
+		PTZCruiseTrackCreateScope, PTZCruiseTrackReadScope, PTZTargetTrackScope, LiveKeyframeScope, PTZDragZoomScope:
 		return true
 	default:
 		return false
@@ -72,57 +73,13 @@ func isPTZScope(scope string) bool {
 }
 
 func ptzPattern(scope string) string {
-	switch scope {
-	case PTZPresetListScope, PTZPresetSaveScope:
-		return "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/presets"
-	case PTZPresetCallScope:
-		return "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/presets/:presetId/call"
-	case PTZPresetDeleteScope:
-		return "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/presets/:presetId"
-	case PTZOperationReadScope:
-		return "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/operations/:operationId"
-	case PTZMoveScope:
-		return "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/move"
-	case PTZPreciseScope:
-		return "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/precise"
-	case PTZExtendedScope:
-		return "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/extended"
-	case PTZWiperScope:
-		return "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/wiper"
-	case PTZHomePositionSetScope:
-		return "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/home-position"
-	case PTZCruiseControlScope:
-		return "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/cruise/control"
-	case PTZCruiseTrackCreateScope:
-		return "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/cruise/tracks"
-	case PTZCruiseTrackReadScope:
-		return "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/cruise/tracks/:trackId"
-	case PTZTargetTrackScope:
-		return "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/target-track"
-	default:
+	if !isPTZScope(scope) {
 		return ""
 	}
+	return metadataPattern(scope)
 }
-
-func ptzMethod(scope string) string {
-	if scope == PTZPresetListScope || scope == PTZOperationReadScope || scope == PTZCruiseTrackReadScope {
-		return http.MethodGet
-	}
-	if scope == PTZPresetDeleteScope {
-		return http.MethodDelete
-	}
-	return http.MethodPost
-}
-
-func ptzRouteMatches(q gatewayRequest) bool {
-	pattern := ptzPattern(q.scope)
-	if pattern == "" || q.pattern != pattern || q.method != ptzMethod(q.scope) || validatePath(q.path) != nil || q.rawQuery != "" {
-		return false
-	}
-	path := strings.NewReplacer(":deviceId", q.deviceID, ":channelId", q.channelID, ":presetId", q.presetID, ":operationId", q.operationID, ":trackId", q.trackID).Replace(pattern)
-	rawPath, _, hasQuery := strings.Cut(q.rawURI, "?")
-	return path == q.path && rawPath == q.path && !hasQuery
-}
+func ptzMethod(scope string) string         { return metadataMethod(scope) }
+func ptzRouteMatches(q gatewayRequest) bool { return isPTZScope(q.scope) && metadataRouteMatches(q) }
 
 func validatePTZID(value string) bool {
 	if len(value) == 0 || len(value) > 20 {
@@ -137,6 +94,7 @@ func validatePTZID(value string) bool {
 }
 
 func validatePTZRequest(q gatewayRequest) error {
+	q.body = dispatchBody(q)
 	if !validatePTZID(q.deviceID) || !validatePTZID(q.channelID) {
 		return ErrPTZInvalid
 	}
@@ -207,7 +165,7 @@ func validatePTZRequest(q gatewayRequest) error {
 func isPTZJSONWriteScope(scope string) bool {
 	switch scope {
 	case PTZMoveScope, PTZPreciseScope, PTZExtendedScope, PTZWiperScope, PTZHomePositionSetScope, PTZCruiseControlScope,
-		PTZCruiseTrackCreateScope, PTZTargetTrackScope:
+		PTZCruiseTrackCreateScope, PTZTargetTrackScope, LiveKeyframeScope, PTZDragZoomScope:
 		return true
 	default:
 		return false

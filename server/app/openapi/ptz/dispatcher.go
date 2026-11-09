@@ -50,22 +50,30 @@ type presetView struct {
 }
 
 type operationView struct {
-	OperationID  string `json:"operationId"`
-	Status       string `json:"status"`
-	Action       string `json:"action"`
-	SN           int    `json:"sn"`
-	SIPStatus    int    `json:"sipStatus,omitempty"`
-	DeviceResult string `json:"deviceResult,omitempty"`
-	DeviceError  string `json:"deviceError,omitempty"`
+	OperationID        string     `json:"operationId"`
+	Status             string     `json:"status"`
+	Action             string     `json:"action"`
+	SN                 int        `json:"sn"`
+	SIPStatus          int        `json:"sipStatus,omitempty"`
+	DeviceResult       string     `json:"deviceResult,omitempty"`
+	DeviceError        string     `json:"deviceError,omitempty"`
+	DeviceID           string     `json:"deviceId"`
+	ChannelID          string     `json:"channelId"`
+	TargetCode         string     `json:"targetCode"`
+	ProtocolVersion    string     `json:"protocolVersion"`
+	ResponseRequired   bool       `json:"responseRequired"`
+	DeviceAcknowledged bool       `json:"deviceAcknowledged"`
+	ErrorCode          string     `json:"errorCode"`
+	ErrorMessage       string     `json:"errorMessage"`
+	RequestedAt        time.Time  `json:"requestedAt"`
+	SentAt             *time.Time `json:"sentAt"`
+	CompletedAt        *time.Time `json:"completedAt"`
+	DeadlineAt         *time.Time `json:"deadlineAt"`
 }
 
 type controlOperationView struct {
-	OperationID        string `json:"operationId"`
-	Status             string `json:"status"`
-	Action             string `json:"action"`
-	SN                 int    `json:"sn"`
-	Result             string `json:"result"`
-	DeviceAcknowledged bool   `json:"deviceAcknowledged"`
+	operationView
+	Result string `json:"result"`
 }
 
 type moveInput struct {
@@ -166,6 +174,8 @@ func (d *Dispatcher) Handle(ctx context.Context, request auth.PTZRequest) (any, 
 		return nil, auth.ErrPTZInvalid
 	}
 	switch request.Scope {
+	case LiveKeyframeScope, PTZDragZoomScope:
+		return d.extraControl(ctx, request)
 	case auth.PTZMoveScope:
 		return d.move(ctx, request)
 	case auth.PTZPreciseScope:
@@ -868,7 +878,9 @@ func controlOperationResponse(operation gbmodels.GbPTZOperation) controlOperatio
 			result = "result_unknown"
 		}
 	}
-	return controlOperationView{OperationID: operation.OperationID, Status: string(operation.Status), Action: operation.Action, SN: operation.SN, Result: result, DeviceAcknowledged: acknowledged}
+	view := operationResponse(operation)
+	view.DeviceAcknowledged = acknowledged
+	return controlOperationView{operationView: view, Result: result}
 }
 
 func (d *Dispatcher) listPresets(ctx context.Context, request auth.PTZRequest) (any, error) {
@@ -965,11 +977,20 @@ func (d *Dispatcher) getOperation(ctx context.Context, request auth.PTZRequest) 
 	if operation.DeviceID != target.DeviceID || operation.ChannelID != channel.ID || operation.DeviceCode != target.DeviceCode || operation.ChannelCode != channel.ChannelID {
 		return nil, auth.ErrPTZNotFound
 	}
+	if isExtraControlAction(operation.Action) && !extraControlOwnedBy(request, operation.IdempotencyKey) {
+		return nil, auth.ErrPTZNotFound
+	}
 	return operationResponse(operation), nil
 }
 
 func operationResponse(operation gbmodels.GbPTZOperation) operationView {
-	return operationView{OperationID: operation.OperationID, Status: string(operation.Status), Action: operation.Action, SN: operation.SN, SIPStatus: operation.SIPStatus, DeviceResult: operation.DeviceResult, DeviceError: operation.DeviceError}
+	return operationView{
+		OperationID: operation.OperationID, Status: string(operation.Status), Action: operation.Action, SN: operation.SN,
+		SIPStatus: operation.SIPStatus, DeviceResult: operation.DeviceResult, DeviceError: operation.DeviceError,
+		DeviceID: operation.DeviceCode, ChannelID: operation.ChannelCode, TargetCode: operation.TargetCode, ProtocolVersion: operation.ProfileVersion,
+		ResponseRequired: operation.ResponseRequired, DeviceAcknowledged: operation.ResponseRequired && (operation.Status == gbmodels.PTZOperationAccepted || operation.Status == gbmodels.PTZOperationRejected),
+		ErrorCode: operation.ErrorCode, ErrorMessage: operation.ErrorMessage, RequestedAt: operation.CreatedAt, SentAt: operation.SentAt, CompletedAt: operation.CompletedAt, DeadlineAt: operation.DeadlineAt,
+	}
 }
 
 func mapTargetError(err error) error {

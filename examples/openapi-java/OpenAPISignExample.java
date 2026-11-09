@@ -45,6 +45,28 @@ import javax.crypto.spec.SecretKeySpec;
  * retry with a new timestamp, nonce, and signature; do not automatically
  * retry a POST whose result is unknown. Never put AK/SK or a signature into a
  * media URL or browser storage.
+ *
+ * Action API examples (accessKey, secretKey and audience come from your
+ * server-side configuration; generate a fresh timestamp and nonce per call):
+ * <pre>
+ * Request query = new Request("GET", "/openapi/v1/channel/info",
+ *     "deviceId=34020000002000000001&amp;channelId=34020000001320000001",
+ *     "", new byte[0], accessKey, timestamp, nonce, audience);
+ * String querySignature = sign(query, secretKey);
+ *
+ * byte[] body = ("{\"deviceId\":\"34020000002000000001\","
+ *     + "\"channelId\":\"34020000001320000001\"}").getBytes(StandardCharsets.UTF_8);
+ * Request command = new Request("POST", "/openapi/v1/live/start", "",
+ *     "application/json", body, accessKey, timestamp, freshNonce, audience);
+ * String commandSignature = sign(command, secretKey);
+ * </pre>
+ * Send the exact path, query and body bytes used above. Set
+ * X-UVP-Sign-Version: 1, X-UVP-Access-Key, X-UVP-Timestamp, X-UVP-Nonce and
+ * X-UVP-Signature headers; POST also requires Content-Type: application/json.
+ * Operations whose schema requires Idempotency-Key must use the constructor
+ * that accepts that key and send the same value as the HTTP header.
+ * The legacy paths in the golden fixture are byte-level signing test vectors,
+ * not callable API endpoints; use api/openapi-v1.yaml for current routes.
  */
 public final class OpenAPISignExample {
     private static final int MAX_BODY_BYTES = 64 * 1024;
@@ -58,7 +80,7 @@ public final class OpenAPISignExample {
     public static void main(String[] args) throws Exception {
         if (args.length == 1 && "--self-test".equals(args[0])) {
             selfTest();
-            System.out.println("OpenAPI signing self-test passed: 2 golden vectors");
+            System.out.println("OpenAPI signing self-test passed: 2 golden vectors and 2 action requests");
             return;
         }
         System.err.println("usage: java OpenAPISignExample.java --self-test");
@@ -714,6 +736,17 @@ public final class OpenAPISignExample {
         String timestamp = stringField(fixture, "timestamp");
         String nonce = stringField(fixture, "nonce");
         String audience = stringField(fixture, "audience");
+        Request queryAction = new Request("GET", "/openapi/v1/channel/info",
+                "deviceId=34020000002000000001&channelId=34020000001320000001", "", new byte[0],
+                accessKey, timestamp, nonce, audience);
+        require("46065e6b19edc23cfae7b0af636705f35fc387ab76728ccb144e883a88e8f540"
+                .equals(sign(queryAction, secretKey)));
+        byte[] actionBody = utf8("{\"deviceId\":\"34020000002000000001\","
+                + "\"channelId\":\"34020000001320000001\"}");
+        Request postAction = new Request("POST", "/openapi/v1/live/start", "", "application/json",
+                actionBody, accessKey, timestamp, nonce, audience);
+        require("b20b8edf93a1b081edb04c74967728b50ed6b17e6a15c7560b0148d6f0fd14a2"
+                .equals(sign(postAction, secretKey)));
         byte[] decodedKey = decodeSecretKey(secretKey);
         require(decodedKeyHex.equals(hex(decodedKey)));
         Object vectorsValue = fixture.get("vectors");

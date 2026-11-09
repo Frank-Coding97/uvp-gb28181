@@ -99,15 +99,32 @@ type Request struct {
 }
 
 type ConfiguredSubscription struct {
-	ID             string    `json:"id"`
-	DeviceID       string    `json:"deviceId"`
-	Kind           EventKind `json:"kind"`
-	Enabled        bool      `json:"enabled"`
-	Status         string    `json:"status"`
-	ExpiresAt      time.Time `json:"expiresAt"`
-	ExpiresSeconds int       `json:"expiresSeconds"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	Upstream       *UpstreamSubscription `json:"upstream"`
+	ID             string                `json:"id"`
+	DeviceID       string                `json:"deviceId"`
+	Kind           EventKind             `json:"kind"`
+	Enabled        bool                  `json:"enabled"`
+	Status         string                `json:"status"`
+	ExpiresAt      time.Time             `json:"expiresAt"`
+	ExpiresSeconds int                   `json:"expiresSeconds"`
+	CreatedAt      time.Time             `json:"createdAt"`
+	UpdatedAt      time.Time             `json:"updatedAt"`
+}
+
+// UpstreamSubscription is the shared device-level SIP subscription. Its
+// settings and health belong to all platform consumers, not to this client.
+// It is nil for logical-only event kinds or if no shared row exists yet.
+type UpstreamSubscription struct {
+	Enabled         bool       `json:"enabled"`
+	Status          string     `json:"status"`
+	ExpiresSeconds  int        `json:"expiresSeconds"`
+	IntervalSeconds int        `json:"intervalSeconds"`
+	ExpiresAt       *time.Time `json:"expiresAt"`
+	LastSubscribeAt *time.Time `json:"lastSubscribeAt"`
+	LastNotifyAt    *time.Time `json:"lastNotifyAt"`
+	RetryCount      int        `json:"retryCount"`
+	LastStatusCode  int        `json:"lastStatusCode"`
+	LastError       string     `json:"lastError"`
 }
 
 type Event struct {
@@ -208,7 +225,7 @@ func (s *Service) CreateSubscription(ctx context.Context, request Request) (Conf
 		return ConfiguredSubscription{}, ErrUnavailable
 	}
 	if result.RowsAffected > 0 && existing.Enabled && existing.ExpiresAt.After(s.now()) {
-		return s.subscriptionView(ctx, &existing, device.DeviceID), nil
+		return s.subscriptionView(ctx, &existing, device.DeviceID)
 	}
 	if kindNeedsSIP(request.Kind) {
 		if s.upstream == nil {
@@ -244,7 +261,7 @@ func (s *Service) CreateSubscription(ctx context.Context, request Request) (Conf
 	if err := s.db.WithContext(ctx).Save(&existing).Error; err != nil {
 		return ConfiguredSubscription{}, ErrUnavailable
 	}
-	return s.subscriptionView(ctx, &existing, device.DeviceID), nil
+	return s.subscriptionView(ctx, &existing, device.DeviceID)
 }
 
 func (s *Service) GetSubscription(ctx context.Context, request Request) (ConfiguredSubscription, error) {
@@ -252,7 +269,7 @@ func (s *Service) GetSubscription(ctx context.Context, request Request) (Configu
 	if err != nil {
 		return ConfiguredSubscription{}, err
 	}
-	return s.subscriptionView(ctx, subscription, device.DeviceID), nil
+	return s.subscriptionView(ctx, subscription, device.DeviceID)
 }
 
 // SubscriptionList is bounded by the fixed event kinds the platform supports,
@@ -278,7 +295,11 @@ func (s *Service) ListSubscriptions(ctx context.Context, request Request) (Subsc
 	}
 	items := make([]ConfiguredSubscription, 0, len(rows))
 	for index := range rows {
-		items = append(items, s.subscriptionView(ctx, &rows[index], device.DeviceID))
+		view, err := s.subscriptionView(ctx, &rows[index], device.DeviceID)
+		if err != nil {
+			return SubscriptionList{}, err
+		}
+		items = append(items, view)
 	}
 	return SubscriptionList{Items: items}, nil
 }
@@ -305,7 +326,7 @@ func (s *Service) RenewSubscription(ctx context.Context, request Request) (Confi
 	if err := s.db.WithContext(ctx).Save(subscription).Error; err != nil {
 		return ConfiguredSubscription{}, ErrUnavailable
 	}
-	return s.subscriptionView(ctx, subscription, device.DeviceID), nil
+	return s.subscriptionView(ctx, subscription, device.DeviceID)
 }
 
 func (s *Service) CancelSubscription(ctx context.Context, request Request) (ConfiguredSubscription, error) {
@@ -320,7 +341,7 @@ func (s *Service) CancelSubscription(ctx context.Context, request Request) (Conf
 			return ConfiguredSubscription{}, ErrUnavailable
 		}
 	}
-	return s.subscriptionView(ctx, subscription, device.DeviceID), nil
+	return s.subscriptionView(ctx, subscription, device.DeviceID)
 }
 
 func (s *Service) PollEvents(ctx context.Context, request Request) (EventPage, error) {
@@ -545,15 +566,28 @@ func (s *Service) ownedSubscription(ctx context.Context, request Request) (*Open
 	return &subscription, &device, nil
 }
 
-func (s *Service) subscriptionView(ctx context.Context, subscription *OpenAPIDeviceSubscription, deviceCode string) ConfiguredSubscription {
+func (s *Service) subscriptionView(ctx context.Context, subscription *OpenAPIDeviceSubscription, deviceCode string) (ConfiguredSubscription, error) {
 	status := "enabled"
 	if !subscription.Enabled {
 		status = "cancelled"
 	} else if !subscription.ExpiresAt.After(s.now()) {
 		status = "expired"
 	}
-	return ConfiguredSubscription{ID: subscription.ID, DeviceID: deviceCode, Kind: subscription.Kind, Enabled: subscription.Enabled, Status: status,
+	view := ConfiguredSubscription{ID: subscription.ID, DeviceID: deviceCode, Kind: subscription.Kind, Enabled: subscription.Enabled, Status: status,
 		ExpiresAt: subscription.ExpiresAt, ExpiresSeconds: subscription.ExpiresSeconds, CreatedAt: subscription.CreatedAt, UpdatedAt: subscription.UpdatedAt}
+	if kindNeedsSIP(subscription.Kind) {
+		var shared gbmodels.GbDeviceSubscription
+		result := s.db.WithContext(ctx).Where("device_id = ? AND kind = ?", subscription.DeviceID, sipKind(subscription.Kind)).Limit(1).Find(&shared)
+		if result.Error != nil {
+			return ConfiguredSubscription{}, ErrUnavailable
+		}
+		if result.RowsAffected > 0 {
+			view.Upstream = &UpstreamSubscription{Enabled: shared.Enabled, Status: string(shared.Status), ExpiresSeconds: shared.ExpiresSeconds,
+				IntervalSeconds: shared.IntervalSeconds, ExpiresAt: shared.ExpiresAt, LastSubscribeAt: shared.LastSubscribeAt,
+				LastNotifyAt: shared.LastNotifyAt, RetryCount: shared.RetryCount, LastStatusCode: shared.LastStatusCode, LastError: shared.LastError}
+		}
+	}
+	return view, nil
 }
 
 func (s *Service) alarmEventsEnabled() bool {

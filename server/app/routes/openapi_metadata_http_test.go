@@ -111,18 +111,25 @@ func TestOpenAPIRootMetadataUsesHMACAndExactOwner(t *testing.T) {
 		require.NotContains(t, string(body), "forged-client-id")
 		return response.StatusCode, string(body)
 	}
-	for _, path := range []string{"/devices", "/devices/" + device, "/devices/" + device + "/status", "/devices/" + device + "/channels", "/devices/" + device + "/channels/" + channel, "/devices/" + device + "/channels/" + channel + "/status"} {
+	for _, path := range []string{
+		"/device/list",
+		"/device/info?deviceId=" + device,
+		"/device/status?deviceId=" + device,
+		"/channel/list?deviceId=" + device,
+		"/channel/info?deviceId=" + device + "&channelId=" + channel,
+		"/channel/status?deviceId=" + device + "&channelId=" + channel,
+	} {
 		status, body := call("GET", "/openapi/v1"+path, true)
 		require.Equal(t, 200, status, body)
 		require.NotContains(t, body, "hidden")
 		require.NotContains(t, body, "ownerDeptId")
 	}
-	status, body := call("GET", "/openapi/v1/devices/"+other, true)
+	status, body := call("GET", "/openapi/v1/device/info?deviceId="+other, true)
 	require.Equal(t, 404, status, body)
-	status, body = call("GET", "/openapi/v1/devices", false)
+	status, body = call("GET", "/openapi/v1/device/list", false)
 	require.Equal(t, 401, status, body)
 	require.NoError(t, db.Where("client_id = ? AND scope = ?", 1, "device:list").Delete(&models.ClientScope{}).Error)
-	status, body = call("GET", "/openapi/v1/devices", true)
+	status, body = call("GET", "/openapi/v1/device/list", true)
 	require.Equal(t, 403, status, body)
 	status, body = call("POST", "/openapi/v1/devices/"+device+"/channels/"+channel+"/live-authorizations", false)
 	require.Equal(t, 404, status, body)

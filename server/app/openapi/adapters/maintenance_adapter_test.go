@@ -49,7 +49,7 @@ func TestMaintenanceRecordAdapterRequiresScopedCapabilityAndIdempotency(t *testi
 	require.Contains(t, service.commands[0].IdempotencyKey, "openapi-client:5:")
 	require.Equal(t, uint(10), service.commands[0].ActorDeptID)
 	require.Equal(t, uint(0), service.commands[0].ActorID)
-	require.Equal(t, map[string]any{"operationId": "op-1", "action": "record_start", "status": gbmodels.PTZOperationQueued, "sn": 12, "responseRequired": true, "deviceAcknowledged": false, "profileVersion": "2022"}, data)
+	require.Subset(t, data, map[string]any{"operationId": "op-1", "action": "record_start", "status": gbmodels.PTZOperationQueued, "sn": 12, "responseRequired": true, "deviceAcknowledged": false, "profileVersion": "2022"})
 }
 
 func TestMaintenanceAdapterFailsClosedOnUnknownOrUnsupportedControl(t *testing.T) {

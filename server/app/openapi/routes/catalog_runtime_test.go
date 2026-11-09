@@ -36,7 +36,7 @@ func TestInitializeCatalogRuntimePublishesInitialReleaseOnMigratedCatalog(t *tes
 	require.NoError(t, err)
 	require.NotNil(t, runtime)
 	require.NotNil(t, runtime.Active(), "已迁移但从未发布过的 catalog 必须自举出一个 active release")
-	operation, err := runtime.Resolve("GET", "/openapi/v1/devices")
+	operation, err := runtime.Resolve("GET", "/openapi/v1/device/list")
 	require.NoError(t, err)
 	require.Equal(t, "device:list", operation.Scope)
 	_, ready := runtime.ReadyIdentity()
@@ -88,7 +88,7 @@ func TestInitializeCatalogRuntimeHydratesPublishedRelease(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, runtime)
 	require.NotNil(t, runtime.Active())
-	operation, err := runtime.Resolve("GET", "/openapi/v1/devices")
+	operation, err := runtime.Resolve("GET", "/openapi/v1/device/list")
 	require.NoError(t, err)
 	require.Equal(t, "device:list", operation.Scope)
 	// A release that already covers the code-owned surface is not revised.
@@ -109,15 +109,19 @@ func TestCatalogRuntimeRegistersScopedDeviceQueryAdapters(t *testing.T) {
 		scope string
 		path  string
 	}{
-		{"device:alarms", "/openapi/v1/devices/" + deviceID + "/alarms"},
-		{"device:status-events", "/openapi/v1/devices/" + deviceID + "/status-events"},
-		{"channel:precise-status", "/openapi/v1/devices/" + deviceID + "/channels/" + channelID + "/ptz/precise-status"},
-		{"ptz:home-position:read", "/openapi/v1/devices/" + deviceID + "/channels/" + channelID + "/ptz/home-position"},
-		{"ptz:cruise:read", "/openapi/v1/devices/" + deviceID + "/channels/" + channelID + "/ptz/cruise/tracks"},
-		{"channel:target-track:read", "/openapi/v1/devices/" + deviceID + "/channels/" + channelID + "/target-track"},
+		{"device:alarms", "/openapi/v1/alarm/list"},
+		{"device:status-events", "/openapi/v1/event/status/list"},
+		{"channel:precise-status", "/openapi/v1/ptz/position"},
+		{"ptz:home-position:read", "/openapi/v1/ptz/home/info"},
+		{"ptz:cruise:read", "/openapi/v1/ptz/cruise/list"},
+		{"channel:target-track:read", "/openapi/v1/ptz/track/info"},
 	} {
+		params := map[string]string{"deviceId": deviceID}
+		if !strings.HasPrefix(operation.scope, "device:") {
+			params["channelId"] = channelID
+		}
 		_, err := runtime.Dispatch(context.Background(), operation.scope, catalogruntime.Invocation{
-			Method: "GET", Path: operation.path,
+			Method: "GET", Path: operation.path, Params: params,
 			Value: adapters.Request{DeviceID: deviceID, ChannelID: channelID},
 		})
 		require.ErrorIsf(t, err, adapters.ErrNotFound, "scope %s must dispatch to its query adapter", operation.scope)
@@ -150,7 +154,7 @@ func TestInitializeCatalogRuntimeRepairsPartialRelease(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, runtime.Active())
 	require.Equal(t, bootstrap.CoreCatalogScopes(), activeReleaseScopes(t, db))
-	operation, err := runtime.Resolve("GET", "/openapi/v1/devices/34020000002000000001/channels/34020000001320000001/ptz/presets")
+	operation, err := runtime.Resolve("GET", "/openapi/v1/ptz/preset/list")
 	require.NoError(t, err, "补齐后的 release 必须含 PTZ delegated scope")
 	require.Equal(t, "ptz:preset:list", operation.Scope)
 }
@@ -251,7 +255,7 @@ func TestCatalogPublishFailureReasonClassifiesTimeout(t *testing.T) {
 	require.Equal(t, "catalog_publish_timeout", catalogPublishFailureReason(context.DeadlineExceeded))
 }
 
-func TestCatalogHydrateReadsSysAPIMetadataInOneBatch(t *testing.T) {
+func TestCatalogStartupReadsSysAPIMetadataInBatches(t *testing.T) {
 	db := newCatalogRuntimeTestDB(t)
 	require.NoError(t, db.AutoMigrate(catalogRuntimeTables(t, true)...))
 	_, err := InitializeCatalogRuntime(context.Background(), db)
@@ -264,7 +268,7 @@ func TestCatalogHydrateReadsSysAPIMetadataInOneBatch(t *testing.T) {
 	}))
 	_, err = InitializeCatalogRuntime(context.Background(), db)
 	require.NoError(t, err)
-	require.Equal(t, 1, queries, "hydration metadata checks must not query once per operation")
+	require.Equal(t, 2, queries, "contract refresh and hydration each read metadata in one batch, never once per operation")
 }
 
 func TestCatalogSysAPIBatchPreservesOrderMissingAssetsAndFirstMatch(t *testing.T) {

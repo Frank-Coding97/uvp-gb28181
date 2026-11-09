@@ -55,7 +55,7 @@ export interface UpgradeStatus {
 }
 
 /**
- * 后台定时检查的结果。助手每 6 小时自查一次官方源，这里只是读取缓存，
+ * 后台定时检查的结果。助手每 15 分钟自查一次官方源，这里只是读取缓存，
  * 不会触发网络请求（手动「检查在线更新」才会）。
  */
 export interface UpgradeNotice {

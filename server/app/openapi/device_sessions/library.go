@@ -4,8 +4,9 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
-	"fmt"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -264,8 +265,7 @@ func libraryImage(row gbmodels.GbChannelSnapshot, deviceID, channelID string) Li
 	image := LibraryImage{
 		SnapshotID: uint64(row.ID), FileName: row.FileName, Size: row.Size, MD5: row.MD5,
 		Source: row.Source, CapturedAt: row.CapturedAt, ReceivedAt: row.CreatedAt,
-		ContentPath: fmt.Sprintf("/openapi/v1/devices/%s/channels/%s/snapshot-library/%d/content",
-			deviceID, channelID, row.ID),
+		ContentPath: "/openapi/v1/snapshot/library/content?" + url.Values{"deviceId": {deviceID}, "channelId": {channelID}, "snapshotId": {strconv.FormatUint(uint64(row.ID), 10)}}.Encode(),
 	}
 	if row.SessionID != nil {
 		image.SessionID = *row.SessionID

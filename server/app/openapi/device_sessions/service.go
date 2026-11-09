@@ -91,19 +91,24 @@ type CaptureImage struct {
 }
 
 type CaptureSession struct {
-	SessionID         string         `json:"sessionId"`
-	DeviceID          string         `json:"deviceId"`
-	ChannelID         string         `json:"channelId"`
-	State             string         `json:"state"`
-	CommandStatus     string         `json:"commandStatus"`
-	SnapNum           int            `json:"snapNum"`
-	Interval          int            `json:"interval"`
-	ReceivedCount     int            `json:"receivedCount"`
-	NotifiedCount     int            `json:"notifiedCount"`
-	Images            []CaptureImage `json:"images"`
-	CreatedAt         time.Time      `json:"createdAt"`
-	UpdatedAt         time.Time      `json:"updatedAt"`
-	registrySessionID string
+	SessionID          string         `json:"sessionId"`
+	DeviceID           string         `json:"deviceId"`
+	ChannelID          string         `json:"channelId"`
+	State              string         `json:"state"`
+	OperationID        string         `json:"operationId"`
+	CommandStatus      string         `json:"commandStatus"`
+	CommandSIPStatus   int            `json:"commandSipStatus"`
+	CommandResult      string         `json:"commandResult"`
+	CommandResponseAt  *time.Time     `json:"commandResponseAt"`
+	CommandCompletedAt *time.Time     `json:"commandCompletedAt"`
+	SnapNum            int            `json:"snapNum"`
+	Interval           int            `json:"interval"`
+	ReceivedCount      int            `json:"receivedCount"`
+	NotifiedCount      int            `json:"notifiedCount"`
+	Images             []CaptureImage `json:"images"`
+	CreatedAt          time.Time      `json:"createdAt"`
+	UpdatedAt          time.Time      `json:"updatedAt"`
+	registrySessionID  string
 }
 
 type ImageContent struct {
@@ -356,7 +361,7 @@ func (s *Service) updateRecord(ctx context.Context, record CaptureSessionRecord,
 func (s *Service) captureView(ctx context.Context, record CaptureSessionRecord) (CaptureSession, error) {
 	view := CaptureSession{
 		SessionID: record.SessionID, DeviceID: record.DeviceID, ChannelID: record.ChannelID,
-		State: record.State, CommandStatus: "unknown", SnapNum: record.SnapNum, Interval: record.Interval,
+		State: record.State, OperationID: record.OperationID, CommandStatus: "unknown", SnapNum: record.SnapNum, Interval: record.Interval,
 		Images: []CaptureImage{}, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt,
 		registrySessionID: record.RegistrySessionID,
 	}
@@ -374,6 +379,8 @@ func (s *Service) captureView(ctx context.Context, record CaptureSessionRecord) 
 		operation, err := s.commands.GetOperation(ctx, record.OperationID)
 		if err == nil {
 			view.CommandStatus = string(operation.Status)
+			view.CommandSIPStatus, view.CommandResult = operation.SIPStatus, operation.DeviceResult
+			view.CommandResponseAt, view.CommandCompletedAt = operation.ResponseAt, operation.CompletedAt
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return CaptureSession{}, ErrUnavailable
 		}
@@ -388,8 +395,7 @@ func (s *Service) captureView(ctx context.Context, record CaptureSessionRecord) 
 	for _, row := range rows {
 		view.Images = append(view.Images, CaptureImage{
 			FileName: row.FileName, Size: row.Size, MD5: row.MD5, CapturedAt: row.CapturedAt,
-			ContentURL: fmt.Sprintf("/openapi/v1/devices/%s/channels/%s/snapshot-sessions/%s/images/%s/content",
-				url.PathEscape(record.DeviceID), url.PathEscape(record.ChannelID), url.PathEscape(record.SessionID), url.PathEscape(row.FileName)),
+			ContentURL: "/openapi/v1/snapshot/image/content?" + url.Values{"deviceId": {record.DeviceID}, "channelId": {record.ChannelID}, "sessionId": {record.SessionID}, "fileName": {row.FileName}}.Encode(),
 		})
 	}
 	if len(rows) > view.ReceivedCount {

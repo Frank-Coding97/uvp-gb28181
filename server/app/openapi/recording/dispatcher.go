@@ -32,19 +32,23 @@ const (
 	ScopeRecordQueryOptions  = "device:record-query:options"
 	ScopePlaybackCreate      = "device:playback-create"
 	ScopePlaybackRead        = "device:playback-read"
+	ScopePlaybackList        = "device:playback-list"
 	ScopePlaybackAction      = "device:playback-action"
 	ScopePlaybackStop        = "device:playback-stop"
 	ScopeDownloadCreate      = "device:download-create"
 	ScopeDownloadRead        = "device:download-read"
+	ScopeDownloadList        = "device:download-list"
 	ScopeDownloadCancel      = "device:download-cancel"
 	RecordQueryAdapterKey    = "device.record-query.v1"
 	RecordQueryOptionsKey    = "device.record-query-options.v1"
 	PlaybackCreateAdapterKey = "device.playback-create.v1"
 	PlaybackReadAdapterKey   = "device.playback-read.v1"
+	PlaybackListAdapterKey   = "device.playback-list.v1"
 	PlaybackActionAdapterKey = "device.playback-action.v1"
 	PlaybackStopAdapterKey   = "device.playback-stop.v1"
 	DownloadCreateAdapterKey = "device.download-create.v1"
 	DownloadReadAdapterKey   = "device.download-read.v1"
+	DownloadListAdapterKey   = "device.download-list.v1"
 	DownloadCancelAdapterKey = "device.download-cancel.v1"
 )
 
@@ -106,6 +110,7 @@ type Request struct {
 type RecordItem struct {
 	RecordKey  string    `json:"recordKey"`
 	DeviceID   string    `json:"deviceId"`
+	ChannelID  string    `json:"channelId"`
 	Name       string    `json:"name,omitempty"`
 	StartTime  time.Time `json:"startTime"`
 	EndTime    time.Time `json:"endTime"`
@@ -116,6 +121,8 @@ type RecordItem struct {
 }
 
 type RecordPage struct {
+	DeviceID        string       `json:"deviceId"`
+	ChannelID       string       `json:"channelId"`
 	Items           []RecordItem `json:"items"`
 	TotalRecords    int          `json:"totalRecords"`
 	PageSize        int          `json:"pageSize"`
@@ -147,7 +154,24 @@ type PlaybackView struct {
 	Scale           float64           `json:"scale"`
 	CreatedAt       time.Time         `json:"createdAt"`
 	Deadline        time.Time         `json:"deadline"`
-	Existing        bool              `json:"existing,omitempty"`
+	Existing        bool              `json:"existing"`
+	RecordKey       string            `json:"recordKey"`
+	StreamID        string            `json:"streamId"`
+	SSRC            string            `json:"ssrc"`
+	DownloadSpeed   uint32            `json:"downloadSpeed"`
+	DefaultProtocol string            `json:"defaultProtocol"`
+	EndReason       string            `json:"endReason"`
+	ErrorCode       string            `json:"errorCode"`
+	ErrorStage      string            `json:"errorStage"`
+	LastActivityAt  time.Time         `json:"lastActivityAt"`
+	IdleDeadline    time.Time         `json:"idleDeadline"`
+}
+
+type SessionPage struct {
+	Items    []PlaybackView `json:"items"`
+	Page     int            `json:"page"`
+	PageSize int            `json:"pageSize"`
+	Total    int            `json:"total"`
 }
 
 type Dispatcher struct {
@@ -262,6 +286,8 @@ func (d *Dispatcher) Handle(ctx context.Context, scope string, request Request) 
 		return d.createPlayback(ctx, request)
 	case ScopePlaybackRead:
 		return d.readPlayback(ctx, request)
+	case ScopePlaybackList:
+		return d.listSessions(ctx, request, gbplayback.ModePlayback)
 	case ScopePlaybackAction:
 		return d.actionPlayback(ctx, request)
 	case ScopePlaybackStop:
@@ -270,6 +296,8 @@ func (d *Dispatcher) Handle(ctx context.Context, scope string, request Request) 
 		return d.createDownload(ctx, request)
 	case ScopeDownloadRead:
 		return d.readDownload(ctx, request)
+	case ScopeDownloadList:
+		return d.listSessions(ctx, request, gbplayback.ModeDownload)
 	case ScopeDownloadCancel:
 		return d.cancelDownload(ctx, request)
 	default:
@@ -282,12 +310,17 @@ func (d *Dispatcher) Handle(ctx context.Context, scope string, request Request) 
 // and which record types it can report. It is read-only and never opens a SIP
 // session, so it works for offline channels too (Online reports that state).
 type RecordQueryOptions struct {
-	Device         RecordQueryOptionDevice  `json:"device"`
-	Channel        RecordQueryOptionChannel `json:"channel"`
-	Timezone       string                   `json:"timezone"`
-	ServerNow      string                   `json:"serverNow"`
-	MaxRangeHours  int                      `json:"maxRangeHours"`
-	SupportedTypes []string                 `json:"supportedTypes"`
+	DeviceID         string                   `json:"deviceId"`
+	ChannelID        string                   `json:"channelId"`
+	ProtocolVersion  string                   `json:"protocolVersion"`
+	Device           RecordQueryOptionDevice  `json:"device"`
+	Channel          RecordQueryOptionChannel `json:"channel"`
+	Timezone         string                   `json:"timezone"`
+	ServerNow        string                   `json:"serverNow"`
+	MaxRangeHours    int                      `json:"maxRangeHours"`
+	SupportedTypes   []string                 `json:"supportedTypes"`
+	MaxPageSize      int                      `json:"maxPageSize"`
+	CursorTTLSeconds int                      `json:"cursorTtlSeconds"`
 }
 
 type RecordQueryOptionDevice struct {
@@ -297,8 +330,9 @@ type RecordQueryOptionDevice struct {
 }
 
 type RecordQueryOptionChannel struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Online bool   `json:"online"`
 }
 
 // recordQueryOptions resolves the caller's scope and reports the accepted
@@ -316,12 +350,14 @@ func (d *Dispatcher) recordQueryOptions(ctx context.Context, request Request) (R
 		return RecordQueryOptions{}, err
 	}
 	return RecordQueryOptions{
-		Device:         RecordQueryOptionDevice{ID: target.DeviceCode, Name: target.DeviceName, Online: target.DeviceOnline && target.ChannelOnline},
-		Channel:        RecordQueryOptionChannel{ID: target.ChannelCode, Name: target.ChannelName},
+		DeviceID: target.DeviceCode, ChannelID: target.ChannelCode, ProtocolVersion: target.EffectiveVersion,
+		Device:         RecordQueryOptionDevice{ID: target.DeviceCode, Name: target.DeviceName, Online: target.DeviceOnline},
+		Channel:        RecordQueryOptionChannel{ID: target.ChannelCode, Name: target.ChannelName, Online: target.ChannelOnline},
 		Timezone:       d.config.Location.String(),
 		ServerNow:      d.config.Now().In(d.config.Location).Format(time.RFC3339),
 		MaxRangeHours:  d.config.MaxRangeHours,
 		SupportedTypes: []string{"all", "manual", "alarm"},
+		MaxPageSize:    d.config.MaxPageSize, CursorTTLSeconds: int(d.config.CursorTTL / time.Second),
 	}, nil
 }
 
@@ -334,7 +370,7 @@ func (d *Dispatcher) search(ctx context.Context, request Request) (RecordPage, e
 		return RecordPage{}, adapters.ErrInvalidRequest
 	}
 	if hasCursor {
-		if len(request.Body) != 0 {
+		if !emptyProjectedBody(request.Body) {
 			return RecordPage{}, adapters.ErrInvalidRequest
 		}
 		return d.continueSearch(ctx, request, cursor, requestedPageSize)
@@ -392,7 +428,7 @@ func (d *Dispatcher) search(ctx context.Context, request Request) (RecordPage, e
 			continue
 		}
 		items = append(items, RecordItem{
-			RecordKey: record.RecordKey, DeviceID: target.ChannelCode, Name: record.Name,
+			RecordKey: record.RecordKey, DeviceID: target.DeviceCode, ChannelID: target.ChannelCode, Name: record.Name,
 			StartTime: startTime, EndTime: endTime, Secrecy: record.Secrecy, Type: string(record.Type),
 			RecorderID: record.RecorderID, FileSize: record.FileSize,
 		})
@@ -406,7 +442,7 @@ func (d *Dispatcher) search(ctx context.Context, request Request) (RecordPage, e
 		}
 		return items[i].RecordKey < items[j].RecordKey
 	})
-	page := RecordPage{TotalRecords: len(items), PageSize: pageSize, ProtocolVersion: target.EffectiveVersion, Status: string(result.Status), Incomplete: result.Incomplete,
+	page := RecordPage{DeviceID: target.DeviceCode, ChannelID: target.ChannelCode, TotalRecords: len(items), PageSize: pageSize, ProtocolVersion: target.EffectiveVersion, Status: string(result.Status), Incomplete: result.Incomplete,
 		DeclaredTotal: result.DeclaredTotal, ReceivedCount: len(items), StartedAt: result.StartedAt, FinishedAt: result.FinishedAt}
 	if len(items) > pageSize {
 		checker, ok := d.queries.(queryGenerationChecker)
@@ -645,7 +681,7 @@ func (d *Dispatcher) createPlayback(ctx context.Context, request Request) (any, 
 	if created.Session == nil || !sessionMatches(created.Session, request.ClientID, target) {
 		return nil, adapters.ErrUnavailable
 	}
-	return playbackView(created.Session, target.EffectiveVersion, true), nil
+	return playbackView(created.Session, target.EffectiveVersion, created.Existing), nil
 }
 
 func (d *Dispatcher) createDownload(ctx context.Context, request Request) (any, error) {
@@ -714,7 +750,7 @@ func (d *Dispatcher) readDownload(ctx context.Context, request Request) (any, er
 }
 
 func (d *Dispatcher) cancelDownload(ctx context.Context, request Request) (any, error) {
-	if d.playback == nil || strings.TrimSpace(request.SessionID) == "" || len(request.Body) != 0 {
+	if d.playback == nil || strings.TrimSpace(request.SessionID) == "" || !emptyProjectedBody(request.Body) {
 		return nil, adapters.ErrInvalidRequest
 	}
 	target, err := d.resolveTarget(ctx, request)
@@ -743,17 +779,75 @@ func (d *Dispatcher) readPlayback(ctx context.Context, request Request) (any, er
 		return nil, err
 	}
 	session, ok := d.playback.PeekForOwner(request.SessionID, clientOwner(request.ClientID))
-	if !ok || session == nil {
+	if !ok || session == nil || session.Mode != gbplayback.ModePlayback {
 		return nil, adapters.ErrNotFound
 	}
 	if !sessionMatches(session, request.ClientID, target) {
 		return nil, adapters.ErrNotFound
 	}
 	session, ok = d.playback.GetForOwner(request.SessionID, clientOwner(request.ClientID))
-	if !ok || session == nil || !sessionMatches(session, request.ClientID, target) {
+	if !ok || session == nil || session.Mode != gbplayback.ModePlayback || !sessionMatches(session, request.ClientID, target) {
 		return nil, adapters.ErrNotFound
 	}
 	return playbackView(session, target.EffectiveVersion, false), nil
+}
+
+func (d *Dispatcher) listSessions(ctx context.Context, request Request, mode gbplayback.Mode) (SessionPage, error) {
+	lister, ok := d.playback.(interface {
+		ListForOwner(string) []*gbplayback.Session
+	})
+	if !ok {
+		return SessionPage{}, adapters.ErrUnavailable
+	}
+	if len(request.Body) != 0 || request.SessionID != "" {
+		return SessionPage{}, adapters.ErrInvalidRequest
+	}
+	page, size := 1, 20
+	for name, value := range request.Query {
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 {
+			return SessionPage{}, adapters.ErrInvalidRequest
+		}
+		switch name {
+		case "page":
+			page = n
+		case "pageSize":
+			size = n
+		default:
+			return SessionPage{}, adapters.ErrInvalidRequest
+		}
+	}
+	if size > 100 || page-1 > int(^uint(0)>>1)/size {
+		return SessionPage{}, adapters.ErrInvalidRequest
+	}
+	target, err := d.resolveTarget(ctx, request)
+	if err != nil {
+		return SessionPage{}, err
+	}
+	sessions := lister.ListForOwner(clientOwner(request.ClientID))
+	items := make([]PlaybackView, 0, len(sessions))
+	for _, session := range sessions {
+		if session == nil || session.Mode != mode || !sessionMatches(session, request.ClientID, target) {
+			continue
+		}
+		items = append(items, playbackView(session, target.EffectiveVersion, false))
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if !items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].CreatedAt.After(items[j].CreatedAt)
+		}
+		return items[i].SessionID < items[j].SessionID
+	})
+	result := SessionPage{Items: []PlaybackView{}, Page: page, PageSize: size, Total: len(items)}
+	start := (page - 1) * size
+	if start < len(items) {
+		result.Items = items[start:minInt(start+size, len(items))]
+	}
+	return result, nil
+}
+
+func emptyProjectedBody(body []byte) bool {
+	return len(body) == 0 || bytes.Equal(bytes.TrimSpace(body), []byte("{}"))
 }
 
 func (d *Dispatcher) actionPlayback(ctx context.Context, request Request) (any, error) {
@@ -790,7 +884,7 @@ func (d *Dispatcher) stopPlayback(ctx context.Context, request Request) (any, er
 	if d.playback == nil {
 		return nil, adapters.ErrUnavailable
 	}
-	if strings.TrimSpace(request.SessionID) == "" || len(request.Body) != 0 {
+	if strings.TrimSpace(request.SessionID) == "" || !emptyProjectedBody(request.Body) {
 		return nil, adapters.ErrInvalidRequest
 	}
 	session, target, err := d.authorizedSession(ctx, request)
@@ -809,7 +903,7 @@ func (d *Dispatcher) stopPlayback(ctx context.Context, request Request) (any, er
 func (d *Dispatcher) authorizedSession(ctx context.Context, request Request) (*gbplayback.Session, Target, error) {
 	owner := clientOwner(request.ClientID)
 	session, ok := d.playback.PeekForOwner(request.SessionID, owner)
-	if !ok || session == nil {
+	if !ok || session == nil || session.Mode != gbplayback.ModePlayback {
 		return nil, Target{}, adapters.ErrNotFound
 	}
 	target, err := d.resolveTarget(ctx, request)
@@ -872,6 +966,9 @@ func playbackView(session *gbplayback.Session, protocolVersion string, existing 
 		MediaURLs: session.MediaURLs, HasAudio: session.HasAudio, StartTime: session.SegmentStart, EndTime: session.SegmentEnd,
 		PlayFrom: session.PlayFrom, PositionSeconds: session.PositionSeconds, Scale: session.Scale,
 		CreatedAt: session.CreatedAt, Deadline: session.Deadline, Existing: existing,
+		RecordKey: session.RecordKey, StreamID: session.StreamID, SSRC: session.SSRC, DownloadSpeed: session.DownloadSpeed,
+		DefaultProtocol: session.DefaultProtocol, EndReason: session.EndReason, ErrorCode: session.ErrorCode, ErrorStage: session.ErrorStage,
+		LastActivityAt: session.LastActivityAt, IdleDeadline: session.IdleDeadline,
 	}
 }
 
@@ -1012,7 +1109,7 @@ func (a *operationAdapter) Execute(ctx context.Context, invocation catalogruntim
 	if err != nil {
 		return nil, err
 	}
-	if a.method == http.MethodGet && len(invocation.Body) != 0 || a.scope != ScopeRecordQuery && len(invocation.Query) != 0 {
+	if a.method == http.MethodGet && len(invocation.Body) != 0 || a.scope != ScopeRecordQuery && a.scope != ScopePlaybackList && a.scope != ScopeDownloadList && len(invocation.Query) != 0 {
 		return nil, adapters.ErrInvalidRequest
 	}
 	return a.dispatcher.Handle(ctx, a.scope, request)
@@ -1024,10 +1121,12 @@ func NewAdapterRegistrations(dispatcher *Dispatcher) []catalogruntime.AdapterReg
 		{RecordQueryOptionsKey, ScopeRecordQueryOptions, http.MethodGet},
 		{PlaybackCreateAdapterKey, ScopePlaybackCreate, http.MethodPost},
 		{PlaybackReadAdapterKey, ScopePlaybackRead, http.MethodGet},
+		{PlaybackListAdapterKey, ScopePlaybackList, http.MethodGet},
 		{PlaybackActionAdapterKey, ScopePlaybackAction, http.MethodPost},
 		{PlaybackStopAdapterKey, ScopePlaybackStop, http.MethodPost},
 		{DownloadCreateAdapterKey, ScopeDownloadCreate, http.MethodPost},
 		{DownloadReadAdapterKey, ScopeDownloadRead, http.MethodGet},
+		{DownloadListAdapterKey, ScopeDownloadList, http.MethodGet},
 		{DownloadCancelAdapterKey, ScopeDownloadCancel, http.MethodDelete},
 	}
 	registrations := make([]catalogruntime.AdapterRegistration, 0, len(definitions))

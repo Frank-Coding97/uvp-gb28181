@@ -49,6 +49,9 @@ type gatewayRequest struct {
 	headers                                                                                                                                HeaderValues
 	contentType                                                                                                                            string
 	body                                                                                                                                   []byte
+	businessBody                                                                                                                           []byte
+	businessQuery                                                                                                                          string
+	bound                                                                                                                                  bool
 	params                                                                                                                                 map[string]string
 }
 type gatewayResponse struct {
@@ -137,6 +140,10 @@ func (g *Gateway) handleCatalog(c *gin.Context, requestID, scope string, respond
 		respond(gatewayError(requestID, 400, "INVALID_REQUEST"))
 		return
 	}
+	if err := bindActionRequest(&q); err != nil {
+		respond(gatewayError(requestID, 400, "INVALID_REQUEST"))
+		return
+	}
 	q.headers = HeaderValues{SignVersion: append([]string(nil), r.Header.Values("X-UVP-Sign-Version")...), AccessKey: append([]string(nil), r.Header.Values("X-UVP-Access-Key")...), Timestamp: append([]string(nil), r.Header.Values("X-UVP-Timestamp")...), Nonce: append([]string(nil), r.Header.Values("X-UVP-Nonce")...), Signature: append([]string(nil), r.Header.Values("X-UVP-Signature")...), ContentType: append([]string(nil), r.Header.Values("Content-Type")...), ContentEncoding: append([]string(nil), r.Header.Values("Content-Encoding")...), IdempotencyKey: append([]string(nil), r.Header.Values("Idempotency-Key")...)}
 	if len(q.headers.IdempotencyKey) == 1 {
 		q.idempotencyKey = q.headers.IdempotencyKey[0]
@@ -206,6 +213,9 @@ func (g *Gateway) process(hardContext context.Context, q gatewayRequest) (output
 	ctx, cancel := context.WithDeadline(hardContext, deadline.Add(-g.config.AuditReserve))
 	defer cancel()
 	invalid := func(status int, code string) gatewayResponse { return gatewayError(q.requestID, status, code) }
+	if bindActionRequest(&q) != nil {
+		return invalid(400, "INVALID_REQUEST")
+	}
 	if !metadataRouteMatches(q) {
 		return invalid(400, "INVALID_REQUEST")
 	}
@@ -303,7 +313,7 @@ func (g *Gateway) process(hardContext context.Context, q gatewayRequest) (output
 					code = "OK"
 				}
 			} else {
-				if q.scope == PlayLiveScope {
+				if q.scope == PlayLiveScope || q.scope == PlayLiveStopScope || q.scope == PlayLiveReadScope || q.scope == PlayLiveListScope {
 					response = playFailure(q.requestID, readErr)
 				} else {
 					response = metadataFailure(q.requestID, readErr)

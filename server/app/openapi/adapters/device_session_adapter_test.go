@@ -216,7 +216,7 @@ func TestDeviceSessionLibraryDeleteRequiresExplicitConfirmation(t *testing.T) {
 		`{"ids":[1],"confirmed":true,"extra":1}`,
 	} {
 		_, err := adapter.Execute(context.Background(), catalogruntime.Invocation{
-			Scope: LibraryDeleteScope, Method: "DELETE", Params: params, Body: []byte(body), Value: value,
+			Scope: LibraryDeleteScope, Method: "POST", Params: params, Body: []byte(body), Value: value,
 		})
 		require.ErrorIs(t, err, ErrInvalidRequest, "body %s must be rejected", body)
 	}
@@ -229,12 +229,12 @@ func TestDeviceSessionLibraryDeleteRequiresExplicitConfirmation(t *testing.T) {
 	tooMany, err := json.Marshal(map[string]any{"ids": ids, "confirmed": true})
 	require.NoError(t, err)
 	_, err = adapter.Execute(context.Background(), catalogruntime.Invocation{
-		Scope: LibraryDeleteScope, Method: "DELETE", Params: params, Body: tooMany, Value: value,
+		Scope: LibraryDeleteScope, Method: "POST", Params: params, Body: tooMany, Value: value,
 	})
 	require.ErrorIs(t, err, ErrInvalidRequest)
 
 	data, err := adapter.Execute(context.Background(), catalogruntime.Invocation{
-		Scope: LibraryDeleteScope, Method: "DELETE", Params: params,
+		Scope: LibraryDeleteScope, Method: "POST", Params: params,
 		Body: []byte(`{"ids":[11,12],"confirmed":true}`), Value: value,
 	})
 	require.NoError(t, err)
@@ -243,7 +243,7 @@ func TestDeviceSessionLibraryDeleteRequiresExplicitConfirmation(t *testing.T) {
 
 	// scope / method 不可互换：读码不能删图。
 	_, err = adapter.Execute(context.Background(), catalogruntime.Invocation{
-		Scope: LibraryReadScope, Method: "DELETE", Params: params,
+		Scope: LibraryReadScope, Method: "POST", Params: params,
 		Body: []byte(`{"ids":[11],"confirmed":true}`), Value: value,
 	})
 	require.ErrorIs(t, err, ErrInvalidRequest)

@@ -225,7 +225,10 @@ func TestOpenAPIResourceMetadataUsesExactOwnerAndValidDepartment(t *testing.T) {
 
 	status, err := svc.GetDeviceStatus(ctx, resourceOwnerDept, resourceDevice)
 	require.NoError(t, err)
-	assert.Equal(t, DeviceStatus{DeviceID: resourceDevice, Status: "online"}, status)
+	assert.Equal(t, resourceDevice, status.DeviceID)
+	assert.Equal(t, "online", status.Status)
+	require.NotNil(t, status.Online)
+	assert.True(t, *status.Online)
 
 	channels, err := svc.ListChannels(ctx, resourceOwnerDept, resourceDevice, ChannelListOptions{})
 	require.NoError(t, err)
@@ -238,7 +241,11 @@ func TestOpenAPIResourceMetadataUsesExactOwnerAndValidDepartment(t *testing.T) {
 	assert.Equal(t, resourceDevice, channel.DeviceID)
 	channelStatus, err := svc.GetChannelStatus(ctx, resourceOwnerDept, resourceDevice, resourceChannel)
 	require.NoError(t, err)
-	assert.Equal(t, ChannelStatus{DeviceID: resourceDevice, ChannelID: resourceChannel, Status: "online"}, channelStatus)
+	assert.Equal(t, resourceDevice, channelStatus.DeviceID)
+	assert.Equal(t, resourceChannel, channelStatus.ChannelID)
+	assert.Equal(t, "online", channelStatus.Status)
+	require.NotNil(t, channelStatus.Online)
+	assert.True(t, *channelStatus.Online)
 
 	for _, deptID := range []uint{0, 40, 50, 60, 999} {
 		_, err := svc.ListDevices(ctx, deptID, DeviceListOptions{})
@@ -355,10 +362,20 @@ func TestOpenAPIResourceDTOWhitelist(t *testing.T) {
 	require.NoError(t, err)
 	channel, err := svc.GetChannel(ctx, resourceOwnerDept, resourceDevice, resourceChannel)
 	require.NoError(t, err)
-	deviceJSON, err := json.Marshal(device)
-	require.NoError(t, err)
-	channelJSON, err := json.Marshal(channel)
-	require.NoError(t, err)
-	assert.JSONEq(t, `{"deviceId":"34020000002000000010","name":"本部门设备","alias":"主设备","manufacturer":"厂商A","model":"型号A","status":"online"}`, string(deviceJSON))
-	assert.JSONEq(t, `{"deviceId":"34020000002000000010","channelId":"37011200001310000010","name":"正常通道","alias":"通道别名","manufacturer":"厂商A","model":"型号A","status":"online","ptzType":1}`, string(channelJSON))
+
+	deviceFields, channelFields := resourceJSON(t, device), resourceJSON(t, channel)
+	keys := func(fields map[string]any) []string {
+		result := make([]string, 0, len(fields))
+		for key := range fields {
+			result = append(result, key)
+		}
+		return result
+	}
+	require.ElementsMatch(t, []string{"deviceId", "name", "alias", "manufacturer", "model", "status", "firmware", "transport", "ip", "port", "registerTime", "registerExpireAt", "keepaliveTime", "keepaliveInterval", "expires", "offlineAt", "channelCount", "onlineChannelCount", "reportedVersion", "effectiveVersion", "effectiveVersionSource", "effectiveVersionAt", "protocolOverride", "subscribeCapability", "subscribeLastTest", "subscribeExpiresAt", "reportedCharset", "wireCharset", "reportedCharsetAt", "createdAt", "updatedAt"}, keys(deviceFields))
+	require.ElementsMatch(t, []string{"deviceId", "channelId", "name", "alias", "manufacturer", "model", "status", "ptzType", "owner", "civilCode", "parentId", "roomType", "supplyLightType", "directionType", "resolution", "positionType", "useType", "photoelectricImagingType", "capturePositionType", "streamNumberList", "ipAddress", "port", "longitude", "latitude", "positionSource", "positionUpdatedAt", "statusEvent", "streamId", "onDemandLive", "streamTransport", "audioEnabled", "recordingMode", "cloudRecordingEnabled", "cloudRecordingState", "cloudRecordingError", "cloudRecordingUpdatedAt", "snapshotAt", "createdAt", "updatedAt"}, keys(channelFields))
+	assert.Equal(t, "本部门设备", deviceFields["name"])
+	assert.Equal(t, "正常通道", channelFields["name"])
+	assert.Equal(t, "online", deviceFields["status"])
+	assert.Equal(t, "online", channelFields["status"])
+
 }

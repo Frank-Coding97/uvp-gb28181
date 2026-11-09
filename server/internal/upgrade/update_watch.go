@@ -16,7 +16,7 @@ import (
 // version check. The check only asks the release source for the newest signed
 // manifest: it never downloads, stages, creates a task, or applies anything.
 // Automatic upgrades were removed, so this must stay a read-only probe.
-const DefaultUpdateCheckInterval = 6 * time.Hour
+const DefaultUpdateCheckInterval = 15 * time.Minute
 
 // DefaultUpdateCheckDelay keeps the first probe away from process startup,
 // where the preflight subprocess would compete with the business runtime.

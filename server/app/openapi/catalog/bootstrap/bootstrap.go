@@ -9,11 +9,9 @@
 // Every operation must be published because client.ScopePublished reads the
 // release and nothing else.
 //
-// Publishing stays deliberate: startup repairs additively, with the sole
-// pre-release exception of explicitly retired scopes, and `-publish-catalog`
-// remains the explicit operator override for all other contract changes.
-// An installation whose release already covers the surface is never re-seeded
-// or re-versioned.
+// Startup repairs missing capabilities and migrates the retired pre-release
+// resource routes to the action contract. Other edits still require the
+// explicit -publish-catalog operator entry point.
 package bootstrap
 
 import (
@@ -41,7 +39,7 @@ var (
 )
 
 // BootstrapResult reports rows created by EnsureCoreCatalog. Existing rows are
-// deliberately not counted and are never updated by this function.
+// deliberately not counted; pre-release route migrations retain their IDs.
 type BootstrapResult struct {
 	GroupsCreated       int
 	CapabilitiesCreated int
@@ -151,7 +149,7 @@ func CoreCatalogScopes() []string {
 
 // EnsureCoreCatalog creates the initial editable catalog rows. It is safe to
 // call during every startup: rows are matched by their stable code, scope, and
-// route, and existing rows are left untouched. A matching sys_api row is copied
+// route. Retired pre-release URLs are migrated in place. A matching sys_api row is copied
 // as metadata only; sys_api is never used as the external scope or as the
 // publication trigger.
 func EnsureCoreCatalog(ctx context.Context, db *gorm.DB, actorID int64) (BootstrapResult, error) {
@@ -390,6 +388,14 @@ func ensureCapability(ctx context.Context, tx *gorm.DB, group openapimodels.Capa
 		if capability.DeletedAt != nil {
 			return openapimodels.Capability{}, false, fmt.Errorf("%w: capability scope %q is soft deleted", ErrBootstrapConflict, definition.scope)
 		}
+		updates := capabilityContractUpdates(capability, definition, sysAPI)
+		if len(updates) > 0 {
+			updates["row_version"] = gorm.Expr("row_version + ?", 1)
+			updates["updated_by"] = createdBy
+			if err := tx.WithContext(ctx).Model(&capability).Updates(updates).Error; err != nil {
+				return capability, false, err
+			}
+		}
 		return capability, false, nil
 	}
 
@@ -432,6 +438,33 @@ func ensureOperation(ctx context.Context, tx *gorm.DB, capability openapimodels.
 		}
 		if operation.DeletedAt != nil {
 			return false, fmt.Errorf("%w: operation %q is soft deleted", ErrBootstrapConflict, definition.code)
+		}
+		// Replace only the retired pre-release resource routes. Stable identities,
+		// grants and old immutable releases are retained; disabled rows stay disabled.
+		if isLegacyActionRoute(operation.ExternalPath) && operation.ExternalPath != definition.externalPath {
+			if len(lookups) > 0 {
+				if owner, exists := lookups[0].routes[routeSeedKey{definition.method, definition.externalPath}]; exists && owner.ID != operation.ID {
+					return false, fmt.Errorf("%w: action route is already reserved", ErrBootstrapConflict)
+				}
+			}
+			previousRoute := routeSeedKey{operation.Method, operation.ExternalPath}
+			updates := map[string]any{"method": definition.method, "external_path": definition.externalPath,
+				"request_schema": definition.requestSchema, "sys_api_method": definition.sysAPIMethod, "updated_by": createdBy}
+			if err := tx.WithContext(ctx).Model(&operation).Updates(updates).Error; err != nil {
+				return false, err
+			}
+			if len(lookups) > 0 {
+				delete(lookups[0].routes, previousRoute)
+				operation.Method, operation.ExternalPath = definition.method, definition.externalPath
+				lookups[0].routes[routeSeedKey{definition.method, definition.externalPath}] = operation
+			}
+		}
+		updates := operationContractUpdates(operation, definition, sysAPI)
+		if len(updates) > 0 {
+			updates["updated_by"] = createdBy
+			if err := tx.WithContext(ctx).Model(&operation).Updates(updates).Error; err != nil {
+				return false, err
+			}
 		}
 		return false, nil
 	}

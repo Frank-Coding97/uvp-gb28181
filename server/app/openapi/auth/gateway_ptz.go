@@ -65,7 +65,7 @@ func (g *Gateway) handlePTZ(c *gin.Context, requestID, scope string, respond fun
 		}
 		q.body = append([]byte(nil), body...)
 	}
-	if !ptzRouteMatches(q) || validatePTZRequest(q) != nil {
+	if bindActionRequest(&q) != nil || !ptzRouteMatches(q) || validatePTZRequest(q) != nil {
 		failEarly(gatewayError(requestID, http.StatusBadRequest, "INVALID_REQUEST"))
 		return
 	}
@@ -109,7 +109,7 @@ func (g *Gateway) processPTZ(hardContext context.Context, q gatewayRequest) (out
 	ctx, cancel := context.WithDeadline(hardContext, deadline.Add(-g.config.AuditReserve))
 	defer cancel()
 	invalid := func(status int, code string) gatewayResponse { return gatewayError(q.requestID, status, code) }
-	if !ptzRouteMatches(q) || validatePTZRequest(q) != nil {
+	if bindActionRequest(&q) != nil || !ptzRouteMatches(q) || validatePTZRequest(q) != nil {
 		return invalid(http.StatusBadRequest, "INVALID_REQUEST")
 	}
 	if len(q.headers.SignVersion) == 0 || len(q.headers.AccessKey) == 0 || len(q.headers.Timestamp) == 0 || len(q.headers.Nonce) == 0 || len(q.headers.Signature) == 0 {
@@ -189,12 +189,12 @@ func (g *Gateway) processPTZ(hardContext context.Context, q gatewayRequest) (out
 		}
 		return invalid(http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE")
 	}
-	request := PTZRequest{Scope: q.scope, ClientID: view.ID, OwnerDeptID: view.OwnerDeptID, DataScope: view.DataScope, DeviceID: q.deviceID, ChannelID: q.channelID, PresetID: q.presetID, TrackID: q.trackID, OperationID: q.operationID, IdempotencyKey: q.idempotencyKey, Body: append([]byte(nil), q.body...)}
+	request := PTZRequest{Scope: q.scope, ClientID: view.ID, OwnerDeptID: view.OwnerDeptID, DataScope: view.DataScope, DeviceID: q.deviceID, ChannelID: q.channelID, PresetID: q.presetID, TrackID: q.trackID, OperationID: q.operationID, IdempotencyKey: q.idempotencyKey, Body: append([]byte(nil), dispatchBody(q)...)}
 	var data any
 	var dispatchErr error
 	if g.catalog != nil && g.catalog.Active() != nil {
 		data, dispatchErr = g.catalog.Dispatch(ctx, q.scope, catalogruntime.Invocation{
-			Method: q.method, Path: q.path, Params: q.params, Body: append([]byte(nil), q.body...),
+			Method: q.method, Path: q.path, Params: q.params, Body: append([]byte(nil), dispatchBody(q)...),
 			Value: request,
 		})
 	} else {

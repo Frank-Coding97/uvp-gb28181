@@ -170,7 +170,7 @@ func (adapter *deviceQueryAdapter) Dispatch(ctx context.Context, request Request
 	if err := validateResourceScope(request.ResourceScope); err != nil {
 		return nil, err
 	}
-	if request.List.Keyword != "" || request.List.Status != "" {
+	if (request.List.Keyword != "" && adapter.operation != listDeviceAlarms) || request.List.Status != "" {
 		return nil, ErrInvalidRequest
 	}
 	var data any
@@ -180,9 +180,17 @@ func (adapter *deviceQueryAdapter) Dispatch(ctx context.Context, request Request
 		if request.ChannelID != "" || request.Cursor != "" {
 			return nil, ErrInvalidRequest
 		}
-		data, err = adapter.reader.ListDeviceAlarmsInScope(ctx, request.ResourceScope, request.DeviceID, resource.DeviceListOptions{
-			Page: request.List.Page, PageSize: request.List.PageSize,
-		})
+		filter, parseErr := alarmFilterFromRequest(request)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		if reader, ok := adapter.reader.(DeviceAlarmReader); ok {
+			data, err = reader.SearchDeviceAlarmsInScope(ctx, request.ResourceScope, request.DeviceID, filter)
+		} else if len(request.Query) == 0 && request.List.Keyword == "" {
+			data, err = adapter.reader.ListDeviceAlarmsInScope(ctx, request.ResourceScope, request.DeviceID, filter.DeviceListOptions)
+		} else {
+			return nil, ErrUnavailable
+		}
 	case listDeviceStatusEvents:
 		if request.ChannelID != "" || request.List.Page < 0 || request.List.Page > 1 {
 			return nil, ErrInvalidRequest

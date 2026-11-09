@@ -85,12 +85,11 @@ type PublishOutcome struct {
 // EnsurePublishedCatalog guarantees that a migrated installation has an active
 // release that covers the code-owned scope surface.
 //
-// It is idempotent in the strongest sense for a healthy installation: when the
-// active release already contains every code-owned scope, nothing is seeded,
-// published or version-bumped, so restarting a live deployment cannot roll its
-// contract forward.
+// A healthy action-contract installation remains unchanged on restart.
+// Retired pre-release resource URLs are migrated through a new immutable
+// release, preserving historical releases and stable scope grants.
 //
-// The one automatic mutation is a strictly additive repair. A release that
+// Missing scopes are repaired additively. A release that
 // predates part of the surface — an installation that published before this
 // binary learned about a scope, for example — is exactly as broken as an
 // installation that never published: the extra scopes appear in the
@@ -182,7 +181,11 @@ func PublishCurrentCatalog(ctx context.Context, db *gorm.DB, actorID int64, runt
 			Version:   active.Release.Version,
 			ItemCount: len(active.Items),
 		}
-		if draftSurfaceSignature(draft) == draftSurfaceSignature(active.Draft()) {
+		_, snapshotContractDrift, err := coreContractDrift(ctx, db, active)
+		if err != nil {
+			return PublishOutcome{}, err
+		}
+		if draftSurfaceSignature(draft) == draftSurfaceSignature(active.Draft()) && !snapshotContractDrift {
 			return existing, nil
 		}
 	}
@@ -220,7 +223,11 @@ func reconcilePublishedCatalog(ctx context.Context, db *gorm.DB, actorID int64, 
 	if err != nil {
 		return PublishOutcome{}, err
 	}
-	if len(missing) == 0 && len(retired) == 0 && !groupDrift {
+	sourceContractDrift, snapshotContractDrift, err := coreContractDrift(ctx, db, active)
+	if err != nil {
+		return PublishOutcome{}, err
+	}
+	if len(missing) == 0 && len(retired) == 0 && !groupDrift && !sourceContractDrift && !snapshotContractDrift && !legacyActionRouteDrift(active) {
 		return existing, nil
 	}
 	existing.CoreScopesMissing = missing
@@ -235,7 +242,7 @@ func reconcilePublishedCatalog(ctx context.Context, db *gorm.DB, actorID int64, 
 	if !draftCoversScopes(draft, publishedScopesExcludingRetired(active)) {
 		return existing, nil
 	}
-	if len(retired) == 0 && draftSurfaceSignature(draft) == draftSurfaceSignature(active.Draft()) && !groupDrift {
+	if len(retired) == 0 && draftSurfaceSignature(draft) == draftSurfaceSignature(active.Draft()) && !groupDrift && !snapshotContractDrift {
 		// The rows exist but produce the same surface — a disabled or
 		// soft-deleted core row is kept out of the draft by catalogRows.
 		// Report rather than publish a release that would not close the gap.
@@ -323,7 +330,7 @@ func publishDraft(ctx context.Context, repository *catalogstore.Repository, runt
 }
 
 // missingCoreScopes returns the code-owned scopes the active release does not
-// publish, sorted. It is the only trigger for an automatic revision.
+// publish, sorted. Missing scopes and retired pre-release URLs trigger repair.
 func missingCoreScopes(active *catalogstore.ReleaseSnapshot) []string {
 	published := publishedScopeSet(active)
 	missing := make([]string, 0)
@@ -432,4 +439,24 @@ func draftSurfaceSignature(draft catalogruntime.Draft) string {
 	}
 	sort.Strings(entries)
 	return strings.Join(entries, "\x1e")
+}
+
+// Pre-release URLs were replaced as one contract revision before external use.
+func isLegacyActionRoute(path string) bool {
+	return path == "/openapi/v1/devices" || strings.HasPrefix(path, "/openapi/v1/devices/") || path == "/openapi/v1/capabilities"
+}
+func legacyActionRouteDrift(active *catalogstore.ReleaseSnapshot) bool {
+	if active == nil {
+		return false
+	}
+	core := make(map[string]bool)
+	for _, scope := range CoreCatalogScopes() {
+		core[scope] = true
+	}
+	for _, item := range active.Items {
+		if core[item.Scope] && isLegacyActionRoute(item.ExternalPath) {
+			return true
+		}
+	}
+	return false
 }

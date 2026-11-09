@@ -93,6 +93,11 @@ func TestCreateCaptureUsesNamespacedClientOwnerAndDeviceIdempotency(t *testing.T
 	created, err := service.CreateCapture(context.Background(), request)
 	require.NoError(t, err)
 	require.Equal(t, "queued", created.CommandStatus)
+	require.Equal(t, "operation-1", created.OperationID)
+	require.Zero(t, created.CommandSIPStatus)
+	require.Empty(t, created.CommandResult)
+	require.Nil(t, created.CommandResponseAt)
+	require.Nil(t, created.CommandCompletedAt)
 	require.Equal(t, "waiting", created.State)
 	require.NotEmpty(t, created.SessionID)
 	require.Len(t, commands.commands, 1)
@@ -108,6 +113,18 @@ func TestCreateCaptureUsesNamespacedClientOwnerAndDeviceIdempotency(t *testing.T
 	require.NoError(t, err)
 	require.Equal(t, created.SessionID, replayed.SessionID)
 	require.Len(t, commands.commands, 1, "same client/key must not issue another SnapShotConfig")
+
+	operation := commands.byID[created.OperationID]
+	confirmed := created.CreatedAt.Add(time.Second)
+	operation.SIPStatus, operation.DeviceResult = 200, "OK"
+	operation.ResponseAt, operation.CompletedAt = &confirmed, &confirmed
+	commands.byID[created.OperationID] = operation
+	read, err := service.GetCapture(context.Background(), 91, captureScope(), captureTestDevice, captureTestChannel, created.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, 200, read.CommandSIPStatus)
+	require.Equal(t, "OK", read.CommandResult)
+	require.Equal(t, &confirmed, read.CommandResponseAt)
+	require.Equal(t, &confirmed, read.CommandCompletedAt)
 }
 
 func TestCaptureSessionAndImageAccessAreClientAndDepartmentScoped(t *testing.T) {

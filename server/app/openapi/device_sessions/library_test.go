@@ -64,7 +64,7 @@ func TestSnapshotLibraryListsAndReadsImagesThatBelongToTheChannelScope(t *testin
 	for _, item := range page.Items {
 		require.NotContains(t, item.ContentPath, "37011200001310000011")
 	}
-	require.Contains(t, page.Items[0].ContentPath, "snapshot-library/")
+	require.Contains(t, page.Items[0].ContentPath, "/snapshot/library/content?")
 
 	filtered, err := service.ListLibrary(context.Background(), captureScope(), captureTestDevice, captureTestChannel, LibraryListOptions{
 		To: base.Add(30 * time.Minute).Format(time.RFC3339),

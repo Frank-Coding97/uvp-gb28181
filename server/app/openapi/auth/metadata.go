@@ -39,14 +39,14 @@ func parseMetadata(q gatewayRequest, owner uint, dataScopes ...int8) (metadataIn
 		dataScope = dataScopes[0]
 	}
 	m := metadataInput{owner: owner, dataScope: dataScope, scope: q.scope, deviceID: q.deviceID, channelID: q.channelID, page: 1, size: 20, query: make(map[string]string)}
-	values, err := url.ParseQuery(q.rawQuery)
+	values, err := url.ParseQuery(dispatchQuery(q))
 	if err != nil {
 		return m, err
 	}
 	operation, ok := contractOperation(q.scope)
 	allowed := make(map[string]bool)
 	if ok {
-		for _, name := range operation.QueryAllowlist {
+		for _, name := range operation.BusinessQueryAllowlist {
 			allowed[name] = true
 		}
 	}

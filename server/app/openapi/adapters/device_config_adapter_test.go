@@ -150,7 +150,7 @@ func TestDeviceConfigAdaptersValidateWritesAndVideoParamOperations(t *testing.T)
 		byKey[registration.Key] = registration.Adapter
 	}
 	params := map[string]string{"deviceId": deviceConfigAdapterTestDevice, "channelId": deviceConfigAdapterTestChannel}
-	request := deviceConfigInvocation(DeviceConfigApplyScope, "PUT", `{"blocks":{"frameMirror":{"value":1}}}`, params, nil)
+	request := deviceConfigInvocation(DeviceConfigApplyScope, "POST", `{"blocks":{"frameMirror":{"value":1}}}`, params, nil)
 	_, err := byKey[DeviceConfigApplyAdapterKey].Execute(context.Background(), request)
 	require.NoError(t, err)
 	require.NotNil(t, service.applyBlocks.FrameMirror)
@@ -167,7 +167,7 @@ func TestDeviceConfigAdaptersValidateWritesAndVideoParamOperations(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, 1, service.videoSnapshotCalls)
 
-	request = deviceConfigInvocation(VideoParamsApplyScope, "PUT", `{"items":[{"streamNumber":0,"videoFormat":"2","resolution":"1920x1080","frameRate":"25","bitRateType":"1","videoBitRate":"2048"}]}`, params, nil)
+	request = deviceConfigInvocation(VideoParamsApplyScope, "POST", `{"items":[{"streamNumber":0,"videoFormat":"2","resolution":"1920x1080","frameRate":"25","bitRateType":"1","videoBitRate":"2048"}]}`, params, nil)
 	_, err = byKey[VideoParamsApplyAdapterKey].Execute(context.Background(), request)
 	require.NoError(t, err)
 	require.Len(t, service.videoItems, 1)
@@ -226,12 +226,12 @@ func TestDeviceConfigAdapterRejectsInvalidConfigAndVideoParameters(t *testing.T)
 		byKey[registration.Key] = registration.Adapter
 	}
 	params := map[string]string{"deviceId": deviceConfigAdapterTestDevice, "channelId": deviceConfigAdapterTestChannel}
-	badConfig := deviceConfigInvocation(DeviceConfigApplyScope, "PUT", `{"blocks":{"frameMirror":{"value":99}}}`, params, nil)
+	badConfig := deviceConfigInvocation(DeviceConfigApplyScope, "POST", `{"blocks":{"frameMirror":{"value":99}}}`, params, nil)
 	_, err := byKey[DeviceConfigApplyAdapterKey].Execute(context.Background(), badConfig)
 	require.ErrorIs(t, err, ErrInvalidRequest)
 	require.Zero(t, service.applyCalls)
 
-	badVideo := deviceConfigInvocation(VideoParamsApplyScope, "PUT", `{"items":[{"streamNumber":0,"videoFormat":"2","resolution":"1920*1080","frameRate":"25","bitRateType":"1","videoBitRate":"2048"}]}`, params, nil)
+	badVideo := deviceConfigInvocation(VideoParamsApplyScope, "POST", `{"items":[{"streamNumber":0,"videoFormat":"2","resolution":"1920*1080","frameRate":"25","bitRateType":"1","videoBitRate":"2048"}]}`, params, nil)
 	_, err = byKey[VideoParamsApplyAdapterKey].Execute(context.Background(), badVideo)
 	require.ErrorIs(t, err, ErrInvalidRequest)
 	require.Zero(t, service.videoApplyCalls)
@@ -249,7 +249,7 @@ func TestDeviceConfigAdapterRejectsReadOnlyInternalAndCallerSelectedSnapshotFiel
 		`{"blocks":{"videoAlarmRecord":{"additionalStreams":1}}}`,
 		`{"blocks":{"snapShot":{"snapNum":1,"uploadUrl":"https://caller.example/upload","sessionId":"01234567890123456789012345678901"}}}`,
 	} {
-		request := deviceConfigInvocation(DeviceConfigApplyScope, "PUT", body, params, nil)
+		request := deviceConfigInvocation(DeviceConfigApplyScope, "POST", body, params, nil)
 		_, err := adapter.Execute(context.Background(), request)
 		require.ErrorIs(t, err, ErrInvalidRequest, body)
 	}

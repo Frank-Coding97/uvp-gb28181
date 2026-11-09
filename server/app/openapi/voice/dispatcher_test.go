@@ -52,7 +52,8 @@ func (service *fakeTalkService) Create(_ context.Context, request talk.CreateReq
 	keyValue := request.OpenAPIIdempotencyKey
 	session := &gbmodels.GbTalkSession{SessionID: sessionID, ChannelID: request.Channel.ID, DeviceID: request.Device.DeviceID,
 		TargetID: request.Channel.ChannelID, OpenAPIClientID: request.OpenAPIClientID, OpenAPIIdempotencyKey: &keyValue,
-		OpenAPIRequestHash: request.OpenAPIRequestHash, Mode: request.Mode, State: gbmodels.TalkSessionReserved, ExpiresAt: service.now.Add(time.Minute)}
+		OpenAPIRequestHash: request.OpenAPIRequestHash, Mode: request.Mode, State: gbmodels.TalkSessionReserved, ExpiresAt: service.now.Add(time.Minute),
+		CreatedAt: service.now, UpdatedAt: service.now}
 	service.sessions[sessionID] = session
 	service.idempotency[key] = sessionID
 	return createResult(session), nil
@@ -167,6 +168,43 @@ func TestVoiceCreateUsesClientIdentityAndClientScopedIdempotency(t *testing.T) {
 	third := thirdData.(SessionView)
 	require.NotEqual(t, first.SessionID, third.SessionID, "an identical idempotency key is isolated by client")
 	require.EqualValues(t, 42, service.createCalls[2].OpenAPIClientID)
+}
+
+func TestVoiceViewsIncludeRealTargetAndLifecycleFactsWithoutInternalErrors(t *testing.T) {
+	service := newFakeTalkService()
+	dispatcher := newTestDispatcher(service)
+	request := testRequest(41)
+	data, err := dispatcher.Handle(context.Background(), ScopeTalkCreate, request)
+	require.NoError(t, err)
+	created := data.(SessionView)
+	require.Equal(t, request.DeviceID, created.DeviceID)
+	require.Equal(t, request.ChannelID, created.ChannelID)
+	require.Equal(t, service.now, created.CreatedAt)
+	require.Equal(t, service.now, created.UpdatedAt)
+	require.False(t, created.HasError)
+	require.NotEmpty(t, created.Media.ICEServers, "creation retains the actual ICE configuration")
+
+	session := service.sessions[created.SessionID]
+	session.SignalPhase = gbmodels.TalkSignalPhaseSourceReady
+	session.Error = "failed upstream https://internal.example.test/whip?token=private"
+	session.UpdatedAt = service.now.Add(time.Second)
+	request.SessionID, request.IdempotencyKey = session.SessionID, ""
+	data, err = dispatcher.Handle(context.Background(), ScopeTalkRead, request)
+	require.NoError(t, err)
+	view := data.(SessionView)
+	require.Equal(t, "source_ready", view.Phase)
+	require.Equal(t, session.UpdatedAt, view.UpdatedAt)
+	require.True(t, view.HasError)
+	encoded, err := json.Marshal(view)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "private")
+	require.NotContains(t, string(encoded), "internal.example.test")
+	var fields map[string]any
+	require.NoError(t, json.Unmarshal(encoded, &fields))
+	require.Contains(t, fields, "startedAt")
+	require.Contains(t, fields, "endedAt")
+	require.Nil(t, fields["startedAt"])
+	require.Nil(t, fields["endedAt"])
 }
 
 func TestVoiceReadAndEndRequireClientAndDepartmentOwnedSession(t *testing.T) {
@@ -328,6 +366,7 @@ func TestVoiceViewDoesNotEmbedDomainErrorOrInternalIDs(t *testing.T) {
 	encoded, err := json.Marshal(view)
 	require.NoError(t, err)
 	require.NotContains(t, string(encoded), "channelId\":71")
-	require.NotContains(t, string(encoded), "deviceId\":\"34020000001320000001\"")
+	require.NotContains(t, string(encoded), "deviceId\":7")
+	require.Contains(t, string(encoded), "deviceId\":\"34020000001320000001\"")
 	require.False(t, strings.Contains(string(encoded), "sourceStream"))
 }

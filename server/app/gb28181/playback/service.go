@@ -581,6 +581,13 @@ func (s *Service) PeekForOwner(sessionID, ownerID string) (*Session, bool) {
 	return s.registry.GetForOwner(sessionID, ownerID)
 }
 
+func (s *Service) ListForOwner(ownerID string) []*Session {
+	if s == nil || s.registry == nil {
+		return []*Session{}
+	}
+	return s.registry.ListForOwner(ownerID)
+}
+
 func (s *Service) StopForOwner(ctx context.Context, sessionID, ownerID, reason string) error {
 	if s == nil || s.registry == nil {
 		return ErrPlaybackNotFound

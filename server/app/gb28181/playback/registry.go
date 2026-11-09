@@ -244,6 +244,28 @@ func (r *Registry) GetForOwner(id, ownerID string) (*Session, bool) {
 	return session, true
 }
 
+// ListForOwner returns independent snapshots and never extends idle leases.
+func (r *Registry) ListForOwner(ownerID string) []*Session {
+	result := make([]*Session, 0)
+	if strings.TrimSpace(ownerID) == "" {
+		return result
+	}
+	r.mu.RLock()
+	records := make([]*sessionRecord, 0, len(r.sessions))
+	for _, record := range r.sessions {
+		records = append(records, record)
+	}
+	r.mu.RUnlock()
+	for _, record := range records {
+		record.mu.Lock()
+		if record.session.OwnerID == ownerID {
+			result = append(result, record.session.clone())
+		}
+		record.mu.Unlock()
+	}
+	return result
+}
+
 func (r *Registry) GetByCallID(callID string) (*Session, bool) {
 	if strings.TrimSpace(callID) == "" {
 		return nil, false

@@ -45,7 +45,7 @@ func catalogDB(t *testing.T) (*gorm.DB, resource.DepartmentScope) {
 	require.NoError(t, err)
 	raw.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = raw.Close() })
-	require.NoError(t, db.AutoMigrate(&appmodels.SysDepartment{}, &gbmodels.GbDevice{}))
+	require.NoError(t, db.AutoMigrate(&appmodels.SysDepartment{}, &gbmodels.GbDevice{}, &gbmodels.GbChannel{}))
 	active := int8(1)
 	for _, department := range []appmodels.SysDepartment{
 		{BaseModel: appmodels.BaseModel{ID: catalogDept}, Name: "root", Status: &active},

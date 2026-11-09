@@ -458,7 +458,7 @@ const autoCheckHint = computed(() => {
   return noticeCheckedAt.value ? `上次检查 ${formatTime(noticeCheckedAt.value)}` : "等待首次检查";
 });
 /**
- * 打开开关后立刻查一次：否则用户要等最多 6 小时才能看到结果，会以为没生效。
+ * 打开开关后立刻查一次：否则用户要等最多 15 分钟才能看到结果，会以为没生效。
  * 关闭是纯本地设置，不需要再打一次官方源。
  */
 const toggleAutoCheck = async (enabled: boolean) => {

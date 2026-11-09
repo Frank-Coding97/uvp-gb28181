@@ -36,7 +36,7 @@ func captureCatalogBody(c *gin.Context, q *gatewayRequest) error {
 	if !ok || len(r.TransferEncoding) != 0 || r.ContentLength < 0 || r.ContentLength > maxBodyBytes {
 		return ErrDenied
 	}
-	jsonBody := r.Method != http.MethodGet && operation.RequestSchema != "{}"
+	jsonBody := r.Method != http.MethodGet
 	if !jsonBody {
 		if r.ContentLength != 0 {
 			return ErrDenied
@@ -130,12 +130,14 @@ func (g *Gateway) dispatchCatalog(ctx context.Context, q gatewayRequest, clientI
 		return nil, adapters.ErrUnavailable
 	}
 	var value any
-	if q.scope == PlayLiveScope || q.scope == PlayLiveStopScope {
+	if q.scope == PlayLiveListScope {
+		value = PlayListRequest{PlayRequest: PlayRequest{ClientID: clientID, OwnerDeptID: metadata.owner, DataScope: metadata.dataScope, DeviceID: metadata.deviceID, ChannelID: metadata.channelID, ClientIP: q.source}, Page: metadata.page, PageSize: metadata.size}
+	} else if q.scope == PlayLiveScope || q.scope == PlayLiveStopScope || q.scope == PlayLiveReadScope {
 		value = PlayRequest{ClientID: clientID, OwnerDeptID: metadata.owner, DataScope: metadata.dataScope, DeviceID: metadata.deviceID, ChannelID: metadata.channelID, ClientIP: q.source}
 	} else {
 		value = adapters.Request{ClientID: clientID, IdempotencyKey: q.idempotencyKey, ResourceScope: resource.DepartmentScope{OwnerDeptID: metadata.owner, DataScope: metadata.dataScope}, DeviceID: metadata.deviceID, ChannelID: metadata.channelID, Cursor: metadata.cursor, Query: metadata.query, List: adapters.ListOptions{Page: metadata.page, PageSize: metadata.size, Keyword: metadata.keyword, Status: metadata.status}}
 	}
 	return g.catalog.Dispatch(ctx, q.scope, catalogruntime.Invocation{
-		Method: q.method, Path: q.path, Params: q.params, Query: metadata.query, Body: append([]byte(nil), q.body...), Value: value,
+		Method: q.method, Path: q.path, Params: q.params, Query: metadata.query, Body: append([]byte(nil), dispatchBody(q)...), Value: value,
 	})
 }

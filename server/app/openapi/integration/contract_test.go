@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"encoding/json"
 	"go/ast"
 	"go/parser"
@@ -10,15 +11,21 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
+	"gorm.io/gorm"
 	"uvplatform.com/uvp-gb28181/app/gb28181/manscdp"
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	appmodels "uvplatform.com/uvp-gb28181/app/models"
 	"uvplatform.com/uvp-gb28181/app/openapi/client"
 	"uvplatform.com/uvp-gb28181/app/openapi/contracts"
 	"uvplatform.com/uvp-gb28181/app/openapi/resource"
@@ -118,11 +125,12 @@ type contractOperation struct {
 }
 
 type contractParameterRef struct {
-	Ref      string         `yaml:"$ref"`
-	Name     string         `yaml:"name"`
-	In       string         `yaml:"in"`
-	Required bool           `yaml:"required"`
-	Schema   contractSchema `yaml:"schema"`
+	Description string         `yaml:"description"`
+	Ref         string         `yaml:"$ref"`
+	Name        string         `yaml:"name"`
+	In          string         `yaml:"in"`
+	Required    bool           `yaml:"required"`
+	Schema      contractSchema `yaml:"schema"`
 }
 
 type contractParameter struct {
@@ -150,10 +158,13 @@ type contractHeader struct {
 }
 
 type contractMediaType struct {
-	Schema contractSchema `yaml:"schema"`
+	Schema  contractSchema `yaml:"schema"`
+	Example map[string]any `yaml:"example"`
 }
 
 type contractSchema struct {
+	Description          string                    `yaml:"description"`
+	Example              any                       `yaml:"example"`
 	Ref                  string                    `yaml:"$ref"`
 	Type                 string                    `yaml:"type"`
 	Format               string                    `yaml:"format"`
@@ -162,7 +173,7 @@ type contractSchema struct {
 	Required             []string                  `yaml:"required"`
 	Properties           map[string]contractSchema `yaml:"properties"`
 	Items                *contractSchema           `yaml:"items"`
-	AdditionalProperties *bool                     `yaml:"additionalProperties"`
+	AdditionalProperties any                       `yaml:"additionalProperties"`
 	MinLength            *int                      `yaml:"minLength"`
 	MaxLength            *int                      `yaml:"maxLength"`
 	Minimum              *int                      `yaml:"minimum"`
@@ -183,6 +194,7 @@ type contractRoute struct {
 	standardRefs         []string
 	requiresConfirmation bool
 	queryAllowlist       []string
+	targetParameters     []string
 }
 
 var publicContractRoutes = func() []contractRoute {
@@ -200,6 +212,7 @@ var publicContractRoutes = func() []contractRoute {
 			standardRefs:         append([]string(nil), operation.StandardRefs...),
 			requiresConfirmation: operation.RequiresConfirmation,
 			queryAllowlist:       append([]string(nil), operation.QueryAllowlist...),
+			targetParameters:     append([]string(nil), operation.TargetParameters...),
 		})
 	}
 	return routes
@@ -227,7 +240,18 @@ func TestOpenAPIContract(t *testing.T) {
 	require.Contains(t, secretHandling, "browser")
 	require.Equal(t, "HMAC-SHA256", doc.SignatureContract.Algorithm)
 	require.Equal(t, requiredSignatureHeaders, doc.SignatureContract.RequiredHeaders)
-	require.Equal(t, []string{"cursor", "keyword", "page", "pageSize", "status"}, doc.SignatureContract.QueryAllowlist)
+	queryFields := make(map[string]bool)
+	for _, route := range publicContractRoutes {
+		for _, name := range route.queryAllowlist {
+			queryFields[name] = true
+		}
+	}
+	var queryAllowlist []string
+	for name := range queryFields {
+		queryAllowlist = append(queryAllowlist, name)
+	}
+	sort.Strings(queryAllowlist)
+	require.Equal(t, queryAllowlist, doc.SignatureContract.QueryAllowlist)
 	require.Contains(t, strings.ToLower(doc.SignatureContract.PathRule), "ascii")
 	require.Contains(t, strings.ToLower(doc.SignatureContract.PathRule), "encoded")
 	require.Contains(t, strings.ToLower(doc.SignatureContract.QueryRule), "rfc3986")
@@ -336,14 +360,17 @@ func TestDeviceCaptureIsPublishedOnlyThroughTheWiredCaptureSessionSurface(t *tes
 		require.Contains(t, client.SupportedScopes(), scope)
 	}
 	for _, path := range []string{
-		"/openapi/v1/devices/{deviceId}/channels/{channelId}/snapshot-sessions",
-		"/openapi/v1/devices/{deviceId}/channels/{channelId}/snapshot-sessions/{sessionId}",
-		"/openapi/v1/devices/{deviceId}/channels/{channelId}/snapshot-sessions/{sessionId}/images/{fileName}/content",
+		"/openapi/v1/snapshot/start",
+		"/openapi/v1/snapshot/info",
+		"/openapi/v1/snapshot/image/content",
 	} {
 		require.Contains(t, doc.Paths, path)
 	}
-	// 草稿期名称不得复活。
+	// 草稿期与已替换的资源路径都不得复活。
 	for _, path := range []string{
+		"/openapi/v1/devices/{deviceId}/channels/{channelId}/snapshot-sessions",
+		"/openapi/v1/devices/{deviceId}/channels/{channelId}/snapshot-sessions/{sessionId}",
+		"/openapi/v1/devices/{deviceId}/channels/{channelId}/snapshot-sessions/{sessionId}/images/{fileName}/content",
 		"/openapi/v1/devices/{deviceId}/channels/{channelId}/snapshots",
 		"/openapi/v1/devices/{deviceId}/channels/{channelId}/snapshots/{sessionId}",
 		"/openapi/v1/devices/{deviceId}/channels/{channelId}/snapshots/{sessionId}/images/{fileName}",
@@ -373,7 +400,7 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 	require.Equal(t, route.requiresConfirmation, operation.Confirmation, route.scope+" confirmation")
 	parameters := make(map[string]contractParameter)
 	for _, ref := range operation.Parameters {
-		parameter := contractParameter{Name: ref.Name, In: ref.In, Required: ref.Required, Schema: ref.Schema}
+		parameter := contractParameter{Name: ref.Name, In: ref.In, Required: ref.Required, Schema: ref.Schema, Description: ref.Description}
 		if ref.Ref != "" {
 			const prefix = "#/components/parameters/"
 			require.Truef(t, strings.HasPrefix(ref.Ref, prefix), "unsupported parameter ref %s", ref.Ref)
@@ -383,6 +410,10 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 		}
 		require.NotEmpty(t, parameter.Name)
 		require.NotEmpty(t, parameter.In)
+		require.Contains(t, []string{"header", "query"}, parameter.In)
+		if route.method == "post" {
+			require.Equal(t, "header", parameter.In, "POST business parameters must be in JSON")
+		}
 		parameters[parameter.Name] = parameter
 	}
 	for _, name := range requiredSignatureHeaders {
@@ -415,17 +446,10 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 		require.Equal(t, 1, *schema.MinLength)
 		require.Equal(t, 128, *schema.MaxLength)
 	}
-	// A POST normally carries a JSON body. The documented exceptions are the
-	// operations declared with `x-uvp-body: empty`: live playback takes no
-	// input, and a catalog refresh is addressed entirely by its path parameter.
-	//
-	// A DELETE is bodyless by default. Image-library deletion is the documented
-	// exception: it removes a caller-selected set, and the selection must be
-	// explicit in the body instead of hiding in a query string that proxies and
-	// access logs would record.
-	bodylessPOST := route.scope == "play:live" || route.scope == "device:catalog:refresh"
-	requestBodyRequired := (route.method == "post" && !bodylessPOST) || route.method == "put" ||
-		route.scope == "ptz:preset:delete" || route.scope == "channel:snapshot:library:delete"
+	// Every action POST signs targets and command fields in one JSON object.
+	require.Contains(t, []string{"get", "post"}, route.method)
+	require.NotContains(t, route.path, "{")
+	requestBodyRequired := route.method == "post"
 	if requestBodyRequired {
 		require.Equal(t, "application/json", operation.ContentType)
 		require.NotNil(t, operation.RequestBody)
@@ -434,14 +458,19 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 		require.Contains(t, operation.RequestBody.Content, "application/json")
 		bodySchema := resolveSchema(t, doc, operation.RequestBody.Content["application/json"].Schema)
 		require.Equal(t, "object", bodySchema.Type)
+		example := operation.RequestBody.Content["application/json"].Example
+		require.NotEmpty(t, example, route.scope+" must provide a usable JSON request example")
+		for _, field := range bodySchema.Required {
+			require.Contains(t, example, field, route.scope+" example missing required field")
+		}
 		if route.scope == "ptz:preset:save" {
-			require.Equal(t, []string{"presetId"}, bodySchema.Required)
+			require.ElementsMatch(t, []string{"deviceId", "channelId", "presetId"}, bodySchema.Required)
 			require.Equal(t, "integer", bodySchema.Properties["presetId"].Type)
 			require.Equal(t, 1, *bodySchema.Properties["presetId"].Minimum)
 			require.Equal(t, 255, *bodySchema.Properties["presetId"].Maximum)
 		} else if route.scope == "ptz:precise" {
 			require.NotNil(t, bodySchema.MinProperties)
-			require.Equal(t, 1, *bodySchema.MinProperties)
+			require.Equal(t, 3, *bodySchema.MinProperties)
 			require.Contains(t, bodySchema.Properties, "pan")
 			require.Contains(t, bodySchema.Properties, "tilt")
 			require.Contains(t, bodySchema.Properties, "zoom")
@@ -450,10 +479,15 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 		} else {
 			var expected contractSchema
 			require.NoError(t, json.Unmarshal([]byte(route.requestSchema), &expected))
-			require.Equal(t, expected.Required, bodySchema.Required, route.scope+" request fields")
+			require.ElementsMatch(t, expected.Required, bodySchema.Required, route.scope+" request fields")
+		}
+		for _, target := range route.targetParameters {
+			require.Contains(t, bodySchema.Properties, target, route.scope)
+			require.Contains(t, bodySchema.Required, target, route.scope)
+			require.NotContains(t, parameters, target, "POST targets must be in JSON")
 		}
 		require.NotNil(t, bodySchema.AdditionalProperties)
-		require.False(t, *bodySchema.AdditionalProperties)
+		require.Equal(t, false, bodySchema.AdditionalProperties)
 	} else {
 		require.Nil(t, operation.RequestBody)
 		require.Empty(t, operation.ContentType)
@@ -471,7 +505,12 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 	require.Equal(t, wantQuery, queryNames)
 	for _, name := range queryNames {
 		parameter := parameters[name]
-		require.False(t, parameter.Required)
+		isTarget := false
+		for _, target := range route.targetParameters {
+			isTarget = isTarget || target == name
+		}
+		required := isTarget || (route.scope == "channel:cloud-record:dates" && (name == "startDate" || name == "endDate"))
+		require.Equal(t, required, parameter.Required, route.scope+" query required "+name)
 		schema := resolveSchema(t, doc, parameter.Schema)
 		switch name {
 		case "keyword":
@@ -500,14 +539,14 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 	}
 	for _, name := range []string{"deviceId", "channelId"} {
 		if parameter, ok := parameters[name]; ok {
-			require.Equal(t, "path", parameter.In)
+			require.Equal(t, "query", parameter.In)
 			require.True(t, parameter.Required)
 			require.Equal(t, "^[0-9]{20}$", resolveSchema(t, doc, parameter.Schema).Pattern)
 		}
 	}
 	for _, name := range []string{"presetId", "operationId"} {
 		if parameter, ok := parameters[name]; ok {
-			require.Equal(t, "path", parameter.In)
+			require.Equal(t, "query", parameter.In)
 			require.True(t, parameter.Required)
 		}
 	}
@@ -661,6 +700,138 @@ func checkPublicDTOs(t *testing.T, doc openAPIContract) {
 	require.Equal(t, []any{"supported", "unsupported", "unknown"}, capability.Properties["state"].Enum)
 }
 
+func TestOpenAPIResourceResponseSchemasMatchSerializedQueries(t *testing.T) {
+	doc := loadOpenAPIContract(t)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &appmodels.SysDepartment{}))
+	active := int8(1)
+	require.NoError(t, db.Create(&appmodels.SysDepartment{BaseModel: appmodels.BaseModel{ID: 10}, Status: &active}).Error)
+	observed := time.Date(2026, 11, 9, 8, 0, 0, 0, time.UTC)
+	device := gbmodels.GbDevice{DeviceID: "34020000002000000001", Name: "门店设备", Firmware: "V1.0", Transport: "TCP", IP: "192.0.2.10", Port: 5060, Status: 1, OwnerDeptID: 10, RegisterTime: &observed, EffectiveVersion: "2022", ReportedVersion: "2022", ReportedCharset: "GB18030", WireCharset: "GB18030"}
+	channel := gbmodels.GbChannel{DeviceID: device.DeviceID, ChannelID: "34020000001320000001", Name: "门店入口", Owner: "门店", CivilCode: "340200", PTZType: 1, RoomType: 2, Status: 1, OwnerDeptID: 10, Longitude: 118.38, Latitude: 31.33, PositionSource: "catalog", PositionUpdatedAt: &observed, SnapshotAt: &observed}
+	require.NoError(t, db.Create(&device).Error)
+	require.NoError(t, db.Create(&channel).Error)
+	svc := resource.New(db)
+	deviceDetail, err := svc.GetDevice(context.Background(), 10, device.DeviceID)
+	require.NoError(t, err)
+	deviceList, err := svc.ListDevices(context.Background(), 10, resource.DeviceListOptions{})
+	require.NoError(t, err)
+	channelDetail, err := svc.GetChannel(context.Background(), 10, device.DeviceID, channel.ChannelID)
+	require.NoError(t, err)
+	channelList, err := svc.ListChannels(context.Background(), 10, device.DeviceID, resource.ChannelListOptions{})
+	require.NoError(t, err)
+	require.Equal(t, deviceDetail, deviceList.Items[0], "list and detail must share one device DTO")
+	require.Equal(t, channelDetail, channelList.Items[0], "list and detail must share one channel DTO")
+	for _, sample := range []struct {
+		name   string
+		value  any
+		fields int
+	}{
+		{"Device", deviceDetail, 31},
+		{"Channel", channelDetail, 39},
+	} {
+		t.Run(sample.name, func(t *testing.T) {
+			schema := resolveSchema(t, doc, contractSchema{Ref: "#/components/schemas/" + sample.name})
+			require.Len(t, schema.Properties, sample.fields)
+			for name, field := range schema.Properties {
+				require.NotEmpty(t, field.Description, name+" requires a meaningful description")
+			}
+			dto := reflect.TypeOf(sample.value)
+			for index := 0; index < dto.NumField(); index++ {
+				field := dto.Field(index)
+				name := strings.Split(field.Tag.Get("json"), ",")[0]
+				property := schema.Properties[name]
+				switch field.Type.Kind() {
+				case reflect.String:
+					require.Equal(t, "string", property.Type, name)
+				case reflect.Int, reflect.Int8, reflect.Int64:
+					require.Equal(t, "integer", property.Type, name)
+				case reflect.Float64:
+					require.Equal(t, "number", property.Type, name)
+				case reflect.Bool:
+					require.Equal(t, "boolean", property.Type, name)
+				case reflect.Pointer:
+					require.Equal(t, reflect.TypeOf((*time.Time)(nil)), field.Type, name)
+					require.Equal(t, "string", property.Type, name)
+					require.Equal(t, "date-time", property.Format, name)
+					require.True(t, property.Nullable, name)
+				default:
+					t.Fatalf("unexpected public DTO field type %s: %v", name, field.Type)
+				}
+			}
+			body, err := json.Marshal(sample.value)
+			require.NoError(t, err)
+			var actual any
+			require.NoError(t, json.Unmarshal(body, &actual))
+			checkResourceJSONSchema(t, doc, schema, actual)
+			require.NotNil(t, schema.Example, "response example must contain the full public DTO")
+			checkResourceJSONSchema(t, doc, schema, schema.Example)
+		})
+	}
+}
+
+func checkResourceJSONSchema(t *testing.T, doc openAPIContract, schema contractSchema, value any) {
+	t.Helper()
+	schema = resolveSchema(t, doc, schema)
+	if value == nil {
+		require.True(t, schema.Nullable, "JSON null must be declared nullable")
+		return
+	}
+	if schema.Type == "object" {
+		object, ok := value.(map[string]any)
+		require.True(t, ok)
+		require.Len(t, object, len(schema.Properties))
+		require.Len(t, schema.Required, len(schema.Properties), "all DTO fields are emitted, including nullable times")
+		for name, field := range schema.Properties {
+			require.Contains(t, object, name)
+			require.Contains(t, schema.Required, name)
+			checkResourceJSONSchema(t, doc, field, object[name])
+		}
+		return
+	}
+	body, err := json.Marshal(value)
+	require.NoError(t, err)
+	var normalized any
+	require.NoError(t, json.Unmarshal(body, &normalized))
+	switch schema.Type {
+	case "string":
+		text, ok := normalized.(string)
+		require.True(t, ok)
+		if schema.Format == "date-time" {
+			_, err := time.Parse(time.RFC3339Nano, text)
+			require.NoError(t, err)
+		}
+		if schema.Pattern != "" {
+			require.Regexp(t, regexp.MustCompile(schema.Pattern), text)
+		}
+	case "integer", "number":
+		number, ok := normalized.(float64)
+		require.True(t, ok)
+		if schema.Type == "integer" {
+			require.Equal(t, float64(int64(number)), number)
+		}
+	case "boolean":
+		_, ok := normalized.(bool)
+		require.True(t, ok)
+	default:
+		t.Fatalf("unsupported response schema type %q", schema.Type)
+	}
+	if len(schema.Enum) != 0 {
+		matched := false
+		for _, allowed := range schema.Enum {
+			encoded, err := json.Marshal(allowed)
+			require.NoError(t, err)
+			matched = matched || string(encoded) == string(body)
+		}
+		require.True(t, matched, "value %s is outside the documented enum", body)
+	}
+}
+
 func jsonFieldNames(typeOf reflect.Type) map[string]struct{} {
 	fields := make(map[string]struct{}, typeOf.NumField())
 	for i := 0; i < typeOf.NumField(); i++ {
@@ -739,15 +910,7 @@ func checkInstalledBoundary(t *testing.T, doc openAPIContract) {
 	root := gin.New()
 	require.NoError(t, routes.InstallPublicBoundary(root, nil, nil))
 	for _, route := range publicContractRoutes {
-		path := strings.ReplaceAll(route.path, "{deviceId}", "34020000001320000001")
-		path = strings.ReplaceAll(path, "{channelId}", "34020000001320000002")
-		path = strings.ReplaceAll(path, "{presetId}", "3")
-		path = strings.ReplaceAll(path, "{trackId}", "3")
-		path = strings.ReplaceAll(path, "{operationId}", "op-test")
-		path = strings.ReplaceAll(path, "{subscriptionId}", "550e8400-e29b-41d4-a716-446655440000")
-		path = strings.ReplaceAll(path, "{sessionId}", "550e8400-e29b-41d4-a716-446655440000")
-		path = strings.ReplaceAll(path, "{fileName}", "snapshot.jpg")
-		path = strings.ReplaceAll(path, "{snapshotId}", "42")
+		path := route.path
 		request := httptest.NewRequest(strings.ToUpper(route.method), path, nil)
 		response := httptest.NewRecorder()
 		root.ServeHTTP(response, request)
@@ -762,7 +925,7 @@ func checkInstalledBoundary(t *testing.T, doc openAPIContract) {
 	}
 	wireServer := httptest.NewServer(root)
 	defer wireServer.Close()
-	headResponse, err := wireServer.Client().Head(wireServer.URL + "/openapi/v1/devices")
+	headResponse, err := wireServer.Client().Head(wireServer.URL + "/openapi/v1/device/list")
 	require.NoError(t, err)
 	defer func() { _ = headResponse.Body.Close() }()
 	require.Equal(t, 405, headResponse.StatusCode)

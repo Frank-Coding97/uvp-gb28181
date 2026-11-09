@@ -22,7 +22,7 @@ import (
 const (
 	ptzTestDevice  = "34020000002000000010"
 	ptzTestChannel = "34020000001320000010"
-	ptzPresetPath  = "/openapi/v1/devices/" + ptzTestDevice + "/channels/" + ptzTestChannel + "/ptz/presets"
+	ptzPresetPath  = "/openapi/v1/ptz/preset/list"
 )
 
 type ptzDispatcherStub struct {
@@ -40,7 +40,7 @@ func (s *ptzDispatcherStub) Handle(context.Context, PTZRequest) (any, error) {
 func ptzRouter(gate *Gateway) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.GET("/openapi/v1/devices/:deviceId/channels/:channelId/ptz/presets", gate.Handler(PTZPresetListScope))
+	router.GET(ptzPresetPath, gate.Handler(PTZPresetListScope))
 	return router
 }
 
@@ -50,6 +50,7 @@ func signedPTZRequest(t *testing.T, secret, nonce string) *http.Request {
 	input := SignatureInput{
 		Method:    http.MethodGet,
 		Path:      ptzPresetPath,
+		RawQuery:  "deviceId=" + ptzTestDevice + "&channelId=" + ptzTestChannel,
 		AccessKey: fmt.Sprintf("uvp_%032x", 1),
 		Timestamp: now,
 		Nonce:     nonce,
@@ -57,7 +58,7 @@ func signedPTZRequest(t *testing.T, secret, nonce string) *http.Request {
 	}
 	signature, err := Sign(input, secret)
 	require.NoError(t, err)
-	request := httptest.NewRequest(http.MethodGet, "http://example.test"+ptzPresetPath, nil)
+	request := httptest.NewRequest(http.MethodGet, "http://example.test"+ptzPresetPath+"?"+input.RawQuery, nil)
 	request.RequestURI = request.URL.RequestURI()
 	request.Header.Set("X-UVP-Sign-Version", "1")
 	request.Header.Set("X-UVP-Access-Key", input.AccessKey)

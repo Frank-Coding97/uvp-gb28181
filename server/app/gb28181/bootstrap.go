@@ -1169,6 +1169,9 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 		openapiadapters.NewGormMaintenanceResolver(deviceDB), newPTZService,
 		openapiadapters.NewGormMaintenanceOperationReader(deviceDB),
 	)
+	openAPIAdapterRegistrations = append(openAPIAdapterRegistrations, openapiadapters.NewChannelRefreshAdapterRegistrations(
+		openapiadapters.NewGormMaintenanceResolver(deviceDB), newPTZService, openapiadapters.NewGormMaintenanceOperationReader(deviceDB),
+	)...)
 	openAPIAdapterRegistrations = append(openAPIAdapterRegistrations,
 		openapiadapters.NewDeviceConfigAdapterRegistrations(openapideviceconfig.New(deviceDB, newPTZService))...)
 	openAPIAdapterRegistrations = append(openAPIAdapterRegistrations, openapideviceupgrade.NewDispatcher(deviceDB, newFirmwareUpgradeService).Registrations()...)

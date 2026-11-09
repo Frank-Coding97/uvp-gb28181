@@ -41,12 +41,12 @@ func TestRegistryIncludesScopedTalkAndBroadcastSessionOperations(t *testing.T) {
 		scope, method, path, adapter, risk, idempotency string
 		confirmation                                    bool
 	}{
-		{"device:talk:create", http.MethodPost, "/openapi/v1/devices/:deviceId/channels/:channelId/talk-sessions", "device.voice-talk-create.v1", RiskMedia, IdempotencyRequired, false},
-		{"device:talk:read", http.MethodGet, "/openapi/v1/devices/:deviceId/channels/:channelId/talk-sessions/:sessionId", "device.voice-talk-read.v1", RiskRead, IdempotencyNone, false},
-		{"device:talk:end", http.MethodPost, "/openapi/v1/devices/:deviceId/channels/:channelId/talk-sessions/:sessionId/end", "device.voice-talk-end.v1", RiskControl, IdempotencyNone, false},
-		{"device:broadcast:create", http.MethodPost, "/openapi/v1/devices/:deviceId/channels/:channelId/broadcast-sessions", "device.voice-broadcast-create.v1", RiskMedia, IdempotencyRequired, false},
-		{"device:broadcast:read", http.MethodGet, "/openapi/v1/devices/:deviceId/channels/:channelId/broadcast-sessions/:sessionId", "device.voice-broadcast-read.v1", RiskRead, IdempotencyNone, false},
-		{"device:broadcast:end", http.MethodPost, "/openapi/v1/devices/:deviceId/channels/:channelId/broadcast-sessions/:sessionId/end", "device.voice-broadcast-end.v1", RiskControl, IdempotencyNone, false},
+		{"device:talk:create", http.MethodPost, "/openapi/v1/talk/start", "device.voice-talk-create.v1", RiskMedia, IdempotencyRequired, false},
+		{"device:talk:read", http.MethodGet, "/openapi/v1/talk/info", "device.voice-talk-read.v1", RiskRead, IdempotencyNone, false},
+		{"device:talk:end", http.MethodPost, "/openapi/v1/talk/stop", "device.voice-talk-end.v1", RiskControl, IdempotencyNone, false},
+		{"device:broadcast:create", http.MethodPost, "/openapi/v1/broadcast/start", "device.voice-broadcast-create.v1", RiskMedia, IdempotencyRequired, false},
+		{"device:broadcast:read", http.MethodGet, "/openapi/v1/broadcast/info", "device.voice-broadcast-read.v1", RiskRead, IdempotencyNone, false},
+		{"device:broadcast:end", http.MethodPost, "/openapi/v1/broadcast/stop", "device.voice-broadcast-end.v1", RiskControl, IdempotencyNone, false},
 	} {
 		operation, ok := byScope[want.scope]
 		require.Truef(t, ok, "missing voice scope %s", want.scope)
@@ -71,8 +71,8 @@ func TestRegistryIncludesScopedTalkAndBroadcastMediaProxyOperations(t *testing.T
 	for _, want := range []struct {
 		scope, path, adapter string
 	}{
-		{"device:talk:media", "/openapi/v1/devices/:deviceId/channels/:channelId/talk-sessions/:sessionId/media", "device.voice-talk-media.v1"},
-		{"device:broadcast:media", "/openapi/v1/devices/:deviceId/channels/:channelId/broadcast-sessions/:sessionId/media", "device.voice-broadcast-media.v1"},
+		{"device:talk:media", "/openapi/v1/talk/media", "device.voice-talk-media.v1"},
+		{"device:broadcast:media", "/openapi/v1/broadcast/media", "device.voice-broadcast-media.v1"},
 	} {
 		operation, ok := byScope[want.scope]
 		require.Truef(t, ok, "missing media scope %s", want.scope)
@@ -107,13 +107,13 @@ func TestRegistryIncludesTheGB281812022PTZControlSurface(t *testing.T) {
 		scope, method, path, adapter string
 		versions                     []string
 	}{
-		{"ptz:move", "POST", "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/move", "delegated.ptz.move.v1", []string{"2016", "2022"}},
-		{"ptz:precise", "POST", "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/precise", "delegated.ptz.precise.v1", []string{"2022"}},
-		{"ptz:extended", "POST", "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/extended", "delegated.ptz.extended.v1", []string{"2016", "2022"}},
-		{"ptz:wiper", "POST", "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/wiper", "delegated.ptz.wiper.v1", []string{"2016", "2022"}},
-		{"ptz:home-position:set", "POST", "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/home-position", "delegated.ptz.home-position-set.v1", []string{"2016", "2022"}},
-		{"ptz:cruise:control", "POST", "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/cruise/control", "delegated.ptz.cruise-control.v1", []string{"2016", "2022"}},
-		{"ptz:target-track", "POST", "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/target-track", "delegated.ptz.target-track.v1", []string{"2022"}},
+		{"ptz:move", "POST", "/openapi/v1/ptz/control", "delegated.ptz.move.v1", []string{"2016", "2022"}},
+		{"ptz:precise", "POST", "/openapi/v1/ptz/position/set", "delegated.ptz.precise.v1", []string{"2022"}},
+		{"ptz:extended", "POST", "/openapi/v1/ptz/extended/control", "delegated.ptz.extended.v1", []string{"2016", "2022"}},
+		{"ptz:wiper", "POST", "/openapi/v1/ptz/wiper/set", "delegated.ptz.wiper.v1", []string{"2016", "2022"}},
+		{"ptz:home-position:set", "POST", "/openapi/v1/ptz/home/set", "delegated.ptz.home-position-set.v1", []string{"2016", "2022"}},
+		{"ptz:cruise:control", "POST", "/openapi/v1/ptz/cruise/control", "delegated.ptz.cruise-control.v1", []string{"2016", "2022"}},
+		{"ptz:target-track", "POST", "/openapi/v1/ptz/track/set", "delegated.ptz.target-track.v1", []string{"2022"}},
 	} {
 		operation, ok := byScope[want.scope]
 		require.Truef(t, ok, "missing PTZ scope %s", want.scope)
@@ -136,8 +136,8 @@ func TestRegistryIncludesCruiseTrackCreateAndRead(t *testing.T) {
 		scope, method, path, adapter, risk, idempotency string
 		versions                                        []string
 	}{
-		{"ptz:cruise:track:create", "POST", "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/cruise/tracks", "delegated.ptz.cruise-track-create.v1", RiskControl, IdempotencyRequired, []string{"2016", "2022"}},
-		{"ptz:cruise:track:read", "GET", "/openapi/v1/devices/:deviceId/channels/:channelId/ptz/cruise/tracks/:trackId", "delegated.ptz.cruise-track-read.v1", RiskRead, IdempotencyNone, []string{"2016", "2022"}},
+		{"ptz:cruise:track:create", "POST", "/openapi/v1/ptz/cruise/save", "delegated.ptz.cruise-track-create.v1", RiskControl, IdempotencyRequired, []string{"2016", "2022"}},
+		{"ptz:cruise:track:read", "GET", "/openapi/v1/ptz/cruise/info", "delegated.ptz.cruise-track-read.v1", RiskRead, IdempotencyNone, []string{"2016", "2022"}},
 	} {
 		operation, ok := byScope[want.scope]
 		require.Truef(t, ok, "missing cruise track scope %s", want.scope)
@@ -157,13 +157,13 @@ func TestRegistryIncludesDeviceEventAndPositionReadOperations(t *testing.T) {
 		got[operation.Scope] = operation.Method + " " + operation.ExternalPath
 	}
 	require.Equal(t, map[string]string{
-		"device:subscription:create":   "POST /openapi/v1/devices/{deviceId}/subscriptions",
-		"device:subscription:read":     "GET /openapi/v1/devices/{deviceId}/subscriptions/{subscriptionId}",
-		"device:subscription:renew":    "POST /openapi/v1/devices/{deviceId}/subscriptions/{subscriptionId}/renew",
-		"device:subscription:cancel":   "DELETE /openapi/v1/devices/{deviceId}/subscriptions/{subscriptionId}",
-		"device:events:read":           "GET /openapi/v1/devices/{deviceId}/subscriptions/{subscriptionId}/events",
-		"device:position:read":         "GET /openapi/v1/devices/{deviceId}/positions",
-		"device:position:history:read": "GET /openapi/v1/devices/{deviceId}/positions/history",
+		"device:subscription:create":   "POST /openapi/v1/subscription/create",
+		"device:subscription:read":     "GET /openapi/v1/subscription/info",
+		"device:subscription:renew":    "POST /openapi/v1/subscription/renew",
+		"device:subscription:cancel":   "POST /openapi/v1/subscription/cancel",
+		"device:events:read":           "GET /openapi/v1/event/list",
+		"device:position:read":         "GET /openapi/v1/position/latest",
+		"device:position:history:read": "GET /openapi/v1/position/history",
 	}, map[string]string{
 		"device:subscription:create":   got["device:subscription:create"],
 		"device:subscription:read":     got["device:subscription:read"],
@@ -184,13 +184,13 @@ func TestRegistryIncludesDeviceConfigurationOperations(t *testing.T) {
 		method string
 		path   string
 	}{
-		"device:config:refresh":        {"POST", "/openapi/v1/devices/{deviceId}/channels/{channelId}/device-configs/refresh"},
-		"device:config:read":           {"GET", "/openapi/v1/devices/{deviceId}/channels/{channelId}/device-configs"},
-		"device:config:apply":          {"PUT", "/openapi/v1/devices/{deviceId}/channels/{channelId}/device-configs"},
-		"channel:video-params:refresh": {"POST", "/openapi/v1/devices/{deviceId}/channels/{channelId}/video-params/refresh"},
-		"channel:video-params:read":    {"GET", "/openapi/v1/devices/{deviceId}/channels/{channelId}/video-params"},
-		"channel:video-params:apply":   {"PUT", "/openapi/v1/devices/{deviceId}/channels/{channelId}/video-params"},
-		"device:config:operation:read": {"GET", "/openapi/v1/devices/{deviceId}/channels/{channelId}/config-operations/{operationId}"},
+		"device:config:refresh":        {"POST", "/openapi/v1/config/refresh"},
+		"device:config:read":           {"GET", "/openapi/v1/config/info"},
+		"device:config:apply":          {"POST", "/openapi/v1/config/set"},
+		"channel:video-params:refresh": {"POST", "/openapi/v1/video/params/refresh"},
+		"channel:video-params:read":    {"GET", "/openapi/v1/video/params/info"},
+		"channel:video-params:apply":   {"POST", "/openapi/v1/video/params/set"},
+		"device:config:operation:read": {"GET", "/openapi/v1/config/operation/info"},
 	}
 	require.Len(t, got, len(Operations()))
 	for scope, expected := range want {
@@ -212,7 +212,7 @@ func TestRegistryIncludesScopedGB281812022FirmwareUpgrade(t *testing.T) {
 	create, ok := byScope["device:firmware-upgrade:execute"]
 	require.True(t, ok)
 	require.Equal(t, "POST", create.Method)
-	require.Equal(t, "/openapi/v1/devices/:deviceId/firmware-upgrades", create.GinPath)
+	require.Equal(t, "/openapi/v1/firmware/upgrade", create.GinPath)
 	require.Equal(t, "device.maintenance.firmware-upgrade.v1", create.AdapterKey)
 	require.Equal(t, RiskDestructive, create.RiskLevel)
 	require.Equal(t, IdempotencyRequired, create.IdempotencyMode)
@@ -225,7 +225,7 @@ func TestRegistryIncludesScopedGB281812022FirmwareUpgrade(t *testing.T) {
 	read, ok := byScope["device:firmware-upgrade:read"]
 	require.True(t, ok)
 	require.Equal(t, "GET", read.Method)
-	require.Equal(t, "/openapi/v1/devices/:deviceId/firmware-upgrades/:operationId", read.GinPath)
+	require.Equal(t, "/openapi/v1/firmware/info", read.GinPath)
 	require.Equal(t, "device.maintenance.firmware-upgrade-read.v1", read.AdapterKey)
 	require.Equal(t, RiskRead, read.RiskLevel)
 	require.Equal(t, IdempotencyNone, read.IdempotencyMode)

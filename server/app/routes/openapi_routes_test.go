@@ -67,10 +67,11 @@ func TestOpenAPIRootDefaultClosedAndIsolatedFromCORS(t *testing.T) {
 		method, path string
 		status       int
 	}{
-		{"GET", "/openapi/v1/devices", 503},
-		{"OPTIONS", "/openapi/v1/devices", 405},
-		{"GET", "/openapi/v1/devices/", 404},
-		{"CUSTOM", "/openapi/v1/devices", 405},
+		{"GET", "/openapi/v1/device/list", 503},
+		{"OPTIONS", "/openapi/v1/device/list", 405},
+		{"GET", "/openapi/v1/device/list/", 404},
+		{"CUSTOM", "/openapi/v1/device/list", 405},
+		{"GET", "/openapi/v1/devices", 404},
 	} {
 		out := httptest.NewRecorder()
 		request := httptest.NewRequest(tc.method, tc.path, nil)

@@ -45,9 +45,9 @@ type openAPIEncodingPolicy struct {
 }
 
 type openAPIJSONBodyPolicy struct {
-	ExactFields           []string `yaml:"exactFields"`
-	RejectUnknownFields   bool     `yaml:"rejectUnknownFields"`
-	RejectDuplicateFields bool     `yaml:"rejectDuplicateFields"`
+	FieldRule             string `yaml:"fieldRule"`
+	RejectUnknownFields   bool   `yaml:"rejectUnknownFields"`
+	RejectDuplicateFields bool   `yaml:"rejectDuplicateFields"`
 }
 
 func TestOpenAPITransportContractRequiresFixedLengthJSONPOST(t *testing.T) {
@@ -58,7 +58,7 @@ func TestOpenAPITransportContractRequiresFixedLengthJSONPOST(t *testing.T) {
 	require.NoError(t, yaml.Unmarshal(body, &document))
 	require.Equal(t, "HTTP/1.1", document.Transport.HTTPVersion)
 	require.False(t, document.Transport.POST.Body.ContentLength.Required)
-	require.Equal(t, 0, document.Transport.POST.Body.ContentLength.Minimum)
+	require.Equal(t, 2, document.Transport.POST.Body.ContentLength.Minimum)
 	require.Equal(t, 65536, document.Transport.POST.Body.ContentLength.Maximum)
 	require.Equal(t, "exact body byte length", document.Transport.POST.Body.ContentLength.Value)
 	require.False(t, document.Transport.POST.Body.ContentLength.Signed)
@@ -66,7 +66,9 @@ func TestOpenAPITransportContractRequiresFixedLengthJSONPOST(t *testing.T) {
 	require.False(t, document.Transport.POST.Body.TransferEncoding.Chunked)
 	require.False(t, document.Transport.POST.Body.ContentEncoding.Allowed)
 	require.Equal(t, "application/json", document.Transport.POST.Body.ContentType)
-	require.Equal(t, []string{"protocol"}, document.Transport.POST.Body.JSON.ExactFields)
+	require.Contains(t, document.Transport.POST.Body.JSON.FieldRule, "request schema")
+	require.Contains(t, document.Transport.POST.Body.JSON.FieldRule, "target identifiers")
+	require.Contains(t, document.Transport.POST.Body.JSON.FieldRule, "original JSON bytes")
 	require.True(t, document.Transport.POST.Body.JSON.RejectUnknownFields)
 	require.True(t, document.Transport.POST.Body.JSON.RejectDuplicateFields)
 	require.False(t, document.Transport.POST.AutomaticRetry)

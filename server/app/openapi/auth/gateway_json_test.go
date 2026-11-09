@@ -19,7 +19,7 @@ import (
 )
 
 func TestCatalogJSONGatewayRejectsInvalidTransportAndAuthenticatesBody(t *testing.T) {
-	for _, kind := range []string{"valid", "tampered", "unknown", "duplicate", "chunked", "content-type", "no-scope", "missing-key", "cross-department", "replay"} {
+	for _, kind := range []string{"valid", "tampered", "target-tampered", "missing-target", "unknown", "duplicate", "chunked", "content-type", "no-scope", "missing-key", "cross-department", "replay"} {
 		t.Run(kind, func(t *testing.T) {
 			gate, db, secret := gatewayFixture(t)
 			require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbChannel{}))
@@ -38,17 +38,21 @@ func TestCatalogJSONGatewayRejectsInvalidTransportAndAuthenticatesBody(t *testin
 			registry := catalogruntime.NewAdapterRegistry()
 			require.NoError(t, registry.Register(catalogruntime.AdapterRegistration{Key: "test.json.v1", ContractVersion: "v1", Adapter: spy}))
 			runtime := catalogruntime.NewCatalogRuntime(registry, nil)
-			_, report, err := runtime.Publish(context.Background(), catalogruntime.Draft{Operations: []catalogruntime.Operation{{Scope: scope, Method: "POST", ExternalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/ptz/presets/{presetId}/call", AdapterKey: "test.json.v1", ContractVersion: "v1"}}})
+			_, report, err := runtime.Publish(context.Background(), catalogruntime.Draft{Operations: []catalogruntime.Operation{{Scope: scope, Method: "POST", ExternalPath: "/openapi/v1/ptz/preset/call", AdapterKey: "test.json.v1", ContractVersion: "v1"}}})
 			require.NoError(t, err)
 			require.True(t, report.Valid())
 			gate.catalog = runtime
-			path := "/openapi/v1/devices/" + deviceID + "/channels/" + channelID + "/ptz/presets/1/call"
-			body := "{}"
+			path := "/openapi/v1/ptz/preset/call"
+			validBody := fmt.Sprintf(`{"deviceId":%q,"channelId":%q,"presetId":"1"}`, deviceID, channelID)
+			body := validBody
 			if kind == "unknown" {
-				body = `{"ownerDeptId":20}`
+				body = strings.TrimSuffix(validBody, "}") + `,"ownerDeptId":20}`
 			}
 			if kind == "duplicate" {
 				body = `{"a":1,"a":2}`
+			}
+			if kind == "missing-target" {
+				body = fmt.Sprintf(`{"deviceId":%q,"presetId":"1"}`, deviceID)
 			}
 			key := "catalog-test-key"
 			if kind == "missing-key" {
@@ -58,12 +62,15 @@ func TestCatalogJSONGatewayRejectsInvalidTransportAndAuthenticatesBody(t *testin
 			// Invalid JSON is signed as a valid body then replaced, to exercise the boundary parser.
 			signed := input
 			if kind == "duplicate" {
-				signed.Body = []byte("{}")
+				signed.Body = []byte(validBody)
 			}
 			signature, err := Sign(signed, secret)
 			require.NoError(t, err)
 			if kind == "tampered" {
-				body = "{ }"
+				body = " " + validBody
+			}
+			if kind == "target-tampered" {
+				body = strings.ReplaceAll(validBody, channelID, "37011200001310000020")
 			}
 			request := httptest.NewRequest("POST", path, strings.NewReader(body))
 			for k, v := range map[string]string{"Content-Type": "application/json", "X-UVP-Sign-Version": "1", "X-UVP-Access-Key": input.AccessKey, "X-UVP-Timestamp": input.Timestamp, "X-UVP-Nonce": input.Nonce, "X-UVP-Signature": signature, "Idempotency-Key": key} {
@@ -79,7 +86,7 @@ func TestCatalogJSONGatewayRejectsInvalidTransportAndAuthenticatesBody(t *testin
 				request.Header.Set("Content-Type", "text/plain")
 			}
 			router := gin.New()
-			router.POST("/openapi/v1/devices/:deviceId/channels/:channelId/ptz/presets/:presetId/call", func(c *gin.Context) {
+			router.POST(path, func(c *gin.Context) {
 				gate.handleCatalog(c, "json-test", scope, func(response gatewayResponse) { writeGateway(c, response) })
 			})
 			out := httptest.NewRecorder()
@@ -88,7 +95,7 @@ func TestCatalogJSONGatewayRejectsInvalidTransportAndAuthenticatesBody(t *testin
 			switch kind {
 			case "valid", "replay":
 				expected = 200
-			case "tampered":
+			case "tampered", "target-tampered":
 				expected = 401
 			case "no-scope":
 				expected = 403
@@ -102,7 +109,7 @@ func TestCatalogJSONGatewayRejectsInvalidTransportAndAuthenticatesBody(t *testin
 				require.True(t, ok)
 				require.EqualValues(t, 1, typed.ClientID)
 				require.Equal(t, key, typed.IdempotencyKey)
-				require.Equal(t, []byte(body), invocation.Body)
+				require.JSONEq(t, `{}`, string(invocation.Body))
 				require.Equal(t, "1", invocation.Params["presetId"])
 			} else {
 				require.Empty(t, invocation.Scope)

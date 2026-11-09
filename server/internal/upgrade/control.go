@@ -243,12 +243,16 @@ func (s *ControlService) Check(ctx context.Context) (ControlCheckResult, error) 
 	if err != nil {
 		return ControlCheckResult{}, err
 	}
-	return ControlCheckResult{
+	result := ControlCheckResult{
 		Manifest:       manifest,
 		Artifact:       artifact,
 		CurrentVersion: preflight.CurrentVersion,
 		HasUpdate:      isNewerRelease(manifest, preflight.CurrentVersion),
-	}, nil
+	}
+	if s.UpdateWatch != nil {
+		_ = s.UpdateWatch.Record(&result, nil, s.now())
+	}
+	return result, nil
 }
 
 // CheckManifest exposes the same registered, signed manifest check used by

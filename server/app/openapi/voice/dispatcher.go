@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -74,11 +73,17 @@ type MediaResource struct {
 
 type SessionView struct {
 	SessionID string                   `json:"sessionId"`
+	DeviceID  string                   `json:"deviceId"`
+	ChannelID string                   `json:"channelId"`
 	Mode      gbmodels.TalkSessionMode `json:"mode"`
 	State     string                   `json:"state"`
+	Phase     string                   `json:"phase"`
+	HasError  bool                     `json:"hasError"`
+	CreatedAt time.Time                `json:"createdAt"`
+	UpdatedAt time.Time                `json:"updatedAt"`
 	ExpiresAt time.Time                `json:"expiresAt"`
-	StartedAt *time.Time               `json:"startedAt,omitempty"`
-	EndedAt   *time.Time               `json:"endedAt,omitempty"`
+	StartedAt *time.Time               `json:"startedAt"`
+	EndedAt   *time.Time               `json:"endedAt"`
 	Media     *MediaResource           `json:"media,omitempty"`
 }
 
@@ -278,8 +283,18 @@ func (dispatcher *Dispatcher) create(ctx context.Context, mode gbmodels.TalkSess
 	if result == nil || strings.TrimSpace(result.SessionID) == "" {
 		return SessionView{}, adapters.ErrUnavailable
 	}
-	return SessionView{SessionID: result.SessionID, Mode: result.Mode, State: result.State, ExpiresAt: result.ExpiresAt,
-		Media: mediaResource(result.SessionID, result.Mode, request, result.Uplink)}, nil
+	session, err := dispatcher.talk.GetForOpenAPIClient(ctx, request.ClientID, result.SessionID)
+	if err != nil {
+		return SessionView{}, mapTalkError(err)
+	}
+	if !ownsTarget(session, target, mode) {
+		return SessionView{}, adapters.ErrNotFound
+	}
+	view := sessionView(session, target)
+	if view.Media != nil {
+		view.Media = mediaResource(session.SessionID, session.Mode, request, result.Uplink)
+	}
+	return view, nil
 }
 
 func (dispatcher *Dispatcher) resolveTarget(ctx context.Context, request Request) (Target, error) {
@@ -364,7 +379,9 @@ func ownsTarget(session *gbmodels.GbTalkSession, target Target, mode gbmodels.Ta
 }
 
 func sessionView(session *gbmodels.GbTalkSession, target Target) SessionView {
-	view := SessionView{SessionID: session.SessionID, Mode: session.Mode, State: string(session.State), ExpiresAt: session.ExpiresAt,
+	view := SessionView{SessionID: session.SessionID, DeviceID: session.DeviceID, ChannelID: session.TargetID,
+		Mode: session.Mode, State: string(session.State), Phase: string(session.SignalPhase), HasError: session.Error != "",
+		CreatedAt: session.CreatedAt, UpdatedAt: session.UpdatedAt, ExpiresAt: session.ExpiresAt,
 		StartedAt: session.StartedAt, EndedAt: session.EndedAt}
 	if !session.State.IsTerminal() {
 		view.Media = mediaResource(session.SessionID, session.Mode, Request{DeviceID: target.Device.DeviceID, ChannelID: target.Channel.ChannelID}, talk.UplinkDescriptor{
@@ -375,11 +392,10 @@ func sessionView(session *gbmodels.GbTalkSession, target Target) SessionView {
 }
 
 func mediaResource(sessionID string, mode gbmodels.TalkSessionMode, request Request, descriptor talk.UplinkDescriptor) *MediaResource {
-	collection := "talk-sessions"
+	path := "/openapi/v1/talk/media"
 	if mode == gbmodels.TalkSessionModeBroadcast {
-		collection = "broadcast-sessions"
+		path = "/openapi/v1/broadcast/media"
 	}
-	path := "/openapi/v1/devices/" + url.PathEscape(request.DeviceID) + "/channels/" + url.PathEscape(request.ChannelID) + "/" + collection + "/" + url.PathEscape(sessionID) + "/media"
 	return &MediaResource{Path: path, Protocol: descriptor.Protocol, ContentType: descriptor.ContentType, ICEServers: descriptor.ICEServers}
 }
 

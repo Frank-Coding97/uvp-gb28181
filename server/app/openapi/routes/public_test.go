@@ -19,18 +19,19 @@ func TestOpenAPIPublicBoundaryRejectsWithoutRedirectOrGlobalMiddleware(t *testin
 		method, path string
 		status       int
 	}{
-		{"GET", "/openapi/v1/devices", 503},
-		{"GET", "/openapi/v1/devices/", 404},
-		{"GET", "/openapi/v1//devices", 404},
-		{"GET", "/openapi/v1/%64evices", 400},
-		{"POST", "/openapi/v1/devices/34020000002000000010/firmware-upgrades", 503},
-		{"GET", "/openapi/v1/devices/34020000002000000010/firmware-upgrades/operation-1", 503},
+		{"GET", "/openapi/v1/device/list", 503},
+		{"GET", "/openapi/v1/device/list/", 404},
+		{"GET", "/openapi/v1//device/list", 404},
+		{"GET", "/openapi/v1/%64evice/list", 400},
+		{"POST", "/openapi/v1/firmware/upgrade", 503},
+		{"GET", "/openapi/v1/firmware/info?deviceId=34020000002000000010&operationId=operation-1", 503},
 		{"GET", "/openapi", 404},
-		{"HEAD", "/openapi/v1/devices", 405},
-		{"OPTIONS", "/openapi/v1/devices", 405},
-		{"PATCH", "/openapi/v1/devices", 405},
-		{"CUSTOM", "/openapi/v1/devices", 405},
-		{"POST", "/openapi/v1/devices/34020000002000000010/channels/34020000001320000010/live", 503},
+		{"HEAD", "/openapi/v1/device/list", 405},
+		{"OPTIONS", "/openapi/v1/device/list", 405},
+		{"PATCH", "/openapi/v1/device/list", 405},
+		{"CUSTOM", "/openapi/v1/device/list", 405},
+		{"POST", "/openapi/v1/live/start", 503},
+		{"GET", "/openapi/v1/devices", 404},
 		{"POST", "/openapi/v1/devices/34020000002000000010/channels/34020000001320000010/live-authorizations", 404},
 	} {
 		out := httptest.NewRecorder()

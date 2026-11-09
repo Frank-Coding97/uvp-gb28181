@@ -335,7 +335,7 @@ func TestRecordingAdapterRegistrationsMapInvocationIntoTypedDispatcher(t *testin
 		return testTarget(), nil
 	}), query, &snapshotStub{}, &playbackStub{})
 	registrations := NewAdapterRegistrations(dispatcher)
-	require.Len(t, registrations, 9)
+	require.Len(t, registrations, 11)
 	registry := catalogruntime.NewAdapterRegistry()
 	for _, registration := range registrations {
 		require.NoError(t, registry.Register(registration))
@@ -360,7 +360,7 @@ func TestPlaybackActionAdapterMapsAuthenticatedPathAndSignedBody(t *testing.T) {
 	target := testTarget()
 	session := &gbplayback.Session{
 		ID: "session-one", OwnerID: "openapi-client:31", DeviceID: testDeviceCode,
-		ChannelID: "71", Authorization: target.Authorization,
+		ChannelID: "71", Authorization: target.Authorization, Mode: gbplayback.ModePlayback,
 	}
 	plays := &playbackStub{peek: session}
 	dispatcher := testDispatcher(targetResolverFunc(func(context.Context, resource.DepartmentScope, string, string) (Target, error) {
@@ -472,7 +472,7 @@ func TestPlaybackCreateBindsSnapshotAndSessionToOpenAPIClient(t *testing.T) {
 
 func TestPlaybackSessionOperationsRequireClientOwnershipAndCurrentDepartmentScope(t *testing.T) {
 	target := testTarget()
-	session := &gbplayback.Session{ID: "session-one", OwnerID: "openapi-client:31", DeviceID: testDeviceCode, ChannelID: "71", Authorization: target.Authorization}
+	session := &gbplayback.Session{ID: "session-one", OwnerID: "openapi-client:31", DeviceID: testDeviceCode, ChannelID: "71", Authorization: target.Authorization, Mode: gbplayback.ModePlayback}
 	plays := &playbackStub{peek: session, get: session}
 	resolveCalls := 0
 	dispatcher := testDispatcher(targetResolverFunc(func(_ context.Context, scope resource.DepartmentScope, deviceID, channelID string) (Target, error) {
@@ -502,7 +502,7 @@ func TestPlaybackSessionOperationsRequireClientOwnershipAndCurrentDepartmentScop
 
 func TestPlaybackRejectsTargetMovedOutsideClientScopeBeforeTouchOrAction(t *testing.T) {
 	target := testTarget()
-	session := &gbplayback.Session{ID: "session-one", OwnerID: "openapi-client:31", DeviceID: testDeviceCode, Authorization: target.Authorization}
+	session := &gbplayback.Session{ID: "session-one", OwnerID: "openapi-client:31", DeviceID: testDeviceCode, Authorization: target.Authorization, Mode: gbplayback.ModePlayback}
 	plays := &playbackStub{peek: session, get: session}
 	dispatcher := testDispatcher(targetResolverFunc(func(context.Context, resource.DepartmentScope, string, string) (Target, error) {
 		return Target{}, resource.ErrResourceNotFound

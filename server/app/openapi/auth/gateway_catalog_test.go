@@ -51,7 +51,7 @@ func TestOpenAPIGatewayUsesActiveCatalogRuntimeForMetadataRead(t *testing.T) {
 	}))
 	catalog := catalogruntime.NewCatalogRuntime(registry, nil)
 	_, report, err := catalog.Publish(context.Background(), catalogruntime.Draft{Operations: []catalogruntime.Operation{{
-		Scope: "device:list", Method: "GET", ExternalPath: "/openapi/v1/devices",
+		Scope: "device:list", Method: "GET", ExternalPath: "/openapi/v1/device/list",
 		AdapterKey: "test.catalog.device-list.v1", ContractVersion: "v1",
 	}}})
 	require.NoError(t, err)
@@ -72,7 +72,7 @@ func TestOpenAPIGatewayUsesActiveCatalogRuntimeForMetadataRead(t *testing.T) {
 	invocation := spy.Invocation()
 	require.Equal(t, "device:list", invocation.Scope)
 	require.Equal(t, "GET", invocation.Method)
-	require.Equal(t, "/openapi/v1/devices", invocation.Path)
+	require.Equal(t, "/openapi/v1/device/list", invocation.Path)
 	request, ok := invocation.Value.(adapters.Request)
 	require.True(t, ok)
 	require.Equal(t, resource.DepartmentScope{OwnerDeptID: 10, DataScope: resource.DataScopeDepartment}, request.ResourceScope)
@@ -96,7 +96,7 @@ func TestOpenAPIGatewayRejectsDurableRuntimeIdentityDrift(t *testing.T) {
 	require.NoError(t, registry.Register(catalogruntime.AdapterRegistration{Key: "test.catalog.device-list.v1", ContractVersion: "v1", Adapter: adapter}))
 	catalog := catalogruntime.NewCatalogRuntime(registry, nil)
 	_, report, err := catalog.Publish(context.Background(), catalogruntime.Draft{Operations: []catalogruntime.Operation{{
-		Scope: "device:list", Method: "GET", ExternalPath: "/openapi/v1/devices", AdapterKey: "test.catalog.device-list.v1", ContractVersion: "v1",
+		Scope: "device:list", Method: "GET", ExternalPath: "/openapi/v1/device/list", AdapterKey: "test.catalog.device-list.v1", ContractVersion: "v1",
 	}}})
 	require.NoError(t, err)
 	require.True(t, report.Valid())
@@ -130,7 +130,7 @@ func TestOpenAPIGatewayRejectsHydratedRuntimeAfterCatalogPublicationUntilRestart
 	require.NoError(t, db.Create(&capability).Error)
 	operation := openapimodels.Operation{
 		CapabilityID: capability.ID, Code: "list", Name: "设备列表", Method: "GET",
-		ExternalPath: "/openapi/v1/devices", AdapterKey: adapters.DeviceListAdapterKey,
+		ExternalPath: "/openapi/v1/device/list", AdapterKey: adapters.DeviceListAdapterKey,
 		AdapterContractVersion: adapters.ResourceAdapterContractVersion, ResourceType: "device", RiskLevel: "read",
 		IdempotencyMode: "none", RequestSchema: `{}`, ResponseSchema: `{}`, Status: openapimodels.CatalogStatusActive,
 		CreatedAt: now, UpdatedAt: now,
@@ -184,11 +184,12 @@ func TestNewReadScopesRequireExplicitGrantAndRejectResourceSubstitution(t *testi
 				if kind == "catalog-missing" {
 					require.NoError(t, db.AutoMigrate(&openapimodels.RuntimeState{}))
 				}
-				path := strings.NewReplacer(":deviceId", deviceID, ":channelId", channelID).Replace(metadataPattern(scope))
-				input := SignatureInput{Method: "GET", Path: path, AccessKey: fmt.Sprintf("uvp_%032x", 1), Timestamp: fmt.Sprint(time.Now().Unix()), Nonce: strings.Repeat("b", 32), Audience: "test-audience"}
+				path := metadataPattern(scope)
+				query := "deviceId=" + deviceID + "&channelId=" + channelID
+				input := SignatureInput{Method: "GET", Path: path, RawQuery: query, AccessKey: fmt.Sprintf("uvp_%032x", 1), Timestamp: fmt.Sprint(time.Now().Unix()), Nonce: strings.Repeat("b", 32), Audience: "test-audience"}
 				signature, err := Sign(input, secret)
 				require.NoError(t, err)
-				req := httptest.NewRequest("GET", path, nil)
+				req := httptest.NewRequest("GET", path+"?"+query, nil)
 				for k, v := range map[string]string{"X-UVP-Sign-Version": "1", "X-UVP-Access-Key": input.AccessKey, "X-UVP-Timestamp": input.Timestamp, "X-UVP-Nonce": input.Nonce, "X-UVP-Signature": signature} {
 					req.Header.Set(k, v)
 				}
@@ -248,18 +249,19 @@ func TestLivePlaybackUsesPublishedAdapterInsteadOfFallback(t *testing.T) {
 	spy := &catalogDispatchSpy{}
 	require.NoError(t, registry.Register(catalogruntime.AdapterRegistration{Key: adapters.PlayLiveAdapterKey, ContractVersion: "v1", Adapter: spy}))
 	runtime := catalogruntime.NewCatalogRuntime(registry, nil)
-	_, report, err := runtime.Publish(context.Background(), catalogruntime.Draft{Operations: []catalogruntime.Operation{{Scope: PlayLiveScope, Method: "POST", ExternalPath: "/openapi/v1/devices/{deviceId}/channels/{channelId}/live", AdapterKey: adapters.PlayLiveAdapterKey, ContractVersion: "v1"}}})
+	_, report, err := runtime.Publish(context.Background(), catalogruntime.Draft{Operations: []catalogruntime.Operation{{Scope: PlayLiveScope, Method: "POST", ExternalPath: "/openapi/v1/live/start", AdapterKey: adapters.PlayLiveAdapterKey, ContractVersion: "v1"}}})
 	require.NoError(t, err)
 	require.True(t, report.Valid())
 	gate.catalog = runtime
 	fallback := &liveCatalogFallbackSpy{}
 	gate.play = fallback
-	path := "/openapi/v1/devices/" + deviceID + "/channels/" + channelID + "/live"
-	input := SignatureInput{Method: "POST", Path: path, AccessKey: fmt.Sprintf("uvp_%032x", 1), Timestamp: fmt.Sprint(time.Now().Unix()), Nonce: strings.Repeat("f", 32), Audience: "test-audience"}
+	path := "/openapi/v1/live/start"
+	body := fmt.Sprintf(`{"deviceId":%q,"channelId":%q}`, deviceID, channelID)
+	input := SignatureInput{Method: "POST", Path: path, ContentType: "application/json", Body: []byte(body), AccessKey: fmt.Sprintf("uvp_%032x", 1), Timestamp: fmt.Sprint(time.Now().Unix()), Nonce: strings.Repeat("f", 32), Audience: "test-audience"}
 	signature, err := Sign(input, secret)
 	require.NoError(t, err)
-	req := httptest.NewRequest("POST", path, nil)
-	for k, v := range map[string]string{"X-UVP-Sign-Version": "1", "X-UVP-Access-Key": input.AccessKey, "X-UVP-Timestamp": input.Timestamp, "X-UVP-Nonce": input.Nonce, "X-UVP-Signature": signature} {
+	req := httptest.NewRequest("POST", path, strings.NewReader(body))
+	for k, v := range map[string]string{"Content-Type": "application/json", "X-UVP-Sign-Version": "1", "X-UVP-Access-Key": input.AccessKey, "X-UVP-Timestamp": input.Timestamp, "X-UVP-Nonce": input.Nonce, "X-UVP-Signature": signature} {
 		req.Header.Set(k, v)
 	}
 	router := gin.New()

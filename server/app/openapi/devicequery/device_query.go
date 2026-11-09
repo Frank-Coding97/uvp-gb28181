@@ -159,17 +159,19 @@ type TargetTrackSnapshot struct {
 }
 
 func (s *Service) ListDeviceAlarmsInScope(ctx context.Context, scope resource.DepartmentScope, deviceCode string, options resource.DeviceListOptions) (AlarmPage, error) {
-	page, pageSize, err := normalizePage(options, maxPageSize)
+	return s.SearchDeviceAlarmsInScope(ctx, scope, deviceCode, AlarmFilter{DeviceListOptions: options})
+}
+
+func (s *Service) SearchDeviceAlarmsInScope(ctx context.Context, scope resource.DepartmentScope, deviceCode string, options AlarmFilter) (AlarmPage, error) {
+	page, pageSize, err := normalizePage(resource.DeviceListOptions{Page: options.Page, PageSize: options.PageSize}, maxPageSize)
 	if err != nil {
+		return AlarmPage{}, err
+	}
+	if err := options.validate(); err != nil {
 		return AlarmPage{}, err
 	}
 	device, err := s.scopedDevice(ctx, scope, deviceCode)
 	if err != nil {
-		return AlarmPage{}, err
-	}
-	query := s.db.WithContext(ctx).Model(&gbmodels.GbAlarmEvent{}).Where("device_id = ?", device.ID)
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
 		return AlarmPage{}, err
 	}
 	type alarmRow struct {
@@ -187,10 +189,15 @@ func (s *Service) ListDeviceAlarmsInScope(ctx context.Context, scope resource.De
 		Latitude       *float64
 	}
 	rows := make([]alarmRow, 0)
-	result := s.db.WithContext(ctx).Table("gb_alarm_event AS a").
+	query := s.db.WithContext(ctx).Table("gb_alarm_event AS a").
 		Joins("LEFT JOIN gb_channel AS c ON c.id = a.channel_id AND c.device_id = ? AND c.owner_dept_id = ? AND c.deleted_at IS NULL", device.DeviceID, device.OwnerDeptID).
-		Where("a.device_id = ?", device.ID).
-		Select("a.id, a.received_at, a.alarm_time, c.channel_id AS channel_code, a.source_code, a.priority, a.method, a.alarm_type, a.alarm_type_param, a.description, a.longitude, a.latitude").
+		Where("a.device_id = ?", device.ID)
+	query = options.apply(query)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return AlarmPage{}, err
+	}
+	result := query.Select("a.id, a.received_at, a.alarm_time, c.channel_id AS channel_code, a.source_code, a.priority, a.method, a.alarm_type, a.alarm_type_param, a.description, a.longitude, a.latitude").
 		Order("a.received_at DESC, a.id DESC").
 		Offset((page - 1) * pageSize).Limit(pageSize).Scan(&rows)
 	if result.Error != nil {

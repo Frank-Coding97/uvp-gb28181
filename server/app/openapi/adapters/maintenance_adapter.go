@@ -723,6 +723,10 @@ func maintenanceOperationView(operation gbmodels.GbPTZOperation) map[string]any 
 		"operationId": operation.OperationID, "action": operation.Action, "status": operation.Status,
 		"sn": operation.SN, "responseRequired": operation.ResponseRequired,
 		"deviceAcknowledged": acknowledged, "profileVersion": operation.ProfileVersion,
+		"deviceId": operation.DeviceCode, "channelId": operation.ChannelCode, "targetCode": operation.TargetCode,
+		"sipStatus": operation.SIPStatus, "deviceResult": operation.DeviceResult, "deviceError": operation.DeviceError,
+		"errorCode": operation.ErrorCode, "errorMessage": operation.ErrorMessage,
+		"requestedAt": operation.CreatedAt, "sentAt": operation.SentAt, "completedAt": operation.CompletedAt, "deadlineAt": operation.DeadlineAt,
 	}
 }
 

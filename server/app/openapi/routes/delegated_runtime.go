@@ -19,7 +19,7 @@ func delegatedRuntimeBindings(ptz auth.PTZDispatcher, playback ...auth.PlayDispa
 	bindings := make(map[string]catalogruntime.Adapter)
 	if ptz != nil {
 		for _, registration := range adapters.NewDelegatedPlaneRegistrations() {
-			if registration.Key == adapters.PlayLiveAdapterKey {
+			if registration.Key == adapters.PlayLiveAdapterKey || registration.Key == adapters.PlayLiveStopAdapterKey || registration.Key == adapters.PlayLiveReadAdapterKey || registration.Key == adapters.PlayLiveListAdapterKey {
 				continue
 			}
 			bindings[registration.Key] = delegatedRuntimeAdapter(func(ctx context.Context, invocation catalogruntime.Invocation) (any, error) {
@@ -33,6 +33,22 @@ func delegatedRuntimeBindings(ptz auth.PTZDispatcher, playback ...auth.PlayDispa
 	}
 	if len(playback) > 0 && playback[0] != nil {
 		dispatcher := playback[0]
+		if reader, ok := dispatcher.(auth.PlayReader); ok {
+			bindings[adapters.PlayLiveReadAdapterKey] = delegatedRuntimeAdapter(func(ctx context.Context, invocation catalogruntime.Invocation) (any, error) {
+				request, ok := invocation.Value.(auth.PlayRequest)
+				if !ok || invocation.Scope != auth.PlayLiveReadScope || !dispatcher.Ready() {
+					return nil, auth.ErrPlayUnavailable
+				}
+				return reader.Read(ctx, request)
+			})
+			bindings[adapters.PlayLiveListAdapterKey] = delegatedRuntimeAdapter(func(ctx context.Context, invocation catalogruntime.Invocation) (any, error) {
+				request, ok := invocation.Value.(auth.PlayListRequest)
+				if !ok || invocation.Scope != auth.PlayLiveListScope || !dispatcher.Ready() {
+					return nil, auth.ErrPlayUnavailable
+				}
+				return reader.List(ctx, request)
+			})
+		}
 		bindings[adapters.PlayLiveAdapterKey] = delegatedRuntimeAdapter(func(ctx context.Context, invocation catalogruntime.Invocation) (any, error) {
 			request, ok := invocation.Value.(auth.PlayRequest)
 			if !ok || invocation.Scope != auth.PlayLiveScope || !dispatcher.Ready() {

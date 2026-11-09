@@ -123,6 +123,53 @@ def canonical_line_count(spec: dict) -> int:
     return len(lines)
 
 
+def check_action_contract(spec: dict) -> None:
+    """公开动作接口只使用 GET query / POST JSON，示例覆盖必填字段。"""
+    def resolve(node):
+        if not isinstance(node, dict) or "$ref" not in node:
+            return node
+        target = spec
+        for part in node["$ref"].split("/")[1:]:
+            target = target[part]
+        return target
+
+    scopes = set()
+    for path, item in (spec.get("paths") or {}).items():
+        if not re.fullmatch(r"/openapi/v1/[a-z]+(?:/[a-z]+)*", path):
+            fail(f"{path} 必须是固定的短动作路径，目标标识通过 query/JSON 传入")
+        for method, operation in item.items():
+            if method not in ("get", "post"):
+                fail(f"{path} 仅允许 GET 查询或 POST JSON 操作")
+                continue
+            scope = operation.get("x-uvp-scope")
+            if not scope or scope in scopes:
+                fail(f"{path} 缺少 scope 或 scope 重复：{scope!r}")
+            scopes.add(scope)
+            parameters = [resolve(p) for p in operation.get("parameters", [])]
+            if any(p.get("in") == "path" for p in parameters):
+                fail(f"{path} 仍含 path 参数")
+            if method == "get":
+                if "requestBody" in operation:
+                    fail(f"{path} GET 不允许请求体")
+                continue
+            if any(p.get("in") == "query" for p in parameters):
+                fail(f"{path} POST 业务参数应全部放入 JSON")
+            body = resolve(operation.get("requestBody") or {})
+            media = (body.get("content") or {}).get("application/json") or {}
+            schema = resolve(media.get("schema") or {})
+            example = media.get("example")
+            if not body.get("required") or schema.get("type") != "object":
+                fail(f"{path} POST 必须声明必填 JSON object")
+            if schema.get("additionalProperties") is not False:
+                fail(f"{path} POST 必须拒绝未知字段")
+            if not isinstance(example, dict):
+                fail(f"{path} 缺少 JSON 请求示例")
+            else:
+                for key in schema.get("required", []):
+                    if key not in example:
+                        fail(f"{path} 请求示例缺少必填字段 {key}")
+
+
 def check_fixture(spec: dict) -> None:
     """夹具必须自洽，且行数与规范声明的 canonical 行数一致。"""
     if not os.path.isfile(FIXTURE):
@@ -286,6 +333,7 @@ def main() -> int:
     check_versions(spec)
     check_schema_keys(spec)
     check_const(spec)
+    check_action_contract(spec)
     check_fixture(spec)
     check_java_example(spec)
     if not args.no_java:
