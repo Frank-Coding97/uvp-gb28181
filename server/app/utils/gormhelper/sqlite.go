@@ -29,10 +29,22 @@ import (
 //     否则跨表引用可以写成孤儿数据而没有任何报错。
 //   - _txlock=immediate：立刻拿写锁，而不是延迟到事务首次写入才拿 ——
 //     否则并发事务会在中途才失败，重试逻辑没法推理。
+//   - synchronous(NORMAL)：⛔⛔ 这一项是**吞吐的生死线**，不是可选项。
+//     SQLite 的默认 synchronous 是 FULL(2)，WAL 模式下它要求**每次提交都 fsync WAL**；
+//     本项目 SkipDefaultTransaction=true + 连接池 1 条，于是每个写语句都是一次
+//     「拿唯一连接 → 写 → fsync → 还连接」，实测被钉死在 **48 次/秒**（p50 14ms）。
+//     2026-11-09 千路压测实测：1000 台设备冷启动注册 ≈ 5000 次 DB 操作 ⇒ 要 100 秒，
+//     而 SIP 注册 32 秒就超时 ⇒ 全部重试 ⇒ 排队越积越长，日志里全是
+//     `db.slow_query duration_ms=50000~170000` 和 `context deadline exceeded`。
+//     改成 NORMAL 后同一负载 **2745 次/秒（57 倍）**，p50 降到亚毫秒。
+//     代价：操作系统掉电可能丢**最后若干个已提交事务**（数据库本身不会损坏）——
+//     与 MySQL 缺省语义一致，对监控平台完全可接受。
+//     ⛔ 不要"为了安全"改回 FULL / 或干脆不写（=默认 FULL）：那会直接把千路容量砍到几十路。
 var sqlitePragmas = []string{
 	"_pragma=busy_timeout(5000)",
 	"_pragma=journal_mode(WAL)",
 	"_pragma=foreign_keys(1)",
+	"_pragma=synchronous(NORMAL)",
 }
 
 func sqliteDSN(dataSource string) string {

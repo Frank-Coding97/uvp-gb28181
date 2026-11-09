@@ -52,7 +52,7 @@ func (f sqliteFixture) GetStringSlice(k string) []string {
 }
 func (f sqliteFixture) GetUintSlice(k string) []uint { return nil }
 func (f sqliteFixture) Set(k string, v interface{})  { f[k] = v }
-func (f sqliteFixture) SaveConfig() error              { return nil }
+func (f sqliteFixture) SaveConfig() error            { return nil }
 
 // withSQLiteConfig 临时换掉全局配置指针，并在测试结束后还原。
 //
@@ -65,7 +65,7 @@ func withSQLiteConfig(t *testing.T, fixture app.YmlConfigInterf) {
 	t.Cleanup(func() { app.ConfigYml = previous })
 }
 
-// TestSQLiteDSNCarriesRequiredPragmas 锁住 DSN 上的三个 PRAGMA。
+// TestSQLiteDSNCarriesRequiredPragmas 锁住 DSN 上的 PRAGMA 清单。
 //
 // 这条是行为断言，不是字符串比对好看：每个 PRAGMA 都对应一个真实故障模式，
 // 少了任何一个都会在客户机上以"偶发、难复现"的形式出现（见 sqlitePragmas 的注释）。
@@ -73,10 +73,11 @@ func TestSQLiteDSNCarriesRequiredPragmas(t *testing.T) {
 	dsn := sqliteDSN("/var/lib/uvp/uvp.db")
 
 	for _, want := range []string{
-		"_pragma=busy_timeout(5000)", // 缺了 → 并发写直接 SQLITE_BUSY
-		"_pragma=journal_mode(WAL)",  // 缺了 → 读写混合时写锁竞争
+		"_pragma=busy_timeout(5000)",  // 缺了 → 并发写直接 SQLITE_BUSY
+		"_pragma=journal_mode(WAL)",   // 缺了 → 读写混合时写锁竞争
 		"_pragma=foreign_keys(1)",     // 缺了 → REFERENCES 形同虚设，可写孤儿数据
-		"_txlock=immediate",          // 缺了 → 并发事务在中途才失败
+		"_pragma=synchronous(NORMAL)", // 缺了 → 默认 FULL，每次提交 fsync，吞吐掉到 1/57
+		"_txlock=immediate",           // 缺了 → 并发事务在中途才失败
 	} {
 		if !strings.Contains(dsn, want) {
 			t.Errorf("DSN 缺少 %s\n实际: %s", want, dsn)
@@ -165,9 +166,9 @@ func TestGetOneSqliteClientOpensUsableDatabase(t *testing.T) {
 
 	withSQLiteConfig(t, sqliteFixture{
 		"gormv2." + consts.DbTypeSqlite + ".write.database": dbPath,
-		"logs.level":            "error",
-		"logs.outputs":          []string{"stdout"},
-		"logs.stdoutformat":     "json",
+		"logs.level":        "error",
+		"logs.outputs":      []string{"stdout"},
+		"logs.stdoutformat": "json",
 	})
 	app.BasePath = dir
 
