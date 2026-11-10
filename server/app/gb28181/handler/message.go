@@ -274,8 +274,8 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			StartedAt: time.Now(),
 		})
 	}
-	if head.CmdType == manscdp.CmdCatalog {
-		// Catalog 入库会排队等待数据库；先确认 SIP 已收报文，避免设备超时重发。
+	if head.CmdType == manscdp.CmdCatalog || head.CmdType == manscdp.CmdConfigDownload {
+		// 目录和配置应答处理都可能等待数据库；先确认 SIP 已收报文，避免设备超时重发。
 		_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
 		responseSent = true
 	}
