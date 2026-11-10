@@ -644,11 +644,18 @@ function Get-CtlPortDefault {
     if (-not $m.Success) {
         Fail "读不到 $Name 的默认端口（ctl.ps1 的 `$PortDefault 表里没有？）"
     }
-    return $m.Groups[1].Value
+    # ⛔⛔ 2026-11-10 现场事故：出包把 16 个端口写成「UVP_XXX_PORT=」+「下一行才是
+    #   数字」，客户全新安装时 ctl 把等号后的空值当成现场意图 ⇒ 启动即报
+    #   「UVP_ZLM_RTP_RANGE 格式无效：（应形如 15514-15563）」。
+    #   这里只放行纯数字，任何空白/换行都不许混进值里；写盘前还有逐行兜底校验。
+    $value = $m.Groups[1].Value.Trim()
+    if ($value -notmatch '^\d+$') { Fail "读到的 $Name 默认端口不是纯数字：[$value]" }
+    return $value
 }
 $rtpRangeMatch = [regex]::Match($ctlText, "(?m)^\`$ZlmRtpRange\s*=\s*'([0-9]+-[0-9]+)'")
 if (-not $rtpRangeMatch.Success) { Fail '读不到 RTP 端口段默认值（ctl.ps1 的 $ZlmRtpRange 没定义？）' }
-$pkgRtpRange = $rtpRangeMatch.Groups[1].Value
+$pkgRtpRange = $rtpRangeMatch.Groups[1].Value.Trim()
+if ($pkgRtpRange -notmatch '^\d+-\d+$') { Fail "读到的 RTP 端口段默认值格式不对：[$pkgRtpRange]" }
 
 $portLines = @(
     '# [uvp-ports] ============================================================',
@@ -665,27 +672,33 @@ $portLines = @(
     '# [uvp-ports]   用 netsh int ipv4 show excludedportrange protocol=tcp 可查。',
     '# [uvp-ports] ============================================================',
     '# [uvp-ports] ---- 管理页 / 后端 / Redis ----',
-    'UVP_NGINX_HTTP_PORT=' + (Get-CtlPortDefault 'NGINX_HTTP'),
-    'UVP_HTTPS_PORT=' + (Get-CtlPortDefault 'HTTPS'),
-    'UVP_HTTP_PORT=' + (Get-CtlPortDefault 'HTTP'),
-    'UVP_REDIS_PORT=' + (Get-CtlPortDefault 'REDIS'),
+    # ⛔⛔ 一律用**双引号插值**生成「KEY=值」这一个字符串。
+    #   旧写法 `'KEY=' + (Get-CtlPortDefault ...)` 在 PowerShell 5.1 的数组字面量里
+    #   实际落盘成了「KEY=」和「15500」上下两行（1.1.16~1.1.20 全中招）。
+    #   插值没有「+ 与数组拼接」的歧义，写盘前的逐行校验再兜一次底。
+    "UVP_NGINX_HTTP_PORT=$(Get-CtlPortDefault 'NGINX_HTTP')",
+    "UVP_HTTPS_PORT=$(Get-CtlPortDefault 'HTTPS')",
+    "UVP_HTTP_PORT=$(Get-CtlPortDefault 'HTTP')",
+    "UVP_REDIS_PORT=$(Get-CtlPortDefault 'REDIS')",
     '# [uvp-ports] ---- 流媒体（ZLMediaKit）----',
-    'UVP_ZLM_HTTP_PORT=' + (Get-CtlPortDefault 'ZLM_HTTP'),
-    'UVP_ZLM_SSL_PORT=' + (Get-CtlPortDefault 'ZLM_SSL'),
-    'UVP_ZLM_RTSP_PORT=' + (Get-CtlPortDefault 'ZLM_RTSP'),
-    'UVP_ZLM_RTMP_PORT=' + (Get-CtlPortDefault 'ZLM_RTMP'),
-    'UVP_ZLM_RTC_PORT=' + (Get-CtlPortDefault 'ZLM_RTC'),
-    'UVP_ZLM_RTP_PROXY_PORT=' + (Get-CtlPortDefault 'ZLM_RTP_PROXY'),
-    'UVP_ZLM_RTP_RANGE=' + $pkgRtpRange,
-    'UVP_ZLM_SIGNALING_PORT=' + (Get-CtlPortDefault 'ZLM_SIGNALING'),
-    'UVP_ZLM_SIGNALING_SSL_PORT=' + (Get-CtlPortDefault 'ZLM_SIGNALING_SSL'),
-    'UVP_ZLM_SRT_PORT=' + (Get-CtlPortDefault 'ZLM_SRT'),
-    'UVP_ZLM_ONVIF_PORT=' + (Get-CtlPortDefault 'ZLM_ONVIF'),
-    'UVP_ZLM_ICE_PORT=' + (Get-CtlPortDefault 'ZLM_ICE'),
+    "UVP_ZLM_HTTP_PORT=$(Get-CtlPortDefault 'ZLM_HTTP')",
+    "UVP_ZLM_SSL_PORT=$(Get-CtlPortDefault 'ZLM_SSL')",
+    "UVP_ZLM_RTSP_PORT=$(Get-CtlPortDefault 'ZLM_RTSP')",
+    "UVP_ZLM_RTMP_PORT=$(Get-CtlPortDefault 'ZLM_RTMP')",
+    "UVP_ZLM_RTC_PORT=$(Get-CtlPortDefault 'ZLM_RTC')",
+    "UVP_ZLM_RTP_PROXY_PORT=$(Get-CtlPortDefault 'ZLM_RTP_PROXY')",
+    "UVP_ZLM_RTP_RANGE=$pkgRtpRange",
+    "UVP_ZLM_SIGNALING_PORT=$(Get-CtlPortDefault 'ZLM_SIGNALING')",
+    "UVP_ZLM_SIGNALING_SSL_PORT=$(Get-CtlPortDefault 'ZLM_SIGNALING_SSL')",
+    "UVP_ZLM_SRT_PORT=$(Get-CtlPortDefault 'ZLM_SRT')",
+    "UVP_ZLM_ONVIF_PORT=$(Get-CtlPortDefault 'ZLM_ONVIF')",
+    "UVP_ZLM_ICE_PORT=$(Get-CtlPortDefault 'ZLM_ICE')",
     ''
 )
 
-$envBody = @(
+# ⛔ 整个数组必须用括号包住再 -join：PowerShell 的一元 -join 与 + 的优先级很容易看错，
+#   写散了会得到「数组」而不是「字符串」，落盘时按 $OFS 连接，端口键和值就分了家。
+$envBody = ( @(
     '# ============================================================',
     '# UVP-GB28181 环境变量（本文件由出包脚本生成）',
     '#',
@@ -707,7 +720,27 @@ $envBody = @(
     '# ⚠️ 换主密钥后**已签发的客户端凭据全部失效**，需重新下发。',
     "UVP_OPENAPI_MASTER_KEY=$openApiKey",
     ''
-) -join "`r`n"
+) ) -join "`r`n"
+
+# ⛔⛔ 写盘前逐行验收（2026-11-10 现场事故的直接护栏）：
+#   端口键必须是「KEY=合法数字」且**在同一行**，键数必须正好 16 个。
+#   打包阶段判这个几乎零成本，漏到客户机器上就是一次装不上 + 一次上门。
+#   注意只匹配端口键（…PORT / …RANGE），不能把下面两个 base64 密钥行也卷进来。
+$portValueLinePattern = '^UVP_[A-Z0-9_]*(?:PORT|RANGE)=(.*)$'
+$portValueCount = 0
+foreach ($envLine in ($envBody -split "`r`n")) {
+    $portMatch = [regex]::Match($envLine, $portValueLinePattern)
+    if (-not $portMatch.Success) { continue }
+    $portValueCount++
+    $portValue = $portMatch.Groups[1].Value
+    if ($portValue -notmatch '^\d+(-\d+)?$') {
+        Fail "config.env 的端口值不合法（值必须和键写在同一行）：[$envLine]。出包中止，请检查 `$portLines 的拼接。"
+    }
+}
+if ($portValueCount -ne 16) {
+    Fail "config.env 的端口区应有 16 个键，实际 $portValueCount 个。出包中止，请检查 `$portLines。"
+}
+
 Write-Utf8NoBom -Path (Join-Path $Pkg 'config\config.env') -Text $envBody
 Ok 'config.env 已写入（16 个端口 + SIP 报文诊断密钥 + OpenAPI 主密钥）'
 

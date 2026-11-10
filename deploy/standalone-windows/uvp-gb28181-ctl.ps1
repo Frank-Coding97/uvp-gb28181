@@ -289,25 +289,47 @@ function Test-FreshInstall {
 # ⚠️ ③ 是 2026-11-09 补的（与 Linux 版同一处）：② 把「无基线」一律当升级，
 #   连全新装机的第一次启动也误伤了。③ 只认"跑过才会生成"的产物，
 #   因此不会让老包升级被误判成新装。
+# ⛔⛔ 2026-11-10 现场事故护栏：出包一度把 16 个端口写成「KEY=」+「下一行才是数字」，
+#   判据 ③（全新安装以 config.env 为准）把等号后的空值当成现场意图，启动即拒启。
+#   ⇒ 空值 / 非数字 / 越界一律视为「没设」，回退出厂默认；坏配置最多让改端口失效，
+#     绝不该让平台起不来。出包侧另有写盘前逐行校验，这里是第二道。
+function Test-PortValue {
+    param([string]$Value)
+    if ($Value -notmatch '^\d{1,5}$') { return $false }
+    $n = [int]$Value
+    return ($n -ge 1 -and $n -le 65535)
+}
+function Test-RtpRangeValue {
+    param([string]$Value)
+    return ($Value -match '^\d{1,5}-\d{1,5}$')
+}
+function Test-PortLikeValue {
+    param([string]$Key, [string]$Value)
+    if ($Key -eq $ZlmRtpRangeKey) { return (Test-RtpRangeValue $Value) }
+    return (Test-PortValue $Value)
+}
+
 function Resolve-Port {
     param([string]$Name, [hashtable]$EnvMap, [ref]$UserSetKeys, [hashtable]$Baseline)
     $envKey = $PortEnvKeys[$Name]
     $fromEnv = [Environment]::GetEnvironmentVariable($envKey)
-    if ($fromEnv) {
+    if ($fromEnv -and (Test-PortValue $fromEnv)) {
         $UserSetKeys.Value += $envKey
         return [int]$fromEnv
     }
-    if ($EnvMap.ContainsKey('UVP_USER_SET_' + $envKey) -and $EnvMap.ContainsKey($envKey)) {
+    if ($EnvMap.ContainsKey('UVP_USER_SET_' + $envKey) -and $EnvMap.ContainsKey($envKey) -and
+        (Test-PortValue ($EnvMap[$envKey]))) {
         $UserSetKeys.Value += $envKey
         return [int]$EnvMap[$envKey]
     }
     if ($Baseline -and $Baseline.ContainsKey($envKey) -and $EnvMap.ContainsKey($envKey) -and
-        $Baseline[$envKey] -ne $EnvMap[$envKey]) {
+        $Baseline[$envKey] -ne $EnvMap[$envKey] -and (Test-PortValue ($EnvMap[$envKey]))) {
         $UserSetKeys.Value += $envKey
         return [int]$EnvMap[$envKey]
     }
-    # ③ 全新安装：没有基线可依，config.env 里的值就是现场要的值。
-    if ($Baseline.Count -eq 0 -and $EnvMap.ContainsKey($envKey) -and (Test-FreshInstall)) {
+    # ③ 全新安装：没有基线可依，config.env 里的**合法**值就是现场要的值。
+    if ($Baseline.Count -eq 0 -and $EnvMap.ContainsKey($envKey) -and (Test-FreshInstall) -and
+        (Test-PortValue ($EnvMap[$envKey]))) {
         $UserSetKeys.Value += $envKey
         return [int]$EnvMap[$envKey]
     }
@@ -317,21 +339,25 @@ function Resolve-Port {
 function Resolve-RtpRange {
     param([hashtable]$EnvMap, [ref]$UserSetKeys, [hashtable]$Baseline)
     $fromEnv = [Environment]::GetEnvironmentVariable($ZlmRtpRangeKey)
-    if ($fromEnv) {
+    if ($fromEnv -and (Test-RtpRangeValue $fromEnv)) {
         $UserSetKeys.Value += $ZlmRtpRangeKey
         return $fromEnv
     }
-    if ($EnvMap.ContainsKey('UVP_USER_SET_' + $ZlmRtpRangeKey) -and $EnvMap.ContainsKey($ZlmRtpRangeKey)) {
+    if ($EnvMap.ContainsKey('UVP_USER_SET_' + $ZlmRtpRangeKey) -and
+        $EnvMap.ContainsKey($ZlmRtpRangeKey) -and (Test-RtpRangeValue ($EnvMap[$ZlmRtpRangeKey]))) {
         $UserSetKeys.Value += $ZlmRtpRangeKey
         return $EnvMap[$ZlmRtpRangeKey]
     }
-    if ($Baseline -and $Baseline.ContainsKey($ZlmRtpRangeKey) -and $EnvMap.ContainsKey($ZlmRtpRangeKey) -and
-        $Baseline[$ZlmRtpRangeKey] -ne $EnvMap[$ZlmRtpRangeKey]) {
+    if ($Baseline -and $Baseline.ContainsKey($ZlmRtpRangeKey) -and
+        $EnvMap.ContainsKey($ZlmRtpRangeKey) -and
+        $Baseline[$ZlmRtpRangeKey] -ne $EnvMap[$ZlmRtpRangeKey] -and
+        (Test-RtpRangeValue ($EnvMap[$ZlmRtpRangeKey]))) {
         $UserSetKeys.Value += $ZlmRtpRangeKey
         return $EnvMap[$ZlmRtpRangeKey]
     }
-    # ③ 全新安装：段值同样要采纳（否则改了 RTP 段等于没改）。
-    if ($Baseline.Count -eq 0 -and $EnvMap.ContainsKey($ZlmRtpRangeKey) -and (Test-FreshInstall)) {
+    # ③ 全新安装：段值同样要采纳（否则改了 RTP 段等于没改），但只采纳合法值。
+    if ($Baseline.Count -eq 0 -and $EnvMap.ContainsKey($ZlmRtpRangeKey) -and (Test-FreshInstall) -and
+        (Test-RtpRangeValue ($EnvMap[$ZlmRtpRangeKey]))) {
         $UserSetKeys.Value += $ZlmRtpRangeKey
         return $EnvMap[$ZlmRtpRangeKey]
     }
@@ -340,6 +366,17 @@ function Resolve-RtpRange {
 
 function Get-Config {
     $envMap = Read-EnvFileMap -Path $EnvFile
+    # 坏配置只提示一次（16 个端口全坏时别刷屏），把「为什么没按文件里的值走」说清楚。
+    $badPortKeys = @()
+    foreach ($key in (@($PortEnvKeys.Values) + $ZlmRtpRangeKey)) {
+        if ($envMap.ContainsKey($key) -and
+            -not (Test-PortLikeValue -Key $key -Value ($envMap[$key]))) {
+            $badPortKeys += $key
+        }
+    }
+    if ($badPortKeys.Count -gt 0) {
+        Write-UvpWarn "config.env 里 $($badPortKeys.Count) 个端口值为空或非法（如 $($badPortKeys[0])），已忽略并使用出厂默认端口"
+    }
     # 基线：上次落盘的端口值（uvp-setup ports-sync --baseline 写的）。
     # ⛔ 不存在是**正常**的：老包升级上来第一次启动就是这种状态
     #   ⇒ 判据 ② 不成立，全部按本包默认值走（正是"跟着新端口规划"的语义）。
