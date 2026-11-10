@@ -121,7 +121,9 @@ func resolveDirectoryDeviceScope(c *gin.Context, db *gorm.DB) (*directoryDeviceS
 			}
 		}
 		return resultScope, nil
-	case gbdirectory.FilterBusinessDevice:
+	// FilterDevice 与旧的 FilterBusinessDevice 语义相同：都只收窄到一台设备。
+	// 区别只在 key 来自哪棵目录树，筛选口径必须一致，否则地图与列表会分叉。
+	case gbdirectory.FilterBusinessDevice, gbdirectory.FilterDevice:
 		var device gbmodels.GbDevice
 		result := db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).Where("id = ?", filter.NodeID).Limit(1).Find(&device)
 		if result.Error != nil {

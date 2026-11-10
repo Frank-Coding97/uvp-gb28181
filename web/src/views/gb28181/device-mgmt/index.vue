@@ -2455,6 +2455,22 @@ function attachMapLifecycle() {
   });
 }
 
+/**
+ * 数据加载失败的提示去重。列表/地图按 2s 轮询，同一个坏请求会把 toast 叠满屏
+ * （全新安装目录筛选 400 时实测一屏能堆十几条「目录筛选参数错误」）。
+ * ⛔ 只压「同一句错误 + 8 秒内重复」：第一次照常弹，换了错误文案立刻弹。
+ */
+let lastLoadErrorMessage = "";
+let lastLoadErrorAt = 0;
+function reportLoadError(error: unknown, fallback: string) {
+  const message = (error as { message?: string } | null)?.message || fallback;
+  const now = Date.now();
+  if (message === lastLoadErrorMessage && now - lastLoadErrorAt < 8000) return;
+  lastLoadErrorMessage = message;
+  lastLoadErrorAt = now;
+  Message.error(message);
+}
+
 let channelRequestVersion = 0;
 let deviceRequestVersion = 0;
 async function loadChannelsData() {
@@ -2477,7 +2493,7 @@ async function loadChannelsData() {
       total.value = res.data?.total || 0;
     }
   } catch (error: any) {
-    if (version === channelRequestVersion) Message.error(error?.message || "通道列表加载失败");
+    if (version === channelRequestVersion) reportLoadError(error, "通道列表加载失败");
   } finally {
     if (version === channelRequestVersion) rowsLoading.value = false;
   }
@@ -2501,7 +2517,7 @@ async function loadDevicesData() {
       total.value = response.data?.total || 0;
     }
   } catch (error: any) {
-    if (version === deviceRequestVersion) Message.error(error?.message || "设备列表加载失败");
+    if (version === deviceRequestVersion) reportLoadError(error, "设备列表加载失败");
   } finally {
     if (version === deviceRequestVersion) rowsLoading.value = false;
   }
@@ -2545,7 +2561,7 @@ async function loadMapData() {
     }
   } catch (error: any) {
     if (seq !== mapDataSeq) return;
-    Message.error(error?.message || "地图数据加载失败");
+    reportLoadError(error, "地图数据加载失败");
   } finally {
     if (seq === mapDataSeq) mapLoading.value = false;
   }

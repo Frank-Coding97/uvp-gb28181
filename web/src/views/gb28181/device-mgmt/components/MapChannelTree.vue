@@ -128,6 +128,12 @@ async function loadScopeOptions() {
   const groups: Array<{ label: string; options: ScopeOption[] }> = [];
   const flatten = (nodes: DirectoryNode[], view: "department" | "business", depth: number, out: ScopeOption[]) => {
     for (const node of nodes) {
+      // ⛔ 设备叶子不是「范围」：它的 key 形如 <view>:device:<父>:<设备ID>，
+      //    早前后端目录筛选接口不认这类 key，选中后 devices / channels / markers /
+      //    clusters / channel-tree 会一起 400「目录筛选参数错误」。全新安装时设备还
+      //    挂在「未分配部门 / 未知行政区」下，下拉里几乎只有这一项可点，最易踩。
+      //    想按设备看走列表页点设备（切 deviceId 过滤），语义也更准。
+      if (node.type === "device") continue;
       out.push({ value: `${view}|${node.key}`, label: `${"— ".repeat(depth)}${node.name}`, view, node });
       if (depth < 1 && node.children?.length) flatten(node.children, view, depth + 1, out);
     }

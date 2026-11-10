@@ -208,6 +208,51 @@ describe("MapChannelTree", () => {
     wrapper2.unmount();
   });
 
+  it("范围下拉不放设备叶子：选了它后端会 400「目录筛选参数错误」", async () => {
+    // 全新安装时部门/业务分组树里往往只有一台挂在「未分配部门」下的设备，
+    // 设备叶子曾是下拉里唯一可点的项，一选就让五个接口一起 400、轮询刷屏。
+    listDirectoryTree.mockReset().mockImplementation((view: string) =>
+      Promise.resolve({
+        code: 0,
+        data: {
+          list:
+            view === "department"
+              ? [
+                  {
+                    key: "department:dept:10",
+                    name: "总部",
+                    type: "department",
+                    readOnly: true,
+                    count: 1,
+                    onlineCount: 1,
+                    depth: 0,
+                    children: [
+                      {
+                        key: "department:device:10:7",
+                        name: "UVP-Sim-Desktop",
+                        type: "device",
+                        readOnly: true,
+                        count: 1,
+                        onlineCount: 1,
+                        depth: 1
+                      }
+                    ]
+                  }
+                ]
+              : []
+        }
+      })
+    );
+    const wrapper = mountTree();
+    await flushPromises();
+
+    const select = wrapper.get("[data-testid='map-scope-select']");
+    expect(select.text()).toContain("总部");
+    expect(select.text()).not.toContain("UVP-Sim-Desktop");
+    expect(select.html()).not.toContain("department:device:10:7");
+    wrapper.unmount();
+  });
+
   it("切换范围下拉会带上节点本身，清空则回 null", async () => {
     const wrapper = mountTree();
     await flushPromises();
