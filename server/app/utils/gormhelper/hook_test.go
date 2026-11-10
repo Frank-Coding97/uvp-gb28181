@@ -50,3 +50,19 @@ func TestCreateBeforeHookWarnsForStructValue(t *testing.T) {
 	CreateBeforeHook(&gorm.DB{Statement: &gorm.Statement{Dest: createHookRow{}}})
 	require.Equal(t, 1, logs.Len())
 }
+
+func TestCreateBeforeHookAcceptsMapValue(t *testing.T) {
+	core, logs := observer.New(zap.WarnLevel)
+	previous := app.ZapLog
+	app.ZapLog = zap.New(core)
+	t.Cleanup(func() { app.ZapLog = previous })
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&createHookRow{}))
+	require.NoError(t, db.Callback().Create().Before("gorm:create").Register("test:create", CreateBeforeHook))
+	require.NoError(t, db.Model(&createHookRow{}).Create(map[string]interface{}{"created_by": 42}).Error)
+	require.Zero(t, logs.Len(), "GORM accepts map values for Create")
+	var saved createHookRow
+	require.NoError(t, db.First(&saved).Error)
+	require.Equal(t, uint(42), saved.CreatedBy)
+}

@@ -21,6 +21,9 @@ func MaskNotDataError(gormDB *gorm.DB) {
 func CreateBeforeHook(gormDB *gorm.DB) {
 	// CreateInBatches 将指针切片拆成普通切片传给回调；其元素仍可写。
 	kind := reflect.TypeOf(gormDB.Statement.Dest).Kind()
+	if kind == reflect.Map {
+		return
+	}
 	if kind != reflect.Pointer && kind != reflect.Slice {
 		app.ZapLog.Warn(myerrors.ErrorsGormDBCreateParamsNotPtr)
 	} else {
