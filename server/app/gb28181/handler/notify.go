@@ -66,7 +66,12 @@ func (h *NotifyHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	callID, cseq := sipPairKey(req)
 	logger := app.Log(ctx).Named("gb28181.notify")
 	status, reason := 200, "OK"
-	defer func() { _ = tx.Respond(sip.NewResponseFromRequest(req, status, reason, nil)) }()
+	responseSent := false
+	defer func() {
+		if !responseSent {
+			_ = tx.Respond(sip.NewResponseFromRequest(req, status, reason, nil))
+		}
+	}()
 	if h == nil {
 		return
 	}
@@ -89,6 +94,8 @@ func (h *NotifyHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	event := strings.ToLower(strings.TrimSpace(strings.Split(headerValue(req, "Event"), ";")[0]))
 	if head.CmdType == manscdp.CmdPTZPrecisePosition || head.CmdType == manscdp.CmdPTZPosition ||
 		strings.Contains(event, "ptzprecise") || strings.Contains(event, "ptzposition") {
+		_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+		responseSent = true
 		state, expires := parseSubscriptionState(headerValue(req, "Subscription-State"))
 		if err := notifier.OnNotify(context.Background(), subscribe.Notification{
 			Kind: gbmodels.SubscriptionKindPTZPrecisePosition, DeviceCode: head.DeviceID, CallID: callID, CSeq: cseq,

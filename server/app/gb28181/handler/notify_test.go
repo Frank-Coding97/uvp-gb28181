@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/emiago/sipgo/sip"
 	"github.com/emiago/sipgo/siptest"
@@ -13,6 +14,17 @@ import (
 )
 
 type notifyRecorder struct{ values []subscribe.Notification }
+
+type blockingNotifyRecorder struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (r *blockingNotifyRecorder) OnNotify(context.Context, subscribe.Notification) error {
+	close(r.entered)
+	<-r.release
+	return nil
+}
 
 func (r *notifyRecorder) OnNotify(_ context.Context, value subscribe.Notification) error {
 	r.values = append(r.values, value)
@@ -101,5 +113,34 @@ func TestNotifyHandler_PTZPositionDispatchesAndAcknowledges(t *testing.T) {
 	require.Equal(t, "C", notifier.values[0].DeviceCode)
 	require.Equal(t, "ptz-position-notify", notifier.values[0].CallID)
 	require.Len(t, tx.Result(), 1)
+	require.EqualValues(t, 200, tx.Result()[0].StatusCode)
+}
+
+func TestPTZPositionNotifyAcknowledgedBeforePersistence(t *testing.T) {
+	req := sip.NewRequest(sip.NOTIFY, sip.Uri{User: "D", Host: "3402000000"})
+	prepareNotifyRequest(req)
+	req.SetBody([]byte(`<Notify><CmdType>PTZPosition</CmdType><SN>3</SN><DeviceID>C</DeviceID><Pan>12.5</Pan></Notify>`))
+	req.AppendHeader(sip.NewHeader("Event", "PTZPosition"))
+	callID := sip.CallIDHeader("ptz-early-ack")
+	req.AppendHeader(&callID)
+	req.AppendHeader(&sip.CSeqHeader{SeqNo: 2, MethodName: sip.NOTIFY})
+	tx := siptest.NewServerTxRecorder(req)
+	notifier := &blockingNotifyRecorder{entered: make(chan struct{}), release: make(chan struct{})}
+	done := make(chan struct{})
+	go func() {
+		NewNotifyHandler(notifier).Handle(req, tx)
+		close(done)
+	}()
+	defer func() {
+		close(notifier.release)
+		<-done
+	}()
+
+	select {
+	case <-notifier.entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("PTZ NOTIFY 没有进入处理器")
+	}
+	require.Len(t, tx.Result(), 1, "处理器等待数据库时，NOTIFY 应已收到应答")
 	require.EqualValues(t, 200, tx.Result()[0].StatusCode)
 }
