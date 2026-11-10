@@ -9356,7 +9356,7 @@ onUnmounted(() => {
    刻意与通道卡片同一族：同样的头部圆点+名称、同样的说明行、同样的动作按钮药丸。
    宽度按 300px 定死：够看清是"哪一路、人在不在"，又不会盖掉半块地图（旧模态是 960px）。 */
 :deep(.map-video-card) {
-  /* ⛔⛔ 这条不能删：本项目**没有**全局 `* { box-sizing: border-box }`
+  /* ⛔⛔ 这条不能删：本项目**没有**全局的 box-sizing: border-box 规则
      （`src/style/index.scss` 只重置了 padding/margin）。缺了它，300px 是**内容宽度**，
      盒子实际占 300+12×2=324px，而下面 `.maplibregl-popup-content` 的 max-width 只有
      304px 且 `overflow: hidden` ⇒ 右边 20px 被直接切掉：
