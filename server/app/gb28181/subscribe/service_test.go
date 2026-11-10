@@ -22,6 +22,17 @@ type fakeSender struct {
 	calls    []uac.SubscriptionRequest
 }
 
+type immediateNotifySender struct {
+	onSend func(uac.SubscriptionRequest) error
+}
+
+func (f *immediateNotifySender) SendSubscribe(_ context.Context, req uac.SubscriptionRequest) (uac.SubscriptionResponse, error) {
+	if err := f.onSend(req); err != nil {
+		return uac.SubscriptionResponse{}, err
+	}
+	return uac.SubscriptionResponse{StatusCode: 200, Expires: req.Expires, CallID: req.CallID, CSeq: req.CSeq}, nil
+}
+
 func (f *fakeSender) SendSubscribe(_ context.Context, req uac.SubscriptionRequest) (uac.SubscriptionResponse, error) {
 	f.calls = append(f.calls, req)
 	return f.response, f.err
@@ -52,6 +63,23 @@ func TestService_EnableActivatesOneKind(t *testing.T) {
 	var count int64
 	require.NoError(t, db.Model(&gbmodels.GbDeviceSubscription{}).Where("device_id = ?", device.ID).Count(&count).Error)
 	require.EqualValues(t, 1, count)
+}
+
+func TestService_InitialNotifyArrivesBeforeSubscribeResponse(t *testing.T) {
+	svc, db, device := newServiceTest(t, nil)
+	svc.sender = &immediateNotifySender{onSend: func(req uac.SubscriptionRequest) error {
+		require.NotEmpty(t, req.CallID)
+		return svc.OnNotify(context.Background(), Notification{
+			Kind: gbmodels.SubscriptionKindCatalog, DeviceCode: device.DeviceID, CallID: req.CallID,
+		})
+	}}
+
+	_, err := svc.Enable(context.Background(), device, gbmodels.SubscriptionKindCatalog)
+	require.NoError(t, err)
+	var sub gbmodels.GbDeviceSubscription
+	require.NoError(t, db.Where("device_id = ? AND kind = ?", device.ID, gbmodels.SubscriptionKindCatalog).First(&sub).Error)
+	require.NotEmpty(t, sub.CallID)
+	require.NotNil(t, sub.LastNotifyAt)
 }
 
 func TestService_EnableRejectsOfflineAndDegradesOnFailure(t *testing.T) {
@@ -181,13 +209,14 @@ func TestService_RenewClearsStaleDialogOn481(t *testing.T) {
 	require.NotNil(t, stored.NextActionAt)
 	require.WithinDuration(t, svc.now().Add(time.Minute), *stored.NextActionAt, time.Second)
 
-	// 下一次必须是首包：不带任何对话凭据，对端才会新建订阅。
+	// 下一次必须是新对话首包：新的 Call-ID 预先落库，但不带旧 tag。
 	sender.err = nil
 	sender.response = uac.SubscriptionResponse{StatusCode: 200, Expires: 3600, CallID: "call-2", LocalTag: "l2", RemoteTag: "r2", CSeq: 1}
 	_, err = svc.Renew(context.Background(), device, gbmodels.SubscriptionKindCatalog)
 	require.NoError(t, err)
 	last := sender.calls[len(sender.calls)-1]
-	require.Empty(t, last.CallID)
+	require.NotEmpty(t, last.CallID)
+	require.NotEqual(t, "call-1", last.CallID)
 	require.Empty(t, last.LocalTag)
 	require.Empty(t, last.RemoteTag)
 	require.Equal(t, "Catalog;id="+strconv.FormatUint(uint64(sub.ID), 10), last.Event)

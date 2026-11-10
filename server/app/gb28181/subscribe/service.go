@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -264,8 +265,11 @@ func (s *Service) Configure(ctx context.Context, device *gbmodels.GbDevice, kind
 
 func (s *Service) send(ctx context.Context, device *gbmodels.GbDevice, sub *gbmodels.GbDeviceSubscription, expires int) (*gbmodels.GbDeviceSubscription, error) {
 	now := s.now()
+	if sub.CallID == "" {
+		sub.CallID = "subscription-" + uuid.NewString()
+	}
 	if err := s.db.WithContext(ctx).Model(sub).Updates(map[string]any{
-		"status": gbmodels.SubscriptionStatusPending, "last_subscribe_at": now,
+		"status": gbmodels.SubscriptionStatusPending, "last_subscribe_at": now, "call_id": sub.CallID,
 	}).Error; err != nil {
 		return sub, err
 	}
