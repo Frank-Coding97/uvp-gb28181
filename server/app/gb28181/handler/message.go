@@ -274,6 +274,11 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			StartedAt: time.Now(),
 		})
 	}
+	if head.CmdType == manscdp.CmdCatalog {
+		// Catalog 入库会排队等待数据库；先确认 SIP 已收报文，避免设备超时重发。
+		_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+		responseSent = true
+	}
 	if head.CmdType == manscdp.CmdDeviceControl || head.CmdType == manscdp.CmdDeviceUpgradeResult {
 		processor := h.getUpgradeProcessor()
 		if head.CmdType == manscdp.CmdDeviceUpgradeResult && processor == nil {
