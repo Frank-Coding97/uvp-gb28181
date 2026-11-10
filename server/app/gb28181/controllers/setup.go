@@ -144,11 +144,29 @@ func (sc *SetupController) SaveConfig(c *gin.Context) {
 				logging.Error(err))
 		}
 	}
+	// ⛔⛔ SIP 监听失败**不一定**从 reload() 的返回值冒出来：SIP 自己的 error handler
+	//   会把运行态标成 failed，而 reload 仍返回 nil。实测 1.1.20 Windows 包把引导页
+	//   默认端口烤成 51064（落在系统动态端口排除区），点「完成」后接口回
+	//   reloadedOk=true、前端弹「已成功启动」，可同一份响应里的 runtime 已是 failed，
+	//   转头铃铛又报未运行 —— 用户看到的就是「刚引导完就报错」。
+	//   ⇒ 以运行态为最终判据，别把「保存成功」展示成「启动成功」。
+	runtimeSnapshot := sc.runtime.Snapshot()
+	if reloadOK && sc.reload != nil && runtimeSnapshot.State == gbsetup.RuntimeFailed {
+		reloadOK = false
+		reloadErrText = runtimeSnapshot.ErrorSummary
+		if reloadErrText == "" {
+			reloadErrText = "SIP 服务启动失败，请检查端口是否被系统保留或被其它程序占用"
+		}
+		app.Log(c.Request.Context()).Warn("SIP 保存后运行态为失败（热启动未返回错误）",
+			zap.String("event", "setup.sip_reload_runtime_failed"),
+			zap.String("server_id", view.ServerID),
+			zap.String("error", reloadErrText))
+	}
 	response := gin.H{
 		"config":      view,
 		"reloadedOk":  reloadOK,
 		"reloadError": reloadErrText,
-		"runtime":     sc.runtime.Snapshot(),
+		"runtime":     runtimeSnapshot,
 	}
 	if sc.mediaDefaultsReloader != nil {
 		mediaDefaultsApplied := true

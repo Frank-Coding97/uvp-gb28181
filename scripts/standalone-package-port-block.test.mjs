@@ -164,3 +164,52 @@ test('Windows 启动脚本：空值/非法值不采纳，回退出厂默认', ()
   assert.match(resolvePort, /Test-PortValue \(\$EnvMap\[\$envKey\]\)/, '判据 ③ 未校验端口值');
   assert.match(resolveRange, /Test-RtpRangeValue \(\$EnvMap\[\$ZlmRtpRangeKey\]\)/, '判据 ③ 未校验 RTP 段');
 });
+
+// ---------------------------------------------------------------------------
+// ⛔⛔ 1.1.20 Windows 全量包事故：出包时用 -SkipFrontend 复用了 Linux 构建的
+//    web\dist，引导页预填 SIP 端口 51064（Linux 段），而 Windows 段是 15564。
+//    51064 落在 Windows「动态端口排除区」（52 实测 51006-51105 被系统保留），
+//    用户一路点「完成」→ SIP UDP bind 被拒 → 刚引导完就报错/注册不上。
+//    原来的读回断言只在「重新构建前端」分支里，复用 dist 时完全没查。
+// ---------------------------------------------------------------------------
+test('Windows 出包：前端 SIP 默认端口无条件校验，Linux 段值一律拒绝', () => {
+  const sip = WIN_BUILD.match(/^\$SipPort\s*=\s*(\d+)/m);
+  assert.ok(sip, '找不到 $SipPort 定义');
+  assert.equal(sip[1], '15564', 'Windows 段 SIP 端口必须是段基址 + 64');
+
+  const fnStart = WIN_BUILD.indexOf('function Assert-FrontendSipPort');
+  assert.ok(fnStart > 0, '缺少前端 SIP 默认端口读回断言');
+  const skipIdx = WIN_BUILD.indexOf('if ($SkipFrontend)');
+  const freshIdx = WIN_BUILD.indexOf('Log \'阶段 1/4 · 产物新鲜度断言\'');
+  assert.ok(skipIdx > 0 && freshIdx > skipIdx, '找不到前端构建/新鲜度断言的位置');
+  assert.ok(fnStart > skipIdx, '断言必须在前端构建与复用两个分支之外');
+  const call = WIN_BUILD.indexOf('\nAssert-FrontendSipPort', fnStart);
+  assert.ok(call > 0 && call < freshIdx, '断言必须无条件执行（位于新鲜度检查之前）');
+
+  const body = WIN_BUILD.slice(fnStart, call);
+  assert.match(body, /51064/, '必须显式拦截 Linux 段端口 51064');
+  assert.match(body, /\$expected = \[string\]\$SipPort/, '必须以出包脚本的 $SipPort 为判据');
+  assert.match(body, /-SkipFrontend/, '复用 dist 的场景必须同样校验');
+  // 旧的「只在 else 分支里 grep 一下 $SipPort」写法不许复活。
+  assert.equal(
+    (WIN_BUILD.match(/Select-String -Pattern \$SipPort -SimpleMatch -List/g) || []).length,
+    0,
+    '旧的宽松读回断言不该还在',
+  );
+});
+
+test('Windows 启动脚本：由部署层把 SIP 默认端口下发给后端', () => {
+  assert.match(
+    WIN_CTL,
+    /\$env:UVP_DEFAULT_SIP_PORT = \[string\]\$SipPort/,
+    '缺少部署层 SIP 默认端口下发（前端产物串味时就没有兜底）',
+  );
+  const backend = WIN_CTL.slice(
+    WIN_CTL.indexOf('function Start-Backend'),
+    WIN_CTL.indexOf('function Start-Zlm'),
+  );
+  assert.ok(
+    backend.includes('$env:UVP_DEFAULT_SIP_PORT'),
+    '下发必须落在 Start-Backend 里，否则后端子进程读不到',
+  );
+});

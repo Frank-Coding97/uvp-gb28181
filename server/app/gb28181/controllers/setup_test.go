@@ -234,3 +234,29 @@ func TestSetupController_SaveConfigValidationAndDatabaseFailure(t *testing.T) {
 	require.Equal(t, http.StatusInternalServerError, recorder.Code)
 	require.NotContains(t, recorder.Body.String(), "SELECT")
 }
+
+// ⛔⛔ 回归：SIP 监听失败时 reload() 可能**不返回错误** —— SIP 自己的 error handler
+//
+//	把运行态标成 failed，热启动函数照样返回 nil。1.1.20 Windows 包把引导页默认端口
+//	烤成 51064（落在 Windows 动态端口排除区），用户点「完成」时接口回
+//	reloadedOk=true、前端弹「已成功启动」，可同一份响应的 runtime 已是 failed，
+//	转头铃铛又报未运行 —— 现场看到的就是「刚引导完就报错」。
+func TestSetupController_SaveConfigFailedRuntimeIsReported(t *testing.T) {
+	db := newSetupControllerDB(t)
+	runtime := gbsetup.NewRuntimeStatus()
+	reload := func() error {
+		runtime.MarkFailed("SIP UDP 监听失败: bind: 权限被禁止")
+		return nil
+	}
+	router := newSetupControllerRouter(NewSetupController(db, runtime, nil, reload))
+	body := `{"deploymentMode":"lan","listenIp":"0.0.0.0","advertiseIp":"192.168.1.10","port":51064,"domain":"3402000000","serverId":"34020000002000000001","hookIp":"192.168.1.10","sdpIp":"192.168.1.10","streamIp":"192.168.1.10","password":"Sec12345Aa!!"}`
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/config", bytes.NewBufferString(body)))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+
+	data := decodeSetupResponse(t, recorder)["data"].(map[string]any)
+	require.Equal(t, false, data["reloadedOk"], "运行态已 failed，不能回报热启动成功")
+	require.Contains(t, data["reloadError"], "bind", "必须把 SIP 的真实错误回给引导页")
+	runtimeView := data["runtime"].(map[string]any)
+	require.Equal(t, string(gbsetup.RuntimeFailed), runtimeView["state"])
+}

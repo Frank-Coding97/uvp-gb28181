@@ -347,17 +347,48 @@ if ($SkipBuild) {
         Remove-Item -LiteralPath $envLocal -Force -ErrorAction SilentlyContinue
     }
     if (-not (Test-Path -LiteralPath $DistIndex)) { Fail "前端构建后仍没有 $DistIndex" }
-    # ⛔⛔ 读回断言：注入没生效必须**当场报错**。否则包照常出、引导页预填的还是 5061，
-    #   而"SIP 在 $SipPort"只存在于文档里，现场根本发现不了。
-    $hit = Get-ChildItem -LiteralPath $distDir -Recurse -File -ErrorAction SilentlyContinue |
-        Select-String -Pattern $SipPort -SimpleMatch -List -ErrorAction SilentlyContinue
-    if (-not $hit) {
-        Fail "前端产物里找不到注入的 SIP 默认端口 $SipPort —— VITE_DEFAULT_SIP_PORT 未生效" +
-             "（变量名或 vite 读 env 的方式有变）。"
-    }
-    Ok "前端产物已生成，SIP 默认端口 $SipPort 读回校验通过"
+    Ok "前端产物已生成"
     }
 }
+
+# ---- 前端产物里的 SIP 默认端口：无条件读回校验 ----
+#
+# ⛔⛔ 为什么连 -SkipFrontend 也必须查：Windows 段 SIP = 15564、Linux 段 = 51064，
+#   两边共用同一份 web\dist。出包时用 -SkipFrontend 复用 Linux 刚构建的 dist，
+#   包照出、mtime 新鲜度断言也过，但引导页预填 51064 —— 而 Windows 的
+#   「动态端口排除区」常覆盖 51000 段（52 实测 51006-51105 被保留），
+#   SIP UDP 一绑就 WSAEACCES：管理员一路点「完成」，平台却起不来，
+#   报错只说「以一种访问权限不允许的方式访问了套接字」，现场根本查不到端口段这层原因。
+#   1.1.20 Windows 全量包正是这么串味的。⇒ 校验放在构建/复用两条路径**之外**。
+function Assert-FrontendSipPort {
+    $distDir = Join-Path $WebDir 'dist'
+    $jsFiles = @(Get-ChildItem -LiteralPath $distDir -Recurse -File -Filter '*.js' -ErrorAction SilentlyContinue)
+    if ($jsFiles.Count -eq 0) { Fail "web\dist 里没有 js 产物，无法校验 SIP 默认端口" }
+    $expected = [string]$SipPort
+    # ① 兜底硬拦截：别平台的段值一个字都不许出现在 Windows 前端产物里。
+    $foreign = @($jsFiles | Select-String -Pattern '51064' -SimpleMatch -List -ErrorAction SilentlyContinue)
+    if ($foreign.Count -gt 0) {
+        Fail ("前端产物里出现 Linux 段 SIP 端口 51064（Windows 段应为 $SipPort）：" +
+              "$($foreign[0].Path)。多半是 -SkipFrontend 复用了 Linux 构建的 web\dist，" +
+              "去掉该开关重新构建前端。")
+    }
+    # ② 正查：vite 把 validPort(import.meta.env.VITE_DEFAULT_SIP_PORT) 压成 A("15564") 形态。
+    $injected = @{}
+    foreach ($f in $jsFiles) {
+        $hits = Select-String -LiteralPath $f.FullName -Pattern 'A\("(\d{4,5})"\)' -AllMatches -ErrorAction SilentlyContinue
+        foreach ($h in $hits) { foreach ($m in $h.Matches) { $injected[$m.Groups[1].Value] = $true } }
+    }
+    if (-not $injected.ContainsKey($expected)) {
+        Fail ("前端产物里读不到注入的 SIP 默认端口 $SipPort —— VITE_DEFAULT_SIP_PORT 未生效" +
+              "或 vite 产物形态已变。探测到的注入值：$($injected.Keys -join ',')")
+    }
+    $wrong = @($injected.Keys | Where-Object { $_ -ne $expected })
+    if ($wrong.Count -gt 0) {
+        Fail "前端产物里混入非 Windows 段的 SIP 默认端口：$($wrong -join ',')（应为 $SipPort）"
+    }
+    Ok "前端产物 SIP 默认端口 $SipPort 读回校验通过（-SkipFrontend 同样校验）"
+}
+Assert-FrontendSipPort
 
 # ---- 产物新鲜度断言（无条件执行）----
 #

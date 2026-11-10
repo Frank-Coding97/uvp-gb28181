@@ -1201,6 +1201,13 @@ function Start-Backend {
     # 级联抓拍没有浏览器 HTTP 请求可推导入口；运行期只提供 nginx 明文端口，
     # 具体地址由后端按 SIP 本地接入地址生成。
     $env:UVP_DEVICE_HTTP_PORT = [string]$Ports.NGINX_HTTP
+    # ⛔⛔ 引导页的 SIP 默认端口必须由**部署层**下发，不能只信前端烤进去的常量。
+    #   实测（1.1.20 Windows 全量包）：出包时复用了 Linux 构建的 web\dist，
+    #   引导页预填 51064 —— 正好落在 Windows 动态端口保留区（netsh excludedportrange），
+    #   管理员一路点「完成」→ SIP UDP bind 被系统拒绝 → 平台起不来，报错还离根因很远。
+    #   后端 status 下发这个值后，前端优先采纳部署层事实，构建期常量只作兜底。
+    #   ⚠️ 与下面端口预检/输出用的是同一个 $SipPort，别一处改一处不改。
+    $env:UVP_DEFAULT_SIP_PORT = [string]$SipPort
     # ⛔⛔ 进程权威目录必须**显式指到包内**，绝不能让它走平台默认值。
     #   后端 `processauthority.PrepareStateDir()` 的解析顺序是：
     #     ① config.yml 的 `processauthority.state_dir`（非空则**原样返回**，不创建、不绝对化）
