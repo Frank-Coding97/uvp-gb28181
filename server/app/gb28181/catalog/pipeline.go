@@ -21,7 +21,7 @@ import (
 // - IngestDelta — Subscribe NOTIFY 单条事件入库(Add / Update / Del / 状态变化)
 //
 // 实现策略:
-// - 单事务处理一批(失败回滚)
+// - 短事务分组处理一批，单条失败回滚到 savepoint
 // - 节点未找到时 find-or-create(物化路径回填)
 // - 多挂载通过 gb_channel_mount 表
 // - anomaly 编码 -> 兜底 virtual_org + 写审计
@@ -30,9 +30,7 @@ type Pipeline struct {
 
 	// slots 是入库并发闸门，容量 = defaultIngestConcurrency。
 	//
-	// ⛔⛔ 为什么必须有它：ingest 内部是**逐条 item 各开一个事务**（见
-	// ingestOne），每个事务都要独占一条 DB 连接。一台设备一次 Catalog
-	// 应答动辄几十条通道 ⇒ 单个 Ingest 就要连着申请几十次连接。
+	// ingest 内部按短批次使用事务，每批独占一条 DB 连接。
 	// 实测 2026-11-09 万级压测：128 台设备同时回目录，把 maxopenconns=128
 	// 的连接池瞬间打满，128 条事务悬挂在 gb_catalog_node 上不提交不释放
 	// ⇒ 全平台 DB 饥饿（注册/云台/后台任务全部 context deadline exceeded），
@@ -47,6 +45,10 @@ type Pipeline struct {
 // 取值依据：单批最坏 ~60 条通道 × 单条 ~30ms ≈ 2s，16 并发下 128 批
 // 约 8 轮 ≈ 16s 消化完，既不会拖垮连接池，也不会让目录同步慢到超时。
 const defaultIngestConcurrency = 16
+
+// 两条目录项是万级场景每台设备的常见应答；短批次减少提交次数，
+// 同时避免大型目录应答长期持有事务锁。
+const ingestTransactionBatchSize = 4
 
 // IngestBatchTimeout 单批入库的总预算。
 //
@@ -129,26 +131,36 @@ func (p *Pipeline) ingest(ctx context.Context, sender Sender, items []CatalogIte
 	var firstErr error
 	civilNodeCache := make(map[string]*gbmodels.GbCatalogNode)
 	ordered, parents := orderCatalogItems(items)
-	for _, it := range ordered {
-		if it.DeviceID == "" {
-			continue
+	for start := 0; start < len(ordered); start += ingestTransactionBatchSize {
+		end := start + ingestTransactionBatchSize
+		if end > len(ordered) {
+			end = len(ordered)
 		}
-		if err := p.ingestOne(ctx, sender, it, parents[it.DeviceID], preserveIdentity, civilNodeCache); err != nil {
-			if firstErr == nil {
-				firstErr = err
+		err := p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			for _, it := range ordered[start:end] {
+				if it.DeviceID == "" {
+					continue
+				}
+				if err := p.ingestOne(ctx, tx, sender, it, parents[it.DeviceID], preserveIdentity, civilNodeCache); err != nil {
+					if firstErr == nil {
+						firstErr = err
+					}
+					// The failed item may have cached nodes rolled back to its savepoint.
+					clear(civilNodeCache)
+				}
 			}
-			// The failed item transaction may have rolled back nodes cached while
-			// processing it. Clear the batch cache so later items resolve them again.
-			for code := range civilNodeCache {
-				delete(civilNodeCache, code)
-			}
+			return ctx.Err()
+		})
+		if err != nil {
+			clear(civilNodeCache)
+			return err
 		}
 	}
 	return firstErr
 }
 
-func (p *Pipeline) ingestOne(ctx context.Context, sender Sender, it CatalogItem, hasChildren, preserveIdentity bool, civilNodeCache map[string]*gbmodels.GbCatalogNode) error {
-	return p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+func (p *Pipeline) ingestOne(ctx context.Context, db *gorm.DB, sender Sender, it CatalogItem, hasChildren, preserveIdentity bool, civilNodeCache map[string]*gbmodels.GbCatalogNode) error {
+	return db.Transaction(func(tx *gorm.DB) error {
 		cls, err := classifyCatalogItem(tx, sender, it, hasChildren, preserveIdentity)
 		if err != nil {
 			return err
