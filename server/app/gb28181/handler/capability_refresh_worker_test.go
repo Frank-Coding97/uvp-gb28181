@@ -3,11 +3,59 @@ package handler
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestCapabilityDeviceRefreshBoundsDatabaseWork(t *testing.T) {
+	r := &deviceCapabilityRefresher{deviceWorkers: make(chan struct{}, 2)}
+	var active, peak atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < 12; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			require.True(t, r.runDeviceRefresh(context.Background(), func(context.Context) {
+				current := active.Add(1)
+				for previous := peak.Load(); current > previous; previous = peak.Load() {
+					if peak.CompareAndSwap(previous, current) {
+						break
+					}
+				}
+				time.Sleep(15 * time.Millisecond)
+				active.Add(-1)
+			}))
+		}()
+	}
+	wg.Wait()
+	require.LessOrEqual(t, peak.Load(), int32(2))
+	require.Greater(t, peak.Load(), int32(0))
+}
+
+func TestCapabilityDeviceRefreshBudgetStartsAfterAdmission(t *testing.T) {
+	r := &deviceCapabilityRefresher{deviceWorkers: make(chan struct{}, 1)}
+	r.deviceWorkers <- struct{}{}
+	started := make(chan time.Time, 1)
+	done := make(chan bool, 1)
+	go func() {
+		done <- r.runDeviceRefresh(context.Background(), func(ctx context.Context) {
+			deadline, _ := ctx.Deadline()
+			started <- deadline
+		})
+	}()
+	select {
+	case <-started:
+		t.Fatal("refresh started before a device slot was available")
+	case <-time.After(200 * time.Millisecond):
+	}
+	<-r.deviceWorkers
+	deadline := <-started
+	require.Greater(t, time.Until(deadline), capabilityRefreshBudget-100*time.Millisecond)
+	require.True(t, <-done)
+}
 
 // 2026-11-09 万级压测事故的防回归：能力刷新原来用**无超时**的
 // `r.workers <- struct{}{}` 抢下行槽位。一旦槽位里的活卡住（发送队列堵、

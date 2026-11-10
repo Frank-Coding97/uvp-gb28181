@@ -1,12 +1,33 @@
 package handler
 
 import (
+	"context"
 	"testing"
 
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
+
+func TestCapabilityRefreshSkipsOfflineDevice(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}))
+	deviceCode := "34020000001320000001"
+	require.NoError(t, db.Create(&gbmodels.GbDevice{DeviceID: deviceCode, Status: gbmodels.DeviceStatusOffline}).Error)
+	channelReads := 0
+	require.NoError(t, db.Callback().Query().Before("gorm:query").Register("count-channel-reads", func(tx *gorm.DB) {
+		if tx.Statement.Table == "gb_channel" {
+			channelReads++
+		}
+	}))
+
+	r := &deviceCapabilityRefresher{db: db}
+	r.refreshDevice(context.Background(), deviceCode, "offline", 0)
+	require.Zero(t, channelReads, "offline device must not continue into capability queries")
+}
 
 // 能力刷新必须"只补没读到的通道"。
 //

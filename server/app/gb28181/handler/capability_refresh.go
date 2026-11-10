@@ -53,6 +53,11 @@ const (
 	// 兜底作用：无论内部哪一步卡住，到点必须放手并释放 running 标，
 	// 让下一批 Catalog 完成时还能重新触发。⛔ 不能设成"永久"。
 	capabilityRefreshBudget = 5 * time.Minute
+
+	// 万台 Catalog 同时完成时，先限制进入数据库和 PTZ 意图事务的设备数。
+	// 等待时间不占用单台设备的执行预算。
+	capabilityDeviceConcurrency   = 32
+	capabilityDeviceAdmissionWait = 20 * time.Minute
 )
 
 // CapabilityRefresher 在一批 Catalog 完整入库后刷新设备能力。
@@ -61,9 +66,10 @@ type CapabilityRefresher interface {
 }
 
 type deviceCapabilityRefresher struct {
-	db      *gorm.DB
-	ptz     *ptz.Service
-	workers chan struct{}
+	db            *gorm.DB
+	ptz           *ptz.Service
+	workers       chan struct{}
+	deviceWorkers chan struct{}
 
 	// mu 保护 running/pending：同一台设备同时只跑一轮，轮内再来的触发只置一个
 	// "待补一轮"标记，等这一轮结束后合并执行一次。⛔ 不能直接丢弃——
@@ -80,7 +86,8 @@ func NewCapabilityRefresher(db *gorm.DB, service *ptz.Service, workers int) Capa
 	}
 	return &deviceCapabilityRefresher{
 		db: db, ptz: service, workers: make(chan struct{}, workers),
-		running: make(map[string]struct{}), pending: make(map[string]struct{}),
+		deviceWorkers: make(chan struct{}, capabilityDeviceConcurrency),
+		running:       make(map[string]struct{}), pending: make(map[string]struct{}),
 	}
 }
 
@@ -104,21 +111,31 @@ func (r *deviceCapabilityRefresher) Refresh(ctx context.Context, deviceCode stri
 	if !r.begin(deviceCode) {
 		return
 	}
-	// ⛔ 预算必须从本轮触发开始算，且覆盖所有补轮：卡住的活不能永远占着 running 标。
-	budget, cancel := context.WithTimeout(scope, capabilityRefreshBudget)
 	admitted := app.BackgroundWork.Go(func() {
-		defer cancel()
-		defer r.finish(deviceCode)
-		for round := 0; ; round++ {
-			r.refreshDevice(budget, deviceCode, roundKey(key, round), round)
-			if !r.consumePending(deviceCode) || round+1 >= capabilityMaxFollowUpRound {
-				return
+		worked := false
+		defer func() {
+			if worked {
+				r.finish(deviceCode)
+			} else {
+				r.release(deviceCode)
 			}
-			// 分页 Catalog 的最后几批可能刚落地，等一拍再补一轮；
-			// 这一轮会被 FreshVideoParamChannels 滤成"只补没读到的通道"。
-			if !sleepContext(budget, capabilitySettleDelay) {
-				return
+		}()
+		worked = r.runDeviceRefresh(scope, func(budget context.Context) {
+			for round := 0; ; round++ {
+				r.refreshDevice(budget, deviceCode, roundKey(key, round), round)
+				if !r.consumePending(deviceCode) || round+1 >= capabilityMaxFollowUpRound {
+					return
+				}
+				// 分页 Catalog 的最后几批可能刚落地，等一拍再补一轮；
+				// 这一轮会被 FreshVideoParamChannels 滤成"只补没读到的通道"。
+				if !sleepContext(budget, capabilitySettleDelay) {
+					return
+				}
 			}
+		})
+		if !worked {
+			app.Log(scope).Named("gb28181.capability").Warn("等待设备能力刷新槽位超时",
+				zap.String("event", "gb28181.capability.device_wait_timeout"), zap.String("device_id", deviceCode))
 		}
 	})
 	if !admitted {
@@ -126,9 +143,23 @@ func (r *deviceCapabilityRefresher) Refresh(ctx context.Context, deviceCode stri
 		// 不会走到上面的 defer ⇒ 必须在这里手动释放，否则该设备永远被判"正在刷新"。
 		// ⛔ 这里**不能**调 finish：finish 见到 pending 会重新触发 Refresh，
 		// 而准入已关 ⇒ 再次 admitted=false ⇒ 无限递归。
-		cancel()
 		r.release(deviceCode)
 	}
+}
+
+func (r *deviceCapabilityRefresher) runDeviceRefresh(ctx context.Context, refresh func(context.Context)) bool {
+	wait, cancelWait := context.WithTimeout(ctx, capabilityDeviceAdmissionWait)
+	defer cancelWait()
+	select {
+	case r.deviceWorkers <- struct{}{}:
+		defer func() { <-r.deviceWorkers }()
+	case <-wait.Done():
+		return false
+	}
+	budget, cancelBudget := context.WithTimeout(ctx, capabilityRefreshBudget)
+	defer cancelBudget()
+	refresh(budget)
+	return true
 }
 
 func roundKey(key string, round int) string {
@@ -186,6 +217,9 @@ func (r *deviceCapabilityRefresher) refreshDevice(scope context.Context, deviceC
 		AccessEpoch int64 `gorm:"column:access_epoch"`
 	}
 	if result := r.db.WithContext(scope).Where("device_id = ?", deviceCode).Limit(1).Find(&device); result.Error != nil || result.RowsAffected != 1 {
+		return
+	}
+	if device.Status != gbmodels.DeviceStatusOnline {
 		return
 	}
 	base := ptz.Target{DeviceEpoch: device.AccessEpoch, DeviceID: uint(device.ID), DeviceCode: device.DeviceID, IP: device.IP, Port: device.Port, Transport: device.Transport,
