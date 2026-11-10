@@ -2,13 +2,93 @@ package ptz
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
+
+func TestExpireApplicationLocksByPrimaryKeyAndPreservesResponses(t *testing.T) {
+	fixture := newSchedulerFixture(t, 1)
+	now := fixture.clock.Now()
+	var operations []gbmodels.GbPTZOperation
+	for i := 0; i < 5; i++ {
+		deadline := now.Add(-time.Minute)
+		status := gbmodels.PTZOperationSent
+		if i == 3 {
+			deadline = now.Add(time.Minute)
+		}
+		if i == 4 {
+			status = gbmodels.PTZOperationAccepted
+		}
+		operations = append(operations, gbmodels.GbPTZOperation{
+			OperationID: fmt.Sprintf("application-%d", i), IdempotencyKey: fmt.Sprintf("application-key-%d", i),
+			DeviceID: 1, DeviceCode: "D", ChannelID: 1, ChannelCode: "C",
+			CmdType: "ConfigDownload", Action: actionRefreshDeviceConfigs, PayloadJSON: "{}", SN: i + 1,
+			Status: status, ResponseRequired: true, MaxAttempts: 1, DeadlineAt: &deadline, CreatedAt: now,
+		})
+	}
+	require.NoError(t, fixture.db.Create(&operations).Error)
+	responseArrived := false
+	require.NoError(t, fixture.db.Callback().Query().After("gorm:query").Register("accept-after-expiry-scan", func(tx *gorm.DB) {
+		if _, ok := tx.Statement.Dest.(*[]uint); !ok || responseArrived {
+			return
+		}
+		responseArrived = true
+		tx.AddError(fixture.db.Model(&gbmodels.GbPTZOperation{}).Where("id = ?", operations[0].ID).
+			Update("status", gbmodels.PTZOperationAccepted).Error)
+	}))
+	var updates []string
+	require.NoError(t, fixture.db.Callback().Update().After("gorm:update").Register("capture-expiry-update", func(tx *gorm.DB) {
+		if tx.Statement.Table == "gb_ptz_operation" {
+			updates = append(updates, tx.Statement.SQL.String())
+		}
+	}))
+
+	require.NoError(t, fixture.scheduler.expireApplication(t.Context(), now))
+	require.True(t, responseArrived)
+	require.NotEmpty(t, updates)
+	for _, statement := range updates {
+		require.Contains(t, strings.ToLower(statement), "id = ?", "expiry updates must start from the primary key")
+	}
+	for i, operation := range operations {
+		stored := loadSchedulerOperation(t, fixture.db, operation.ID)
+		if i == 0 {
+			require.Equal(t, gbmodels.PTZOperationAccepted, stored.Status)
+		} else if i < 3 {
+			require.Equal(t, gbmodels.PTZOperationTimeout, stored.Status)
+		} else {
+			require.Equal(t, operation.Status, stored.Status)
+		}
+	}
+}
+
+func TestExpireTransportLocksByPrimaryKey(t *testing.T) {
+	fixture := newSchedulerFixture(t, 1)
+	operation := fixture.createOperation(t, 1)
+	now := fixture.clock.Now()
+	require.NoError(t, fixture.db.Model(&gbmodels.GbPTZOperation{}).Where("id = ?", operation.ID).
+		Update("transport_deadline_at", now.Add(-time.Minute)).Error)
+	var updates []string
+	require.NoError(t, fixture.db.Callback().Update().After("gorm:update").Register("capture-transport-expiry", func(tx *gorm.DB) {
+		if tx.Statement.Table == "gb_ptz_operation" {
+			updates = append(updates, tx.Statement.SQL.String())
+		}
+	}))
+
+	require.NoError(t, fixture.scheduler.expireTransport(t.Context(), now))
+	require.NotEmpty(t, updates)
+	for _, statement := range updates {
+		require.Contains(t, strings.ToLower(statement), "id = ?", "transport expiry must use the primary key")
+	}
+	stored := loadSchedulerOperation(t, fixture.db, operation.ID)
+	require.Equal(t, gbmodels.PTZOperationUnknown, stored.Status)
+	require.Equal(t, schedulerErrorTransportUnknown, stored.ErrorCode)
+}
 
 // 排队超时判死必须"分批 + 按主键"，不能退回一次性范围 UPDATE。
 //

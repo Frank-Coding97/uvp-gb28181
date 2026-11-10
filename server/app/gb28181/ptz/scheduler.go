@@ -68,10 +68,10 @@ const (
 	// ⛔ 这两个值配合 expireQueued 的分批改写使用，不要当成纯性能参数：
 	// 一次性范围 UPDATE 会先锁二级索引再回表锁主键，与单条回写的加锁顺序相反，
 	// 万级并发下会持续撞 1213（实测 6311 次）。分批 + 按主键升序更新是**正确性**要求。
-	schedulerExpireChunk  = 256
-	schedulerExpireRounds = 8
-	schedulerTransportWindow     = 15 * time.Second
-	schedulerApplicationWindow   = 15 * time.Second
+	schedulerExpireChunk       = 256
+	schedulerExpireRounds      = 8
+	schedulerTransportWindow   = 15 * time.Second
+	schedulerApplicationWindow = 15 * time.Second
 
 	// 结果回写预算。一次回写要跑「查 attempt → 查 operation → 更新 attempt →
 	// 更新 operation」四趟往返，跨机房/隧道链路上单趟就有 80~150ms 抖动，丢包
@@ -709,21 +709,54 @@ func (s *Scheduler) expireQueued(ctx context.Context, now time.Time) error {
 }
 
 func (s *Scheduler) expireTransport(ctx context.Context, now time.Time) error {
-	return s.db.WithContext(ctx).Model(&gbmodels.GbPTZOperation{}).
-		Where("response_required = ? AND status = ? AND transport_deadline_at IS NOT NULL AND transport_deadline_at <= ?", true, gbmodels.PTZOperationQueued, gbmodels.PTZTimeComparison(s.db, now)).
-		Updates(map[string]interface{}{
-			"status": gbmodels.PTZOperationUnknown, "error_code": schedulerErrorTransportUnknown,
-			"error_message": "PTZ MESSAGE 传输结果不确定", "completed_at": now, "next_attempt_at": nil,
-		}).Error
+	return s.expireByPrimaryKey(ctx, now, schedulerExpiry{
+		from: gbmodels.PTZOperationQueued, to: gbmodels.PTZOperationUnknown,
+		deadlineColumn: "transport_deadline_at",
+		errorCode:      schedulerErrorTransportUnknown, errorMessage: "PTZ MESSAGE 传输结果不确定",
+	})
 }
 
 func (s *Scheduler) expireApplication(ctx context.Context, now time.Time) error {
-	return s.db.WithContext(ctx).Model(&gbmodels.GbPTZOperation{}).
-		Where("response_required = ? AND status = ? AND deadline_at IS NOT NULL AND deadline_at <= ?", true, gbmodels.PTZOperationSent, gbmodels.PTZTimeComparison(s.db, now)).
-		Updates(map[string]interface{}{
-			"status": gbmodels.PTZOperationTimeout, "error_code": schedulerErrorApplicationTimeout,
-			"error_message": "等待设备应用层响应超时", "completed_at": now, "next_attempt_at": nil,
-		}).Error
+	return s.expireByPrimaryKey(ctx, now, schedulerExpiry{
+		from: gbmodels.PTZOperationSent, to: gbmodels.PTZOperationTimeout,
+		deadlineColumn: "deadline_at",
+		errorCode:      schedulerErrorApplicationTimeout, errorMessage: "等待设备应用层响应超时",
+	})
+}
+
+type schedulerExpiry struct {
+	from, to       gbmodels.PTZOperationStatus
+	deadlineColumn string
+	errorCode      string
+	errorMessage   string
+}
+
+func (s *Scheduler) expireByPrimaryKey(ctx context.Context, now time.Time, expiry schedulerExpiry) error {
+	// 候选查询不加锁；逐条按主键条件更新，避免与应答回写形成二级索引/主键锁反序。
+	for round := 0; round < schedulerExpireRounds; round++ {
+		var ids []uint
+		if err := ptzWriter(s.db).WithContext(ctx).Model(&gbmodels.GbPTZOperation{}).
+			Where("response_required = ? AND status = ? AND "+expiry.deadlineColumn+" IS NOT NULL AND "+expiry.deadlineColumn+" <= ?",
+				true, expiry.from, gbmodels.PTZTimeComparison(s.db, now)).
+			Order("id").Limit(schedulerExpireChunk).Pluck("id", &ids).Error; err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if err := ptzWriter(s.db).WithContext(ctx).Model(&gbmodels.GbPTZOperation{}).
+				Where("id = ? AND response_required = ? AND status = ? AND "+expiry.deadlineColumn+" IS NOT NULL AND "+expiry.deadlineColumn+" <= ?",
+					id, true, expiry.from, gbmodels.PTZTimeComparison(s.db, now)).
+				Updates(map[string]interface{}{
+					"status": expiry.to, "error_code": expiry.errorCode,
+					"error_message": expiry.errorMessage, "completed_at": now, "next_attempt_at": nil,
+				}).Error; err != nil {
+				return err
+			}
+		}
+		if len(ids) < schedulerExpireChunk {
+			break
+		}
+	}
+	return nil
 }
 
 func (s *Scheduler) recoverExpiredLeases(ctx context.Context, now time.Time) error {
