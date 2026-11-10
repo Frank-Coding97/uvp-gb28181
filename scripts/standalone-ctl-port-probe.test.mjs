@@ -125,3 +125,57 @@ test('静态：check_ports_free 先提示、且缺 ss 时不许报"预检通过"
   assert.match(body, /端口预检：已跳过/,
     '缺 ss 时不能说"通过"——把"没检查"说成"没问题"比不检查更危险');
 });
+
+// ---------------------------------------------------------------------------
+// Windows 版 Test-PortsFree 的静态门禁（本机无 pwsh，只能钉代码形态）。
+//
+// ⛔⛔ 2026-11-10 现场反馈「端口检测也不准」，复查发现 11-09 那次修复
+//   （e69365a9「识别出站连接占端口」）**只改了 Linux 的 check_ports_free**，
+//   Windows 的端口预检没同步，还额外留了两个洞：
+//     · 真绑定探测只认 reserved，探到 busy（出站连接 / TIME_WAIT 占本地端口）
+//       直接丢掉 ⇒ 「预检通过 ✓」紧接着服务 bind 失败；
+//     · 两条 Get-Net* 命令任一失败就 return，连不依赖它们的真绑定探测都不跑。
+//   Linux 版「缺 ss 不许报通过」的硬测试只覆盖了 Linux，这里把 Windows 补上。
+// ---------------------------------------------------------------------------
+const WIN_CTL = readFileSync(
+  new URL('../deploy/standalone-windows/uvp-gb28181-ctl.ps1', import.meta.url), 'utf8');
+const winPreflight = (() => {
+  const start = WIN_CTL.indexOf('function Test-PortsFree');
+  assert.ok(start >= 0, '找不到 Windows 版 Test-PortsFree');
+  const end = WIN_CTL.indexOf('\nfunction ', start + 1);
+  return WIN_CTL.slice(start, end > start ? end : undefined);
+})();
+
+test('静态：Windows 真绑定探到 busy 必须报出来，不许只认 reserved', () => {
+  assert.match(winPreflight, /\$bindBusy\s*=\s*@\(\)/, '缺少 busy 结果收集');
+  assert.match(winPreflight, /\$state -eq 'busy'\)\s*\{\s*\$bindBusy \+= "UDP /,
+    'UDP 探测的 busy 分支');
+  assert.match(winPreflight, /\$state -eq 'busy'\)\s*\{\s*\$bindBusy \+= "TCP /,
+    'TCP 探测的 busy 分支');
+  assert.match(winPreflight, /if \(\$bindBusy\.Count -gt 0\)/, 'busy 收集后必须有失败分支');
+  assert.match(winPreflight, /没有进程可停/, 'busy 必须说明这类占用停不掉');
+});
+
+test('静态：Windows 占用扫描失败时不能跳过整个预检', () => {
+  const catchStart = winPreflight.indexOf('} catch {');
+  const catchEnd = winPreflight.indexOf('$conflicts = @()');
+  assert.ok(catchStart >= 0 && catchEnd > catchStart, '找不到占用扫描的 catch 块');
+  const catchBlock = winPreflight.slice(catchStart, catchEnd);
+  assert.doesNotMatch(catchBlock, /\breturn\b/,
+    '扫描失败直接 return 会把不依赖扫描的真绑定探测一起跳过（等于一个端口都没查）');
+  assert.match(catchBlock, /\$scanOk = \$false/, '扫描失败必须留下"没扫过"的状态');
+  assert.match(winPreflight, /if \(\$scanOk\)/, '结论必须按扫描是否成功分叉');
+});
+
+test('静态：Windows 预检结论不许把 SIP 端口当范围终点，也不许在没扫描时报"通过"', () => {
+  const tail = winPreflight.slice(winPreflight.indexOf('# ⛔ 结论不许把 SIP'));
+  assert.ok(tail.length > 0, '找不到预检结论段');
+  assert.doesNotMatch(tail, /端口预检通过[^\r\n]*\$SipPort/,
+    'SIP 明确不在预检内，拿它当范围终点是误导');
+  const elseStart = tail.indexOf('} else {');
+  assert.ok(elseStart >= 0, '缺少扫描失败时的结论分支');
+  const elseBlock = tail.slice(elseStart);
+  assert.doesNotMatch(elseBlock, /端口预检通过/,
+    '扫描没做成时不能说"预检通过"——把"没检查"说成"没问题"比不检查更危险');
+  assert.match(elseBlock, /端口占用扫描不可用/, '必须明说扫了什么、没扫什么');
+});

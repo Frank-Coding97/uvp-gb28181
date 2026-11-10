@@ -880,14 +880,19 @@ function Test-PortsFree {
     # ⛔ SIP（$SipPort）**不在预检内**：它的端口由平台引导页录入（存 gb_sip_config 表），
     #   包内无从得知客户要填哪个，Linux 版同样把它排除。
 
+    # ⛔ 占用扫描只负责「指认占用者」；能不能绑，以第二道的真绑定探测为准。
+    #   两条 Get-Net* 命令在部分机器上不可用（家庭版 / 权限不足 / 旧系统）⇒
+    #   扫描失败**不许把整个预检 return 掉**：真绑定探测不依赖它们，必须照跑，
+    #   否则「预检通过」其实是「一个端口都没检查」（Linux 版对此有硬门禁）。
     $tcpSet = @{}
     $udpSet = @{}
+    $scanOk = $true
     try {
         foreach ($c in (Get-NetTCPConnection -State Listen -ErrorAction Stop)) { $tcpSet[[int]$c.LocalPort] = $c.OwningProcess }
         foreach ($c in (Get-NetUDPEndpoint -ErrorAction Stop)) { $udpSet[[int]$c.LocalPort] = $c.OwningProcess }
     } catch {
-        Write-UvpWarn "无法用 Get-NetTCPConnection 预检端口（$($_.Exception.Message)），跳过端口占用检查"
-        return
+        $scanOk = $false
+        Write-UvpWarn "占用扫描不可用（$($_.Exception.Message)），改为只靠真绑定探测判端口能否使用"
     }
 
     $conflicts = @()
@@ -908,26 +913,43 @@ function Test-PortsFree {
     if ($conflicts.Count -gt 0) {
         # ⛔ 端口被别人占着而照样启动的后果：nginx 会连到别的服务上，而 status 仍报「运行中」，
         #   客户看到的是**别的系统的页面**，全程零报错。
+        # ⚠️ Get-NetUDPEndpoint 会把「出站连接的本地 UDP 端点」也列进来 —— 那不是能停掉的
+        #   监听进程，硬按提示去停只会白忙（与 Linux 版 11-09 补的说明是同一件事）。
         Fail ("以下端口已被占用，请先释放（或先执行本目录的 stop.cmd 停掉本平台）：`n        - " +
-              (($conflicts | Select-Object -First 12) -join "`n        - "))
+              (($conflicts | Select-Object -First 12) -join "`n        - ") + "`n" +
+              "      若占用者是系统进程 / 查不到、且反复停不掉，多半是本机出站连接或 TIME_WAIT`n" +
+              "      临时占着的本地端口（不是服务在监听）：等它自己释放，或把 config\config.env`n" +
+              "      的端口段整体挪开，再执行 stop.cmd → start.cmd。")
     }
 
     # ------------------------------------------------------------------
-    # 第二道：**真·绑定探测** —— 专抓「被 Windows 保留」的端口。
+    # 第二道：**真·绑定探测** —— 「这个端口现在到底能不能用」以它为准。
     #
-    # ⛔⛔ 上面那轮扫描只看得到「有进程占着」，看不到「被系统预留」。而被预留的端口
-    #   bind 必然 WSAEACCES，足以让 ZLM 秒退、SIP 永远注册不上 —— 且表现是
-    #   「预检通过 ✓ / 服务已启动 ✓ / 一秒后 status 说不在了」，排查要绕很远。
-    #   ⇒ 这里对计划用到的每个端口**逐个真绑一次**（IPv6 双栈，与 ZLM 一致），
-    #     只把 reserved 这一类拦下来（busy 已由上一轮报告过）。
-    #   ⚠️ 探测顺序固定（先 TCP 后 UDP、端口升序），失败信息可复现。
+    # ⛔⛔ 扫描只看得到「有人在监听」，看不到两类同样绑不上的情况：
+    #   · 被 Windows **保留**的端口（bind 直接 WSAEACCES，ZLM 秒退）；
+    #   · 出站连接 / TIME_WAIT 把端口当**本地源端口**占着（不是 LISTEN，
+    #     Get-NetTCPConnection -State Listen 查不到，但 bind 一样失败）。
+    #   Linux 版 2026-11-09 已补后者，Windows 版却只认 reserved、把 busy 直接丢了
+    #   ⇒ 「端口预检通过 ✓」紧接着服务起不来，就是现场反馈的检测不准。
+    #   ⇒ 非 ok 一律要有交代：reserved 单独说处置办法，busy 说明「停不掉」，
+    #     error 是探测本身异常（不是端口占用），只告警、不拦启动。
+    #   第一轮扫到冲突就直接 Fail 退出了，所以能走到这里的 busy 必然是扫描看不见的占用。
+    #   ⚠️ 探测顺序固定（先 UDP 后 TCP、端口升序），失败信息可复现。
     # ------------------------------------------------------------------
     $reserved = @()
+    $bindBusy = @()
+    $bindErrors = @()
     foreach ($p in ($udpPorts | Sort-Object -Unique)) {
-        if ((Get-PortBindState -Port $p -Protocol 'UDP') -eq 'reserved') { $reserved += "UDP $p" }
+        $state = Get-PortBindState -Port $p -Protocol 'UDP'
+        if ($state -eq 'reserved') { $reserved += "UDP $p" }
+        elseif ($state -eq 'busy') { $bindBusy += "UDP $p" }
+        elseif ($state -eq 'error') { $bindErrors += "UDP $p" }
     }
     foreach ($p in ($tcpPorts | Sort-Object -Unique)) {
-        if ((Get-PortBindState -Port $p -Protocol 'TCP') -eq 'reserved') { $reserved += "TCP $p" }
+        $state = Get-PortBindState -Port $p -Protocol 'TCP'
+        if ($state -eq 'reserved') { $reserved += "TCP $p" }
+        elseif ($state -eq 'busy') { $bindBusy += "TCP $p" }
+        elseif ($state -eq 'error') { $bindErrors += "TCP $p" }
     }
     if ($reserved.Count -gt 0) {
         $shown = $reserved | Select-Object -First 8
@@ -939,8 +961,28 @@ function Test-PortsFree {
               "              ⇒ 把 config\config.env 里的端口段挪出保留区（见包内 README 第四节），`n" +
               "                再执行 stop.cmd → start.cmd。")
     }
-    Write-UvpOk ("端口预检通过（TCP $($Ports.HTTPS)-$SipPort + UDP " +
-                 "$($Ports.ZLM_SRT)/$($Ports.ZLM_ICE)/$($ZlmRtpRange.Split('-')[0])-$SipPort，均实测可绑定）")
+    if ($bindBusy.Count -gt 0) {
+        $shown = $bindBusy | Select-Object -First 12
+        Fail ("以下端口实测绑不上，但占用扫描里**找不到监听进程**：`n        - " +
+              (($shown) -join "`n        - ") + "`n" +
+              "      常见原因：本机一条出站连接或刚关闭的连接（TIME_WAIT）正把它当本地端口用，`n" +
+              "      或端口落在 Windows 动态端口范围内。这类占用**没有进程可停**，重试往往也一样；`n" +
+              "      处置：等几分钟再 start，或把 config\config.env 的端口段整体挪开。`n" +
+              "      查保留段（管理员 CMD）：netsh int ipv4 show excludedportrange protocol=tcp")
+    }
+    if ($bindErrors.Count -gt 0) {
+        Write-UvpWarn "有 $($bindErrors.Count) 个端口的真绑定探测本身异常（非端口占用），已跳过这些端口的判定"
+    }
+    # ⛔ 结论不许把 SIP 端口当范围终点：SIP 明确不在预检内（见上面 880 行），
+    #   且改过 RTP 段后旧写法显示的范围会完全是错的。
+    if ($scanOk) {
+        Write-UvpOk ("端口预检通过（TCP $($tcpPorts.Count) 个 / UDP $($udpPorts.Count) 个端口，RTP 段 $ZlmRtpRange，均实测可绑定）")
+    } else {
+        # ⛔ 不能把「没做占用扫描」说成「预检通过」：真绑定只证明「现在能绑」，
+        #   证明不了「没有别的程序正在监听」（Linux 版对此有硬测试）。
+        Write-UvpWarn '端口占用扫描不可用：未核对是否有别的程序在监听，仅真绑定探测通过'
+        Write-UvpOk ("真绑定探测通过（TCP $($tcpPorts.Count) 个 / UDP $($udpPorts.Count) 个端口可绑定；RTP 段 $ZlmRtpRange）")
+    }
 
     # --------------------------------------------------------------
     # SIP 端口：只**告警**、不拦启动。
