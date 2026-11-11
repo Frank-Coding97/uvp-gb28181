@@ -10,13 +10,25 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"uvplatform.com/uvp-gb28181/app/utils/ymlconfig"
 	upgrade "uvplatform.com/uvp-gb28181/internal/upgrade"
 )
+
+// ⛔ macOS 上 t.TempDir() 的完整路径本身就有 100+ 字节，超过 AF_UNIX 的
+//    sun_path 上限；这些用例只构造 runtime、不真的监听，但生产侧的
+//    ValidateSocketPath 会如实拒绝。统一用 os.TempDir() 下的短路径，
+//    别让 fixture 自己变成一条不可能 bind 的路径。
+var testSocketCounter atomic.Uint64
+
+func shortSocketPath() string {
+	return filepath.Join(os.TempDir(), "uvp-m-"+strconv.FormatUint(testSocketCounter.Add(1), 10)+".sock")
+}
 
 func TestWriteRegistrationIsPrivateAndDoesNotContainPassword(t *testing.T) {
 	// The root has to be an absolute path on the host running the test: a
@@ -110,7 +122,7 @@ func TestBuildServeRuntimeUsesRegisteredStateAndRejectsConflict(t *testing.T) {
 	}
 	wantState := filepath.Join(root, "updater-state")
 	assembly, err := buildServeRuntime(serveOptions{
-		SocketPath:       filepath.Join(root, "updater.sock"),
+		SocketPath:       shortSocketPath(),
 		RegistrationPath: registrationPath,
 	})
 	if err != nil {
@@ -120,7 +132,7 @@ func TestBuildServeRuntimeUsesRegisteredStateAndRejectsConflict(t *testing.T) {
 		t.Fatalf("state = %q, want %q", assembly.state, wantState)
 	}
 	if _, err := buildServeRuntime(serveOptions{
-		SocketPath:       filepath.Join(root, "updater.sock"),
+		SocketPath:       shortSocketPath(),
 		StatePath:        filepath.Join(root, "other-state"),
 		RegistrationPath: registrationPath,
 	}); err == nil || !strings.Contains(err.Error(), "does not match") {
@@ -162,6 +174,16 @@ func TestBuildServeRuntimeRejectsBlankSocketPath(t *testing.T) {
 	}
 }
 
+// ⛔ 助手必须在建目录/开监听之前拒绝超限路径，否则现场只看到
+//    "bind: invalid argument"，排查要绕一大圈（222 上踩过）。
+func TestBuildServeRuntimeRejectsOverlongSocketPath(t *testing.T) {
+	long := strings.Repeat("a", upgrade.MaxSocketPathBytes+1)
+	_, err := buildServeRuntime(serveOptions{SocketPath: long, StatePath: t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "107-byte") {
+		t.Fatalf("overlong socket error = %v", err)
+	}
+}
+
 func TestBuildServeRuntimeWiresRegisteredControl(t *testing.T) {
 	root := t.TempDir()
 	registrationPath := secureRegistrationPath(t)
@@ -180,7 +202,7 @@ func TestBuildServeRuntimeWiresRegisteredControl(t *testing.T) {
 		t.Fatal(err)
 	}
 	assembly, err := buildServeRuntime(serveOptions{
-		SocketPath:       filepath.Join(root, "updater.sock"),
+		SocketPath:       shortSocketPath(),
 		RegistrationPath: registrationPath,
 	})
 	if err != nil {

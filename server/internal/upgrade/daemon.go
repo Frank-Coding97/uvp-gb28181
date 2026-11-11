@@ -79,8 +79,11 @@ func CallUnix(ctx context.Context, socketPath string, request ProtocolRequest) (
 	if err := request.Validate(); err != nil {
 		return ProtocolResponse{}, err
 	}
-	if strings.TrimSpace(socketPath) == "" {
-		return ProtocolResponse{}, errors.New("updater socket path is required")
+	// ⛔ 路径超过 AF_UNIX 上限时 net.Dial 只报 "connect: invalid argument"，
+	//   业务侧（服务升级页）只能显示一个笼统的 503，现场看不出是安装目录太深。
+	//   提前校验，让错误里带上字节数与「把目录移浅」的可操作指引。
+	if err := ValidateSocketPath(socketPath); err != nil {
+		return ProtocolResponse{}, err
 	}
 	dialer := net.Dialer{}
 	conn, err := dialer.DialContext(ctx, "unix", socketPath)

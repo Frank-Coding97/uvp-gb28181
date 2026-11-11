@@ -120,8 +120,10 @@ func parseServeOptions(args []string, getenv func(string) string) (serveOptions,
 
 func buildServeRuntime(options serveOptions) (*serveRuntime, error) {
 	socketPath := strings.TrimSpace(options.SocketPath)
-	if socketPath == "" {
-		return nil, errors.New("updater socket path is required")
+	// ⛔ 必须在建目录/开监听之前判：AF_UNIX 的 sun_path 只有 107 字节可用，
+	//   超限时 net.Listen 只报一句 "bind: invalid argument"，现场完全看不出是路径太长。
+	if err := upgrade.ValidateSocketPath(socketPath); err != nil {
+		return nil, err
 	}
 	var registration *upgrade.Registration
 	var adapter upgrade.DeploymentAdapter

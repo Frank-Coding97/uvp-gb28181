@@ -66,7 +66,7 @@ func TestBuildServeRuntimeWiresRegisteredPreflightAndScheduler(t *testing.T) {
 		t.Fatal(err)
 	}
 	assembly, err := buildServeRuntime(serveOptions{
-		SocketPath:       filepath.Join(root, "updater.sock"),
+		SocketPath:       shortSocketPath(),
 		RegistrationPath: registrationPath,
 	})
 	if err != nil {

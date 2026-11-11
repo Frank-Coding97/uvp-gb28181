@@ -39,6 +39,48 @@ $OutputEncoding = [Console]::OutputEncoding
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location -LiteralPath $Root
+# ------------------------------------------------ 升级助手通信文件路径 ----
+# ⛔⛔ Windows 的 AF_UNIX 本地通信通道对路径长度有硬限制：sun_path 共 108 字节
+#    （含结尾 NUL），可用 107 字节。包内 run\updater.sock 会**随解压目录一起变长**，
+#    客户把压缩包套两层、或解压到很深的用户目录就悄悄超限：助手报
+#    bind: invalid argument、后端报 connect: invalid argument，「服务升级」页
+#    一律 503，日志里完全看不出根因（2026-11-10 在 222 上实测，现场正好 108
+#    字节，只差一个字；把内层目录改名为 app 后 79 字节，立刻恢复）。
+# ⇒ 优先仍用包内路径（绿色包自包含）；超限时自动改放到**固定短目录**，
+#    路径与安装根解耦、长度恒定，助手 --socket 与后端 UVP_UPDATER_SOCKET
+#    都读同一个 $UpdaterSocket。文件名带安装根的短指纹，同机多套实例不串。
+# ⚠️ 上限 107 必须与 Go 侧 internal/upgrade.MaxSocketPathBytes 保持一致；
+#    必须有防回归测试 scripts/standalone-windows-updater-path-and-lock.test.mjs。
+$script:UpdaterSocketFallback = $false
+function Resolve-UpdaterSocketPath {
+    param([string]$Preferred, [string]$RootPath)
+    $limit = 107
+    # ⛔ 按 UTF-8 **字节**数判，不是字符数：中文目录一个字占 3 字节。
+    if ([System.Text.Encoding]::UTF8.GetByteCount($Preferred) -le $limit) {
+        return $Preferred
+    }
+    $script:UpdaterSocketFallback = $true
+    $programData = $env:ProgramData
+    if ([string]::IsNullOrWhiteSpace($programData)) { $programData = 'C:\ProgramData' }
+    $shortDir = Join-Path $programData 'uvp-updater'
+    try {
+        New-Item -ItemType Directory -Force -Path $shortDir -ErrorAction Stop | Out-Null
+    } catch {
+        throw "安装目录过深，且无法创建升级助手短路径目录 $shortDir ：$($_.Exception.Message)。请把本包移到更短的目录（例如 D:\uvp）后重试。"
+    }
+    # Windows 路径大小写不敏感；统一大写再取指纹，保证同一安装根每次算出同一个文件，
+    # 就地升级（替换包内文件但安装根不变）前后也不会换 socket。
+    $sha = [System.Security.Cryptography.SHA1]::Create()
+    $hashBytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($RootPath.ToUpperInvariant()))
+    $sha.Dispose()
+    $digest = ([System.BitConverter]::ToString($hashBytes)).Replace('-', '').Substring(0, 12).ToLowerInvariant()
+    $fallback = Join-Path $shortDir ("u-{0}.sock" -f $digest)
+    if ([System.Text.Encoding]::UTF8.GetByteCount($fallback) -gt $limit) {
+        throw "升级助手通信文件路径仍过长（$([System.Text.Encoding]::UTF8.GetByteCount($fallback)) 字节，上限 $limit 字节）：$fallback 。请把本包移到更短的目录（例如 D:\uvp），或删掉解压时多出来的同名文件夹层后重试。"
+    }
+    return $fallback
+}
+
 
 # ---------------------------------------------------------------- 目录布局 ----
 $BinDir      = Join-Path $Root 'bin'
@@ -88,7 +130,8 @@ $NginxPidFile   = Join-Path $RunDir 'nginx.pid'
 $UpdaterDir     = Join-Path $Root 'updater'
 $UpdaterExe     = Join-Path $UpdaterDir 'uvp-updater.exe'
 $UpdaterCtl     = Join-Path $Root 'uvp-gb28181-ctl.cmd'
-$UpdaterSocket  = Join-Path $RunDir 'updater.sock'
+# ⛔ 见上方 Resolve-UpdaterSocketPath：超过 107 字节会自动改用固定短目录。
+$UpdaterSocket  = Resolve-UpdaterSocketPath -Preferred (Join-Path $RunDir 'updater.sock') -RootPath $Root
 $UpdaterState   = Join-Path $Root 'updater-state'
 $UpdaterReg     = Join-Path $ConfDir 'updater-registration.json'
 $UpdaterPidFile = Join-Path $RunDir 'updater.pid'
@@ -1183,6 +1226,18 @@ function Initialize-ProcessAuthorityDir {
         '/grant:r', '*S-1-5-18:(OI)(CI)F',
         '/grant:r', '*S-1-5-32-544:(OI)(CI)F',
         '/T', '/C')
+    # ⛔⛔ 2026-11-10 在 222 上踩到：/inheritance:r + /grant:r '*SID:(OI)(CI)F'
+    #   递归（/T）到**普通文件**时，带 (OI)(CI) 的 ACE 对文件不生效 ⇒ 已存在的
+    #   api-authority.lock 被剥光 DACL（空 DACL = 拒绝所有人）。后端
+    #   AcquireLocalLock 打不开它，直接 phase=process_authority 拒绝启动。
+    #   ⚠️ 只在**第二次及以后启动**触发：首次启动时锁文件还不存在，后端随后创建
+    #      它并继承父目录（已收紧）的三项授权，一切正常 ⇒ 极易漏测、且全新安装验不出来。
+    #   ⇒ 收紧目录后，单独把锁文件的继承授权恢复回来（父目录此刻已是受信三项）。
+    #   ⛔ 别删锁文件"救急"：会生成新的 domainID，接着报 database_domain_mismatch。
+    $lockFile = Join-Path $Path 'api-authority.lock'
+    if (Test-Path -LiteralPath $lockFile) {
+        $null = Invoke-NativeText -Exe 'icacls.exe' -Arguments @($lockFile, '/reset', '/C')
+    }
     if ($out -match 'Failed processing\s+[1-9]') {
         Write-UvpWarn "进程权威目录权限收紧部分失败，后端可能拒绝启动（$Path）"
     }
@@ -1387,6 +1442,9 @@ function Start-Updater {
     if (-not (Test-Path -LiteralPath $UpdaterExe)) {
         Write-UvpWarn '本包未包含升级助手（updater\uvp-updater.exe），在线升级不可用'
         return
+    }
+    if ($script:UpdaterSocketFallback) {
+        Write-UvpWarn "安装目录较深，升级助手通信文件已改用短路径：$UpdaterSocket"
     }
     Install-UpdaterImage
     # 后端靠这个环境变量找 socket；助手不在时也设上，页面只会显示"助手不可用"，
