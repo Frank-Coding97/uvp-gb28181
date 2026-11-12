@@ -10,7 +10,7 @@ set GOOS=linux
 set GOARCH=amd64
 
 set OUTPUT_DIR=dist
-set OUTPUT_NAME=gin-fast-linux
+set OUTPUT_NAME=uvp-gb28181-linux
 
 if not exist "%OUTPUT_DIR%" (
     mkdir "%OUTPUT_DIR%"

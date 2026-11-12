@@ -1,6 +1,6 @@
 package plugins
 
 import (
-	 _ "uvplatform.cn/uvp-gb28181/plugins/{{.DirName}}/routes"
+	 _ "uvplatform.com/uvp-gb28181/plugins/{{.DirName}}/routes"
 )
 

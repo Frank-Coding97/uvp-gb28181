@@ -1,0 +1,201 @@
+{"id": 11, "name": "男", "value": "1", "status": 1, "dict_id": 1}
+{"id": 12, "name": "女", "value": "0", "status": 1, "dict_id": 1}
+{"id": 13, "name": "其它", "value": "2", "status": 1, "dict_id": 1}
+{"id": 21, "name": "禁用", "value": "0", "status": 1, "dict_id": 2}
+{"id": 22, "name": "启用", "value": "1", "status": 1, "dict_id": 2}
+{"id": 31, "name": "总经理", "value": "1", "status": 1, "dict_id": 3}
+{"id": 32, "name": "总监", "value": "2", "status": 1, "dict_id": 3}
+{"id": 33, "name": "人事主管", "value": "3", "status": 1, "dict_id": 3}
+{"id": 34, "name": "开发部主管", "value": "4", "status": 1, "dict_id": 3}
+{"id": 35, "name": "普通职员", "value": "5", "status": 1, "dict_id": 3}
+{"id": 36, "name": "其它", "value": "999", "status": 1, "dict_id": 3}
+{"id": 41, "name": "失败", "value": "0", "status": 1, "dict_id": 4}
+{"id": 42, "name": "成功", "value": "1", "status": 1, "dict_id": 4}
+{"id": 43, "name": "未知", "value": "0", "status": 1, "dict_id": 5}
+{"id": 44, "name": "球机", "value": "1", "status": 1, "dict_id": 5}
+{"id": 45, "name": "半球", "value": "2", "status": 1, "dict_id": 5}
+{"id": 46, "name": "固定枪机", "value": "3", "status": 1, "dict_id": 5}
+{"id": 47, "name": "遥控枪机", "value": "4", "status": 1, "dict_id": 5}
+{"id": 48, "name": "WS-FLV", "value": "ws-flv", "status": 1, "dict_id": 6}
+{"id": 49, "name": "HTTP-FLV", "value": "http-flv", "status": 1, "dict_id": 6}
+{"id": 50, "name": "HLS", "value": "hls", "status": 1, "dict_id": 6}
+{"id": 51, "name": "WebRTC", "value": "webrtc", "status": 1, "dict_id": 6}
+{"id": 58, "name": "遥控半球", "value": "5", "status": 1, "dict_id": 5}
+{"id": 59, "name": "多目设备的全景/拼接通道", "value": "6", "status": 1, "dict_id": 5}
+{"id": 60, "name": "多目设备的分割通道", "value": "7", "status": 1, "dict_id": 5}
+{"id": 61, "name": "媒体已就绪", "value": "ready", "status": 1, "dict_id": 7}
+{"id": 62, "name": "媒体失败", "value": "failed", "status": 1, "dict_id": 7}
+{"id": 63, "name": "媒体已停止", "value": "stopped", "status": 1, "dict_id": 7}
+{"id": 64, "name": "媒体未知", "value": "unknown", "status": 1, "dict_id": 7}
+{"id": 65, "name": "已见首帧", "value": "first_frame", "status": 1, "dict_id": 8}
+{"id": 66, "name": "客户端失败", "value": "failed", "status": 1, "dict_id": 8}
+{"id": 67, "name": "客户端未知", "value": "unknown", "status": 1, "dict_id": 8}
+{"id": 68, "name": "未知", "value": "unknown", "status": 1, "dict_id": 9}
+{"id": 69, "name": "请求接入", "value": "request", "status": 1, "dict_id": 9}
+{"id": 70, "name": "参数校验", "value": "validation", "status": 1, "dict_id": 9}
+{"id": 71, "name": "节点选择", "value": "node", "status": 1, "dict_id": 9}
+{"id": 72, "name": "RTP 分配", "value": "rtp", "status": 1, "dict_id": 9}
+{"id": 73, "name": "INVITE 信令", "value": "invite", "status": 1, "dict_id": 9}
+{"id": 74, "name": "媒体就绪", "value": "media", "status": 1, "dict_id": 9}
+{"id": 75, "name": "播放授权", "value": "authorization", "status": 1, "dict_id": 9}
+{"id": 76, "name": "客户端播放", "value": "client", "status": 1, "dict_id": 9}
+{"id": 77, "name": "停止播放", "value": "stop", "status": 1, "dict_id": 9}
+{"id": 78, "name": "资源清理", "value": "cleanup", "status": 1, "dict_id": 9}
+{"id": 79, "name": "进行中", "value": "in_progress", "status": 1, "dict_id": 10}
+{"id": 80, "name": "已完成", "value": "completed", "status": 1, "dict_id": 10}
+{"id": 81, "name": "已失败", "value": "failed", "status": 1, "dict_id": 10}
+{"id": 82, "name": "超时未结束", "value": "stale_in_progress", "status": 1, "dict_id": 10}
+{"id": 83, "name": "未知", "value": "unknown", "status": 1, "dict_id": 11}
+{"id": 84, "name": "进行中", "value": "in_progress", "status": 1, "dict_id": 11}
+{"id": 85, "name": "已证实", "value": "confirmed", "status": 1, "dict_id": 11}
+{"id": 86, "name": "失败", "value": "failed", "status": 1, "dict_id": 11}
+{"id": 87, "name": "不适用", "value": "not_applicable", "status": 1, "dict_id": 11}
+{"id": 88, "name": "HTTP 请求", "value": "http", "status": 1, "dict_id": 12}
+{"id": 89, "name": "播放服务", "value": "play_service", "status": 1, "dict_id": 12}
+{"id": 90, "name": "SIP 信令", "value": "sip", "status": 1, "dict_id": 12}
+{"id": 91, "name": "ZLM 回调", "value": "zlm_hook", "status": 1, "dict_id": 12}
+{"id": 92, "name": "浏览器客户端", "value": "client", "status": 1, "dict_id": 12}
+{"id": 93, "name": "生命周期保留任务", "value": "retention", "status": 1, "dict_id": 12}
+{"id": 94, "name": "收到播放请求", "value": "request_received", "status": 1, "dict_id": 13}
+{"id": 95, "name": "参数校验通过", "value": "validation_succeeded", "status": 1, "dict_id": 13}
+{"id": 96, "name": "参数校验失败", "value": "validation_failed", "status": 1, "dict_id": 13}
+{"id": 97, "name": "已选择节点", "value": "node_selected", "status": 1, "dict_id": 13}
+{"id": 98, "name": "节点选择失败", "value": "node_selection_failed", "status": 1, "dict_id": 13}
+{"id": 99, "name": "已分配 RTP", "value": "rtp_allocated", "status": 1, "dict_id": 13}
+{"id": 100, "name": "RTP 分配失败", "value": "rtp_allocation_failed", "status": 1, "dict_id": 13}
+{"id": 101, "name": "无需分配 RTP", "value": "rtp_not_applicable", "status": 1, "dict_id": 13}
+{"id": 102, "name": "已发送 INVITE", "value": "invite_sent", "status": 1, "dict_id": 13}
+{"id": 103, "name": "INVITE 已接受", "value": "invite_accepted", "status": 1, "dict_id": 13}
+{"id": 104, "name": "INVITE 被拒绝", "value": "invite_rejected", "status": 1, "dict_id": 13}
+{"id": 105, "name": "INVITE 超时", "value": "invite_timeout", "status": 1, "dict_id": 13}
+{"id": 106, "name": "无需发送 INVITE", "value": "invite_not_applicable", "status": 1, "dict_id": 13}
+{"id": 107, "name": "媒体流已就绪", "value": "media_ready", "status": 1, "dict_id": 13}
+{"id": 108, "name": "复用已有媒体流", "value": "reuse_media_ready", "status": 1, "dict_id": 13}
+{"id": 109, "name": "媒体流超时", "value": "media_timeout", "status": 1, "dict_id": 13}
+{"id": 110, "name": "已下发播放地址", "value": "play_url_issued", "status": 1, "dict_id": 13}
+{"id": 111, "name": "播放授权失败", "value": "authorization_failed", "status": 1, "dict_id": 13}
+{"id": 112, "name": "客户端已见首帧", "value": "first_frame", "status": 1, "dict_id": 13}
+{"id": 113, "name": "客户端播放器错误", "value": "player_error", "status": 1, "dict_id": 13}
+{"id": 114, "name": "已请求停止播放", "value": "stop_requested", "status": 1, "dict_id": 13}
+{"id": 115, "name": "资源清理完成", "value": "cleanup_completed", "status": 1, "dict_id": 13}
+{"id": 116, "name": "资源清理部分失败", "value": "cleanup_partial_failure", "status": 1, "dict_id": 13}
+{"id": 117, "name": "播放生命周期超时", "value": "stale_in_progress", "status": 1, "dict_id": 13}
+{"id": 118, "name": "ZLM 流已注册", "value": "hook_stream_registered", "status": 1, "dict_id": 13}
+{"id": 119, "name": "ZLM 流已注销", "value": "hook_stream_unregistered", "status": 1, "dict_id": 13}
+{"id": 120, "name": "ZLM 已上报流量", "value": "hook_flow_reported", "status": 1, "dict_id": 13}
+{"id": 121, "name": "ZLM 无阅读者", "value": "hook_none_reader", "status": 1, "dict_id": 13}
+{"id": 122, "name": "ZLM RTP 超时", "value": "hook_rtp_timeout", "status": 1, "dict_id": 13}
+{"id": 123, "name": "MPEG-4", "value": "1", "status": 1, "dict_id": 14}
+{"id": 124, "name": "H.264", "value": "2", "status": 1, "dict_id": 14}
+{"id": 125, "name": "SVAC", "value": "3", "status": 1, "dict_id": 14}
+{"id": 126, "name": "3GP", "value": "4", "status": 1, "dict_id": 14}
+{"id": 127, "name": "H.265", "value": "5", "status": 1, "dict_id": 14}
+{"id": 128, "name": "QCIF", "value": "1", "status": 1, "dict_id": 15}
+{"id": 129, "name": "CIF", "value": "2", "status": 1, "dict_id": 15}
+{"id": 130, "name": "4CIF", "value": "3", "status": 1, "dict_id": 15}
+{"id": 131, "name": "D1", "value": "4", "status": 1, "dict_id": 15}
+{"id": 132, "name": "720P", "value": "5", "status": 1, "dict_id": 15}
+{"id": 133, "name": "1080P", "value": "6", "status": 1, "dict_id": 15}
+{"id": 134, "name": "CBR", "value": "1", "status": 1, "dict_id": 16}
+{"id": 135, "name": "VBR", "value": "2", "status": 1, "dict_id": 16}
+{"id": 136, "name": "在线", "value": "online", "status": 1, "dict_id": 17}
+{"id": 137, "name": "离线", "value": "offline", "status": 1, "dict_id": 17}
+{"id": 138, "name": "在线", "value": "active", "status": 1, "dict_id": 18}
+{"id": 139, "name": "维护中", "value": "maintenance", "status": 1, "dict_id": 18}
+{"id": 140, "name": "离线", "value": "offline", "status": 1, "dict_id": 18}
+{"id": 141, "name": "已停用", "value": "disabled", "status": 1, "dict_id": 19}
+{"id": 142, "name": "在线", "value": "online", "status": 1, "dict_id": 19}
+{"id": 143, "name": "注册已过期", "value": "registration_expired", "status": 1, "dict_id": 19}
+{"id": 144, "name": "心跳超时", "value": "heartbeat_stale", "status": 1, "dict_id": 19}
+{"id": 145, "name": "等待心跳", "value": "awaiting_heartbeat", "status": 1, "dict_id": 19}
+{"id": 146, "name": "等待注册", "value": "awaiting_registration", "status": 1, "dict_id": 19}
+{"id": 147, "name": "室外", "value": "1", "status": 1, "dict_id": 20}
+{"id": 148, "name": "室内", "value": "2", "status": 1, "dict_id": 20}
+{"id": 149, "name": "无补光", "value": "1", "status": 1, "dict_id": 21}
+{"id": 150, "name": "红外补光", "value": "2", "status": 1, "dict_id": 21}
+{"id": 151, "name": "白光补光", "value": "3", "status": 1, "dict_id": 21}
+{"id": 152, "name": "激光补光", "value": "4", "status": 1, "dict_id": 21}
+{"id": 153, "name": "其他", "value": "9", "status": 1, "dict_id": 21}
+{"id": 154, "name": "东", "value": "1", "status": 1, "dict_id": 22}
+{"id": 155, "name": "西", "value": "2", "status": 1, "dict_id": 22}
+{"id": 156, "name": "南", "value": "3", "status": 1, "dict_id": 22}
+{"id": 157, "name": "北", "value": "4", "status": 1, "dict_id": 22}
+{"id": 158, "name": "东南", "value": "5", "status": 1, "dict_id": 22}
+{"id": 159, "name": "东北", "value": "6", "status": 1, "dict_id": 22}
+{"id": 160, "name": "西南", "value": "7", "status": 1, "dict_id": 22}
+{"id": 161, "name": "西北", "value": "8", "status": 1, "dict_id": 22}
+{"id": 162, "name": "省际检查站", "value": "1", "status": 1, "dict_id": 23}
+{"id": 163, "name": "党政机关", "value": "2", "status": 1, "dict_id": 23}
+{"id": 164, "name": "车站码头", "value": "3", "status": 1, "dict_id": 23}
+{"id": 165, "name": "中心广场", "value": "4", "status": 1, "dict_id": 23}
+{"id": 166, "name": "体育场馆", "value": "5", "status": 1, "dict_id": 23}
+{"id": 167, "name": "商业中心", "value": "6", "status": 1, "dict_id": 23}
+{"id": 168, "name": "宗教场所", "value": "7", "status": 1, "dict_id": 23}
+{"id": 169, "name": "校园周边", "value": "8", "status": 1, "dict_id": 23}
+{"id": 170, "name": "治安复杂区域", "value": "9", "status": 1, "dict_id": 23}
+{"id": 171, "name": "交通干线", "value": "10", "status": 1, "dict_id": 23}
+{"id": 172, "name": "治安", "value": "1", "status": 1, "dict_id": 24}
+{"id": 173, "name": "交通", "value": "2", "status": 1, "dict_id": 24}
+{"id": 174, "name": "重点", "value": "3", "status": 1, "dict_id": 24}
+{"id": 175, "name": "可见光成像", "value": "1", "status": 1, "dict_id": 25}
+{"id": 176, "name": "热成像", "value": "2", "status": 1, "dict_id": 25}
+{"id": 177, "name": "雷达成像", "value": "3", "status": 1, "dict_id": 25}
+{"id": 178, "name": "X光成像", "value": "4", "status": 1, "dict_id": 25}
+{"id": 179, "name": "深度光场成像", "value": "5", "status": 1, "dict_id": 25}
+{"id": 180, "name": "其他", "value": "9", "status": 1, "dict_id": 25}
+{"id": 210, "name": "重复执行", "value": "1", "status": 1, "dict_id": 27}
+{"id": 211, "name": "单次执行", "value": "0", "status": 1, "dict_id": 27}
+{"id": 212, "name": "并行", "value": "1", "status": 1, "dict_id": 28}
+{"id": 213, "name": "丢弃", "value": "0", "status": 1, "dict_id": 28}
+{"id": 214, "name": "服务器错误", "value": "server_error", "status": 1, "dict_id": 29}
+{"id": 215, "name": "会话创建失败", "value": "session_create_failed", "status": 1, "dict_id": 29}
+{"id": 216, "name": "密码错误", "value": "password_incorrect", "status": 1, "dict_id": 29}
+{"id": 217, "name": "账户已锁定", "value": "account_locked", "status": 1, "dict_id": 29}
+{"id": 218, "name": "用户未启用", "value": "user_disabled", "status": 1, "dict_id": 29}
+{"id": 219, "name": "用户不存在", "value": "user_not_found", "status": 1, "dict_id": 29}
+{"id": 220, "name": "验证码错误", "value": "captcha_invalid", "status": 1, "dict_id": 29}
+{"id": 225, "name": "不启用镜像", "value": "0", "status": 1, "dict_id": 30}
+{"id": 226, "name": "水平镜像（左右翻转）", "value": "1", "status": 1, "dict_id": 30}
+{"id": 227, "name": "上下镜像（上下翻转）", "value": "2", "status": 1, "dict_id": 30}
+{"id": 228, "name": "中心镜像（旋转 180°）", "value": "3", "status": 1, "dict_id": 30}
+{"id": 232, "name": "主码流", "value": "0", "status": 1, "dict_id": 31}
+{"id": 233, "name": "子码流 1", "value": "1", "status": 1, "dict_id": 31}
+{"id": 234, "name": "子码流 2", "value": "2", "status": 1, "dict_id": 31}
+{"id": 235, "name": "子码流 3", "value": "3", "status": 1, "dict_id": 31}
+{"id": 239, "name": "可播放", "value": "available", "status": 1, "dict_id": 32}
+{"id": 240, "name": "离线", "value": "offline", "status": 1, "dict_id": 32}
+{"id": 241, "name": "通道不存在", "value": "missing", "status": 1, "dict_id": 32}
+{"id": 242, "name": "无权访问", "value": "forbidden", "status": 1, "dict_id": 32}
+{"id": 246, "name": "HTTP 会话", "value": "mediakit::HttpSession", "status": 1, "dict_id": 33}
+{"id": 247, "name": "RTSP 会话", "value": "mediakit::RtspSession", "status": 1, "dict_id": 33}
+{"id": 248, "name": "RTMP 会话", "value": "mediakit::RtmpSession", "status": 1, "dict_id": 33}
+{"id": 249, "name": "RTP 会话", "value": "mediakit::RtpSession", "status": 1, "dict_id": 33}
+{"id": 250, "name": "SRT 会话", "value": "mediakit::SrtSession", "status": 1, "dict_id": 33}
+{"id": 251, "name": "WebSocket 会话", "value": "mediakit::WebSocketSession", "status": 1, "dict_id": 33}
+{"id": 252, "name": "WebRTC 会话", "value": "mediakit::WebRtcSession", "status": 1, "dict_id": 33}
+{"id": 253, "name": "TCP 会话", "value": "mediakit::TcpSession", "status": 1, "dict_id": 33}
+{"id": 254, "name": "UDP 会话", "value": "mediakit::UdpSession", "status": 1, "dict_id": 33}
+{"id": 261, "name": "实时点播", "value": "realtime_playback", "status": 1, "dict_id": 34}
+{"id": 262, "name": "设备回放", "value": "device_playback", "status": 1, "dict_id": 34}
+{"id": 263, "name": "语音对讲", "value": "talk", "status": 1, "dict_id": 34}
+{"id": 264, "name": "级联转发", "value": "cascade", "status": 1, "dict_id": 34}
+{"id": 265, "name": "录像计划", "value": "recording_plan", "status": 1, "dict_id": 34}
+{"id": 266, "name": "持续录像", "value": "continuous_recording", "status": 1, "dict_id": 34}
+{"id": 267, "name": "录像会话", "value": "recording_session", "status": 1, "dict_id": 34}
+{"id": 268, "name": "平台管理资源", "value": "managed", "status": 1, "dict_id": 34}
+{"id": 269, "name": "未知持有", "value": "unknown", "status": 1, "dict_id": 34}
+{"id": 276, "name": "平稳", "value": "ok", "status": 1, "dict_id": 35}
+{"id": 277, "name": "需关注", "value": "warning", "status": 1, "dict_id": 35}
+{"id": 278, "name": "异常", "value": "error", "status": 1, "dict_id": 35}
+{"id": 279, "name": "未知", "value": "unknown", "status": 1, "dict_id": 35}
+{"id": 283, "name": "平稳", "value": "steady", "status": 1, "dict_id": 36}
+{"id": 284, "name": "轻微波动", "value": "slight", "status": 1, "dict_id": 36}
+{"id": 285, "name": "明显不匀", "value": "rough", "status": 1, "dict_id": 36}
+{"id": 286, "name": "无法判断", "value": "unknown", "status": 1, "dict_id": 36}
+{"id": 290, "name": "采样期间未收到媒体帧", "value": "no_frames", "status": 1, "dict_id": 37}
+{"id": 291, "name": "帧到达出现连续大间隔", "value": "large_arrival_gap", "status": 1, "dict_id": 37}
+{"id": 292, "name": "采样窗口内没有关键帧", "value": "missing_keyframe", "status": 1, "dict_id": 37}
+{"id": 293, "name": "媒体时间戳倒退", "value": "timestamp_regression", "status": 1, "dict_id": 37}
+{"id": 297, "name": "支持", "value": "supported", "status": 1, "dict_id": 38}
+{"id": 298, "name": "不支持", "value": "unsupported", "status": 1, "dict_id": 38}
+{"id": 299, "name": "尚未确认", "value": "unknown", "status": 1, "dict_id": 38}

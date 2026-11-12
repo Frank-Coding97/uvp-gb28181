@@ -6,10 +6,20 @@ import (
 	"strconv"
 	"strings"
 
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
+)
+
+// 密码复杂度正则。
+//
+// ⛔⛔ 前端同源实现在 web/src/utils/password-policy.ts，改这里必须同步改前端，
+//     否则会出现「前端显示合规、后端却放过了弱密码」（或反过来）。
+var (
+	lowerCharRegex   = regexp.MustCompile(`[a-z]`)
+	upperCharRegex   = regexp.MustCompile(`[A-Z]`)
+	specialCharRegex = regexp.MustCompile(`[!@#$%]`)
 )
 
 // PasswordValidatorMiddleware 密码验证中间件
@@ -59,10 +69,18 @@ func PasswordValidatorMiddleware() gin.HandlerFunc {
 			return
 		}
 
+		// 验证密码必须同时包含大写和小写字母
+		if !lowerCharRegex.MatchString(password) || !upperCharRegex.MatchString(password) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"code":    400,
+				"message": "密码必须同时包含大写和小写字母",
+			})
+			c.Abort()
+			return
+		}
+
 		// 如果配置要求特殊字符，则验证密码是否包含特殊字符
 		if requireSpecialChar {
-			// 定义特殊字符正则表达式
-			specialCharRegex := regexp.MustCompile(`[!@#$%]`)
 			if !specialCharRegex.MatchString(password) {
 				c.JSON(http.StatusBadRequest, gin.H{
 					"code":    400,

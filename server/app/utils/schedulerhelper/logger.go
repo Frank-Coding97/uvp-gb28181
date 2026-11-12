@@ -91,7 +91,10 @@ func (f *FileJobLogger) rotateLogFileUnsafe() error {
 
 	// 关闭旧文件
 	if f.logFile != nil {
-		f.logFile.Close()
+		if err := f.logFile.Close(); err != nil {
+			return fmt.Errorf("关闭旧日志文件失败: %w", err)
+		}
+		f.logFile = nil
 	}
 
 	// 创建新文件
@@ -117,7 +120,9 @@ func (f *FileJobLogger) startDailyRotateCheck() {
 	for {
 		select {
 		case <-ticker.C:
-			f.rotateLogFile()
+			if err := f.rotateLogFile(); err != nil {
+				f.logger.Printf("日志轮转失败: %v", err)
+			}
 		case <-f.done:
 			return
 		}
@@ -134,8 +139,11 @@ func (f *FileJobLogger) log(level LogLevel, jobID, format string, args ...interf
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if time.Since(f.lastCheck) > time.Minute {
-		f.rotateLogFileUnsafe()
-		f.lastCheck = time.Now()
+		if err := f.rotateLogFileUnsafe(); err != nil {
+			f.logger.Printf("日志轮转失败: %v", err)
+		} else {
+			f.lastCheck = time.Now()
+		}
 	}
 
 	f.logger.Println(logMsg)

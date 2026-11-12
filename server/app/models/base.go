@@ -3,6 +3,7 @@ package models
 import (
 	"net/url"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -24,28 +25,42 @@ func (r *BaseRequest) Bind(c *gin.Context, obj interface{}) (err error) {
 	// GET请求：只处理数组参数、query和uri参数，不处理body
 	if c.Request.Method == "GET" {
 		r.parseArrayParams(c, obj)
-		c.ShouldBindQuery(obj)
-		c.ShouldBindUri(obj)
+		if err := c.ShouldBindQuery(obj); err != nil {
+			return err
+		}
+		if err := c.ShouldBindUri(obj); err != nil {
+			return err
+		}
 		return nil // GET请求通常没有body
 	}
 
 	// 非GET请求：根据Content-Type决定绑定策略
 	if strings.Contains(contentType, "application/json") {
 		// JSON请求：只处理路径参数，body由ShouldBindBodyWith处理 避免消耗request body
-		c.ShouldBindUri(obj)
+		if err := c.ShouldBindUri(obj); err != nil {
+			return err
+		}
 		return c.ShouldBindBodyWith(obj, binding.JSON)
 	} else if strings.Contains(contentType, "application/x-www-form-urlencoded") ||
 		strings.Contains(contentType, "multipart/form-data") {
 		// 表单数据：先解析数组参数，然后处理query和uri，最后处理body
 		r.parseArrayParams(c, obj)
-		c.ShouldBindQuery(obj)
-		c.ShouldBindUri(obj)
+		if err := c.ShouldBindQuery(obj); err != nil {
+			return err
+		}
+		if err := c.ShouldBindUri(obj); err != nil {
+			return err
+		}
 		return c.ShouldBind(obj)
 	} else {
 		// 其他类型的请求：处理数组参数、query和uri参数
 		r.parseArrayParams(c, obj)
-		c.ShouldBindQuery(obj)
-		c.ShouldBindUri(obj)
+		if err := c.ShouldBindQuery(obj); err != nil {
+			return err
+		}
+		if err := c.ShouldBindUri(obj); err != nil {
+			return err
+		}
 		return nil
 	}
 
@@ -181,6 +196,37 @@ type BasePaging struct {
 	Order    string `json:"order" form:"order"`
 }
 
+// orderByPattern 合法排序表达式：`列名 [asc|desc]`，最多三段，列名可带表别名前缀。
+//
+// ⛔⛔ 为什么必需：GORM 的 `Order(string)` 是**原样拼进 SQL** 的
+//
+//	（clause.Column{Raw: true}），`?order=id desc,(select sleep(5))` 会直接
+//	落到 `ORDER BY` 后面 —— 用户、附件、角色等 10 个列表接口共用这个 Paginate。
+//	生成器实测：`SELECT * FROM users ORDER BY extractvalue(1,concat(0x7e,(select version())))`。
+//
+// ⛔ 白名单而不是黑名单：只允许标识符 + 方向，括号、逗号（除分隔列）、引号、
+//
+//	运算符一律进不来，不依赖"猜攻击者会写什么"。
+//	列名不做表结构校验（这里拿不到表名），写错列名只会报 SQL 错误，不会变成注入。
+var orderByPattern = regexp.MustCompile(
+	`(?i)^[a-z_][a-z0-9_]{0,63}(\.[a-z_][a-z0-9_]{0,63})?(\s+(asc|desc))?` +
+		`(\s*,\s*[a-z_][a-z0-9_]{0,63}(\.[a-z_][a-z0-9_]{0,63})?(\s+(asc|desc))?){0,2}$`,
+)
+
+// normalizeOrder 返回可安全下发给数据库的排序表达式；非法值一律返回空串。
+//
+// ⛔ 非法值选择「忽略」而不是「报错」：这个结构被 10 个列表接口共用，
+//
+//	收紧后直接 400 会把历史前端/第三方调用方一起打断，而忽略既不破坏兼容、
+//	也不给注入留口子（等同没传排序参数）。
+func (bp *BasePaging) normalizeOrder() string {
+	order := strings.TrimSpace(bp.Order)
+	if order == "" || !orderByPattern.MatchString(order) {
+		return ""
+	}
+	return order
+}
+
 // 分页数据
 func (bp *BasePaging) Paginate() func(db *gorm.DB) *gorm.DB {
 	return func(db *gorm.DB) *gorm.DB {
@@ -188,8 +234,8 @@ func (bp *BasePaging) Paginate() func(db *gorm.DB) *gorm.DB {
 			db = db.Offset((bp.PageNum - 1) * bp.PageSize).Limit(bp.PageSize)
 		}
 
-		if bp.Order != "" {
-			db = db.Order(bp.Order)
+		if order := bp.normalizeOrder(); order != "" {
+			db = db.Order(order)
 		}
 		return db
 	}

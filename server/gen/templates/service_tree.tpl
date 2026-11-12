@@ -1,14 +1,11 @@
 package service
 
 import (
-	"uvplatform.cn/uvp-gb28181/plugins/{{.DirName}}/models"
+	"uvplatform.com/uvp-gb28181/plugins/{{.DirName}}/models"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
-{{- if or .HasCreatedBy .HasTenantID}}
-	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
-{{- end}}
-{{- if .HasTenantID}}
-	"uvplatform.cn/uvp-gb28181/app/utils/tenanthelper"
+{{- if .HasCreatedBy}}
+	"uvplatform.com/uvp-gb28181/app/utils/datascope"
 {{- end}}
 )
 
@@ -90,9 +87,6 @@ func (s *{{.StructName}}Service) GetTreeList(c *gin.Context) (models.{{.StructNa
 	scopes := []func(*gorm.DB) *gorm.DB{}
 {{- if .HasCreatedBy}}
 	scopes = append(scopes, datascope.GetDataScope(c))
-{{- end}}
-{{- if .HasTenantID}}
-	scopes = append(scopes, tenanthelper.TenantScope(c))
 {{- end}}
 	err := {{.StructNameLower}}List.Find(c, scopes...)
 	if err != nil {

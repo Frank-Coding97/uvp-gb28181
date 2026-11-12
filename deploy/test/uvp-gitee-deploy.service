@@ -1,0 +1,9 @@
+[Unit]
+Description=Build and deploy the latest UVP Gitee revision
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/sbin/uvp-gitee-deploy-worker

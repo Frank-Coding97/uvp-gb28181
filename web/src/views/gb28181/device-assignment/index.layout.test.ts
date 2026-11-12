@@ -1,0 +1,47 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+
+const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/device-assignment/index.vue"), "utf-8");
+const deptTreePanel = readFileSync(resolve(process.cwd(), "src/components/dept-tree-panel/index.vue"), "utf-8");
+
+describe("device assignment department tree", () => {
+  it("renders the shared department tree panel with the fully loaded tree", () => {
+    // 部门树已抽成 `dept-tree-panel`（与账号管理共用），页面不再自带一套 a-tree
+    expect(source).toContain("<dept-tree-panel");
+    expect(source).toContain(':data="deptTree"');
+    expect(source).not.toMatch(/<a-tree[\s\S]*?<\/a-tree>/);
+
+    // 「默认全展开」的契约落在组件里，别在页面侧丢掉
+    expect(deptTreePanel).toContain('v-if="data.length"');
+    expect(deptTreePanel).toContain("default-expand-all");
+  });
+
+  it("keeps the per-department assign entry inside the tree node", () => {
+    expect(source).toContain('<template #node-extra="{ node }">');
+    expect(source).toContain("分配本部门设备");
+  });
+
+  it("keeps vertical scrolling inside the device table", () => {
+    expect(source).toMatch(/\.right-box\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?overflow:\s*hidden;/);
+  });
+
+  it("keeps the five column widths inside a balanced band", () => {
+    const widths = Array.from(source.matchAll(/<a-table-column[^>]*:width="(\d+)"/g)).map(m => Number(m[1]));
+
+    expect(widths).toHaveLength(5);
+    expect(Math.max(...widths) / Math.min(...widths)).toBeLessThanOrEqual(1.6);
+  });
+
+  it("merges device name and device code into one two-line cell", () => {
+    expect(source).toContain('title="设备"');
+    expect(source).not.toContain('title="设备编号"');
+    expect(source).not.toContain('title="设备名称"');
+    expect(source).toContain("device-cell__name");
+    expect(source).toContain("device-cell__code");
+
+    const cellStyle = source.match(/\.device-cell\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+    expect(cellStyle).toContain("flex-direction: column");
+    expect(cellStyle).toContain("min-width: 0");
+  });
+});

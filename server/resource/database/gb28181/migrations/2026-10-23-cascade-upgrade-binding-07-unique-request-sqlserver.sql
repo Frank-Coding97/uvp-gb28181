@@ -1,0 +1,1 @@
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.gb_device_firmware_upgrade') AND name=N'uk_firmware_upgrade_cascade_request') CREATE UNIQUE INDEX [uk_firmware_upgrade_cascade_request] ON [dbo].[gb_device_firmware_upgrade] ([cascade_request_key]) WHERE [cascade_request_key] IS NOT NULL;

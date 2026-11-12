@@ -1,0 +1,1 @@
+ALTER TABLE "gb_channel" ADD COLUMN IF NOT EXISTS "status_event" VARCHAR(8) NOT NULL DEFAULT '';

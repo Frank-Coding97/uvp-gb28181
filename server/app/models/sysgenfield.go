@@ -3,8 +3,8 @@ package models
 import (
 	"context"
 	"fmt"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/utils/common"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/utils/common"
 
 	"gorm.io/gorm"
 )
@@ -169,7 +169,6 @@ func (list SysGenFieldList) ToColumnTemplate() ColumnTemplateList {
 		"UpdatedAt": true,
 		"DeletedAt": true,
 		"CreatedBy": true,
-		"TenantId":  true,
 	}
 
 	// 获取主键的GoType

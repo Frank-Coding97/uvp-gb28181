@@ -24,9 +24,6 @@ dist-ssr
 *.sln
 *.sw?
 
-# Husky
-.husky/
-
 # Roo
 .roo/
 
@@ -38,3 +35,9 @@ src/plugins/*/
 /plans
 /AGENTS.md
 /.history
+
+# 临时视觉验收脚手架：只为本机截图/看效果用，用完即删，一律不进仓库。
+# ⛔ vite.preview.config.ts 曾被 f076ca60 误带进仓库（文件头自己写着"用完即删"），
+#    2026-10-29 已 git rm --cached 移出索引、文件留在本地，靠这两条兜住以后不再复发。
+/vite.preview.config.ts
+/preview/

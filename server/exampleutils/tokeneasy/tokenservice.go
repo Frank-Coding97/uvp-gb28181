@@ -2,9 +2,9 @@ package tokeneasy
 
 import (
 	"context"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/utils/tokenhelper"
 	"sync"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/utils/tokenhelper"
 )
 
 var (

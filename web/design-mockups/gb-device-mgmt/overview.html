@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>UVP · 设备管理 · 首屏 KPI Overview</title>
+<link rel="stylesheet" href="./common.css" />
+<style>
+  /* 仅 KPI Overview 专用样式 */
+  .page { display: flex; flex-direction: column; min-height: 100vh; }
+
+  /* KPI 区 (spec §9.3) */
+  .kpi-zone {
+    padding: var(--space-4) var(--space-6);
+    background: var(--color-bg-1);
+  }
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: var(--space-4);
+  }
+  .kpi-card {
+    height: var(--kpi-card-height);
+    background: var(--color-bg-2);
+    border: 1px solid var(--color-border-1);
+    border-radius: var(--radius-3);
+    padding: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    cursor: pointer;
+    transition: transform var(--duration-fast) var(--ease-out),
+                box-shadow var(--duration-fast) var(--ease-out),
+                border-color var(--duration-fast) var(--ease-out);
+    position: relative;
+    overflow: hidden;
+  }
+  .kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-card-hover);
+    border-color: var(--color-border-2);
+  }
+  .kpi-card .label {
+    color: var(--color-text-3);
+    font-size: var(--font-12);
+    letter-spacing: 0.04em;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .kpi-card .label svg {
+    width: 14px; height: 14px;
+    opacity: 0.6;
+  }
+  .kpi-card .main {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+  }
+  .kpi-card .num {
+    font-size: var(--font-32);
+    font-weight: 600;
+    color: var(--color-text-1);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    line-height: 1;
+  }
+  .kpi-card .delta {
+    font-size: var(--font-12);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+  .kpi-card .delta.up { color: var(--status-online); }
+  .kpi-card .delta.down { color: var(--status-danger); }
+  .kpi-card .sub {
+    margin-top: auto;
+    color: var(--color-text-3);
+    font-size: var(--font-12);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  /* mini 7 天条形图 */
+  .spark {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 24px;
+  }
+  .spark span {
+    flex: 1;
+    background: var(--primary-fade-24);
+    border-radius: 1px;
+    transition: background var(--duration-fast) var(--ease-out);
+  }
+  .kpi-card:hover .spark span { background: var(--primary-6); }
+
+  /* 在线率环形(KPI 区,比列表的大) */
+  .kpi-ring {
+    width: 56px; height: 56px;
+    position: relative;
+    margin-left: auto;
+  }
+  .kpi-ring svg { transform: rotate(-90deg); }
+  .kpi-ring text {
+    transform: rotate(90deg);
+    fill: var(--color-text-1);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  /* 在/离 mini 柱 */
+  .mini-bar {
+    display: flex;
+    height: 4px;
+    border-radius: var(--radius-pill);
+    overflow: hidden;
+    width: 80px;
+  }
+  .mini-bar .on { background: var(--status-online); }
+  .mini-bar .off { background: var(--status-offline); }
+
+  /* 第 4 / 5 / 6 张卡片的告警态 */
+  .kpi-card.alert {
+    border-color: rgba(245, 158, 11, 0.32);
+    background: linear-gradient(135deg, var(--color-bg-2) 0%, rgba(245, 158, 11, 0.04) 100%);
+  }
+  .kpi-card.alert .num { color: var(--status-warning); }
+  .kpi-card.danger {
+    border-color: rgba(239, 68, 68, 0.32);
+    background: linear-gradient(135deg, var(--color-bg-2) 0%, rgba(239, 68, 68, 0.04) 100%);
+  }
+  .kpi-card.danger .num { color: var(--status-danger); }
+  .kpi-card.anomaly {
+    border-color: rgba(245, 158, 11, 0.24);
+  }
+  .kpi-card.anomaly .num { color: var(--status-warning); }
+
+  /* 折叠按钮 */
+  .kpi-collapse-btn {
+    position: absolute;
+    top: var(--space-3);
+    right: var(--space-3);
+    width: 24px; height: 24px;
+    border-radius: var(--radius-1);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-text-4);
+    background: transparent;
+    opacity: 0;
+    transition: opacity var(--duration-fast) var(--ease-out);
+  }
+  .kpi-card:hover .kpi-collapse-btn { opacity: 1; }
+
+  /* 占位主区 */
+  .stub-main {
+    flex: 1;
+    margin: 0 var(--space-6) var(--space-6);
+    border: 1px dashed var(--color-border-2);
+    border-radius: var(--radius-3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-text-4);
+    font-size: var(--font-13);
+    text-align: center;
+    line-height: 1.7;
+    padding: var(--space-12);
+  }
+  .stub-main .arrow { color: var(--primary-6); font-weight: 500; }
+  .stub-main a { color: var(--primary-5); text-decoration: underline; text-underline-offset: 4px; }
+
+  /* 注释脚标 */
+  .footnote {
+    padding: var(--space-2) var(--space-6) var(--space-4);
+    color: var(--color-text-4);
+    font-size: 11px;
+    font-family: var(--font-mono);
+    letter-spacing: 0.04em;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ============ 顶栏(spec §9.2)============ -->
+  <div class="topbar">
+    <div class="logo">
+      <span class="dot"></span>
+      UVP
+    </div>
+    <div class="breadcrumb">
+      <span>项目</span>
+      <span class="sep">/</span>
+      <span class="cur">设备管理</span>
+    </div>
+
+    <div class="cmdk">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <span>搜索设备 / 通道 / 编码 ...</span>
+      <span class="kbd"><kbd>⌘</kbd><kbd>K</kbd></span>
+    </div>
+
+    <div class="view-switch">
+      <button class="active" title="KPI 总览">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+      </button>
+      <button title="树视图">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M6 8v3a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V8"/><path d="M12 14v2"/></svg>
+      </button>
+      <button title="列表视图">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <button title="卡片视图">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      </button>
+      <button title="地图视图">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21 3 6"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>
+      </button>
+    </div>
+
+    <button class="icon-btn" title="筛选">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+      <span class="badge">2</span>
+    </button>
+    <button class="btn-primary">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      新建设备
+    </button>
+    <button class="icon-btn" title="设置">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+  </div>
+
+  <!-- ============ KPI 区(spec §9.3 + Q1 新增第六张)============ -->
+  <div class="kpi-zone">
+    <div class="kpi-grid">
+
+      <!-- 卡 1: 设备总数 -->
+      <div class="kpi-card">
+        <div class="label">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          设备总数
+        </div>
+        <div class="main">
+          <span class="num">124</span>
+          <span class="delta up">+3</span>
+        </div>
+        <div class="spark">
+          <span style="height:30%"></span>
+          <span style="height:45%"></span>
+          <span style="height:38%"></span>
+          <span style="height:62%"></span>
+          <span style="height:55%"></span>
+          <span style="height:78%"></span>
+          <span style="height:90%"></span>
+        </div>
+        <button class="kpi-collapse-btn" title="折叠 KPI 区">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg>
+        </button>
+      </div>
+
+      <!-- 卡 2: 在线率 -->
+      <div class="kpi-card">
+        <div class="label">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+          在线率
+        </div>
+        <div class="row" style="align-items:flex-start; gap:var(--space-3)">
+          <div class="col" style="gap:var(--space-1)">
+            <span class="num">87<span style="font-size:var(--font-20); color:var(--color-text-3); margin-left:2px">%</span></span>
+            <span class="delta up">+2.1%</span>
+          </div>
+          <div class="kpi-ring">
+            <svg viewBox="0 0 60 60" width="56" height="56">
+              <circle cx="30" cy="30" r="24" fill="none" stroke="var(--color-border-2)" stroke-width="4"/>
+              <circle cx="30" cy="30" r="24" fill="none" stroke="var(--status-online)" stroke-width="4"
+                stroke-dasharray="151" stroke-dashoffset="20" stroke-linecap="round"/>
+            </svg>
+          </div>
+        </div>
+        <div class="sub">
+          <span class="status-dot online"></span> 在线 108
+          <span style="margin: 0 var(--space-1); color: var(--color-text-4)">·</span>
+          <span class="status-dot offline"></span> 离线 16
+        </div>
+      </div>
+
+      <!-- 卡 3: 通道总数 -->
+      <div class="kpi-card">
+        <div class="label">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+          通道总数
+        </div>
+        <div class="main">
+          <span class="num">1,284</span>
+          <span class="delta up">+47</span>
+        </div>
+        <div class="sub" style="margin-top: var(--space-2)">
+          <span style="color: var(--status-online); font-weight:500">1,118 在线</span>
+          <span style="color: var(--color-text-4)">·</span>
+          <span style="color: var(--color-text-3)">166 离线</span>
+        </div>
+        <div class="mini-bar" style="margin-top:auto">
+          <span class="on" style="width:87%"></span>
+          <span class="off" style="width:13%"></span>
+        </div>
+      </div>
+
+      <!-- 卡 4: 今日告警 -->
+      <div class="kpi-card danger">
+        <div class="label">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          今日告警
+        </div>
+        <div class="main">
+          <span class="num">3</span>
+          <span class="status-dot danger"></span>
+        </div>
+        <div class="sub">
+          <span>2 紧急 · 1 普通</span>
+        </div>
+      </div>
+
+      <!-- 卡 5: 心跳异常 -->
+      <div class="kpi-card alert">
+        <div class="label">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          心跳异常
+        </div>
+        <div class="main">
+          <span class="num">5</span>
+        </div>
+        <div class="sub">
+          <span>超时未上报 ≥ 3 min</span>
+        </div>
+      </div>
+
+      <!-- 卡 6: 目录异常(Q1 决议新增) -->
+      <div class="kpi-card anomaly">
+        <div class="label">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          目录异常
+        </div>
+        <div class="main">
+          <span class="num">7</span>
+          <span class="delta down">-2</span>
+        </div>
+        <div class="sub">
+          <span>编码无法识别 / 兜底节点</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============ 占位主区(提示后续四视图入口)============ -->
+  <div class="stub-main">
+    <div>
+      KPI 总览之下即<span class="arrow">主区域</span>,根据视图切换器渲染:<br><br>
+      <a href="./tree.html">树视图</a> ·
+      <a href="./list.html">列表视图</a> ·
+      <a href="./card.html">卡片视图</a> ·
+      <a href="./map.html">地图视图</a> ·
+      <a href="./drawer.html">右侧详情抽屉</a>
+    </div>
+  </div>
+
+  <div class="footnote">
+    web/design-mockups/gb-device-mgmt/overview.html · KPI Overview · 对应 spec §9.2 + §9.3 + Q1 新增第 6 张「目录异常」卡
+  </div>
+</div>
+</body>
+</html>

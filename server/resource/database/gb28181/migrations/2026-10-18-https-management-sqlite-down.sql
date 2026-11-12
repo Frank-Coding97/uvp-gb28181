@@ -1,0 +1,3 @@
+DELETE FROM sys_menu_api WHERE api_id IN (SELECT id FROM sys_api WHERE path IN ('/api/system/https/status','/api/system/https/check-port','/api/system/https/certificate','/api/system/https/apply'));
+DELETE FROM sys_casbin_rule WHERE v1 IN ('/api/system/https/status','/api/system/https/check-port','/api/system/https/certificate','/api/system/https/apply');
+DELETE FROM sys_api WHERE path IN ('/api/system/https/status','/api/system/https/check-port','/api/system/https/certificate','/api/system/https/apply');

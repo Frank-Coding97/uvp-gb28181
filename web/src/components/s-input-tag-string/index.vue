@@ -11,7 +11,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed } from "vue";
 
 interface Props {
   /**
@@ -26,27 +26,27 @@ interface Props {
   /** 是否禁用 */
   disabled?: boolean;
   /** 最大标签数量 */
-  maxTagCount?: number | 'responsive';
+  maxTagCount?: number | "responsive";
   /** 是否只读 */
   readonly?: boolean;
   /** 尺寸 */
-  size?: 'small' | 'medium' | 'large';
+  size?: "small" | "medium" | "large";
   /** 分隔符，默认为逗号 */
   separator?: string;
 }
 
 interface Emits {
-  (e: 'update:modelValue', value: string): void;
+  (e: "update:modelValue", value: string): void;
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  modelValue: '',
-  placeholder: '请输入标签，按 Enter 键添加',
+  modelValue: "",
+  placeholder: "请输入标签，按 Enter 键添加",
   allowClear: true,
   disabled: false,
   readonly: false,
-  size: 'medium',
-  separator: ','
+  size: "medium",
+  separator: ","
 });
 
 const emit = defineEmits<Emits>();
@@ -57,7 +57,7 @@ const emit = defineEmits<Emits>();
  */
 const localTags = computed({
   get(): string[] {
-    if (!props.modelValue || typeof props.modelValue !== 'string') {
+    if (!props.modelValue || typeof props.modelValue !== "string") {
       return [];
     }
     return props.modelValue
@@ -71,7 +71,7 @@ const localTags = computed({
       .map(tag => tag.trim())
       .filter(tag => tag.length > 0)
       .join(props.separator);
-    emit('update:modelValue', stringValue);
+    emit("update:modelValue", stringValue);
   }
 });
 </script>

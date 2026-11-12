@@ -1,0 +1,949 @@
+package repository
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+
+	"uvplatform.com/uvp-gb28181/app/gb28181/cascade/model"
+)
+
+var (
+	ErrPlatformNotFound       = errors.New("cascade platform not found")
+	ErrRevisionConflict       = errors.New("cascade platform revision conflict")
+	ErrInvalidProjection      = errors.New("invalid cascade projection")
+	ErrInvalidMediaTransition = errors.New("invalid cascade media transition")
+)
+
+type PlatformStore interface {
+	CreatePlatform(ctx context.Context, platform *model.GbCascadePlatform) error
+	FindPlatform(ctx context.Context, platformID uint64) (*model.GbCascadePlatform, error)
+	ListPlatforms(ctx context.Context) ([]model.GbCascadePlatform, error)
+	ListEnabledPlatforms(ctx context.Context) ([]model.GbCascadePlatform, error)
+	UpdatePlatformConfig(ctx context.Context, platform *model.GbCascadePlatform, expectedRevision uint64) (*model.GbCascadePlatform, error)
+	SetPublishGroup(ctx context.Context, platformID, expectedRevision uint64, publishGroup bool) (*model.GbCascadePlatform, error)
+	SoftDeletePlatform(ctx context.Context, platformID uint64) error
+	RecordRegistrationSuccess(ctx context.Context, platformID uint64, registeredAt, expiresAt time.Time) error
+	RecordRegistrationExpired(ctx context.Context, platformID uint64, at time.Time) error
+	RecordRegistrationFailure(ctx context.Context, platformID uint64, code, message string, at time.Time) error
+	RecordHeartbeatSuccess(ctx context.Context, platformID uint64, at time.Time) error
+	RecordHeartbeatFailure(ctx context.Context, platformID uint64, code, message string, at time.Time) error
+}
+
+type ProjectionStore interface {
+	ReplaceProjection(ctx context.Context, platformID uint64, expectedProjectionRevision uint64, devices []DeviceProjectionInput, channels []ChannelProjectionInput) error
+	ProjectionSnapshot(ctx context.Context, platformID uint64) (*ProjectionSnapshot, error)
+}
+
+type BusinessGroupStore interface {
+	ReplaceBusinessGroup(ctx context.Context, platformID uint64, expectedProjectionRevision uint64, nodes []BusinessNodeInput, bindings []BusinessBindingInput) error
+}
+
+type BusinessGroupShareStore interface {
+	ReplaceBusinessGroupWithShares(ctx context.Context, platformID uint64, expectedProjectionRevision uint64, nodes []BusinessNodeInput, bindings []BusinessBindingInput, shareChannelIDs []uint64, authorize BusinessGroupSourceAuthorizer) error
+}
+
+type BusinessGroupResourceStore interface {
+	ReplaceBusinessGroupWithResourceChanges(ctx context.Context, platformID uint64, expectedProjectionRevision uint64, nodes []BusinessNodeInput, bindings []BusinessBindingInput, legacyShareChannelIDs []uint64, changes BusinessGroupResourceChanges, authorize BusinessGroupSourceAuthorizer) error
+}
+
+type BusinessGroupPublicationUpdate struct {
+	PublishGroup           *bool
+	ExpectedConfigRevision uint64
+}
+
+type BusinessGroupPublicationAuthorizer func() error
+
+type BusinessGroupOptionsStore interface {
+	ReplaceBusinessGroupWithOptions(ctx context.Context, platformID, expectedProjectionRevision uint64, nodes []BusinessNodeInput, bindings []BusinessBindingInput, legacyShareChannelIDs []uint64, changes BusinessGroupResourceChanges, publication BusinessGroupPublicationUpdate, authorize BusinessGroupSourceAuthorizer, authorizePublication BusinessGroupPublicationAuthorizer) error
+}
+
+type MediaSessionStore interface {
+	CreateMediaSession(ctx context.Context, session *model.GbCascadeMediaSession) error
+	FindMediaSessionByDialog(ctx context.Context, dialogKey string) (*model.GbCascadeMediaSession, error)
+	TransitionMediaSession(ctx context.Context, dialogKey string, from, to model.CascadeMediaSessionState, at time.Time) (bool, error)
+	ListNonterminalMediaSessions(ctx context.Context, platformID uint64) ([]model.GbCascadeMediaSession, error)
+}
+
+type AlarmDeliveryStore interface {
+	EnqueueAlarmDelivery(ctx context.Context, delivery *model.GbCascadeAlarmDelivery) (bool, error)
+	ClaimAlarmDeliveries(ctx context.Context, owner string, now time.Time, lease time.Duration, limit int, deliveryKeys ...string) ([]model.GbCascadeAlarmDelivery, error)
+	CompleteAlarmDelivery(ctx context.Context, id uint64, owner string, now time.Time) (bool, error)
+	CheckpointAlarmDelivery(ctx context.Context, id uint64, owner string, now time.Time, targets string) (bool, error)
+	RetryAlarmDelivery(ctx context.Context, id uint64, owner string, now, next time.Time, deliveryErr string, maxAttempts int) (bool, error)
+}
+
+// Repository is the persistence boundary for cascade controllers and actors.
+// Callers update configuration, runtime facts, projections, and media sessions through separate methods.
+type Repository interface {
+	PlatformStore
+	ProjectionStore
+	BusinessGroupStore
+	MediaSessionStore
+	AlarmDeliveryStore
+}
+
+type GormRepository struct {
+	db *gorm.DB
+}
+
+func NewGormRepository(db *gorm.DB) *GormRepository {
+	return &GormRepository{db: db}
+}
+
+func (r *GormRepository) EnqueueAlarmDelivery(ctx context.Context, delivery *model.GbCascadeAlarmDelivery) (bool, error) {
+	result := r.db.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "delivery_key"}}, DoNothing: true}).Create(delivery)
+	if result.Error != nil {
+		// SQL Server's create callback does not honor a non-primary conflict
+		// target for identity inserts. Verify durable existence after a rejected
+		// insert instead of treating every database error as a duplicate.
+		var existing model.GbCascadeAlarmDelivery
+		check := r.db.WithContext(ctx).Select("id").Where("delivery_key = ?", delivery.DeliveryKey).Limit(1).Find(&existing)
+		if check.Error == nil && check.RowsAffected == 1 {
+			return false, nil
+		}
+		return false, errors.Join(result.Error, check.Error)
+	}
+	return result.RowsAffected == 1, result.Error
+}
+
+func (r *GormRepository) ClaimAlarmDeliveries(ctx context.Context, owner string, now time.Time, lease time.Duration, limit int, deliveryKeys ...string) ([]model.GbCascadeAlarmDelivery, error) {
+	if owner == "" || lease <= 0 || limit <= 0 {
+		return nil, fmt.Errorf("invalid alarm delivery lease")
+	}
+	// Selection is advisory. Each conditional UPDATE below atomically acquires a
+	// single item without dialect-specific locks or a read-to-write transaction.
+	var candidates []model.GbCascadeAlarmDelivery
+	query := r.db.WithContext(ctx).Where("(state = ? AND next_attempt_at <= ?) OR (state = ? AND lease_until <= ?)", model.CascadeAlarmDeliveryPending, now, model.CascadeAlarmDeliveryLeased, now)
+	if len(deliveryKeys) > 0 {
+		query = query.Where("delivery_key IN ?", deliveryKeys)
+	}
+	if err := query.Order("next_attempt_at ASC, id ASC").Limit(limit).Find(&candidates).Error; err != nil {
+		return nil, err
+	}
+	var claimed []model.GbCascadeAlarmDelivery
+	until := now.Add(lease)
+	for _, item := range candidates {
+		result := r.db.WithContext(ctx).Model(&model.GbCascadeAlarmDelivery{}).
+			Where("id = ? AND attempts = ? AND ((state = ? AND next_attempt_at <= ?) OR (state = ? AND lease_until <= ?))", item.ID, item.Attempts, model.CascadeAlarmDeliveryPending, now, model.CascadeAlarmDeliveryLeased, now).
+			Updates(map[string]any{"state": model.CascadeAlarmDeliveryLeased, "lease_owner": owner, "lease_until": until, "attempts": gorm.Expr("attempts + 1"), "updated_at": now})
+		if result.Error != nil {
+			return claimed, result.Error
+		}
+		if result.RowsAffected == 1 {
+			item.State, item.LeaseOwner, item.LeaseUntil, item.Attempts = model.CascadeAlarmDeliveryLeased, owner, &until, item.Attempts+1
+			claimed = append(claimed, item)
+		}
+	}
+	return claimed, nil
+}
+
+func (r *GormRepository) CompleteAlarmDelivery(ctx context.Context, id uint64, owner string, now time.Time) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&model.GbCascadeAlarmDelivery{}).
+		Where("id = ? AND state = ? AND lease_owner = ? AND lease_until > ?", id, model.CascadeAlarmDeliveryLeased, owner, now).
+		Updates(map[string]any{"state": model.CascadeAlarmDeliverySent, "lease_owner": "", "lease_until": nil, "sent_at": now, "last_error": "", "updated_at": now})
+	return result.RowsAffected == 1, result.Error
+}
+
+func (r *GormRepository) CheckpointAlarmDelivery(ctx context.Context, id uint64, owner string, now time.Time, targets string) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&model.GbCascadeAlarmDelivery{}).
+		Where("id = ? AND state = ? AND lease_owner = ? AND lease_until > ?", id, model.CascadeAlarmDeliveryLeased, owner, now).
+		Updates(map[string]any{"notify_targets": targets, "updated_at": now})
+	return result.RowsAffected == 1, result.Error
+}
+
+func (r *GormRepository) RetryAlarmDelivery(ctx context.Context, id uint64, owner string, now, next time.Time, deliveryErr string, maxAttempts int) (bool, error) {
+	if maxAttempts <= 0 {
+		return false, fmt.Errorf("invalid alarm delivery attempt limit")
+	}
+	result := r.db.WithContext(ctx).Model(&model.GbCascadeAlarmDelivery{}).
+		Where("id = ? AND state = ? AND lease_owner = ? AND lease_until > ?", id, model.CascadeAlarmDeliveryLeased, owner, now).
+		Updates(map[string]any{"state": gorm.Expr("CASE WHEN attempts >= ? THEN ? ELSE ? END", maxAttempts, model.CascadeAlarmDeliveryFailed, model.CascadeAlarmDeliveryPending), "lease_owner": "", "lease_until": nil, "next_attempt_at": next, "last_error": deliveryErr, "updated_at": now})
+	return result.RowsAffected == 1, result.Error
+}
+
+// CreatePlatform 新建一个上级平台。
+//
+// 名称与接入关系都命中"已软删的遗留行"时接手那一行而不是 INSERT —— 否则用户
+// 删掉平台再建一个同名(或同上级地址)的平台会撞 1062。理由见 platform_resurrect.go。
+//
+// 两个键位分别命中两条不同的遗留行时(名称取自 A 行、接入关系取自 B 行,两条都已删):
+// 接手接入关系那条,并把另一条连残留子表一起真删 —— 键位腾干净才建得出来,
+// 而这两条行在界面上都看不见,用户没有任何入口可点。
+func (r *GormRepository) CreatePlatform(ctx context.Context, platform *model.GbCascadePlatform) error {
+	row := *platform
+	row.ID = 0
+	if row.ConfigRevision == 0 {
+		row.ConfigRevision = 1
+	}
+	if row.EffectiveVersion == "" {
+		row.EffectiveVersion = "2016"
+	}
+	if row.EffectiveVersionFrom == "" {
+		row.EffectiveVersionFrom = "default"
+	}
+	if row.ProfileOverride == "" {
+		row.ProfileOverride = model.CascadeProfileOverrideAuto
+	}
+	if row.Transport == "" {
+		row.Transport = "UDP"
+	}
+	if row.RegisterExpires == 0 {
+		row.RegisterExpires = 3600
+	}
+	if row.KeepaliveInterval == 0 {
+		row.KeepaliveInterval = 60
+	}
+	if row.CatalogBatchSize == 0 {
+		row.CatalogBatchSize = 1
+	}
+	now := time.Now().UTC()
+	if row.CreatedAt.IsZero() {
+		row.CreatedAt = now
+	}
+	row.UpdatedAt = now
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if row.PublishGroup {
+			return fmt.Errorf("%w: 新建上级平台时不能直接启用业务分组发布，请先创建平台并配置 215 根节点", ErrInvalidProjection)
+		}
+		// 两个唯一索引都不含 deleted_at,软删的平台行会继续占着"名称"和"接入关系"
+		// 两个键位。先腾掉另一个键位上的遗留行、再认领这一条,否则删掉再建同名平台
+		// 会撞 1062(见 platform_resurrect.go)。
+		claim, err := findRetiredPlatform(tx, &row)
+		if err != nil {
+			return err
+		}
+		if claim != nil {
+			// ⛔ 顺序不能颠倒:先真删占着另一个键位的那条,再接手这条 ——
+			// 反过来的话,接手的 Save 会先撞上它占着的键位。
+			if err := purgeRetiredPlatform(tx, claim.purge); err != nil {
+				return err
+			}
+			if err := resurrectPlatform(tx, &row, claim.take); err != nil {
+				return err
+			}
+		} else if err := tx.Create(&row).Error; err != nil {
+			return err
+		}
+		*platform = row
+		return nil
+	})
+}
+
+func (r *GormRepository) FindPlatform(ctx context.Context, platformID uint64) (*model.GbCascadePlatform, error) {
+	var platform model.GbCascadePlatform
+	// 全局 gorm hook 会吞掉 ErrRecordNotFound,判空必须看 RowsAffected
+	result := r.db.WithContext(ctx).Limit(1).Find(&platform, platformID)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, ErrPlatformNotFound
+	}
+	return &platform, nil
+}
+
+func (r *GormRepository) ListPlatforms(ctx context.Context) ([]model.GbCascadePlatform, error) {
+	var platforms []model.GbCascadePlatform
+	err := r.db.WithContext(ctx).Order("id").Find(&platforms).Error
+	return platforms, err
+}
+
+func (r *GormRepository) ListEnabledPlatforms(ctx context.Context) ([]model.GbCascadePlatform, error) {
+	var platforms []model.GbCascadePlatform
+	err := r.db.WithContext(ctx).Where("enabled = ?", true).Order("id").Find(&platforms).Error
+	return platforms, err
+}
+
+// UpdatePlatformConfig intentionally excludes runtime facts. Actor events cannot be overwritten by a stale form post.
+//
+// 改名前先看目标名称/接入关系有没有被一条"已删除"的平台占着:那种 UPDATE 会撞唯一键,
+// 接口只回一句"已存在",而用户翻遍平台列表也找不到那个平台(它已经删了)。
+// 处理方式是把那行连残留子表一起真删,把键位腾出来 —— 遗留行在界面上完全不可见,
+// 不腾的话用户只能换个名字,或者手工清库。
+// ⚠️ 改名不接手任何遗留行(目标必须落在当前这条活着的平台上),所以 take 与 purge
+// 两条占着键位的遗留行都要清掉。
+func (r *GormRepository) UpdatePlatformConfig(ctx context.Context, platform *model.GbCascadePlatform, expectedRevision uint64) (*model.GbCascadePlatform, error) {
+	if platform == nil || platform.ID == 0 || expectedRevision == 0 {
+		return nil, ErrRevisionConflict
+	}
+	var updateErr error
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current model.GbCascadePlatform
+		result := tx.Limit(1).Find(&current, platform.ID)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrPlatformNotFound
+		}
+		if current.ConfigRevision != expectedRevision {
+			return ErrRevisionConflict
+		}
+		claim, err := findRetiredPlatform(tx, platform)
+		if err != nil {
+			return err
+		}
+		if claim != nil {
+			if err := purgeRetiredPlatform(tx, claim.take); err != nil {
+				return err
+			}
+			if err := purgeRetiredPlatform(tx, claim.purge); err != nil {
+				return err
+			}
+		}
+		identitiesChanged := current.LocalDeviceID != platform.LocalDeviceID || current.UpstreamServerID != platform.UpstreamServerID
+		validateGroupPublication := platform.PublishGroup && (!current.PublishGroup || identitiesChanged)
+		if validateGroupPublication {
+			if len(platform.LocalDeviceID) < 13 || platform.LocalDeviceID[10:13] != "200" {
+				return fmt.Errorf("%w: 发布业务分组要求本平台设备 ID 的设备类型为 200", ErrInvalidProjection)
+			}
+			var rootCount int64
+			if err := tx.Model(&model.GbCascadeBusinessNode{}).
+				Where("platform_id = ? AND kind = ? AND parent_code = ''", platform.ID, "group").Count(&rootCount).Error; err != nil {
+				return err
+			}
+			if rootCount != 1 {
+				return fmt.Errorf("%w: 发布业务分组前必须配置唯一的 215 根节点", ErrInvalidProjection)
+			}
+		}
+		if identitiesChanged || validateGroupPublication {
+			var storedNodes []model.GbCascadeBusinessNode
+			if err := tx.Where("platform_id = ?", platform.ID).Find(&storedNodes).Error; err != nil {
+				return err
+			}
+			nodes := make([]BusinessNodeInput, 0, len(storedNodes))
+			for _, node := range storedNodes {
+				nodes = append(nodes, BusinessNodeInput{Code: node.Code})
+			}
+			if err := validateBusinessCodesAgainstPlatform(tx, *platform, nodes); err != nil {
+				return err
+			}
+		}
+		if platform.PublishGroup {
+			nodes, bindings, err := loadBusinessGroupInputs(tx, platform.ID)
+			if err != nil {
+				return err
+			}
+			if _, err := validatePublishedBusinessGroup(tx, *platform, nodes, bindings); err != nil {
+				return err
+			}
+		}
+
+		updates := platformConfigUpdates(platform)
+		updates["config_revision"] = gorm.Expr("config_revision + ?", 1)
+		updates["updated_at"] = time.Now().UTC()
+		query := tx.Model(&model.GbCascadePlatform{}).
+			Where("id = ? AND config_revision = ?", platform.ID, expectedRevision)
+		if current.PublishGroup != platform.PublishGroup || identitiesChanged {
+			// 发布开关和业务树都占用 ProjectionRevision，使"校验根后开启发布"与
+			// "移除/替换根"在数据库中串行化，避免检查通过后根被并发清空。
+			query = query.Where("projection_revision = ?", current.ProjectionRevision)
+			updates["projection_revision"] = gorm.Expr("projection_revision + ?", 1)
+		}
+		write := query.Updates(updates)
+		if write.Error != nil {
+			return write.Error
+		}
+		if write.RowsAffected == 0 {
+			updateErr = ErrRevisionConflict
+			return updateErr
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, ErrRevisionConflict) && updateErr == nil {
+			if _, findErr := r.FindPlatform(ctx, platform.ID); findErr != nil {
+				return nil, findErr
+			}
+		}
+		return nil, err
+	}
+	return r.FindPlatform(ctx, platform.ID)
+}
+
+func platformConfigUpdates(platform *model.GbCascadePlatform) map[string]any {
+	return map[string]any{
+		"name":                   platform.Name,
+		"upstream_server_id":     platform.UpstreamServerID,
+		"upstream_domain":        platform.UpstreamDomain,
+		"host":                   platform.Host,
+		"port":                   platform.Port,
+		"local_device_id":        platform.LocalDeviceID,
+		"local_domain":           platform.LocalDomain,
+		"local_sip_ip":           platform.LocalSIPIP,
+		"local_sip_port":         platform.LocalSIPPort,
+		"media_advertise_ip":     platform.MediaAdvertiseIP,
+		"auth_username":          platform.AuthUsername,
+		"secret_nonce":           platform.SecretNonce,
+		"secret_ciphertext":      platform.SecretCiphertext,
+		"secret_alg":             platform.SecretAlg,
+		"secret_key_version":     platform.SecretKeyVersion,
+		"profile_override":       platform.ProfileOverride,
+		"charset_override":       platform.CharsetOverride,
+		"register_expires":       platform.RegisterExpires,
+		"keepalive_interval":     platform.KeepaliveInterval,
+		"retry_policy":           platform.RetryPolicy,
+		"transport":              platform.Transport,
+		"catalog_batch_size":     platform.CatalogBatchSize,
+		"auto_push_catalog":      platform.AutoPushCatalog,
+		"publish_platform":       platform.PublishPlatform,
+		"publish_civil":          platform.PublishCivil,
+		"publish_group":          platform.PublishGroup,
+		"max_streams":            platform.MaxStreams,
+		"ptz_enabled":            platform.PTZEnabled,
+		"config_enabled":         platform.ConfigEnabled,
+		"upgrade_enabled":        platform.UpgradeEnabled,
+		"device_control_enabled": platform.DeviceControlEnabled,
+		"maintenance_enabled":    platform.MaintenanceEnabled,
+		"recording_enabled":      platform.RecordingEnabled,
+		"rtcp_keepalive":         platform.RTCPKeepalive,
+		"enabled":                platform.Enabled,
+	}
+}
+
+// SoftDeletePlatform hides the platform and deactivates its projection in one
+// transaction. Media-session safety is enforced by the management service.
+func (r *GormRepository) SoftDeletePlatform(ctx context.Context, platformID uint64) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var platform model.GbCascadePlatform
+		result := tx.Limit(1).Find(&platform, platformID)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrPlatformNotFound
+		}
+		now := time.Now().UTC()
+		if err := tx.Model(&model.GbCascadeChannelProjection{}).Where("platform_id = ? AND active = ?", platformID, true).
+			Updates(map[string]any{"active": false, "revision": gorm.Expr("revision + ?", 1), "updated_at": now}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("platform_id = ?", platformID).Delete(&model.GbCascadeBusinessBinding{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("platform_id = ?", platformID).Delete(&model.GbCascadeBusinessNode{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.GbCascadeDeviceProjection{}).Where("platform_id = ? AND active = ?", platformID, true).
+			Updates(map[string]any{"active": false, "revision": gorm.Expr("revision + ?", 1), "updated_at": now}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("platform_id = ?", platformID).Delete(&model.GbCascadeBusinessBinding{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("platform_id = ?", platformID).Delete(&model.GbCascadeBusinessNode{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&platform).Error
+	})
+}
+
+func (r *GormRepository) RecordRegistrationSuccess(ctx context.Context, platformID uint64, registeredAt, expiresAt time.Time) error {
+	return r.updateRuntimeFacts(ctx, platformID, map[string]any{
+		"register_at": registeredAt, "register_expires_at": expiresAt,
+		"last_error_code": "", "last_error_message": "", "last_error_at": nil,
+	})
+}
+
+// RecordRegistrationVersion stores the final REGISTER capability observation
+// separately from the configured override. It is called only for auto-profile
+// platforms after a successful final response.
+func (r *GormRepository) RecordRegistrationVersion(ctx context.Context, platformID uint64, reported, effective, source string, at time.Time) error {
+	return r.updateRuntimeFacts(ctx, platformID, map[string]any{
+		"reported_gb_version":      reported,
+		"reported_gb_version_at":   at,
+		"effective_version":        effective,
+		"effective_version_source": source,
+		"effective_version_at":     at,
+	})
+}
+
+// RecordRegistrationExpired represents an Expires: 0 response. It does not touch heartbeat facts.
+func (r *GormRepository) RecordRegistrationExpired(ctx context.Context, platformID uint64, _ time.Time) error {
+	return r.updateRuntimeFacts(ctx, platformID, map[string]any{
+		"register_at": nil, "register_expires_at": nil,
+	})
+}
+
+func (r *GormRepository) RecordRegistrationFailure(ctx context.Context, platformID uint64, code, message string, at time.Time) error {
+	return r.recordFailure(ctx, platformID, code, message, at)
+}
+
+func (r *GormRepository) RecordHeartbeatSuccess(ctx context.Context, platformID uint64, at time.Time) error {
+	return r.updateRuntimeFacts(ctx, platformID, map[string]any{
+		"heartbeat_at": at, "last_error_code": "", "last_error_message": "", "last_error_at": nil,
+	})
+}
+
+func (r *GormRepository) RecordHeartbeatFailure(ctx context.Context, platformID uint64, code, message string, at time.Time) error {
+	return r.recordFailure(ctx, platformID, code, message, at)
+}
+
+func (r *GormRepository) recordFailure(ctx context.Context, platformID uint64, code, message string, at time.Time) error {
+	return r.updateRuntimeFacts(ctx, platformID, map[string]any{
+		"last_error_code": code, "last_error_message": message, "last_error_at": at,
+	})
+}
+
+func (r *GormRepository) updateRuntimeFacts(ctx context.Context, platformID uint64, updates map[string]any) error {
+	updates["updated_at"] = time.Now().UTC()
+	result := r.db.WithContext(ctx).Model(&model.GbCascadePlatform{}).Where("id = ?", platformID).Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		var count int64
+		if err := r.db.WithContext(ctx).Model(&model.GbCascadePlatform{}).Where("id = ?", platformID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count == 0 {
+			return ErrPlatformNotFound
+		}
+	}
+	return nil
+}
+
+type DeviceProjectionInput struct {
+	SourceDeviceID    uint64
+	PublishedDeviceID string
+	Name              string
+	Manufacturer      string
+	Model             string
+	Owner             string
+	CivilCode         string
+	Address           string
+	Parental          int
+	Secrecy           int
+}
+
+type ChannelProjectionInput struct {
+	SourceDeviceID     uint64
+	SourceChannelID    uint64
+	PublishedChannelID string
+	Name               string
+	ParentOverride     string
+	PTZAllowed         bool
+}
+
+type ProjectionSnapshot struct {
+	Platform model.GbCascadePlatform
+	Devices  []model.GbCascadeDeviceProjection
+	Channels []model.GbCascadeChannelProjection
+	Nodes    []model.GbCascadeBusinessNode
+	Bindings []model.GbCascadeBusinessBinding
+	Revision uint64
+}
+
+// ReplaceProjection atomically replaces one platform's active authorization projection.
+func (r *GormRepository) ReplaceProjection(ctx context.Context, platformID uint64, expectedProjectionRevision uint64, devices []DeviceProjectionInput, channels []ChannelProjectionInput) error {
+	channels = append([]ChannelProjectionInput(nil), channels...)
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var platform model.GbCascadePlatform
+		if result := tx.Limit(1).Find(&platform, platformID); result.Error != nil {
+			return result.Error
+		} else if result.RowsAffected == 0 {
+			return ErrPlatformNotFound
+		}
+		// 投影替换是破坏性全量操作:请求必须携带其基于的修订号,
+		// 两个管理员基于同一旧快照保存时后提交者必须得到冲突而非静默覆盖
+		if platform.ProjectionRevision != expectedProjectionRevision {
+			return ErrRevisionConflict
+		}
+		if err := allocatePublishedChannelIDs(tx, platformID, devices, channels); err != nil {
+			return err
+		}
+		if err := validateProjectionInputs(devices, channels); err != nil {
+			return err
+		}
+		if err := validateProjectionBusinessCodeCollisions(tx, platformID, devices, channels); err != nil {
+			return err
+		}
+		deviceIDs := make(map[uint64]uint64, len(devices))
+		desiredDevices := make([]uint64, 0, len(devices))
+		for _, input := range devices {
+			row, err := upsertDeviceProjection(tx, platformID, input)
+			if err != nil {
+				return err
+			}
+			deviceIDs[input.SourceDeviceID] = row.ID
+			desiredDevices = append(desiredDevices, input.SourceDeviceID)
+		}
+		if err := deactivateAbsentDevices(tx, platformID, desiredDevices); err != nil {
+			return err
+		}
+
+		desiredChannels := make([]uint64, 0, len(channels))
+		for _, input := range channels {
+			if err := upsertChannelProjection(tx, platformID, deviceIDs[input.SourceDeviceID], input); err != nil {
+				return err
+			}
+			desiredChannels = append(desiredChannels, input.SourceChannelID)
+		}
+		if err := deactivateAbsentChannels(tx, platformID, desiredChannels); err != nil {
+			return err
+		}
+		// 取消共享即解除业务挂载,但不删除平台目录节点;若随后重新共享,旧挂载不会恢复。
+		if err := tx.Where(`platform_id = ? AND NOT EXISTS (
+			SELECT 1 FROM gb_cascade_channel_projection AS channel_projection
+			WHERE channel_projection.platform_id = gb_cascade_business_binding.platform_id
+			AND channel_projection.source_channel_id = gb_cascade_business_binding.source_channel_id
+			AND channel_projection.active = ?
+		)`, platformID, true).Delete(&model.GbCascadeBusinessBinding{}).Error; err != nil {
+			return err
+		}
+		if platform.PublishGroup {
+			nodes, bindings, err := loadBusinessGroupInputs(tx, platformID)
+			if err != nil {
+				return err
+			}
+			if _, err := validatePublishedBusinessGroup(tx, platform, nodes, bindings); err != nil {
+				return err
+			}
+		}
+		// 提交时做真正的 CAS:revision 条件写回,并发陈旧写者得到 0 行而非覆盖
+		result := tx.Model(&model.GbCascadePlatform{}).
+			Where("id = ? AND projection_revision = ?", platformID, expectedProjectionRevision).
+			Updates(map[string]any{
+				"projection_revision": gorm.Expr("projection_revision + ?", 1),
+				"updated_at":          time.Now().UTC(),
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrRevisionConflict
+		}
+		return nil
+	})
+}
+
+func validateProjectionBusinessCodeCollisions(tx *gorm.DB, platformID uint64, devices []DeviceProjectionInput, channels []ChannelProjectionInput) error {
+	codes := make([]string, 0, len(devices)+len(channels))
+	for _, device := range devices {
+		codes = append(codes, device.PublishedDeviceID)
+	}
+	for _, channel := range channels {
+		codes = append(codes, channel.PublishedChannelID)
+	}
+	if len(codes) == 0 {
+		return nil
+	}
+	var count int64
+	if err := tx.Model(&model.GbCascadeBusinessNode{}).
+		Where("platform_id = ? AND code IN ?", platformID, codes).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return fmt.Errorf("%w: 共享资源编号与当前业务分组节点编号冲突", ErrInvalidProjection)
+	}
+	return nil
+}
+
+func validateProjectionInputs(devices []DeviceProjectionInput, channels []ChannelProjectionInput) error {
+	deviceSet := make(map[uint64]struct{}, len(devices))
+	publishedIDs := make(map[string]struct{}, len(devices)+len(channels))
+	for _, input := range devices {
+		if input.SourceDeviceID == 0 || input.PublishedDeviceID == "" {
+			return ErrInvalidProjection
+		}
+		if _, exists := deviceSet[input.SourceDeviceID]; exists {
+			return ErrInvalidProjection
+		}
+		deviceSet[input.SourceDeviceID] = struct{}{}
+		if _, exists := publishedIDs[input.PublishedDeviceID]; exists {
+			return ErrInvalidProjection
+		}
+		publishedIDs[input.PublishedDeviceID] = struct{}{}
+	}
+	channelSet := make(map[uint64]struct{}, len(channels))
+	for _, input := range channels {
+		if input.SourceChannelID == 0 || input.PublishedChannelID == "" {
+			return ErrInvalidProjection
+		}
+		if _, exists := deviceSet[input.SourceDeviceID]; !exists {
+			return ErrInvalidProjection
+		}
+		if _, exists := channelSet[input.SourceChannelID]; exists {
+			return ErrInvalidProjection
+		}
+		channelSet[input.SourceChannelID] = struct{}{}
+		if _, exists := publishedIDs[input.PublishedChannelID]; exists {
+			return ErrInvalidProjection
+		}
+		publishedIDs[input.PublishedChannelID] = struct{}{}
+	}
+	return nil
+}
+
+func upsertDeviceProjection(tx *gorm.DB, platformID uint64, input DeviceProjectionInput) (*model.GbCascadeDeviceProjection, error) {
+	var row model.GbCascadeDeviceProjection
+	result := tx.Unscoped().Where("platform_id = ? AND source_device_id = ?", platformID, input.SourceDeviceID).First(&row)
+	if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil, result.Error
+	}
+	now := time.Now().UTC()
+	if result.RowsAffected == 0 {
+		// 按 source_device_id 查不到,但同一个 published_device_id 可能已经被一条
+		// "源设备早已不存在"的历史投影占着 —— 设备删过又重新接入,gb_device 换了
+		// 自增 id,published id 还是同一个国标号。这条路上 INSERT 必撞
+		// uk_cascade_device_published 报 1062,共享接口只能回 409。
+		// 认领那一行(改写 source_device_id)而不是新建:published id 不抖动,
+		// 行 id 不变,挂在上面的通道投影的 device_projection_id 也不会悬空。
+		claimed, claimErr := claimDeviceProjectionByPublishedID(tx, platformID, input.PublishedDeviceID)
+		if claimErr != nil {
+			return nil, claimErr
+		}
+		if claimed != nil {
+			row = *claimed
+			row.Revision++
+		} else {
+			row = model.GbCascadeDeviceProjection{PlatformID: platformID, SourceDeviceID: input.SourceDeviceID, CreatedAt: now, Revision: 1}
+		}
+	} else {
+		row.Revision++
+	}
+	row.SourceDeviceID = input.SourceDeviceID
+	row.PublishedDeviceID = input.PublishedDeviceID
+	row.Name = input.Name
+	row.Manufacturer = input.Manufacturer
+	row.Model = input.Model
+	row.Owner = input.Owner
+	row.CivilCode = input.CivilCode
+	row.Address = input.Address
+	row.Parental = input.Parental
+	row.Secrecy = input.Secrecy
+	row.Active = true
+	row.UpdatedAt = now
+	row.DeletedAt = gorm.DeletedAt{}
+	if err := tx.Unscoped().Save(&row).Error; err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+// claimDeviceProjectionByPublishedID 找出同一个上级平台上占着这个 published id 的投影行,
+// 供 upsertDeviceProjection 在"按 source_device_id 查不到"时认领。查不到返回 nil。
+//
+// 认领不会抢走活设备的投影:设备的 published_device_id 就是它的国标号,而
+// gb_device.device_id 唯一 —— 还活着的另一台设备不可能正占着这个号。能占着的只可能是
+// 设备自己(那会在按 source_device_id 的查询里命中),或者一条源已消失的历史行。
+//
+// 通道投影不走这条路径:通道的 published id 由 allocatePublishedChannelIDs 统一分配,
+// 撞号在分配阶段就被避让到别的号段,落不到 INSERT 撞键这一步。
+//
+// 用 Limit(1).Find 而不是 First:ErrRecordNotFound 可能被调用方关掉
+// (见 TestReplaceProjectionCreatesRowsWhenRecordNotFoundErrorsAreMasked),
+// 只有 RowsAffected 可靠。
+func claimDeviceProjectionByPublishedID(tx *gorm.DB, platformID uint64, publishedDeviceID string) (*model.GbCascadeDeviceProjection, error) {
+	if publishedDeviceID == "" {
+		return nil, nil
+	}
+	var row model.GbCascadeDeviceProjection
+	result := tx.Unscoped().Where("platform_id = ? AND published_device_id = ?", platformID, publishedDeviceID).Limit(1).Find(&row)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, nil
+	}
+	return &row, nil
+}
+
+func upsertChannelProjection(tx *gorm.DB, platformID, deviceProjectionID uint64, input ChannelProjectionInput) error {
+	var row model.GbCascadeChannelProjection
+	result := tx.Unscoped().Where("platform_id = ? AND source_channel_id = ?", platformID, input.SourceChannelID).First(&row)
+	if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return result.Error
+	}
+	now := time.Now().UTC()
+	if result.RowsAffected == 0 {
+		row = model.GbCascadeChannelProjection{PlatformID: platformID, SourceChannelID: input.SourceChannelID, CreatedAt: now, Revision: 1}
+	} else {
+		row.Revision++
+	}
+	row.DeviceProjectionID = deviceProjectionID
+	row.PublishedChannelID = input.PublishedChannelID
+	row.Name = input.Name
+	row.ParentOverride = input.ParentOverride
+	row.PTZAllowed = input.PTZAllowed
+	row.Active = true
+	row.UpdatedAt = now
+	row.DeletedAt = gorm.DeletedAt{}
+	return tx.Unscoped().Save(&row).Error
+}
+
+func deactivateAbsentDevices(tx *gorm.DB, platformID uint64, desired []uint64) error {
+	query := tx.Model(&model.GbCascadeDeviceProjection{}).Where("platform_id = ? AND active = ?", platformID, true)
+	if len(desired) > 0 {
+		query = query.Where("source_device_id NOT IN ?", desired)
+	}
+	return query.Updates(map[string]any{"active": false, "revision": gorm.Expr("revision + ?", 1), "updated_at": time.Now().UTC()}).Error
+}
+
+func deactivateAbsentChannels(tx *gorm.DB, platformID uint64, desired []uint64) error {
+	query := tx.Model(&model.GbCascadeChannelProjection{}).Where("platform_id = ? AND active = ?", platformID, true)
+	if len(desired) > 0 {
+		query = query.Where("source_channel_id NOT IN ?", desired)
+	}
+	return query.Updates(map[string]any{"active": false, "revision": gorm.Expr("revision + ?", 1), "updated_at": time.Now().UTC()}).Error
+}
+
+func (r *GormRepository) ProjectionSnapshot(ctx context.Context, platformID uint64) (*ProjectionSnapshot, error) {
+	snapshot := &ProjectionSnapshot{}
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if result := tx.Limit(1).Find(&snapshot.Platform, platformID); result.Error != nil {
+			return result.Error
+		} else if result.RowsAffected == 0 {
+			return ErrPlatformNotFound
+		}
+		if err := tx.Where("platform_id = ? AND active = ?", platformID, true).Order("id").Find(&snapshot.Devices).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("platform_id = ? AND active = ?", platformID, true).Order("id").Find(&snapshot.Channels).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("platform_id = ?", platformID).Order("sort, id").Find(&snapshot.Nodes).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("platform_id = ?", platformID).Order("id").Find(&snapshot.Bindings).Error; err != nil {
+			return err
+		}
+		snapshot.Revision = snapshot.Platform.ProjectionRevision
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return snapshot, nil
+}
+
+func (r *GormRepository) CreateMediaSession(ctx context.Context, session *model.GbCascadeMediaSession) error {
+	if session == nil || session.PlatformID == 0 || session.DialogKey == "" {
+		return fmt.Errorf("%w: media session identity", ErrInvalidProjection)
+	}
+	row := *session
+	row.ID = 0
+	if row.State == "" {
+		row.State = model.CascadeMediaSessionStateReceived
+	}
+	if row.Kind == "" {
+		row.Kind = model.CascadeMediaSessionKindVideo
+	}
+	now := time.Now().UTC()
+	if row.ReceivedAt == nil {
+		row.ReceivedAt = &now
+	}
+	if row.CreatedAt.IsZero() {
+		row.CreatedAt = now
+	}
+	row.UpdatedAt = now
+	if err := r.db.WithContext(ctx).Create(&row).Error; err != nil {
+		return err
+	}
+	*session = row
+	return nil
+}
+
+func (r *GormRepository) FindMediaSessionByDialog(ctx context.Context, dialogKey string) (*model.GbCascadeMediaSession, error) {
+	var session model.GbCascadeMediaSession
+	result := r.db.WithContext(ctx).Where("dialog_key = ?", dialogKey).Limit(1).Find(&session)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, nil
+	}
+	return &session, nil
+}
+
+// FindMediaSessionsByCallID returns non-terminal media rows for one inbound
+// SIP MESSAGE/INVITE transaction. Broadcast correlation also carries its SN
+// in the sanitized summary, so callers can disambiguate repeated upstream
+// Call-IDs without adding protocol-specific columns to the shared media table.
+func (r *GormRepository) FindMediaSessionsByCallID(ctx context.Context, callID string) ([]model.GbCascadeMediaSession, error) {
+	callID = strings.TrimSpace(callID)
+	if callID == "" {
+		return nil, nil
+	}
+	terminal := []model.CascadeMediaSessionState{
+		model.CascadeMediaSessionStateClosed,
+		model.CascadeMediaSessionStateFailed,
+		model.CascadeMediaSessionStateCancelled,
+		model.CascadeMediaSessionStateAborted,
+	}
+	var sessions []model.GbCascadeMediaSession
+	err := r.db.WithContext(ctx).Where("call_id = ? AND session_kind = ? AND state NOT IN ?", callID, model.CascadeMediaSessionKindBroadcast, terminal).Order("id DESC").Find(&sessions).Error
+	return sessions, err
+}
+
+func (r *GormRepository) ListNonterminalVideoSessions(ctx context.Context) ([]model.GbCascadeMediaSession, error) {
+	return r.listNonterminalMediaSessions(ctx, 0, model.CascadeMediaSessionKindVideo)
+}
+
+func (r *GormRepository) ListNonterminalBroadcastSessions(ctx context.Context) ([]model.GbCascadeMediaSession, error) {
+	return r.listNonterminalMediaSessions(ctx, 0, model.CascadeMediaSessionKindBroadcast)
+}
+
+func (r *GormRepository) TransitionMediaSession(ctx context.Context, dialogKey string, from, to model.CascadeMediaSessionState, at time.Time) (bool, error) {
+	if !canTransitionMedia(from, to) {
+		return false, fmt.Errorf("%w: %s -> %s", ErrInvalidMediaTransition, from, to)
+	}
+	updates := map[string]any{"state": to, "updated_at": at}
+	switch to {
+	case model.CascadeMediaSessionStateAnswered:
+		updates["answered_at"] = at
+	case model.CascadeMediaSessionStateActive:
+		updates["active_at"] = at
+	case model.CascadeMediaSessionStateClosed, model.CascadeMediaSessionStateFailed, model.CascadeMediaSessionStateCancelled, model.CascadeMediaSessionStateAborted:
+		updates["closed_at"] = at
+	}
+	result := r.db.WithContext(ctx).Model(&model.GbCascadeMediaSession{}).
+		Where("dialog_key = ? AND state = ?", dialogKey, from).Updates(updates)
+	return result.RowsAffected > 0, result.Error
+}
+
+func (r *GormRepository) ListNonterminalMediaSessions(ctx context.Context, platformID uint64) ([]model.GbCascadeMediaSession, error) {
+	return r.listNonterminalMediaSessions(ctx, platformID, "")
+}
+
+func (r *GormRepository) listNonterminalMediaSessions(ctx context.Context, platformID uint64, kind model.CascadeMediaSessionKind) ([]model.GbCascadeMediaSession, error) {
+	terminal := []model.CascadeMediaSessionState{
+		model.CascadeMediaSessionStateClosed,
+		model.CascadeMediaSessionStateFailed,
+		model.CascadeMediaSessionStateCancelled,
+		model.CascadeMediaSessionStateAborted,
+	}
+	var sessions []model.GbCascadeMediaSession
+	query := r.db.WithContext(ctx).Where("state NOT IN ?", terminal).Order("id")
+	if kind != "" {
+		query = query.Where("session_kind = ?", kind)
+	}
+	if platformID != 0 {
+		query = query.Where("platform_id = ?", platformID)
+	}
+	err := query.Find(&sessions).Error
+	return sessions, err
+}
+
+func canTransitionMedia(from, to model.CascadeMediaSessionState) bool {
+	switch from {
+	case model.CascadeMediaSessionStateReceived:
+		return to == model.CascadeMediaSessionStateProvisioning || to == model.CascadeMediaSessionStateCancelled || to == model.CascadeMediaSessionStateFailed || to == model.CascadeMediaSessionStateAborted
+	case model.CascadeMediaSessionStateProvisioning:
+		return to == model.CascadeMediaSessionStateAnswered || to == model.CascadeMediaSessionStateCancelled || to == model.CascadeMediaSessionStateFailed || to == model.CascadeMediaSessionStateAborted
+	case model.CascadeMediaSessionStateAnswered:
+		return to == model.CascadeMediaSessionStateActive || to == model.CascadeMediaSessionStateClosing || to == model.CascadeMediaSessionStateFailed || to == model.CascadeMediaSessionStateAborted
+	case model.CascadeMediaSessionStateActive:
+		return to == model.CascadeMediaSessionStateClosing || to == model.CascadeMediaSessionStateFailed || to == model.CascadeMediaSessionStateAborted
+	case model.CascadeMediaSessionStateClosing:
+		return to == model.CascadeMediaSessionStateClosed || to == model.CascadeMediaSessionStateFailed || to == model.CascadeMediaSessionStateAborted
+	default:
+		return false
+	}
+}

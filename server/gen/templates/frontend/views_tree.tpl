@@ -16,7 +16,7 @@
                     </a-button>
                 </a-space>
 
-            <a-table :data="treeDataList" :loading="loading" :pagination="false"
+            <a-table class="uvp-data-table" :data="treeDataList" :loading="loading" :pagination="false"
                 :bordered="{ wrapper: true, cell: true }" :row-key="'{{if .PrimaryKey}}{{.PrimaryKey.JsonTag}}{{else}}id{{end}}'" :default-expand-all-rows="true">
                 <template #columns>
 {{- range .Columns}}
@@ -58,9 +58,9 @@
         </a-card>
 
         <!-- 编辑/创建弹窗 -->
-        <a-modal v-model:visible="modalVisible" :title="modalTitle" :on-before-ok="handleSave"
+        <a-modal modal-class="uvp-system-dialog" v-model:visible="modalVisible" :title="modalTitle" :on-before-ok="handleSave"
             @cancel="handleCancel">
-            <a-form :model="editingData" :rules="rules" ref="formRef">
+            <a-form class="uvp-system-form" :model="editingData" :rules="rules" ref="formRef">
                 {{- if .ParentIdField}}
                 <a-form-item field="{{.ParentIdField.JsonTag}}" label="父级">
                     <a-tree-select
@@ -233,6 +233,7 @@ const {
 } = use{{.StructName}}PluginHook();
 
 const modalVisible = ref(false);
+const isEditMode = ref(false);
 const formRef = ref();
 const modalTitle = ref('');
 
@@ -340,6 +341,7 @@ const handleCreate = () => {
 {{- end}}
 {{- end}}
     });
+    isEditMode.value = false;
     modalTitle.value = '新增数据';
     modalVisible.value = true;
 };
@@ -360,6 +362,7 @@ const handleAddChild = (record: {{.StructName}}Data) => {
     // 设置父级ID为当前行的ID
     editingData.{{.ParentIdField.JsonTag}} = record.{{if .PrimaryKey}}{{.PrimaryKey.JsonTag}}{{else}}id{{end}};
     {{- end}}
+    isEditMode.value = false;
     modalTitle.value = '新增子级数据';
     modalVisible.value = true;
 };
@@ -370,6 +373,7 @@ const handleEdit = async (record: {{.StructName}}Data) => {
     const detail = await getDetail(record.{{if .PrimaryKey}}{{.PrimaryKey.JsonTag}}{{else}}id{{end}});
     // 赋值给编辑数据
     Object.assign(editingData, detail.data);
+    isEditMode.value = true;
     modalTitle.value = '编辑数据';
     modalVisible.value = true;
 };
@@ -394,7 +398,7 @@ const handleSave = async () => {
     if (isValid) return false;
     try {
         const dataToSave = JSON.parse(JSON.stringify(editingData));
-        if (editingData.{{if .PrimaryKey}}{{.PrimaryKey.JsonTag}}{{else}}id{{end}}) {
+        if (isEditMode.value) {
             // 更新数据
             await updateData(dataToSave);
         } else {
@@ -412,6 +416,7 @@ const handleSave = async () => {
 
 // 取消操作
 const handleCancel = () => {
+    isEditMode.value = false;
     modalVisible.value = false;
 };
 

@@ -1,0 +1,1 @@
+IF COL_LENGTH(N'dbo.gb_cascade_platform', N'upgrade_enabled') IS NOT NULL EXEC(N'ALTER TABLE [dbo].[gb_cascade_platform] DROP CONSTRAINT [df_gb_cascade_platform_upgrade_enabled]; ALTER TABLE [dbo].[gb_cascade_platform] DROP COLUMN [upgrade_enabled]');

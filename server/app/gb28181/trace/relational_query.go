@@ -1,0 +1,822 @@
+package trace
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+
+	"gorm.io/gorm"
+
+	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/trace/diagnosis"
+)
+
+func validateMessageFilter(filter MessageFilter) error {
+	if filter.From.IsZero() || filter.To.IsZero() || !filter.From.Before(filter.To) || filter.To.Sub(filter.From) > MaxTraceQueryRange {
+		return ErrTraceTimeRangeRequired
+	}
+	if filter.StatusMin != 0 || filter.StatusMax != 0 {
+		min, max := filter.StatusMin, filter.StatusMax
+		if min == 0 {
+			min = SIPStatusMin
+		}
+		if max == 0 {
+			max = SIPStatusMax
+		}
+		if min > max || min < SIPStatusMin || max > SIPStatusMax {
+			return errors.New("invalid SIP trace status code range")
+		}
+	}
+	return nil
+}
+
+func applyTraceKeywordFilter(query *gorm.DB, keyword, traceTable string) *gorm.DB {
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return query
+	}
+	like := "%" + strings.ToLower(keyword) + "%"
+	predicate := fmt.Sprintf(`
+		LOWER(%[1]s.call_id) LIKE ? OR LOWER(%[1]s.device_id) LIKE ? OR EXISTS (
+			SELECT 1 FROM gb_device
+			WHERE gb_device.device_id = %[1]s.device_id
+			  AND (LOWER(gb_device.name) LIKE ? OR LOWER(gb_device.alias) LIKE ?)
+		)`, traceTable)
+	return query.Where(predicate, like, like, like, like)
+}
+
+func legacyMethodFallbacks(code BusinessCode) []string {
+	switch code {
+	case BusinessRegister:
+		return []string{"REGISTER"}
+	case BusinessSubscription:
+		return []string{"SUBSCRIBE", "NOTIFY"}
+	case BusinessHangup:
+		return []string{"BYE", "CANCEL"}
+	case BusinessAck:
+		return []string{"ACK"}
+	default:
+		return nil
+	}
+}
+
+func applyBusinessCodeFilter(query *gorm.DB, code BusinessCode, table string) *gorm.DB {
+	if code == "" {
+		return query
+	}
+	if code == BusinessUnknown {
+		return query.Where("("+table+".business_code = ? OR "+table+".business_code = '' OR "+table+".business_type = '') AND "+table+".method NOT IN ?",
+			string(BusinessUnknown), []string{"REGISTER", "SUBSCRIBE", "NOTIFY", "BYE", "CANCEL", "ACK"})
+	}
+	methods := legacyMethodFallbacks(code)
+	if len(methods) == 0 {
+		return query.Where(table+".business_code = ? AND "+table+".business_type <> ''", string(code))
+	}
+	return query.Where("("+table+".business_code = ? AND "+table+".business_type <> '') OR (("+
+		table+".business_code = ? OR "+table+".business_code = '' OR "+table+".business_type = '') AND "+table+".method IN ?)",
+		string(code), string(BusinessUnknown), methods)
+}
+
+func applyMessageFilter(db *gorm.DB, filter MessageFilter) (*gorm.DB, error) {
+	if err := validateMessageFilter(filter); err != nil {
+		return nil, err
+	}
+	db = db.Where("occurred_at >= ? AND occurred_at < ?", filter.From.UTC(), filter.To.UTC())
+	if len(filter.DeviceIDs) > 0 {
+		db = db.Where("device_id IN ?", filter.DeviceIDs)
+	} else if filter.DeviceID != "" {
+		db = db.Where("device_id = ?", filter.DeviceID)
+	}
+	if filter.CallID != "" {
+		db = db.Where("call_id = ?", filter.CallID)
+	}
+	if filter.Direction != "" {
+		db = db.Where("direction = ?", string(filter.Direction))
+	}
+	if filter.Method != "" {
+		db = db.Where("method = ?", filter.Method)
+	}
+	if filter.StatusCode != 0 {
+		db = db.Where("status_code = ?", filter.StatusCode)
+	}
+	if filter.StatusMin != 0 || filter.StatusMax != 0 {
+		min, max := filter.StatusMin, filter.StatusMax
+		if min == 0 {
+			min = SIPStatusMin
+		}
+		if max == 0 {
+			max = SIPStatusMax
+		}
+		db = db.Where("status_code >= ? AND status_code <= ?", min, max)
+	}
+	db = applyBusinessCodeFilter(db, filter.BusinessCode, "gb_sip_trace_message")
+	db = applyTraceKeywordFilter(db, filter.Keyword, "gb_sip_trace_message")
+	return db, nil
+}
+
+func messageSummary(row gbmodels.GbSipTraceMessage) MessageSummary {
+	businessCode := BusinessCode(row.BusinessCode)
+	businessType := row.BusinessType
+	businessConfidence := row.BusinessConfidence
+	if businessCode == "" || businessCode == BusinessUnknown || businessType == "" {
+		fallback := fallbackBusinessForMethod(row.Method)
+		businessCode, businessType, businessConfidence = fallback.Code, fallback.Label, fallback.Confidence
+	}
+	fromID, toID := row.FromID, row.ToID
+	if fromID == "" {
+		fromID = extractNationalID(row.FromURI)
+	}
+	if toID == "" {
+		toID = extractNationalID(row.ToURI)
+	}
+	return MessageSummary{
+		EventID: row.EventID, OccurredAt: row.OccurredAt.UTC(), Direction: Direction(row.Direction),
+		Transport: row.Transport, LocalAddr: row.LocalAddr, RemoteAddr: row.RemoteAddr,
+		DeviceID: row.DeviceID, Method: row.Method, StatusCode: row.StatusCode, CallID: row.CallID,
+		CSeq: row.CSeq, CSeqMethod: row.CSeqMethod, FromURI: row.FromURI, ToURI: row.ToURI,
+		FromID: fromID, ToID: toID, BusinessCode: businessCode, BusinessType: businessType, BusinessConfidence: businessConfidence,
+		UserAgent: row.UserAgent, Malformed: row.Malformed, ParseError: row.ParseError,
+	}
+}
+
+func rowBusiness(row gbmodels.GbSipTraceMessage) businessClassification {
+	if row.BusinessCode != "" && BusinessCode(row.BusinessCode) != BusinessUnknown && row.BusinessType != "" {
+		return businessClassification{BusinessCode(row.BusinessCode), row.BusinessType, row.BusinessConfidence}
+	}
+	return fallbackBusinessForMethod(row.Method)
+}
+
+func (s *RelationalStore) ListMessages(ctx context.Context, filter MessageFilter) (MessagePage, error) {
+	query, err := applyMessageFilter(s.db.WithContext(ctx).Model(&gbmodels.GbSipTraceMessage{}), filter)
+	if err != nil {
+		return MessagePage{}, err
+	}
+	if filter.Cursor != "" {
+		cursor, err := DecodeMessageCursor(filter.Cursor)
+		if err != nil {
+			return MessagePage{}, err
+		}
+		query = query.Where("occurred_at < ? OR (occurred_at = ? AND event_id < ?)", cursor.OccurredAt, cursor.OccurredAt, cursor.EventID)
+	}
+	// 报文侧维持分页语义（默认 100、封顶 500、带游标）。
+	// ⚠️ 2026-11-03 一度改成「不传 limit ⇒ 全量」，当天又收回：
+	// 全量响应体随条数线性膨胀（500B/条），10MB 级 JSON 传输+解析都不划算，
+	// 页面上也无处安放。真正需要"看得更多"的是会话列表，走滚动分页。
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = DefaultMessagePageSize
+	}
+	if limit > MaxMessagePageSize {
+		limit = MaxMessagePageSize
+	}
+	var rows []gbmodels.GbSipTraceMessage
+	// omit 报文体两列：列表只用摘要字段，把几 MB 级的密文读出来纯属浪费内存。
+	if err := query.Omit("payload_nonce", "payload_ciphertext").
+		Order("occurred_at DESC").Order("event_id DESC").Limit(limit + 1).Find(&rows).Error; err != nil {
+		return MessagePage{}, fmt.Errorf("query relational SIP trace messages: %w", err)
+	}
+	items := make([]MessageSummary, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, messageSummary(row))
+	}
+	page := MessagePage{Items: items}
+	if len(items) > limit {
+		last := items[limit-1]
+		page.Items = items[:limit]
+		page.NextCursor = EncodeMessageCursor(MessageCursor{OccurredAt: last.OccurredAt, EventID: last.EventID})
+	}
+	return page, nil
+}
+
+func (s *RelationalStore) GetMessage(ctx context.Context, eventID string) (StoredMessage, error) {
+	var row gbmodels.GbSipTraceMessage
+	err := s.db.WithContext(ctx).First(&row, "event_id = ?", eventID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return StoredMessage{}, ErrTraceMessageNotFound
+	}
+	if err != nil {
+		return StoredMessage{}, fmt.Errorf("query relational SIP trace message: %w", err)
+	}
+	return StoredMessage{
+		MessageSummary: messageSummary(row),
+		Payload: EncryptedPayload{
+			Nonce: append([]byte(nil), row.PayloadNonce...), Ciphertext: append([]byte(nil), row.PayloadCiphertext...),
+			Algorithm: row.PayloadAlgorithm, KeyVersion: row.PayloadKeyVersion, DigestSHA256: row.PayloadDigestSHA256,
+		},
+	}, nil
+}
+
+type sessionAccumulator struct {
+	summary SessionSummary
+	methods map[string]struct{}
+}
+
+func businessPriority(code BusinessCode) int {
+	switch code {
+	case BusinessUnknown, "":
+		return 0
+	case BusinessAck:
+		return 1
+	case BusinessRegister, BusinessKeepalive, BusinessCatalog, BusinessDeviceInfo, BusinessDeviceStatus, BusinessDeviceControl, BusinessAlarm, BusinessPTZ, BusinessSubscription, BusinessHangup:
+		return 2
+	default:
+		return 3
+	}
+}
+
+type sessionCandidate struct {
+	EventID string
+	Day     time.Time
+	CallID  string
+	LastAt  time.Time
+}
+
+type databaseTime time.Time
+
+func (value *databaseTime) Scan(raw any) error {
+	if at, ok := raw.(time.Time); ok {
+		*value = databaseTime(at)
+		return nil
+	}
+	var text string
+	switch raw := raw.(type) {
+	case string:
+		text = raw
+	case []byte:
+		text = string(raw)
+	default:
+		return fmt.Errorf("unsupported database time value %T", raw)
+	}
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05-07:00",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05",
+	} {
+		if at, err := time.Parse(layout, text); err == nil {
+			*value = databaseTime(at)
+			return nil
+		}
+	}
+	return fmt.Errorf("unsupported database time %q", text)
+}
+
+func validateSessionFilter(filter SessionFilter) error {
+	if filter.From.IsZero() || filter.To.IsZero() || !filter.From.Before(filter.To) || filter.To.Sub(filter.From) > MaxSessionQueryRange {
+		return ErrTraceTimeRangeRequired
+	}
+	if filter.DiagnosisCode != "" && filter.DiagnosisCategory == "" {
+		return errors.New("diagnosis category is required when code is set")
+	}
+	if filter.DiagnosisCategory != "" {
+		if filter.DiagnosisCode == "" {
+			if filter.DiagnosisCategory != diagnosis.CategoryRegisterFailure && filter.DiagnosisCategory != diagnosis.CategoryPlayStuck {
+				return errors.New("invalid diagnosis category")
+			}
+		} else if err := diagnosis.ValidateCategoryCode(filter.DiagnosisCategory, filter.DiagnosisCode); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func sessionQueryRange(filter SessionFilter) (time.Time, time.Time) {
+	return filter.From.UTC(), filter.To.UTC()
+}
+
+func applySessionFilter(query *gorm.DB, filter SessionFilter, from, to time.Time) *gorm.DB {
+	query = query.
+		Where("occurred_at >= ? AND occurred_at < ?", from, to)
+	if len(filter.DeviceIDs) > 0 {
+		query = query.Where("device_id IN ?", filter.DeviceIDs)
+	} else if filter.DeviceID != "" {
+		query = query.Where("device_id = ?", filter.DeviceID)
+	}
+	if filter.CallID != "" {
+		query = query.Where("call_id = ?", filter.CallID)
+	}
+	query = applyTraceKeywordFilter(query, filter.Keyword, "gb_sip_trace_message")
+	return query
+}
+
+func (s *RelationalStore) listSessionCandidates(
+	ctx context.Context,
+	filter SessionFilter,
+	from time.Time,
+	to time.Time,
+	limit int,
+	offset int,
+) ([]sessionCandidate, error) {
+	candidates := make([]sessionCandidate, 0)
+	for day := from; day.Before(to); day = day.AddDate(0, 0, 1) {
+		dayEnd := day.AddDate(0, 0, 1)
+		if dayEnd.After(to) {
+			dayEnd = to
+		}
+		var rows []struct {
+			CallID  string       `gorm:"column:call_id"`
+			EventID string       `gorm:"column:standalone_event_id"`
+			LastAt  databaseTime `gorm:"column:last_at"`
+		}
+		query := applySessionFilter(
+			s.db.WithContext(ctx).Model(&gbmodels.GbSipTraceMessage{}),
+			filter,
+			day,
+			dayEnd,
+		)
+		if err := query.
+			Select("call_id, CASE WHEN call_id = '' THEN event_id ELSE '' END AS standalone_event_id, MAX(occurred_at) AS last_at").
+			Group("call_id, CASE WHEN call_id = '' THEN event_id ELSE '' END").
+			Order("MAX(occurred_at) DESC").Order("call_id DESC").Order("standalone_event_id DESC").
+			Limit(limit + offset).
+			Scan(&rows).Error; err != nil {
+			return nil, fmt.Errorf("query relational SIP trace session candidates: %w", err)
+		}
+		for _, row := range rows {
+			candidates = append(candidates, sessionCandidate{
+				Day: day, CallID: row.CallID, EventID: row.EventID, LastAt: time.Time(row.LastAt).UTC(),
+			})
+		}
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].LastAt.Equal(candidates[j].LastAt) {
+			if candidates[i].CallID == candidates[j].CallID {
+				return candidates[i].EventID > candidates[j].EventID
+			}
+			return candidates[i].CallID > candidates[j].CallID
+		}
+		return candidates[i].LastAt.After(candidates[j].LastAt)
+	})
+	if offset >= len(candidates) {
+		return []sessionCandidate{}, nil
+	}
+	candidates = candidates[offset:]
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+	return candidates, nil
+}
+
+func applySessionCandidates(query *gorm.DB, candidates []sessionCandidate) *gorm.DB {
+	// Group dialog IDs by their time window instead of generating an OR for
+	// every candidate: SQLite limits expression depth even for bound queries.
+	type window struct {
+		day     time.Time
+		callIDs []string
+	}
+	var windows []window
+	windowIndexes := make(map[time.Time]int)
+	var eventIDs []string
+	for _, candidate := range candidates {
+		if candidate.EventID != "" {
+			eventIDs = append(eventIDs, candidate.EventID)
+			continue
+		}
+		index, ok := windowIndexes[candidate.Day]
+		if !ok {
+			index = len(windows)
+			windowIndexes[candidate.Day] = index
+			windows = append(windows, window{day: candidate.Day})
+		}
+		windows[index].callIDs = append(windows[index].callIDs, candidate.CallID)
+	}
+	var scope *gorm.DB
+	for _, window := range windows {
+		// Call-ID identifies the SIP dialog. Device ID is a collector-side hint and
+		// may change between INVITE and ACK/BYE when both directions are observed.
+		condition := "call_id IN ? AND occurred_at >= ? AND occurred_at < ?"
+		args := []any{window.callIDs, window.day, window.day.AddDate(0, 0, 1)}
+		if scope == nil {
+			scope = query.Session(&gorm.Session{NewDB: true}).Where(condition, args...)
+		} else {
+			scope = scope.Or(condition, args...)
+		}
+	}
+	if len(eventIDs) > 0 {
+		if scope == nil {
+			scope = query.Session(&gorm.Session{NewDB: true}).Where("event_id IN ?", eventIDs)
+		} else {
+			scope = scope.Or("event_id IN ?", eventIDs)
+		}
+	}
+	if scope == nil {
+		return query.Where("1 = 0")
+	}
+	return query.Where(scope)
+}
+
+func sessionIdentity(day time.Time, deviceID, callID string) string {
+	return day.UTC().Format("2006-01-02") + "\x00" + deviceID + "\x00" + callID
+}
+
+func sessionConversationIdentity(day time.Time, callID, fromID, toID, deviceID string) string {
+	dayKey := day.UTC().Format("2006-01-02")
+	if fromID != "" || toID != "" {
+		return dayKey + "\x00call\x00" + callID + "\x00from\x00" + fromID + "\x00to\x00" + toID
+	}
+	return sessionIdentity(day, deviceID, callID)
+}
+
+func applyDiagnosisBaseFilter(query *gorm.DB, filter SessionFilter) *gorm.DB {
+	query = query.Where("state = ? AND observed_at >= ? AND observed_at < ?",
+		string(diagnosis.StateActive), filter.From.UTC(), filter.To.UTC())
+	if len(filter.DeviceIDs) > 0 {
+		query = query.Where("device_id IN ?", filter.DeviceIDs)
+	} else if filter.DeviceID != "" {
+		query = query.Where("device_id = ?", filter.DeviceID)
+	}
+	if filter.CallID != "" {
+		query = query.Where("call_id = ?", filter.CallID)
+	}
+	query = applyTraceKeywordFilter(query, filter.Keyword, "gb_sip_trace_session_diagnosis")
+	if filter.DiagnosisCategory != "" {
+		query = query.Where("category = ?", string(filter.DiagnosisCategory))
+	}
+	if filter.DiagnosisCode != "" {
+		query = query.Where("code = ?", string(filter.DiagnosisCode))
+	}
+	return query
+}
+
+func (s *RelationalStore) activeSessionDiagnoses(ctx context.Context, filter SessionFilter) ([]gbmodels.GbSipTraceSessionDiagnosis, error) {
+	var rows []gbmodels.GbSipTraceSessionDiagnosis
+	query := applyDiagnosisBaseFilter(
+		s.db.WithContext(ctx).Model(&gbmodels.GbSipTraceSessionDiagnosis{}), filter,
+	)
+	if err := query.Order("observed_at ASC").Order("id ASC").Find(&rows).Error; err != nil {
+		// 诊断表查询失败只有在未请求诊断条件时才允许降级(原始报文列表
+		// 不该被 additive 的诊断表故障藏起来);显式按类别/代码筛选时,
+		// 静默返回空会把数据库故障伪装成"没有诊断结果"
+		if filter.DiagnosisCategory == "" && filter.DiagnosisCode == "" {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return rows, nil
+}
+
+func diagnosisSummary(row gbmodels.GbSipTraceSessionDiagnosis) SessionDiagnosis {
+	return SessionDiagnosis{
+		ObservedAt: row.ObservedAt.UTC(), CorrelationKey: row.CorrelationKey,
+		Category: diagnosis.Category(row.Category), Code: diagnosis.Code(row.Code),
+		Stage: diagnosis.Stage(row.Stage), Source: diagnosis.Source(row.Source),
+		DeviceID: row.DeviceID, ChannelID: row.ChannelID, CallID: row.CallID,
+		CSeq: row.CSeq, Method: row.Method, StatusCode: row.StatusCode, StreamID: row.StreamID,
+	}
+}
+
+func matchesDiagnosisFilter(item SessionDiagnosis, filter SessionFilter) bool {
+	return (filter.DiagnosisCategory == "" || item.Category == filter.DiagnosisCategory) &&
+		(filter.DiagnosisCode == "" || item.Code == filter.DiagnosisCode)
+}
+
+func reconstructedRegisterDiagnosis(session SessionSummary) *SessionDiagnosis {
+	if session.FirstMethod != "REGISTER" || session.FinalStatus < 400 || session.FinalStatus == 401 {
+		return nil
+	}
+	return &SessionDiagnosis{
+		ObservedAt: session.LastAt, Category: diagnosis.CategoryRegisterFailure,
+		Code: diagnosis.CodeUndetermined, Stage: diagnosis.StageRegister,
+		Source: diagnosis.SourceReconstructed, DeviceID: session.DeviceID,
+		CallID: session.CallID, Method: "REGISTER", StatusCode: session.FinalStatus,
+	}
+}
+
+// loadSessionRows 执行报文查询并返回按时间排序的原始行。
+// ⛔ 这里是「按时间窗全量查询」唯一的内存入口，保险丝必须打在这儿：
+// 命中行数超过 MaxTraceQueryRows 就报 ErrTraceQueryTooBroad，绝不静默截断
+// （截断会让聚合出来的会话缺报文，表现成"会话不完整/状态不对"，比报错更难查）。
+// payload 两列在会话聚合里用不到，一并 omit 掉，省掉密文带来的成倍内存。
+func (s *RelationalStore) loadSessionRows(query *gorm.DB) ([]gbmodels.GbSipTraceMessage, error) {
+	var rows []gbmodels.GbSipTraceMessage
+	if err := query.
+		Omit("payload_nonce", "payload_ciphertext").
+		Order("occurred_at ASC").Order("event_id ASC").
+		Limit(MaxTraceQueryRows + 1).
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("query relational SIP trace sessions: %w", err)
+	}
+	if len(rows) > MaxTraceQueryRows {
+		return nil, ErrTraceQueryTooBroad
+	}
+	return rows, nil
+}
+
+// summarizeRows 把原始报文行聚合为会话摘要
+func summarizeRows(rows []gbmodels.GbSipTraceMessage, retention time.Duration) []SessionSummary {
+	accumulators := make(map[string]*sessionAccumulator)
+	conversationAliases := make(map[string]string)
+	for _, row := range rows {
+		at := row.OccurredAt.UTC()
+		day := time.Date(at.Year(), at.Month(), at.Day(), 0, 0, 0, 0, time.UTC)
+		fromID, toID := row.FromID, row.ToID
+		if fromID == "" {
+			fromID = extractNationalID(row.FromURI)
+		}
+		if toID == "" {
+			toID = extractNationalID(row.ToURI)
+		}
+		key := sessionConversationIdentity(day, row.CallID, fromID, toID, row.DeviceID)
+		if row.CallID == "" {
+			key += "\x00event\x00" + row.EventID
+		}
+		if row.CallID != "" {
+			callAlias := day.UTC().Format("2006-01-02") + "\x00" + row.CallID
+			if alias, ok := conversationAliases[callAlias]; ok {
+				// A SIP dialog can be observed with different collector device IDs,
+				// and response/ACK rows may omit From/To metadata. Once a Call-ID has
+				// an evidence-backed identity, keep all of its rows in that session.
+				key = alias
+			} else {
+				conversationAliases[callAlias] = key
+			}
+		}
+		acc := accumulators[key]
+		if acc == nil {
+			business := rowBusiness(row)
+			source, destination := normalizeStoredAddr(row.LocalAddr), normalizeStoredAddr(row.RemoteAddr)
+			if row.Direction == string(DirectionInbound) {
+				source, destination = normalizeStoredAddr(row.RemoteAddr), normalizeStoredAddr(row.LocalAddr)
+			}
+			acc = &sessionAccumulator{summary: SessionSummary{
+				Day: day, DeviceID: row.DeviceID, CallID: row.CallID, FirstAt: at, LastAt: at,
+				FirstMethod: row.Method, FromURI: row.FromURI, ToURI: row.ToURI,
+				FromID: fromID, ToID: toID, BusinessCode: business.Code, BusinessType: business.Label, BusinessConfidence: business.Confidence,
+				SourceAddr: source, DestinationAddr: destination,
+			}, methods: make(map[string]struct{})}
+			if row.CallID == "" {
+				acc.summary.EventID = row.EventID
+			}
+			accumulators[key] = acc
+		}
+		acc.summary.LastAt = at
+		acc.summary.MessageCount++
+		if row.Direction == string(DirectionInbound) {
+			acc.summary.InboundCount++
+		} else if row.Direction == string(DirectionOutbound) {
+			acc.summary.OutboundCount++
+		}
+		if row.Method != "" {
+			acc.methods[row.Method] = struct{}{}
+		}
+		business := rowBusiness(row)
+		if businessPriority(business.Code) > businessPriority(acc.summary.BusinessCode) {
+			acc.summary.BusinessCode = business.Code
+			acc.summary.BusinessType = business.Label
+			acc.summary.BusinessConfidence = business.Confidence
+		}
+		if acc.summary.FromID == "" {
+			acc.summary.FromID = row.FromID
+		}
+		if acc.summary.ToID == "" {
+			acc.summary.ToID = row.ToID
+		}
+		if row.StatusCode >= 200 {
+			acc.summary.FinalStatus = row.StatusCode
+			acc.summary.FinalResponseCount++
+		}
+		if row.StatusCode == 0 && row.Method != "" && row.Method != "ACK" {
+			acc.summary.RequestCount++
+		}
+	}
+	now := time.Now().UTC()
+	sessions := make([]SessionSummary, 0, len(accumulators))
+	for _, acc := range accumulators {
+		for method := range acc.methods {
+			acc.summary.Methods = append(acc.summary.Methods, method)
+		}
+		sort.Strings(acc.summary.Methods)
+		expiresAt := acc.summary.LastAt.Add(retention)
+		missing := acc.summary.RequestCount > acc.summary.FinalResponseCount
+		acc.summary.SessionDerivedState = SessionDerivedState{
+			OriginalAvailable: now.Before(expiresAt), OriginalExpiresAt: expiresAt,
+			MissingResponse: missing,
+		}
+		sessions = append(sessions, acc.summary)
+	}
+	return sessions
+}
+
+func attachSessionDiagnoses(sessions []SessionSummary, rows []gbmodels.GbSipTraceSessionDiagnosis, filter SessionFilter) []SessionSummary {
+	bySession := make(map[string][]SessionDiagnosis)
+	for _, row := range rows {
+		key := sessionIdentity(row.SessionDay, row.DeviceID, row.CallID)
+		bySession[key] = append(bySession[key], diagnosisSummary(row))
+	}
+	filtered := make([]SessionSummary, 0, len(sessions))
+	for i := range sessions {
+		session := &sessions[i]
+		session.diagnoses = append(session.diagnoses, bySession[sessionIdentity(session.Day, session.DeviceID, session.CallID)]...)
+		if reconstructed := reconstructedRegisterDiagnosis(*session); reconstructed != nil {
+			hasRegisterDiagnosis := false
+			for _, item := range session.diagnoses {
+				if item.Category == diagnosis.CategoryRegisterFailure {
+					hasRegisterDiagnosis = true
+					break
+				}
+			}
+			if !hasRegisterDiagnosis {
+				session.diagnoses = append(session.diagnoses, *reconstructed)
+			}
+		}
+		matching := make([]SessionDiagnosis, 0, len(session.diagnoses))
+		for _, item := range session.diagnoses {
+			if matchesDiagnosisFilter(item, filter) {
+				matching = append(matching, item)
+			}
+		}
+		if (filter.DiagnosisCategory != "" || filter.DiagnosisCode != "") && len(matching) == 0 {
+			continue
+		}
+		if len(matching) > 0 {
+			latest := matching[len(matching)-1]
+			session.Diagnosis = &latest
+		}
+		missing := session.RequestCount > session.FinalResponseCount
+		statusAnomaly := session.FinalStatus >= 300
+		if session.FirstMethod == "REGISTER" && session.FinalStatus == 401 && !missing && len(session.diagnoses) == 0 {
+			statusAnomaly = false
+		}
+		session.MissingResponse = missing
+		session.Anomaly = missing || statusAnomaly || len(session.diagnoses) > 0
+		if !filter.Anomaly || session.Anomaly {
+			filtered = append(filtered, *session)
+		}
+	}
+	return filtered
+}
+
+func (s *RelationalStore) reduceSessions(ctx context.Context, filter SessionFilter, candidateLimit int) ([]SessionSummary, error) {
+	if err := validateSessionFilter(filter); err != nil {
+		return nil, err
+	}
+	diagnosisRows, err := s.activeSessionDiagnoses(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	from, to := sessionQueryRange(filter)
+	if filter.BusinessCode != "" && candidateLimit > 0 {
+		return s.reduceBusinessSessions(ctx, filter, diagnosisRows, from, to, candidateLimit)
+	}
+	query := applySessionFilter(s.db.WithContext(ctx).Model(&gbmodels.GbSipTraceMessage{}), filter, from, to)
+	if candidateLimit > 0 {
+		candidates, err := s.listSessionCandidates(ctx, filter, from, to, candidateLimit, 0)
+		if err != nil {
+			return nil, err
+		}
+		if len(candidates) == 0 {
+			return []SessionSummary{}, nil
+		}
+		query = applySessionCandidates(query, candidates)
+	}
+	rows, err := s.loadSessionRows(query)
+	if err != nil {
+		return nil, err
+	}
+	sessions := summarizeRows(rows, s.rawMessageRetention())
+	sessions = attachSessionDiagnoses(sessions, diagnosisRows, filter)
+	sessions = filterSessionsByBusiness(sessions, filter.BusinessCode)
+	sort.Slice(sessions, func(i, j int) bool {
+		if sessions[i].LastAt.Equal(sessions[j].LastAt) {
+			if sessions[i].CallID == sessions[j].CallID {
+				return sessions[i].EventID > sessions[j].EventID
+			}
+			return sessions[i].CallID > sessions[j].CallID
+		}
+		return sessions[i].LastAt.After(sessions[j].LastAt)
+	})
+	return sessions, nil
+}
+
+func filterSessionsByBusiness(sessions []SessionSummary, code BusinessCode) []SessionSummary {
+	if code == "" {
+		return sessions
+	}
+	filtered := make([]SessionSummary, 0, len(sessions))
+	for _, session := range sessions {
+		if session.BusinessCode == code {
+			filtered = append(filtered, session)
+		}
+	}
+	return filtered
+}
+
+func (s *RelationalStore) reduceBusinessSessions(
+	ctx context.Context,
+	filter SessionFilter,
+	diagnosisRows []gbmodels.GbSipTraceSessionDiagnosis,
+	from time.Time,
+	to time.Time,
+	candidateLimit int,
+) ([]SessionSummary, error) {
+	const candidatePageSize = 200
+	matched := make([]SessionSummary, 0, candidateLimit)
+	for offset := 0; ; offset += candidatePageSize {
+		candidates, err := s.listSessionCandidates(ctx, filter, from, to, candidatePageSize, offset)
+		if err != nil {
+			return nil, err
+		}
+		if len(candidates) == 0 {
+			break
+		}
+		query := applySessionFilter(s.db.WithContext(ctx).Model(&gbmodels.GbSipTraceMessage{}), filter, from, to)
+		rows, err := s.loadSessionRows(applySessionCandidates(query, candidates))
+		if err != nil {
+			return nil, err
+		}
+		sessions := summarizeRows(rows, s.rawMessageRetention())
+		sessions = attachSessionDiagnoses(sessions, diagnosisRows, filter)
+		matched = append(matched, filterSessionsByBusiness(sessions, filter.BusinessCode)...)
+		if len(matched) >= candidateLimit || len(candidates) < candidatePageSize {
+			break
+		}
+	}
+	sort.Slice(matched, func(i, j int) bool {
+		if matched[i].LastAt.Equal(matched[j].LastAt) {
+			if matched[i].CallID == matched[j].CallID {
+				return matched[i].EventID > matched[j].EventID
+			}
+			return matched[i].CallID > matched[j].CallID
+		}
+		return matched[i].LastAt.After(matched[j].LastAt)
+	})
+	if len(matched) > candidateLimit {
+		matched = matched[:candidateLimit]
+	}
+	return matched, nil
+}
+
+func (s *RelationalStore) ListSessions(ctx context.Context, filter SessionFilter) ([]SessionSummary, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = DefaultSessionPageSize
+	}
+	if limit > MaxSessionPageSize {
+		limit = MaxSessionPageSize
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	// ⚠️ 会话是内存聚合出来的，没有"直接跳到第 N 页"的办法：要拿到第 N 页，
+	// 必须先把前 offset+limit 个候选会话聚合出来再切片 ⇒ 成本随 offset 线性增长。
+	// 几千条量级够用；真到上万条应改成 (lastAt, callId) 游标分页。
+	candidateLimit := offset + limit
+	if candidateLimit > MaxTraceQueryRows {
+		return nil, ErrTraceQueryTooBroad
+	}
+	// 异常/诊断过滤必须看全会话才能判定命中，这两种情况只能全量聚合，
+	// 由 loadSessionRows 的 MaxTraceQueryRows 保险丝兜底。
+	if filter.Anomaly || filter.DiagnosisCategory != "" || filter.DiagnosisCode != "" {
+		candidateLimit = 0
+	}
+	sessions, err := s.reduceSessions(ctx, filter, candidateLimit)
+	if err != nil {
+		return nil, err
+	}
+	if offset >= len(sessions) {
+		return []SessionSummary{}, nil
+	}
+	end := offset + limit
+	if end > len(sessions) {
+		end = len(sessions)
+	}
+	return sessions[offset:end], nil
+}
+
+func (s *RelationalStore) GetSessionStats(ctx context.Context, filter SessionFilter) (SessionStats, error) {
+	filter.Limit = 0
+	filter.Offset = 0
+	filter.Anomaly = false
+	// ⭐ 统计口径与列表一致：全量精确计数，不再拿 1000 个候选样本冒充总数
+	// （旧行为会让「总计」静默停在 1000）。真正失控的是行数，由 loadSessionRows
+	// 的 MaxTraceQueryRows 保险丝兜底 —— 超了直接报错，不给出半截数字。
+	sessions, err := s.reduceSessions(ctx, filter, 0)
+	if err != nil {
+		return SessionStats{}, err
+	}
+	var stats SessionStats
+	stats.Truncated = false
+	stats.Total = uint64(len(sessions))
+	for _, session := range sessions {
+		if session.Anomaly {
+			stats.Anomaly++
+		}
+		categories := make(map[diagnosis.Category]struct{})
+		for _, item := range session.diagnoses {
+			categories[item.Category] = struct{}{}
+		}
+		if _, ok := categories[diagnosis.CategoryRegisterFailure]; ok {
+			stats.RegisterFail++
+		}
+		if _, ok := categories[diagnosis.CategoryPlayStuck]; ok {
+			stats.PlayStuck++
+		}
+	}
+	stats.InvitePending = stats.PlayStuck
+	return stats, nil
+}

@@ -3,6 +3,7 @@
 ## 组件概述
 
 本目录提供了五个上传相关的组件：
+
 - [`image-upload.vue`](./image-upload.vue) - 单图上传组件
 - [`multi-image-upload.vue`](./multi-image-upload.vue) - 多图上传组件（照片墙形式）
 - [`file-upload.vue`](./file-upload.vue) - 通用文件上传组件
@@ -28,13 +29,7 @@
 <template>
   <div>
     <!-- 单选模式 -->
-    <affix-selector
-      v-model:visible="visible"
-      title="选择图片"
-      :multiple="false"
-      @confirm="handleConfirm"
-      @close="handleClose"
-    />
+    <affix-selector v-model:visible="visible" title="选择图片" :multiple="false" @confirm="handleConfirm" @close="handleClose" />
 
     <!-- 多选模式 -->
     <affix-selector
@@ -48,58 +43,62 @@
 </template>
 
 <script setup lang="ts">
-import AffixSelector from '@/components/upload/affix-selector.vue';
+import AffixSelector from "@/components/upload/affix-selector.vue";
 
 const visible = ref(false);
 
 // 单选回调
 const handleConfirm = (url: string) => {
-  console.log('选中的图片URL:', url);
+  console.log("选中的图片URL:", url);
 };
 
 // 多选回调
 const handleConfirmMultiple = (urls: string[]) => {
-  console.log('选中的图片URL数组:', urls);
+  console.log("选中的图片URL数组:", urls);
 };
 
 const handleClose = () => {
-  console.log('选择器已关闭');
+  console.log("选择器已关闭");
 };
 </script>
 ```
 
 ### Props 属性
 
-| 属性名 | 类型 | 默认值 | 说明 |
-|--------|------|--------|------|
-| visible | boolean | false | 控制模态框显示/隐藏，支持 v-model |
-| multiple | boolean | false | 是否为多选模式 |
-| title | string | '选择图片' | 模态框标题 |
+| 属性名   | 类型    | 默认值     | 说明                              |
+| -------- | ------- | ---------- | --------------------------------- |
+| visible  | boolean | false      | 控制模态框显示/隐藏，支持 v-model |
+| multiple | boolean | false      | 是否为多选模式                    |
+| title    | string  | '选择图片' | 模态框标题                        |
 
 ### Events 事件
 
-| 事件名 | 说明 | 参数 |
-|--------|------|------|
-| update:visible | 显示状态变化时触发 | (visible: boolean) |
-| confirm | 确认选择时触发 | 单选: (url: string), 多选: (urls: string[]) |
-| close | 关闭模态框时触发 | - |
+| 事件名         | 说明               | 参数                                        |
+| -------------- | ------------------ | ------------------------------------------- |
+| update:visible | 显示状态变化时触发 | (visible: boolean)                          |
+| confirm        | 确认选择时触发     | 单选: (url: string), 多选: (urls: string[]) |
+| close          | 关闭模态框时触发   | -                                           |
 
 ### 功能说明
 
 #### 1. 搜索功能
+
 - 支持按图片名称搜索
 - 提供查询和重置按钮
 
 #### 2. 图片列表
+
 - 以表格形式展示
 - 显示图片ID、名称、预览、文件大小、创建时间
 - 支持分页
 
 #### 3. 图片预览
+
 - 点击预览列可查看图片大图
 - 独立的预览模态框
 
 #### 4. 选择模式
+
 - **单选模式**: 使用 radio 选择，返回单个 URL
 - **多选模式**: 使用 checkbox 选择，支持全选，返回 URL 数组
 
@@ -125,57 +124,46 @@ const handleClose = () => {
     <image-upload v-model="avatarUrl" />
 
     <!-- 自定义配置 -->
-    <image-upload
-      v-model="coverImage"
-      title="上传封面"
-      :width="200"
-      :height="150"
-      :show-select-button="true"
-    />
+    <image-upload v-model="coverImage" title="上传封面" :width="200" :height="150" :show-select-button="true" />
 
     <!-- 带缩略图 -->
-    <image-upload
-      v-model="thumbUrl"
-      :is-thumb="1"
-      :thumb-width="120"
-      :thumb-height="120"
-    />
+    <image-upload v-model="thumbUrl" :is-thumb="1" :thumb-width="120" :thumb-height="120" />
   </div>
 </template>
 
 <script setup lang="ts">
-import ImageUpload from '@/components/upload/image-upload.vue';
+import ImageUpload from "@/components/upload/image-upload.vue";
 
-const avatarUrl = ref('');
-const coverImage = ref('');
-const thumbUrl = ref('');
+const avatarUrl = ref("");
+const coverImage = ref("");
+const thumbUrl = ref("");
 </script>
 ```
 
 ### Props 属性
 
-| 属性名 | 类型 | 默认值 | 说明 |
-|--------|------|--------|------|
-| modelValue | string | '' | 双向绑定的图片URL |
-| title | string | '上传图片' | 上传按钮的标题文字 |
-| accept | string | 'image/*' | 接受的文件类型 |
-| width | string \| number | 120 | 图片显示宽度 |
-| height | string \| number | 120 | 图片显示高度 |
-| disabled | boolean | false | 是否禁用上传 |
-| isThumb | number | 0 | 是否生成缩略图 (0: 否, 1: 是) |
-| thumbWidth | number | 120 | 缩略图宽度 |
-| thumbHeight | number | 120 | 缩略图高度 |
-| showSelectButton | boolean | true | 是否显示右侧选择按钮 |
+| 属性名           | 类型             | 默认值     | 说明                          |
+| ---------------- | ---------------- | ---------- | ----------------------------- |
+| modelValue       | string           | ''         | 双向绑定的图片URL             |
+| title            | string           | '上传图片' | 上传按钮的标题文字            |
+| accept           | string           | 'image/\*' | 接受的文件类型                |
+| width            | string \| number | 120        | 图片显示宽度                  |
+| height           | string \| number | 120        | 图片显示高度                  |
+| disabled         | boolean          | false      | 是否禁用上传                  |
+| isThumb          | number           | 0          | 是否生成缩略图 (0: 否, 1: 是) |
+| thumbWidth       | number           | 120        | 缩略图宽度                    |
+| thumbHeight      | number           | 120        | 缩略图高度                    |
+| showSelectButton | boolean          | true       | 是否显示右侧选择按钮          |
 
 ### Events 事件
 
-| 事件名 | 说明 | 参数 |
-|--------|------|------|
-| update:modelValue | 图片URL变化时触发 | (url: string) |
-| change | 文件状态变化时触发 | (file: FileItem) |
-| success | 上传成功时触发 | (url: string) |
-| error | 上传失败时触发 | (error: Error) |
-| uploadSuccess | 上传成功时触发 | (data: any) |
+| 事件名            | 说明               | 参数             |
+| ----------------- | ------------------ | ---------------- |
+| update:modelValue | 图片URL变化时触发  | (url: string)    |
+| change            | 文件状态变化时触发 | (file: FileItem) |
+| success           | 上传成功时触发     | (url: string)    |
+| error             | 上传失败时触发     | (error: Error)   |
+| uploadSuccess     | 上传成功时触发     | (data: any)      |
 
 ---
 
@@ -200,9 +188,9 @@ const thumbUrl = ref('');
   <div>
     <!-- 基本用法 -->
     <multi-image-upload v-model="imageUrls" />
-    
+
     <!-- 自定义配置 -->
-    <multi-image-upload 
+    <multi-image-upload
       v-model="productImages"
       title="上传商品图片"
       :width="120"
@@ -212,17 +200,12 @@ const thumbUrl = ref('');
     />
 
     <!-- 带缩略图 -->
-    <multi-image-upload
-      v-model="thumbUrls"
-      :is-thumb="1"
-      :thumb-width="120"
-      :thumb-height="120"
-    />
+    <multi-image-upload v-model="thumbUrls" :is-thumb="1" :thumb-width="120" :thumb-height="120" />
   </div>
 </template>
 
 <script setup lang="ts">
-import MultiImageUpload from '@/components/upload/multi-image-upload.vue';
+import MultiImageUpload from "@/components/upload/multi-image-upload.vue";
 
 const imageUrls = ref<string[]>([]);
 const productImages = ref<string[]>([]);
@@ -232,44 +215,48 @@ const thumbUrls = ref<string[]>([]);
 
 ### Props 属性
 
-| 属性名 | 类型 | 默认值 | 说明 |
-|--------|------|--------|------|
-| modelValue | string[] | [] | 双向绑定的图片URL数组 |
-| title | string | '上传图片' | 上传按钮的标题文字 |
-| accept | string | 'image/*' | 接受的文件类型 |
-| width | string \| number | 120 | 图片显示宽度 |
-| height | string \| number | 120 | 图片显示高度 |
-| maxCount | number | 10 | 最大上传数量限制 |
-| isThumb | number | 0 | 是否生成缩略图 (0: 否, 1: 是) |
-| thumbWidth | number | 120 | 缩略图宽度 |
-| thumbHeight | number | 120 | 缩略图高度 |
-| showSelectButton | boolean | true | 是否显示选择按钮 |
+| 属性名           | 类型             | 默认值     | 说明                          |
+| ---------------- | ---------------- | ---------- | ----------------------------- |
+| modelValue       | string[]         | []         | 双向绑定的图片URL数组         |
+| title            | string           | '上传图片' | 上传按钮的标题文字            |
+| accept           | string           | 'image/\*' | 接受的文件类型                |
+| width            | string \| number | 120        | 图片显示宽度                  |
+| height           | string \| number | 120        | 图片显示高度                  |
+| maxCount         | number           | 10         | 最大上传数量限制              |
+| isThumb          | number           | 0          | 是否生成缩略图 (0: 否, 1: 是) |
+| thumbWidth       | number           | 120        | 缩略图宽度                    |
+| thumbHeight      | number           | 120        | 缩略图高度                    |
+| showSelectButton | boolean          | true       | 是否显示选择按钮              |
 
 ### Events 事件
 
-| 事件名 | 说明 | 参数 |
-|--------|------|------|
+| 事件名            | 说明                  | 参数             |
+| ----------------- | --------------------- | ---------------- |
 | update:modelValue | 图片URL数组变化时触发 | (urls: string[]) |
-| uploadSuccess | 上传成功时触发 | (data: any) |
+| uploadSuccess     | 上传成功时触发        | (data: any)      |
 
 ### 功能说明
 
 #### 1. 照片墙布局
+
 - 已上传的图片以网格形式排列
 - 支持鼠标悬停效果
 - 响应式布局，自动换行
 
 #### 2. 图片操作
+
 - **预览**: 点击图片可放大预览
 - **删除**: 点击删除按钮可移除图片
 - **上传进度**: 上传过程中显示进度条
 
 #### 3. 上传限制
+
 - 支持配置最大上传数量
 - 达到上限后上传按钮自动禁用
 - 显示当前上传数量/最大数量
 
 #### 4. 自定义上传
+
 - 使用项目统一的 `uploadAffixAPI` 接口
 - 支持FormData格式上传
 - 自动处理上传成功/失败状态
@@ -297,58 +284,51 @@ const thumbUrls = ref<string[]>([]);
   <div>
     <!-- 基本用法 - 上传任意文件 -->
     <file-upload v-model="files" />
-    
+
     <!-- 限制文件类型和数量 -->
-    <file-upload
-      v-model="documents"
-      title="上传文档"
-      accept=".pdf,.doc,.docx,.xls,.xlsx"
-      :max-count="5"
-    />
-    
+    <file-upload v-model="documents" title="上传文档" accept=".pdf,.doc,.docx,.xls,.xlsx" :max-count="5" />
+
     <!-- 上传图片 -->
-    <file-upload
-      v-model="images"
-      title="上传图片"
-      accept="image/*"
-      :max-count="10"
-    />
+    <file-upload v-model="images" title="上传图片" accept="image/*" :max-count="10" />
   </div>
 </template>
 
 <script setup lang="ts">
-import FileUpload from '@/components/upload/file-upload.vue';
+import FileUpload from "@/components/upload/file-upload.vue";
 
 // 双向绑定的值为JSON数组字符串
-const files = ref<string>('[]');
-const documents = ref<string>('[]');
-const images = ref<string>('[]');
+const files = ref<string>("[]");
+const documents = ref<string>("[]");
+const images = ref<string>("[]");
 
 // 监听变化
-watch(() => files.value, (newVal) => {
-  const fileList = JSON.parse(newVal);
-  console.log('文件列表:', fileList);
-});
+watch(
+  () => files.value,
+  newVal => {
+    const fileList = JSON.parse(newVal);
+    console.log("文件列表:", fileList);
+  }
+);
 </script>
 ```
 
 ### Props 属性
 
-| 属性名 | 类型 | 默认值 | 说明 |
-|--------|------|--------|------|
-| modelValue | string | '[]' | 双向绑定的文件信息JSON数组字符串 |
-| title | string | '上传文件' | 上传按钮的标题文字 |
-| accept | string | '*' | 接受的文件类型，如 '.pdf,.doc' 或 'image/*' |
-| maxCount | number | 10 | 最大上传数量限制 |
+| 属性名     | 类型   | 默认值     | 说明                                         |
+| ---------- | ------ | ---------- | -------------------------------------------- |
+| modelValue | string | '[]'       | 双向绑定的文件信息JSON数组字符串             |
+| title      | string | '上传文件' | 上传按钮的标题文字                           |
+| accept     | string | '\*'       | 接受的文件类型，如 '.pdf,.doc' 或 'image/\*' |
+| maxCount   | number | 10         | 最大上传数量限制                             |
 
 ### Events 事件
 
-| 事件名 | 说明 | 参数 |
-|--------|------|------|
-| update:modelValue | 文件列表变化时触发 | (jsonString: string) |
-| change | 文件状态变化时触发 | (fileList: FileInfo[]) |
-| success | 上传成功时触发 | (fileData: AffixItem) |
-| error | 上传失败时触发 | (error: Error) |
+| 事件名            | 说明               | 参数                   |
+| ----------------- | ------------------ | ---------------------- |
+| update:modelValue | 文件列表变化时触发 | (jsonString: string)   |
+| change            | 文件状态变化时触发 | (fileList: FileInfo[]) |
+| success           | 上传成功时触发     | (fileData: AffixItem)  |
+| error             | 上传失败时触发     | (error: Error)         |
 
 ### 文件信息格式
 
@@ -356,12 +336,12 @@ watch(() => files.value, (newVal) => {
 
 ```typescript
 interface FileInfo {
-    id: number;        // 文件ID
-    name: string;      // 文件名
-    size: number;      // 文件大小（字节）
-    url: string;       // 文件URL
-    suffix: string;    // 文件后缀
-    ftype: string;     // 文件类型
+  id: number; // 文件ID
+  name: string; // 文件名
+  size: number; // 文件大小（字节）
+  url: string; // 文件URL
+  suffix: string; // 文件后缀
+  ftype: string; // 文件类型
 }
 ```
 
@@ -410,18 +390,13 @@ interface FileInfo {
 
 ```vue
 <template>
-  <file-upload
-    v-model="idCardFiles"
-    title="上传身份证"
-    accept=".jpg,.jpeg,.png"
-    :max-count="2"
-  />
+  <file-upload v-model="idCardFiles" title="上传身份证" accept=".jpg,.jpeg,.png" :max-count="2" />
 </template>
 
 <script setup lang="ts">
-import FileUpload from '@/components/upload/file-upload.vue';
+import FileUpload from "@/components/upload/file-upload.vue";
 
-const idCardFiles = ref<string>('[]');
+const idCardFiles = ref<string>("[]");
 </script>
 ```
 
@@ -429,18 +404,13 @@ const idCardFiles = ref<string>('[]');
 
 ```vue
 <template>
-  <file-upload
-    v-model="contractFiles"
-    title="上传合同"
-    accept=".pdf,.doc,.docx"
-    :max-count="10"
-  />
+  <file-upload v-model="contractFiles" title="上传合同" accept=".pdf,.doc,.docx" :max-count="10" />
 </template>
 
 <script setup lang="ts">
-import FileUpload from '@/components/upload/file-upload.vue';
+import FileUpload from "@/components/upload/file-upload.vue";
 
-const contractFiles = ref<string>('[]');
+const contractFiles = ref<string>("[]");
 </script>
 ```
 
@@ -511,56 +481,41 @@ const contractFiles = ref<string>('[]');
   <div>
     <!-- 基本用法 -->
     <chunk-upload v-model="files" />
-    
+
     <!-- 限制文件类型和数量 -->
-    <chunk-upload
-      v-model="documents"
-      accept=".pdf,.doc,.docx,.zip"
-      :max-count="5"
-      :max-file-size="1024 * 1024 * 1024"
-    />
-    
+    <chunk-upload v-model="documents" accept=".pdf,.doc,.docx,.zip" :max-count="5" :max-file-size="1024 * 1024 * 1024" />
+
     <!-- 自定义分片配置 -->
-    <chunk-upload
-      v-model="largeFiles"
-      :chunk-size="5 * 1024 * 1024"
-      :concurrency="3"
-      :max-retry="3"
-      :auto-start="true"
-    />
-    
+    <chunk-upload v-model="largeFiles" :chunk-size="5 * 1024 * 1024" :concurrency="3" :max-retry="3" :auto-start="true" />
+
     <!-- 手动控制上传 -->
-    <chunk-upload
-      ref="chunkUploadRef"
-      v-model="manualFiles"
-      :auto-start="false"
-    />
+    <chunk-upload ref="chunkUploadRef" v-model="manualFiles" :auto-start="false" />
     <a-button @click="startAllUploads">开始上传</a-button>
   </div>
 </template>
 
 <script setup lang="ts">
-import ChunkUpload from '@/components/upload/chunk-upload.vue';
+import ChunkUpload from "@/components/upload/chunk-upload.vue";
 
-const files = ref<string>('[]');
-const documents = ref<string>('[]');
-const largeFiles = ref<string>('[]');
-const manualFiles = ref<string>('[]');
+const files = ref<string>("[]");
+const documents = ref<string>("[]");
+const largeFiles = ref<string>("[]");
+const manualFiles = ref<string>("[]");
 const chunkUploadRef = ref();
 
 // 监听上传成功事件
 const handleSuccess = (data: any, fileItem: any) => {
-  console.log('上传成功:', data);
+  console.log("上传成功:", data);
 };
 
 // 监听上传进度
 const handleProgress = (progress: any, fileItem: any) => {
-  console.log('上传进度:', progress.percent);
+  console.log("上传进度:", progress.percent);
 };
 
 // 监听上传错误
 const handleError = (error: Error, fileItem: any) => {
-  console.error('上传失败:', error.message);
+  console.error("上传失败:", error.message);
 };
 
 // 手动开始所有上传
@@ -583,60 +538,60 @@ const resetAllFiles = () => {
 
 ### Props 属性
 
-| 属性名 | 类型 | 默认值 | 说明 |
-|--------|------|--------|------|
-| modelValue | string | '[]' | 双向绑定的文件信息JSON数组字符串 |
-| accept | string | '*' | 接受的文件类型，如 '.pdf,.doc' 或 'image/*' |
-| maxCount | number | 10 | 最大上传数量限制 |
-| maxFileSize | number | 0 | 最大文件大小限制（字节），0表示使用环境变量或默认值 |
-| chunkSize | number | 0 | 分片大小（字节），0表示使用环境变量或默认值 |
-| concurrency | number | 0 | 并发上传分片数，0表示使用环境变量或默认值 |
-| maxRetry | number | 0 | 最大重试次数，0表示使用环境变量或默认值 |
-| largeFileThreshold | number | 0 | 大文件阈值（字节），超过此值使用分片上传，0表示使用环境变量或默认值 |
-| autoStart | boolean | true | 是否自动开始上传 |
+| 属性名             | 类型    | 默认值 | 说明                                                                |
+| ------------------ | ------- | ------ | ------------------------------------------------------------------- |
+| modelValue         | string  | '[]'   | 双向绑定的文件信息JSON数组字符串                                    |
+| accept             | string  | '\*'   | 接受的文件类型，如 '.pdf,.doc' 或 'image/\*'                        |
+| maxCount           | number  | 10     | 最大上传数量限制                                                    |
+| maxFileSize        | number  | 0      | 最大文件大小限制（字节），0表示使用环境变量或默认值                 |
+| chunkSize          | number  | 0      | 分片大小（字节），0表示使用环境变量或默认值                         |
+| concurrency        | number  | 0      | 并发上传分片数，0表示使用环境变量或默认值                           |
+| maxRetry           | number  | 0      | 最大重试次数，0表示使用环境变量或默认值                             |
+| largeFileThreshold | number  | 0      | 大文件阈值（字节），超过此值使用分片上传，0表示使用环境变量或默认值 |
+| autoStart          | boolean | true   | 是否自动开始上传                                                    |
 
 ### Events 事件
 
-| 事件名 | 说明 | 参数 |
-|--------|------|------|
-| update:modelValue | 文件列表变化时触发 | (jsonString: string) |
-| change | 文件状态变化时触发 | (fileList: FileItem[]) |
-| success | 上传成功时触发 | (data: any, fileItem: FileItem) |
-| error | 上传失败时触发 | (error: Error, fileItem: FileItem) |
-| progress | 上传进度变化时触发 | (progress: ChunkProgress, fileItem: FileItem) |
+| 事件名            | 说明               | 参数                                          |
+| ----------------- | ------------------ | --------------------------------------------- |
+| update:modelValue | 文件列表变化时触发 | (jsonString: string)                          |
+| change            | 文件状态变化时触发 | (fileList: FileItem[])                        |
+| success           | 上传成功时触发     | (data: any, fileItem: FileItem)               |
+| error             | 上传失败时触发     | (error: Error, fileItem: FileItem)            |
+| progress          | 上传进度变化时触发 | (progress: ChunkProgress, fileItem: FileItem) |
 
 ### 暴露方法
 
-| 方法名 | 说明 | 参数 |
-|--------|------|------|
-| reset | 重置文件列表（取消所有上传并清空） | - |
-| clearDone | 清除已完成的文件 | - |
+| 方法名    | 说明                               | 参数 |
+| --------- | ---------------------------------- | ---- |
+| reset     | 重置文件列表（取消所有上传并清空） | -    |
+| clearDone | 清除已完成的文件                   | -    |
 
 ### 文件状态
 
 文件在上传过程中会经历以下状态：
 
-| 状态 | 说明 |
-|------|------|
-| waiting | 等待上传 |
-| hashing | 计算文件哈希值（用于秒传） |
-| uploading | 上传中 |
-| paused | 已暂停 |
-| merging | 合并分片中 |
-| done | 上传完成 |
-| error | 上传失败 |
+| 状态      | 说明                       |
+| --------- | -------------------------- |
+| waiting   | 等待上传                   |
+| hashing   | 计算文件哈希值（用于秒传） |
+| uploading | 上传中                     |
+| paused    | 已暂停                     |
+| merging   | 合并分片中                 |
+| done      | 上传完成                   |
+| error     | 上传失败                   |
 
 ### 进度信息格式
 
 ```typescript
 interface ChunkProgress {
-    status: string;           // 当前状态
-    totalChunks: number;      // 总分片数
-    uploadedChunks: number;   // 已上传分片数
-    percent: number;          // 上传进度百分比 (0-100)
-    currentSpeed?: string;    // 当前上传速度（如 "2.5 MB/s"）
-    remainingTime?: string;   // 剩余时间（如 "00:05:32"）
-    hashingPercent?: number;  // 哈希计算进度百分比
+  status: string; // 当前状态
+  totalChunks: number; // 总分片数
+  uploadedChunks: number; // 已上传分片数
+  percent: number; // 上传进度百分比 (0-100)
+  currentSpeed?: string; // 当前上传速度（如 "2.5 MB/s"）
+  remainingTime?: string; // 剩余时间（如 "00:05:32"）
+  hashingPercent?: number; // 哈希计算进度百分比
 }
 ```
 
@@ -649,12 +604,7 @@ interface ChunkProgress {
 - 支持自定义分片大小、并发数等参数
 
 ```vue
-<chunk-upload
-  v-model="files"
-  :chunk-size="5 * 1024 * 1024"
-  :concurrency="3"
-  :large-file-threshold="100 * 1024 * 1024"
-/>
+<chunk-upload v-model="files" :chunk-size="5 * 1024 * 1024" :concurrency="3" :large-file-threshold="100 * 1024 * 1024" />
 ```
 
 #### 2. 断点续传
@@ -664,10 +614,7 @@ interface ChunkProgress {
 - 网络中断后可继续上传
 
 ```vue
-<chunk-upload
-  v-model="files"
-  :auto-start="false"
-/>
+<chunk-upload v-model="files" :auto-start="false" />
 ```
 
 #### 3. 秒传功能
@@ -726,10 +673,10 @@ Props 配置 > 环境变量 > 默认值
 </template>
 
 <script setup lang="ts">
-const videoFiles = ref<string>('[]');
+const videoFiles = ref<string>("[]");
 
 const handleVideoUpload = (data: any) => {
-  console.log('视频上传成功:', data.url);
+  console.log("视频上传成功:", data.url);
 };
 </script>
 ```
@@ -757,7 +704,7 @@ const handleVideoUpload = (data: any) => {
 </template>
 
 <script setup lang="ts">
-const docFiles = ref<string>('[]');
+const docFiles = ref<string>("[]");
 const uploadRef = ref();
 
 const handleProgress = (progress: any) => {
@@ -767,7 +714,7 @@ const handleProgress = (progress: any) => {
 const startUpload = () => {
   // 遍历文件列表，手动触发上传
   // 注意：当前实现需要在 addFiles 中处理
-  console.log('开始上传');
+  console.log("开始上传");
 };
 
 const clearDone = () => {
@@ -785,12 +732,7 @@ const resetAll = () => {
 ```vue
 <template>
   <div>
-    <chunk-upload
-      v-model="monitoredFiles"
-      @progress="handleProgress"
-      @success="handleSuccess"
-      @error="handleError"
-    />
+    <chunk-upload v-model="monitoredFiles" @progress="handleProgress" @success="handleSuccess" @error="handleError" />
     <div v-if="overallProgress > 0" style="margin-top: 16px;">
       <a-progress :percent="overallProgress / 100" />
       <p>总体进度: {{ overallProgress.toFixed(2) }}%</p>
@@ -800,24 +742,24 @@ const resetAll = () => {
 </template>
 
 <script setup lang="ts">
-const monitoredFiles = ref<string>('[]');
+const monitoredFiles = ref<string>("[]");
 const overallProgress = ref(0);
-const totalSpeed = ref('');
+const totalSpeed = ref("");
 
 const handleProgress = (progress: any) => {
   // 计算总体进度
   const fileList = JSON.parse(monitoredFiles.value);
   // 这里可以根据实际需求计算总体进度
   overallProgress.value = progress.percent;
-  totalSpeed.value = progress.currentSpeed || '';
+  totalSpeed.value = progress.currentSpeed || "";
 };
 
 const handleSuccess = (data: any) => {
-  console.log('文件上传成功:', data.name);
+  console.log("文件上传成功:", data.name);
 };
 
 const handleError = (error: Error) => {
-  console.error('上传失败:', error.message);
+  console.error("上传失败:", error.message);
 };
 </script>
 ```

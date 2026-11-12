@@ -1,13 +1,16 @@
 package gormhelper
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/global/myerrors"
 	"strings"
 	"time"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/consts"
+	"uvplatform.com/uvp-gb28181/app/global/myerrors"
 
+	dameng "github.com/godoes/gorm-dameng"
 	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
@@ -38,18 +41,112 @@ func GetOnePostgreSqlClient() (*gorm.DB, error) {
 	return GetSqlDriver(sqlType, readDbIsOpen)
 }
 
+// 获取一个人大金仓 KingbaseES 客户端。
+//
+// 金仓在通信协议层兼容 PostgreSQL（官方文档给的 Go 示例就是
+// gorm.io/driver/postgres + 默认端口 54321），所以这里走同一个 dialector：
+// 好处是 migration.DialectOf 会把它判成 postgres，整批 -postgresql.sql
+// 迁移集直接复用，不需要第二套 SQL。
+func GetOneKingbaseClient() (*gorm.DB, error) {
+	sqlType := consts.DbTypeKingbase
+	readDbIsOpen := app.ConfigYml.GetInt("gormv2." + sqlType + ".isopenreaddb")
+	return GetSqlDriver(sqlType, readDbIsOpen)
+}
+
+// 获取一个阿里 PolarDB 客户端（MySQL 版）。
+//
+// PolarDB 的 MySQL 版走 MySQL wire protocol，官方驱动可直连，故复用
+// mysql dialector ⇒ DialectOf 判成 mysql ⇒ 复用 mysql 迁移集。
+// ⚠️ 若现场是 PolarDB for PostgreSQL 版本，走 GetOnePostgreSqlClient 那一路，
+// 不能配成 polardb，否则会用 MySQL 协议去连 PG 端口。
+func GetOnePolarDBClient() (*gorm.DB, error) {
+	sqlType := consts.DbTypePolarDB
+	readDbIsOpen := app.ConfigYml.GetInt("gormv2." + sqlType + ".isopenreaddb")
+	return GetSqlDriver(sqlType, readDbIsOpen)
+}
+
+// 获取一个达梦 DM8 客户端。
+//
+// ⛔ 达梦是三者中唯一协议不兼容现有驱动的，用社区维护的 gorm dialector
+// （基于达梦官方 Go 驱动源码二次开发，驱动已内嵌在 dm8 子包里，无 CGO）。
+// 换回达梦官方安装目录下的 gorm_v2_dialect.zip 时，只需改这一处 import
+// 与 getDbDialector 里的一个 case —— 其余代码不认具体驱动包。
+func GetOneDMClient() (*gorm.DB, error) {
+	sqlType := consts.DbTypeDM
+	readDbIsOpen := app.ConfigYml.GetInt("gormv2." + sqlType + ".isopenreaddb")
+	return GetSqlDriver(sqlType, readDbIsOpen)
+}
+
+// Client 按数据库类型取出连接，是**唯一**的类型分发入口。
+//
+// ⛔ 调用方不要再自己写 switch。历史状况：codegenservice 与
+// pluginsmanagerservice 各抄了四份完全相同的四分支 switch（合计 8 处），
+// 加一种库要改 8 个地方，漏掉一处就是「代码生成器连 MySQL、业务连达梦」
+// 这种串库故障，而且症状看起来像数据丢了。
+//
+// sqlType 为空时读 gormv2.usedbtype；未配置或未知取值回落 MySQL，
+// 保持与 app.DB() 一致的历史语义。
+func Client(sqlType string) (*gorm.DB, error) {
+	if strings.TrimSpace(sqlType) == "" {
+		sqlType = app.ConfigYml.GetString("gormv2.usedbtype")
+	}
+	switch consts.NormalizeDbType(sqlType) {
+	case consts.DbTypeSqlServer:
+		return GetOneSqlserverClient()
+	case consts.DbTypePostgreSql:
+		return GetOnePostgreSqlClient()
+	case consts.DbTypeSqlite:
+		return GetOneSqliteClient()
+	case consts.DbTypeKingbase:
+		return GetOneKingbaseClient()
+	case consts.DbTypePolarDB:
+		return GetOnePolarDBClient()
+	case consts.DbTypeDM:
+		return GetOneDMClient()
+	default:
+		return GetOneMysqlClient()
+	}
+}
+
+// usePrepareStmt 决定某个方言是否启用 GORM 的语句预编译缓存。
+//
+// 默认开，只有 PolarDB 默认关：
+//
+// ⛔ PolarDB-X（开源版 v2.4.2 / 5.4.19 内核）的**客户端预编译协议**（COM_STMT_PREPARE）
+// 对语句有限制 —— 启动时的数据库身份探测
+// `SELECT DATABASE() AS database_name, VERSION() AS database_version`
+// 走文本协议完全正常，一旦被 GORM 缓存成预编译语句就报
+// `Prepare does not support sql: SELECT DATABASE() ...`（实测 192.168.10.220）。
+// 服务端的 `PREPARE ... FROM '...'` 反而是通的，所以这不是 SQL 写法问题。
+//
+// 症状很误导：进程起不来，日志只有「读取数据库身份失败」，看起来像连不上库。
+//
+// 云上的 PolarDB MySQL 版是 8.0 内核，没有这个限制 —— 真要用预编译，
+// 在配置里显式写 `gormv2.polardb.preparestmt: 1` 即可覆盖默认值。
+func usePrepareStmt(sqlType string) bool {
+	enabled := consts.NormalizeDbType(sqlType) != consts.DbTypePolarDB
+	if app.ConfigYml != nil {
+		if v := strings.TrimSpace(app.ConfigYml.GetString("gormv2." + sqlType + ".preparestmt")); v != "" {
+			enabled = v == "1" || strings.EqualFold(v, "true")
+		}
+	}
+	return enabled
+}
+
 // 获取数据库驱动, 可以通过options 动态参数连接任意多个数据库
 func GetSqlDriver(sqlType string, readDbIsOpen int, dbConf ...ConfigParams) (*gorm.DB, error) {
 
 	var dbDialector gorm.Dialector
 	if val, err := getDbDialector(sqlType, "Write", dbConf...); err != nil {
-		app.ZapLog.Error(myerrors.ErrorsDialectorDbInitFail+sqlType, zap.Error(err))
+		app.Log(context.Background()).Named("db").Error("数据库驱动初始化失败",
+			zap.String("event", "db.dialector.init_failed"),
+			zap.String("dialect", sqlType), zap.String("role", "write"), zap.Error(err))
 	} else {
 		dbDialector = val
 	}
 	gormDb, err := gorm.Open(dbDialector, &gorm.Config{
 		SkipDefaultTransaction: true,
-		PrepareStmt:            true,
+		PrepareStmt:            usePrepareStmt(sqlType),
 		Logger:                 redefineLog(sqlType), //拦截、接管 gorm v2 自带日志
 	})
 	if err != nil {
@@ -61,7 +158,9 @@ func GetSqlDriver(sqlType string, readDbIsOpen int, dbConf ...ConfigParams) (*go
 	// 读写分离配置只
 	if readDbIsOpen == 1 {
 		if val, err := getDbDialector(sqlType, "Read", dbConf...); err != nil {
-			app.ZapLog.Error(myerrors.ErrorsDialectorDbInitFail+sqlType, zap.Error(err))
+			app.Log(context.Background()).Named("db").Error("数据库驱动初始化失败",
+				zap.String("event", "db.dialector.init_failed"),
+				zap.String("dialect", sqlType), zap.String("role", "read"), zap.Error(err))
 		} else {
 			dbDialector = val
 		}
@@ -77,6 +176,10 @@ func GetSqlDriver(sqlType string, readDbIsOpen int, dbConf ...ConfigParams) (*go
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	if err := installLogContext(gormDb); err != nil {
+		return nil, err
 	}
 
 	// 查询没有数据，屏蔽 gorm v2 包中会爆出的错误
@@ -107,12 +210,17 @@ func getDbDialector(sqlType, readWrite string, dbConf ...ConfigParams) (gorm.Dia
 	var dbDialector gorm.Dialector
 	dsn := getDsn(sqlType, readWrite, dbConf...)
 	switch strings.ToLower(sqlType) {
-	case "mysql":
+	case "mysql", "polardb":
+		// PolarDB（MySQL 版）走 MySQL wire protocol，官方驱动直连。
 		dbDialector = mysql.Open(dsn)
 	case "sqlserver", "mssql":
 		dbDialector = sqlserver.Open(dsn)
-	case "postgres", "postgresql", "postgre":
+	case "postgres", "postgresql", "postgre", "kingbase":
+		// 金仓在协议层兼容 PostgreSQL，复用同一 dialector ⇒ DialectOf 判成
+		// postgres ⇒ 复用整批 -postgresql.sql 迁移集。
 		dbDialector = postgres.Open(dsn)
+	case "dm", "dameng":
+		dbDialector = dameng.Open(dsn)
 	default:
 		return nil, errors.New(myerrors.ErrorsDbDriverNotExists + sqlType)
 	}
@@ -172,28 +280,98 @@ func getDsn(sqlType, readWrite string, dbConf ...ConfigParams) string {
 	}
 
 	switch strings.ToLower(sqlType) {
-	case "mysql":
-		// 如果未配置时区，默认使用 Local
+	case "mysql", "polardb":
+		// PolarDB（MySQL 版）与 MySQL 同一套 DSN 语法。
 		if TimeZone == "" {
 			TimeZone = "Local"
 		}
-		return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=true&loc=%s", User, Pass, Host, Port, DataBase, Charset, TimeZone)
+		// multiStatements=true:迁移 runner 一次 Exec 整个 .sql 文件(多语句),驱动必须放行
+		dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=true&loc=%s&multiStatements=true", User, Pass, Host, Port, DataBase, Charset, TimeZone)
+		// 隔离级别必须随连接下发：MySQL 服务端默认是 REPEATABLE-READ，
+		// 而本仓有大量 check-then-act 写路径，在 RR 下会因间隙锁产生死锁
+		// （详见 DefaultMySQLTransactionIsolation 的注释）。
+		// %27 是单引号：驱动会对参数值做 url.QueryUnescape 再拼进
+		// `SET transaction_isolation = '<值>'`，不带引号会拼出非法 SQL。
+		return dsn + fmt.Sprintf("&transaction_isolation=%%27%s%%27", mysqlTransactionIsolation(sqlType))
 	case "sqlserver", "mssql":
 		// UseRowNumberForPaging=true 这个参数会告诉GORM的驱动，在为分页生成SQL时，使用兼容旧版本（SQL Server 2008）的ROW_NUMBER()语法，而不是OFFSET...FETCH
 		return fmt.Sprintf("server=%s;port=%d;database=%s;user id=%s;password=%s;encrypt=disable;UseRowNumberForPaging=true", Host, Port, DataBase, User, Pass)
-	case "postgresql", "postgre", "postgres":
+	case "postgresql", "postgre", "postgres", "kingbase":
+		// 金仓与 PostgreSQL 同一套 libpq 连接串（端口默认 54321，由配置给）。
 		// 如果未配置时区，默认使用 Asia/Shanghai
 		if TimeZone == "" {
 			TimeZone = "Asia/Shanghai"
 		}
 		return fmt.Sprintf("host=%s port=%d dbname=%s user=%s password=%s sslmode=disable TimeZone=%s", Host, Port, DataBase, User, Pass, TimeZone)
+	case "dm", "dameng":
+		// 达梦的 DSN 与前三者完全不同：dm://user:pass@host:port?schema=X
+		//
+		// ⛔ schema 不是可选的锦上添花 —— 达梦一套实例下按模式(schema)隔离表，
+		//    登录后看到的表集合取决于当前模式。不指定时驱动会用用户的默认模式，
+		//    而「用户名即模式名」，一旦建库时的模式与登录用户不一致，
+		//    迁移会把表建到 A 模式、业务查询去 B 模式找，表现为「建表成功但查不到表」。
+		//    所以这里读不到就退回用户名，绝不留给驱动自己猜。
+		schema := app.ConfigYml.GetString("gormv2." + sqlType + "." + readWrite + ".schema")
+		if schema == "" {
+			schema = app.ConfigYml.GetString("gormv2." + sqlType + ".schema")
+		}
+		if schema == "" {
+			schema = User
+		}
+		return dameng.BuildUrl(User, Pass, Host, Port, map[string]string{"schema": schema})
 	}
 	return ""
 }
 
-// 创建自定义日志模块，对 gorm 日志进行拦截、
-func redefineLog(sqlType string) gormLog.Interface {
-	return createCustomGormLog(sqlType,
-		SetInfoStrFormat("[info] %s\n"), SetWarnStrFormat("[warn] %s\n"), SetTraceErrStrFormat("[error] %s\n"),
-		SetTraceStrFormat("[traceStr] %s [%.3fms] [rows:%v] %s\n"), SetTraceWarnStrFormat("[traceWarn] %s %s [%.3fms] [rows:%v] %s\n"), SetTracErrStrFormat("[traceErr] %s %s [%.3fms] [rows:%v] %s\n"))
+// mysqlIsolationLevels 是允许下发给 MySQL 连接的隔离级别白名单。
+//
+// ⛔ 不是多此一举：这个值最终会被拼成 `SET transaction_isolation = '<值>'`，
+// 而驱动对参数值只做 url 解码、不做 SQL 转义（见 go-sql-driver/mysql
+// connection.go 里的 cmdSet 拼接）。配置项由运维填写，但配置文件可能来自
+// 客户现场，不能假设可信 —— 不做白名单就是一条注入通道。
+var mysqlIsolationLevels = map[string]struct{}{
+	"READ-UNCOMMITTED": {},
+	"READ-COMMITTED":   {},
+	"REPEATABLE-READ":  {},
+	"SERIALIZABLE":     {},
 }
+
+// DefaultMySQLTransactionIsolation 是 MySQL 连接使用的默认隔离级别。
+//
+// ⛔⛔ 为什么不用 MySQL 默认的 REPEATABLE-READ：
+// RR 下对**不存在的行**做等值查询会加间隙锁（gap lock）。本仓有大量
+// 「先查唯一键是否存在、不存在则插入」的写路径（通道挂载、设备订阅），
+// 这在高并发下极其危险：所有事务都锁在同一段尾间隙上，再各自申请
+// insert intention lock ⇒ 互相等待 ⇒ 死锁。
+//
+// 2026-11-09 在 220 上实测（10002 台设备空库冷启动，MySQL 8.0.46）：
+//   - `gb_channel_mount` insert 死锁 6311 条，15 秒新增 1563 条；
+//   - 慢查询 p50 38 秒 / max 120 秒，其中 select 占 2141 条 —— 普通查询
+//     也在排队，因为 128 条连接全被卡在锁上；
+//   - 通道覆盖率仅 836/10002 = 8.4%，设备在线但页面看不到摄像头；
+//   - InnoDB 死锁快照证实：两个事务插入**不同的行**，却都持有 supremum
+//     的 X 锁并等待同一个 insert intention ⇒ 典型间隙锁死锁。
+//
+// READ-COMMITTED 不产生间隙锁，这类死锁从根上消失；代价是允许不可重复读
+// 与幻读，而本仓的事务都是「注册/心跳/目录同步」这类短事务，不依赖
+// 同一事务内两次读取一致，因此语义上是安全的。
+const DefaultMySQLTransactionIsolation = "READ-COMMITTED"
+
+// mysqlTransactionIsolation 读取并校验 MySQL 隔离级别，非法值静默回落默认值。
+//
+// ⛔ 回落而不是报错：隔离级别配错了不该让平台起不来（登录页都打不开），
+// 而且回落方向是「更安全的并发行为」，不会引入数据风险。
+func mysqlTransactionIsolation(sqlType string) string {
+	raw := strings.ToUpper(strings.TrimSpace(
+		app.ConfigYml.GetString("gormv2." + sqlType + ".transactionisolation")))
+	if raw == "" {
+		return DefaultMySQLTransactionIsolation
+	}
+	if _, ok := mysqlIsolationLevels[raw]; !ok {
+		return DefaultMySQLTransactionIsolation
+	}
+	return raw
+}
+
+// 创建自定义日志模块，对 gorm 日志进行拦截、
+func redefineLog(sqlType string) gormLog.Interface { return createCustomGormLog(sqlType) }

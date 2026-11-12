@@ -1,0 +1,2 @@
+ALTER TABLE "meta_node"
+  ADD COLUMN "sdp_ip" TEXT NOT NULL DEFAULT '';

@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>UVP · 设备管理页 · 视觉原型</title>
+<link rel="stylesheet" href="./common.css" />
+<style>
+  body { padding: var(--space-8) var(--space-6); }
+  .wrap { max-width: 1200px; margin: 0 auto; }
+  .head { padding-bottom: var(--space-4); border-bottom: 1px solid var(--color-border-2); margin-bottom: var(--space-6); }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    color: var(--color-text-3);
+    text-transform: uppercase;
+    margin-bottom: var(--space-2);
+  }
+  h1 {
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--color-text-1);
+    letter-spacing: -0.3px;
+    margin-bottom: var(--space-3);
+  }
+  .lede {
+    max-width: 76ch;
+    color: var(--color-text-3);
+    font-size: var(--font-13);
+    line-height: 1.7;
+  }
+  .lede code {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 1px 6px;
+    background: var(--color-bg-2);
+    border: 1px solid var(--color-border-2);
+    border-radius: var(--radius-1);
+    color: var(--color-text-2);
+  }
+  .lede a {
+    color: var(--primary-5);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-4);
+    margin-top: var(--space-6);
+  }
+  .card {
+    display: flex;
+    flex-direction: column;
+    background: var(--color-bg-2);
+    border: 1px solid var(--color-border-1);
+    border-radius: var(--radius-3);
+    text-decoration: none;
+    overflow: hidden;
+    transition: transform var(--duration-mid) var(--ease-out),
+                box-shadow var(--duration-mid) var(--ease-out),
+                border-color var(--duration-mid) var(--ease-out);
+  }
+  .card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-card-hover);
+    border-color: var(--color-border-2);
+  }
+  .card .preview {
+    aspect-ratio: 16 / 10;
+    border-bottom: 1px solid var(--color-border-1);
+    position: relative;
+    overflow: hidden;
+    background: var(--color-bg-1);
+  }
+  .card iframe {
+    position: absolute;
+    inset: 0;
+    width: 200%;
+    height: 200%;
+    transform: scale(0.5);
+    transform-origin: top left;
+    border: 0;
+    pointer-events: none;
+  }
+  .card-body { padding: var(--space-4) var(--space-4) var(--space-4); }
+  .card-id {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    color: var(--color-text-3);
+    margin-bottom: var(--space-1);
+  }
+  .card h2 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--color-text-1);
+    margin-bottom: var(--space-2);
+    letter-spacing: -0.2px;
+  }
+  .card p {
+    font-size: var(--font-13);
+    color: var(--color-text-3);
+    line-height: 1.6;
+  }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: var(--space-3); }
+  .tag-pill {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    color: var(--color-text-3);
+    border: 1px solid var(--color-border-2);
+    padding: 2px 8px;
+    border-radius: var(--radius-1);
+  }
+  .tag-pill.primary { color: var(--primary-5); border-color: var(--primary-fade-24); background: var(--primary-fade-08); }
+
+  .foot {
+    margin-top: var(--space-12);
+    padding-top: var(--space-4);
+    border-top: 1px solid var(--color-border-2);
+    font-size: var(--font-12);
+    color: var(--color-text-3);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+  }
+  .foot a { color: var(--color-text-2); text-decoration: underline; text-underline-offset: 3px; }
+  .foot a:hover { color: var(--color-text-1); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="head">
+    <div class="eyebrow">UVP · Device Management · Visual Mockups</div>
+    <h1>设备管理页 · 视觉原型</h1>
+    <p class="lede">
+      对应 <code>~/Documents/Atlas/wiki/projects/uvp/specs/gb-catalog-tree-and-device-mgmt.md</code> §8 视觉规范 / §9 四视图。
+      色板 / 间距 / 阴影 / 缓动按 <code>common.css</code> token 化,plan 阶段落到 <code>web/src/style/var/global-theme.scss</code> 一对一覆盖。
+      <br><br>
+      Phase 1 出效果四件套:<a href="./list.html">列表</a> · <a href="./card.html">卡片</a> · <a href="./map.html">地图</a> · <a href="./drawer.html">详情抽屉</a>。
+      KPI 总览 (overview.html) 已挪到后续「首页面板 spec」,本期不算设备管理页范围。
+    </p>
+  </div>
+
+  <div class="grid">
+
+    <a class="card" href="./list.html" target="_blank" rel="noopener">
+      <div class="preview"><iframe src="./list.html" loading="lazy" tabindex="-1"></iframe></div>
+      <div class="card-body">
+        <div class="card-id">M5 / LIST · 运维向</div>
+        <h2>列表视图</h2>
+        <p>精致表格 56px 行 · 缩略图渐变占位 · 双行设备名 · 通道胶囊 · 在线率环形 · 相对时间 + 等宽数字 · 多挂载链状角标 · anomaly 异常徽章 · 行 hover 抬升 · 批量条 + 筛选 chip 行。</p>
+        <div class="tags">
+          <span class="tag-pill primary">spec §9.5</span>
+          <span class="tag-pill">56px ROW</span>
+          <span class="tag-pill">RING</span>
+          <span class="tag-pill">BULK</span>
+        </div>
+      </div>
+    </a>
+
+    <a class="card" href="./card.html" target="_blank" rel="noopener">
+      <div class="preview"><iframe src="./card.html" loading="lazy" tabindex="-1"></iframe></div>
+      <div class="card-body">
+        <div class="card-id">M6 / CARD · 监控员向</div>
+        <h2>卡片视图</h2>
+        <p>16:9 快照网格 · 60s 自动刷新 · 渐变蒙层状态条 · 离线灰度滤镜 + 暗化覆盖 · PTZ / 报警 / anomaly 角标 · LIVE 实时呼吸点 · 双击点播浮窗 · hover 抬升 4px + 阴影加深。</p>
+        <div class="tags">
+          <span class="tag-pill primary">spec §9.6</span>
+          <span class="tag-pill">16:9 SNAP</span>
+          <span class="tag-pill">PTZ</span>
+          <span class="tag-pill">LIVE</span>
+        </div>
+      </div>
+    </a>
+
+    <a class="card" href="./map.html" target="_blank" rel="noopener">
+      <div class="preview"><iframe src="./map.html" loading="lazy" tabindex="-1"></iframe></div>
+      <div class="card-body">
+        <div class="card-id">M7 / MAP · 地理空间</div>
+        <h2>地图视图</h2>
+        <p>暗色城市底图(济南简化 SVG)· 主干道 / 小清河 / 三行政区块 · 当前节点光晕 · 三档 Marker(在线 / 离线 / 告警呼吸)· Cluster 气泡 + 在线率弧 · hover 浮预览卡 · 视野统计气泡 · 图例 · 工具条(图层 / 热力 / 轨迹)。</p>
+        <div class="tags">
+          <span class="tag-pill primary">spec §9.7</span>
+          <span class="tag-pill">DARK MAP</span>
+          <span class="tag-pill">CLUSTER</span>
+          <span class="tag-pill">AMAP v2</span>
+        </div>
+      </div>
+    </a>
+
+    <a class="card" href="./drawer.html" target="_blank" rel="noopener">
+      <div class="preview"><iframe src="./drawer.html" loading="lazy" tabindex="-1"></iframe></div>
+      <div class="card-body">
+        <div class="card-id">M8 / DRAWER · 选中节点详情</div>
+        <h2>右侧详情抽屉</h2>
+        <p>抽屉占主区 40% 主区自适应缩窄 · 大快照 + LIVE 状态条 · 能力 chip(PTZ/音频/录像/H.265)· 国标信息表(20 位编码逐段) · 多挂载位置列表(主 + 业务分组)· 最近 24h 在线时序条 · 底部 sticky 点播 CTA + 云台/抓图/回放。</p>
+        <div class="tags">
+          <span class="tag-pill primary">spec §9.8</span>
+          <span class="tag-pill">CHANNEL</span>
+          <span class="tag-pill">TIMELINE</span>
+          <span class="tag-pill">STICKY CTA</span>
+        </div>
+      </div>
+    </a>
+
+  </div>
+
+  <div class="foot">
+    <span>web/design-mockups/gb-device-mgmt/index.html</span>
+    <span>
+      <a href="../index.html">← 回到 design-mockups 总入口</a>
+      &nbsp; · &nbsp;
+      <a href="./common.css">查看 common.css token</a>
+    </span>
+  </div>
+</div>
+</body>
+</html>

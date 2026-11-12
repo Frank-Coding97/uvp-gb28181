@@ -1,7 +1,7 @@
 package service
 
 import (
-	"uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/models"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -19,23 +19,29 @@ func NewSysJobResultsService() *SysJobResultsService {
 func (s *SysJobResultsService) Delete(c *gin.Context, id uint64) error {
 	// 查找sys_job_results记录
 	sysJobResults := models.NewSysJobResults()
-	if err := sysJobResults.GetByID(c, id); err != nil {
+	if err := sysJobResults.GetByID(c.Request.Context(), id); err != nil {
 		return err
 	}
 
 	// 删除数据库记录
-	if err := sysJobResults.Delete(c); err != nil {
+	if err := sysJobResults.Delete(c.Request.Context()); err != nil {
 		return err
 	}
 
 	return nil
 }
 
+// ClearAll 清空sys_job_results全部记录，返回删除行数
+func (s *SysJobResultsService) ClearAll(c *gin.Context) (int64, error) {
+	sysJobResultsList := models.NewSysJobResultsList()
+	return sysJobResultsList.ClearAll(c.Request.Context())
+}
+
 // GetByID 根据ID获取sys_job_results
 func (s *SysJobResultsService) GetByID(c *gin.Context, id uint64) (*models.SysJobResults, error) {
 	// 查找sys_job_results记录
 	sysJobResults := models.NewSysJobResults()
-	if err := sysJobResults.GetByID(c, id); err != nil {
+	if err := sysJobResults.GetByID(c.Request.Context(), id); err != nil {
 		return nil, err
 	}
 
@@ -47,13 +53,13 @@ func (s *SysJobResultsService) List(c *gin.Context, req models.SysJobResultsList
 	// 获取总数
 	sysJobResultsList := models.NewSysJobResultsList()
 	scopes := []func(*gorm.DB) *gorm.DB{req.Handle()}
-	total, err := sysJobResultsList.GetTotal(c, scopes...)
+	total, err := sysJobResultsList.GetTotal(c.Request.Context(), scopes...)
 	if err != nil {
 		return nil, 0, err
 	}
 	scopes = append(scopes, req.Paginate())
 	// 获取分页数据
-	err = sysJobResultsList.Find(c, scopes...)
+	err = sysJobResultsList.Find(c.Request.Context(), scopes...)
 	if err != nil {
 		return nil, 0, err
 	}

@@ -1,0 +1,4 @@
+# 前端检查闸门：只对本次暂存的文件跑 eslint --fix / prettier --write / stylelint --fix。
+# husky 执行钩子时 cwd 是仓库根，而前端工程在 web/ 下，所以先切进去；
+# 切进去之后 lint-staged 只会看到 web/ 范围内的暂存文件，不会去碰后端的 Go 代码。
+cd web && ./node_modules/.bin/lint-staged

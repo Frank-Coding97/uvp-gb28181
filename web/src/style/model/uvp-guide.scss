@@ -1,0 +1,224 @@
+/*
+ * 新手引导浮层皮肤（driver.js）
+ *
+ * 为什么必须重写而不是「微调」：driver.js 自带样式是给独立 demo 用的 ——
+ *   `all: unset` 打底、13px Helvetica、5px 圆角、白底黑边加纯黑投影。
+ * 落在我们这套「14px / 14px 圆角 / 冷调浅蓝灰边 / --uvp-dialog-* 阴影」的语言里
+ * 一眼就是外来物。这里把它整体拉回系统语言，颜色全部走 token，
+ * 因此**暗色主题天然跟随**，不需要再写一份 `body[arco-theme="dark"]` 分支。
+ *
+ * ⛔⛔ 选择器一律带 `.driver-popover.uvp-guide`（两个类）：
+ *   driver.css 里 `.driver-popover *` 的特异性是 (0,1,0)，只写 `.uvp-guide *`
+ *   同样是 (0,1,0) —— 打平就**比加载顺序**，而 driver.css 是在 useGuide.ts 里
+ *   后置引入的，会赢。两个类一起写 (0,2,0) 才能稳压，无需 !important。
+ */
+
+.driver-popover.uvp-guide {
+  box-sizing: border-box;
+
+  /* 下限定 300 而不是 288：图例那一步是「键 + 释义」两列，窄一点释义就整块换行，
+     扫读时眼睛要来回折，反而不如宽一点。 */
+  min-width: 300px;
+  max-width: 384px;
+  padding: 16px 18px 14px;
+  font-family: AliFangYuanTi, "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: var(--uvp-text-primary);
+  background: var(--uvp-dialog-bg);
+  border: 1px solid var(--uvp-dialog-border);
+  border-radius: 14px;
+  box-shadow:
+    0 14px 36px -14px rgb(15 23 42 / 22%),
+    0 4px 10px -4px rgb(15 23 42 / 10%),
+    inset 0 1px 2px rgb(15 23 42 / 4%);
+}
+
+/* driver.css 给浮层内所有后代钉死了 Helvetica，必须同级压回去。 */
+.driver-popover.uvp-guide * {
+  font-family: AliFangYuanTi, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+.driver-popover.uvp-guide .driver-popover-title {
+  padding-right: 26px;
+  font-size: 15px;
+  font-weight: 640;
+  line-height: 22px;
+  color: var(--uvp-text-primary);
+  letter-spacing: 0.1px;
+}
+
+.driver-popover.uvp-guide .driver-popover-description {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 21px;
+  color: var(--uvp-text-secondary);
+  letter-spacing: 0.1px;
+}
+
+/* 正文里的 <b> 强调。默认只加粗、颜色仍继承 secondary，在暗色下几乎看不出强调，
+   统一提到 primary 色。 */
+.driver-popover.uvp-guide .driver-popover-description b {
+  font-weight: 600;
+  color: var(--uvp-text-primary);
+}
+
+/* 关闭按钮：默认 18px 的灰色 ✕ 位置偏外，收进来一点跟标题基线对齐。 */
+.driver-popover.uvp-guide .driver-popover-close-btn {
+  top: 10px;
+  right: 10px;
+  width: 22px;
+  height: 22px;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--uvp-text-tertiary);
+  border-radius: 6px;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.driver-popover.uvp-guide .driver-popover-close-btn:hover,
+.driver-popover.uvp-guide .driver-popover-close-btn:focus {
+  color: var(--uvp-text-primary);
+  background: color-mix(in srgb, var(--uvp-text-primary) 7%, transparent);
+}
+
+.driver-popover.uvp-guide .driver-popover-footer {
+  margin-top: 14px;
+}
+
+.driver-popover.uvp-guide .driver-popover-progress-text {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--uvp-text-tertiary);
+  letter-spacing: 0.2px;
+}
+
+/* ── 底部按钮 ────────────────────────────────────────────────────────────
+ * ⛔⛔ 主按钮的实心底色必须用 `--uvp-solid-bg`，**不能**用 `--uvp-brand`：
+ *   那是文字色，暗色下等于浅蓝 #60a5fa，白字压上去对比度只有 2:1，
+ *   整块按钮会「发白发糊」。solid 一组两套主题都是深蓝 #2563eb，白字约 5:1。
+ * ──────────────────────────────────────────────────────────────────────── */
+.driver-popover.uvp-guide .driver-popover-footer button {
+  padding: 5px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--uvp-secondary-action-text);
+  text-shadow: none;
+  background: var(--uvp-search-secondary-btn-bg);
+  border: 1px solid var(--uvp-search-secondary-btn-border);
+  border-radius: 8px;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.driver-popover.uvp-guide .driver-popover-footer button:hover,
+.driver-popover.uvp-guide .driver-popover-footer button:focus {
+  outline: none;
+  background: var(--uvp-search-secondary-btn-hover-bg);
+  border-color: var(--uvp-secondary-action-border);
+}
+
+/* 主按钮。⛔ 用 driver 自己的 `driver-popover-next-btn` 类，不走 `:last-child` ——
+ * 第一步时「上一步」会被隐藏，靠位置判断容易把次序搞错。
+ * ⛔⛔ 选择器必须带 `.driver-popover-footer`（凑到 4 个类）：上面那条按钮基础规则是
+ *    `.driver-popover.uvp-guide .driver-popover-footer button`，特异性 (0,3,1)；
+ *    只写 `.driver-popover.uvp-guide .driver-popover-next-btn` 是 (0,3,0)，
+ *    **会被基础规则压掉** —— 实测表现就是主按钮和「上一步」长得一模一样（白底描边），
+ *    整个浮层失去唯一的行动指引。 */
+.driver-popover.uvp-guide .driver-popover-footer .driver-popover-next-btn {
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-bg);
+  border-color: var(--uvp-solid-border);
+}
+
+.driver-popover.uvp-guide .driver-popover-footer .driver-popover-next-btn:hover,
+.driver-popover.uvp-guide .driver-popover-footer .driver-popover-next-btn:focus {
+  color: var(--uvp-solid-text);
+  background: var(--uvp-solid-hover-bg);
+  border-color: var(--uvp-solid-hover-bg);
+}
+
+.driver-popover.uvp-guide .driver-popover-footer .driver-popover-next-btn:active {
+  background: var(--uvp-solid-active-bg);
+  border-color: var(--uvp-solid-active-bg);
+}
+
+.driver-popover.uvp-guide .driver-popover-footer .driver-popover-btn-disabled {
+  opacity: 0.45;
+}
+
+.driver-popover.uvp-guide .driver-popover-navigation-btns button + button {
+  margin-left: 8px;
+}
+
+/* ── 箭头 ────────────────────────────────────────────────────────────────
+ * 默认是写死的白三角。颜色必须跟着浮层底色走，否则暗色下箭头是一块亮白的补丁。
+ * 方向语义：`arrow-side-top` = 浮层在元素**上方** ⇒ 箭头贴在浮层底边朝下。
+ * ──────────────────────────────────────────────────────────────────────── */
+.driver-popover.uvp-guide .driver-popover-arrow {
+  border-width: 6px;
+}
+
+.driver-popover.uvp-guide .driver-popover-arrow-side-top {
+  border-top-color: var(--uvp-dialog-bg);
+}
+
+.driver-popover.uvp-guide .driver-popover-arrow-side-bottom {
+  border-bottom-color: var(--uvp-dialog-bg);
+}
+
+.driver-popover.uvp-guide .driver-popover-arrow-side-left {
+  border-left-color: var(--uvp-dialog-bg);
+}
+
+.driver-popover.uvp-guide .driver-popover-arrow-side-right {
+  border-right-color: var(--uvp-dialog-bg);
+}
+
+/* ═══════════════════ 按钮图例（description 里用 HTML 排版） ═══════════════════
+ * 设备列表的操作列有 7 个按钮，一句自然语言讲不清。用「键 + 释义」两列，
+ * 键做成浅底小胶囊，跟表格里的动作按钮观感呼应。
+ * ⛔ 这两列的宽度是**固定**的（62px）：用 auto 时每行按最长键算宽，
+ *    「通道」和「维护」两行会左右错开，看着像没对齐。
+ * ═══════════════════════════════════════════════════════════════════════════ */
+.driver-popover.uvp-guide .uvp-guide-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 11px;
+}
+
+.driver-popover.uvp-guide .uvp-guide-legend__row {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 9px;
+  align-items: baseline;
+}
+
+.driver-popover.uvp-guide .uvp-guide-legend__key {
+  padding: 1px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--uvp-text-primary);
+  text-align: center;
+  white-space: nowrap;
+  background: var(--uvp-surface-muted);
+  border: 1px solid var(--uvp-border-subtle);
+  border-radius: 5px;
+}
+
+.driver-popover.uvp-guide .uvp-guide-legend__desc {
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--uvp-text-secondary);
+}
+
+/* 步骤里需要强调的关键词（比如「自动刷新」的倒计时）。 */
+.driver-popover.uvp-guide .uvp-guide-em {
+  font-weight: 600;
+  color: var(--uvp-text-primary);
+}

@@ -1,4 +1,3 @@
-import { Tenant } from "@/api/tenant";
 export type userType = {
   id: number;
   avatar: string;
@@ -6,10 +5,4 @@ export type userType = {
   nickname: string;
   roles: Array<number>;
   permissions: Array<string>;
-  tenantID: number;
-  tenantCode: string;
-  tenantName: string;
-  tenantDomain: string;
-  defaultTenant?: Tenant;
-  tenants?: Array<Tenant>;
 };

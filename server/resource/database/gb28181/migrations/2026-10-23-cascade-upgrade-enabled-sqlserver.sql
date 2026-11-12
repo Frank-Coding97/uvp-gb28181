@@ -1,0 +1,1 @@
+IF COL_LENGTH(N'dbo.gb_cascade_platform', N'upgrade_enabled') IS NULL ALTER TABLE [dbo].[gb_cascade_platform] ADD [upgrade_enabled] BIT NOT NULL CONSTRAINT [df_gb_cascade_platform_upgrade_enabled] DEFAULT 0;

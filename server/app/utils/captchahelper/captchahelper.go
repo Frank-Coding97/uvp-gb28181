@@ -1,8 +1,9 @@
 package captchahelper
 
 import (
-	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"sync"
+	"time"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 
 	"github.com/mojocn/base64Captcha"
 )
@@ -17,6 +18,9 @@ var (
 	captchaHelperOnce     sync.Once
 )
 
+// 验证码有效期：超时即失效，避免一次出码被无限次重试。
+const captchaTTL = 5 * time.Minute
+
 // GetCaptchaHelper 获取CaptchaHelper单例
 func GetCaptchaHelper() *CaptchaHelper {
 	captchaHelperOnce.Do(func() {
@@ -27,18 +31,13 @@ func GetCaptchaHelper() *CaptchaHelper {
 
 // NewCaptchaHelper 创建CaptchaHelper实例
 func NewCaptchaHelper() *CaptchaHelper {
-	store := base64Captcha.DefaultMemStore
-	ds := &base64Captcha.DriverString{
-		Height:          32,                                     // 验证码高度
-		Width:           150,                                    // 验证码宽度
-		NoiseCount:      20,                                     // 验证码干扰点数量
-		ShowLineOptions: 10,                                     // 验证码干扰线数量
-		Length:          app.ConfigYml.GetInt("captcha.length"), // 验证码字符长度
-		Source:          "abcdefghjkmnpqrstuvwxyz23456789",      // 验证码字符源
-		Fonts:           []string{"chromohv.ttf"},               // 验证码字体
-	}
+	// 验证码有限期内有效，用完即销毁（Verify 的 clear=true）
+	store := base64Captcha.NewMemoryStore(1024, captchaTTL)
+	// 图形由 ReadableDriver 自绘（字号/配色可控），不再用库里 RandomColor 那套随机器，
+	// 避免出现浅色字压浅色底导致"看不出来"。
+	driver := NewReadableDriver(app.ConfigYml.GetInt("captcha.length"))
 	return &CaptchaHelper{
-		driver: base64Captcha.NewCaptcha(ds.ConvertFonts(), store),
+		driver: base64Captcha.NewCaptcha(driver, store),
 		store:  store,
 	}
 }

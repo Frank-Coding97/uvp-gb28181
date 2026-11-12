@@ -1,6 +1,7 @@
 package imagehelper
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -17,13 +18,13 @@ import (
 // dstPath: 缩略图保存路径
 // width: 缩略图宽度
 // height: 缩略图高度
-func GenerateThumbnail(srcPath, dstPath string, width, height int) error {
+func GenerateThumbnail(srcPath, dstPath string, width, height int) (err error) {
 	// 打开原图文件
 	srcFile, err := os.Open(srcPath)
 	if err != nil {
 		return fmt.Errorf("打开原图失败: %v", err)
 	}
-	defer srcFile.Close()
+	defer func() { err = errors.Join(err, srcFile.Close()) }()
 
 	// 解码图片
 	img, format, err := image.Decode(srcFile)
@@ -45,7 +46,7 @@ func GenerateThumbnail(srcPath, dstPath string, width, height int) error {
 	if err != nil {
 		return fmt.Errorf("创建缩略图文件失败: %v", err)
 	}
-	defer dstFile.Close()
+	defer func() { err = errors.Join(err, dstFile.Close()) }()
 
 	// 根据格式编码保存
 	switch strings.ToLower(format) {

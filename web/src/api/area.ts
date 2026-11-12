@@ -30,7 +30,7 @@ let areaDataPromise: Promise<AreaItem[]> | null = null;
 /**
  * 获取地区数据
  * 从服务器获取地区数据，并实现缓存机制避免重复请求
- * 
+ *
  * @returns Promise<AreaItem[]> 地区数据数组
  */
 export async function getAreaData(): Promise<AreaItem[]> {
@@ -46,12 +46,12 @@ export async function getAreaData(): Promise<AreaItem[]> {
 
   // 发起请求并缓存 Promise
   areaDataPromise = fetchAreaDataFromServer()
-    .then((data) => {
+    .then(data => {
       areaDataCache = data;
       areaDataPromise = null; // 请求完成后清除 Promise 缓存
       return data;
     })
-    .catch((error) => {
+    .catch(error => {
       areaDataPromise = null; // 请求失败后清除 Promise 缓存
       throw error;
     });
@@ -61,12 +61,12 @@ export async function getAreaData(): Promise<AreaItem[]> {
 
 /**
  * 从服务器获取地区数据
- * 
+ *
  * @returns Promise<AreaItem[]> 地区数据数组
  */
 async function fetchAreaDataFromServer(): Promise<AreaItem[]> {
   const url = import.meta.env.VITE_APP_BASE_URL + "/public/area/area.json";
-  
+
   try {
     const data = await http.request<AreaItem[]>("get", url);
     return data;
@@ -78,20 +78,17 @@ async function fetchAreaDataFromServer(): Promise<AreaItem[]> {
 
 /**
  * 根据地区编码路径查找地区信息
- * 
+ *
  * @param areaData 地区数据数组
  * @param path 地区编码路径数组（如 ["11", "1101", "110101"]）
  * @returns AreaItem[] 匹配的地区信息数组
  */
-export function findAreaByPath(
-  areaData: AreaItem[],
-  path: string[]
-): AreaItem[] {
+export function findAreaByPath(areaData: AreaItem[], path: string[]): AreaItem[] {
   const result: AreaItem[] = [];
   let currentLevel = areaData;
 
   for (const code of path) {
-    const found = currentLevel.find((item) => item.value === code);
+    const found = currentLevel.find(item => item.value === code);
     if (found) {
       result.push(found);
       currentLevel = found.children || [];

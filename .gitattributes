@@ -1,0 +1,18 @@
+# Source files use LF consistently across macOS, Linux, and CI.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Preserve binary and protocol fixture bytes.
+*.dat -text
+*.bin -text
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.zip binary
+*.gz binary

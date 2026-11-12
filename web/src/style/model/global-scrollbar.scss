@@ -11,7 +11,7 @@
 ::-webkit-scrollbar-thumb {
   width: 6px;
   height: 6px;
-  background-color: $color-border-3;
+  background-color: var(--uvp-scrollbar-thumb);
   border-radius: 6px;
 }
 
@@ -19,29 +19,40 @@
 ::-webkit-scrollbar-thumb:hover {
   width: 6px;
   height: 6px;
-  background-color: $color-border-4;
+  background-color: var(--uvp-scrollbar-thumb-hover);
 }
 
 // 设置IE/Edge浏览器滚动条的样式，与webkit内核浏览器样式相同
 ::-ms-scrollbar-thumb {
   width: 6px;
   height: 6px;
-  background-color: $color-border-3;
+  background-color: var(--uvp-scrollbar-thumb);
   border-radius: 6px;
 }
 ::-ms-scrollbar-thumb:hover {
   width: 6px;
   height: 6px;
-  background-color: $color-border-4;
+  background-color: var(--uvp-scrollbar-thumb-hover);
 }
 
 // arco滚动条样式
+.arco-scrollbar .arco-scrollbar-thumb-bar {
+  background-color: var(--uvp-scrollbar-thumb);
+}
+
+.arco-scrollbar .arco-scrollbar-thumb:hover .arco-scrollbar-thumb-bar,
+.arco-scrollbar .arco-scrollbar-thumb-dragging .arco-scrollbar-thumb-bar {
+  background-color: var(--uvp-scrollbar-thumb-hover);
+}
+
 // 横向
 .arco-scrollbar-thumb-direction-horizontal .arco-scrollbar-thumb-bar {
   height: 4px !important;
+  margin: 5.5px 0 !important;
 }
 
 // 纵向
 .arco-scrollbar-thumb-direction-vertical .arco-scrollbar-thumb-bar {
   width: 4px !important;
+  margin: 0 5.5px !important;
 }

@@ -18,7 +18,9 @@ ehthumbs.db
 *~
 
 # AI 工具
+.ai/
 .claude/
+.codex/
 CLAUDE.md
 AGENTS.md
 .trae/
@@ -47,3 +49,58 @@ temp/
 .env
 .env.local
 .env.production
+
+# VS Code dlv 调试临时二进制
+server/__debug_bin*
+__debug_bin*
+
+# 编译出的服务端二进制
+server/uvp-gb28181
+server/main
+
+# 本地 MCP / Playwright 调试配置(可能含密钥)
+.mcp.json
+.playwright-mcp/
+server/.playwright-mcp/
+
+# 本地 CI/CD 临时密钥（仅用于初始化 GitHub Secrets，严禁提交）
+.ci-secrets/
+
+# 发布产物(打包脚本输出,不入库)
+release-output/
+
+# 运行时上传目录(固件包/图片等测试数据,不入库)
+server/uploads/
+
+# 临时截图 / 调试 JSON(开发过程产物,不入库)
+*.png
+!web/public/**/*.png
+!web/src/**/*.png
+!server/**/*.png
+check-*.json
+test-long-text.json
+
+# Local credential keys
+**/secrets/cascade.key
+**/secrets/.cascade-key-*
+
+# 出包脚本的"预置源码包"目录（UVP_SRCDIR 指向它，容器里挂成 /src/.uvp-src）。
+# 装的是 nginx/openssl/pcre2/zlib/redis 的官方 tar 包，合计 ~25MB ——
+# 它们只是网络不稳时的离线兜底，不该进仓库（每次出包都能重新下）。
+.uvp-src/
+
+# 过程文档：AI 产出的规格/方案/任务记录/审查稿，只在本地参考，不入库。
+# ⚠️ docs/releases/（发版脚本按版本号取用）与 docs/contact/（README 配图）**不在此列**，
+#    它们是对外交付物，必须入库。
+docs/specs/
+docs/plans/
+docs/tasks/
+docs/audits/
+docs/device-channel-tree/
+docs/camera-first-frame-*.md
+
+# 用户操作手册与软著申请材料：正文、142 张插图、导出的 docx/PDF 合计约 90MB，
+# 一次性推进两个公开远程就永久留在历史里。老板 2026-10-22 决定：**整个留在本地不入库**。
+# ⚠️ 下次真要把手册发出去，走 Gitee 发行版附件（与交付包同一条路），别提交进 git。
+docs/manual/
+docs/software-copyright/

@@ -25,7 +25,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref } from "vue";
 
 const departmentId = ref(0);
 </script>
@@ -41,9 +41,9 @@ const departmentId = ref(0);
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref } from "vue";
 
-const departmentIds = ref('');
+const departmentIds = ref("");
 </script>
 ```
 
@@ -78,18 +78,18 @@ const departmentIds = ref('');
 
 ### Props
 
-| 属性 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| modelValue | `number \| string \| undefined` | - | **必填**。绑定值，单选时为数值，多选时为逗号分隔的字符串，支持 `undefined` |
-| multiple | `boolean` | `false` | 是否多选模式 |
-| disabled | `boolean` | `false` | 是否禁用 |
-| placeholder | `string` | `'请选择部门'` | 占位符文本 |
-| maxLabelLength | `number` | `10` | 标签文本最大长度，超出显示省略号 |
+| 属性           | 类型                            | 默认值         | 说明                                                                       |
+| -------------- | ------------------------------- | -------------- | -------------------------------------------------------------------------- |
+| modelValue     | `number \| string \| undefined` | -              | **必填**。绑定值，单选时为数值，多选时为逗号分隔的字符串，支持 `undefined` |
+| multiple       | `boolean`                       | `false`        | 是否多选模式                                                               |
+| disabled       | `boolean`                       | `false`        | 是否禁用                                                                   |
+| placeholder    | `string`                        | `'请选择部门'` | 占位符文本                                                                 |
+| maxLabelLength | `number`                        | `10`           | 标签文本最大长度，超出显示省略号                                           |
 
 ### Events
 
-| 事件名 | 说明 | 参数类型 |
-|--------|------|----------|
+| 事件名            | 说明             | 参数类型                        |
+| ----------------- | ---------------- | ------------------------------- |
 | update:modelValue | 绑定值变化时触发 | `number \| string \| undefined` |
 
 ## 数据格式说明
@@ -110,10 +110,10 @@ const departmentId: number | undefined = undefined;
 
 ```typescript
 // 绑定值类型（逗号分隔的字符串）
-const departmentIds: string | undefined = '1,2,3';
+const departmentIds: string | undefined = "1,2,3";
 
 // 未选中时
-const departmentIds: string | undefined = '';
+const departmentIds: string | undefined = "";
 // 或者
 const departmentIds: string | undefined = undefined;
 ```
@@ -128,31 +128,23 @@ const departmentIds: string | undefined = undefined;
     </a-form-item>
 
     <a-form-item label="管辖部门（多选）">
-      <select-department 
-        v-model="form.manageDeptIds" 
-        :multiple="true" 
-        placeholder="请选择管辖部门"
-      />
+      <select-department v-model="form.manageDeptIds" :multiple="true" placeholder="请选择管辖部门" />
     </a-form-item>
 
     <a-form-item label="部门（禁用）">
-      <select-department 
-        v-model="form.fixedDeptId" 
-        :disabled="true" 
-        placeholder="不可选择"
-      />
+      <select-department v-model="form.fixedDeptId" :disabled="true" placeholder="不可选择" />
     </a-form-item>
   </a-form>
 </template>
 
 <script setup lang="ts">
-import { reactive } from 'vue';
+import { reactive } from "vue";
 
 const form = reactive({
-  departmentId: 0,        // 单选，初始未选中
-  manageDeptIds: '',      // 多选，初始未选中
-  fixedDeptId: 1,         // 单选，已选中部门 1
-  optionalId: undefined   // 单选，使用 undefined 表示未选中
+  departmentId: 0, // 单选，初始未选中
+  manageDeptIds: "", // 多选，初始未选中
+  fixedDeptId: 1, // 单选，已选中部门 1
+  optionalId: undefined // 单选，使用 undefined 表示未选中
 });
 </script>
 ```
@@ -181,12 +173,12 @@ select-department/
 
 ## 与 SelectUser 组件的差异
 
-| 特性 | SelectUser | SelectDepartment |
-|------|-----------|------------------|
-| 数据展示方式 | 表格 + 分页 | 树形结构 |
-| 数据加载 | 分页加载 | 一次性加载全部 |
-| 搜索范围 | 用户名称/昵称 | 部门名称 |
-| 选择方式 | 点击行选中 | 点击节点选中/多选复选框 |
+| 特性         | SelectUser    | SelectDepartment        |
+| ------------ | ------------- | ----------------------- |
+| 数据展示方式 | 表格 + 分页   | 树形结构                |
+| 数据加载     | 分页加载      | 一次性加载全部          |
+| 搜索范围     | 用户名称/昵称 | 部门名称                |
+| 选择方式     | 点击行选中    | 点击节点选中/多选复选框 |
 
 ## 更新日志
 
