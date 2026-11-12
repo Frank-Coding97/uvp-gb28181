@@ -118,6 +118,23 @@ else
   echo "[uvp-zlm][WARN] 未提供 UVP_ZLM_SECRET，ZLM 会用出厂 secret 或随机生成，平台将无法调用其 API" >&2
 fi
 
+# ---- WebRTC 对外地址（[rtc] externIP）----
+# ⛔ 为什么必须在这里写：这个键出厂是空值，ZLM 只能把**本机网卡地址**写进 SDP。
+#   浏览器与平台不在同一网段时那个地址不可达 ⇒ 对讲"点了没反应"。
+# ⛔ ZLM 对它是**替换**语义（m.addr.address = extern_ips[0]），不是追加 ——
+#   填一个错地址，连内网原本能直连的候选都会一起被换掉。
+# ⛔ 没给值就**不动 ini**：不猜、也不清空。页面里手填过的值会被 ZLM 落盘回
+#   config.ini（setServerConfig 会 dumpFile），这里清空等于把人家改的抹掉。
+if [ -n "${UVP_ZLM_EXTERN_IP:-}" ]; then
+  awk -v want="$UVP_ZLM_EXTERN_IP" '
+    /^\[/ { sec=$0; gsub(/[][ \t]/, "", sec); print; next }
+    sec=="rtc" && /^externIP=/ { print "externIP=" want; next }
+    { print }
+  ' "$RUN_DIR/config.ini" > "$RUN_DIR/config.ini.tmp"
+  mv "$RUN_DIR/config.ini.tmp" "$RUN_DIR/config.ini"
+  echo "[uvp-zlm] rtc.externIP 已设为 ${UVP_ZLM_EXTERN_IP}（WebRTC 对浏览器可见的地址）" >&2
+fi
+
 # ---- hook 回调地址里的后端端口 ----
 # ⛔ 只改「本平台的 managed hook 端点」（/index/hook/ 这个路径前缀）：
 #   cap 与 node 参数**一个都不能动** —— cap 是由 zlm.secret + mediaServerId

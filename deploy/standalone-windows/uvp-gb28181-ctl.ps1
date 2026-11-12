@@ -1083,6 +1083,32 @@ function Invoke-PortsSync {
     if ($LASTEXITCODE -ne 0) { Fail "端口同步失败（uvp-setup 退出码 $LASTEXITCODE）" }
 }
 
+# Invoke-RtcExternIP 把 WebRTC 对外地址写进 ZLM 的 config.ini（[rtc] externIP）。
+#
+# 为什么由部署脚本写：这个键出厂是空值，ZLM 只能把本机网卡地址写进 SDP；
+# 浏览器一旦不在同一网段，拿到的候选地址就不可达 —— 表现是「对讲点了没反应」。
+# 取值规则与 Linux 版完全一致（同一个 uvp-setup 子命令）：
+#   显式配置 UVP_ZLM_EXTERN_IP > 云元数据公网 IP > 本机默认出口网卡 IPv4。
+#
+# ⛔ 失败不阻断启动：对讲是附加能力，不该把「对讲不通」升级成「平台起不来」；
+#   但也绝不静默，否则现场只剩「没反应」一个线索。
+function Invoke-RtcExternIP {
+    if (-not (Test-Path -LiteralPath $ZlmIni)) { return }
+    $explicit = ''
+    $envMap = Read-EnvFileMap -Path $EnvFile
+    if ($envMap.ContainsKey('UVP_ZLM_EXTERN_IP')) { $explicit = ([string]$envMap['UVP_ZLM_EXTERN_IP']).Trim() }
+    $syncArgs = @('rtc-externip', '--ini', $ZlmIni)
+    # ⛔ 空值不能拼进去：PowerShell 拼原生命令行时会把**空字符串参数整条丢掉**，
+    #   于是 uvp-setup 收到一个没有值的 --ip 直接报错退出
+    #   （与 ports-sync 的 --user-set 是同一个坑，见上面的注释）。
+    if ($explicit -ne '') { $syncArgs += @('--ip', $explicit) }
+    & $SetupExe @syncArgs
+    if ($LASTEXITCODE -ne 0) {
+        Write-UvpWarn ('WebRTC 对外地址（rtc.externIP）同步失败 —— ' +
+                       '跨网段/公网访问时对讲可能连不上（同网段不受影响）')
+    }
+}
+
 function Invoke-TlsMaterial {
     foreach ($dir in @((Split-Path -Parent $NginxCrt), (Split-Path -Parent $ZlmSslPem))) {
         if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
@@ -1528,6 +1554,7 @@ function Invoke-Start {
     }
     Invoke-DatabaseInit
     Invoke-PortsSync -Config $config
+    Invoke-RtcExternIP
     Invoke-NginxConfRender
     Invoke-TlsMaterial
 

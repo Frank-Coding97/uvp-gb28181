@@ -157,6 +157,38 @@ detect_lan_ip() {
   printf '%s' "$ip"
 }
 
+# detect_public_ip 取云主机元数据里的「公网 IP」，取不到返回空。
+#
+# 为什么需要它：阿里云/腾讯云的弹性公网 IP 是 NAT 映射出来的，网卡上**只有
+# 内网地址 10.x** —— detect_lan_ip 拿到的是 10.x，但对公网浏览器不可达。
+# 局域网部署的机器命不中这些地址（请求会快速失败），由调用方回落到网卡地址。
+#
+# ⛔ 用 python3 而不是 curl：curl 不是每台机器都有（220 上就没有，见文件末尾的
+#   健康检查注释），而 python3 是 make-config.py 的硬依赖、必然存在。
+detect_public_ip() {
+  "$PY" - <<'PYEOF' 2>/dev/null || true
+import urllib.request
+
+for url in (
+    "http://100.100.100.200/latest/meta-data/eipv4",
+    "http://metadata.tencentyun.com/latest/meta-data/public-ipv4",
+    "http://169.254.169.254/latest/meta-data/public-ipv4",
+):
+    try:
+        with urllib.request.urlopen(url, timeout=1) as r:
+            ip = r.read(64).decode("utf-8", "replace").strip()
+    except Exception:
+        continue
+    parts = ip.split(".")
+    if len(parts) != 4 or not all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
+        continue
+    if ip == "0.0.0.0" or ip.startswith(("127.", "169.254.")):
+        continue
+    print(ip, end="")
+    break
+PYEOF
+}
+
 # ================================================================ 预检 ====
 log "预检运行环境"
 
@@ -685,6 +717,20 @@ log "  密钥已生成（OpenAPI 43 字符 / SIP trace ${#SIP_TRACE_KEY} 字符�
 # =========================================================== 编排文件 ====
 log "写入 compose.yml 与 .env"
 cp "$PKG_DIR/compose.yml" "$ROOT/compose.yml"
+
+# WebRTC 对外地址（rtc.externIP）：浏览器拿到的候选地址就是它。
+# 局网部署 = 本机内网 IP；公网部署 = 公网 IP（云主机弹性 IP 只能从元数据取）。
+# ⛔ 不能填错成"随便是哪个地址都行"：ZLM 对它是**替换**语义，填错会让
+#   连内网原本能直连的对讲一起坏掉。所以取不到就留空（ini 保持原值）。
+EXTERN_IP="${UVP_ZLM_EXTERN_IP:-}"
+if [ -z "$EXTERN_IP" ]; then EXTERN_IP="$(detect_public_ip)"; fi
+if [ -z "$EXTERN_IP" ]; then EXTERN_IP="$(detect_lan_ip)"; fi
+if [ -n "$EXTERN_IP" ]; then
+  log "WebRTC 对外地址：${EXTERN_IP}（跨网段对讲用；填错会在页面里表现为对讲连不上）"
+else
+  log "⚠️ 未检测到本机对外地址：跨网段对讲需在 .env 里手设 UVP_ZLM_EXTERN_IP"
+fi
+
 cat > "$ROOT/.env" <<ENVFILE
 UVP_ROOT=${ROOT}
 UVP_VERSION=${VERSION}
@@ -707,6 +753,9 @@ UVP_ZLM_MEDIA_SERVER_ID=uvp-media-server-0001
 #    那行传的就是这个值，两处是同一份契约。不一致时后端调 ZLM API 全部 401，
 #    平台里表现为「媒体节点在线、点播回放全失败」，而容器状态看起来完全正常。
 UVP_ZLM_SECRET=${ZLM_SECRET}
+# WebRTC 对外地址（写进 ZLM 的 [rtc] externIP）。留空 = 不动 ini。
+# 换机器/换公网 IP 后重新装一次或改这里即可；页面里改这个值会被下次启动覆盖。
+UVP_ZLM_EXTERN_IP=${EXTERN_IP}
 UVP_UPDATER_SOCKET_DIR=/run/uvp-updater
 UVP_REDIS_MAXMEMORY=512mb
 # ⛔ 密钥写进 .env：升级时不要覆盖这个文件里的这两行，换了就等于把所有

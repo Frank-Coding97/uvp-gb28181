@@ -150,7 +150,7 @@ var configCatalog = []ConfigGroup{
 		// Linux 临时端口区,乱改更容易撞端口。
 		Name: "WebRTC",
 		Items: []ConfigItem{
-			{Key: "rtc.externIP", Default: "", HotReloadable: true, Comment: "WebRTC 对外地址；公网/NAT 部署填写客户端可达的公网 IP，多个地址用逗号分隔；留空使用本机地址。保存后新建会话生效，已有会话需重新连接"},
+			{Key: "rtc.externIP", Default: "", HotReloadable: true, Comment: "WebRTC 对外地址；公网/NAT 部署填写客户端可达的公网 IP，多个地址用逗号分隔；留空使用本机地址。部署脚本会在每次启动时按本机地址自动填好（云主机取公网 IP）；如需固定自己的值，请改 config.env 的 UVP_ZLM_EXTERN_IP，否则重启会被自动值覆盖。保存后新建会话生效，已有会话需重新连接"},
 			{Key: "rtc.interfaces", Default: "", Mode: ConfigModeRestartRequired, RestartRequired: true, Comment: "ICE 绑定的网卡地址；多网卡或弹性公网 IP（机器本身 bind 不到公网 IP）时填本机内网 IP，多个用逗号分隔；留空自动选择。保存后需重启媒体节点生效"},
 			// 端口项的 Default 留空是刻意的:实际端口由部署端口规划决定(绿色包 510xx,
 			// 与上游出厂 8000/3478 并不相同),这里填一个"默认端口"会在 ZLM 没返回

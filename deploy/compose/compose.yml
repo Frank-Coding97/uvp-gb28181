@@ -90,6 +90,11 @@ services:
       #   不一致时后端调 ZLM API 一律 401，表现是「节点在线但点播/回放全失败」。
       #   不给默认值 —— 缺了就让 compose 解析阶段直接报错，别让它悄悄跑起来。
       UVP_ZLM_SECRET: ${UVP_ZLM_SECRET:?UVP_ZLM_SECRET 必填（须与后端 config.yml 的 zlm.secret 一致）}
+      # ⛔ WebRTC 对外地址：浏览器在 SDP 里拿到的候选地址就是它（ZLM 是**替换**
+      #   语义，不是追加，填错会把原本能直连的候选也换掉）。
+      #   局网部署 = 本机内网 IP；公网部署 = 公网 IP（云主机弹性 IP 由 install.sh
+      #   从元数据取）。install.sh 探测后写进 .env；留空则 entrypoint 不动 ini。
+      UVP_ZLM_EXTERN_IP: ${UVP_ZLM_EXTERN_IP:-}
     volumes:
       # ⛔ 录像/截图/HLS 都落在 ZLM 的 www 下（config.ini 里是相对路径 ./www），
       #    必须挂出来，否则容器一重建录像全没。

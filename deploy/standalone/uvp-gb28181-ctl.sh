@@ -1051,6 +1051,14 @@ ZLM_ONVIF_PORT="${ZLM_ONVIF_PORT:-51012}"
 ZLM_ICE_PORT="${UVP_ZLM_ICE_PORT:-$(read_port_env UVP_ZLM_ICE_PORT)}"
 ZLM_ICE_PORT="${ZLM_ICE_PORT:-51013}"
 
+# ---- WebRTC 对外地址（rtc.externIP）----
+# ⛔ 它决定浏览器在 SDP 里拿到的候选地址，而 ZLM 对它是**替换**语义不是追加：
+#   填一个对端连不到的地址，连内网原本能直连的候选也会被换掉 ⇒ 对讲整体不可用。
+# 留空 = 自动探测（uvp-setup rtc-externip）：云主机取元数据里的公网 IP，
+#   其它取本机默认出口网卡 IPv4 —— 局网部署填内网地址、直连公网填公网地址。
+# 现场想把这个值钉死，就在 config/config.env 里写 UVP_ZLM_EXTERN_IP=<地址>。
+ZLM_EXTERN_IP="${UVP_ZLM_EXTERN_IP:-$(read_env_file UVP_ZLM_EXTERN_IP)}"
+
 # resolve_rtp_pair 把 rtp_proxy 端口与 RTP 动态段对齐。
 #
 # ⛔⛔ 客户最容易踩的错法：改了 `UVP_ZLM_RTP_RANGE` 忘了改
@@ -2445,6 +2453,28 @@ sync_zlm_ports_ini() {
   [ "$rc" -eq 0 ] || fail "ZLM 端口同步失败（退出码 ${rc}）—— 端口跑出规划段会导致收流全废"
 }
 
+# sync_zlm_externip 把 WebRTC 对外地址写进 vendor/zlm/config.ini 的 [rtc] externIP。
+#
+# 为什么必须由部署脚本写：这个键是跨网段/公网用 WebRTC 的**唯一开关**，
+# 出厂是空值（ZLM 只能给本机网卡地址），而浏览器拿到的候选地址一旦是
+# 内网 10.x/192.168.x，公网侧根本连不上 —— 表现就是"对讲点了没反应"。
+#
+# ⛔ 不阻断启动：对讲是附加能力，探测失败不该把"对讲不通"升级成"平台起不来"。
+#   但也绝不静默 —— 否则现场只剩"没反应"这一个线索。函数内部会打一行结论。
+sync_zlm_externip() {
+  [ -f "$ZLM_INI" ] || return 0      # 没有 ini 就用 ZLM 默认值，不阻塞启动
+  [ -x "$SETUP_BIN" ] || return 0
+
+  local rc=0
+  "$SETUP_BIN" rtc-externip --ini "$ZLM_INI" --ip "${ZLM_EXTERN_IP:-}" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    log "⚠️  WebRTC 对外地址（rtc.externIP）同步失败（退出码 ${rc}）"
+    log "    后果：跨网段/公网访问时对讲可能连不上（同网段不受影响）。"
+    log "    排查：$SETUP_BIN rtc-externip --ini $ZLM_INI --dry-run"
+  fi
+  return 0
+}
+
 
 # ---------------------------------------------------------------- ZLM ----
 
@@ -2880,6 +2910,10 @@ case "${1:-start}" in
     sync_zlm_secret
     # ⛔ ZLM 端口也要同步：它的真源是 config.ini，不是本脚本里的变量。
     sync_zlm_ports_ini
+    # ⛔ WebRTC 对外地址（rtc.externIP）同样只在 ini 里生效；
+    #   必须在 start_zlm 之前写好 —— ZLM 只在启动时读一次配置，
+    #   启动后再改就得走它自己的 API（我们没有那条路径的保证）。
+    sync_zlm_externip
     # ⛔ TLS 证书必须在**起 ZLM 之前**备好：ZLM 的 HTTPS/WSS 要加载它。
     #   这里同时给 nginx 和 ZLM 准备同一套证书；失败不阻断（start_nginx 里
     #   还会再兜一次并给出明确报错），只是 ZLM 的 HTTPS 会用不上证书。
@@ -2906,6 +2940,10 @@ case "${1:-start}" in
     ;;
   restart-zlm)
     stop_zlm
+    # ⛔ 这里也同步一次对外地址：换网卡 / 换公网 IP 之后，现场最自然的动作
+    #   就是 restart-zlm，不同步的话新地址要等到下一次全量 start 才生效。
+    #   幂等：值没变就不动 ini，不会造成无谓的文件改写。
+    sync_zlm_externip
     start_zlm
     ;;
   start-updater)

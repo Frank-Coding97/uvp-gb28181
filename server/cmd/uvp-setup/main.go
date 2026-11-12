@@ -49,6 +49,8 @@ func main() {
 		err = runPortsSync(os.Args[2:])
 	case "secret-sync":
 		err = runSecretSync(os.Args[2:])
+	case "rtc-externip":
+		err = runRTExternIP(os.Args[2:])
 	case "https-state":
 		err = runHTTPSState(os.Args[2:])
 	case "https-repair-port":
@@ -84,6 +86,9 @@ func usage() {
 		"  uvp-setup ports-sync --env <config.env> --yml <config.yml> --ini <config.ini> \\",
 		"      --http P --redis P --https P --nginx-http P --zlm-http P --zlm-rtp-proxy P [--user-set K1,K2]",
 		"  uvp-setup secret-sync --ini <config.ini> --yml <config.yml>   # 以 ZLM 为准对齐 zlm.secret",
+		"  uvp-setup rtc-externip --ini <config.ini> [--ip A] [--dry-run]",
+		"      # 把「WebRTC 对外地址」写进 [rtc] externIP：优先 --ip，其次云元数据公网 IP，",
+		"      # 最后本机默认出口网卡 IPv4（局域网/直连公网都对）。留空=自动探测。",
 		"  uvp-setup https-state --root <包根> [--default-port P]        # 打印 \"<0|1> <port>\"",
 		"  uvp-setup https-repair-port --root <包根> --conflict <旧端口> --fallback <新端口>",
 		"      # 端口重排后修存量 settings.json：只在落盘端口 == conflict 时改成 fallback",
