@@ -303,7 +303,31 @@ type AlarmNotify struct {
 	} `xml:"Info"`
 }
 
+// rootElementName 返回报文根元素名；用于区分真正的报警通知与设备回的应答。
+func rootElementName(body []byte) (string, error) {
+	decoder := newDecoder(body)
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			return "", err
+		}
+		if start, ok := token.(xml.StartElement); ok {
+			return start.Name.Local, nil
+		}
+	}
+}
+
 func ParseAlarmNotify(body []byte) (*AlarmNotify, error) {
+	// 设备用 `<Response><CmdType>Alarm</CmdType><Result>OK</Result></Response>` 应答报警，
+	// 它的 CmdType 同样是 Alarm。以前只校验 CmdType，应答被当成新报警入库，
+	// 级别/方式/类型全空（平台显示「未知」）——线上已积累一批这种幽灵记录。
+	root, err := rootElementName(body)
+	if err != nil {
+		return nil, fmt.Errorf("解析 Alarm NOTIFY 失败: %w", err)
+	}
+	if root != "Notify" {
+		return nil, fmt.Errorf("非法 Alarm NOTIFY: 根元素是 %s，只有 Notify 携带报警", root)
+	}
 	var notify AlarmNotify
 	if err := newDecoder(body).Decode(&notify); err != nil {
 		return nil, fmt.Errorf("解析 Alarm NOTIFY 失败: %w", err)

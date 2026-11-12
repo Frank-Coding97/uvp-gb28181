@@ -81,6 +81,15 @@ func TestAlarmEnumLabels(t *testing.T) {
 	require.Equal(t, "图像遮挡报警（2022）", alarmType(&methodVideo, &typeThirteen).Label)
 	require.Equal(t, "未知(13)", alarmType(&methodDevice, &typeThirteen).Label)
 	require.Equal(t, "未知", alarmType(nil, nil).Label)
+
+	// 方式 7 按标准不携带 AlarmType：空类型是「不适用」，不能标成「未知」。
+	methodManual := 7
+	require.Equal(t, "—", alarmType(&methodManual, nil).Label)
+	// 但真的带了值（标准外组合）仍然要显形，不能一起藏掉。
+	typeFive := 5
+	require.Equal(t, "未知(5)", alarmType(&methodManual, &typeFive).Label)
+	// 方式 2/5/6 有类型表，空值依旧是「未知」。
+	require.Equal(t, "未知", alarmType(&methodDevice, nil).Label)
 }
 
 func TestAlarmQueryValidation(t *testing.T) {

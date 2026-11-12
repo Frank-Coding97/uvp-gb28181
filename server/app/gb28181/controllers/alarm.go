@@ -487,8 +487,24 @@ func alarmMethod(value *int) alarmEnumValue {
 	})
 }
 
+// alarmMethodHasTypeTable reports whether GB/T 28181 定义了该报警方式的 AlarmType 取值表。
+// 方式 1/3/4/7 没有类型表，报文里本来就不该出现 AlarmType。
+func alarmMethodHasTypeTable(method int) bool {
+	switch method {
+	case 2, 5, 6:
+		return true
+	default:
+		return false
+	}
+}
+
 func alarmType(method, value *int) alarmEnumValue {
 	if value == nil {
+		// 方式本身就没有类型表时，空类型是「不适用」而不是「未知」。
+		// 例如方式 7（人工报警）按标准不携带 AlarmType，标成「未知」会让人以为平台丢字段。
+		if method != nil && !alarmMethodHasTypeTable(*method) {
+			return alarmEnumValue{Label: "—"}
+		}
 		return alarmEnumValue{Label: "未知"}
 	}
 	labels := map[int]string(nil)

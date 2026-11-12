@@ -75,6 +75,22 @@ func TestParseSubscriptionNotifications(t *testing.T) {
 	require.True(t, strings.Contains(err.Error(), "经纬度"))
 }
 
+// TestParseAlarmNotifyRejectsResponse 锁住「应答不是报警」：设备的
+// `<Response><CmdType>Alarm</CmdType><Result>OK</Result></Response>` 以前会被
+// 当成新报警入库（级别/方式/类型全空，列表里显示「未知」）。
+func TestParseAlarmNotifyRejectsResponse(t *testing.T) {
+	body := []byte(`<?xml version="1.0" encoding="GB2312"?><Response><CmdType>Alarm</CmdType><SN>138</SN><DeviceID>37010000001320009024</DeviceID><Result>OK</Result></Response>`)
+	_, err := ParseAlarmNotify(body)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "根元素是 Response")
+
+	// 正常通知不受影响，且 2022 的 Info/AlarmType 仍然归一化到顶层。
+	notify, err := ParseAlarmNotify([]byte(`<?xml version="1.0" encoding="UTF-8"?><Notify><CmdType>Alarm</CmdType><SN>9</SN><DeviceID>D</DeviceID><AlarmPriority>4</AlarmPriority><AlarmMethod>5</AlarmMethod><Info><AlarmType>2</AlarmType></Info></Notify>`))
+	require.NoError(t, err)
+	require.NotNil(t, notify.AlarmType)
+	require.Equal(t, 2, *notify.AlarmType)
+}
+
 // TestParseMobilePositionNotify_2022ListForm 锁住 GB/T 28181-2022 A.2.5.6 列表形态。
 //
 // 改动前这一形态会被**静默解析成 0,0**：顶层 DeviceID 两版都有，所以非空守卫放行；
