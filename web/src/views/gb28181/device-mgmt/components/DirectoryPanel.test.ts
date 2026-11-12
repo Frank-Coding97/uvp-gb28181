@@ -275,6 +275,46 @@ describe("DirectoryPanel", () => {
     vi.useRealTimers();
   });
 
+  it("does not reload the tree when only the resource kind changes and no filter is set", async () => {
+    vi.useFakeTimers();
+    const wrapper = mountPanel();
+    await flushPromises();
+    const callsBefore = listDirectoryTree.mock.calls.length;
+
+    // 从设备列表点某台设备的「通道」：assetKind device → channel，
+    // 关键词和状态本来就是空的 —— 后端这时压根不看 assetKind，树不会有任何变化。
+    await wrapper.setProps({ resourceFilter: { assetKind: "channel", q: "", status: undefined } });
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+
+    expect(listDirectoryTree).toHaveBeenCalledTimes(callsBefore);
+    expect(wrapper.text()).toContain("山东省");
+    wrapper.unmount();
+    vi.useRealTimers();
+  });
+
+  it("still reloads when the keyword is kept and only the resource kind changes", async () => {
+    vi.useFakeTimers();
+    const wrapper = mountPanel();
+    await wrapper.setProps({ resourceFilter: { assetKind: "device", q: "Gate", status: undefined } });
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+    const callsBefore = listDirectoryTree.mock.calls.length;
+
+    // 有关键词时 assetKind 会决定匹配哪张表（设备名/编号 vs 通道名/编号），必须重载。
+    await wrapper.setProps({ resourceFilter: { assetKind: "channel", q: "Gate", status: undefined } });
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+
+    expect(listDirectoryTree.mock.calls.length).toBeGreaterThan(callsBefore);
+    expect(listDirectoryTree).toHaveBeenLastCalledWith(
+      "administrative",
+      expect.objectContaining({ assetKind: "channel", q: "Gate" })
+    );
+    wrapper.unmount();
+    vi.useRealTimers();
+  });
+
   it("keeps the latest department tree when an older refresh finishes last", async () => {
     const first = deferred<any>();
     const second = deferred<any>();

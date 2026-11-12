@@ -38,8 +38,24 @@ const revisions: Partial<Record<DirectoryView, string>> = {};
 const pending = new Set<DirectoryView>();
 let filterTimer: ReturnType<typeof setTimeout> | undefined;
 let disposed = false;
+/**
+ * ⛔ 只有「关键词 / 状态」会真正改变树的内容 —— 资源类型（assetKind）只在这两者非空时
+ * 才参与后端过滤（`filterDirectoryResources` 在 q、status 都为空时直接原样返回整棵树）。
+ *
+ * 之前直接拿 `JSON.stringify(resourceFilter)` 当 key，于是从设备列表点某台设备的「通道」
+ * 进去（assetKind 由 device 变 channel、关键词和状态本来就是空的）也会重载整棵树：
+ * 用户看到的就是「我只是点进设备的通道列表，左边目录树莫名其妙刷新了一下」。
+ * 空过滤时把 assetKind 归一掉，等价条件不重载。
+ */
+const effectiveResourceFilter = computed(() => {
+  const filter = props.resourceFilter || {};
+  const q = (filter.q || "").trim();
+  const status = filter.status || "";
+  if (!q && !status) return "";
+  return JSON.stringify({ assetKind: filter.assetKind || "", q, status });
+});
 watch(
-  () => JSON.stringify(props.resourceFilter || {}),
+  effectiveResourceFilter,
   () => {
     for (const view of Object.keys(requestTokens) as DirectoryView[]) {
       ++requestTokens[view];

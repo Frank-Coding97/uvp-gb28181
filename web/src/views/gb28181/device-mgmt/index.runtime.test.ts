@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { flushPromises, mount } from "@vue/test-utils";
+import { nextTick } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as maplibreMock from "maplibre-gl";
 import type { MapCluster } from "./api";
@@ -147,6 +148,32 @@ vi.mock("maplibre-gl", () => {
       mapInstances.push(this);
     }
     addControl() {
+      return this;
+    }
+    // 轨迹图层用到的四个方法。真实 MapLibre 一定有，mock 之前缺了这几位，
+    // 于是「切出地图时清理轨迹图层」这条路径一进用例就抛 TypeError。
+    private sourceIds = new Set<string>();
+    private layerIds = new Set<string>();
+    addSource(id: string) {
+      this.sourceIds.add(id);
+      return this;
+    }
+    getSource(id: string) {
+      return this.sourceIds.has(id) ? { id } : undefined;
+    }
+    removeSource(id: string) {
+      this.sourceIds.delete(id);
+      return this;
+    }
+    addLayer(layer: { id: string }) {
+      this.layerIds.add(layer.id);
+      return this;
+    }
+    getLayer(id: string) {
+      return this.layerIds.has(id) ? { id } : undefined;
+    }
+    removeLayer(id: string) {
+      this.layerIds.delete(id);
       return this;
     }
     // 只同步触发 load:让兜底定时器在挂载后立即存在;idle 不触发,
@@ -351,6 +378,25 @@ function lastDevicePageRequest() {
     .filter(params => params.pageSize !== 1)
     .at(-1);
 }
+
+/** 手工控制请求何时返回，用来观察"请求在飞"那一瞬间的界面状态。 */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+const pagedDevice = {
+  id: 31,
+  deviceId: "34020000002000000031",
+  name: "园区 NVR",
+  online: true,
+  status: 1,
+  channelCount: 4,
+  channelOnlineCount: 3
+};
 
 /**
  * 读页面源码本身。用于"样式挂在哪"这类只能从源码判断的断言(运行时拿不到
@@ -1376,6 +1422,72 @@ describe("device-mgmt round-2 修复回归", () => {
     expect(api.listChannels.mock.calls.length).toBeGreaterThan(initialChannelCalls);
     expect(wrapper.findComponent({ name: "DirectoryPanel" }).vm.sync).toHaveBeenCalled();
     expect(refresh.text()).toContain("10s");
+    wrapper.unmount();
+  });
+
+  it("翻页时给可见 loading，10 秒自动刷新只转按钮不盖内容", async () => {
+    api.listDevices.mockResolvedValue(okList(150, [pagedDevice]));
+    const wrapper = mountPage();
+    await flushPromises();
+    expect(wrapper.find(".card-grid-loading").exists()).toBe(false);
+
+    // 用户主动翻页：这一轮必须看得见"在加载"
+    const paging = deferred<unknown>();
+    api.listDevices.mockReturnValueOnce(paging.promise);
+    await wrapper.get('[data-testid="go-page-10"]').trigger("click");
+    await nextTick();
+    expect(wrapper.find(".card-grid-loading").exists()).toBe(true);
+    paging.resolve(okList(150, [pagedDevice]));
+    await flushPromises();
+    expect(wrapper.find(".card-grid-loading").exists()).toBe(false);
+
+    // 10 秒自动刷新：请求确实在飞，但不能把卡片盖住（用户可能正在点按钮）
+    const auto = deferred<unknown>();
+    api.listDevices.mockReturnValue(auto.promise);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await nextTick();
+    expect(api.listDevices.mock.calls.length).toBeGreaterThan(0);
+    expect(wrapper.find(".card-grid-loading").exists()).toBe(false);
+    expect(wrapper.get("[data-testid='refresh-control']").html()).toContain("spin");
+    auto.resolve(okList(150, [pagedDevice]));
+    await flushPromises();
+    expect(wrapper.find(".card-grid-loading").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("逛一圈地图再回来，视角还是原来的设备视角", async () => {
+    api.listDevices.mockResolvedValue(okList(150, [pagedDevice]));
+    const wrapper = mountPage();
+    await flushPromises();
+    expect(wrapper.get('[data-asset-kind="device"]').classes()).toContain("active");
+
+    await wrapper.get('[aria-label="地图视图"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".map-view").exists()).toBe(true);
+
+    // 地图只按通道打点、进去会被强制切成通道视角，但回来不能带着走
+    await wrapper.get('[aria-label="卡片视图"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[data-asset-kind="device"]').classes()).toContain("active");
+    expect(lastDevicePageRequest()).toMatchObject({ page: 1, pageSize: 12 });
+    wrapper.unmount();
+  });
+
+  it("本来就是通道视角时，进地图再回来仍停在自己选的通道视角", async () => {
+    api.listDevices.mockResolvedValue(okList(150, [pagedDevice]));
+    api.listChannels.mockResolvedValue(okList(1, []));
+    const wrapper = mountPage();
+    await flushPromises();
+
+    await wrapper.get('[data-asset-kind="channel"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[data-asset-kind="channel"]').classes()).toContain("active");
+
+    await wrapper.get('[aria-label="地图视图"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('[aria-label="列表视图"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[data-asset-kind="channel"]').classes()).toContain("active");
     wrapper.unmount();
   });
 

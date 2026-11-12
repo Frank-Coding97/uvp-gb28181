@@ -205,6 +205,13 @@ const router = useRouter();
 const route = useRoute();
 const returnSnapshot = consumeDeviceMgmtReturnSnapshot(typeof route.query.returnKey === "string" ? route.query.returnKey : null);
 const assetKind = ref<AssetKind>(returnSnapshot?.assetKind || (viewMode.value === "map" ? "channel" : "device"));
+// 地图只按通道打点，进地图时视角会被强制切成通道。⛔ 切回卡片/表格必须还原，
+// 否则用户从设备列表顺手看一眼地图再回来，视角就莫名其妙停在通道上了。
+// 初始就是地图时（localStorage 记住的）用户并没有选过视角 ⇒ 回来按默认的设备视角。
+let assetKindBeforeMap: AssetKind = returnSnapshot?.assetKind || "device";
+// 只处理「地图 → 卡片/表格」这一次过渡：卡片和表格之间来回切不该动视角，
+// 更要紧的是返回设备列表会先设 assetKind 再设 viewMode，无条件还原会把它覆盖掉。
+let leavingMap = false;
 const navigationMode = ref<"device" | "directory">("directory");
 const selectedDevice = ref<DeviceVO | null>(null);
 const selectedDeviceSummary = ref<DirectoryDevice | null>(null);
@@ -320,7 +327,34 @@ onUnmounted(() => window.removeEventListener("beforeunload", protectChannelDraft
 const channelOperationOptions = computed(() =>
   channelOperationTarget.value ? buildFactChannelOptions([channelOperationTarget.value]) : []
 );
+// ⛔ 两个 loading 别合并回一个：
+//    `rowsLoading` = 用户看得见的加载遮罩（首次进入、切分页、换筛选、手动刷新）；
+//    `rowsRefreshing` = 后台静默刷新在飞（10s 自动轮询），只驱动刷新按钮的转圈。
+//    合并的后果是每 10 秒表格/卡片被遮罩闪一下，用户点按钮点到一半被打断。
 const rowsLoading = ref(false);
+const rowsRefreshing = ref(false);
+// 前台/后台各自计数：可能同时有分页请求和自动刷新请求在飞，
+// 谁回来谁清自己的标记，不能互相清掉（否则遮罩要么提前消失、要么一直转）。
+let rowsForegroundLoads = 0;
+let rowsBackgroundLoads = 0;
+function beginRowsLoad(background: boolean) {
+  if (background) {
+    rowsBackgroundLoads += 1;
+    rowsRefreshing.value = true;
+    return;
+  }
+  rowsForegroundLoads += 1;
+  rowsLoading.value = true;
+}
+function endRowsLoad(background: boolean) {
+  if (background) {
+    rowsBackgroundLoads = Math.max(0, rowsBackgroundLoads - 1);
+    rowsRefreshing.value = rowsBackgroundLoads > 0;
+    return;
+  }
+  rowsForegroundLoads = Math.max(0, rowsForegroundLoads - 1);
+  if (rowsForegroundLoads === 0) rowsLoading.value = false;
+}
 const mapLoading = ref(false);
 const page = ref(1);
 const listPageSize = ref(10);
@@ -758,10 +792,17 @@ watch(viewMode, async mode => {
   deviceListReturnSnapshot.value = null;
   ++channelRequestVersion;
   ++deviceRequestVersion;
+  // 在飞请求已作废，计数必须一起归零，否则下一轮遮罩要么提前消失要么一直转。
+  rowsForegroundLoads = 0;
+  rowsBackgroundLoads = 0;
   rowsLoading.value = false;
+  rowsRefreshing.value = false;
   selectedRowKeys.value = [];
   page.value = 1;
   if (mode === "map") {
+    // 地图里视角开关是隐藏的，期间不会变 ⇒ 记下进来时用户真正选的那个。
+    assetKindBeforeMap = assetKind.value;
+    leavingMap = true;
     assetKind.value = "channel";
     await nextTick(ensureMap);
   } else {
@@ -770,6 +811,10 @@ watch(viewMode, async mode => {
     closeTrajectory();
     closeMarkerCard();
     destroyMap();
+    if (leavingMap) {
+      leavingMap = false;
+      assetKind.value = assetKindBeforeMap;
+    }
   }
   void refreshMainData();
   void refreshStats();
@@ -1318,10 +1363,10 @@ function onPageSizeChange(next: number) {
   refreshMainData();
 }
 
-async function refreshMainData() {
+async function refreshMainData(background = false) {
   if (!canViewDevices.value) return;
   if (viewMode.value === "map") return loadMapData();
-  return assetKind.value === "device" ? loadDevicesData() : loadChannelsData();
+  return assetKind.value === "device" ? loadDevicesData(background) : loadChannelsData(background);
 }
 
 function mapBoundsParams() {
@@ -2475,10 +2520,10 @@ function reportLoadError(error: unknown, fallback: string) {
 
 let channelRequestVersion = 0;
 let deviceRequestVersion = 0;
-async function loadChannelsData() {
+async function loadChannelsData(background = false) {
   if (!canViewDevices.value) return;
   const version = ++channelRequestVersion;
-  rowsLoading.value = true;
+  beginRowsLoad(background);
   try {
     const res = await listChannels({
       q: keyword.value.trim() || undefined,
@@ -2497,14 +2542,14 @@ async function loadChannelsData() {
   } catch (error: any) {
     if (version === channelRequestVersion) reportLoadError(error, "通道列表加载失败");
   } finally {
-    if (version === channelRequestVersion) rowsLoading.value = false;
+    endRowsLoad(background);
   }
 }
 
-async function loadDevicesData() {
+async function loadDevicesData(background = false) {
   if (!canViewDevices.value) return;
   const version = ++deviceRequestVersion;
-  rowsLoading.value = true;
+  beginRowsLoad(background);
   try {
     const response = await listDevices({
       q: keyword.value.trim() || undefined,
@@ -2521,7 +2566,7 @@ async function loadDevicesData() {
   } catch (error: any) {
     if (version === deviceRequestVersion) reportLoadError(error, "设备列表加载失败");
   } finally {
-    if (version === deviceRequestVersion) rowsLoading.value = false;
+    endRowsLoad(background);
   }
 }
 
@@ -3639,7 +3684,7 @@ async function refreshCurrent(background = false) {
   if (!canViewDevices.value) return;
   resetAutoRefreshCountdown();
   await Promise.all([
-    refreshMainData(),
+    refreshMainData(background),
     refreshStats(),
     refreshSelectedDevice(),
     background === true ? directoryPanelRef.value?.sync() : directoryPanelRef.value?.refresh()
@@ -3839,7 +3884,7 @@ onUnmounted(() => {
                 :aria-label="`刷新${assetKind === 'device' ? '设备' : '通道'}列表，自动刷新倒计时 ${autoRefreshCountdown} 秒`"
                 @click="refreshCurrent()"
               >
-                <RefreshCcw :size="14" :class="{ spin: rowsLoading || mapLoading }" />
+                <RefreshCcw :size="14" :class="{ spin: rowsLoading || rowsRefreshing || mapLoading }" />
                 刷新 <span class="refresh-countdown">{{ autoRefreshCountdown }}s</span>
               </button>
               <button
@@ -4016,6 +4061,7 @@ onUnmounted(() => {
             v-model:selected-keys="selectedRowKeys"
             :data="channels"
             :pagination="tablePagination"
+            :loading="rowsLoading"
             row-key="id"
             :scroll="{ x: 2340, y: '85%' }"
             :row-selection="{ type: 'checkbox', showCheckedAll: true }"
@@ -4265,6 +4311,7 @@ onUnmounted(() => {
             v-model:selected-keys="selectedRowKeys"
             :data="devices"
             :pagination="tablePagination"
+            :loading="rowsLoading"
             row-key="id"
             :scroll="{ x: 2040, y: '85%' }"
             :row-selection="{ type: 'checkbox', showCheckedAll: true }"
@@ -4845,6 +4892,8 @@ onUnmounted(() => {
               </article>
             </template>
           </div>
+          <!-- 只在首次进入/切分页/换筛选时盖；10s 自动刷新不盖，否则卡片每十秒闪一次 -->
+          <div v-if="rowsLoading" class="card-grid-loading"><a-spin tip="加载中…" /></div>
           <a-pagination
             v-if="total > 0"
             class="card-pagination uvp-pagination-bar"
@@ -7040,11 +7089,24 @@ onUnmounted(() => {
   border-color: #ef4444;
 }
 .card-view {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-height: 0;
   overflow: hidden;
+}
+
+/* 用户可见的加载态。⛔ 只能由 rowsLoading 驱动：rowsRefreshing（10s 自动刷新）不许进来，
+   否则每十秒盖一次，正在点按钮的用户会被打断。 */
+.card-grid-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--uvp-panel-bg) 72%, transparent);
 }
 .card-grid {
   display: grid;
