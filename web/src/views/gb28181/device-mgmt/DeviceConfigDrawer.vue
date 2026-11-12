@@ -2737,7 +2737,7 @@ onBeforeUnmount(() => {
                   v-for="field in primaryFields"
                   :key="field.key"
                   class="dcg-row"
-                  :class="{ 'is-schedules': field.kind === 'schedules' }"
+                  :class="{ 'is-schedules': field.kind === 'schedules', 'is-switch': field.kind === 'switch' }"
                   :data-testid="`dcg-field-${field.key}`"
                 >
                   <span class="dcg-row-label">{{ field.label }}</span>
@@ -3466,6 +3466,21 @@ onBeforeUnmount(() => {
   grid-template-columns: minmax(96px, 108px) minmax(0, 1fr) auto;
   gap: 10px;
   min-height: 40px;
+}
+
+/* 开关行右侧只有一个 34px 的胶囊，标签列有富余空间 —— 别再把它截成
+ * 「移动侦测上报（…」。那一截正是「标准元素名」，截掉以后这一行就只剩
+ * 业务说法，用户没法把界面和报文对上。
+ * ⛔ 只放宽开关行：滑杆/输入行的标签列必须保持 108px，否则轨道被挤窄到没法拖
+ *    （播放控制台侧栏整块只有 360px 宽）。 */
+.dcg-window--embedded .dcg-row.is-switch {
+  grid-template-columns: minmax(120px, max-content) minmax(0, 1fr) auto;
+}
+
+.dcg-window--embedded .dcg-row.is-switch .dcg-row-label {
+  overflow: visible;
+  line-height: 1.35;
+  white-space: normal;
 }
 
 .dcg-window--embedded .dcg-row-label {
@@ -4727,8 +4742,11 @@ onBeforeUnmount(() => {
   max-width: 88px;
 }
 
+/* 文本类输入与滑杆组取同一右边界（360px）。
+ * ⛔ 这里曾经是 `max-width: none` —— 结果「设备名称」一路顶到面板右边缘，
+ *    同一页里「一串 360px 的滑杆 + 一条通栏输入框」右边界对不上，看着像没排版。 */
 .dcg-window--embedded .dcg-row-control > .dcg-input {
-  max-width: none;
+  max-width: 360px;
 }
 
 .dcg-input {
