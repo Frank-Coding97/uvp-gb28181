@@ -211,17 +211,17 @@ defineExpose({ beforeLeave, dirtyCount, busy });
 }
 .channel-workspace-section-label {
   padding: 0 10px 4px;
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--uvp-text-tertiary);
 }
 .channel-workspace-link {
   display: flex;
   gap: 9px;
   align-items: center;
-  min-height: 36px;
+  min-height: 38px;
   padding: 8px 10px;
   font: inherit;
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--uvp-text-secondary);
   text-align: left;
   cursor: pointer;
@@ -268,7 +268,7 @@ defineExpose({ beforeLeave, dirtyCount, busy });
 }
 .channel-workspace-heading {
   flex: none;
-  padding: 20px 22px 16px;
+  padding: 20px 24px 18px;
   border-bottom: 1px solid var(--uvp-panel-border);
 }
 .channel-workspace-heading-title {
@@ -278,12 +278,12 @@ defineExpose({ beforeLeave, dirtyCount, busy });
 }
 .channel-workspace-heading h3 {
   margin: 0;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
 }
 .channel-workspace-heading p {
-  margin: 7px 0 0;
-  font-size: 12px;
+  margin: 8px 0 0;
+  font-size: 12.5px;
   line-height: 1.6;
   color: var(--uvp-text-tertiary);
 }

@@ -2788,6 +2788,7 @@ onBeforeUnmount(() => {
                       :step="field.step"
                       :unit="field.unit"
                       :label="field.label"
+                      :placeholder="field.optional ? '未设置' : ''"
                       :disabled="familyFieldsDisabled"
                       @update:model-value="setSv(activeGroup.key, field.key, $event)"
                     />
@@ -3391,7 +3392,7 @@ onBeforeUnmount(() => {
 }
 
 .dcg-window--embedded .dcg-params-body {
-  padding: 10px;
+  padding: 14px 16px 20px;
   background: var(--uvp-dialog-bg, #ffffff);
 }
 
@@ -3462,14 +3463,15 @@ onBeforeUnmount(() => {
 }
 
 .dcg-window--embedded .dcg-row {
-  grid-template-columns: minmax(88px, 96px) minmax(0, 1fr) auto;
-  gap: 8px;
+  grid-template-columns: minmax(96px, 108px) minmax(0, 1fr) auto;
+  gap: 10px;
+  min-height: 40px;
 }
 
 .dcg-window--embedded .dcg-row-label {
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 11px;
+  font-size: 12.5px;
   text-align: right;
   white-space: nowrap;
 }
@@ -3482,21 +3484,31 @@ onBeforeUnmount(() => {
   font-size: 9px;
 }
 
+/* ⛔ 这里**不许**再把滑杆的 max-width 放成 none：那会把 200px 的轨道拉成
+ *    整个面板宽（2026-11-12 截图即此 —— 一条从标签一直拖到右边缘的长线），
+ *    滑杆本身的几何现在由 DeviceConfigSlider 统一给（上限 360px、± 24px 方形、
+ *    数值框 76px），嵌入态只微调间距。 */
 .dcg-window--embedded :deep(.cfg-slider) {
-  gap: 3px;
-  max-width: none;
+  gap: 7px;
+  max-width: 360px;
 }
 
-.dcg-window--embedded :deep(.cfg-slider-step) {
-  width: 18px;
+/* 文本类字段（设备名称等）与滑杆组取同一右边界，避免一行短一行长。 */
+.dcg-window--embedded .dcg-row-control > .dcg-input {
+  max-width: 360px;
 }
 
-.dcg-window--embedded :deep(.cfg-slider-track) {
-  min-width: 20px;
+.dcg-window--embedded .dcg-reconcile {
+  gap: 8px;
+  padding: 9px 12px;
+  margin-bottom: 16px;
+  font-size: 12.5px;
+  border-radius: 6px;
 }
 
-.dcg-window--embedded :deep(.cfg-slider-input) {
-  width: 42px;
+.dcg-window--embedded .dcg-reconcile .dcg-reconcile-dot {
+  width: 7px;
+  height: 7px;
 }
 
 .dcg-preview {
@@ -4618,11 +4630,14 @@ onBeforeUnmount(() => {
   background: var(--uvp-warning-soft, #fff7ed);
 }
 
+/* 控件高度统一到 28px（= 按钮体系的 sm 档），字号 12.5px：
+ * 原 24px/12px 在这一页（宽面板 + 大留白）里显得发虚。⚠️ select 的内层
+ * `.arco-select-view` 是 `height: 100%`，抬高根节点高度它会跟着长，不用另配。 */
 .dcg-select,
 .dcg-input {
   min-width: 0;
-  height: 24px;
-  font-size: 12px;
+  height: 28px;
+  font-size: 12.5px;
   color: var(--uvp-text-primary);
   background: var(--uvp-dialog-control-bg, #ffffff);
   border: 1px solid var(--uvp-panel-border, #dbe4f0);
@@ -4693,7 +4708,7 @@ onBeforeUnmount(() => {
 }
 
 .dcg-window--embedded .dcg-row-control > .dcg-select {
-  max-width: none;
+  max-width: 360px;
 }
 
 /* Arco 的根节点由子组件渲染，嵌入模式用 deep 确保宽度规则能落到真实控件。 */
@@ -4703,7 +4718,7 @@ onBeforeUnmount(() => {
 }
 
 :deep(.dcg-window--embedded .dcg-row-control > .dcg-select) {
-  max-width: none;
+  max-width: 360px;
 }
 
 :deep(.dcg-select.is-mini) {
