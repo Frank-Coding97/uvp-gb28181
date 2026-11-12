@@ -120,6 +120,7 @@ export interface TraceMessageQuery {
   statusCode?: number;
   statusMin?: number;
   statusMax?: number;
+  businessCode?: TraceBusinessCode;
   cursor?: string;
   limit?: number;
 }

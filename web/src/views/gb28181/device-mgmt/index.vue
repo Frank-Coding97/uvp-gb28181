@@ -12,6 +12,7 @@ import {
   Crosshair,
   Eye,
   Grid2X2,
+  HeartPulse,
   History,
   Info,
   Joystick,
@@ -103,6 +104,7 @@ import CatalogRefreshProgressDialog from "./CatalogRefreshProgressDialog.vue";
 import { buildFactChannelOptions } from "./deviceFactChannel";
 import { createMaintenanceActivity, isRebootPending, isUpgradeUnresolved } from "./maintenanceActivity";
 import DirectoryPanel from "./components/DirectoryPanel.vue";
+import HeartbeatTable from "./components/HeartbeatTable.vue";
 import MapChannelTree, { type MapScopeSelection } from "./components/MapChannelTree.vue";
 import TrafficTrend from "./components/TrafficTrend.vue";
 import ViewerTable from "./components/ViewerTable.vue";
@@ -653,7 +655,7 @@ const statusEventLoadMoreError = ref("");
 const statusEventScroll = ref<HTMLElement | null>(null);
 const statusEventHasMore = computed(() => statusEventList.value.length < statusEventTotal.value);
 let statusEventRequestVersion = 0;
-const runtimeActiveTab = ref<"status" | "traffic" | "viewers">("status");
+const runtimeActiveTab = ref<"status" | "heartbeat" | "traffic" | "viewers">("status");
 const runtimeChannelCode = ref("");
 const runtimeChannels = ref<ChannelVO[]>([]);
 const runtimeChannelsLoading = ref(false);
@@ -2907,7 +2909,7 @@ watch(runtimeActiveTab, tab => {
     loadStatusEvents();
   }
   if (
-    tab !== "status" &&
+    (tab === "traffic" || tab === "viewers") &&
     statusEventVisible.value &&
     statusEventDevice.value &&
     runtimeChannels.value.length === 0 &&
@@ -5505,6 +5507,17 @@ onUnmounted(() => {
                 <span v-else>向下滚动加载更多 · 已加载 {{ statusEventList.length }}/{{ statusEventTotal }} 条</span>
               </div>
             </div>
+          </a-tab-pane>
+          <a-tab-pane key="heartbeat">
+            <template #title
+              ><span class="runtime-tab-title"><HeartPulse :size="15" />心跳记录</span></template
+            >
+            <!-- 证据向：平台实际收到的每一条心跳 + 平台给它的应答码，出问题时可直接对账 -->
+            <HeartbeatTable
+              v-if="runtimeActiveTab === 'heartbeat'"
+              :device-id="statusEventDevice.deviceId"
+              :accounted-keepalive-at="statusEventDevice.keepaliveTime"
+            />
           </a-tab-pane>
           <a-tab-pane key="traffic">
             <template #title
