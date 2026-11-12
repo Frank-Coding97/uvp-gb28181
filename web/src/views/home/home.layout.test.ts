@@ -134,11 +134,14 @@ describe("editable realtime dashboard layout", () => {
     );
   });
 
-  it("compacts the embedded SIP monitor enough to avoid internal scrolling", () => {
+  it("keeps the embedded SIP monitor compact and lets the pulse chart absorb spare height", () => {
     expect(source).toMatch(/\.embedded\s*\{[^}]*gap:\s*10px;[^}]*height:\s*100%;/s);
-    expect(source).toMatch(/\.embedded\s+:deep\(\.pulse\)\s*\{[^}]*flex:\s*none;/s);
+    // 卡片被拖小时只许长不许缩：缩掉图表会重现"画布高度 > 可见区、y=0 基线被裁"的老问题。
+    expect(source).toMatch(/\.embedded\s+:deep\(\.pulse\)\s*\{[^}]*flex:\s*1 0 auto;/s);
+    // 保底 90px 是原契约；2026-11-10 补维度：有富余高度时曲线区随容器长高，
+    // 空白不再堆在事务网格下面，但仍不引入卡片内部滚动。
     expect(source).toMatch(
-      /\.embedded\s+:deep\(\.pulse__chart\)\s*\{[^}]*flex:\s*none;[^}]*height:\s*90px;[^}]*min-height:\s*90px;/s
+      /\.embedded\s+:deep\(\.pulse__chart\)\s*\{[^}]*flex:\s*1 1 auto;[^}]*height:\s*auto;[^}]*min-height:\s*90px;/s
     );
   });
 

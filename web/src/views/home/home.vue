@@ -961,12 +961,16 @@ onBeforeUnmount(() => {
   border: 0;
   box-shadow: none;
 }
+
+/* ⛔ 图表保底 90px（卡片被拖小的时候不能把 y=0 基线和 x 轴标签挤掉），
+   但卡片下方有富余高度时要让曲线区自己吃掉，别把空白全留在事务网格下面。
+   只许长、不许缩：缩起来会重现「画布高度 > 可见区高度」被 overflow:hidden 裁掉基线的老问题。 */
 .embedded :deep(.pulse) {
-  flex: none;
+  flex: 1 0 auto;
 }
 .embedded :deep(.pulse__chart) {
-  flex: none;
-  height: 90px;
+  flex: 1 1 auto;
+  height: auto;
   min-height: 90px;
 }
 .rate-head {
