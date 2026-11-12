@@ -813,7 +813,9 @@ watch(viewMode, async mode => {
     destroyMap();
     if (leavingMap) {
       leavingMap = false;
-      assetKind.value = assetKindBeforeMap;
+      // 在地图里点了具体设备（左栏设备节点）时上下文就是"这台设备的通道"，
+      // 回卡片要接着看它的通道，别把上下文掰成全网设备列表。
+      assetKind.value = deviceIdFilter.value ? "channel" : assetKindBeforeMap;
     }
   }
   void refreshMainData();

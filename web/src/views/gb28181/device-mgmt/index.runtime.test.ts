@@ -1491,6 +1491,25 @@ describe("device-mgmt round-2 修复回归", () => {
     wrapper.unmount();
   });
 
+  it("从某台设备的通道列表进地图，切回卡片仍看这台设备的通道", async () => {
+    api.listDevices.mockResolvedValue(okList(150, [pagedDevice]));
+    const wrapper = mountPage();
+    await flushPromises();
+
+    await wrapper.get('[data-testid="select-device-a"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[data-asset-kind="channel"]').classes()).toContain("active");
+
+    // 上下文是"这台设备的通道"，逛一圈地图回来不能掰成全网设备列表
+    await wrapper.get('[aria-label="地图视图"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('[aria-label="卡片视图"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[data-asset-kind="channel"]').classes()).toContain("active");
+    expect(api.listChannels.mock.calls.at(-1)?.[0]).toMatchObject({ deviceId: "34020000002000000031" });
+    wrapper.unmount();
+  });
+
   it("切换设备立即刷新该设备通道统计", async () => {
     const wrapper = mountPage();
     await flushPromises();
