@@ -148,6 +148,125 @@ export function buildHeartbeatRows(
   return rows;
 }
 
+/** 条带上的一格：一格代表一段时间，格内可能压了多条心跳。 */
+export interface HeartbeatBucket {
+  index: number;
+  from: number;
+  to: number;
+  /** 这一格里收到的（inbound）心跳条数 */
+  total: number;
+  /** 其中被判定为异常（403/其它拒收/无应答）的条数 */
+  abnormal: number;
+}
+
+export interface HeartbeatTimeline {
+  from: number;
+  to: number;
+  bucketMs: number;
+  buckets: HeartbeatBucket[];
+  /** 窗口内收到的心跳总条数 */
+  total: number;
+  /**
+   * 窗口内「最后一条心跳」的时间（毫秒）。窗口内一条都没有时为 null ——
+   * 这正是「设备早就掉线、今天才来看」的形态，必须单独说出来，不能让条带全灰了之。
+   */
+  lastAt: number | null;
+  /** 最后一条心跳之后到窗口末尾的空白时长 */
+  gapAfterLastMs: number | null;
+  /** 最后一条心跳在条带里的相对位置 0~1（画断点用） */
+  lastRatio: number | null;
+  /** 这段空白是否值得标出来（太短就是正常抖动，标了反而误导） */
+  gapIsNotable: boolean;
+}
+
+/**
+ * 一格代表多长时间。
+ *
+ * 心跳通常 1 分钟一条，所以「一格一条」是最直观的：跨度 ≤2 小时时用 1 分钟一格，
+ * 窗口里有多少分钟就有多少格。24 小时必须放宽到 10 分钟一格 —— 1440 格在屏幕上
+ * 每格不足 0.5 像素，画出来只是一条糊线，那种密度的信息只能靠点击钻取。
+ */
+export function pickHeartbeatBucketMs(spanMs: number): number {
+  const MINUTE = 60_000;
+  if (spanMs <= 2 * 60 * MINUTE) return MINUTE;
+  if (spanMs <= 6 * 60 * MINUTE) return 5 * MINUTE;
+  if (spanMs <= 26 * 60 * MINUTE) return 10 * MINUTE;
+  if (spanMs <= 48 * 60 * MINUTE) return 30 * MINUTE;
+  return 60 * MINUTE;
+}
+
+/**
+ * 把心跳摊到等宽时间格上。
+ *
+ * rows 是倒序（最新在前），这里不假设顺序，自己按时间落格。
+ * 落不进窗口的行直接丢弃 —— 条带的横轴必须严格等于用户选的时间范围，
+ * 否则「最后一段空白」会被窗口外的数据填掉，看起来像没掉线。
+ */
+export function buildHeartbeatTimeline(
+  rows: HeartbeatRow[],
+  fromMs: number,
+  toMs: number,
+  minNotableGapMs = 3 * 60 * 1000
+): HeartbeatTimeline {
+  const span = Math.max(0, toMs - fromMs);
+  const bucketMs = pickHeartbeatBucketMs(span);
+  const count = Math.max(1, Math.ceil(span / bucketMs));
+  const buckets: HeartbeatBucket[] = Array.from({ length: count }, (_, index) => ({
+    index,
+    from: fromMs + index * bucketMs,
+    to: fromMs + (index + 1) * bucketMs,
+    total: 0,
+    abnormal: 0
+  }));
+
+  let lastAt: number | null = null;
+  let total = 0;
+  for (const row of rows) {
+    const at = timestamp(row.receivedAt);
+    if (Number.isNaN(at) || at < fromMs || at >= toMs) continue;
+    const index = Math.min(count - 1, Math.floor((at - fromMs) / bucketMs));
+    buckets[index].total += 1;
+    total += 1;
+    if (row.kind !== "ok" && row.kind !== "pending_response") buckets[index].abnormal += 1;
+    if (lastAt === null || at > lastAt) lastAt = at;
+  }
+
+  const gapAfterLastMs = lastAt === null ? null : Math.max(0, toMs - lastAt);
+  // 阈值取「3 分钟」与「2 格」的较大者：1 小时视图里断 3 分钟就算掉线，
+  // 24 小时视图里断 20 分钟仍可能只是网络抖动，不该标红。
+  const notable = gapAfterLastMs !== null && span > 0 && gapAfterLastMs > Math.max(minNotableGapMs, bucketMs * 2);
+  return {
+    from: fromMs,
+    to: toMs,
+    bucketMs,
+    buckets,
+    total,
+    lastAt,
+    gapAfterLastMs,
+    lastRatio: lastAt === null || span === 0 ? null : (lastAt - fromMs) / span,
+    gapIsNotable: notable
+  };
+}
+
+/** 一格多长，写成「1 分钟」这种给人看的说法 */
+export function formatBucketSpan(ms: number): string {
+  if (ms < 60_000) return `${Math.round(ms / 1000)} 秒`;
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 60) return `${minutes} 分钟`;
+  const hours = Math.round(minutes / 60);
+  return `${hours} 小时`;
+}
+
+/** 坐标轴刻度：跨天的窗口要带日期，否则「20:15 到 20:15」看不出是两天 */
+export function formatAxisTime(ms: number, spanMs: number): string {
+  const date = new Date(ms);
+  if (Number.isNaN(date.getTime())) return "-";
+  const pad = (part: number) => String(part).padStart(2, "0");
+  const clock = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  if (spanMs <= 12 * 60 * 60 * 1000) return clock;
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${clock}`;
+}
+
 export function summarizeHeartbeats(rows: HeartbeatRow[]): HeartbeatSummary {
   if (rows.length === 0) {
     return { total: 0, abnormal: 0, latestAt: null, averageIntervalMs: null };

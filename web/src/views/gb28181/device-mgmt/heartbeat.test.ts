@@ -2,11 +2,15 @@ import { describe, expect, it } from "vitest";
 import type { TraceMessageSummary } from "@/api/gb28181-trace";
 import {
   buildHeartbeatRows,
+  buildHeartbeatTimeline,
   classifyHeartbeat,
+  formatBucketSpan,
   formatDuration,
   heartbeatDriftWarning,
   heartbeatWindowRange,
-  summarizeHeartbeats
+  pickHeartbeatBucketMs,
+  summarizeHeartbeats,
+  type HeartbeatRow
 } from "./heartbeat";
 
 function message(overrides: Partial<TraceMessageSummary> = {}): TraceMessageSummary {
@@ -148,5 +152,134 @@ describe("间隔可读化", () => {
     expect(formatDuration(65_000)).toBe("1 分 05 秒");
     expect(formatDuration(3_600_000)).toBe("1 小时");
     expect(formatDuration(null)).toBe("-");
+  });
+});
+
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+
+/** 已经配好应答的成品行，直接喂给条带 */
+function heartbeatRow(atMs: number, kind: HeartbeatRow["kind"] = "ok"): HeartbeatRow {
+  return {
+    key: `hb-${atMs}`,
+    receivedAt: new Date(atMs).toISOString(),
+    resultCode: kind === "ok" ? 200 : kind === "registration_expired" ? 403 : 0,
+    kind,
+    latencyMs: 2,
+    intervalMs: null,
+    sourceAddr: "182.33.246.128:36159",
+    transport: "UDP",
+    userAgent: "MERCURY IP-Camera",
+    callId: `hb-${atMs}`,
+    malformed: false
+  };
+}
+
+describe("心跳连续性条带", () => {
+  it("1 小时窗口按 1 分钟一格 —— 一格正好一条心跳", () => {
+    const from = Date.UTC(2026, 10, 12, 10, 0, 0);
+    const to = from + HOUR;
+    const rows = Array.from({ length: 60 }, (_, index) => heartbeatRow(from + index * MINUTE + 30_000));
+
+    const timeline = buildHeartbeatTimeline(rows, from, to);
+    expect(timeline.bucketMs).toBe(MINUTE);
+    expect(timeline.buckets).toHaveLength(60);
+    expect(timeline.total).toBe(60);
+    expect(timeline.buckets.every(bucket => bucket.total === 1)).toBe(true);
+  });
+
+  it("24 小时窗口放宽到 10 分钟一格：一格压 10 条，1440 条挤不进屏幕时靠点击钻取", () => {
+    const from = Date.UTC(2026, 10, 12, 0, 0, 0);
+    const to = from + 24 * HOUR;
+    const rows = Array.from({ length: 24 * 60 }, (_, index) => heartbeatRow(from + index * MINUTE + 1_000));
+
+    const timeline = buildHeartbeatTimeline(rows, from, to);
+    expect(timeline.bucketMs).toBe(10 * MINUTE);
+    expect(timeline.buckets).toHaveLength(144);
+    expect(timeline.buckets.every(bucket => bucket.total === 10)).toBe(true);
+  });
+
+  it("断档的时段是空格子，前后两侧仍能看出有数据", () => {
+    const from = Date.UTC(2026, 10, 12, 0, 0, 0);
+    const to = from + 24 * HOUR;
+    // 03:00 ~ 06:00 停机三小时
+    const rows = Array.from({ length: 24 * 60 }, (_, index) => from + index * MINUTE + 1_000)
+      .filter(at => at < from + 3 * HOUR || at >= from + 6 * HOUR)
+      .map(at => heartbeatRow(at));
+
+    const timeline = buildHeartbeatTimeline(rows, from, to);
+    const gap = timeline.buckets.slice(18, 36);
+    expect(gap.every(bucket => bucket.total === 0)).toBe(true);
+    expect(timeline.buckets[17].total).toBe(10);
+    expect(timeline.buckets[36].total).toBe(10);
+  });
+
+  it("设备掉线后能说清「最后一条在什么时候、距现在多久」", () => {
+    const from = Date.UTC(2026, 10, 11, 20, 0, 0);
+    const to = from + 24 * HOUR;
+    // 最后一条心跳出现在窗口起点后 130 分钟，之后彻底没有
+    const rows = Array.from({ length: 131 }, (_, index) => heartbeatRow(from + index * MINUTE + 30_000));
+
+    const timeline = buildHeartbeatTimeline(rows, from, to);
+    expect(timeline.total).toBe(131);
+    expect(timeline.lastAt).toBe(from + 130 * MINUTE + 30_000);
+    expect(timeline.gapIsNotable).toBe(true);
+    expect(timeline.gapAfterLastMs).toBe(to - (from + 130 * MINUTE + 30_000));
+    // 最后一条落在条带约 9% 的位置，后面的空白占了九成
+    expect(timeline.lastRatio).toBeCloseTo(130.5 / 1440, 3);
+  });
+
+  it("正常抖动（断两格）不标成掉线", () => {
+    const from = Date.UTC(2026, 10, 12, 10, 0, 0);
+    const to = from + HOUR;
+    // 最后一分钟没收到，但只差 1 分钟
+    const rows = Array.from({ length: 59 }, (_, index) => heartbeatRow(from + index * MINUTE + 30_000));
+
+    const timeline = buildHeartbeatTimeline(rows, from, to);
+    expect(timeline.gapIsNotable).toBe(false);
+  });
+
+  it("窗口内一条都没有时如实返回空，而不是伪造一个时间点", () => {
+    const from = Date.UTC(2026, 10, 12, 0, 0, 0);
+    const timeline = buildHeartbeatTimeline([], from, from + 24 * HOUR);
+    expect(timeline.total).toBe(0);
+    expect(timeline.lastAt).toBeNull();
+    expect(timeline.gapAfterLastMs).toBeNull();
+    expect(timeline.gapIsNotable).toBe(false);
+    expect(timeline.buckets.every(bucket => bucket.total === 0)).toBe(true);
+  });
+
+  it("窗口之外的心跳不得混进来 —— 否则尾部空白会被填掉", () => {
+    const from = Date.UTC(2026, 10, 12, 0, 0, 0);
+    const to = from + HOUR;
+    const rows = [heartbeatRow(from - 10 * MINUTE), heartbeatRow(to + 10 * MINUTE), heartbeatRow(from + 25 * MINUTE)];
+
+    const timeline = buildHeartbeatTimeline(rows, from, to);
+    expect(timeline.total).toBe(1);
+    expect(timeline.buckets[25].total).toBe(1);
+  });
+
+  it("被拒收的心跳落在格子里时标成异常，不能和正常的混为一格", () => {
+    const from = Date.UTC(2026, 10, 12, 10, 0, 0);
+    const to = from + HOUR;
+    const rows = [
+      heartbeatRow(from + 30_000),
+      heartbeatRow(from + MINUTE + 30_000, "registration_expired"),
+      heartbeatRow(from + 2 * MINUTE + 30_000, "registration_expired")
+    ];
+
+    const timeline = buildHeartbeatTimeline(rows, from, to);
+    expect(timeline.buckets[0].abnormal).toBe(0);
+    expect(timeline.buckets[1].abnormal).toBe(1);
+    expect(timeline.buckets[2].abnormal).toBe(1);
+  });
+
+  it("粒度跟着跨度走，短窗口才给到 1 分钟", () => {
+    expect(pickHeartbeatBucketMs(HOUR)).toBe(MINUTE);
+    expect(pickHeartbeatBucketMs(24 * HOUR)).toBe(10 * MINUTE);
+    expect(pickHeartbeatBucketMs(7 * 24 * HOUR)).toBe(HOUR);
+    expect(formatBucketSpan(MINUTE)).toBe("1 分钟");
+    expect(formatBucketSpan(10 * MINUTE)).toBe("10 分钟");
+    expect(formatBucketSpan(HOUR)).toBe("1 小时");
   });
 });
