@@ -262,6 +262,8 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 
 	kind := txKindFromCmd(head.CmdType)
 	responseSent := false
+	// 默认 200；只有「证据充分但注册已失效」的心跳会改成 4xx 来推设备重注册。
+	responseStatus := http.StatusOK
 	// 已知 Kind 的入向事件:Begin + End 一起打(瞬时事务,server 端立刻应答)
 	// Catalog Response 也走入向计数,即便 UAC 端没埋点也至少有一条
 	if h.recorder != nil && kind != metrics.TxUnknown && callID != "" {
@@ -464,7 +466,19 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			restored, err := device.KeepaliveFrom(ctx, head.DeviceID, gbmodels.KeepaliveSource{
 				SenderDeviceID: ptzDeviceCode(req, ""), Address: req.Source(), Transport: req.Transport(), ReceivedAt: receivedAt,
 			})
-			if errors.Is(err, gbmodels.ErrKeepaliveSourceRejected) {
+			if errors.Is(err, gbmodels.ErrKeepaliveRegistrationExpired) {
+				// 设备身份对得上、注册却已过期：回 403 而不是 200。
+				// 回 200 等于告诉设备"你注册还有效"，它就会一直只发心跳、
+				// 不重新 REGISTER，平台这边又拒收所有心跳 —— 双方互相等待，
+				// 设备永久卡在离线（线上已有一例）。4xx 是唯一能从这个死锁里
+				// 把设备推回 REGISTER 的手段。
+				responseStatus = http.StatusForbidden
+				responseSent = true
+				_ = tx.Respond(sip.NewResponseFromRequest(req, responseStatus, "Registration Expired", nil))
+				logger.Info("GB28181 注册已过期,回 403 促使设备重新注册",
+					zap.String("event", "gb28181.message.keepalive_registration_expired"),
+					zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq))
+			} else if errors.Is(err, gbmodels.ErrKeepaliveSourceRejected) {
 				logger.Info("GB28181 心跳来源与有效注册不匹配,忽略", zap.String("event", "gb28181.message.keepalive_source_rejected"), zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq))
 			} else if err != nil {
 				logger.Warn("GB28181 心跳处理失败",
@@ -548,11 +562,11 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	// 其它 CmdType 本期不处理,统一回 200
 	if !responseSent {
-		_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+		_ = tx.Respond(sip.NewResponseFromRequest(req, responseStatus, http.StatusText(responseStatus), nil))
 	}
 
 	if h.recorder != nil && kind != metrics.TxUnknown && callID != "" {
-		h.recorder.End(callID, cseq, 200, true)
+		h.recorder.End(callID, cseq, responseStatus, responseStatus < 400)
 	}
 }
 

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"net/http"
 	"testing"
 	"time"
 
@@ -73,6 +74,13 @@ func TestMessageKeepaliveEndpoint(t *testing.T) {
 			tx := siptest.NewServerTxRecorder(req)
 			h.Handle(req, tx)
 			require.Len(t, tx.Result(), 1)
+			// 注册过期是**唯一**会回 4xx 的分支：目的是把"只发心跳不续注册"的设备
+			// 推回 REGISTER。来源不可信仍然回 200，不给探测者任何反馈。
+			wantStatus := http.StatusOK
+			if tc.expired {
+				wantStatus = http.StatusForbidden
+			}
+			require.EqualValues(t, wantStatus, tx.Result()[0].StatusCode, "unexpected SIP response status")
 			got, err := gbmodels.FindByDeviceID(context.Background(), d.DeviceID)
 			require.NoError(t, err)
 			require.NotNil(t, got)

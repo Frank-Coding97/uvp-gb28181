@@ -178,8 +178,8 @@ func UpdateReportedCharset(c context.Context, deviceID, declared, effective stri
 	return app.DB().WithContext(c).Model(&GbDevice{}).
 		Where("device_id = ? AND (reported_charset <> ? OR wire_charset <> ?)", deviceID, declared, effective).
 		Updates(map[string]interface{}{
-			"reported_charset":   declared,
-			"wire_charset":      effective,
+			"reported_charset":    declared,
+			"wire_charset":        effective,
 			"reported_charset_at": &now,
 		}).Error
 }
@@ -199,6 +199,15 @@ type KeepaliveSource struct {
 }
 
 var ErrKeepaliveSourceRejected = errors.New("keepalive source does not match a current registration")
+
+// ErrKeepaliveRegistrationExpired 表示来源身份与档案一致（同一设备、同一 IP、同传输层），
+// 但注册已经过期或从未注册。
+//
+// 与 ErrKeepaliveSourceRejected 分成两个错误是**有意的**：来源不符是可疑报文，只能静默丢弃；
+// 注册过期是**可恢复**的，调用方应当回 4xx 促使设备重新 REGISTER ——
+// 若照旧回 200，设备会认为注册仍然有效，于是只发心跳不续注册，
+// 平台这边又拒绝一切心跳，双方谁都等不到对方先动，设备就永久卡在离线（线上已发一例）。
+var ErrKeepaliveRegistrationExpired = errors.New("keepalive arrived after the registration expired")
 
 // TouchKeepaliveFrom refreshes a registered source port. UDP MESSAGE does not
 // authenticate a new IP or transport: those changes require REGISTER.
@@ -234,9 +243,13 @@ func touchKeepalive(c context.Context, deviceID string, onlineOnHeartbeat bool, 
 			if err != nil || portErr != nil || port < 1 || port > 65535 || ip == nil || ip.IsUnspecified() ||
 				registeredIP == nil || !ip.Equal(registeredIP) || source.SenderDeviceID != deviceID ||
 				(transport != "UDP" && transport != "TCP" && transport != "TLS") || !strings.EqualFold(transport, d.Transport) ||
-				now.IsZero() || d.RegisterTime == nil || d.RegisterTime.IsZero() || d.RegisterTime.After(now) ||
-				d.RegisterExpireAt == nil || !d.RegisterExpireAt.After(time.Now()) {
+				now.IsZero() || d.RegisterTime == nil || d.RegisterTime.IsZero() || d.RegisterTime.After(now) {
 				return ErrKeepaliveSourceRejected
+			}
+			// 身份已对上，剩下的唯一拒收原因就是注册失效。单独一种错误，
+			// 让 handler 有机会回 4xx 把设备推回 REGISTER（见 ErrKeepaliveRegistrationExpired）。
+			if d.RegisterExpireAt == nil || !d.RegisterExpireAt.After(time.Now()) {
+				return ErrKeepaliveRegistrationExpired
 			}
 			// A delayed handler must not roll back a newer heartbeat or registration.
 			// Snapshot predicates also protect dialects without row-level locks.

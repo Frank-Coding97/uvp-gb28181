@@ -197,3 +197,39 @@ func TestConcurrentKeepalivesKeepNewestEndpointAndSingleRecovery(t *testing.T) {
 	require.NoError(t, db.Model(&GbDeviceStatusEvent{}).Count(&count).Error)
 	require.EqualValues(t, 1, count)
 }
+
+// TestKeepaliveExpiredRegistrationIsRecoverable 锁住「注册过期」与「来源不符」分开这件事：
+// 前者要能被 handler 识别成"可恢复"并回 4xx 推设备重注册，后者只能静默丢弃。
+func TestKeepaliveExpiredRegistrationIsRecoverable(t *testing.T) {
+	db := newReliabilityDB(t)
+	now := time.Now()
+	registered := now.Add(-2 * time.Hour)
+	expires := now.Add(-time.Minute)
+	d := GbDevice{
+		DeviceID: "37010301021180000010", IP: "182.33.246.128", Port: 36173, Transport: "UDP",
+		Status: DeviceStatusOffline, RegisterTime: &registered, RegisterExpireAt: &expires, KeepaliveTime: &registered,
+	}
+	require.NoError(t, db.Create(&d).Error)
+
+	// 同一设备、同一 IP，只是 NAT 端口变了 → 身份成立，拒收原因只剩"注册过期"
+	restored, err := TouchKeepaliveFrom(context.Background(), d.DeviceID, true, KeepaliveSource{
+		SenderDeviceID: d.DeviceID, Address: "182.33.246.128:36159", Transport: "UDP", ReceivedAt: now,
+	})
+	require.ErrorIs(t, err, ErrKeepaliveRegistrationExpired)
+	require.NotErrorIs(t, err, ErrKeepaliveSourceRejected)
+	require.False(t, restored)
+
+	// 换 IP 仍是不可信来源：不能走"提醒重注册"那条路
+	_, err = TouchKeepaliveFrom(context.Background(), d.DeviceID, true, KeepaliveSource{
+		SenderDeviceID: d.DeviceID, Address: "182.33.246.129:36159", Transport: "UDP", ReceivedAt: now,
+	})
+	require.ErrorIs(t, err, ErrKeepaliveSourceRejected)
+	require.NotErrorIs(t, err, ErrKeepaliveRegistrationExpired)
+
+	// 被拒的心跳不得改写端点、状态与心跳时间
+	got, err := FindByDeviceID(context.Background(), d.DeviceID)
+	require.NoError(t, err)
+	require.Equal(t, 36173, got.Port)
+	require.Equal(t, DeviceStatusOffline, got.Status)
+	require.True(t, got.KeepaliveTime.Equal(registered))
+}
