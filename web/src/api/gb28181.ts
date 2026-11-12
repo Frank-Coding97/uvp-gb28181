@@ -1742,6 +1742,8 @@ export interface TalkSessionView {
   startedAt?: string;
   endedAt?: string;
   error?: string;
+  /** 信令已通但媒体大概率到不了设备的现场提示；不阻断会话。 */
+  warning?: string;
 }
 
 export const createTalkSession = (channelId: number, mode: "broadcast" | "talk") =>

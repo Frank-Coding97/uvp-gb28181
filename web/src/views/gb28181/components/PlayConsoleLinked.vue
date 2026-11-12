@@ -4770,6 +4770,9 @@ type TalkState = "idle" | "permission" | "publishing" | "signaling" | "talking" 
 const talkState = ref<TalkState>("idle");
 const talkMode = ref<"broadcast" | "talk">("broadcast");
 const talkSession = ref<TalkCreateResult | null>(null);
+// 信令通了但媒体大概率到不了设备时的现场提示（后端判定，前端只负责展示）。
+// 与 talkState 分开：它不影响会话能不能继续，只在 talking 态常驻提醒。
+const talkWarning = ref("");
 let talkConnection: RTCPeerConnection | null = null;
 let talkStream: MediaStream | null = null;
 let talkSessionChannelId: number | null = null;
@@ -4911,6 +4914,7 @@ async function refreshTalkSession(channelId: number, sessionId: string) {
       await stopTalk();
       return;
     }
+    talkWarning.value = String(response.data?.warning || "");
     if (["failed", "expired", "ended"].includes(String(response.data?.state))) await stopTalk();
   } catch {
     // 短暂轮询失败不打断正在说话，租约超时由后端最终收敛。
@@ -4924,6 +4928,7 @@ async function waitTalkActive(channelId: number, sessionId: string, token: numbe
     if (!hasPermission("gb28181:talk:control") || token !== talkToken) return false;
     const response = await getTalkSession(channelId, sessionId);
     if (!hasPermission("gb28181:talk:control") || token !== talkToken) return false;
+    talkWarning.value = String(response.data?.warning || "");
     const state = response.data?.state;
     if (state === "active") return true;
     if (["failed", "expired", "ended"].includes(String(state))) throw new Error(response.data?.error || `对讲会话已${state}`);
@@ -5055,6 +5060,7 @@ function cleanupTalkLocally() {
   talkConnection = null;
   talkSession.value = null;
   talkSessionChannelId = null;
+  talkWarning.value = "";
 }
 
 async function stopTalk() {
@@ -5214,6 +5220,7 @@ provide(PLAY_CONSOLE_CONTEXT, {
   talkLevel,
   talkSpectrum,
   talkButtonText,
+  talkWarning,
   moveSpeed,
   sendPtz,
   precisePan,

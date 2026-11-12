@@ -46,6 +46,7 @@ const {
   talkLevel,
   talkSpectrum,
   talkButtonText,
+  talkWarning,
   moveSpeed,
   sendPtz,
   precisePan,
@@ -203,6 +204,13 @@ const {
         </span>
         <span>{{ talkButtonText }}</span>
       </a-button>
+
+      <!-- 信令已通、媒体大概率到不了设备时的现场提示。
+           只在 talking 态显示：此时才走完设备 offer 协商，后端才知道设备选了 UDP 还是 TCP。
+           ⛔ 不做成弹窗：操作员正在说话，弹窗会挡操作，而且一秒钟就消失了看不出原因。 -->
+      <p v-if="talkState === 'talking' && talkWarning" class="talk-warning" role="alert" data-testid="talk-warning">
+        {{ talkWarning }}
+      </p>
 
       <div class="speed-row">
         <label>
@@ -884,6 +892,22 @@ const {
   background: var(--uvp-dialog-control-bg);
   border-color: var(--uvp-panel-border);
   opacity: 1;
+}
+
+/* 媒体通道不可达提示：暗色面板上的柔和告警块，不能抢过「停止广播」按钮的视觉层级。
+ * 颜色一律走 --uvp-danger（暗色下是浅红文字色），底色用 color-mix 兑透明，不新造色值。 */
+.talk-warning {
+  padding: 6px 8px;
+  margin: 6px 10px 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--uvp-danger);
+  text-align: left;
+  word-break: normal;
+  overflow-wrap: anywhere;
+  background: color-mix(in srgb, var(--uvp-danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--uvp-danger) 26%, transparent);
+  border-radius: 6px;
 }
 
 /* 「正在说话」的频谱：11 根 bar 分别对应从低频到高频的频段。

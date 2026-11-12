@@ -2533,6 +2533,39 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
+  it("广播信令通了但媒体不可达时，在说话态常驻提示", async () => {
+    // 广播的传输方式由设备 offer 决定（UDP / TCP 主动 / TCP 被动），平台只能照办。
+    // 后端拿到设备 offer 后判定"媒体大概率到不了设备"，前端在说话态把它显示出来：
+    // 否则操作员看到的是"正在广播"，而设备一点声音都没有。
+    const { wrapper } = await bootActiveBroadcast();
+    expect(wrapper.find("[data-testid='talk-warning']").exists()).toBe(false);
+
+    api.getTalkSession.mockReturnValueOnce({
+      code: 0,
+      message: "",
+      data: {
+        sessionId: "talk-1",
+        mode: "broadcast",
+        state: "active",
+        expiresAt: "",
+        warning: "设备用 UDP 传音频，与平台不在同一网段，声音大概率传不到设备。"
+      }
+    });
+    const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+    document.dispatchEvent(new Event("visibilitychange"));
+    await flushPromises();
+
+    expect(wrapper.get("[data-testid='talk-warning']").text()).toContain("不在同一网段");
+
+    // 停止后提示必须消失，否则换一台设备还会挂着上一台的告警。
+    await wrapper.get("[data-testid='talk-button']").trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-testid='talk-warning']").exists()).toBe(false);
+
+    hidden.mockRestore();
+    wrapper.unmount();
+  });
+
   it("切标签页或窗口失焦不会掐断正在进行的广播", async () => {
     // ⛔ 曾经的缺陷：`window.blur` 与 `visibilitychange` 一起调了 `releaseContinuousControls`，
     //    那个函数顺手 `stopTalk()`。于是"一边广播一边看别的标签页"直接断流 ——

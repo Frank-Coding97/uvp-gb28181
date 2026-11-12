@@ -55,6 +55,9 @@ type TalkSessionView struct {
 	StartedAt *time.Time                `json:"startedAt,omitempty"`
 	EndedAt   *time.Time                `json:"endedAt,omitempty"`
 	Error     string                    `json:"error,omitempty"`
+	// Warning 是「信令已通但媒体大概率到不了设备」的现场提示，不阻断会话。
+	// 与 Error 分开：这是可用性提示，不是失败原因，前端在 talking 态一直展示。
+	Warning string `json:"warning,omitempty"`
 }
 
 func NewTalkController(service TalkSessionService) *TalkController {
@@ -135,7 +138,7 @@ func (c *TalkController) Get(ctx *gin.Context) {
 	if !c.ready(ctx) {
 		return
 	}
-	channel, _, ok := c.loadTarget(ctx)
+	channel, device, ok := c.loadTarget(ctx)
 	if !ok {
 		return
 	}
@@ -151,7 +154,7 @@ func (c *TalkController) Get(ctx *gin.Context) {
 			return
 		}
 	}
-	c.Success(ctx, talkSessionView(session))
+	c.Success(ctx, talkSessionView(session, device.IP))
 }
 
 func (c *TalkController) Delete(ctx *gin.Context) {
@@ -352,9 +355,12 @@ func (c *TalkController) logUplinkFailure(ctx *gin.Context, err error, code stri
 		logging.Error(err))
 }
 
-func talkSessionView(session *gbmodels.GbTalkSession) TalkSessionView {
+// talkSessionView 组装会话视图。deviceIP 是设备的 SIP 信令来源地址，
+// 只用于判断「设备报的媒体地址平台是否够得着」（见 talk.BroadcastTransportWarning）。
+func talkSessionView(session *gbmodels.GbTalkSession, deviceIP string) TalkSessionView {
 	return TalkSessionView{
 		SessionID: session.SessionID, Mode: session.Mode, State: session.State, Phase: session.SignalPhase, ExpiresAt: session.ExpiresAt,
 		StartedAt: session.StartedAt, EndedAt: session.EndedAt, Error: session.Error,
+		Warning: talk.BroadcastTransportWarning(session.Mode, session.SenderMode, session.RemoteMediaIP, deviceIP),
 	}
 }
