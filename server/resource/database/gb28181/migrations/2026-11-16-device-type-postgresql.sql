@@ -1,0 +1,1 @@
+ALTER TABLE "gb_device" ADD COLUMN IF NOT EXISTS "device_type" VARCHAR(16) NOT NULL DEFAULT 'ipc';

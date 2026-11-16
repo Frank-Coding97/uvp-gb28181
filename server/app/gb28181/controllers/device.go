@@ -106,6 +106,7 @@ func (dc *DeviceController) Update(c *gin.Context) {
 	deviceID := c.Param("deviceId")
 	var body struct {
 		Alias            *string `json:"alias"`
+		DeviceType       *string `json:"deviceType"`
 		Manufacturer     *string `json:"manufacturer"`
 		Model            *string `json:"model"`
 		Firmware         *string `json:"firmware"`
@@ -139,6 +140,15 @@ func (dc *DeviceController) Update(c *gin.Context) {
 	updates := make(map[string]interface{})
 	if body.Alias != nil {
 		updates["alias"] = *body.Alias
+	}
+	// 设备类型由用户手动维护，只接受 ipc/nvr/platform；空串按 IPC 处理。
+	if body.DeviceType != nil {
+		deviceType, ok := gbmodels.NormalizeDeviceType(*body.DeviceType)
+		if !ok {
+			app.Response.Fail(c, "设备类型只能是 ipc、nvr 或 platform", http.StatusUnprocessableEntity)
+			return
+		}
+		updates["device_type"] = deviceType
 	}
 	if body.Manufacturer != nil {
 		updates["manufacturer"] = *body.Manufacturer

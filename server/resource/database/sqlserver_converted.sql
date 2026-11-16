@@ -1,7 +1,7 @@
 -- UVP-GB28181 SQL Server release initialization script
 -- Generated from the development schema by
 -- server/resource/database/baseline/generate_sql.py. Do not edit by hand.
--- Schema fingerprint: b21f30f17802ccda435c1a7b352543ada61d3a020221b7488af0b25913b7f01d
+-- Schema fingerprint: a5cf4560e5db23ea398965802ee75465b3e7a2c85f48a4c5e61916538dde7729
 -- Contains production table structures and release baseline data only.
 
 -- 方言差异（由 profile 消化，阅读时注意）：
@@ -665,6 +665,7 @@ BEGIN
     [device_id] NVARCHAR(20) NOT NULL DEFAULT N'',
     [name] NVARCHAR(255) NOT NULL DEFAULT N'',
     [alias] NVARCHAR(255) NOT NULL DEFAULT N'',
+    [device_type] NVARCHAR(16) NOT NULL DEFAULT N'ipc',
     [password] NVARCHAR(255) NOT NULL DEFAULT N'',
     [transport] NVARCHAR(8) NOT NULL DEFAULT N'',
     [manufacturer] NVARCHAR(255) NOT NULL DEFAULT N'',

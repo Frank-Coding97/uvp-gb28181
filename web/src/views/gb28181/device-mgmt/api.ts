@@ -94,6 +94,8 @@ export interface DeviceVO {
   deviceId: string;
   name: string;
   alias: string;
+  /** ipc / nvr / platform（用户手动维护，默认 ipc）。 */
+  deviceType?: string;
   transport: string;
   manufacturer: string;
   model: string;
@@ -776,6 +778,8 @@ export interface CreateDeviceDTO {
   name?: string;
   password?: string;
   transport?: "UDP" | "TCP";
+  /** ipc / nvr / platform；留空按 ipc。 */
+  deviceType?: string;
 }
 
 export const createDevice = (data: CreateDeviceDTO) =>
@@ -857,6 +861,8 @@ export const updateDevice = (
   deviceId: string,
   data: {
     alias?: string;
+    /** ipc / nvr / platform（用户手动维护的展示类型）。 */
+    deviceType?: string;
     manufacturer?: string;
     model?: string;
     firmware?: string;

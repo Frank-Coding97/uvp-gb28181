@@ -6,7 +6,7 @@
     "live_table_count": 118,
     "included_table_count": 117,
     "excluded_table_count": 20,
-    "schema_fingerprint": "b21f30f17802ccda435c1a7b352543ada61d3a020221b7488af0b25913b7f01d",
+    "schema_fingerprint": "a5cf4560e5db23ea398965802ee75465b3e7a2c85f48a4c5e61916538dde7729",
     "policy_rev": 1
   },
   "excluded_tables": {
@@ -4611,6 +4611,15 @@
           "default": "",
           "extra": "",
           "comment": "用户自定义别名(用户可编辑,不被设备上报覆盖)",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "device_type",
+          "type": "varchar(16)",
+          "nullable": false,
+          "default": "ipc",
+          "extra": "",
+          "comment": "设备类型 ipc/nvr/platform(用户维护)",
           "collation": "utf8mb4_general_ci"
         },
         {

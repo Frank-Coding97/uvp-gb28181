@@ -38,7 +38,9 @@ import {
   Bell,
   ChevronLeft,
   ChevronRight,
-  CircleQuestionMark
+  CircleQuestionMark,
+  HardDrive,
+  Network
 } from "@lucide/vue";
 import { startPlay, stopPlay, type PlayResult } from "@/api/gb28181";
 import { listZLMNodes, type ZLMNode } from "@/api/gb28181-zlm";
@@ -111,6 +113,14 @@ import ViewerTable from "./components/ViewerTable.vue";
 import { cloudRecordingStateMeta, mergeCloudRecordingState } from "./cloudRecordingState";
 import { catalogShapeFromAttributes, catalogShapeText } from "./channelAttributeText";
 import { useChannelAttributeEntries } from "./useChannelAttributeDict";
+import {
+  DEFAULT_DEVICE_TYPE,
+  DEVICE_TYPE_OPTIONS,
+  deviceTypeLabel,
+  deviceTypeShortLabel,
+  normalizeDeviceType,
+  type DeviceType
+} from "./deviceType";
 import { coordPatchAfterSave, positionSourceText, resolveChannelCoordPayload } from "./channelPositionForm";
 import { buildMapCenter, formatMapCenter, normalizeMapCenter, type MapCenter } from "./mapView";
 import {
@@ -697,9 +707,21 @@ const runtimeChannelsError = ref("");
 const channelMounts = ref<ChannelMount[]>([]);
 const timeline = ref<TimelineSlot[]>([]);
 const editDeviceVisible = ref(false);
+// 卡片图标只按「用户维护的设备类型」区分，不在这里猜型号。
+const DEVICE_TYPE_ICONS = { ipc: Camera, nvr: HardDrive, platform: Network } as const;
+function deviceTypeIcon(raw?: string | null) {
+  return DEVICE_TYPE_ICONS[normalizeDeviceType(raw)];
+}
+// 该设备当前是否已配独立密码（由接口的 hasPassword 回显，明文永不下发）。
+const editHasPassword = ref(false);
+// 勾选「清除」= 保存时显式传空串，让设备回落统一接入密码。
+const editPasswordCleared = ref(false);
+const editingDevice = ref(false);
+const editingDeviceId = ref("");
 const editDeviceForm = ref<{
   deviceId: string;
   alias: string;
+  deviceType: DeviceType;
   name: string;
   zlmNodeId: number;
   protocolOverride: ProtocolOverride;
@@ -707,17 +729,12 @@ const editDeviceForm = ref<{
 }>({
   deviceId: "",
   alias: "",
+  deviceType: DEFAULT_DEVICE_TYPE,
   name: "",
   zlmNodeId: 0,
   protocolOverride: "auto",
   password: ""
 });
-// 该设备当前是否已配独立密码（由接口的 hasPassword 回显，明文永不下发）。
-const editHasPassword = ref(false);
-// 勾选「清除」= 保存时显式传空串，让设备回落统一接入密码。
-const editPasswordCleared = ref(false);
-const editingDevice = ref(false);
-const editingDeviceId = ref("");
 const zlmNodes = ref<ZLMNode[]>([]);
 const zlmNodesLoading = ref(false);
 const zlmNodesError = ref("");
@@ -3158,7 +3175,8 @@ const createDeviceVisible = ref(false);
 const createDeviceForm = reactive<CreateDeviceDTO>({
   deviceId: "",
   name: "",
-  password: ""
+  password: "",
+  deviceType: DEFAULT_DEVICE_TYPE
 });
 const createDeviceFormRef = ref();
 const creatingDevice = ref(false);
@@ -3208,6 +3226,7 @@ function openCreateDeviceModal() {
   createDeviceForm.deviceId = "";
   createDeviceForm.name = "";
   createDeviceForm.password = "";
+  createDeviceForm.deviceType = DEFAULT_DEVICE_TYPE;
   createDeviceVisible.value = true;
   createDeviceFormRef.value?.clearValidate?.();
 }
@@ -3221,7 +3240,8 @@ async function handleCreateDevice() {
     const res = await createDevice({
       deviceId: createDeviceForm.deviceId.trim(),
       name: createDeviceForm.name?.trim() || undefined,
-      password: createDeviceForm.password?.trim() || undefined
+      password: createDeviceForm.password?.trim() || undefined,
+      deviceType: createDeviceForm.deviceType || DEFAULT_DEVICE_TYPE
     });
     if (res.code === 0) {
       Message.success("设备已创建");
@@ -3246,6 +3266,7 @@ function openEditDeviceModal(record: DeviceVO) {
   editDeviceForm.value = {
     deviceId: record.deviceId,
     alias: record.alias || "",
+    deviceType: normalizeDeviceType(record.deviceType),
     name: record.name || "",
     zlmNodeId: record.zlmNodeId || 0,
     protocolOverride: originalProtocolOverride,
@@ -3366,7 +3387,15 @@ async function handleEditChannel() {
 
 function cancelEditDevice() {
   editDeviceVisible.value = false;
-  editDeviceForm.value = { deviceId: "", alias: "", name: "", zlmNodeId: 0, protocolOverride: "auto", password: "" };
+  editDeviceForm.value = {
+    deviceId: "",
+    alias: "",
+    deviceType: DEFAULT_DEVICE_TYPE,
+    name: "",
+    zlmNodeId: 0,
+    protocolOverride: "auto",
+    password: ""
+  };
   editHasPassword.value = false;
   editPasswordCleared.value = false;
   editingDeviceId.value = "";
@@ -3399,6 +3428,7 @@ async function handleEditDevice() {
         : {};
     const res = await updateDevice(editingDeviceId.value, {
       alias: editDeviceForm.value.alias,
+      deviceType: editDeviceForm.value.deviceType,
       protocolOverride: editDeviceForm.value.protocolOverride,
       ...zlmNodeUpdate,
       ...passwordUpdate
@@ -4384,6 +4414,14 @@ onUnmounted(() => {
                   >
                 </template>
               </a-table-column>
+              <a-table-column title="类型" :width="110">
+                <template #cell="{ record }">
+                  <span class="device-type-inline">
+                    <component :is="deviceTypeIcon(record.deviceType)" :size="14" aria-hidden="true" />
+                    <span>{{ deviceTypeShortLabel(record.deviceType) }}</span>
+                  </span>
+                </template>
+              </a-table-column>
               <a-table-column title="厂商" :width="120">
                 <template #cell="{ record }"
                   ><span class="text-ellipsis">{{ record.manufacturer || "-" }}</span></template
@@ -4535,7 +4573,11 @@ onUnmounted(() => {
                 @dblclick="onDeviceDblclick(item, $event)"
               >
                 <div class="device-card-head">
-                  <span class="device-card-icon"><Camera :size="18" /></span>
+                  <a-tooltip :content="deviceTypeLabel(item.deviceType)" position="top">
+                    <span class="device-card-icon">
+                      <component :is="deviceTypeIcon(item.deviceType)" :size="18" />
+                    </span>
+                  </a-tooltip>
                   <div class="device-card-title">
                     <a-tooltip :content="deviceNameText(item)" position="top"
                       ><strong class="text-ellipsis">{{ deviceNameText(item) }}</strong></a-tooltip
@@ -5708,6 +5750,12 @@ onUnmounted(() => {
         <a-form-item field="name" label="设备名称">
           <a-input v-model="createDeviceForm.name" placeholder="选填,方便识别" allow-clear />
         </a-form-item>
+        <a-form-item field="deviceType" label="设备类型">
+          <a-select v-model="createDeviceForm.deviceType" :options="DEVICE_TYPE_OPTIONS" />
+          <template #extra>
+            <span class="form-hint">默认 IPC，创建后仍可在「编辑设备」里修改。</span>
+          </template>
+        </a-form-item>
         <a-form-item field="password" label="设备密码">
           <a-input-password v-model="createDeviceForm.password" placeholder="选填，留空则沿用平台统一接入密码" allow-clear />
           <template #extra>
@@ -5746,6 +5794,12 @@ onUnmounted(() => {
           <a-input v-model="editDeviceForm.alias" placeholder="选填,给设备起一个好记的名字" allow-clear />
           <template #extra>
             <span class="form-hint">优先展示,不会被设备重新注册覆盖</span>
+          </template>
+        </a-form-item>
+        <a-form-item field="deviceType" label="设备类型">
+          <a-select v-model="editDeviceForm.deviceType" :options="DEVICE_TYPE_OPTIONS" />
+          <template #extra>
+            <span class="form-hint">仅用于列表/卡片的图标与分类展示，不影响接入协议；默认 IPC。</span>
           </template>
         </a-form-item>
         <a-form-item field="password" label="设备密码">
@@ -7243,6 +7297,14 @@ onUnmounted(() => {
   display: grid;
   gap: 3px;
   min-width: 0;
+}
+
+/* 表格里的设备类型：图标 + 短文案，跟卡片图标同一套映射 */
+.device-type-inline {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--uvp-text-secondary);
 }
 .device-card-title strong {
   color: var(--uvp-text-primary);

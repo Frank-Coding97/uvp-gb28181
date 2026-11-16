@@ -21,6 +21,28 @@ const (
 	DeviceStatusOnline  int8 = 1 // 在线
 )
 
+// 设备类型。由用户手动维护（默认 IPC），只用于展示与筛选，不参与协议逻辑：
+// 注册报文里没有可靠的 NVR / 下级平台判据，自动推断必然猜错。
+const (
+	DeviceTypeIPC      = "ipc"      // 摄像机（默认）
+	DeviceTypeNVR      = "nvr"      // 硬盘录像机
+	DeviceTypePlatform = "platform" // 下级国标平台
+)
+
+// NormalizeDeviceType 归一用户/接口传入的类型值，返回标准值与是否合法。
+// 空串视为「未指定」，合法并归一为 IPC。
+func NormalizeDeviceType(raw string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", DeviceTypeIPC:
+		return DeviceTypeIPC, true
+	case DeviceTypeNVR:
+		return DeviceTypeNVR, true
+	case DeviceTypePlatform:
+		return DeviceTypePlatform, true
+	}
+	return "", false
+}
+
 // SubscribeCapability 订阅能力(Q4 决议:智能升降级状态机)
 // unknown:首次注册,未尝试
 // subscribed:SUBSCRIBE Catalog 成功,等 NOTIFY 推送
@@ -50,9 +72,12 @@ const (
 // 在线模型:keepalive_time + keepalive_interval 是事实真相,status 是物化缓存(由事实派生)
 type GbDevice struct {
 	models.BaseModel
-	DeviceID          string     `gorm:"column:device_id;size:20;uniqueIndex;comment:20位国标编码" json:"deviceId"`
-	Name              string     `gorm:"column:name;size:255;comment:设备名称(设备自上报)" json:"name"`
-	Alias             string     `gorm:"column:alias;size:255;default:'';comment:用户自定义别名(不被上报覆盖)" json:"alias"`
+	DeviceID string `gorm:"column:device_id;size:20;uniqueIndex;comment:20位国标编码" json:"deviceId"`
+	Name     string `gorm:"column:name;size:255;comment:设备名称(设备自上报)" json:"name"`
+	Alias    string `gorm:"column:alias;size:255;default:'';comment:用户自定义别名(不被上报覆盖)" json:"alias"`
+	// DeviceType 用户手动维护的设备类型(ipc/nvr/platform)。默认 IPC，
+	// 绝不会被设备上报覆盖 —— 平台从注册报文推不出真实形态。
+	DeviceType        string     `gorm:"column:device_type;size:16;not null;default:ipc;comment:设备类型 ipc/nvr/platform(用户维护)" json:"deviceType"`
 	Password          string     `gorm:"column:password;size:255;comment:按设备独立密码(本期用统一密码,留空)" json:"-"`
 	Transport         string     `gorm:"column:transport;size:8;comment:传输模式 UDP/TCP" json:"transport"`
 	Manufacturer      string     `gorm:"column:manufacturer;size:255;comment:厂商" json:"manufacturer"`
@@ -108,6 +133,18 @@ func (d *GbDevice) IsOnlineByFact(timeoutCount, graceSeconds int) bool {
 // TableName 表名
 func (GbDevice) TableName() string {
 	return "gb_device"
+}
+
+// BeforeCreate 给自动建档/手动创建设备补上默认类型 IPC。
+//
+// ⛔ 只挂 Create、不挂 Update：注册续期走 Upsert 的 Updates(d) 分支，那里
+// d.DeviceType 是零值（空串）会被 GORM 跳过，用户手工维护的类型因此得以保留。
+// 若在这里顺手挂 BeforeSave，设备每次重新注册都会把 NVR/下级平台打回 IPC。
+func (d *GbDevice) BeforeCreate(tx *gorm.DB) error {
+	if strings.TrimSpace(d.DeviceType) == "" {
+		d.DeviceType = DeviceTypeIPC
+	}
+	return nil
 }
 
 func NewGbDevice() *GbDevice {

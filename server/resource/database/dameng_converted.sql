@@ -1,7 +1,7 @@
 -- UVP-GB28181 达梦 DM8 release initialization script
 -- Generated from the development schema by
 -- server/resource/database/baseline/generate_sql.py. Do not edit by hand.
--- Schema fingerprint: b21f30f17802ccda435c1a7b352543ada61d3a020221b7488af0b25913b7f01d
+-- Schema fingerprint: a5cf4560e5db23ea398965802ee75465b3e7a2c85f48a4c5e61916538dde7729
 -- Contains production table structures and release baseline data only.
 
 -- 方言差异（由 profile 消化，阅读时注意）：
@@ -640,6 +640,7 @@ CREATE TABLE "gb_device" (
   "device_id" VARCHAR(60) NOT NULL DEFAULT '',
   "name" VARCHAR(765) NOT NULL DEFAULT '',
   "alias" VARCHAR(765) NOT NULL DEFAULT '',
+  "device_type" VARCHAR(48) NOT NULL DEFAULT 'ipc',
   "password" VARCHAR(765) NOT NULL DEFAULT '',
   "transport" VARCHAR(24) NOT NULL DEFAULT '',
   "manufacturer" VARCHAR(765) NOT NULL DEFAULT '',
@@ -684,6 +685,7 @@ COMMENT ON TABLE "gb_device" IS 'GB28181国标设备表';
 COMMENT ON COLUMN "gb_device"."device_id" IS '20位国标编码';
 COMMENT ON COLUMN "gb_device"."name" IS '设备名称';
 COMMENT ON COLUMN "gb_device"."alias" IS '用户自定义别名(用户可编辑,不被设备上报覆盖)';
+COMMENT ON COLUMN "gb_device"."device_type" IS '设备类型 ipc/nvr/platform(用户维护)';
 COMMENT ON COLUMN "gb_device"."password" IS '按设备独立密码(本期用统一密码,留空)';
 COMMENT ON COLUMN "gb_device"."transport" IS '传输模式 UDP/TCP';
 COMMENT ON COLUMN "gb_device"."manufacturer" IS '厂商';

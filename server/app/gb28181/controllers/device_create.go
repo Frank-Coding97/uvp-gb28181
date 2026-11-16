@@ -20,10 +20,11 @@ func (dc *DeviceMgmtController) CreateDevice(c *gin.Context) {
 	}
 
 	var body struct {
-		DeviceID  string `json:"deviceId" binding:"required"`
-		Name      string `json:"name"`
-		Password  string `json:"password"`
-		Transport string `json:"transport"`
+		DeviceID   string `json:"deviceId" binding:"required"`
+		Name       string `json:"name"`
+		Password   string `json:"password"`
+		Transport  string `json:"transport"`
+		DeviceType string `json:"deviceType"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		dc.FailAndAbort(c, "请求体不合法", err)
@@ -49,6 +50,13 @@ func (dc *DeviceMgmtController) CreateDevice(c *gin.Context) {
 	}
 	if body.Transport != "UDP" && body.Transport != "TCP" {
 		dc.FailAndAbort(c, "传输模式只能是 UDP 或 TCP", nil)
+		return
+	}
+
+	// 校验设备类型(留空 = 默认 IPC)
+	deviceType, ok := gbmodels.NormalizeDeviceType(body.DeviceType)
+	if !ok {
+		dc.FailAndAbort(c, "设备类型只能是 ipc、nvr 或 platform", nil)
 		return
 	}
 
@@ -103,6 +111,7 @@ func (dc *DeviceMgmtController) CreateDevice(c *gin.Context) {
 		Name:                strings.TrimSpace(body.Name),
 		Password:            strings.TrimSpace(body.Password),
 		Transport:           body.Transport,
+		DeviceType:          deviceType,
 		Status:              gbmodels.DeviceStatusOffline,
 		KeepaliveInterval:   60,
 		CreatedBy:           createdBy,
