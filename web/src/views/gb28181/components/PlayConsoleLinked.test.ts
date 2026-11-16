@@ -1204,6 +1204,14 @@ describe("PlayConsoleLinked 双区联动", () => {
       `webrtc://zlm:${signalingPort}/index/api/webrtc?app=rtp&stream=stream-webrtc&type=play`
     );
     expect(player.attributes("data-zlm-webrtc")).toBe("true");
+
+    await wrapper
+      .findAll(".proto-btn")
+      .find(button => button.text() === "WS-FLV")!
+      .trigger("click");
+    await flushPromises();
+    expect(player.attributes("data-url")).toBe(initialURL);
+    expect(player.attributes("data-zlm-webrtc")).toBe("false");
     wrapper.unmount();
   });
 
@@ -1373,6 +1381,79 @@ describe("PlayConsoleLinked 双区联动", () => {
         .find(b => b.text() === "WebRTC")!
         .attributes("disabled")
     ).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it.each([
+    ["http:", "HTTP-FLV", "http://zlm:18080/rtp/secure.live.flv"],
+    ["https:", "HTTP-FLV", "https://zlm:18443/rtp/secure.live.flv"],
+    ["http:", "HLS", "http://zlm:18080/rtp/secure/hls.m3u8"],
+    ["https:", "HLS", "https://zlm:18443/rtp/secure/hls.m3u8"]
+  ])("在 %s 页面手动切换 %s 使用对应安全级别的地址", async (pageProtocol, label, expectedURL) => {
+    vi.stubGlobal("location", { ...window.location, protocol: pageProtocol });
+    api.startPlay.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: {
+        streamId: "stream-secure",
+        ssrc: "0102030405",
+        app: "rtp",
+        urls: {
+          wsFlv: "ws://zlm:18080/rtp/secure.live.flv",
+          wssFlv: "wss://zlm:18443/rtp/secure.live.flv",
+          httpFlv: "http://zlm:18080/rtp/secure.live.flv",
+          httpsFlv: "https://zlm:18443/rtp/secure.live.flv",
+          hls: "http://zlm:18080/rtp/secure/hls.m3u8",
+          httpsHls: "https://zlm:18443/rtp/secure/hls.m3u8"
+        },
+        wsflvUrl: "ws://legacy/rtp/secure.live.flv",
+        httpFlvUrl: "http://legacy/rtp/secure.live.flv",
+        hlsUrl: "http://legacy/rtp/secure/hls.m3u8",
+        expireAt: 0
+      }
+    });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper
+      .findAll(".proto-btn")
+      .find(button => button.text() === label)!
+      .trigger("click");
+    await flushPromises();
+    expect(wrapper.get("[data-testid='play-window']").attributes("data-url")).toBe(expectedURL);
+    wrapper.unmount();
+  });
+
+  it("HTTPS 页面缺少安全端点时禁用相应快捷协议,不回退到不安全的旧地址", async () => {
+    vi.stubGlobal("location", { ...window.location, protocol: "https:" });
+    api.startPlay.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: {
+        streamId: "stream-secure-only",
+        ssrc: "0102030405",
+        app: "rtp",
+        urls: { wssFlv: "wss://zlm:18443/rtp/secure.live.flv" },
+        wsflvUrl: "ws://legacy/rtp/secure.live.flv",
+        httpFlvUrl: "http://legacy/rtp/secure.live.flv",
+        hlsUrl: "http://legacy/rtp/secure/hls.m3u8",
+        expireAt: 0
+      }
+    });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    for (const label of ["HTTP-FLV", "HLS"]) {
+      expect(
+        wrapper
+          .findAll(".proto-btn")
+          .find(button => button.text() === label)!
+          .attributes("disabled")
+      ).toBeDefined();
+    }
+    const wsFlv = wrapper.findAll(".proto-btn").find(button => button.text() === "WS-FLV")!;
+    expect(wsFlv.attributes("disabled")).toBeUndefined();
+    await wsFlv.trigger("click");
+    await flushPromises();
+    expect(wrapper.get("[data-testid='play-window']").attributes("data-url")).toBe("wss://zlm:18443/rtp/secure.live.flv");
     wrapper.unmount();
   });
 

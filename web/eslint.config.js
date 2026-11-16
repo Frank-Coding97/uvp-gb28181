@@ -65,6 +65,7 @@ export default defineConfig([
       ".idea",
       "dist",
       "/public",
+      "public/easyplayer/**", // 第三方压缩包保留原格式，由播放器资源与加载回归测试验证
       "/docs",
       ".husky",
       ".local",

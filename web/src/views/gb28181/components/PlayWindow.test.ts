@@ -215,12 +215,18 @@ describe("PlayWindow playback embedding", () => {
     await flushPromises();
 
     expect(wrapper.get('[data-testid="player-loading"]').text()).toContain("等待首帧");
+    expect(wrapper.classes()).toContain("is-loading");
+    // 原生 loading 用内联 display:flex 显示，首帧占位期间需要覆盖它。
+    expect(playWindowSource).toMatch(
+      /\.play-window\.is-loading :deep\(\.easyplayer-loading\)\s*\{\s*display:\s*none !important;/
+    );
 
     videoInfo = { width: 1920, height: 1080 };
     vi.advanceTimersByTime(1000);
     await wrapper.vm.$nextTick();
 
     expect(wrapper.find('[data-testid="player-loading"]').exists()).toBe(false);
+    expect(wrapper.classes()).not.toContain("is-loading");
     expect(wrapper.emitted("firstFrame")).toHaveLength(1);
     wrapper.unmount();
   });
@@ -244,6 +250,7 @@ describe("PlayWindow playback embedding", () => {
     await wrapper.vm.$nextTick();
 
     expect(wrapper.find('[data-testid="player-loading"]').exists()).toBe(false);
+    expect(wrapper.classes()).not.toContain("is-loading");
     expect(wrapper.get(".err").text()).toContain("拉流超时");
     wrapper.unmount();
   });
@@ -473,6 +480,73 @@ describe("PlayWindow playback embedding", () => {
     await flushPromises();
     expect(order).toEqual(["construct", "destroy()", "destroyed", "construct"]);
 
+    wrapper.unmount();
+  });
+
+  it("连续切换协议时,后一次切换也必须等待正在进行的销毁", async () => {
+    const instances: FakeEasyPlayer[] = [];
+    const finishDestroy: Array<() => void> = [];
+    class FakeEasyPlayer {
+      constructor() {
+        instances.push(this);
+      }
+      on = vi.fn();
+      play = vi.fn();
+      destroy = vi.fn(() => new Promise<void>(resolve => finishDestroy.push(resolve)));
+    }
+    (globalThis as { EasyPlayerPro?: unknown }).EasyPlayerPro = FakeEasyPlayer;
+    const wrapper = mount(PlayWindow, { props: { url: "ws://zlm/live.flv", zlmWebrtc: false } });
+    await flushPromises();
+
+    await wrapper.setProps({ url: "webrtc://zlm/live", zlmWebrtc: true });
+    await wrapper.setProps({ url: "ws://zlm/live.flv", zlmWebrtc: false });
+    await flushPromises();
+    expect(instances).toHaveLength(1);
+    expect(instances[0].destroy).toHaveBeenCalledTimes(1);
+
+    finishDestroy.shift()!();
+    await flushPromises();
+    expect(instances).toHaveLength(2);
+    expect(instances[1].play).toHaveBeenCalledExactlyOnceWith("ws://zlm/live.flv");
+    expect(wrapper.emitted("error")).toBeUndefined();
+
+    wrapper.unmount();
+    finishDestroy.shift()!();
+    await flushPromises();
+  });
+
+  it.each(["error", "timeout"])("切回 FLV 后忽略旧实例迟到的 %s 事件", async event => {
+    const listeners: Array<Record<string, (...args: any[]) => void>> = [];
+    class FakeEasyPlayer {
+      constructor() {
+        const callbacks: Record<string, (...args: any[]) => void> = {};
+        listeners.push(callbacks);
+        this.on = vi.fn((name, callback) => {
+          callbacks[name] = callback;
+        });
+      }
+      on: ReturnType<typeof vi.fn>;
+      play = vi.fn();
+      destroy = vi.fn();
+    }
+    (globalThis as { EasyPlayerPro?: unknown }).EasyPlayerPro = FakeEasyPlayer;
+    const wrapper = mount(PlayWindow, { props: { url: "ws://zlm/live.flv", zlmWebrtc: false } });
+    await flushPromises();
+    await wrapper.setProps({ url: "webrtc://zlm/live", zlmWebrtc: true });
+    await flushPromises();
+    await wrapper.setProps({ url: "ws://zlm/live.flv", zlmWebrtc: false });
+    await flushPromises();
+
+    listeners[0][event]("decoderWorkerInitError");
+    listeners[1][event]("decoderWorkerInitError");
+    await flushPromises();
+    expect(wrapper.emitted("error")).toBeUndefined();
+    expect(wrapper.emitted("playerError")).toBeUndefined();
+    expect(wrapper.text()).not.toContain("decoderWorkerInitError");
+    listeners[2][event]("decoderWorkerInitError");
+    await flushPromises();
+    expect(wrapper.emitted("error")).toEqual([[event === "error" ? "EasyPlayer 错误: decoderWorkerInitError" : "拉流超时"]]);
+    expect(wrapper.emitted("playerError")).toHaveLength(1);
     wrapper.unmount();
   });
 

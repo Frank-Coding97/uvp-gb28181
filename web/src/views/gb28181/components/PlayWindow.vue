@@ -59,6 +59,7 @@ const player = shallowRef<any>(null);
 const smoothness = shallowRef<PlayerSmoothness | null>(null);
 const errorMsg = ref("");
 const firstFrameReady = ref(false);
+const waitingForFirstFrame = computed(() => Boolean(props.url) && !firstFrameReady.value && !errorMsg.value);
 const userStore = useUserStoreHook();
 const canScreenshot = computed(() => {
   const permissions = userStore.account.permissions ?? [];
@@ -139,6 +140,8 @@ function stopSizePolling() {
   }
 }
 
+let pendingDestroy: Promise<void> | undefined;
+
 /**
  * 销毁当前播放器，并**等到库把容器交还**才返回。
  *
@@ -158,11 +161,19 @@ async function destroy(): Promise<void> {
   smoothness.value = null;
   const instance = player.value;
   player.value = null;
-  if (!instance) return;
+  if (!instance) return pendingDestroy;
+  const pending = (async () => {
+    try {
+      await instance.destroy();
+    } catch (e) {
+      console.warn("EasyPlayerPro destroy error", e);
+    }
+  })();
+  pendingDestroy = pending;
   try {
-    await instance.destroy();
-  } catch (e) {
-    console.warn("EasyPlayerPro destroy error", e);
+    await pending;
+  } finally {
+    if (pendingDestroy === pending) pendingDestroy = undefined;
   }
 }
 
@@ -262,12 +273,14 @@ async function play(u: string, token: number) {
       void destroy();
     };
     p.on("error", (err: any) => {
+      if (player.value !== p) return;
       errorMsg.value = `EasyPlayer 错误: ${typeof err === "string" ? err : JSON.stringify(err)}`;
       emit("error", errorMsg.value);
       reportPlayerError("player_error");
       discardBrokenInstance();
     });
     p.on("timeout", () => {
+      if (player.value !== p) return;
       errorMsg.value = "拉流超时";
       emit("error", errorMsg.value);
       reportPlayerError("player_timeout");
@@ -363,8 +376,10 @@ async function switchTo(u: string, force = false): Promise<void> {
     // ⛔ 必须等 destroy 落定再重建（库的容器占用标记是异步清掉的），
     //    否则构造函数会抛 `EasyPlayerPro err container`。
     await destroy();
-    if (token !== playToken) return;
   }
+  // destroy() 会立即清空 player；后续切换仍须等同一次销毁交还容器。
+  await pendingDestroy;
+  if (token !== playToken) return;
   playerFamily = nextFamily;
   await play(u, token);
 }
@@ -430,9 +445,9 @@ defineExpose({ stop: destroy, getSmoothness, getVideoSize, refreshVideoSize: rea
 </script>
 
 <template>
-  <div :class="['play-window', { playback }]">
+  <div :class="['play-window', { playback, 'is-loading': waitingForFirstFrame }]">
     <div ref="containerRef" class="player" />
-    <div v-if="url && !firstFrameReady && !errorMsg" class="loading" data-testid="player-loading" role="status">
+    <div v-if="waitingForFirstFrame" class="loading" data-testid="player-loading" role="status">
       <span class="loading-spinner" aria-hidden="true" />
       <span>正在连接视频流，等待首帧…</span>
     </div>
@@ -470,6 +485,11 @@ defineExpose({ stop: destroy, getSmoothness, getVideoSize, refreshVideoSize: rea
   width: 100%;
   height: 100%;
   min-height: 100%;
+}
+
+/* 首帧占位由组件统一展示，避免与 EasyPlayer 内联显示的原生 loading 重叠。 */
+.play-window.is-loading :deep(.easyplayer-loading) {
+  display: none !important;
 }
 
 .loading {

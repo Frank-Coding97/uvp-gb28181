@@ -613,23 +613,25 @@ type ProtocolOption = {
 const protocol = ref<StreamProtocol | "">("ws-flv");
 const playbackSnapshot = ref<PlaybackSource | null>(null);
 function protocolUrlsFor(result: PlayResult | null | undefined): ProtocolURLMap {
+  const secure = window.location.protocol === "https:";
   return {
-    "ws-flv": result?.urls?.wsFlv || result?.wsflvUrl || null,
-    "http-flv": result?.urls?.httpFlv || result?.httpFlvUrl || null,
+    // 快捷协议是逻辑类型；手动切换也必须像首次点播一样选择安全端点及其端口。
+    "ws-flv": (secure ? result?.urls?.wssFlv : result?.urls?.wsFlv || result?.wsflvUrl) || null,
+    "http-flv": (secure ? result?.urls?.httpsFlv : result?.urls?.httpFlv || result?.httpFlvUrl) || null,
     "wss-flv": result?.urls?.wssFlv || null,
     "https-flv": result?.urls?.httpsFlv || null,
     "ws-fmp4": result?.urls?.wsFmp4 || null,
     "http-fmp4": result?.urls?.httpFmp4 || null,
     "wss-fmp4": result?.urls?.wssFmp4 || null,
     "https-fmp4": result?.urls?.httpsFmp4 || null,
-    hls: result?.urls?.hls || result?.hlsUrl || null,
+    hls: (secure ? result?.urls?.httpsHls : result?.urls?.hls || result?.hlsUrl) || null,
     "https-hls": result?.urls?.httpsHls || null,
     "ws-ts": result?.urls?.wsTs || null,
     "http-ts": result?.urls?.httpTs || null,
     "wss-ts": result?.urls?.wssTs || null,
     "https-ts": result?.urls?.httpsTs || null,
     // EasyPlayer 按页面协议恢复信令 URL，HTTPS 页面必须同时选择 HTTPS 端口。
-    webrtc: (window.location.protocol === "https:" ? result?.urls?.webrtcs : result?.urls?.webrtc) || null,
+    webrtc: (secure ? result?.urls?.webrtcs : result?.urls?.webrtc) || null,
     webrtcs: result?.urls?.webrtcs || null,
     rtmp: result?.urls?.rtmp || null,
     rtmps: result?.urls?.rtmps || null,
