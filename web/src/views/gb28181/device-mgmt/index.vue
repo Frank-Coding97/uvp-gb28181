@@ -559,11 +559,17 @@ function streamIdentificationText(value?: string | null) {
   return "未知配置";
 }
 
+/**
+ * 通道卡片上的码流提示：**只说"当前直播和所选配置不一致"这类需要用户知情的情况**。
+ *
+ * 一致时不再提示 —— "已请求所选配置，但设备实际码流未确认"这种话对用户没有可操作性
+ * （既不能点、也不能改，只是告诉我们自己没核实），白白占掉卡片一行。2026-11-16 去掉。
+ */
 function streamIdentificationNotice(item: ChannelVO) {
   if (!isChannelPlaying(item)) return "";
   if (item.currentStreamIdentification == null) return "当前直播请求的码流配置无法确认；新配置在下次新建直播时使用";
   if (item.currentStreamIdentification !== (item.streamIdentification || "")) return "当前直播未使用所选配置；下次新建直播时使用";
-  return "当前直播已请求所选配置，设备实际码流未确认";
+  return "";
 }
 const canUpdateRecording = computed(() => hasPermission("gb28181:channel:recording:update"));
 const canStopPlayback = computed(() => hasPermission("gb28181:play:stop"));

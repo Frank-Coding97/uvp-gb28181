@@ -1068,7 +1068,10 @@ describe("device-mgmt round-2 修复回归", () => {
     await wrapper.get('[data-asset-kind="channel"]').trigger("click");
     await flushPromises();
     const card = wrapper.get("article.channel-summary-card");
-    expect(card.text()).toContain("当前直播已请求所选配置，设备实际码流未确认");
+    // 一致时不再有任何提示（"已请求所选配置、设备实际码流未确认"那句话 2026-11-16 已按需求删掉，
+    // 别再加回来 —— 它对用户没有可操作性）。不一致时的两条提示仍要保留，见下一条用例。
+    expect(card.text()).not.toContain("当前直播已请求所选配置");
+    expect(card.find(".channel-stream-notice").exists()).toBe(false);
     const select = card
       .findAllComponents({ name: "ASelect" })
       .find((component: any) => component.props("modelValue") === "stream:0");
