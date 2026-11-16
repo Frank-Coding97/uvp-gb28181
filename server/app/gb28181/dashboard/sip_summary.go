@@ -10,11 +10,17 @@ import (
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
 
+// SIPMinutePoint 是「今日」走势的一个分钟点。
+//
+// ⛔ Transactions 必须单独给：卡片大字是当日累计事务数，曲线要画**同源的累计**，
+//
+//	拿 requests 或 success+failure 近似会让"末点 ≠ 大字"，用户一眼就看出对不上。
 type SIPMinutePoint struct {
-	BucketStart time.Time `json:"bucketStart"`
-	Requests    uint64    `json:"requests"`
-	Success     uint64    `json:"success"`
-	Failure     uint64    `json:"failure"`
+	BucketStart  time.Time `json:"bucketStart"`
+	Requests     uint64    `json:"requests"`
+	Transactions uint64    `json:"transactions"`
+	Success      uint64    `json:"success"`
+	Failure      uint64    `json:"failure"`
 }
 
 type SIPMetricSummary struct {
@@ -65,6 +71,7 @@ func (query *SIPMetricQuery) Summary(ctx context.Context, now time.Time) (SIPMet
 			points[bucket] = point
 		}
 		point.Requests += row.RequestCount
+		point.Transactions += row.TransactionCount
 		point.Success += row.TransactionSuccess
 		point.Failure += row.TransactionFailure
 	}

@@ -288,6 +288,7 @@ import {
   openDashboardCardDrilldown
 } from "./dashboardCardDrilldown";
 import { buildMediaRuntimeLedger, type MediaRuntimeLedgerKind } from "./dashboardDrilldownState";
+import { cumulativeTrend } from "./dashboardState";
 import { useDashboardDrilldown } from "./useDashboardDrilldown";
 import { hasPermission } from "@/hooks/usePermission";
 
@@ -314,10 +315,7 @@ const trafficDirection = ref<TrafficDirection>("upstream");
 const drilldown = useDashboardDrilldown();
 const mediaLedgerVisible = ref(false),
   mediaLedgerKind = ref<MediaRuntimeLedgerKind>("streams");
-const playSuccessTrend = ref<number[]>([]),
-  mediaRateSamples = ref<ZLMMediaRateSample[]>([]),
-  upstreamTrafficTrend = ref<number[]>([]),
-  downstreamTrafficTrend = ref<number[]>([]);
+const mediaRateSamples = ref<ZLMMediaRateSample[]>([]);
 let grid: DashboardGridHandle | null = null,
   timer: ReturnType<typeof setInterval> | null = null,
   clockTimer: ReturnType<typeof setInterval> | null = null;
@@ -335,7 +333,13 @@ const sipSummary = computed(() => {
   if (!sip || !["ok", "partial"].includes(sip.status)) return null;
   return sip.data;
 });
-const sipTodayTrend = computed(() => sipSummary.value?.series.slice(-24).map(item => item.requests) ?? []);
+/**
+ * 今日 SIP 处理数量的走势 = **今日累计事务数**，与卡片大字同源。
+ *
+ * ⛔ 原来取系列的最后 24 个点画（= 最近 24 分钟的每分钟增量）：既和大字（今日累计）
+ *    不同量纲，也永远不会攀升；再加上 MiniTrend 按自身最大值归一化，曲线被压成一条直线。
+ */
+const sipTodayTrend = computed(() => cumulativeTrend(sipSummary.value?.series?.map(item => item.transactions) ?? []));
 const sipRpm = computed(() => {
   const values = sipSnapshot.value?.pulse.samples ?? [];
   return values.length ? values.reduce((sum, item) => sum + item.msgPerSec, 0) : null;
@@ -352,6 +356,16 @@ const inviteSuccessRate = computed<number | null>(() => {
   const rate = playSummary.value?.rate;
   return typeof rate === "number" && Number.isFinite(rate) ? Math.min(1, Math.max(0, rate)) : null;
 });
+/**
+ * 点播成功率趋势 = 后端按小时分好的 24 个桶，**空桶（rate == null）跳过**。
+ *
+ * ⛔ 旧实现是前端每 5 秒把"当前 24H 成功率"push 进数组：最多 2 分钟样本、刷新即清空，
+ *    而 24H 滚动成功率在 2 分钟内几乎不变 ⇒ 永远是一条水平线（用户 2026-11-16 报的问题）。
+ * ⛔ 空桶不能当 0%：那是"这段时间没人点播"，不是"点播全失败"。
+ */
+const playSuccessTrend = computed(() =>
+  (playSummary.value?.series ?? []).map(item => item.rate).filter((rate): rate is number => typeof rate === "number")
+);
 const playSuccessDescription = computed(() => {
   const play = dashboardSummary.value?.play;
   if (play?.status === "empty") return "近 24 小时暂无点播样本";
@@ -382,9 +396,17 @@ const todayTraffic = computed(() => {
 const selectedTrafficValue = computed<number | null>(
   () => todayTraffic.value?.[trafficDirection.value === "upstream" ? "upstreamBytes" : "downstreamBytes"] ?? null
 );
-const selectedTrafficTrend = computed(() =>
-  trafficDirection.value === "upstream" ? upstreamTrafficTrend.value : downstreamTrafficTrend.value
-);
+/**
+ * 流量趋势 = 后端给的小时增量序列，**不是**"打开页面以来的累计值采样"。
+ *
+ * ⛔ 旧实现是前端每 5 秒把当前累计值 push 进数组（最多 24 个样本 = 2 分钟，刷新即归零），
+ *    画出来必然是一条略斜的直线 —— 用户 2026-11-16 报"一直是平的、没有波动"。
+ *    现在数据源是 gb_device_traffic_hourly 的每小时增量，白天高、深夜低，才有形状。
+ */
+const selectedTrafficTrend = computed(() => {
+  const series = todayTraffic.value?.series ?? [];
+  return series.map(item => (trafficDirection.value === "upstream" ? item.upstreamBytes : item.downstreamBytes));
+});
 const trafficDescription = computed(() => (trafficDirection.value === "upstream" ? "今日累计上行流量" : "今日已结算下行流量"));
 const trafficTrendColor = computed(() => (trafficDirection.value === "upstream" ? "var(--uvp-brand)" : "var(--uvp-brand-cyan)"));
 const trafficCoveragePartial = computed(() => dashboardSummary.value?.traffic?.status === "partial");
@@ -523,11 +545,8 @@ async function refreshData() {
       devices.value = { total: assets.data.devices.total, online: assets.data.devices.online };
       channels.value = { total: assets.data.channels.total, online: assets.data.channels.online };
     }
-    if (inviteSuccessRate.value != null) playSuccessTrend.value = [...playSuccessTrend.value.slice(-23), inviteSuccessRate.value];
-    if (todayTraffic.value) {
-      upstreamTrafficTrend.value = [...upstreamTrafficTrend.value.slice(-23), todayTraffic.value.upstreamBytes];
-      downstreamTrafficTrend.value = [...downstreamTrafficTrend.value.slice(-23), todayTraffic.value.downstreamBytes];
-    }
+    // ⛔ 这里不再自攒趋势样本：成功率与流量的序列都由后端随 summary 一起给
+    //    （前端自攒只有"打开页面后这 2 分钟"，且一刷新就归零，画出来是假的平线）。
   } else dashboardSummary.value = null;
   updatedAt.value = new Date();
   refreshing.value = false;

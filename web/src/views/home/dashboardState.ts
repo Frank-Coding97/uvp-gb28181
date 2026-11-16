@@ -83,6 +83,33 @@ export function ratioPercent(part: number, total: number): number | null {
   return Math.round(Math.min(1, part / total) * 100);
 }
 
+/**
+ * 把「每分钟增量」序列压成「累计值」曲线（可选降采样）。
+ *
+ * 为什么需要它：卡片大字是"今日累计"，曲线如果照搬后端的分桶增量（每分钟请求数），
+ * 两者既不同量纲、也不会攀升 —— 用户 2026-11-16 报的"应该一直是攀升的、为什么波动那么小"
+ * 就是拿增量在画累计卡片。累计后末点 = 大字，形状单调向上。
+ *
+ * 降采样取每个等距窗口的**末值**：累计曲线上的末值才是"到那一刻为止的总量"，
+ * 取均值会把攀升压平，取首值会少算一截。
+ */
+export function cumulativeTrend(values: readonly number[], limit = 48): number[] {
+  if (!values.length || limit < 1) return [];
+  const cumulative: number[] = [];
+  let total = 0;
+  for (const value of values) {
+    total += Number.isFinite(value) ? value : 0;
+    cumulative.push(total);
+  }
+  if (cumulative.length <= limit) return cumulative;
+  const step = cumulative.length / limit;
+  const points: number[] = [];
+  for (let index = 0; index < limit; index += 1) {
+    points.push(cumulative[Math.min(cumulative.length - 1, Math.ceil((index + 1) * step) - 1)]);
+  }
+  return points;
+}
+
 export function describeSipRuntime(runtime: { state: string; errorSummary?: string }): DashboardServiceStatus {
   switch (runtime.state) {
     case "running":

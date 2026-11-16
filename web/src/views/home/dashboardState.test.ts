@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAttentionItems,
   classifyDashboardError,
+  cumulativeTrend,
   describeSipRuntime,
   loadStateLabel,
   metricText,
@@ -122,5 +123,25 @@ describe("dashboard state", () => {
     );
 
     expect(items.map(item => item.route)).toEqual(["/gb28181/device-mgmt/index"]);
+  });
+
+  /**
+   * 「今日 SIP 处理数量」卡片：大字是累计，曲线也必须是累计。
+   * ⛔ 这条挡的是回归到「拿每分钟增量画累计卡片」——两者不同量纲，曲线永远不会攀升。
+   */
+  it("turns per-minute increments into a rising cumulative curve", () => {
+    expect(cumulativeTrend([3, 0, 5])).toEqual([3, 3, 8]);
+    // 末点必须等于总量：卡片大字的数字要能和曲线末端对上。
+    expect(cumulativeTrend([3, 0, 5]).at(-1)).toBe(8);
+    expect(cumulativeTrend([])).toEqual([]);
+    expect(cumulativeTrend([1, 2], 0)).toEqual([]);
+  });
+
+  it("downsamples cumulative curves by window end, not by average", () => {
+    const curve = cumulativeTrend([1, 1, 1, 1, 1, 1, 1, 1], 4);
+    expect(curve).toEqual([2, 4, 6, 8]);
+    // 降采样后仍然单调不减，且末点守恒（取均值会把攀升压平）。
+    expect(curve.at(-1)).toBe(8);
+    for (let index = 1; index < curve.length; index += 1) expect(curve[index]).toBeGreaterThanOrEqual(curve[index - 1]);
   });
 });

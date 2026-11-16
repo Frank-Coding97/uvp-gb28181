@@ -20,8 +20,19 @@ export interface HomeDashboardSection<T> {
 export interface TodayTrafficSummary {
   upstreamBytes: number;
   downstreamBytes: number;
+  /**
+   * 今日每小时的上行 / 下行**增量**（后端按小时桶补齐，缺数据的小时为 0）。
+   * ⛔ 不要拿它当累计值画：累计值只会单调上升，形状永远是"平的"，看不出波动。
+   */
+  series?: TrafficSeriesPoint[];
   status: HomeDashboardSection<unknown>["status"];
   coverage: HomeDashboardSection<unknown>["coverage"];
+}
+
+export interface TrafficSeriesPoint {
+  bucketStart: string;
+  upstreamBytes: number;
+  downstreamBytes: number;
 }
 
 export interface OnlineRateSummary {
@@ -44,14 +55,27 @@ export interface PlaySuccessSummary {
   started: number;
   staleStarted: number;
   rate: number | null;
+  /**
+   * 24 小时按小时分桶的样本（后端给，固定 24 个点，含空桶）。
+   * ⛔ 空桶 `rate` 为 null：「这段时间没人点播」≠「点播全失败」，前端不能当 0% 画。
+   */
+  series?: PlayRateSeriesPoint[];
   status: HomeDashboardSection<unknown>["status"];
   coverage: HomeDashboardSection<unknown>["coverage"];
   asOf: string;
 }
 
+export interface PlayRateSeriesPoint {
+  bucketStart: string;
+  attempts: number;
+  success: number;
+  rate: number | null;
+}
+
 export interface SIPMinuteSummary {
   bucketStart: string;
   requests: number;
+  transactions: number;
   success: number;
   failure: number;
 }
