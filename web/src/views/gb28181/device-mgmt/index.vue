@@ -121,7 +121,7 @@ import {
   normalizeDeviceType,
   type DeviceType
 } from "./deviceType";
-import { coordPatchAfterSave, positionSourceText, resolveChannelCoordPayload } from "./channelPositionForm";
+import { positionSourceText } from "./channelPositionForm";
 import { buildMapCenter, formatMapCenter, normalizeMapCenter, type MapCenter } from "./mapView";
 import {
   describeEmptyTrajectory,
@@ -759,12 +759,6 @@ const zlmNodeOptions = computed(() => {
 let originalProtocolOverride: ProtocolOverride = "auto";
 let originalZLMNodeID = 0;
 const editChannelVisible = ref(false);
-// 坐标来源: '' 无 / 'catalog' 目录 / 'mobile' 实时上报 / 'manual' 人工录入
-const editChannelPositionSource = ref("");
-// 坐标输入用 string 承载: 空串 = 本次不修改坐标, 数字 = 设置, 两者都填 0 = 清除。
-// 用 a-input-number 的话空值表达能力弱, 这里自己控格式。
-const editChannelLongitude = ref("");
-const editChannelLatitude = ref("");
 function emptyEditChannelForm() {
   return {
     channelId: "",
@@ -772,10 +766,7 @@ function emptyEditChannelForm() {
     alias: "",
     name: "",
     manufacturer: "",
-    model: "",
-    ptzType: 0,
-    streamTransport: "UDP",
-    onDemandLive: true
+    model: ""
   };
 }
 const editChannelForm = ref(emptyEditChannelForm());
@@ -2386,9 +2377,7 @@ function openLocationPickerForMarker(
 /**
  * 通道列表 / 通道卡片上「位置」那支铅笔：直接开踩点弹窗。
  *
- * 为什么值得单独开一个入口：补坐标是**高频小动作**，走「编辑通道 → 找到坐标两框 → 保存」
- * 要开一个十几项的表单；而踩点弹窗里本来就带经纬度输入框，既能在图上点、也能手填，
- * 关掉即时落库（见 handleLocationConfirm 的非编辑弹窗分支）。
+ * 踩点弹窗里带经纬度输入框，既能在图上点、也能手填，确认后即时落库。
  */
 function openLocationPickerForChannel(channel: ChannelVO) {
   if (!canEditChannel.value) {
@@ -2404,36 +2393,11 @@ function openLocationPickerForChannel(channel: ChannelVO) {
   locationPickerVisible.value = true;
 }
 
-/** 从通道编辑弹窗打开踩点：把当前输入框里的值带过去，避免"两边不一致"。 */
-function openLocationPickerFromEdit() {
-  if (!editingChannelId.value) return;
-  locationPickerTarget.value = {
-    id: editingChannelId.value,
-    name: editChannelForm.value.alias || editChannelForm.value.name || "通道",
-    longitude: Number(editChannelLongitude.value) || 0,
-    latitude: Number(editChannelLatitude.value) || 0
-  };
-  locationPickerVisible.value = true;
-}
-
-/**
- * 踩点结果回填。
- *
- * ⛔ 从通道编辑弹窗进来时只回填、不保存：用户在弹窗里可能还要改别名等其它字段，
- *    直接落库会让"我还没点保存怎么就生效了"。
- * ⛔ 从地图卡片进来时没有其它待改字段，直接落库更符合预期（点完就生效）。
- */
+/** 踩点确认后保存位置，并刷新地图与通道列表。 */
 async function handleLocationConfirm(payload: { longitude: number; latitude: number }) {
   const target = locationPickerTarget.value;
   locationPickerVisible.value = false;
   if (!target) return;
-
-  if (editChannelVisible.value && editingChannelId.value === target.id) {
-    editChannelLongitude.value = payload.longitude === 0 ? "0" : String(payload.longitude);
-    editChannelLatitude.value = payload.latitude === 0 ? "0" : String(payload.latitude);
-    Message.success("已填入坐标，点「保存」后生效");
-    return;
-  }
 
   try {
     const res = await updateChannel(target.id, { longitude: payload.longitude, latitude: payload.latitude });
@@ -3303,17 +3267,8 @@ function openEditChannelModal(record: ChannelVO) {
     alias: record.alias || "",
     name: record.name || "",
     manufacturer: record.manufacturer || "",
-    model: record.model || "",
-    ptzType: record.ptzType || 0,
-    streamTransport: record.streamTransport || "UDP",
-    onDemandLive: record.onDemandLive !== false
+    model: record.model || ""
   };
-  // 已有坐标时预填, 让"当前是什么"和"要改成什么"在同一处看得见。
-  // 来源是 mobile 时也预填 —— 人工填过就等于接管, 由用户决定要不要覆盖实时值。
-  const hasCoord = !!(record.longitude || record.latitude);
-  editChannelLongitude.value = hasCoord ? String(record.longitude) : "";
-  editChannelLatitude.value = hasCoord ? String(record.latitude) : "";
-  editChannelPositionSource.value = record.positionSource || "";
   editingChannelId.value = record.id;
   editChannelVisible.value = true;
 }
@@ -3322,58 +3277,26 @@ function cancelEditChannel() {
   editChannelVisible.value = false;
   editingChannelId.value = 0;
   editChannelForm.value = emptyEditChannelForm();
-  editChannelLongitude.value = "";
-  editChannelLatitude.value = "";
-  editChannelPositionSource.value = "";
-}
-
-// 人工坐标入参归一: '' 成对空 = 不动; 成对数字 = 设置; 单给 0 = 非法。
-function resolveCoordPayload() {
-  return resolveChannelCoordPayload(editChannelLongitude.value, editChannelLatitude.value);
 }
 
 async function handleEditChannel() {
   if (!canEditChannel.value) return;
   if (!editingChannelId.value) return;
-  const coord = resolveCoordPayload();
-  if ("error" in coord) {
-    Message.error(coord.error);
-    return;
-  }
   editingChannel.value = true;
   try {
-    const [ptzRes, transportRes] = await Promise.all([
-      updateChannel(editingChannelId.value, {
-        alias: editChannelForm.value.alias,
-        ptzType: editChannelForm.value.ptzType,
-        onDemandLive: editChannelForm.value.onDemandLive,
-        ...coord.payload
-      }),
-      canEditTransport.value
-        ? updateChannelStreamTransport(editingChannelId.value, editChannelForm.value.streamTransport as any)
-        : Promise.resolve({ code: 0, message: "" })
-    ]);
-    if (ptzRes.code !== 0 || transportRes.code !== 0) {
-      Message.error(ptzRes.code !== 0 ? ptzRes.message || "摄像头类型更新失败" : transportRes.message || "流传输模式更新失败");
+    const res = await updateChannel(editingChannelId.value, { alias: editChannelForm.value.alias });
+    if (res.code !== 0) {
+      Message.error(res.message || "通道信息更新失败");
       return;
     }
-    const coordPatch = coordPatchAfterSave(coord.payload);
     const item = channels.value.find(channel => channel.id === editingChannelId.value);
     if (item) {
       item.alias = editChannelForm.value.alias;
-      item.ptzType = editChannelForm.value.ptzType;
-      if (canEditTransport.value) item.streamTransport = editChannelForm.value.streamTransport;
-      item.onDemandLive = editChannelForm.value.onDemandLive;
-      if (coordPatch) Object.assign(item, coordPatch);
     }
     if (channelDetail.value?.id === editingChannelId.value) {
       channelDetail.value = {
         ...channelDetail.value,
-        alias: editChannelForm.value.alias,
-        ptzType: editChannelForm.value.ptzType,
-        ...(canEditTransport.value ? { streamTransport: editChannelForm.value.streamTransport } : {}),
-        onDemandLive: editChannelForm.value.onDemandLive,
-        ...(coordPatch ?? {})
+        alias: editChannelForm.value.alias
       };
     }
     Message.success("通道信息已更新");
@@ -5879,44 +5802,9 @@ onUnmounted(() => {
           <a-input v-model="editChannelForm.alias" placeholder="选填,给通道起一个好记的名称" allow-clear />
           <template #extra><span class="form-hint">优先展示,不会被设备 Catalog 上报覆盖</span></template>
         </a-form-item>
-        <a-form-item label="厂商 / 型号">
+        <a-form-item label="厂商型号">
           <a-input :model-value="vendorText(editChannelForm)" disabled allow-clear />
           <template #extra><span class="form-hint">来自设备 Catalog 应答,不可编辑</span></template>
-        </a-form-item>
-        <a-form-item label="摄像头类型">
-          <a-select v-model="editChannelForm.ptzType">
-            <a-option v-for="opt in ptzTypeOptions" :key="opt.value" :value="Number(opt.value)">{{ opt.name }}</a-option>
-          </a-select>
-        </a-form-item>
-        <a-form-item label="通道坐标">
-          <div class="coord-inputs">
-            <a-input v-model="editChannelLongitude" placeholder="经度，如 116.99505" allow-clear />
-            <a-input v-model="editChannelLatitude" placeholder="纬度，如 36.66237" allow-clear />
-            <a-button size="small" @click="openLocationPickerFromEdit">
-              <template #icon><MapIcon :size="14" /></template>
-              地图选点
-            </a-button>
-          </div>
-          <template #extra>
-            <span class="form-hint">
-              留空表示本次不修改坐标；两者都填 0 可清除。「地图选点」可直接在地图上点击确定位置。当前来源：{{
-                positionSourceText({ positionSource: editChannelPositionSource }) || "无坐标"
-              }}
-            </span>
-          </template>
-        </a-form-item>
-        <a-form-item label="流传输模式">
-          <template v-if="canEditTransport">
-            <a-select v-model="editChannelForm.streamTransport">
-              <a-option value="UDP">UDP</a-option>
-              <a-option value="TCP-Active">TCP-Active</a-option>
-              <a-option value="TCP-Passive">TCP-Passive</a-option>
-            </a-select>
-          </template>
-          <span v-else>{{ streamTransportText(editChannelForm.streamTransport) }}</span>
-        </a-form-item>
-        <a-form-item label="按需直播">
-          <a-switch v-model="editChannelForm.onDemandLive" checked-text="无人观看自动关闭" unchecked-text="持续保持直播" />
         </a-form-item>
       </a-form>
       <template #footer>
@@ -9456,13 +9344,6 @@ onUnmounted(() => {
 }
 
 /* 通道坐标三路来源的标注（目录 / 实时 / 人工），列表与详情卡共用 */
-.coord-inputs {
-  display: grid;
-
-  /* 经度 / 纬度 / 「地图选点」按钮一行放下：按钮单独一行会让"选完点还得往下找保存"更远。 */
-  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
-  gap: 8px;
-}
 .coord-cell {
   display: inline-flex;
   gap: 6px;

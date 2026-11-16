@@ -568,7 +568,11 @@ function mountPage(options: { teleport?: boolean } = {}) {
         "a-modal": passthroughStub,
         "a-form": passthroughStub,
         "a-form-item": passthroughStub,
-        "a-input": passthroughStub,
+        "a-input": {
+          props: ["modelValue", "disabled"],
+          emits: ["update:modelValue"],
+          template: `<input :value="modelValue" :disabled="disabled" @input="$emit('update:modelValue', $event.target.value)" />`
+        },
         "a-input-password": passthroughStub,
         "a-button": { props: ["disabled"], template: `<button :disabled="disabled"><slot /></button>` },
         "a-select": {
@@ -649,6 +653,88 @@ describe("device-mgmt round-2 修复回归", () => {
     window.localStorage.clear();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it.each(["门岗", ""])("编辑通道只保留五项，保存别名 %j 不提交其他配置", async alias => {
+    user.account.permissions = ["gb28181:device:view", "gb28181:channel:edit", "gb28181:channel:stream-transport:update"];
+    const channel = {
+      ...coordinatedChannel,
+      deviceId: "34020000002000000031",
+      alias: "原别名",
+      manufacturer: "测试厂商",
+      model: "IPC-01",
+      ptzType: 3,
+      streamTransport: "TCP-Passive",
+      onDemandLive: false
+    };
+    api.listChannels.mockResolvedValue(okList(1, [channel]));
+    api.updateChannel.mockResolvedValue({ code: 0, message: "" });
+    api.updateChannelStreamTransport.mockResolvedValue({ code: 0, message: "" });
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get('[data-asset-kind="channel"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('[aria-label="编辑通道"]').trigger("click");
+
+    const modal = wrapper.get('[title="编辑通道"]');
+    expect(modal.findAll("[label]").map(item => item.attributes("label"))).toEqual([
+      "通道编号",
+      "所属设备",
+      "通道名称",
+      "通道别名",
+      "厂商型号"
+    ]);
+    expect(modal.findAll("input").map(input => ({ value: input.element.value, disabled: input.element.disabled }))).toEqual([
+      { value: channel.channelId, disabled: true },
+      { value: channel.deviceId, disabled: true },
+      { value: channel.name, disabled: true },
+      { value: "原别名", disabled: false },
+      { value: "测试厂商 / IPC-01", disabled: true }
+    ]);
+    await modal.get('[label="通道别名"] input').setValue(alias);
+    const otherConfig = {
+      ptzType: 6,
+      streamTransport: "UDP",
+      onDemandLive: true,
+      longitude: 117.1,
+      latitude: 36.7,
+      positionSource: "mobile"
+    };
+    // 模拟弹窗打开后外部配置已更新，保存别名不能用表单旧值覆盖它们。
+    Object.assign(channel, otherConfig);
+    await modal
+      .findAll("button")
+      .find(button => button.text() === "保存")!
+      .trigger("click");
+    await flushPromises();
+    expect(api.updateChannel).toHaveBeenCalledExactlyOnceWith(channel.id, { alias });
+    expect(api.updateChannelStreamTransport).not.toHaveBeenCalled();
+    expect(channel).toMatchObject({ alias, ...otherConfig });
+    expect(modal.attributes("visible")).toBe("false");
+    wrapper.unmount();
+  });
+
+  it("编辑通道保存失败时保留别名草稿和原数据", async () => {
+    user.account.permissions = ["gb28181:device:view", "gb28181:channel:edit"];
+    const channel = { ...coordinatedChannel, deviceId: "34020000002000000031", alias: "原别名" };
+    api.listChannels.mockResolvedValue(okList(1, [channel]));
+    api.updateChannel.mockResolvedValue({ code: 1, message: "保存失败" });
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get('[data-asset-kind="channel"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('[aria-label="编辑通道"]').trigger("click");
+    const modal = wrapper.get('[title="编辑通道"]');
+    await modal.get('[label="通道别名"] input').setValue("新别名");
+    await modal
+      .findAll("button")
+      .find(button => button.text() === "保存")!
+      .trigger("click");
+    await flushPromises();
+    expect(channel.alias).toBe("原别名");
+    expect(modal.attributes("visible")).toBe("true");
+    expect(modal.get<HTMLInputElement>('[label="通道别名"] input').element.value).toBe("新别名");
+    wrapper.unmount();
   });
 
   it("通道配置随列表刷新同步上下线状态，不重建当前工作区", async () => {

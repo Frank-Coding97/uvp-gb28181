@@ -26,6 +26,6 @@ const emit = defineEmits<{ upgrade: []; records: []; reboot: [] }>();
 .maintenance-reboot-menu {
   margin-top: 4px;
   color: var(--uvp-warning);
-  border-top: 1px solid var(--uvp-panel-border);
+  box-shadow: inset 0 1px 0 var(--uvp-panel-border);
 }
 </style>

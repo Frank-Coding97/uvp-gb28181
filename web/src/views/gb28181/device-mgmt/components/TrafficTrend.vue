@@ -459,8 +459,8 @@ onBeforeUnmount(() => {
   min-width: 0;
   min-height: 68px;
   padding: 10px;
-  background: var(--color-bg-2);
-  border: 1px solid var(--color-border-2);
+  background: var(--uvp-panel-bg);
+  border: 1px solid var(--uvp-panel-border);
   border-radius: 9px;
 }
 .metric-icon {
@@ -468,23 +468,23 @@ onBeforeUnmount(() => {
   place-items: center;
   width: 32px;
   height: 32px;
-  color: rgb(var(--primary-6));
-  background: rgb(var(--primary-1));
+  color: var(--uvp-brand);
+  background: var(--uvp-brand-soft);
   border-radius: 8px;
 }
 .metric-card--up .metric-icon {
-  color: rgb(var(--success-6));
-  background: rgb(var(--success-1));
+  color: var(--uvp-success);
+  background: var(--uvp-success-soft);
 }
 .metric-card--total .metric-icon {
-  color: rgb(var(--warning-6));
-  background: rgb(var(--warning-1));
+  color: var(--uvp-warning);
+  background: var(--uvp-warning-soft);
 }
 .metric-card > div > span,
 .metric-card small {
   display: block;
   font-size: 11px;
-  color: var(--color-text-3);
+  color: var(--uvp-text-tertiary);
 }
 .metric-help {
   display: inline-grid;
@@ -494,7 +494,7 @@ onBeforeUnmount(() => {
   padding: 0;
   margin-left: 3px;
   vertical-align: -5px;
-  color: var(--color-text-3);
+  color: var(--uvp-text-tertiary);
   cursor: help;
   background: transparent;
   border: 0;
@@ -504,12 +504,12 @@ onBeforeUnmount(() => {
     background-color 180ms ease;
 }
 .metric-help:hover {
-  color: rgb(var(--primary-6));
-  background: var(--color-fill-2);
+  color: var(--uvp-brand);
+  background: var(--uvp-brand-soft);
 }
 .metric-help:focus-visible {
-  color: rgb(var(--primary-6));
-  outline: 2px solid rgb(var(--primary-6));
+  color: var(--uvp-brand);
+  outline: 2px solid var(--uvp-brand);
   outline-offset: 1px;
 }
 .metric-card strong {
@@ -519,7 +519,7 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
   font-size: 17px;
   font-weight: 650;
-  color: var(--color-text-1);
+  color: var(--uvp-text-primary);
   white-space: nowrap;
 }
 .metric-card small {

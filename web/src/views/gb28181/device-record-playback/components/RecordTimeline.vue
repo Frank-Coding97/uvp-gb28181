@@ -424,7 +424,7 @@ onUnmounted(() => {
   border-radius: 2px;
 }
 .timeline-legend .time::before {
-  background: var(--uvp-brand);
+  background: var(--uvp-solid-bg);
 }
 .timeline-legend .alarm::before {
   background: var(--uvp-danger);
@@ -594,7 +594,8 @@ onUnmounted(() => {
   filter: brightness(1.12);
 }
 .timeline-segment.time {
-  background: var(--uvp-brand);
+  background: var(--uvp-solid-bg);
+  border-color: var(--uvp-solid-hover-bg);
 }
 .timeline-segment.alarm {
   background: var(--uvp-danger);

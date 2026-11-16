@@ -93,12 +93,12 @@ describe("device-mgmt guest permission boundary", () => {
     expect(source).toContain(':disabled="!canViewTraffic"');
   });
 
-  it("does not submit transport changes through the general channel edit without its permission", () => {
+  it("never submits transport changes through the general channel edit", () => {
     const start = source.indexOf("async function handleEditChannel");
     const end = source.indexOf("\n}\n\nfunction cancelEditDevice", start);
     const body = source.slice(start, end);
-    expect(body).toMatch(/canEditTransport\.value\s*\?\s*updateChannelStreamTransport/);
-    expect(body).toContain("if (canEditTransport.value)");
+    expect(body).not.toContain("updateChannelStreamTransport");
+    expect(body).not.toContain("streamTransport");
   });
 
   it("loads only read dependencies for a guest device detail", () => {

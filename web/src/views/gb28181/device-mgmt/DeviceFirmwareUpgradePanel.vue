@@ -915,6 +915,7 @@ onBeforeUnmount(() => {
 }
 .upgrade-submit-wrap {
   display: flex;
+  grid-column: 1 / -1;
   align-items: end;
   justify-content: flex-end;
 }

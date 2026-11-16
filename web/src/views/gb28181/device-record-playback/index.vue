@@ -1033,7 +1033,22 @@ onUnmounted(() => {
   align-items: center;
 }
 
-/* 时间选择器与录像类型下拉的外观全部交给 Arco,页面只声明它们占多宽。 */
+/* 查询控件沿用 s-layout-search 的搜索区皮肤，保留回放工作区的紧凑布局。 */
+.query-field :deep(.time-picker),
+.query-field :deep(.type-select) {
+  box-sizing: border-box;
+  background: var(--uvp-search-control-bg) !important;
+  border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-search-control-shadow) !important;
+}
+.query-field :deep(.time-picker:hover),
+.query-field :deep(.time-picker.arco-picker-focused),
+.query-field :deep(.type-select:hover),
+.query-field :deep(.type-select.arco-select-view-focus) {
+  border-color: var(--uvp-brand) !important;
+  box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
 
 /* ⛔ 作用在 a-select / a-date-picker 上的规则必须用 :deep():scoped 样式不会给
    这两个组件的根元素加父 scopeId,直接写类名编译得过、运行时永远匹配不到。 */
