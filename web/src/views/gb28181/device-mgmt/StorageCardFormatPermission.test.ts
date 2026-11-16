@@ -6,17 +6,32 @@ import { describe, expect, it } from "vitest";
  * 存储卡格式化（A.2.3.1.13）的**权限与入口契约**（源码级）。
  *
  * 为什么只能钉源码：这几条是"跨文件接线"，挂载单测看不到。
- *   - `index.vue` 里权限码 → prop 的那一跳（下面会说明为什么不能只靠单测）；
+ *   - `index.vue` 的权限码 → 工作台 prop → 面板 prop 这**两跳**（下面会说明为什么不能只靠单测）；
  *   - 面板的 prop 默认值（fail-closed）；
  *   - 按钮"禁用而非隐藏"。
+ *
+ * ⛔ 2026-11-16 修：面板已从 `index.vue` 收进 `ChannelConfigWorkspace.vue`（通道配置工作台），
+ *    旧断言还在 `index.vue` 里找 `<StorageCardStatusPanel` ⇒ indexOf 恒 -1、slice 成空串、
+ *    这条用例一直是红的。**接线换了地方，钉的位置就必须跟着搬**——否则它不是"保护"而是噪音，
+ *    真有人把 `:can-format` 接到读权限上也不会有人发现。
  *
  * 已经由行为用例覆盖的部分**不在这里重复**（无权限时禁用、二次确认、无应答文案、
  * 进度跟踪带宽上限等，见 StorageCardStatusPanel.test.ts）—— 重复钉会让两处一起腐烂。
  */
 const DIR = resolve(process.cwd(), "src/views/gb28181/device-mgmt");
 const indexSource = readFileSync(resolve(DIR, "index.vue"), "utf8");
+const workspaceSource = readFileSync(resolve(DIR, "ChannelConfigWorkspace.vue"), "utf8");
 const panelSource = readFileSync(resolve(DIR, "StorageCardStatusPanel.vue"), "utf8");
 const dialogSource = readFileSync(resolve(DIR, "StorageCardFormatDialog.vue"), "utf8");
+
+/** 截取一个自闭合组件标签的写法（`<Tag … />`），避免断言跨到隔壁组件上去。 */
+function componentUse(source: string, tag: string) {
+  const start = source.indexOf(tag);
+  expect(start, `没找到 ${tag}`).toBeGreaterThan(-1);
+  const end = source.indexOf("/>", start);
+  expect(end, `${tag} 的收尾没找到`).toBeGreaterThan(start);
+  return source.slice(start, end);
+}
 
 describe("存储卡格式化的权限与入口契约", () => {
   it("用的是独立权限码 gb28181:device:format_sd，不复用设备控制/查看", () => {
@@ -27,17 +42,22 @@ describe("存储卡格式化的权限与入口契约", () => {
     expect(indexSource).not.toContain('canFormatStorageCard = computed(() => hasPermission("gb28181:ptz:view"));');
   });
 
-  it("存储卡页把读权限与格式化权限分别接到面板上", () => {
-    const panelUse = indexSource.slice(
-      indexSource.indexOf("<StorageCardStatusPanel"),
-      indexSource.indexOf("/>", indexSource.indexOf("<StorageCardStatusPanel"))
-    );
-    expect(panelUse.length).toBeGreaterThan(0);
-    expect(panelUse).toContain(':can-view="canViewDeviceFacts"');
-    expect(panelUse).toContain(':can-format="canFormatStorageCard"');
+  it("权限从列表页一路接到存储卡面板：两跳都不能断", () => {
+    // 第一跳：权限码 → 通道配置工作台（面板搬走后就只剩这一处真正拿权限的地方）。
+    const workspaceUse = componentUse(indexSource, "<ChannelConfigWorkspace");
+    expect(workspaceUse).toContain(':can-read="canViewDeviceFacts"');
+    expect(workspaceUse).toContain(':can-format="canFormatStorageCard"');
     // ⛔ 别把格式化接到读权限或设备控制上（那正是"独立权限码形同虚设"的写法）。
-    expect(panelUse).not.toContain(':can-format="canViewDeviceFacts"');
-    expect(panelUse).not.toContain(':can-format="canControlDevice"');
+    expect(workspaceUse).not.toContain(':can-format="canViewDeviceFacts"');
+    expect(workspaceUse).not.toContain(':can-format="canControlChannelConfig"');
+    expect(workspaceUse).not.toContain(':can-format="canControlDevice"');
+
+    // 第二跳：工作台 prop → 面板 prop（转发时别串到 canRead 上）。
+    const panelUse = componentUse(workspaceSource, "<StorageCardStatusPanel");
+    expect(panelUse).toContain(':can-view="canRead"');
+    expect(panelUse).toContain(':can-format="canFormat"');
+    expect(panelUse).not.toContain(':can-format="canRead"');
+    expect(panelUse).not.toContain(':can-format="canApply"');
   });
 
   it("面板的 canFormat 是可选且 fail-closed 的 prop", () => {
