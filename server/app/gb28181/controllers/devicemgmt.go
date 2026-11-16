@@ -299,7 +299,7 @@ func summaryTime(value *time.Time) time.Time {
 }
 
 // ListDevices 设备列表
-// GET /devices?nodeId=&status=online&vendor=&q=&page=1&pageSize=20&sort=name:asc
+// GET /devices?nodeId=&status=online&deviceType=nvr&vendor=&q=&page=1&pageSize=20&sort=name:asc
 // 未传 sort 时默认按在线状态、注册时间、设备名称、ID 依次倒序
 func (dc *DeviceMgmtController) ListDevices(c *gin.Context) {
 	db := dc.db()
@@ -397,6 +397,17 @@ func (dc *DeviceMgmtController) ListDevices(c *gin.Context) {
 	}
 	if v := c.Query("vendor"); v != "" {
 		q = q.Where("manufacturer = ?", v)
+	}
+	// deviceType 筛选只认三个合法值。⛔ 空串必须提前跳过：
+	// NormalizeDeviceType("") 会合法归一成 ipc，直接调用会让"没传类型"变成"只看 IPC"，
+	// 列表默认就少掉 NVR / 下级平台。
+	if dt := strings.TrimSpace(c.Query("deviceType")); dt != "" {
+		normalized, ok := gbmodels.NormalizeDeviceType(dt)
+		if !ok {
+			dc.Fail(c, "设备类型参数错误", nil, http.StatusBadRequest)
+			return
+		}
+		q = q.Where("device_type = ?", normalized)
 	}
 	if kw := strings.TrimSpace(c.Query("q")); kw != "" {
 		like := "%" + kw + "%"

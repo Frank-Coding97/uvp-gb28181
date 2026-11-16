@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_DEVICE_TYPE,
+  DEVICE_TYPE_FILTER_OPTIONS,
   DEVICE_TYPE_OPTIONS,
   DEVICE_TYPES,
   deviceTypeLabel,
@@ -33,5 +34,11 @@ describe("设备类型（ipc / nvr / platform）", () => {
     expect(deviceTypeLabel(undefined)).toBe("IPC 摄像机");
     expect(deviceTypeShortLabel("platform")).toBe("下级平台");
     expect(deviceTypeShortLabel("bogus")).toBe("IPC");
+  });
+
+  it("工具栏筛选选项与值域同源，只换短文案", () => {
+    // 筛选下拉必须与后端的三个合法值逐个对齐：多一个会 422，少一个就筛不出来。
+    expect(DEVICE_TYPE_FILTER_OPTIONS.map(option => option.value)).toEqual([...DEVICE_TYPES]);
+    expect(DEVICE_TYPE_FILTER_OPTIONS.map(option => option.label)).toEqual(["IPC", "NVR", "下级平台"]);
   });
 });

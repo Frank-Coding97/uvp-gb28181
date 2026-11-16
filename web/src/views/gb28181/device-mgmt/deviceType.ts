@@ -18,6 +18,19 @@ export const DEVICE_TYPE_OPTIONS: ReadonlyArray<{ label: string; value: DeviceTy
   { label: "下级国标平台", value: "platform" }
 ];
 
+/**
+ * 工具栏「类型」筛选下拉的选项。
+ *
+ * 与编辑弹窗的 `DEVICE_TYPE_OPTIONS` 分开：那边是表单项、宽度充裕用全称，
+ * 这边是工具栏、1366 宽的笔记本上还要和搜索框/状态下拉抢位置，只能用短文案
+ * （"NVR 硬盘录像机" 一行要 118px，三个加起来会把搜索框挤到换行）。
+ */
+export const DEVICE_TYPE_FILTER_OPTIONS: ReadonlyArray<{ label: string; value: DeviceType }> = [
+  { label: "IPC", value: "ipc" },
+  { label: "NVR", value: "nvr" },
+  { label: "下级平台", value: "platform" }
+];
+
 const DEVICE_TYPE_LABELS: Record<DeviceType, string> = {
   ipc: "IPC 摄像机",
   nvr: "NVR 硬盘录像机",

@@ -77,3 +77,53 @@ func TestDeviceController_UpdateDeviceTypeRejectsUnknownValue(t *testing.T) {
 	require.Len(t, rows, 1)
 	require.Equal(t, gbmodels.DeviceTypeIPC, rows[0].DeviceType, "非法值不得落库")
 }
+
+// 列表按设备类型筛选。
+// ⛔ 重点锁「不传类型 ≠ 只看 IPC」：NormalizeDeviceType("") 会合法归一成 ipc，
+// 若不做空串短路，默认列表会静默少掉全部 NVR 和下级平台。
+func TestDeviceMgmt_ListDevices_FilterByDeviceType(t *testing.T) {
+	r, db := newDeviceMgmtRouter(t)
+	devices := []gbmodels.GbDevice{
+		{DeviceID: "type-ipc", Name: "摄像机", DeviceType: gbmodels.DeviceTypeIPC, Status: gbmodels.DeviceStatusOnline, SubscribeCapability: gbmodels.SubscribeUnknown},
+		{DeviceID: "type-nvr-a", Name: "录像机 A", DeviceType: gbmodels.DeviceTypeNVR, Status: gbmodels.DeviceStatusOnline, SubscribeCapability: gbmodels.SubscribeUnknown},
+		{DeviceID: "type-nvr-b", Name: "录像机 B", DeviceType: gbmodels.DeviceTypeNVR, Status: gbmodels.DeviceStatusOffline, SubscribeCapability: gbmodels.SubscribeUnknown},
+		{DeviceID: "type-platform", Name: "下级平台", DeviceType: gbmodels.DeviceTypePlatform, Status: gbmodels.DeviceStatusOnline, SubscribeCapability: gbmodels.SubscribeUnknown},
+	}
+	require.NoError(t, db.Create(&devices).Error)
+
+	listIDs := func(query string) []string {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/gb28181/device-mgmt/devices"+query, nil))
+		require.Equal(t, http.StatusOK, w.Code, query)
+		rows := unmarshal(t, w)["data"].(map[string]any)["list"].([]any)
+		ids := make([]string, 0, len(rows))
+		for _, row := range rows {
+			ids = append(ids, row.(map[string]any)["deviceId"].(string))
+		}
+		return ids
+	}
+
+	// 1. 不传 = 不过滤，四种设备全在
+	require.ElementsMatch(t, []string{"type-ipc", "type-nvr-a", "type-nvr-b", "type-platform"}, listIDs(""))
+
+	// 2. 精确筛
+	require.ElementsMatch(t, []string{"type-nvr-a", "type-nvr-b"}, listIDs("?deviceType=nvr"))
+	require.ElementsMatch(t, []string{"type-platform"}, listIDs("?deviceType=platform"))
+
+	// 3. 大小写/空白归一（前端下拉传小写，但手拼 URL/脚本调用不该被卡）
+	require.ElementsMatch(t, []string{"type-ipc"}, listIDs("?deviceType=%20IPC%20"))
+
+	// 4. 与状态筛选叠加：筛 NVR 且在线的只剩 A，环形图统计也按这个口径
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/gb28181/device-mgmt/devices?deviceType=nvr&status=online", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	data := unmarshal(t, w)["data"].(map[string]any)
+	require.Len(t, data["list"].([]any), 1)
+	require.EqualValues(t, 1, data["onlineTotal"])
+	require.EqualValues(t, 0, data["offlineTotal"])
+
+	// 5. 非法值明确报错，不静默返回"什么都筛不到"
+	bad := httptest.NewRecorder()
+	r.ServeHTTP(bad, httptest.NewRequest(http.MethodGet, "/api/gb28181/device-mgmt/devices?deviceType=camera", nil))
+	require.EqualValues(t, 1, unmarshal(t, bad)["code"])
+}

@@ -8,6 +8,7 @@ import {
   shouldUseRecordQueryMock
 } from "./recordQueryMock";
 import { recordQueryOptionsPath, recordQueryPath } from "./recordQueryState";
+import type { DeviceType } from "./deviceType";
 
 export type OnlineStatus = "online" | "offline";
 export type AssetKind = "channel" | "device";
@@ -465,6 +466,7 @@ export interface DeviceQuery extends DirectoryQuery {
   q?: string;
   nodeId?: number;
   status?: OnlineStatus;
+  deviceType?: DeviceType;
   vendor?: string;
   page?: number;
   pageSize?: number;

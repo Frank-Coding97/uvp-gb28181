@@ -115,6 +115,7 @@ import { catalogShapeFromAttributes, catalogShapeText } from "./channelAttribute
 import { useChannelAttributeEntries } from "./useChannelAttributeDict";
 import {
   DEFAULT_DEVICE_TYPE,
+  DEVICE_TYPE_FILTER_OPTIONS,
   DEVICE_TYPE_OPTIONS,
   deviceTypeLabel,
   deviceTypeShortLabel,
@@ -236,6 +237,14 @@ const keyword = ref("");
 const keywordInput = ref<HTMLInputElement | null>(null);
 const deviceIdFilter = ref("");
 const statusFilter = ref<OnlineStatus | undefined>();
+/**
+ * 设备类型筛选。只有「设备」资产才有类型概念。
+ *
+ * 通道视图 / 地图视角下控件隐藏、`loadChannelsData` 也不传它 ⇒ 不影响任何查询；
+ * 切回设备视图时保留上次选的值（比"切一圈回来筛选被偷偷清掉"更符合直觉）。
+ * 隐藏期间如果它还在生效，筛选条里仍有一枚可点的 chip，不会出现"莫名少一截"。
+ */
+const deviceTypeFilter = ref<DeviceType | undefined>();
 // 「在线状态」文案由 `device_status` 字典驱动；媒体节点状态由 `media_node_state` 字典驱动。
 const deviceStatusLabel = useDeviceStatusLabel();
 const mediaNodeStateLabel = useDictLabel(DICT_CODE_MEDIA_NODE_STATE, MEDIA_NODE_STATE_LABEL_FALLBACK);
@@ -782,7 +791,11 @@ const viewOptions: Array<{ label: string; value: ViewMode; icon: any }> = [
 ];
 const hasFilters = computed(() =>
   Boolean(
-    keyword.value || (deviceIdFilter.value && !deviceListReturnSnapshot.value) || statusFilter.value || selectedDirectory.value
+    keyword.value ||
+      (deviceIdFilter.value && !deviceListReturnSnapshot.value) ||
+      statusFilter.value ||
+      deviceTypeFilter.value ||
+      selectedDirectory.value
   )
 );
 const selectedCount = computed(() => selectedRowKeys.value.length);
@@ -843,6 +856,13 @@ watch(darkMode, value => {
 watch(statusFilter, () => {
   if (restoringDeviceListSnapshot) return;
   page.value = 1;
+  refreshMainData();
+  refreshStats();
+});
+watch(deviceTypeFilter, () => {
+  if (restoringDeviceListSnapshot) return;
+  page.value = 1;
+  // 类型筛选同时影响列表与环形图统计，两个一起刷，避免"列表变了、在线率还是旧的"。
   refreshMainData();
   refreshStats();
 });
@@ -1346,6 +1366,7 @@ function resetFilters() {
   selectedDeviceSummary.value = null;
   deviceIdFilter.value = "";
   statusFilter.value = undefined;
+  deviceTypeFilter.value = undefined;
   clearDirectorySelection();
   refreshStats();
 }
@@ -2562,6 +2583,7 @@ async function loadDevicesData(background = false) {
       q: keyword.value.trim() || undefined,
       ...directoryQuery(directoryState.value),
       status: statusFilter.value,
+      deviceType: deviceTypeFilter.value,
       page: page.value,
       pageSize: pageSize.value
     });
@@ -2625,11 +2647,13 @@ let statsRequestVersion = 0;
 async function refreshStats() {
   if (!canViewDevices.value) return;
   const version = ++statsRequestVersion;
+  const isDevice = assetKind.value === "device";
   const scope = {
     q: keyword.value.trim() || undefined,
-    ...(assetKind.value === "device" ? directoryQuery(directoryState.value) : channelScope.value)
+    ...(isDevice ? directoryQuery(directoryState.value) : channelScope.value),
+    // 环形图要跟筛选口径一致：筛了 NVR 却还在显示全部设备的在线率，会让人以为筛选没生效。
+    ...(isDevice ? { deviceType: deviceTypeFilter.value } : {})
   };
-  const isDevice = assetKind.value === "device";
   const [onlineRes, offlineRes] = await Promise.allSettled(
     isDevice
       ? [
@@ -3841,7 +3865,18 @@ onUnmounted(() => {
                 <a-option value="online">在线</a-option>
                 <a-option value="offline">离线</a-option>
               </a-select>
-              <!-- 「使用引导」手动入口。放成图标按钮而不是带文字的按钮：工具栏已经 6 个控件，
+              <!-- 类型筛选只在「设备」资产出现：通道没有类型，地图视角又只认通道点位。
+                   用短文案（IPC / NVR / 下级平台）而不是表单项的全称，否则工具栏在 1366 宽上换行。 -->
+              <a-select
+                v-if="viewMode !== 'map' && assetKind === 'device'"
+                v-model="deviceTypeFilter"
+                allow-clear
+                class="toolbar-select device-type-select"
+                placeholder="类型"
+                :style="{ width: '118px' }"
+                :options="DEVICE_TYPE_FILTER_OPTIONS"
+              />
+              <!-- 「使用引导」手动入口。放成图标按钮而不是带文字的按钮：工具栏控件已经很密，
                    再加一个 84px 的文字按钮就会在 1366 宽上把搜索框挤到换行。 -->
               <a-tooltip content="使用引导：把这页的按钮讲一遍" position="bottom">
                 <button
@@ -3999,6 +4034,10 @@ onUnmounted(() => {
           <span v-if="statusFilter" class="filter-chip"
             >状态: {{ deviceStatusLabel(statusFilter === "online") }}
             <button class="close" @click="statusFilter = undefined">×</button></span
+          >
+          <span v-if="deviceTypeFilter" class="filter-chip"
+            >类型: {{ deviceTypeLabel(deviceTypeFilter) }}
+            <button class="close" @click="deviceTypeFilter = undefined">×</button></span
           >
           <span v-if="selectedDirectory" class="filter-chip"
             >目录: {{ selectedDirectory.name }} <button class="close" @click="clearDirectorySelection()">×</button></span
@@ -6394,6 +6433,11 @@ onUnmounted(() => {
 }
 .status-select {
   min-width: 126px;
+}
+
+/* 类型筛选：文案用短名（IPC / NVR / 下级平台），118px 够放，再窄「下级平台」会被截成省略号。 */
+.device-type-select {
+  min-width: 118px;
 }
 
 /* ⛔ 排除挂了体系语义类的按钮（刷新 / 取消 / 新建）：几何归 `uvp-buttons.scss` 的三档，
