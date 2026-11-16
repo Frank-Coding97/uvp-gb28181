@@ -2366,6 +2366,27 @@ function openLocationPickerForMarker(
   locationPickerVisible.value = true;
 }
 
+/**
+ * 通道列表 / 通道卡片上「位置」那支铅笔：直接开踩点弹窗。
+ *
+ * 为什么值得单独开一个入口：补坐标是**高频小动作**，走「编辑通道 → 找到坐标两框 → 保存」
+ * 要开一个十几项的表单；而踩点弹窗里本来就带经纬度输入框，既能在图上点、也能手填，
+ * 关掉即时落库（见 handleLocationConfirm 的非编辑弹窗分支）。
+ */
+function openLocationPickerForChannel(channel: ChannelVO) {
+  if (!canEditChannel.value) {
+    Message.warning("没有通道编辑权限");
+    return;
+  }
+  locationPickerTarget.value = {
+    id: channel.id,
+    name: displayName(channel),
+    longitude: channel.longitude || 0,
+    latitude: channel.latitude || 0
+  };
+  locationPickerVisible.value = true;
+}
+
 /** 从通道编辑弹窗打开踩点：把当前输入框里的值带过去，避免"两边不一致"。 */
 function openLocationPickerFromEdit() {
   if (!editingChannelId.value) return;
@@ -2408,6 +2429,9 @@ async function handleLocationConfirm(payload: { longitude: number; latitude: num
     // 地图数据重新拉一遍，而不是本地改一个点：清除坐标后该点必须从地图上消失，
     // 本地 patch 很容易漏掉"从有到无"这一支。
     await loadMapData();
+    // 列表/卡片上的「位置」列同样要跟着变（来源标签会变成「人工」、清除后要回到「无坐标」）
+    // —— 只 patch 坐标字段会漏掉来源与更新时间，所以整页重拉；background=true 不闪 loading。
+    void loadChannelsData(true);
     // 左栏通道树的增删与"未设置位置"计数同样会变：补完位置这台设备就进树/出提示了。
     void mapChannelTreeRef.value?.refresh();
   } catch (error: any) {
@@ -4210,12 +4234,24 @@ onUnmounted(() => {
               </a-table-column>
               <a-table-column title="位置信息" :width="200">
                 <template #cell="{ record }">
-                  <a-tooltip :content="locationText(record)" position="top">
-                    <span class="coord-cell">
+                  <!-- 铅笔 = 直接改坐标的入口：补坐标是高频小动作，不该被迫开整张编辑表单。
+                       有权限才出现；无权限的人只看到只读坐标（与其它行内动作的处置一致）。 -->
+                  <span class="coord-cell">
+                    <a-tooltip :content="locationText(record)" position="top">
                       <span class="relative text-ellipsis">{{ locationText(record) }}</span>
-                      <span v-if="positionSourceText(record)" class="coord-source">{{ positionSourceText(record) }}</span>
-                    </span>
-                  </a-tooltip>
+                    </a-tooltip>
+                    <span v-if="positionSourceText(record)" class="coord-source">{{ positionSourceText(record) }}</span>
+                    <a-tooltip v-if="canEditChannel" content="编辑位置 / 填写经纬度" position="top">
+                      <button
+                        class="icon-btn small framed coord-edit-btn"
+                        type="button"
+                        aria-label="编辑通道位置"
+                        @click.stop="openLocationPickerForChannel(record)"
+                      >
+                        <Pencil :size="12" />
+                      </button>
+                    </a-tooltip>
+                  </span>
                 </template>
               </a-table-column>
               <a-table-column title="更新 / 创建时间" :width="190">
@@ -4684,7 +4720,22 @@ onUnmounted(() => {
                       <span>厂商 / 型号</span><strong class="text-ellipsis">{{ vendorText(item) }}</strong>
                     </div>
                     <div>
-                      <span>位置</span><strong>{{ locationText(item) }}</strong>
+                      <span>位置</span>
+                      <!-- 卡片里同一个入口：列表 / 卡片两种视图对"改坐标"的处置必须一致，
+                           否则切一下视图就找不到刚才那个铅笔了。 -->
+                      <strong class="channel-card-coord">
+                        <span class="text-ellipsis">{{ locationText(item) }}</span>
+                        <a-tooltip v-if="canEditChannel" content="编辑位置 / 填写经纬度" position="top">
+                          <button
+                            class="icon-btn small framed coord-edit-btn"
+                            type="button"
+                            aria-label="编辑通道位置"
+                            @click.stop="openLocationPickerForChannel(item)"
+                          >
+                            <Pencil :size="12" />
+                          </button>
+                        </a-tooltip>
+                      </strong>
                     </div>
                     <div>
                       <span>摄像头类型</span>
@@ -9353,6 +9404,20 @@ onUnmounted(() => {
 .coord-cell {
   display: inline-flex;
   gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+/* 铅笔不参与 ellipsis 收缩（坐标再长也得留得住这个入口），文本那一支才吃剩余宽度。 */
+.coord-cell > .text-ellipsis {
+  min-width: 0;
+}
+.coord-edit-btn {
+  flex: 0 0 auto;
+}
+.channel-card-coord {
+  display: inline-flex;
+  gap: 4px;
   align-items: center;
   min-width: 0;
 }
