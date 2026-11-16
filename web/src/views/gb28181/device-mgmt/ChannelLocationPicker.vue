@@ -256,7 +256,7 @@ function resetView() {
   position: relative;
   height: 380px;
   overflow: hidden;
-  background: var(--uvp-dialog-control-bg);
+  background: var(--uvp-surface-muted);
   border: 1px solid var(--uvp-dialog-border);
   border-radius: 12px;
 }
