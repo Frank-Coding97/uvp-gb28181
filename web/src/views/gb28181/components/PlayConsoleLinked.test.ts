@@ -994,6 +994,18 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
+  it("移动速度紧跟在云台方向控制下方", async () => {
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    const joystick = wrapper.get(".joystick-stage").element;
+    const speed = wrapper.get(".speed-row").element;
+    const talk = wrapper.get(".talk-mode-switch").element;
+    expect(joystick.compareDocumentPosition(speed) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(speed.compareDocumentPosition(talk) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    wrapper.unmount();
+  });
+
   it("读取云台默认速度并把第十档映射为协议速度 255", async () => {
     api.fetchServiceConfig.mockResolvedValueOnce({ code: 0, message: "", data: { ptzDefaultSpeed: { level: 10 } } });
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });

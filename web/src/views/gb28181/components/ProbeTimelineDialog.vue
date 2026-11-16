@@ -694,7 +694,7 @@ onBeforeUnmount(releaseCharts);
   background: var(--uvp-panel-border);
 }
 :global(body[arco-theme="dark"] .ptl-brush-bar:not(.empty, .stalled)) {
-  background: color-mix(in srgb, var(--uvp-brand) 80%, var(--uvp-brand-cyan));
+  background: var(--uvp-brand);
 }
 .ptl-brush-bar.stalled {
   background: var(--uvp-warning);

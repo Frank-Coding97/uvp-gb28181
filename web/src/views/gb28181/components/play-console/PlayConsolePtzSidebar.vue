@@ -7,7 +7,6 @@ import {
   Crosshair,
   Focus as FocusIcon,
   Gauge,
-  Info,
   Loader2,
   Mic,
   Move3d,
@@ -144,6 +143,14 @@ const {
         </div>
       </div>
 
+      <div class="speed-row">
+        <label>
+          <span><Gauge :size="12" />移动速度</span>
+          <a-slider v-model="moveSpeed" :min="1" :max="10" :step="1" :show-tooltip="false" aria-label="云台移动速度" />
+          <em>{{ moveSpeed }}</em>
+        </label>
+      </div>
+
       <div class="talk-mode-switch" aria-label="对讲模式">
         <a-button
           type="text"
@@ -211,14 +218,6 @@ const {
       <p v-if="talkState === 'talking' && talkWarning" class="talk-warning" role="alert" data-testid="talk-warning">
         {{ talkWarning }}
       </p>
-
-      <div class="speed-row">
-        <label>
-          <span><Gauge :size="12" />移动速度</span>
-          <a-slider v-model="moveSpeed" :min="1" :max="10" :step="1" :show-tooltip="false" aria-label="云台移动速度" />
-          <em>{{ moveSpeed }}</em>
-        </label>
-      </div>
 
       <div class="lens-grid">
         <div class="lens-item">
@@ -389,10 +388,6 @@ const {
 
     <!-- 高级控制模式(2022):精准 Pan/Tilt/Zoom、关键帧与目标跟踪 -->
     <div v-show="ptzMode === 'precise'" class="ptz-precise">
-      <div class="precise-hint">
-        <Info :size="12" />
-        <span>基于 <strong>PTZPreciseCtrl</strong>(2022),精准角度定位。需设备支持精准 PTZ 协议。</span>
-      </div>
       <div class="axis-row">
         <label>
           <span>Pan 水平角(°)</span>
@@ -807,6 +802,83 @@ const {
   filter: blur(0.2px);
 }
 
+/* 暗色主题：保留拟物层次，但把白色高光换成更明亮的蓝色高光，避免摇杆发灰发白。 */
+:global(body[arco-theme="dark"] .joystick-base) {
+  background: radial-gradient(
+    circle at 36% 28%,
+    color-mix(in srgb, var(--uvp-brand) 38%, var(--uvp-panel-bg)) 0%,
+    color-mix(in srgb, var(--uvp-brand) 24%, var(--uvp-list-toolbar-bg)) 46%,
+    var(--uvp-panel-bg) 100%
+  );
+  border-color: color-mix(in srgb, var(--uvp-brand) 52%, var(--uvp-panel-border));
+  box-shadow:
+    inset 0 3px 4px color-mix(in srgb, var(--uvp-brand-strong) 18%, transparent),
+    inset 0 -8px 14px color-mix(in srgb, var(--uvp-brand) 20%, transparent),
+    0 8px 18px color-mix(in srgb, var(--uvp-brand) 24%, transparent),
+    0 2px 4px color-mix(in srgb, var(--uvp-brand) 22%, transparent);
+}
+:global(body[arco-theme="dark"] .joystick-base::before) {
+  background: radial-gradient(
+    circle at 44% 38%,
+    color-mix(in srgb, var(--uvp-brand) 24%, var(--uvp-list-toolbar-bg)) 0%,
+    var(--uvp-list-toolbar-bg) 62%,
+    color-mix(in srgb, var(--uvp-brand) 14%, var(--uvp-panel-bg)) 100%
+  );
+  border-color: color-mix(in srgb, var(--uvp-brand) 32%, var(--uvp-panel-border));
+  box-shadow:
+    inset 0 5px 10px color-mix(in srgb, var(--uvp-brand) 18%, transparent),
+    inset 0 -2px 4px color-mix(in srgb, var(--uvp-brand-strong) 14%, transparent),
+    0 1px 0 color-mix(in srgb, var(--uvp-brand-strong) 20%, transparent);
+}
+:global(body[arco-theme="dark"] .joystick-base::after) {
+  border-color: color-mix(in srgb, var(--uvp-brand) 34%, var(--uvp-panel-border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--uvp-brand) 14%, transparent);
+}
+:global(body[arco-theme="dark"] .joystick-dot) {
+  background: radial-gradient(
+    circle at 34% 28%,
+    color-mix(in srgb, var(--uvp-brand-strong) 72%, var(--uvp-text-primary)) 0 18%,
+    color-mix(in srgb, var(--uvp-brand) 62%, var(--uvp-text-tertiary)) 58%,
+    color-mix(in srgb, var(--uvp-brand-strong) 48%, var(--uvp-text-tertiary)) 100%
+  );
+  border-color: color-mix(in srgb, var(--uvp-brand) 34%, var(--uvp-panel-border));
+  box-shadow:
+    inset 0 1px 1px color-mix(in srgb, var(--uvp-brand-strong) 50%, transparent),
+    0 1px 4px color-mix(in srgb, var(--uvp-brand) 40%, transparent);
+}
+:global(body[arco-theme="dark"] .joystick-label) {
+  color: color-mix(in srgb, var(--uvp-brand-strong) 58%, var(--uvp-text-secondary));
+}
+:global(body[arco-theme="dark"] .joystick-handle) {
+  background: radial-gradient(
+    circle at 34% 26%,
+    color-mix(in srgb, var(--uvp-brand-strong) 58%, var(--uvp-brand)) 0 6%,
+    color-mix(in srgb, var(--uvp-brand-strong) 38%, var(--uvp-brand)) 20%,
+    var(--uvp-brand) 56%,
+    var(--uvp-brand-strong) 100%
+  );
+  border-color: color-mix(in srgb, var(--uvp-brand-strong) 72%, var(--uvp-brand));
+  box-shadow:
+    inset 4px 4px 8px color-mix(in srgb, var(--uvp-brand-strong) 42%, transparent),
+    inset -6px -8px 11px color-mix(in srgb, #071525 38%, transparent),
+    0 9px 16px color-mix(in srgb, var(--uvp-brand) 46%, transparent),
+    0 3px 4px color-mix(in srgb, #071525 44%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--uvp-brand) 24%, transparent),
+    0 0 0 5px color-mix(in srgb, var(--uvp-brand) 48%, transparent);
+}
+:global(body[arco-theme="dark"] .joystick-handle span) {
+  background: linear-gradient(145deg, color-mix(in srgb, var(--uvp-brand-strong) 82%, transparent), transparent);
+}
+:global(body[arco-theme="dark"] .joystick-stage.active .joystick-handle) {
+  box-shadow:
+    inset 3px 3px 7px color-mix(in srgb, var(--uvp-brand-strong) 34%, transparent),
+    inset -5px -6px 9px color-mix(in srgb, #071525 42%, transparent),
+    0 5px 10px color-mix(in srgb, var(--uvp-brand) 42%, transparent),
+    0 2px 3px color-mix(in srgb, #071525 38%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--uvp-brand) 26%, transparent),
+    0 0 0 5px color-mix(in srgb, var(--uvp-brand) 58%, transparent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .joystick-handle {
     transition: none;
@@ -1067,21 +1139,21 @@ const {
   gap: 4px;
 }
 
-/* 3D 拖拽：进入一种画面手势模式 ⇒ 次级（浅蓝）；当前正处于该模式 ⇒ 蓝实心。 */
+/* 3D 拖拽与镜头控制保持同一层级；只有进入持续拖拽模式后才用实色标记状态。 */
 .drag-zoom-switch button.arco-btn[type="button"] {
   height: 26px;
   padding: 0;
   font-size: 10.5px;
-  color: var(--uvp-btn-secondary-text);
+  color: var(--uvp-text-secondary);
   cursor: pointer;
-  background: var(--uvp-btn-secondary-bg);
-  border: 1px solid var(--uvp-btn-secondary-border);
+  background: transparent;
+  border: 1px solid var(--uvp-panel-border);
   border-radius: 5px;
 }
 .drag-zoom-switch button.arco-btn[type="button"]:hover:not(:disabled) {
-  color: var(--uvp-btn-secondary-text);
-  background: var(--uvp-btn-secondary-bg-hover);
-  border-color: var(--uvp-btn-secondary-text);
+  color: var(--uvp-brand);
+  background: transparent;
+  border-color: var(--uvp-brand);
 }
 .drag-zoom-switch button.arco-btn[type="button"].active {
   font-weight: 600;
@@ -1243,7 +1315,7 @@ const {
 .ptz-precise {
   display: grid;
   gap: 6px;
-  align-content: start;
+  align-content: space-between;
   min-height: 0;
 }
 
@@ -1257,22 +1329,6 @@ const {
 }
 .ptz-precise > .ptz-iframe {
   min-width: 0;
-}
-.precise-hint {
-  display: flex;
-  gap: 6px;
-  align-items: flex-start;
-  padding: 8px 10px;
-  font-size: 10.5px;
-  line-height: 1.5;
-  color: var(--uvp-text-secondary);
-  background: color-mix(in srgb, var(--uvp-brand-cyan) 8%, transparent);
-  border: 1px solid color-mix(in srgb, var(--uvp-brand-cyan) 24%, transparent);
-  border-radius: 8px;
-}
-.precise-hint strong {
-  font-weight: 600;
-  color: var(--uvp-brand-cyan);
 }
 .axis-row label {
   display: grid;

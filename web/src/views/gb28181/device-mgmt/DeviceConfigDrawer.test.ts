@@ -463,7 +463,7 @@ describe("DeviceConfigDrawer 设备配置中心", () => {
     const badge = wrapper.find("[data-testid='dcg-stream-0'] .dcg-row-hint[data-source='不发']");
     expect(badge.exists()).toBe(true);
     expect(badge.text()).toBe("不发");
-    expect(badge.attributes("title")).toContain("VBR");
+    expect(badge.attributes("title")).toContain("可变码率（VBR）");
   });
 
   it("来源徽标按格判定：设备给了值标「设备」，没给标「缺省」", async () => {

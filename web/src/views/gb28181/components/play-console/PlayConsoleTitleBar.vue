@@ -178,7 +178,7 @@ const emit = defineEmits<{
   flex: 0 0 auto;
 }
 
-/* 标题栏两颗：小窗 = 次级（浅蓝，改的是"看的方式"），关闭 = 否定（中性灰，放弃这次播放）。
+/* 标题栏两颗：小窗 = 次级（浅蓝，改的是"看的方式"），关闭 = 停止（琥珀，结束当前播放）。
    2026-11-04 治理：原来两颗都靠同一个 list-toolbar 底，只差小窗带一点品牌色，
    在标题栏深色底上基本分不出来。 */
 .console-window-action.arco-btn[type="button"].is-minimize {
@@ -204,18 +204,18 @@ const emit = defineEmits<{
   box-shadow: 0 4px 12px color-mix(in srgb, var(--uvp-brand) 14%, transparent);
 }
 
-/* 「关闭」= 否定（中性灰）。
-   ⛔ 这里原来是软红：红是全站「会删掉数据」的专用色。关掉播放器只是放弃这次观看，
-      既不删录像也不删配置，用红会让用户以为点下去会丢东西 —— 和工具栏「删除」撞语义。 */
+/* 「关闭」= 停止当前播放（琥珀）。
+   关闭会结束当前播放会话，但不会删除录像或配置，因此使用“停止 / 中断”色，
+   与真正破坏数据的危险红色区分开。 */
 .console-window-action.arco-btn[type="button"].is-close {
-  color: var(--uvp-btn-neutral-text);
-  background: var(--uvp-btn-neutral-bg);
-  border-color: var(--uvp-btn-neutral-border);
+  color: var(--uvp-btn-stop-text);
+  background: var(--uvp-btn-stop-bg);
+  border-color: var(--uvp-btn-stop-border);
 }
 .console-window-action.arco-btn[type="button"].is-close:hover {
-  color: var(--uvp-btn-neutral-text);
-  background: var(--uvp-btn-neutral-bg-hover);
-  border-color: var(--uvp-btn-neutral-border);
+  color: var(--uvp-btn-stop-text);
+  background: var(--uvp-btn-stop-bg-hover);
+  border-color: var(--uvp-btn-stop-border);
   box-shadow: none;
 }
 .console-window-action.arco-btn[type="button"]:focus-visible {

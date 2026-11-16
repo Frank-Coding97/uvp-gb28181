@@ -289,5 +289,10 @@ describe("ProbeTimelineDialog", () => {
     expect(canvasBody).toContain("min-width: 0");
     expect(canvasBody).toContain("box-sizing: border-box");
     expect(canvasBody).toContain("overflow: hidden");
+
+    const darkBrushStart = dialogSource.indexOf(":global(body[arco-theme=\"dark\"] .ptl-brush-bar:not(.empty, .stalled))");
+    expect(darkBrushStart).toBeGreaterThan(-1);
+    const darkBrushBody = dialogSource.slice(darkBrushStart, dialogSource.indexOf("}", darkBrushStart));
+    expect(darkBrushBody).toContain("background: var(--uvp-brand)");
   });
 });

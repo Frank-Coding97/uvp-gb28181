@@ -630,7 +630,7 @@ function cellBadge(
 const BADGE_TITLE: Record<string, string> = {
   设备: "本次回读拿到了这一格，值来自设备",
   缺省: "设备未上报此元素，按缺省处理",
-  不发: "码率类型为 VBR 时不发此元素"
+  不发: "码率类型为可变码率（VBR）时不发此元素"
 };
 
 function badgeTitle(badge: string): string {
@@ -2611,7 +2611,7 @@ onBeforeUnmount(() => {
                       >{{ bitRateBadge(row) }}</span
                     >
                   </div>
-                  <p class="dcg-field-group-note">CBR 时必填，单位 kb/s；VBR 时不发送 VideoBitRate。</p>
+                  <p class="dcg-field-group-note">恒定码率（CBR）时必填，单位 kb/s；可变码率（VBR）时不发送 VideoBitRate。</p>
                 </div>
 
                 <!-- 嵌入模式紧凑布局：码率类型 -->
@@ -2651,7 +2651,7 @@ onBeforeUnmount(() => {
                     v-if="videoBitRateDisabled(row)"
                     class="dcg-row-hint"
                     data-source="不发"
-                    title="VBR 模式不发送 VideoBitRate"
+                    title="可变码率（VBR）模式不发送 VideoBitRate"
                     >不发</span
                   >
                 </div>

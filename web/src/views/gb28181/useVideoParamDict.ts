@@ -12,7 +12,7 @@
  *
  * 兜底：字典没加载（未登录 / 接口失败）时回落 `videoParamCodec` 里与种子逐字对齐的常量。
  */
-import { type ComputedRef } from "vue";
+import { computed, type ComputedRef } from "vue";
 import { useDictLabelMap, useDictOptions, type DictOption } from "@/hooks/useDictOptions";
 import {
   BIT_RATE_TYPE_LABEL_FALLBACK,
@@ -42,9 +42,15 @@ export function useVideoResolutionOptions(): ComputedRef<DictOption[]> {
   return useDictOptions(DICT_CODE_VIDEO_RESOLUTION, optionsFromTable(RESOLUTION_LABEL_FALLBACK));
 }
 
-/** 码率类型下拉（字典 `bit_rate_type`，兜底 1=CBR / 2=VBR）。 */
+/** 码率类型下拉：协议码固定映射中文，未知码值沿用字典文案。 */
 export function useBitRateTypeOptions(): ComputedRef<DictOption[]> {
-  return useDictOptions(DICT_CODE_BIT_RATE_TYPE, optionsFromTable(BIT_RATE_TYPE_LABEL_FALLBACK));
+  const options = useDictOptions(DICT_CODE_BIT_RATE_TYPE, optionsFromTable(BIT_RATE_TYPE_LABEL_FALLBACK));
+  return computed(() =>
+    options.value.map(option => ({
+      ...option,
+      label: BIT_RATE_TYPE_LABEL_FALLBACK[String(option.value)] ?? option.label
+    }))
+  );
 }
 
 export interface VideoParamLabelFns {
@@ -65,6 +71,9 @@ export function useVideoParamLabels(): VideoParamLabelFns {
   return {
     videoFormatText: (value: string | null | undefined) => videoFormatText(value, formatLabels.value),
     resolutionText: (value: string | null | undefined) => resolutionText(value, resolutionLabels.value),
-    bitRateTypeText: (value: string | null | undefined) => bitRateTypeText(value, bitRateLabels.value)
+    bitRateTypeText: (value: string | null | undefined) => {
+      const code = String(value ?? "").trim();
+      return bitRateTypeText(code, { ...bitRateLabels.value, ...BIT_RATE_TYPE_LABEL_FALLBACK });
+    }
   };
 }

@@ -71,10 +71,10 @@ export const RESOLUTION_LABEL_FALLBACK: VideoParamLabelTable = {
   "6": "1080P"
 };
 
-/** `bit_rate_type` 兜底（GB/T 28181 值域，单测逐条锁定）。 */
+/** `bit_rate_type` 展示名（GB/T 28181 值域，单测逐条锁定）。 */
 export const BIT_RATE_TYPE_LABEL_FALLBACK: VideoParamLabelTable = {
-  "1": "CBR",
-  "2": "VBR"
+  "1": "恒定码率（CBR）",
+  "2": "可变码率（VBR）"
 };
 
 export function videoFormatText(
@@ -242,15 +242,15 @@ export function validateVideoParamItem(item: VideoParamCodecItem): string | null
     return `${streamLabel}：帧率必须是 0-99 的整数`;
   }
   if (!isValidBitRateType(item.bitRateType)) {
-    return `${streamLabel}：码率类型必须是 1（CBR）或 2（VBR）`;
+    return `${streamLabel}：码率类型必须是 1（恒定码率）或 2（可变码率）`;
   }
   const bitRate = String(item.videoBitRate ?? "").trim();
   if (videoBitRateRequired(item.bitRateType)) {
-    if (!bitRate) return `${streamLabel}：固定码率(CBR)必须填码率`;
+    if (!bitRate) return `${streamLabel}：恒定码率（CBR）必须填码率`;
     if (!isValidVideoBitRate(bitRate)) return `${streamLabel}：码率必须是 0-100000 的整数（kb/s）`;
     return null;
   }
-  if (bitRate) return `${streamLabel}：可变码率(VBR)不应填码率，该元素在报文里不出现`;
+  if (bitRate) return `${streamLabel}：可变码率（VBR）不应填码率，该元素在报文里不出现`;
   return null;
 }
 

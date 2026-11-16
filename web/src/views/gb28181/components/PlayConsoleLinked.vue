@@ -6949,12 +6949,30 @@ provide(PLAY_CONSOLE_CONTEXT, {
 }
 
 .sidebar-deviceconfig-panel :deep(.dcg-stream.is-compact) {
+  display: flex;
   flex: 1 0 auto;
+  flex-direction: column;
   min-height: 0;
 }
 
 .sidebar-deviceconfig-panel :deep(.dcg-compact-row) {
-  padding: 8px 10px;
+  padding: 6px 10px;
+}
+
+.sidebar-deviceconfig-panel :deep(.dcg-reconcile-inline) {
+  padding: 6px 10px;
+  margin: 8px 10px 10px;
+  font-size: 11px;
+  border: 1px solid transparent;
+}
+
+.sidebar-deviceconfig-panel :deep(.dcg-reconcile-inline.is-ok) {
+  background: color-mix(in srgb, var(--uvp-success) 8%, transparent);
+  border-color: color-mix(in srgb, var(--uvp-success) 22%, transparent);
+}
+
+.sidebar-deviceconfig-panel :deep(.dcg-video-compare-slot) {
+  margin-top: auto;
 }
 
 /* 双栏桌面布局中,右侧操作内容远高于左侧视频是正常的;不能让它的 min-content 高度

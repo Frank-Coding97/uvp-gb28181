@@ -61,8 +61,8 @@ describe("附录 G 码值 → 人读串", () => {
   });
 
   it("映射码率类型", () => {
-    expect(bitRateTypeText("1")).toBe("CBR");
-    expect(bitRateTypeText("2")).toBe("VBR");
+    expect(bitRateTypeText("1")).toBe("恒定码率（CBR）");
+    expect(bitRateTypeText("2")).toBe("可变码率（VBR）");
   });
 
   it("帧率与码率带上单位", () => {
@@ -138,7 +138,7 @@ describe("VideoBitRate 的条件必选（仅 CBR）", () => {
   });
 
   it("CBR 缺码率报错", () => {
-    expect(validateVideoParamItem(item({ bitRateType: "1", videoBitRate: "" }))).toContain("必须填码率");
+    expect(validateVideoParamItem(item({ bitRateType: "1", videoBitRate: "" }))).toContain("恒定码率（CBR）必须填码率");
     expect(validateVideoParamItem(item({ bitRateType: "1", videoBitRate: null }))).toContain("必须填码率");
   });
 
@@ -146,7 +146,7 @@ describe("VideoBitRate 的条件必选（仅 CBR）", () => {
   // 而报文里其实没有这个元素（后端同样拒发）。
   it("VBR 带码率报错，且说明该元素不会出现", () => {
     const failure = validateVideoParamItem(item({ bitRateType: "2", videoBitRate: "2048" }));
-    expect(failure).toContain("VBR");
+    expect(failure).toContain("可变码率（VBR）");
     expect(failure).toContain("不应填码率");
   });
 

@@ -202,6 +202,13 @@ describe("播放控制台表单控件", () => {
 
     expect(hasRuleBlock(cards, ".frame-overview.muted", "color: var(--uvp-text-disabled)", "opacity: 1")).toBe(true);
     expect(cards).toContain(".frame-overview.muted .frame-overview-bar");
+    expect(
+      hasRuleBlock(
+        cards,
+        'body[arco-theme="dark"] .frame-overview:not(.muted) .frame-overview-bar:not(.empty, .stalled)',
+        "background: var(--uvp-brand)"
+      )
+    ).toBe(true);
     expect(hasRuleBlock(title, ".session-badge.paused", "color: var(--uvp-text-secondary)")).toBe(true);
     expect(hasRuleBlock(dialogs, ".preset-save-count.ok", "color: var(--uvp-success)")).toBe(true);
   });

@@ -59,8 +59,8 @@ describe("协议值域锁定（兜底常量）", () => {
     });
   });
 
-  it("bit_rate_type = 1 CBR / 2 VBR", () => {
-    expect(BIT_RATE_TYPE_LABEL_FALLBACK).toEqual({ "1": "CBR", "2": "VBR" });
+  it("bit_rate_type = 1 恒定码率 / 2 可变码率", () => {
+    expect(BIT_RATE_TYPE_LABEL_FALLBACK).toEqual({ "1": "恒定码率（CBR）", "2": "可变码率（VBR）" });
   });
 });
 
@@ -87,8 +87,27 @@ describe("字典驱动", () => {
     ]);
     expect(useVideoResolutionOptions().value.map(option => option.value)).toEqual(["1", "2", "3", "4", "5", "6"]);
     expect(useBitRateTypeOptions().value).toEqual([
-      { value: "1", label: "CBR" },
-      { value: "2", label: "VBR" }
+      { value: "1", label: "恒定码率（CBR）" },
+      { value: "2", label: "可变码率（VBR）" }
+    ]);
+  });
+
+  it("码率类型字典保留协议值，但将英文标签显示为中文", () => {
+    seed([
+      {
+        code: DICT_CODE_BIT_RATE_TYPE,
+        list: [
+          { name: "VBR", value: "2", status: 1 },
+          { name: "CBR", value: "1", status: 1 },
+          { name: "自定义类型", value: "9", status: 1 }
+        ]
+      }
+    ]);
+
+    expect(useBitRateTypeOptions().value).toEqual([
+      { value: "2", label: "可变码率（VBR）" },
+      { value: "1", label: "恒定码率（CBR）" },
+      { value: "9", label: "自定义类型" }
     ]);
   });
 
@@ -127,7 +146,7 @@ describe("字典驱动", () => {
     // 字典里只给了 `2` ⇒ 其余码值仍是兜底（三个字典各自铺底）
     expect(labels.videoFormatText("5")).toBe("H.265");
     expect(labels.resolutionText("5")).toBe("720P");
-    expect(labels.bitRateTypeText("2")).toBe("VBR");
+    expect(labels.bitRateTypeText("2")).toBe("可变码率（VBR）");
   });
 
   it("三个字典互不串台（同 value 的 `1` 在三个 code 里含义不同）", () => {
@@ -137,7 +156,7 @@ describe("字典驱动", () => {
     ]);
     const labels = useVideoParamLabels();
     expect(labels.videoFormatText("1")).toBe("MPEG-4");
-    expect(labels.bitRateTypeText("1")).toBe("CBR");
+    expect(labels.bitRateTypeText("1")).toBe("恒定码率（CBR）");
     // 分辨率字典没给 ⇒ 兜底
     expect(labels.resolutionText("1")).toBe("QCIF");
   });
