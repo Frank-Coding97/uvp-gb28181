@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Copy } from "@lucide/vue";
+import type { ProtocolCompatibility } from "../../playbackCompatibility";
 
 interface ProtocolOption {
   value: string;
@@ -10,6 +11,7 @@ interface ProtocolOption {
 defineProps<{
   protocol: string;
   protocolUrls: Record<string, string | null>;
+  compatibility: Record<string, ProtocolCompatibility>;
   availableOptions: ProtocolOption[];
   shortcutOptions: ProtocolOption[];
   placeholder: string;
@@ -39,7 +41,8 @@ const emit = defineEmits<{
           :key="option.value"
           :value="option.value"
           :label="option.label"
-          :disabled="!option.browserPlayable"
+          :disabled="!option.browserPlayable || Boolean(compatibility[option.value]?.disabledReason)"
+          :title="compatibility[option.value]?.disabledReason || compatibility[option.value]?.warning"
         >
           <div class="protocol-option">
             <strong>{{ option.label }}:</strong>
@@ -71,7 +74,12 @@ const emit = defineEmits<{
         html-type="button"
         class="proto-btn"
         :class="{ active: protocol === option.value }"
-        :disabled="!protocolUrls[option.value]"
+        :disabled="!protocolUrls[option.value] || Boolean(compatibility[option.value]?.disabledReason)"
+        :title="
+          !protocolUrls[option.value]
+            ? '当前节点未返回该协议地址'
+            : compatibility[option.value]?.disabledReason || compatibility[option.value]?.warning
+        "
         @click="emit('switchProtocol', option.value)"
       >
         {{ option.label }}

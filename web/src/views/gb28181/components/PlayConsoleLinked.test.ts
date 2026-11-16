@@ -612,6 +612,7 @@ function pressEscape() {
 
 describe("PlayConsoleLinked 双区联动", () => {
   beforeEach(() => {
+    vi.stubGlobal("RTCPeerConnection", class {});
     userState.account = reactive({ permissions: ["*:*:*"] });
     api.reportPlaybackClientEvent.mockReset();
     api.reportPlaybackClientEvent.mockResolvedValue({ code: 0, message: "", data: { accepted: true } });
@@ -1203,6 +1204,175 @@ describe("PlayConsoleLinked 双区联动", () => {
       `webrtc://zlm:${signalingPort}/index/api/webrtc?app=rtp&stream=stream-webrtc&type=play`
     );
     expect(player.attributes("data-zlm-webrtc")).toBe("true");
+    wrapper.unmount();
+  });
+
+  async function mountCodecConsole(
+    options: { h265Supported?: boolean; preferred?: string; audioCodec?: string; hasAudio?: boolean } = {}
+  ) {
+    vi.stubGlobal("RTCPeerConnection", class {});
+    vi.stubGlobal("RTCRtpReceiver", {
+      getCapabilities: (kind: string) => ({
+        codecs:
+          kind === "video"
+            ? [
+                { mimeType: "video/H264", clockRate: 90000 },
+                ...(options.h265Supported ? [{ mimeType: "video/H265", clockRate: 90000 }] : [])
+              ]
+            : [{ mimeType: "audio/PCMA", clockRate: 8000, channels: 1 }]
+      })
+    });
+    const monitor = await api.getStreamMonitor.getMockImplementation()!();
+    monitor.data.tracks[0].codec = "H265";
+    if (options.audioCodec)
+      monitor.data.tracks.push({ kind: "audio", codec: options.audioCodec, ready: true, sampleRate: 8000, channels: 1 });
+    api.getStreamMonitor.mockResolvedValue(monitor);
+    api.startPlay.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: {
+        streamId: "stream-1",
+        ssrc: "0102030405",
+        app: "rtp",
+        defaultProtocol: options.preferred || "ws-flv",
+        urls: {
+          wsFlv: "ws://zlm/live.flv",
+          httpFlv: "http://zlm/live.flv",
+          hls: "http://zlm/hls.m3u8",
+          webrtc: "http://zlm/index/api/webrtc"
+        }
+      }
+    });
+    const wrapper = mount(PlayConsoleLinked, {
+      props: { visible: true, channel: { ...channel, audioEnabled: options.hasAudio ?? true } }
+    });
+    await flushPromises();
+    return wrapper;
+  }
+
+  it("编码兼容性：不支持 H265 的 WebRTC 快捷标签和下拉框禁用并显示同一原因", async () => {
+    const wrapper = await mountCodecConsole();
+    const button = wrapper.findAll(".proto-btn").find(b => b.text() === "WebRTC")!;
+    const option = wrapper.find('.protocol-switcher option[value="webrtc"]');
+    expect(button.attributes("disabled")).toBeDefined();
+    expect(button.attributes("title")).toContain("H265");
+    expect(option.attributes("disabled")).toBeDefined();
+    expect(option.attributes("title")).toBe(button.attributes("title"));
+    const warn = vi.spyOn(Message, "warning");
+    (wrapper.vm as any).switchProtocol("webrtc");
+    await flushPromises();
+    expect(warn).toHaveBeenCalledWith(button.attributes("title"));
+    expect(wrapper.get("[data-testid='play-window']").attributes("data-url")).toBe("ws://zlm/live.flv");
+    wrapper.unmount();
+  });
+
+  it("编码兼容性：支持 H265 的浏览器允许切换 WebRTC", async () => {
+    const wrapper = await mountCodecConsole({ h265Supported: true });
+    const button = wrapper.findAll(".proto-btn").find(b => b.text() === "WebRTC")!;
+    expect(button.attributes("disabled")).toBeUndefined();
+    await button.trigger("click");
+    await flushPromises();
+    expect(wrapper.get("[data-testid='play-window']").attributes("data-url")).toBe("webrtc://zlm/index/api/webrtc");
+    wrapper.unmount();
+  });
+
+  it("编码兼容性：音频风险只发 message 不阻止切换，关闭音频后不提示", async () => {
+    const wrapper = await mountCodecConsole({ h265Supported: true, audioCodec: "AAC" });
+    const warn = vi.spyOn(Message, "warning");
+    await wrapper
+      .findAll(".proto-btn")
+      .find(b => b.text() === "WebRTC")!
+      .trigger("click");
+    await flushPromises();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("AAC"));
+    expect(wrapper.get("[data-testid='play-window']").attributes("data-url")).toBe("webrtc://zlm/index/api/webrtc");
+    wrapper.unmount();
+    warn.mockClear();
+    const muted = await mountCodecConsole({ h265Supported: true, audioCodec: "AAC", hasAudio: false });
+    await muted
+      .findAll(".proto-btn")
+      .find(b => b.text() === "WebRTC")!
+      .trigger("click");
+    expect(warn).not.toHaveBeenCalled();
+    muted.unmount();
+  });
+
+  it("编码兼容性：默认 WebRTC 在新鲜编码确认不兼容后回退 FLV", async () => {
+    const wrapper = await mountCodecConsole({ preferred: "webrtc" });
+    expect(wrapper.get("[data-testid='play-window']").attributes("data-url")).toBe("ws://zlm/live.flv");
+    expect(wrapper.findAll(".proto-btn.active").map(b => b.text())).toEqual(["WS-FLV"]);
+    wrapper.unmount();
+  });
+
+  it("编码兼容性：没有其他地址时保留明确原因，不继续加载已知不兼容的默认协议", async () => {
+    const wrapper = await mountCodecConsole({ preferred: "webrtc" });
+    const vm = wrapper.vm as any;
+    vm.playResult.urls = { webrtc: "http://zlm/index/api/webrtc" };
+    vm.protocol = "webrtc";
+    await nextTick();
+    expect(wrapper.find("[data-testid='play-window']").exists()).toBe(false);
+    expect(vm.currentProtocolUrl).toBe("");
+    expect(vm.phase).toBe("error");
+    expect(vm.errorMessage).toContain("H265");
+    wrapper.unmount();
+  });
+
+  it("编码兼容性：没有监控权限时不额外查询编码，能力未知仍能尝试 WebRTC", async () => {
+    userState.account = reactive({ permissions: ["gb28181:play:start"] });
+    const wrapper = await mountCodecConsole({ preferred: "webrtc" });
+    expect(api.getStreamMonitor).not.toHaveBeenCalled();
+    expect(
+      wrapper
+        .findAll(".proto-btn")
+        .find(b => b.text() === "WebRTC")!
+        .attributes("disabled")
+    ).toBeUndefined();
+    expect(wrapper.get("[data-testid='play-window']").attributes("data-url")).toBe("webrtc://zlm/index/api/webrtc");
+    wrapper.unmount();
+  });
+
+  it("编码兼容性：浏览器禁用的协议仍可复制地址到外部客户端", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const wrapper = await mountCodecConsole();
+    const row = wrapper.findAll(".protocol-option").find(option => option.text().includes("WebRTC:"))!;
+    await row.get(".protocol-copy-btn").trigger("click");
+    await flushPromises();
+    expect(writeText).toHaveBeenCalledWith("http://zlm/index/api/webrtc");
+    expect(wrapper.get("[data-testid='play-window']").attributes("data-url")).toBe("ws://zlm/live.flv");
+    wrapper.unmount();
+  });
+
+  it("编码兼容性：数据过期或属于其他流时不禁用，已出首帧不被预检强制切走", async () => {
+    const wrapper = await mountCodecConsole({ h265Supported: true, preferred: "webrtc" });
+    const vm = wrapper.vm as any;
+    vm.clientFrameArrived = true;
+    vm.rtcCapabilities = { webrtc: true, video: [{ mimeType: "video/H264" }], audio: null };
+    await nextTick();
+    expect(wrapper.get("[data-testid='play-window']").attributes("data-url")).toBe("webrtc://zlm/index/api/webrtc");
+    expect(
+      wrapper
+        .findAll(".proto-btn")
+        .find(b => b.text() === "WebRTC")!
+        .attributes("disabled")
+    ).toBeDefined();
+    vm.monitorState = "stale";
+    await nextTick();
+    expect(
+      wrapper
+        .findAll(".proto-btn")
+        .find(b => b.text() === "WebRTC")!
+        .attributes("disabled")
+    ).toBeUndefined();
+    vm.monitorState = "fresh";
+    vm.monitorSnapshot = { ...vm.monitorSnapshot, streamId: "other-stream" };
+    await nextTick();
+    expect(
+      wrapper
+        .findAll(".proto-btn")
+        .find(b => b.text() === "WebRTC")!
+        .attributes("disabled")
+    ).toBeUndefined();
     wrapper.unmount();
   });
 

@@ -41,6 +41,7 @@ import { readableHttpError } from "../device-mgmt/recordQueryState";
 import { useFrameMirrorOptions } from "../device-mgmt/useDeviceConfigDict";
 import { buildProbeOverview, probeBucketHeight } from "../probeOverview";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
+import { evaluateProtocolCompatibility, readBrowserCodecCapabilities } from "../playbackCompatibility";
 import {
   assertPCMA8000,
   createAudioLevelMeter,
@@ -2029,6 +2030,36 @@ const liveMetrics = ref<{ bitrate: number; videoLoss: number | null; audioLoss: 
 const readerCount = ref(0);
 const monitorSnapshot = ref<StreamMonitorSnapshot | null>(null);
 const monitorState = ref<MonitorState>("idle");
+const rtcCapabilities = ref(readBrowserCodecCapabilities());
+const protocolCompatibility = computed(() => {
+  const snapshot = monitorSnapshot.value;
+  const tracks =
+    monitorState.value === "fresh" && snapshot && snapshot.streamId === playResult.value?.streamId ? snapshot.tracks : [];
+  return Object.fromEntries(
+    protocolOptions.map(option => [
+      option.value,
+      evaluateProtocolCompatibility(option.value, tracks, rtcCapabilities.value, props.channel?.audioEnabled === true)
+    ])
+  );
+});
+
+watch([protocolCompatibility, protocol], () => {
+  if (phase.value !== "playing" || clientFrameArrived.value || !protocol.value) return;
+  const reason = protocolCompatibility.value[protocol.value]?.disabledReason;
+  if (!reason) return;
+  const fallback = shortcutProtocolOptions.value.find(
+    option => protocolUrls.value[option.value] && !protocolCompatibility.value[option.value]?.disabledReason
+  );
+  playbackSnapshot.value = null;
+  protocol.value = fallback?.value || "";
+  if (fallback) {
+    Message.warning(`${reason}；已切换至 ${fallback.label}`);
+  } else {
+    errorMessage.value = reason;
+    phase.value = "error";
+    clearTimer();
+  }
+});
 /* monitorVideoTrack 曾在 stream tab 展示"视频帧数",tab 删除后失去引用;
  * monitorAudioTrack 探针概览卡音频栏"声道"仍在使用,保留。 */
 const monitorAudioTrack = computed(() => monitorSnapshot.value?.tracks.find(track => track.kind === "audio"));
@@ -5088,10 +5119,16 @@ function switchProtocol(proto: StreamProtocol) {
     Message.warning("当前节点未返回该协议地址");
     return;
   }
+  const compatibility = protocolCompatibility.value[proto];
+  if (compatibility?.disabledReason) {
+    Message.warning(compatibility.disabledReason);
+    return;
+  }
   if (!isBrowserPlayable(proto)) {
     Message.warning("该协议仅供外部客户端使用，浏览器内不可直接播放");
     return;
   }
+  if (compatibility?.warning) Message.warning(compatibility.warning);
   playbackSnapshot.value = null;
   protocol.value = proto;
 }
@@ -5596,6 +5633,7 @@ provide(PLAY_CONSOLE_CONTEXT, {
           <PlayConsoleProtocolBar
             :protocol="protocol"
             :protocol-urls="protocolUrls"
+            :compatibility="protocolCompatibility"
             :available-options="availableProtocolOptions"
             :shortcut-options="shortcutProtocolOptions"
             :placeholder="currentProtocolOption?.label || '无可播放地址'"
