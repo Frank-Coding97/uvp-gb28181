@@ -171,13 +171,16 @@ function resetView() {
 </script>
 
 <template>
+  <!-- ⛔ `uvp-system-dialog` 不能省：面板底色/边框/阴影/16px 圆角/头尾内边距全挂在这个类上
+       （见 src/style/model/uvp-ui-language.scss）。只写自定义类时，弹窗沿用 Arco 主题的暖色
+       暗底 + 直角，而正文里又混着亮色字面量 ⇒ 暗色下文字糊在背景上。 -->
   <a-modal
     :visible="visible"
     :title="`设置位置 · ${channelName || '通道'}`"
     :footer="false"
     :width="720"
     unmount-on-close
-    modal-class="channel-location-modal"
+    modal-class="uvp-system-dialog channel-location-modal"
     @cancel="close"
   >
     <div class="location-picker">
@@ -241,15 +244,21 @@ function resetView() {
   align-items: center;
   margin: 0;
   font-size: 12px;
-  color: #4e5969;
+  color: var(--uvp-text-secondary);
+}
+
+.location-picker__hint svg {
+  flex: none;
+  color: var(--uvp-brand);
 }
 
 .location-picker__map {
   position: relative;
   height: 380px;
   overflow: hidden;
-  background: #eef2f7;
-  border-radius: 8px;
+  background: var(--uvp-dialog-control-bg);
+  border: 1px solid var(--uvp-dialog-border);
+  border-radius: 12px;
 }
 
 .location-picker__map-loading {
@@ -259,7 +268,7 @@ function resetView() {
   align-items: center;
   justify-content: center;
   font-size: 12px;
-  color: #86909c;
+  color: var(--uvp-text-tertiary);
 }
 
 .location-picker__row {
@@ -274,7 +283,7 @@ function resetView() {
   gap: 6px;
   align-items: center;
   font-size: 12px;
-  color: #4e5969;
+  color: var(--uvp-text-secondary);
 }
 
 .location-picker__field :deep(.arco-input-wrapper) {
@@ -283,7 +292,7 @@ function resetView() {
 
 .location-picker__picked {
   font-size: 12px;
-  color: #86909c;
+  color: var(--uvp-text-secondary);
 }
 
 .location-picker__footer {
