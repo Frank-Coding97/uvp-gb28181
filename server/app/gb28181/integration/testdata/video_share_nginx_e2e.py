@@ -56,7 +56,6 @@ http {{
                         f"Nginx did not serve the candidate {name}")
         self.record("production dist share and management entrypoints served by real Nginx")
         super().application()
-        self.check_logs()
 
     def check_logs(self):
         # A query sentinel is harmless and must never enter the media access log.
@@ -96,6 +95,9 @@ def main():
         check.initialize()
         check.media()
         check.application()
+        check.check_deleted_source_identity(check.management_token,
+                                            f"/api/gb28181/channel-shares/{check.channel_pk}")
+        check.check_logs()
         if args.rollback_server:
             check.rollback()
         print(json.dumps({"status": "PASS", "checks": check.checks, "root": str(check.root)}))

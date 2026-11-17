@@ -326,10 +326,11 @@ gb28181:
                          "(id,deployment_mode,listen_ip,advertise_ip,port,domain,server_id,password,hook_ip,sdp_ip,stream_ip) "
                          "VALUES (1,'lan','127.0.0.1','127.0.0.1',?,'3402000000','34020000002000000001',?,'127.0.0.1','127.0.0.1','127.0.0.1')",
                          (self.sip_port, secrets.token_urlsafe(24)))
-            conn.execute("INSERT INTO gb_device "
+            cursor = conn.execute("INSERT INTO gb_device "
                          "(device_id,name,status,owner_dept_id,transport,ip,port,keepalive_time,keepalive_interval,register_expire_at,created_at,updated_at) "
                          "VALUES (?,'Synthetic share E2E',1,1,'UDP','127.0.0.1',?,CURRENT_TIMESTAMP,3600,datetime('now','+1 day'),CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
                          (DEVICE, self.peer_port))
+            self.device_pk = cursor.lastrowid
             cursor = conn.execute("INSERT INTO gb_channel "
                                   "(device_id,channel_id,name,status,owner_dept_id,stream_id,current_ssrc,on_demand_live,created_at,updated_at) "
                                   "VALUES (?,?,'Synthetic share E2E',1,1,?,'0200000001',0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
@@ -411,6 +412,7 @@ segDelay=0
         self.wait(ready, "full application HTTP listener", 60)
         login = self.success("/api/login", "POST", {"username": "admin", "password": self.password})
         token = login["accessToken"]
+        self.management_token = token
         require(login.get("mustChangePassword") is not True, "reset-admin did not disable fixture password change")
         self.record("real admin HTTP login")
         path = f"/api/gb28181/channel-shares/{self.channel_pk}"
@@ -503,6 +505,39 @@ segDelay=0
             require(json.load(live).get("online") is True, "share disable stopped the independent live source")
         self.record("share disable preserved the independent live source")
 
+    def check_deleted_source_identity(self, token, path):
+        for target, target_pk in (("channel", self.channel_pk), ("device", self.device_pk)):
+            current = self.success(path, token=token)
+            link = self.success(path, "PUT", {"enabled": True, "revision": current["revision"]}, token)
+            credential = {"publicId": link["publicId"], "signature": link["signature"]}
+            self.success("/api/public/video-share/resolve", "POST", credential)
+            with sqlite3.connect(self.db) as conn:
+                conn.row_factory = sqlite3.Row
+                channel = dict(conn.execute("SELECT * FROM gb_channel WHERE id=?", (self.channel_pk,)).fetchone())
+                device = dict(conn.execute("SELECT * FROM gb_device WHERE id=?", (self.device_pk,)).fetchone())
+            self.success(f"/api/gb28181/device-mgmt/{target}/{target_pk}", "DELETE", token=token)
+            # Reuse the exact source identity before any post-delete resolve.
+            # Explicit private fixture imports must never revive a signed link.
+            with sqlite3.connect(self.db) as conn:
+                retired = conn.execute("SELECT enabled,revoked_at,revision FROM gb_channel_video_share WHERE channel_pk=?",
+                                       (self.channel_pk,)).fetchone()
+                require(retired and retired[0] == 0 and retired[1] and retired[2] == link["revision"] + 1,
+                        "source deletion did not permanently revoke its share in the same transaction")
+                require(conn.execute("SELECT count(*) FROM gb_channel WHERE id=?", (self.channel_pk,)).fetchone()[0] == 0,
+                        "deletion did not remove the source channel")
+                restore = [("gb_channel", channel)]
+                if target == "device":
+                    require(conn.execute("SELECT count(*) FROM gb_device WHERE id=?", (self.device_pk,)).fetchone()[0] == 0,
+                            "deletion did not remove the source device")
+                    restore.insert(0, ("gb_device", device))
+                for table, row in restore:
+                    columns = ",".join('"' + column + '"' for column in row)
+                    placeholders = ",".join("?" for _ in row)
+                    conn.execute(f"INSERT INTO {table} ({columns}) VALUES ({placeholders})", tuple(row.values()))
+            status, _ = self.request("/api/public/video-share/resolve", "POST", credential)
+            require(status == 410, "reusing the deleted source identity revived its old share")
+            self.record(f"real {target} deletion permanently revoked its share before identical private-fixture identity restoration")
+
     def rollback(self):
         # Sharing is revoked and media observers are closed by application().
         # Keep the same migrated database, key, ZLM and synthetic source intact.
@@ -569,6 +604,8 @@ def main():
         check.initialize()
         check.media()
         check.application()
+        check.check_deleted_source_identity(check.management_token,
+                                            f"/api/gb28181/channel-shares/{check.channel_pk}")
         if args.rollback_server:
             check.rollback()
         print(json.dumps({"status": "PASS", "checks": check.checks, "root": str(check.root)}))

@@ -75,7 +75,8 @@ func TestDeviceMgmtListChannelsAddsOnlyAuthorizedBatchShareState(t *testing.T) {
 			state := row["videoShare"].(map[string]any)
 			require.Equal(t, true, state["enabled"])
 			require.EqualValues(t, 4, state["revision"])
-			require.Len(t, state, 5)
+			require.Equal(t, false, state["expired"])
+			require.Len(t, state, 6)
 		} else {
 			require.NotContains(t, row, "videoShare")
 		}

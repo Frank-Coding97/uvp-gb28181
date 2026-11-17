@@ -11,6 +11,7 @@ import (
 
 	gbcascaderepo "uvplatform.com/uvp-gb28181/app/gb28181/cascade/repository"
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/videoshare"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
@@ -163,6 +164,9 @@ func (dc *DeviceMgmtController) deleteDeviceByID(c *gin.Context, db *gorm.DB, id
 		if res.RowsAffected == 0 {
 			return errors.New("设备不存在或无权限")
 		}
+		if err := videoshare.RevokeDeletedTargetTx(c.Request.Context(), tx, dev.ID, 0); err != nil {
+			return err
+		}
 
 		// 2. 查该设备下所有通道 ID(通过国标 device_id 关联,dept-scoped)
 		var channelIDs []uint
@@ -283,6 +287,9 @@ func (dc *DeviceMgmtController) deleteChannelByID(c *gin.Context, db *gorm.DB, i
 		}
 		if res.RowsAffected == 0 {
 			return errors.New("通道不存在或无权限")
+		}
+		if err := videoshare.RevokeDeletedTargetTx(c.Request.Context(), tx, 0, ch.ID); err != nil {
+			return err
 		}
 
 		// 2. 删该通道所有 mount(无软删字段)

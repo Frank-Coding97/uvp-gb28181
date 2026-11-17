@@ -46,6 +46,39 @@ func RevokeCreatorTx(ctx context.Context, tx *gorm.DB, actorID uint, reason stri
 	}
 }
 
+// RevokeDeletedTargetTx retires activated and pending shares before a source is
+// physically removed. The caller holds the authority gate in the same transaction,
+// so recreating even the same numeric source identity cannot revive a credential.
+func RevokeDeletedTargetTx(ctx context.Context, tx *gorm.DB, devicePK, channelPK uint) error {
+	if ctx == nil || tx == nil || tx.Statement == nil || (devicePK == 0 && channelPK == 0) {
+		return errors.New("video share target revocation requires context, transaction, and target")
+	}
+	if _, ok := tx.Statement.ConnPool.(gorm.TxCommitter); !ok {
+		return errors.New("video share target revocation requires an explicit transaction")
+	}
+	column, target, reason := "channel_pk", channelPK, "channel_deleted"
+	if devicePK != 0 {
+		column, target, reason = "device_pk", devicePK, "device_deleted"
+	}
+	now := time.Now().UTC()
+	for {
+		var shares []gbmodels.GbChannelVideoShare
+		if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where(column+" = ? AND enabled = ? AND revoked_at IS NULL", target, true).
+			Order("id ASC").Limit(100).Find(&shares).Error; err != nil {
+			return err
+		}
+		if len(shares) == 0 {
+			return nil
+		}
+		for i := range shares {
+			if err := revokeShareWithAuditTx(ctx, tx, &shares[i], reason, now); err != nil {
+				return err
+			}
+		}
+	}
+}
+
 // No operator is supplied by these system revocation paths. created_by is the
 // affected creator, not the administrator making the authority change.
 func revokeShareWithAuditTx(ctx context.Context, tx *gorm.DB, share *gbmodels.GbChannelVideoShare, reason string, now time.Time) error {
