@@ -3,7 +3,8 @@
 
 Build server and uvp-setup from the same candidate, then supply absolute paths.
 The root must be new/empty on a supported local filesystem (not /tmp tmpfs).
-No business database, permission seed, migration ledger or SIP peer is used.
+No existing business database, hand-filled migration ledger or SIP peer is used.
+Permissions come only from the product migrations.
 """
 import argparse
 import datetime as dt
