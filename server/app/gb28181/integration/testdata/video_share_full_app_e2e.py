@@ -316,7 +316,7 @@ enable_rtmp=1
         self.record("isolated real ZLM synthetic live source")
 
     def application(self):
-        self.start([self.args.server], "server")
+        self.application_process = self.start([self.args.server], "server")
         def ready():
             with socket.create_connection(("127.0.0.1", self.app_port), timeout=1):
                 return True
@@ -385,6 +385,36 @@ enable_rtmp=1
             require(json.load(live).get("online") is True, "share disable stopped the independent live source")
         self.record("share disable preserved the independent live source")
 
+    def rollback(self):
+        # Sharing is already revoked and its FLV reader joined by application().
+        # Keep the same migrated database, key, ZLM and synthetic source intact.
+        keys = list(self.root.rglob("video-share.key"))
+        require(len(keys) == 1, "persistent signing key was not found uniquely")
+        key = keys[0]
+        saved_key = key.read_bytes()
+        os.killpg(self.application_process.pid, signal.SIGTERM)
+        self.application_process.wait(timeout=15)
+        self.processes.remove(self.application_process)
+        self.start([self.args.rollback_server], "rollback-server")
+        def ready():
+            with socket.create_connection(("127.0.0.1", self.app_port), timeout=1):
+                return True
+        self.wait(ready, "prior-version application listener", 60)
+        login = self.success("/api/login", "POST", {"username": "admin", "password": self.password})
+        result = self.success(f"/api/gb28181/play/{DEVICE}/{CHANNEL}", "POST", token=login["accessToken"])
+        media = result.get("httpFlvUrl") or result.get("urls", {}).get("httpFlv")
+        require(isinstance(media, str) and media, "prior version returned no ordinary FLV URL")
+        with self.opener.open(media, timeout=10) as response:
+            require(response.status == 200 and response.read(3) == b"FLV", "ordinary playback failed after rollback")
+        with sqlite3.connect(self.db) as conn:
+            require(conn.execute("SELECT count(*) FROM gb_channel_video_share WHERE enabled<>0").fetchone()[0] == 0,
+                    "rollback reopened a revoked share")
+            require(conn.execute("SELECT count(*) FROM gb_channel_video_share").fetchone()[0] == 1,
+                    "rollback destroyed share records")
+        require(key.read_bytes() == saved_key, "rollback replaced the persistent share key")
+        self.record("prior version restarted on migrated DB and ordinary authenticated FLV still plays")
+        self.record("rollback retained revoked share records and signing key without destructive Down")
+
     def close(self):
         for proc in reversed(self.processes):
             if proc.poll() is None:
@@ -402,10 +432,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("root", "server", "setup", "baseline", "zlm", "ffmpeg", "sample"):
         parser.add_argument("--" + name, required=True)
+    parser.add_argument("--rollback-server", help="optional prior-version binary for isolated rollback check")
     args = parser.parse_args()
     for name in ("server", "setup", "baseline", "zlm", "ffmpeg", "sample"):
         value = Path(getattr(args, name)).resolve(strict=True)
         setattr(args, name, str(value))
+    if args.rollback_server:
+        args.rollback_server = str(Path(args.rollback_server).resolve(strict=True))
     check = None
     try:
         check = Check(args)
@@ -413,6 +446,8 @@ def main():
         check.initialize()
         check.media()
         check.application()
+        if args.rollback_server:
+            check.rollback()
         print(json.dumps({"status": "PASS", "checks": check.checks, "root": str(check.root)}))
         return 0
     except Exception as error:
