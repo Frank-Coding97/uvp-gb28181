@@ -548,6 +548,8 @@ onBeforeUnmount(() => {
       </section>
 
       <main ref="monitorAreaRef" class="monitor-area" :class="{ fullscreen: isFullscreen }">
+        <!-- 全屏时操作栏默认滑出屏幕外，靠这条顶部感应带把鼠标「接」回来 -->
+        <div v-if="isFullscreen" class="toolbar-reveal-zone" aria-hidden="true" />
         <div class="monitor-toolbar">
           <div class="layout-switcher" role="group" aria-label="选择分屏布局">
             <button
@@ -861,6 +863,49 @@ onBeforeUnmount(() => {
   gap: 10px;
   justify-content: flex-end;
   margin-bottom: 12px;
+}
+
+/* 全屏：操作栏抬起悬浮在画面上，默认收起，鼠标移到顶部（或键盘聚焦）才降下来。
+   收起用 translateY(-100%) 而不是 display:none，否则没法做过渡动画。 */
+.monitor-area.fullscreen .monitor-toolbar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 25;
+  padding: 10px 16px;
+  margin-bottom: 0;
+  background: var(--zlm-card);
+  border-bottom: 1px solid var(--zlm-border);
+  box-shadow: var(--zlm-shadow-sm);
+  opacity: 0;
+  transform: translateY(-100%);
+  transition:
+    transform 0.18s ease,
+    opacity 0.18s ease;
+}
+.toolbar-reveal-zone {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 26;
+  height: 8px;
+}
+.monitor-area.fullscreen .toolbar-reveal-zone:hover ~ .monitor-toolbar,
+.monitor-area.fullscreen .monitor-toolbar:hover,
+.monitor-area.fullscreen .monitor-toolbar:focus-within {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* 触屏设备没有 hover，收起来就再也点不到了，直接常驻。 */
+@media (hover: none) {
+  .monitor-area.fullscreen .monitor-toolbar {
+    position: static;
+    opacity: 1;
+    transform: none;
+  }
 }
 .layout-switcher {
   gap: 4px;
@@ -1320,7 +1365,7 @@ onBeforeUnmount(() => {
 .polling-backdrop {
   position: absolute;
   inset: 0;
-  z-index: 20;
+  z-index: 40; /* 全屏时操作栏是悬浮层（25），弹层必须压过它 */
   display: grid;
   place-items: center;
   background: rgb(15 23 42 / 34%);

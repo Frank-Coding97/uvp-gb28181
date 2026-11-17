@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { nextTick } from "vue";
 
 const api = vi.hoisted(() => ({
   listChannels: vi.fn()
@@ -156,6 +157,49 @@ describe("multi-screen playback page", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/multi-screen-playback/index.vue"), "utf8");
 
     expect(source).toMatch(/\.monitor-toolbar\s*\{[^}]*flex:\s*0 0 auto;/s);
+  });
+
+  it("collapses the monitor toolbar in fullscreen and reveals it from the top edge", async () => {
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/multi-screen-playback/index.vue"), "utf8");
+
+    const fullscreenRule = source.match(/\.monitor-area\.fullscreen \.monitor-toolbar\s*\{([^}]*)\}/s)?.[1] ?? "";
+    expect(fullscreenRule).toMatch(/position:\s*absolute;/);
+    expect(fullscreenRule).toMatch(/transform:\s*translateY\(-100%\);/);
+    expect(fullscreenRule).toMatch(/opacity:\s*0;/);
+    expect(fullscreenRule).toMatch(/transition:[^;]*transform/s);
+
+    // 收起来以后鼠标没法"悬浮到一个已经滑出屏幕的元素"，必须靠顶部感应带把操作栏接回来
+    expect(source).toContain('<div v-if="isFullscreen" class="toolbar-reveal-zone" aria-hidden="true" />');
+    expect(source).toMatch(
+      /\.monitor-area\.fullscreen \.toolbar-reveal-zone:hover ~ \.monitor-toolbar,\s*\.monitor-area\.fullscreen \.monitor-toolbar:hover,\s*\.monitor-area\.fullscreen \.monitor-toolbar:focus-within\s*\{[^}]*opacity:\s*1;[^}]*transform:\s*translateY\(0\);/s
+    );
+    expect(source).toMatch(
+      /@media \(hover: none\) \{\s*\.monitor-area\.fullscreen \.monitor-toolbar \{[^}]*position:\s*static;/s
+    );
+
+    // 轮询设置弹层必须压在悬浮操作栏上面
+    expect(source).toMatch(/\.polling-backdrop\s*\{[^}]*z-index:\s*40;/s);
+
+    const wrapper = mount(MultiScreenPlayback);
+    expect(wrapper.find(".toolbar-reveal-zone").exists()).toBe(false);
+    expect(wrapper.get(".monitor-area").classes()).not.toContain("fullscreen");
+
+    Object.defineProperty(document, "fullscreenElement", {
+      configurable: true,
+      get: () => wrapper.get(".monitor-area").element
+    });
+    document.dispatchEvent(new Event("fullscreenchange"));
+    await nextTick();
+
+    expect(wrapper.get(".monitor-area").classes()).toContain("fullscreen");
+    expect(wrapper.find(".toolbar-reveal-zone").exists()).toBe(true);
+    expect(wrapper.find("[data-test=fullscreen]").exists()).toBe(true);
+
+    Object.defineProperty(document, "fullscreenElement", { configurable: true, get: () => null });
+    document.dispatchEvent(new Event("fullscreenchange"));
+    await nextTick();
+    expect(wrapper.find(".toolbar-reveal-zone").exists()).toBe(false);
+    wrapper.unmount();
   });
 
   it("keeps the desktop polling countdown content inside its status button", () => {
