@@ -85,10 +85,12 @@ function installAggregateApiMocks() {
     );
     aggregateSnapshot = Object.fromEntries(results.map(([section, value]) => [section, structuredClone(value)]));
     aggregateSnapshot.cascade = structuredClone(cascadeSnapshot);
+    aggregateSnapshot.videoShare = { defaultEnabled: false, ttlSeconds: 300 };
     return { code: 0, message: "", data: structuredClone(aggregateSnapshot) };
   });
   api.updateServiceConfig.mockImplementation(async (payload: Record<string, any>) => {
     const next = structuredClone(aggregateSnapshot);
+    next.videoShare = structuredClone(payload.videoShare);
     next.cascade = structuredClone(payload.cascade);
     cascadeSnapshot = structuredClone(payload.cascade);
     for (const [section, , updateName] of aggregateSections) {
@@ -385,7 +387,7 @@ describe("ServiceConfig edit mode", () => {
     await flushPromises();
 
     // 设备接入入口由平台统一管理，不属于用户可配置项。
-    expect(wrapper.findAll("[data-tooltip]")).toHaveLength(32);
+    expect(wrapper.findAll("[data-tooltip]")).toHaveLength(35);
     expect(wrapper.find("[data-field='deviceTimeSync']").attributes("data-tooltip")).toContain("默认关闭");
     expect(wrapper.find("[data-field='saveMobilePositionHistory']").attributes("data-tooltip")).toBe(
       "关闭后仍更新设备和通道的最新位置，不再新增轨迹点。"
@@ -805,7 +807,7 @@ describe("ServiceConfig edit mode", () => {
     expect(wrapper.text()).toContain("扩展 SDP 兼容模式");
     expect(wrapper.find("[data-field='sdpExtension']").attributes("data-tooltip")).toContain("一般设备无需开启");
 
-    const falseSwitch = wrapper.findAll("button").find(button => button.text() === "false");
+    const falseSwitch = wrapper.find("[data-field='sdpExtension'] button");
     expect(falseSwitch?.element).toHaveProperty("disabled", false);
 
     expect(falseSwitch?.element).toHaveProperty("disabled", false);
@@ -1200,5 +1202,108 @@ describe("ServiceConfig edit mode", () => {
     await flushPromises();
 
     expect(wrapper.find("[data-field='sipLogEnabled']").attributes("data-tooltip")).toContain("配置尚未应用");
+  });
+
+  it("shows the default share switch and all unified expiry choices without disabling expiry", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    const toggle = wrapper.get("[data-field='videoShare.defaultEnabled'] button");
+    const field = wrapper.get("[data-field='videoShare.ttlSeconds']");
+    expect(toggle.text()).toBe("false");
+    expect(field.get("select").element).toHaveProperty("value", "300");
+    expect(field.get("select").element).toHaveProperty("disabled", false);
+    expect(field.findAll("option").map(option => [option.attributes("value"), option.text()])).toEqual([
+      ["180", "3 分钟"],
+      ["300", "5 分钟"],
+      ["1800", "30 分钟"],
+      ["3600", "1 小时"],
+      ["custom", "自定义"]
+    ]);
+    expect(toggle.element.closest("label")?.getAttribute("data-tooltip")).toContain("仅影响新注册设备");
+    expect(field.attributes("data-tooltip")).toContain("只影响之后生成的链接");
+    wrapper.unmount();
+  });
+
+  it.each([
+    ["180", 180],
+    ["300", 300],
+    ["1800", 1800],
+    ["3600", 3600]
+  ])("saves the unified share expiry %s through the aggregate API", async (choice, seconds) => {
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get("[data-field='videoShare.defaultEnabled'] button").trigger("click");
+    await wrapper.get("[data-field='videoShare.ttlSeconds'] select").setValue(choice);
+    expect(api.updateServiceConfig).not.toHaveBeenCalled();
+    await wrapper
+      .findAll("button")
+      .find(button => button.text().includes("保存配置"))!
+      .trigger("click");
+    await flushPromises();
+    expect(api.updateServiceConfig).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        videoShare: { defaultEnabled: true, ttlSeconds: seconds }
+      })
+    );
+    expect(wrapper.find(".service-config-unsaved").exists()).toBe(false);
+    expect(wrapper.get("[data-field='videoShare.defaultEnabled'] button").text()).toBe("true");
+    expect(wrapper.get("[data-field='videoShare.ttlSeconds'] select").element).toHaveProperty("value", choice);
+    wrapper.unmount();
+  });
+
+  it("blocks invalid custom share minutes and saves a valid seven-minute value", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    const field = wrapper.get("[data-field='videoShare.ttlSeconds']");
+    await field.get("select").setValue("custom");
+    const input = field.get("input");
+    const save = wrapper.findAll("button").find(button => button.text().includes("保存配置"))!;
+    for (const invalid of ["", "0", "-1", "1.5", "9007199254740991"]) {
+      await input.setValue(invalid);
+      expect(save.element).toHaveProperty("disabled", true);
+      expect(field.attributes("data-validate-status")).toBe("error");
+      expect(field.text()).toContain("正整数分钟");
+      await save.trigger("click");
+      expect(api.updateServiceConfig).not.toHaveBeenCalled();
+    }
+    await input.setValue("7");
+    expect(save.element).toHaveProperty("disabled", false);
+    await save.trigger("click");
+    await flushPromises();
+    expect(api.updateServiceConfig).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        videoShare: { defaultEnabled: false, ttlSeconds: 420 }
+      })
+    );
+    expect(field.get("select").element).toHaveProperty("value", "custom");
+    expect(field.get("input").element).toHaveProperty("value", "7");
+    wrapper.unmount();
+  });
+
+  it("resets share drafts and keeps the saved snapshot after a failed save", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    const field = wrapper.get("[data-field='videoShare.ttlSeconds']");
+    const toggle = wrapper.get("[data-field='videoShare.defaultEnabled'] button");
+    const reset = wrapper.findAll("button").find(button => button.text().includes("重置"))!;
+    const save = wrapper.findAll("button").find(button => button.text().includes("保存配置"))!;
+    await toggle.trigger("click");
+    await field.get("select").setValue("1800");
+    await reset.trigger("click");
+    expect(toggle.text()).toBe("false");
+    expect(field.get("select").element).toHaveProperty("value", "300");
+    expect(api.updateServiceConfig).not.toHaveBeenCalled();
+    await toggle.trigger("click");
+    await field.get("select").setValue("custom");
+    await field.get("input").setValue("7");
+    api.updateServiceConfig.mockResolvedValueOnce({ code: 500, message: "保存失败" });
+    await save.trigger("click");
+    await flushPromises();
+    expect(aggregateSnapshot.videoShare).toEqual({ defaultEnabled: false, ttlSeconds: 300 });
+    await reset.trigger("click");
+    expect(toggle.text()).toBe("false");
+    expect(field.get("select").element).toHaveProperty("value", "300");
+    expect(wrapper.find(".service-config-unsaved").exists()).toBe(false);
+    wrapper.unmount();
   });
 });
