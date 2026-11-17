@@ -165,6 +165,35 @@ func (f *shareRevocationAcceptance) assertPermanentRetirement(t *testing.T, with
 }
 
 func TestVideoShareBusinessWriteRevocationAcceptance(t *testing.T) {
+	t.Run("creator-user-disable", func(t *testing.T) {
+		f := newShareRevocationAcceptance(t, false, 1)
+		require.NoError(t, f.db.AutoMigrate(&models.SysUserSession{}))
+		controller := NewUserController()
+		controller.AuthSessions = service.NewAuthSessionService(f.db)
+		update := func(status int8) {
+			f.call(t, controller.Update, map[string]any{"id": 7, "userName": "share-creator",
+				"nickName": "Share creator", "sex": "1", "deptId": 10, "roles": []uint{3}, "status": status})
+		}
+		f.assertPermanentRetirement(t, func() { update(0) }, func() { update(1) })
+	})
+	t.Run("creator-user-delete-and-id-reuse", func(t *testing.T) {
+		f := newShareRevocationAcceptance(t, false, 1)
+		require.NoError(t, f.db.AutoMigrate(&models.SysUserSession{}))
+		controller := NewUserController()
+		controller.AuthSessions = service.NewAuthSessionService(f.db)
+		f.assertPermanentRetirement(t, func() {
+			f.call(t, controller.Delete, map[string]any{"id": 7})
+		}, func() {
+			// The public user-create API cannot choose a primary key. Rebuild the
+			// same identity directly, without a second user-edit revocation that
+			// could hide an omission in the real Delete handler being verified.
+			require.NoError(t, f.db.Unscoped().Where("id = ?", 7).Delete(&models.User{}).Error)
+			require.NoError(t, f.db.Create(&models.User{BaseModel: models.BaseModel{ID: 7},
+				Username: "share-creator", Status: 1, DeptID: 10}).Error)
+			require.NoError(t, f.db.Create(&models.SysUserRole{UserID: 7, RoleID: 3}).Error)
+			require.NoError(t, service.NewPermissionService().AddRoleForUser(context.Background(), 7, []uint{3}))
+		})
+	})
 	t.Run("role-menu-reassignment", func(t *testing.T) {
 		f := newShareRevocationAcceptance(t, false, 1)
 		assign := func(menus []uint) {
