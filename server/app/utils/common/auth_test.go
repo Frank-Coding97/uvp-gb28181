@@ -40,6 +40,8 @@ func TestGetAccessTokenAllowsQueryTokenOnAllowlistedEndpoints(t *testing.T) {
 		// 批量下载：前端 `<a download>` 由浏览器原生发起，带不了 Authorization 头，
 		// 不在这里放行的话点"批量下载"必然 401（2026-11-04 实测踩过）。
 		"/api/gb28181/device-mgmt/snapshots/archive?ids=1,2,3&token=query-token",
+		// 设备告警实时流（SSE）：EventSource 带不了请求头，且复用告警列表路径。
+		"/api/gb28181/alarms?stream=1&token=query-token",
 	}
 	for _, target := range cases {
 		t.Run(target, func(t *testing.T) {
@@ -70,6 +72,11 @@ func TestGetAccessTokenRejectsQueryTokenOutsideAllowlist(t *testing.T) {
 		// 写操作即使落在白名单路径上也只认请求头。
 		{"POST", "/api/gb28181/device-mgmt/snapshots/archive?token=query-token"},
 		{"POST", "/api/gb28181/security/stream?token=query-token"},
+		// 告警列表的**普通查询**（不带 stream=1）不让 URL 令牌进来：
+		// 与 SSE 共用路径，靠参数区分，避免令牌散落到普通接口的日志里。
+		{"GET", "/api/gb28181/alarms?token=query-token"},
+		{"GET", "/api/gb28181/alarms?stream=0&token=query-token"},
+		{"POST", "/api/gb28181/alarms?stream=1&token=query-token"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.method+" "+tc.target, func(t *testing.T) {

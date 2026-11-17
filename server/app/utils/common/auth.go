@@ -38,6 +38,13 @@ const (
 	snapshotContentSuffix = "/content"
 )
 
+// alarmStreamPath 是设备告警实时流（SSE）的路径。
+//
+// ⛔⛔ 它**复用**了告警列表的路径（`?stream=1` 分流，见 controllers/alarm.go），
+// 所以不能直接塞进上面的 map —— 那等于让「查询告警列表」这个普通 XHR 接口也接受
+// URL 令牌，令牌就会散进 nginx 日志/浏览器历史。这里改成"同路径 + 必须是 SSE"。
+const alarmStreamPath = "/api/gb28181/alarms"
+
 // queryTokenAllowed 判断本次请求是否允许用 `?token=` 鉴权。
 //
 // 只认 GET/HEAD：写操作在浏览器侧从来不需要这条通道，放行只会让令牌多出几个落点
@@ -55,6 +62,11 @@ func queryTokenAllowed(c *gin.Context) bool {
 	requestPath := path.Clean(c.Request.URL.Path)
 	if _, ok := queryTokenAllowlist[requestPath]; ok {
 		return true
+	}
+	// 设备告警实时流：EventSource 带不了 Authorization 头，只能靠 ?token=；
+	// 但普通告警列表查询（同一个路径）仍必须走请求头，见 alarmStreamPath 的注释。
+	if requestPath == alarmStreamPath {
+		return c.Query("stream") == "1"
 	}
 	return strings.HasPrefix(requestPath, snapshotContentPrefix) &&
 		strings.HasSuffix(requestPath, snapshotContentSuffix)
