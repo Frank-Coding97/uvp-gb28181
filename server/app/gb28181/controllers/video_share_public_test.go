@@ -17,10 +17,11 @@ import (
 )
 
 type publicVideoShareResolverStub struct {
-	result     videoshare.PublicShare
-	gotID      string
-	gotSig     string
-	resolveErr error
+	result      videoshare.PublicShare
+	gotID       string
+	gotSig      string
+	resolveErr  error
+	viewerToken string
 }
 
 func (s *publicVideoShareResolverStub) ResolvePublic(_ context.Context, id, signature string) (videoshare.PublicShare, error) {
@@ -32,7 +33,31 @@ func (s *publicVideoShareResolverStub) CreateViewer(_ context.Context, id, signa
 	return videoshare.Viewer{Token: "viewer-token", HTTPFLVPath: "/api/public/video-share/viewers/viewer-token/live.flv"}, nil
 }
 func (s *publicVideoShareResolverStub) LookupViewer(_ context.Context, token string) (videoshare.ViewerAccess, error) {
+	s.viewerToken = token
 	return videoshare.ViewerAccess{ExpiresAt: time.Date(2026, 11, 17, 13, 45, 0, 0, time.UTC)}, nil
+}
+
+func TestPublicVideoShareStatusBoundsChunkedCredentialBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	app.Response = response.NewResponseHandler()
+	resolver := &publicVideoShareResolverStub{}
+	router := gin.New()
+	router.POST("/public/video-share/viewers/status", NewPublicVideoShareController(resolver).ViewerStatus)
+	for _, token := range []string{"valid-viewer", strings.Repeat("x", int(publicVideoShareBodyLimit)+1)} {
+		resolver.viewerToken = ""
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/public/video-share/viewers/status", strings.NewReader(`{"viewerToken":"`+token+`"}`))
+		request.ContentLength = -1
+		request.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(recorder, request)
+		if len(token) > int(publicVideoShareBodyLimit) {
+			require.Equal(t, http.StatusRequestEntityTooLarge, recorder.Code)
+			require.Empty(t, resolver.viewerToken)
+		} else {
+			require.Equal(t, http.StatusOK, recorder.Code)
+			require.Equal(t, token, resolver.viewerToken)
+		}
+	}
 }
 func (s *publicVideoShareResolverStub) CloseViewer(string) error { return nil }
 func (s *publicVideoShareResolverStub) RelayHTTPFLV(_ context.Context, w http.ResponseWriter, _ string) {

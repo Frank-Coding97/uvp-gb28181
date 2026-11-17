@@ -99,8 +99,15 @@ func (c *PublicVideoShareController) ViewerStatus(ctx *gin.Context) {
 		c.Fail(ctx, "视频分享服务尚未装配", nil, http.StatusServiceUnavailable)
 		return
 	}
+	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, publicVideoShareBodyLimit)
 	var body publicVideoShareViewerRequest
 	if err := ctx.ShouldBindJSON(&body); err != nil || strings.TrimSpace(body.ViewerToken) == "" {
+		var oversized *http.MaxBytesError
+		if errors.As(err, &oversized) {
+			ctx.Header("Cache-Control", "no-store")
+			c.Fail(ctx, "分享请求过大", nil, http.StatusRequestEntityTooLarge)
+			return
+		}
 		c.Fail(ctx, "观看会话无效", nil, http.StatusBadRequest)
 		return
 	}
