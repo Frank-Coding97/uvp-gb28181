@@ -239,7 +239,8 @@ http {
             proxy_buffering       off;
         }
 
-        location ^~ /api/public/video-share/viewers/ {
+        # Cover the creation POST as well; a /viewers/ prefix redirects /viewers.
+        location ^~ /api/public/video-share/ {
             proxy_pass http://uvp_backend;
             proxy_http_version 1.1;
             proxy_set_header Host              $http_host;
@@ -254,6 +255,8 @@ http {
             proxy_buffering       off;
             gzip off;
             access_log off;
+            # Error logs also include the capability URL on upstream disconnects.
+            error_log /dev/null crit;
         }
 
         location /api/ {
@@ -333,7 +336,8 @@ http {
         listen      [::]:@PLAIN_HTTP_PORT@;
         server_name _;
 
-        location ^~ /api/public/video-share/viewers/ {
+        # Cover the creation POST as well; a /viewers/ prefix redirects /viewers.
+        location ^~ /api/public/video-share/ {
             proxy_pass http://uvp_backend;
             proxy_http_version 1.1;
             proxy_set_header Host              $http_host;
@@ -348,6 +352,8 @@ http {
             proxy_buffering       off;
             gzip off;
             access_log off;
+            # Error logs also include the capability URL on upstream disconnects.
+            error_log /dev/null crit;
         }
 
         location /api/ {

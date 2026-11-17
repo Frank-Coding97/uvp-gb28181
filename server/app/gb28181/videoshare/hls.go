@@ -152,7 +152,11 @@ func (s *Service) RelayHLS(requestCtx context.Context, w http.ResponseWriter, to
 			}
 		}
 		if readErr != nil {
-			cancel()
+			// Normal EOF must leave time for the server to write the final HTTP chunk.
+			// The deferred stopAbort runs before the deferred cancellation.
+			if !errors.Is(readErr, io.EOF) {
+				cancel()
+			}
 			return
 		}
 	}

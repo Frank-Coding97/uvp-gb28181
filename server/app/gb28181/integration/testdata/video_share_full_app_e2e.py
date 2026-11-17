@@ -67,6 +67,7 @@ class Check:
         self.processes = []
         self.logs = []
         self.checks = []
+        self.media_readers = []
         self.app_port, self.zlm_port, self.rtmp_port, self.sip_port, self.peer_port = ports(5)
         self.base = f"http://127.0.0.1:{self.app_port}"
         self.db = self.root / "data/uvp.db"
@@ -120,7 +121,11 @@ class Check:
             response = error
         with response:
             raw = response.read()
-            return response.status, json.loads(raw) if raw else None
+            try:
+                result = json.loads(raw) if raw else None
+            except (ValueError, UnicodeDecodeError):
+                raise RuntimeError(f"{method} {path.split('/viewers')[0]} returned non-JSON HTTP {response.status}") from None
+            return response.status, result
 
     def success(self, path, method="GET", body=None, token=None):
         status, result = self.request(path, method, body, token)
@@ -128,6 +133,83 @@ class Check:
                 f"{method} {path.split('/viewers/')[0]} failed: HTTP {status}, "
                 f"code={result.get('code') if isinstance(result, dict) else 'non-json'}")
         return result["data"]
+
+    def observe_flv(self, response):
+        state = {"last_byte": time.monotonic(), "bytes": 0,
+                 "ended": threading.Event(), "stop": threading.Event(), "lock": threading.Lock()}
+        def consume():
+            try:
+                while not state["stop"].is_set():
+                    chunk = response.read1(32 * 1024)
+                    if not chunk:
+                        break
+                    with state["lock"]:
+                        state["last_byte"] = time.monotonic()
+                        state["bytes"] += len(chunk)
+            except http.client.IncompleteRead as error:
+                if error.partial:
+                    with state["lock"]:
+                        state["last_byte"] = time.monotonic()
+                        state["bytes"] += len(error.partial)
+            except (OSError, ValueError):
+                pass
+            finally:
+                response.close()
+                state["ended"].set()
+        reader = threading.Thread(target=consume, daemon=True)
+        self.media_readers.append((response, reader, state))
+        reader.start()
+        return state
+
+    def flv_snapshot(self, state):
+        with state["lock"]:
+            return state["bytes"], state["last_byte"]
+
+    def expect_gone(self, path, description):
+        try:
+            response = self.opener.open(self.base + path, timeout=5)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            require(response.status == 410, description + f": HTTP {response.status}")
+
+    def read_hls(self, viewer):
+        path = viewer.get("hlsPath")
+        prefix = "/api/public/video-share/viewers/" + viewer["viewerToken"] + "/hls/"
+        require(isinstance(path, str) and path == prefix + "index.m3u8",
+                "HLS manifest URL escaped its anonymous viewer")
+        segments = []
+        def playlist_ready():
+            with self.opener.open(self.base + path, timeout=10) as response:
+                require(response.status == 200, "anonymous HLS manifest did not return HTTP 200")
+                body = response.read((1 << 20) + 1)
+                require(len(body) <= 1 << 20, "HLS manifest exceeded one MiB")
+                text = body.decode("utf-8")
+                require(text.lstrip().startswith("#EXTM3U"), "response is not an HLS manifest")
+                require("play_token" not in text and self.secret not in text,
+                        "HLS manifest leaked upstream authorization")
+                entries = [line.strip() for line in text.splitlines()
+                           if line.strip() and not line.startswith("#")]
+                if "#EXTINF:" not in text or not entries:
+                    return False
+                for entry in entries:
+                    parsed = urllib.parse.urlsplit(entry)
+                    require(not parsed.scheme and not parsed.netloc and not parsed.query
+                            and not parsed.fragment and parsed.path.startswith(prefix),
+                            "HLS segment URL escaped its anonymous viewer")
+                segments[:] = entries
+                return True
+        self.wait(playlist_ready, "real anonymous HLS media playlist", 30)
+        segment = segments[0]
+        with self.opener.open(self.base + segment, timeout=10) as response:
+            require(response.status == 200, "anonymous HLS segment did not return HTTP 200")
+            body = response.read((8 << 20) + 1)
+            require(3 * 188 <= len(body) <= 8 << 20 and len(body) % 188 == 0,
+                    "HLS segment is not a bounded MPEG-TS payload")
+            require(all(body[offset] == 0x47 for offset in range(0, len(body), 188)),
+                    "HLS segment lacks MPEG-TS packet synchronization")
+        self.record("anonymous HLS returned a real playlist and MPEG-TS segment through viewer-bound relay paths")
+        return path, segment
 
     def configure(self):
         config = f'''server:
@@ -291,10 +373,16 @@ port=0
 [hook]
 enable=0
 [protocol]
-enable_hls=0
+enable_hls=1
+hls_demand=0
+hls_save_path={self.root}/resource/public
 enable_mp4=0
 enable_rtsp=1
 enable_rtmp=1
+[hls]
+segDur=1
+segNum=6
+segDelay=0
 '''
         ini_path = self.root / "config/zlm.ini"
         ini_path.write_text(ini)
@@ -339,46 +427,62 @@ enable_rtmp=1
         require(295 <= (expiry - server_time).total_seconds() <= 300, "share TTL is not global five minutes")
         self.success("/api/public/video-share/resolve", "POST", credential)
         self.record("protected enable/acquire and anonymous resolve with five-minute TTL")
+        ordinary = self.success(f"/api/gb28181/play/{DEVICE}/{CHANNEL}", "POST", token=token)
+        ordinary_url = ordinary.get("httpFlvUrl") or ordinary.get("urls", {}).get("httpFlv")
+        require(isinstance(ordinary_url, str) and ordinary_url,
+                "ordinary authenticated playback returned no FLV URL")
+        parsed = urllib.parse.urlsplit(ordinary_url)
+        require(parsed.scheme == "http" and parsed.hostname == "127.0.0.1"
+                and parsed.port == self.zlm_port
+                and urllib.parse.parse_qs(parsed.query).get("play_token"),
+                "ordinary FLV URL lacks isolated media authorization")
+        ordinary_response = self.opener.open(ordinary_url, timeout=20)
+        require(ordinary_response.status == 200 and ordinary_response.read(3) == b"FLV",
+                "ordinary authenticated playback did not return real FLV")
+        ordinary_reader = self.observe_flv(ordinary_response)
+        self.wait(lambda: self.flv_snapshot(ordinary_reader)[0] > 0,
+                  "ordinary authenticated FLV bytes before share disable", 10)
+        self.record("ordinary backend-authorized FLV connection was established before sharing was disabled")
+        hls_viewer = self.success("/api/public/video-share/viewers", "POST", credential)
+        hls_manifest, hls_segment = self.read_hls(hls_viewer)
         viewer = self.success("/api/public/video-share/viewers", "POST", credential)
+        self.media_capabilities = [viewer["viewerToken"], hls_viewer["viewerToken"],
+                                   link["signature"], self.secret]
         media_path = viewer["httpFlvPath"]
         require(media_path.startswith("/api/public/video-share/viewers/"), "media URL escaped anonymous relay")
         response = self.opener.open(self.base + media_path, timeout=20)
         require(response.status == 200 and response.read(3) == b"FLV", "anonymous relay did not return real FLV")
         self.record("full production viewer preparation, origin proof, authorization hook and FLV relay")
-        last_byte = [time.monotonic()]
-        ended = threading.Event()
-        def consume():
-            try:
-                while response.read(1024):
-                    last_byte[0] = time.monotonic()
-            except http.client.IncompleteRead as error:
-                if error.partial:
-                    last_byte[0] = time.monotonic()
-            except (OSError, ValueError):
-                pass
-            finally:
-                response.close()
-                ended.set()
-        reader = threading.Thread(target=consume, daemon=True)
-        reader.start()
+        anonymous_reader = self.observe_flv(response)
         self.success("/api/public/video-share/viewers/status", "POST", {"viewerToken": viewer["viewerToken"]})
         current = self.success(path, token=token)
-        require(not ended.is_set(), "FLV connection ended before share disable")
+        require(not anonymous_reader["ended"].is_set(), "FLV connection ended before share disable")
+        require(not ordinary_reader["ended"].is_set(), "ordinary FLV ended before share disable")
+        ordinary_before, _ = self.flv_snapshot(ordinary_reader)
         self.success(path, "PUT", {"enabled": False, "revision": current["revision"]}, token)
         revoked_at = time.monotonic()
-        require(ended.wait(30), "existing FLV continued beyond thirty-second revocation budget")
-        require(last_byte[0] - revoked_at <= 30, "new FLV bytes arrived after revocation budget")
-        self.record(f"existing FLV connection stopped within thirty seconds of disable ({max(0, last_byte[0] - revoked_at):.3f}s)")
+        require(anonymous_reader["ended"].wait(30), "existing FLV continued beyond thirty-second revocation budget")
+        _, last_byte = self.flv_snapshot(anonymous_reader)
+        require(last_byte - revoked_at <= 30, "new FLV bytes arrived after revocation budget")
+        self.record(f"existing FLV connection stopped within thirty seconds of disable ({max(0, last_byte - revoked_at):.3f}s)")
         for endpoint, body in (("resolve", credential), ("viewers", credential),
                                ("viewers/status", {"viewerToken": viewer["viewerToken"]})):
             status, _ = self.request("/api/public/video-share/" + endpoint, "POST", body)
             require(status == 410, f"disabled share still allowed {endpoint}: HTTP {status}")
-        try:
-            response = self.opener.open(self.base + media_path, timeout=5)
-        except urllib.error.HTTPError as error:
-            response = error
-        with response:
-            require(response.status == 410, "disabled share still allowed old media session")
+        self.expect_gone(media_path, "disabled share still allowed old FLV session")
+        self.expect_gone(hls_manifest, "disabled share still allowed old HLS manifest")
+        self.expect_gone(hls_segment, "disabled share still allowed old HLS segment")
+        self.record("share disable rejected the previously playable HLS manifest and segment with HTTP 410")
+        require(not ordinary_reader["ended"].is_set(), "share disable interrupted ordinary FLV")
+        ordinary_after, last_ordinary_byte = self.flv_snapshot(ordinary_reader)
+        require(ordinary_after > ordinary_before and last_ordinary_byte > revoked_at,
+                "ordinary FLV supplied no new bytes across share disable")
+        self.wait(lambda: self.flv_snapshot(ordinary_reader)[0] > ordinary_after,
+                  "ordinary FLV progress after anonymous media rejection", 10)
+        require(not ordinary_reader["ended"].is_set(), "ordinary FLV ended after anonymous media rejection")
+        self.record("the same ordinary authenticated FLV connection kept delivering bytes across share disable and anonymous rejection")
+        ordinary_reader["stop"].set()
+        require(ordinary_reader["ended"].wait(5), "ordinary FLV observation did not close")
         self.record("disable revokes old link, new viewers, existing viewer status and media")
         query = urllib.parse.urlencode({"secret": self.secret, "schema": "rtsp", "vhost": "__defaultVhost__", "app": "rtp", "stream": STREAM})
         with self.opener.open(f"http://127.0.0.1:{self.zlm_port}/index/api/isMediaOnline?" + query, timeout=5) as live:
@@ -386,7 +490,7 @@ enable_rtmp=1
         self.record("share disable preserved the independent live source")
 
     def rollback(self):
-        # Sharing is already revoked and its FLV reader joined by application().
+        # Sharing is revoked and media observers are closed by application().
         # Keep the same migrated database, key, ZLM and synthetic source intact.
         keys = list(self.root.rglob("video-share.key"))
         require(len(keys) == 1, "persistent signing key was not found uniquely")
@@ -416,6 +520,8 @@ enable_rtmp=1
         self.record("rollback retained revoked share records and signing key without destructive Down")
 
     def close(self):
+        for _, _, state in self.media_readers:
+            state["stop"].set()
         for proc in reversed(self.processes):
             if proc.poll() is None:
                 os.killpg(proc.pid, signal.SIGTERM)
@@ -424,6 +530,9 @@ enable_rtmp=1
                 except subprocess.TimeoutExpired:
                     os.killpg(proc.pid, signal.SIGKILL)
                     proc.wait(timeout=5)
+        for response, reader, _ in self.media_readers:
+            reader.join(timeout=5)
+            response.close()
         for log in self.logs:
             log.close()
 
