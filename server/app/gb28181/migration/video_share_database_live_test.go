@@ -47,6 +47,22 @@ func TestVideoShareDatabaseSafety(t *testing.T) {
 	require.NoError(t, videoShareDatabaseSafety("1", "uvp_share_test_20261117"))
 }
 
+func TestVideoShareDatabaseDMCaseSensitivity(t *testing.T) {
+	for _, flag := range []int{-1, 1} {
+		err := videoShareDatabaseDMMode(flag)
+		require.ErrorContains(t, err, "unsupported existing deployment mode")
+		require.ErrorContains(t, err, "CASE_SENSITIVE=N")
+	}
+	require.NoError(t, videoShareDatabaseDMMode(0))
+}
+
+func videoShareDatabaseDMMode(flag int) error {
+	if flag != 0 {
+		return errors.New("unsupported existing deployment mode: UVP requires DM CASE_SENSITIVE=N (SF_GET_CASE_SENSITIVE_FLAG()=0)")
+	}
+	return nil
+}
+
 func videoShareDatabaseSafety(optIn, name string) error {
 	if optIn != "1" || !regexp.MustCompile(`^uvp_share_[a-z0-9_]+$`).MatchString(strings.ToLower(name)) {
 		return errors.New("refusing DDL: explicit opt-in and uvp_share_ test database/schema required")
@@ -144,6 +160,11 @@ func videoShareDatabaseOpen(t *testing.T, target videoShareDatabaseTarget, dsn s
 		var actual string
 		require.NoError(t, db.Raw(target.identitySQL).Scan(&actual).Error)
 		require.NoError(t, videoShareDatabaseSafety("1", actual), "connected database/schema identity must also be isolated")
+		if target.dialect == DialectDM {
+			var caseSensitive int
+			require.NoError(t, db.Raw("SELECT SF_GET_CASE_SENSITIVE_FLAG() FROM DUAL").Scan(&caseSensitive).Error, "DM deployment prerequisite must be verified before DDL")
+			require.NoError(t, videoShareDatabaseDMMode(caseSensitive))
+		}
 	} else {
 		var attached []struct{ Name, File string }
 		require.NoError(t, db.Raw("PRAGMA database_list").Scan(&attached).Error)
