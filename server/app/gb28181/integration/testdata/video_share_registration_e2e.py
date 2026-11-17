@@ -9,6 +9,7 @@ No media source, INVITE response media, ZLM process or migration-ledger repair.
 """
 import argparse
 import collections
+import concurrent.futures
 import datetime as dt
 import hashlib
 import ipaddress
@@ -116,10 +117,12 @@ class Peer:
                 return
 
     def request(self, method, body="", extra=(), call_id=None):
-        self.sequence += 1
+        with self.lock:
+            self.sequence += 1
+            sequence = self.sequence
         call_id = call_id or secrets.token_hex(12) + "@registration-e2e"
         uri = f"sip:{SERVER}@{DOMAIN}"
-        cseq = f"{self.sequence} {method}"
+        cseq = f"{sequence} {method}"
         headers = [f"{method} {uri} SIP/2.0",
                    f"Via: SIP/2.0/UDP 127.0.0.1:{self.port};rport;branch=z9hG4bK-{secrets.token_hex(12)}",
                    f"From: <sip:{self.device}@{DOMAIN}>;tag=registration-e2e",
@@ -340,6 +343,55 @@ class RegistrationCheck(Check):
                 "rejected registration or unregister fabricated channels")
         self.record("challenge, bad Digest, actually expired nonce and authenticated unregister create no device sharing policy")
 
+    def concurrent_registration(self):
+        peer = self.peer("34020000002000000015")
+        require(self.one("SELECT count(*) FROM gb_device WHERE device_id=?", peer.device) == 0,
+                "concurrent REGISTER scenario requires a genuinely new device")
+        require(self.success(CONFIG, token=self.token)["videoShare"]["defaultEnabled"],
+                "concurrent REGISTER scenario requires default sharing enabled")
+        # Each original transaction receives a distinct legitimate nonce and
+        # Call-ID. Only their authenticated requests are released together.
+        challenges = [peer.challenge() for _ in range(4)]
+        require(len({fields["nonce"] for _, fields in challenges}) == len(challenges),
+                "concurrent REGISTER preparation requires distinct server-issued nonces")
+        require(self.policy(peer) is None, "challenge preparation initialized a device sharing policy")
+        barrier = threading.Barrier(len(challenges))
+
+        def authenticate(challenge):
+            call_id, fields = challenge
+            auth = peer.authorization(fields)
+            barrier.wait(timeout=5)
+            status, _ = peer.request("REGISTER", extra=["Expires: 3600", "Authorization: " + auth], call_id=call_id)
+            return status
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(challenges)) as executor:
+            pending = [executor.submit(authenticate, challenge) for challenge in challenges]
+            statuses = [future.result(timeout=15) for future in pending]
+        # request() retransmits the exact SIP packet only if a response is lost;
+        # it immediately returns every final status, including 500. There is no
+        # application retry, replacement nonce or dropped failed registration.
+        require(statuses == [200] * len(challenges),
+                f"every original concurrent REGISTER must succeed without application retry; statuses={statuses}")
+        require(self.one("SELECT count(*) FROM gb_device WHERE device_id=?", peer.device) == 1,
+                "concurrent REGISTER created more than one database device identity")
+
+        def policy_rows():
+            with sqlite3.connect(self.db) as conn:
+                return conn.execute("SELECT p.* FROM gb_device_video_share_policy p JOIN gb_device d ON d.id=p.device_pk "
+                                    "WHERE d.device_id=?", (peer.device,)).fetchall()
+
+        snapshot = policy_rows()
+        require(len(snapshot) == 1 and self.policy(peer)[0] == 1,
+                "concurrent REGISTER must create exactly one enabled device policy")
+        self.global_default(False)
+        for _ in range(3):
+            peer.register()
+            require(policy_rows() == snapshot, "later REGISTER refresh changed the first concurrent policy snapshot")
+        require(self.one("SELECT count(*) FROM gb_channel WHERE device_id=?", peer.device) == 0,
+                "concurrent registration without Catalog fabricated channels")
+        self.global_default(True)
+        self.record("four original authenticated UDP REGISTER transactions all succeed concurrently; one device/policy survives repeated refresh after global default changes")
+
     def application(self):
         self.launch_application("server")
         initial = self.success(CONFIG, token=self.token)["videoShare"]
@@ -353,6 +405,7 @@ class RegistrationCheck(Check):
         off_snapshot = self.policy(off)
         self.global_default(True)
         self.rejected_registration()
+        self.concurrent_registration()
         off.catalog(["34020000001320000011"])
         require(not self.state("34020000001320000011")["enabled"], "delayed Catalog used live global flag instead of off snapshot")
         self.record("real UDP 401/Digest/200 default-off registration stays off after global enable and delayed Catalog")
