@@ -104,6 +104,8 @@ async function changeEnabled(enabled: boolean) {
 
 async function openShare() {
   if (busy.value || !state.value.enabled) return;
+  const page = window.open("", "_blank");
+  if (page) page.opener = null;
   busy.value = true;
   try {
     const response = await acquireChannelVideoShareLink(props.channelId, state.value.revision);
@@ -111,8 +113,10 @@ async function openShare() {
     const link = response.data;
     if (response.code !== 0 || !link?.publicId || !link.signature) throw new Error(response.message || "取得分享链接失败");
     updateShareMaterial(link);
+    if (page) page.location.replace(shareUrl.value);
     dialogVisible.value = true;
   } catch (error: any) {
+    page?.close();
     Message.error(error?.message || "取得分享链接失败");
     if (error?.response?.status === 409) {
       shareUrl.value = "";
@@ -177,10 +181,6 @@ async function copy(value: string) {
   }
 }
 
-function openPage() {
-  if (shareUrl.value) window.open(shareUrl.value, "_blank", "noopener,noreferrer");
-}
-
 function refreshWhenVisible() {
   if (document.visibilityState === "visible" && !busy.value) void load();
 }
@@ -210,6 +210,9 @@ onUnmounted(() => {
         <Share2 :size="14" />
       </button>
     </a-tooltip>
+    <span v-if="state.enabled || state.expired" class="share-lifecycle" data-testid="share-lifecycle">
+      {{ state.expired ? "已过期" : state.pending ? "待取得链接" : expiresText }}
+    </span>
     <a-modal v-model:visible="dialogVisible" title="通道分享" :footer="false" :width="520">
       <div class="share-dialog">
         <div class="share-dialog__heading">
@@ -231,9 +234,9 @@ onUnmounted(() => {
           <SQRCodeDraw :text="shareUrl" :options="{ width: 168, margin: 1 }" />
           <span>扫码观看实时画面</span>
         </div>
-        <a-button type="primary" @click="openPage">
-          <template #icon><ExternalLink :size="14" /></template>打开分享页
-        </a-button>
+        <a :href="shareUrl" target="_blank" rel="noopener noreferrer" aria-label="手动打开分享页">
+          <ExternalLink :size="14" />打开分享页
+        </a>
         <a-button aria-label="重新生成分享链接" :loading="busy" :disabled="busy" @click="regenerateShare">重新生成</a-button>
       </div>
     </a-modal>
@@ -245,6 +248,10 @@ onUnmounted(() => {
   display: inline-flex;
   gap: 6px;
   align-items: center;
+}
+.share-lifecycle {
+  font-size: 12px;
+  color: var(--uvp-text-tertiary);
 }
 .share-page-button {
   display: inline-grid;

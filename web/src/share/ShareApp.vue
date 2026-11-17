@@ -18,7 +18,27 @@ import {
 
 declare const EasyPlayerPro: any;
 
-type ViewState = "loading" | "playing" | "offline" | "paused" | "network-error" | "playback-error" | "expired";
+type ViewState =
+  | "loading"
+  | "playing"
+  | "offline"
+  | "paused"
+  | "network-error"
+  | "playback-error"
+  | "manual-play"
+  | "unsupported"
+  | "expired";
+
+// EasyPlayer reports these errors before trying its software decoder. Only its
+// playFailedAndPaused event means that fallback has also failed.
+const unsupportedErrors = new Set([
+  "mediaSourceH265NotSupport",
+  "webcodecsH265NotSupport",
+  "webcodecsUnsupportedConfigurationError",
+  "simdH264DecodeVideoWidthIsTooLarge",
+  "videoCodecIdError"
+]);
+const manualPlayErrors = new Set(["videoElementPlayingFailed", "videoElementPlayingFailedForWebrtc"]);
 
 const credentials = ref<ShareCredentials | null>(null);
 const share = ref<PublicShare | null>(null);
@@ -107,8 +127,7 @@ async function createPlaybackSession() {
     viewer.value = nextViewer;
     await nextTick();
     if (!(await startPlayer(nextViewer, generation)) || disposed || generation !== requestGeneration) return;
-    state.value = "playing";
-    startStatusPolling();
+    if (state.value === "loading") state.value = "playing";
   } catch (error) {
     if (!disposed && generation === requestGeneration) showRequestError(error);
   }
@@ -119,7 +138,10 @@ async function startPlayer(session: ViewerSession, generation: number): Promise<
   if (!playerRoot.value) throw new Error("播放器未就绪");
   if (typeof EasyPlayerPro === "undefined") throw new Error("播放器资源未加载");
   const mediaPath = chooseMediaPath(session);
-  if (!mediaPath) throw new Error("当前浏览器没有可用的视频格式");
+  if (!mediaPath) {
+    showPlaybackError(new DOMException("No supported video format", "NotSupportedError"));
+    return false;
+  }
   const decoderPath = await preparePlayerDecoder();
   if (disposed || generation !== requestGeneration || !playerRoot.value) return false;
   const nextPlayer = new EasyPlayerPro(playerRoot.value, {
@@ -127,6 +149,7 @@ async function startPlayer(session: ViewerSession, generation: number): Promise<
     ...(decoderPath ? { decoderPath } : {}),
     bufferTime: 0.2,
     hasAudio: share.value?.hasAudio === true,
+    // This library maps isMute to isNotMute: false intentionally starts muted.
     isMute: false,
     stretch: false,
     MSE: true,
@@ -137,18 +160,73 @@ async function startPlayer(session: ViewerSession, generation: number): Promise<
     btns: { fullscreen: true, play: true, audio: share.value?.hasAudio === true, screenshot: false, record: false }
   });
   player = nextPlayer;
-  nextPlayer.on("error", () => {
-    if (disposed || generation !== requestGeneration || player !== nextPlayer) return;
-    state.value = "playback-error";
-    errorText.value = "视频暂时无法播放，请检查网络或稍后重试";
+  const isCurrent = () => !disposed && generation === requestGeneration && player === nextPlayer;
+  nextPlayer.on("error", (code: unknown, detail: unknown) => {
+    if (!isCurrent()) return;
+    if (typeof code === "string" && (unsupportedErrors.has(code) || manualPlayErrors.has(code))) return;
+    showPlaybackError(code, detail);
+  });
+  nextPlayer.on("playFailedAndPaused", (code: unknown, detail: unknown) => {
+    if (isCurrent()) showPlaybackError(code, detail);
+  });
+  nextPlayer.on("play", () => {
+    if (isCurrent()) {
+      state.value = "playing";
+      errorText.value = "";
+    }
   });
   nextPlayer.on("timeout", () => {
-    if (disposed || generation !== requestGeneration || player !== nextPlayer) return;
+    if (!isCurrent()) return;
     state.value = "playback-error";
     errorText.value = "连接视频超时，请重试";
   });
-  await nextPlayer.play(mediaPath);
-  return !disposed && generation === requestGeneration;
+  startStatusPolling();
+  try {
+    await nextPlayer.play(mediaPath);
+    return isCurrent();
+  } catch (error) {
+    if (isCurrent()) showPlaybackError(error);
+    return false;
+  }
+}
+
+function showPlaybackError(error: unknown, detail?: unknown) {
+  const code = typeof error === "string" ? error : (error as { name?: string } | null)?.name;
+  const detailName = (detail as { name?: string } | null)?.name;
+  if (code === "NotAllowedError" || detailName === "NotAllowedError" || manualPlayErrors.has(code || "")) {
+    state.value = "manual-play";
+    errorText.value = "视频未能自动播放，请点击播放";
+  } else if (code === "NotSupportedError" || detailName === "NotSupportedError" || unsupportedErrors.has(code || "")) {
+    state.value = "unsupported";
+    errorText.value = "当前浏览器对该视频编码不支持，请更换浏览器或联系分享人调整编码";
+  } else {
+    state.value = "playback-error";
+    errorText.value = "视频暂时无法播放，请检查网络或稍后重试";
+  }
+}
+
+async function playManually() {
+  const current = player;
+  const active = viewer.value;
+  if (disposed || !current || !active || state.value !== "manual-play") return;
+  if (remainingSeconds.value <= 0) {
+    await expire();
+    return;
+  }
+  const generation = requestGeneration;
+  state.value = "loading";
+  errorText.value = "";
+  try {
+    // Call native play while the click still carries browser user activation.
+    // Reuse the authorized viewer; no exchange, decoder preparation or nextTick precedes it.
+    const nativePlayback = Array.from(playerRoot.value?.querySelectorAll("video") || []).map(video => video.play());
+    await Promise.all([...nativePlayback, current.play(chooseMediaPath(active))]);
+    if (!disposed && generation === requestGeneration && player === current && state.value === "loading") {
+      state.value = "playing";
+    }
+  } catch (error) {
+    if (!disposed && generation === requestGeneration && player === current) showPlaybackError(error);
+  }
 }
 
 function chooseMediaPath(session: ViewerSession): string {
@@ -303,7 +381,13 @@ onUnmounted(() => {
         <div ref="playerRoot" class="share-player__screen" />
         <div v-if="state === 'loading'" class="player-message" role="status">正在连接视频流…</div>
         <div
-          v-else-if="state === 'offline' || state === 'network-error' || state === 'playback-error' || state === 'expired'"
+          v-else-if="
+            state === 'offline' ||
+            state === 'network-error' ||
+            state === 'playback-error' ||
+            state === 'unsupported' ||
+            state === 'expired'
+          "
           class="player-message player-message--error"
           role="status"
         >
@@ -311,6 +395,10 @@ onUnmounted(() => {
           <button v-if="state !== 'expired'" type="button" class="icon-text-button" @click="retry">
             <RefreshCw :size="15" />重试
           </button>
+        </div>
+        <div v-else-if="state === 'manual-play'" class="player-message" role="status">
+          <span>{{ errorText }}</span>
+          <button type="button" class="icon-text-button" @click="playManually"><Play :size="15" />点击播放</button>
         </div>
         <div v-else-if="state === 'paused'" class="player-message">
           <span>已暂停</span>

@@ -25,6 +25,7 @@ function mountControl(initialState?: {
   revision: number;
   expiresAt?: string;
   serverTime?: string;
+  expired?: boolean;
 }) {
   return mount(ChannelVideoShareControl, {
     props: { channelId: 42, channelName: "门岗摄像头", initialState },
@@ -46,6 +47,7 @@ function mountControl(initialState?: {
 describe("ChannelVideoShareControl", () => {
   let renewedExpiry: string;
   beforeEach(() => {
+    vi.spyOn(window, "open").mockReturnValue(null);
     renewedExpiry = new Date(Date.now() + 600_000).toISOString();
     modalConfirm.mockReset().mockImplementation(({ onOk }: { onOk: () => void }) => onOk());
     shareApi.getChannelVideoShare.mockReset().mockResolvedValue({
@@ -78,6 +80,60 @@ describe("ChannelVideoShareControl", () => {
         revision: 4
       }
     });
+  });
+
+  it("opens a detached page synchronously before link acquisition completes", async () => {
+    const page = { opener: window, location: { replace: vi.fn() }, close: vi.fn() };
+    vi.mocked(window.open).mockReturnValue(page as unknown as Window);
+    let resolveLink!: (value: unknown) => void;
+    shareApi.acquireChannelVideoShareLink.mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          resolveLink = resolve;
+        })
+    );
+    const wrapper = mountControl({ enabled: true, pending: true, revision: 3 });
+    await wrapper.get('[aria-label="打开通道分享页"]').trigger("click");
+    expect(window.open).toHaveBeenCalledWith("", "_blank");
+    expect(page.opener).toBeNull();
+    expect(page.location.replace).not.toHaveBeenCalled();
+    resolveLink({ code: 0, data: { enabled: true, pending: false, revision: 4, publicId: "share-id", signature: "sig-value" } });
+    await flushPromises();
+    expect(page.location.replace).toHaveBeenCalledWith(expect.stringContaining("share.html#id=share-id&sig=sig-value"));
+    wrapper.unmount();
+  });
+
+  it("closes the preopened page when acquiring the link fails", async () => {
+    const page = { opener: window, location: { replace: vi.fn() }, close: vi.fn() };
+    vi.mocked(window.open).mockReturnValue(page as unknown as Window);
+    shareApi.acquireChannelVideoShareLink.mockRejectedValueOnce(new Error("取得失败"));
+    const wrapper = mountControl({ enabled: true, pending: true, revision: 3 });
+    await wrapper.get('[aria-label="打开通道分享页"]').trigger("click");
+    await flushPromises();
+    expect(page.close).toHaveBeenCalledOnce();
+    expect(page.location.replace).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("keeps a clickable link when the browser blocks the new page", async () => {
+    const wrapper = mountControl({ enabled: true, pending: true, revision: 3 });
+    await wrapper.get('[aria-label="打开通道分享页"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('a[aria-label="手动打开分享页"]').attributes("href")).toContain("share.html#id=share-id&sig=sig-value");
+    wrapper.unmount();
+  });
+
+  it("shows pending, expiry and expired lifecycle state in the channel row", async () => {
+    const wrapper = mountControl({ enabled: true, pending: true, revision: 3 });
+    expect(wrapper.get('[data-testid="share-lifecycle"]').text()).toContain("待取得链接");
+    await wrapper.setProps({ initialState: { enabled: true, pending: false, revision: 4, expiresAt: renewedExpiry } });
+    expect(wrapper.get('[data-testid="share-lifecycle"]').text()).toContain("有效期至");
+    await wrapper.setProps({ initialState: { enabled: false, pending: false, revision: 5, expired: true } });
+    expect(wrapper.get('[data-testid="share-lifecycle"]').text()).toBe("已过期");
+    expect(wrapper.find('[aria-label="打开通道分享页"]').exists()).toBe(false);
+    await wrapper.setProps({ initialState: { enabled: false, pending: false, revision: 6 } });
+    expect(wrapper.find('[data-testid="share-lifecycle"]').exists()).toBe(false);
+    wrapper.unmount();
   });
 
   it("uses the batch list state without a request for each row and accepts refreshed parent state", async () => {

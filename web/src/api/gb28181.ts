@@ -222,6 +222,7 @@ export const listChannels = (deviceId: string) =>
 
 export interface ChannelVideoShareState {
   enabled: boolean;
+  expired?: boolean;
   publicId?: string;
   expiresAt?: string;
   pending: boolean;

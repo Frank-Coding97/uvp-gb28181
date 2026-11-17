@@ -24,6 +24,8 @@ let wrappers: VueWrapper[];
 let nextToken: number;
 let resolveOnline: boolean;
 let statusFailure: number | undefined;
+let hasAudio: boolean;
+let playerEvents: Record<string, (...args: unknown[]) => void>[];
 
 function response(data: unknown, status = 200) {
   return new Response(JSON.stringify({ code: 0, data }), { status, headers: { "Content-Type": "application/json" } });
@@ -32,7 +34,7 @@ function shareResponse(online = resolveOnline) {
   return response({
     name: "门岗摄像头",
     online,
-    hasAudio: true,
+    hasAudio,
     expiresAt: expiry,
     serverTime: new Date(Date.now()).toISOString()
   });
@@ -63,12 +65,22 @@ beforeEach(() => {
   nextToken = 0;
   resolveOnline = true;
   statusFailure = undefined;
+  hasAudio = true;
+  playerEvents = [];
   wrappers = [];
   decoder.mockReset().mockResolvedValue("");
   playerPlay = vi.fn().mockResolvedValue(undefined);
   playerDestroy = vi.fn().mockResolvedValue(undefined);
   playerConstructor = vi.fn(function () {
-    return { play: playerPlay, destroy: playerDestroy, on: vi.fn() };
+    const events: Record<string, (...args: unknown[]) => void> = {};
+    playerEvents.push(events);
+    return {
+      play: playerPlay,
+      destroy: playerDestroy,
+      on: vi.fn((name, handler) => {
+        events[name] = handler;
+      })
+    };
   });
   vi.stubGlobal("EasyPlayerPro", playerConstructor);
   fetchMock = vi.fn(async (url: string, options: RequestInit) => {
@@ -311,6 +323,133 @@ describe("ShareApp anonymous component integration", () => {
     expect(playerConstructor).not.toHaveBeenCalled();
     expect(deleteURLs()).toEqual(["/api/public/video-share/viewers/viewer-1"]);
     await vi.advanceTimersByTimeAsync(10_000);
+    expect(requests("/api/public/video-share/viewers/status")).toHaveLength(0);
+  });
+
+  it("offers manual playback after autoplay is blocked without creating or renewing a viewer", async () => {
+    playerPlay.mockRejectedValueOnce(new DOMException("gesture required", "NotAllowedError"));
+    const wrapper = mountShare();
+    await flushPromises();
+    expect(wrapper.text()).toContain("点击播放");
+    expect(wrapper.text()).not.toContain("网络暂时不可用");
+    const video = document.createElement("video");
+    const nativePlay = vi.fn().mockResolvedValue(undefined);
+    video.play = nativePlay;
+    wrapper.get(".share-player__screen").element.append(video);
+    const button = wrapper.findAll("button").find(button => button.text().includes("点击播放"))!;
+    const clicked = button.trigger("click");
+    // Native play must happen in the click handler, before an API request or nextTick consumes the gesture.
+    expect(nativePlay).toHaveBeenCalledTimes(1);
+    await clicked;
+    await flushPromises();
+    expect(wrapper.text()).not.toContain("点击播放");
+    expect(requests("/api/public/video-share/viewers")).toHaveLength(1);
+    expect(deleteURLs()).toEqual([]);
+    expect(wrapper.text()).toContain("1 分 0 秒");
+  });
+
+  it("offers manual playback for the bundled player's terminal video rendering failure", async () => {
+    const wrapper = mountShare();
+    await flushPromises();
+    playerEvents[0].playFailedAndPaused("videoElementPlayingFailed");
+    await flushPromises();
+    expect(wrapper.text()).toContain("点击播放");
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(requests("/api/public/video-share/viewers/status")).toHaveLength(1);
+  });
+
+  it("allows the bundled decoder to fall back before reporting terminal codec incompatibility", async () => {
+    const wrapper = mountShare();
+    await flushPromises();
+    playerEvents[0].error("webcodecsH265NotSupport");
+    await flushPromises();
+    expect(wrapper.text()).not.toContain("编码不支持");
+    expect(wrapper.text()).not.toContain("视频暂时无法播放");
+    playerEvents[0].playFailedAndPaused("webcodecsH265NotSupport");
+    await flushPromises();
+    expect(wrapper.text()).toContain("编码不支持");
+    expect(wrapper.text()).not.toContain("检查网络");
+    expect(wrapper.text()).not.toContain("正在连接");
+  });
+
+  it("distinguishes a standard unsupported format rejection from an ordinary playback failure", async () => {
+    playerPlay.mockRejectedValueOnce(new DOMException("unsupported codec", "NotSupportedError"));
+    const wrapper = mountShare();
+    await flushPromises();
+    expect(wrapper.text()).toContain("编码不支持");
+    await retryButton(wrapper).trigger("click");
+    await flushPromises();
+    playerEvents[1].error("fetchError");
+    await flushPromises();
+    expect(wrapper.text()).toContain("视频暂时无法播放");
+    expect(wrapper.text()).not.toContain("编码不支持");
+  });
+
+  it.each([true, false])("starts muted and exposes audio controls only when hasAudio is %s", async audio => {
+    hasAudio = audio;
+    mountShare();
+    await flushPromises();
+    expect(playerConstructor).toHaveBeenCalledWith(
+      expect.any(HTMLDivElement),
+      expect.objectContaining({
+        hasAudio: audio,
+        // The bundled player's isMute option maps to isNotMute, so false means muted.
+        isMute: false,
+        btns: expect.objectContaining({ audio })
+      })
+    );
+  });
+
+  it("ignores old player callbacks after retry and after page exit", async () => {
+    const wrapper = mountShare();
+    await flushPromises();
+    const oldEvents = playerEvents[0];
+    oldEvents.error("fetchError");
+    await flushPromises();
+    await retryButton(wrapper).trigger("click");
+    await flushPromises();
+    oldEvents.error("fetchError");
+    oldEvents.timeout();
+    oldEvents.playFailedAndPaused("webcodecsH265NotSupport");
+    await flushPromises();
+    expect(wrapper.text()).not.toContain("视频暂时无法播放");
+    expect(wrapper.text()).not.toContain("编码不支持");
+    expect(wrapper.text()).not.toContain("超时");
+    wrapper.unmount();
+    await flushPromises();
+    playerEvents[1].playFailedAndPaused("videoElementPlayingFailed");
+    playerEvents[1].error("fetchError");
+    await flushPromises();
+    expect(requests("/api/public/video-share/viewers")).toHaveLength(2);
+    expect(deleteURLs()).toEqual(["/api/public/video-share/viewers/viewer-1", "/api/public/video-share/viewers/viewer-2"]);
+  });
+
+  it("does not replace a terminal codec state when the original play promise settles late", async () => {
+    const pending = deferred<void>();
+    playerPlay.mockReturnValueOnce(pending.promise);
+    const wrapper = mountShare();
+    await flushPromises();
+    playerEvents[0].playFailedAndPaused("webcodecsUnsupportedConfigurationError");
+    await flushPromises();
+    expect(wrapper.text()).toContain("编码不支持");
+    pending.resolve();
+    await flushPromises();
+    expect(wrapper.text()).toContain("编码不支持");
+    expect(wrapper.find(".share-tools").exists()).toBe(false);
+  });
+
+  it("ignores player callbacks after the page has exited", async () => {
+    const wrapper = mountShare();
+    await flushPromises();
+    wrapper.unmount();
+    await flushPromises();
+    playerEvents[0].error("fetchError");
+    playerEvents[0].playFailedAndPaused("videoElementPlayingFailed");
+    playerEvents[0].play();
+    playerEvents[0].timeout();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(playerConstructor).toHaveBeenCalledTimes(1);
+    expect(deleteURLs()).toEqual(["/api/public/video-share/viewers/viewer-1"]);
     expect(requests("/api/public/video-share/viewers/status")).toHaveLength(0);
   });
 });
