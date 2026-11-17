@@ -86,3 +86,52 @@ func TestVideoSharePermissionMigrationIsDialectPortableAndIdempotent(t *testing.
 	require.EqualValues(t, 1, roleCount)
 	require.EqualValues(t, 4, policyCount)
 }
+
+func TestVideoSharePermissionBaselineAlwaysCompletesAllDialectRegistrations(t *testing.T) {
+	for _, suffix := range []string{"", "-postgresql", "-sqlserver", "-sqlite", "-dm"} {
+		t.Run(suffix, func(t *testing.T) {
+			// One registered API cannot prove all four APIs, root policies and role-menu
+			// links are present. The idempotent migration must complete the whole set.
+			probe := schemaProbe{hasPermissionRegistration: func(string, string, string) (bool, error) { return true, nil }}
+			needed, err := needsBaselineUpgrade("2026-11-17-channel-video-share-permissions"+suffix+".sql", probe)
+			require.NoError(t, err)
+			require.True(t, needed)
+		})
+	}
+}
+
+func TestVideoSharePermissionEmptyLedgerExecutesNativeSQLInsteadOfOnlyMarking(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	raw, err := db.DB()
+	require.NoError(t, err)
+	raw.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = raw.Close() })
+	for _, statement := range []string{
+		"CREATE TABLE sys_menu (id INTEGER PRIMARY KEY AUTOINCREMENT,parent_id INTEGER,path TEXT,name TEXT,component TEXT,title TEXT,type INTEGER,permission TEXT,created_at DATETIME,updated_at DATETIME,created_by INTEGER)",
+		"CREATE TABLE sys_api (id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT,path TEXT,method TEXT,api_group TEXT,created_at DATETIME,updated_at DATETIME,created_by INTEGER)",
+		"CREATE TABLE sys_menu_api (menu_id INTEGER,api_id INTEGER,PRIMARY KEY(menu_id,api_id))",
+		"CREATE TABLE sys_role_menu (role_id INTEGER,menu_id INTEGER,PRIMARY KEY(role_id,menu_id))",
+		"CREATE TABLE sys_casbin_rule (id INTEGER PRIMARY KEY AUTOINCREMENT,ptype TEXT,v0 TEXT,v1 TEXT,v2 TEXT,v3 TEXT,v4 TEXT,v5 TEXT)",
+		"INSERT INTO sys_menu (id,path,permission) VALUES (140358,'/gb28181/device-mgmt/index','')",
+	} {
+		require.NoError(t, db.Exec(statement).Error)
+	}
+	name := "2026-11-17-channel-video-share-permissions-sqlite.sql"
+	sqlText, err := (&embedSource{dialect: DialectSQLite}).ReadSQL(name)
+	require.NoError(t, err)
+	source := &fakeSource{files: map[string]string{name: sqlText}}
+	for cycle := 0; cycle < 2; cycle++ {
+		// Simulate a fresh baseline ledger, then a partially registered snapshot.
+		store := &fakeStore{applied: map[string]bool{}}
+		require.NoError(t, run(store, &fakeLocker{}, source, &dbExecutor{db: db}, allTablesExistProbe()))
+		require.True(t, store.applied[name])
+		for table, want := range map[string]int64{"sys_api": 4, "sys_menu_api": 4, "sys_role_menu": 1, "sys_casbin_rule": 4} {
+			var count int64
+			require.NoError(t, db.Table(table).Count(&count).Error)
+			require.Equal(t, want, count, "cycle %d %s must be fully registered before migration is marked", cycle, table)
+		}
+		require.NoError(t, db.Exec("DELETE FROM sys_role_menu").Error)
+		require.NoError(t, db.Exec("DELETE FROM sys_casbin_rule WHERE v1 = ?", "/api/gb28181/channel-shares/:id/regenerate").Error)
+	}
+}

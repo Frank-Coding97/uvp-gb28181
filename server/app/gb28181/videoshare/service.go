@@ -53,6 +53,7 @@ func NewService(db *gorm.DB, signer *Signer, ttl func() time.Duration, authorize
 }
 
 type Link struct {
+	Expired    bool       `json:"expired"`
 	Enabled    bool       `json:"enabled"`
 	PublicID   string     `json:"publicId,omitempty"`
 	Signature  string     `json:"signature,omitempty"`
@@ -83,7 +84,7 @@ func (s *Service) Status(ctx context.Context, channelPK uint, actorID uint) (Lin
 		return Link{Revision: share.Revision, ServerTime: s.now().UTC()}, nil
 	}
 	if share.ExpiresAt != nil && !share.ExpiresAt.After(s.now()) {
-		return Link{Revision: share.Revision, ServerTime: s.now().UTC()}, nil
+		return Link{Expired: naturallyExpired(share, s.now()), Revision: share.Revision, ServerTime: s.now().UTC()}, nil
 	}
 	return Link{
 		Enabled:    share.Enabled && share.RevokedAt == nil,
@@ -94,6 +95,11 @@ func (s *Service) Status(ctx context.Context, channelPK uint, actorID uint) (Lin
 		Revision:   share.Revision,
 		ServerTime: s.now().UTC(),
 	}, nil
+}
+
+// naturallyExpired distinguishes elapsed links from manual and authority revocations.
+func naturallyExpired(share gbmodels.GbChannelVideoShare, now time.Time) bool {
+	return share.RevokeReason == "expired" || (share.RevokedAt == nil && share.ExpiresAt != nil && !share.ExpiresAt.After(now))
 }
 
 // EnsurePending creates an automatically enabled share without issuing a link
@@ -190,6 +196,10 @@ func (s *Service) setEnabled(ctx context.Context, channelPK uint, actorID uint, 
 			if createErr := tx.Create(&share).Error; createErr != nil {
 				return createErr
 			}
+			// Sign and return the exact persisted timestamps across database precisions.
+			if err := tx.Where("id = ?", share.ID).Take(&share).Error; err != nil {
+				return err
+			}
 			if err := RecordAuditTx(ctx, tx, "video_share.enabled", actorID, &share); err != nil {
 				return err
 			}
@@ -268,10 +278,9 @@ func (s *Service) setEnabled(ctx context.Context, channelPK uint, actorID uint, 
 		if updates.RowsAffected != 1 {
 			return ErrConflict
 		}
-		share.Generation, share.Enabled, share.ActivatedAt, share.ExpiresAt = newGeneration, true, &now, &expires
-		share.CreatedBy, share.DevicePK, share.DeviceID, share.DeviceEpoch = &actorID, device.ID, device.DeviceID, uint64(device.AccessEpoch)
-		share.Source, share.PolicyActorID, share.PolicyRevision, share.KeyID = "manual", nil, 0, KeyID
-		share.RevokedAt, share.RevokeReason, share.Revision = nil, "", expectedRevision+1
+		if err := tx.Where("id = ?", share.ID).Take(&share).Error; err != nil {
+			return err
+		}
 		event := "video_share.enabled"
 		if regenerate {
 			event = "video_share.regenerated"
@@ -351,8 +360,9 @@ func (s *Service) AcquireLink(ctx context.Context, channelPK uint, actorID uint,
 			if updated.RowsAffected != 1 {
 				return ErrConflict
 			}
-			share.ActivatedAt, share.ExpiresAt, share.CreatedBy = &now, &expires, &actorID
-			share.DevicePK, share.DeviceID, share.DeviceEpoch, share.KeyID, share.Revision = device.ID, device.DeviceID, uint64(device.AccessEpoch), KeyID, share.Revision+1
+			if err := tx.Where("id = ?", share.ID).Take(&share).Error; err != nil {
+				return err
+			}
 			if err := RecordAuditTx(ctx, tx, "video_share.activated", actorID, &share); err != nil {
 				return err
 			}

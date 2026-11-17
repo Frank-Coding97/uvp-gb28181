@@ -12,6 +12,7 @@ import (
 
 // StatusSummary contains only list-safe share lifecycle state.
 type StatusSummary struct {
+	Expired    bool       `json:"expired"`
 	Enabled    bool       `json:"enabled"`
 	Pending    bool       `json:"pending"`
 	Revision   uint64     `json:"revision"`
@@ -58,12 +59,12 @@ func (s *Service) BatchStatus(ctx context.Context, channelIDs []uint, actorID ui
 			return nil
 		}
 		var shares []gbmodels.GbChannelVideoShare
-		if err := tx.Select("channel_pk, enabled, activated_at, expires_at, revision, revoked_at, device_pk, device_id, device_epoch").Where("channel_pk IN ?", allowedIDs).Find(&shares).Error; err != nil {
+		if err := tx.Select("channel_pk, enabled, activated_at, expires_at, revision, revoked_at, revoke_reason, device_pk, device_id, device_epoch").Where("channel_pk IN ?", allowedIDs).Find(&shares).Error; err != nil {
 			return err
 		}
 		for _, share := range shares {
 			enabled := share.Enabled && share.RevokedAt == nil && matchesDevice(snapshots[share.ChannelPK], share.DevicePK, share.DeviceID, share.DeviceEpoch) && (share.ExpiresAt == nil || share.ExpiresAt.After(now))
-			status := StatusSummary{Enabled: enabled, Pending: enabled && share.ActivatedAt == nil, Revision: share.Revision, ServerTime: now}
+			status := StatusSummary{Expired: matchesDevice(snapshots[share.ChannelPK], share.DevicePK, share.DeviceID, share.DeviceEpoch) && naturallyExpired(share, now), Enabled: enabled, Pending: enabled && share.ActivatedAt == nil, Revision: share.Revision, ServerTime: now}
 			if enabled {
 				status.ExpiresAt = share.ExpiresAt
 			}

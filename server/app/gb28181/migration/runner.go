@@ -388,6 +388,13 @@ func needsBaselineTableUpgrade(name string, probe schemaProbe) (bool, error) {
 func needsBaselineUpgrade(name string, probe schemaProbe) (bool, error) {
 	// 菜单补全必须在空版本表的快照库上执行，不能因 API 已注册而跳过角色授权。
 	switch name {
+	case "2026-11-17-channel-video-share-permissions.sql", "2026-11-17-channel-video-share-permissions-postgresql.sql",
+		"2026-11-17-channel-video-share-permissions-sqlserver.sql", "2026-11-17-channel-video-share-permissions-sqlite.sql",
+		"2026-11-17-channel-video-share-permissions-dm.sql":
+		// This idempotent migration completes four API registrations, root
+		// policies and the role-menu link. A single API probe cannot establish
+		// that the entire permission set exists in an empty-ledger snapshot.
+		return true, nil
 	case "2026-10-18-https-management.sql", "2026-10-18-https-management-postgresql.sql",
 		"2026-10-18-https-management-sqlserver.sql", "2026-10-18-https-management-sqlite.sql":
 		return true, nil

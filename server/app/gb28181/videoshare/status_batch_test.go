@@ -173,3 +173,29 @@ func TestBatchStatusPropagatesDatabaseFailureAndCancellation(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	require.Nil(t, states)
 }
+
+func TestStatusDistinguishesNaturalExpiryFromOtherRevocations(t *testing.T) {
+	for _, reason := range []string{"", "expired", "manual", "permission_revoked"} {
+		t.Run(reason, func(t *testing.T) {
+			service, ids, now := batchStatusFixture(t)
+			updates := map[string]interface{}{"revoke_reason": reason}
+			if reason != "" {
+				updates["revoked_at"] = now
+				updates["enabled"] = false
+			}
+			require.NoError(t, service.db.Model(&gbmodels.GbChannelVideoShare{}).Where("channel_pk = ?", ids[2]).Updates(updates).Error)
+			single, err := service.Status(context.Background(), ids[2], 7)
+			require.NoError(t, err)
+			batch, err := service.BatchStatus(context.Background(), ids, 7)
+			require.NoError(t, err)
+			for _, value := range []interface{}{single, batch[ids[2]]} {
+				encoded, err := json.Marshal(value)
+				require.NoError(t, err)
+				var fields map[string]interface{}
+				require.NoError(t, json.Unmarshal(encoded, &fields))
+				require.Equal(t, reason == "" || reason == "expired", fields["expired"])
+				require.Equal(t, false, fields["enabled"])
+			}
+		})
+	}
+}
