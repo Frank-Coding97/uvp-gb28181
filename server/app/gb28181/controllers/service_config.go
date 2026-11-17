@@ -68,6 +68,14 @@ type SaveAlarmMessagesConfig struct {
 	Enabled bool `json:"enabled"`
 }
 
+// AlarmPopupConfig 控制「设备告警实时弹出」。
+//
+// 与 SaveAlarmMessages 是两件事：那个决定要不要落库，这个决定要不要推给前端浮层。
+// 默认开启（见 gbconfig.AlarmPopupEnabledFrom），现场嫌打扰才关。
+type AlarmPopupConfig struct {
+	Enabled bool `json:"enabled"`
+}
+
 type SIPCommandTimeoutConfig struct {
 	TimeoutSec int `json:"timeoutSec"`
 }
@@ -114,6 +122,54 @@ type SIPTraceReloader func() error
 type SIPTraceRuntimeProvider func() bool
 type PlayAuthTTLUpdater func(time.Duration) error
 
+type VideoShareConfig struct {
+	DefaultEnabled bool `json:"defaultEnabled"`
+	TTLSeconds     int  `json:"ttlSeconds"`
+	fieldsPresent  bool
+}
+
+func (v *VideoShareConfig) UnmarshalJSON(data []byte) error {
+	var decoded struct {
+		DefaultEnabled *bool `json:"defaultEnabled"`
+		TTLSeconds     *int  `json:"ttlSeconds"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	if decoded.DefaultEnabled == nil || decoded.TTLSeconds == nil {
+		return errors.New("videoShare requires defaultEnabled and ttlSeconds")
+	}
+	v.DefaultEnabled = *decoded.DefaultEnabled
+	v.TTLSeconds = *decoded.TTLSeconds
+	v.fieldsPresent = true
+	return nil
+}
+
+const defaultVideoShareTTLSeconds = 300
+
+func currentVideoShareConfig() *VideoShareConfig {
+	if app.ConfigYml == nil {
+		return &VideoShareConfig{TTLSeconds: defaultVideoShareTTLSeconds, fieldsPresent: true}
+	}
+	ttl := app.ConfigYml.GetInt(gbconfig.VideoShareTTLSecondsConfigKey)
+	if !validVideoShareTTLSeconds(ttl) {
+		ttl = defaultVideoShareTTLSeconds
+	}
+	return &VideoShareConfig{
+		DefaultEnabled: app.ConfigYml.GetBool(gbconfig.VideoShareDefaultEnabledConfigKey),
+		TTLSeconds:     ttl,
+		fieldsPresent:  true,
+	}
+}
+
+func validVideoShareTTLSeconds(seconds int) bool {
+	if seconds <= 0 || seconds%60 != 0 {
+		return false
+	}
+	maxDurationSeconds := int64(^uint64(0)>>1) / int64(time.Second)
+	return int64(seconds) <= maxDurationSeconds
+}
+
 var playAuthRuntimeReady atomic.Bool
 
 // ServiceConfig is the single public contract for all dynamic GB service
@@ -127,6 +183,7 @@ type ServiceConfig struct {
 	SyncChannelsOnOnline             SyncChannelsOnOnlineConfig             `json:"syncChannelsOnOnline"`
 	OnlineOnHeartbeat                OnlineOnHeartbeatConfig                `json:"onlineOnHeartbeat"`
 	SaveAlarmMessages                SaveAlarmMessagesConfig                `json:"saveAlarmMessages"`
+	AlarmPopup                       AlarmPopupConfig                       `json:"alarmPopup"`
 	SIPCommandTimeout                SIPCommandTimeoutConfig                `json:"sipCommandTimeout"`
 	PreallocationMode                PreallocationModeConfig                `json:"preallocationMode"`
 	IgnoreChannelOfflineStatusNotify IgnoreChannelOfflineStatusNotifyConfig `json:"ignoreChannelOfflineStatusNotify"`
@@ -138,10 +195,15 @@ type ServiceConfig struct {
 	PlaybackSettings                 gbconfig.PlaybackSettings              `json:"playbackSettings"`
 	FixedAddressPlayback             gbconfig.FixedAddressPlaybackSettings  `json:"fixedAddressPlayback"`
 	PlayAuth                         gbconfig.PlayAuthSettings              `json:"playAuth"`
+	VideoShare                       *VideoShareConfig                      `json:"videoShare,omitempty"`
 	RecordCacheTailToleranceSec      int                                    `json:"recordCacheTailToleranceSec"`
 	SIPLog                           SIPLogUpdateResult                     `json:"sipLog"`
 	Cascade                          *gbconfig.CascadeSettings              `json:"cascade,omitempty"`
 	recordCacheTailTolerancePresent  bool
+	videoSharePresent                bool
+	// alarmPopupPresent 记录请求里是否带了 alarmPopup：老前端（或第三方聚合客户端）
+	// 不带这个键时，零值 false 会把「默认开启」的弹窗静默关掉，必须保留现值。
+	alarmPopupPresent bool
 }
 
 // UnmarshalJSON remembers whether the optional compatibility field was sent.
@@ -159,6 +221,8 @@ func (s *ServiceConfig) UnmarshalJSON(data []byte) error {
 	}
 	*s = ServiceConfig(decoded)
 	_, s.recordCacheTailTolerancePresent = fields["recordCacheTailToleranceSec"]
+	_, s.videoSharePresent = fields["videoShare"]
+	_, s.alarmPopupPresent = fields["alarmPopup"]
 	return nil
 }
 
@@ -188,12 +252,12 @@ func (sc *ServiceConfigController) currentServiceConfig() ServiceConfig {
 		SDPExtension:         SDPExtensionConfig{Enabled: gbconfig.SDPExtensionEnabled()},
 		DeviceTimeSync:       DeviceTimeSyncConfig{Enabled: gbconfig.DeviceTimeSyncEnabled()},
 		SyncChannelsOnOnline: SyncChannelsOnOnlineConfig{Enabled: gbconfig.SyncChannelsOnOnline()}, OnlineOnHeartbeat: OnlineOnHeartbeatConfig{Enabled: gbconfig.OnlineOnHeartbeat()},
-		SaveAlarmMessages: SaveAlarmMessagesConfig{Enabled: gbconfig.SaveAlarmMessages()}, SIPCommandTimeout: SIPCommandTimeoutConfig{TimeoutSec: gbconfig.SIPCommandTimeoutSec()},
+		SaveAlarmMessages: SaveAlarmMessagesConfig{Enabled: gbconfig.SaveAlarmMessages()}, AlarmPopup: AlarmPopupConfig{Enabled: gbconfig.AlarmPopupEnabled()}, SIPCommandTimeout: SIPCommandTimeoutConfig{TimeoutSec: gbconfig.SIPCommandTimeoutSec()},
 		PreallocationMode: PreallocationModeConfig{Enabled: gbconfig.PreallocationMode()}, IgnoreChannelOfflineStatusNotify: IgnoreChannelOfflineStatusNotifyConfig{Enabled: gbconfig.IgnoreChannelOfflineStatusNotify()},
 		PTZDefaultSpeed: PTZDefaultSpeedConfig{Level: currentPTZDefaultSpeedLevel()}, DefaultChannelStreamTransport: DefaultChannelStreamTransportConfig{Transport: gbconfig.CurrentDefaultChannelStreamTransport()},
 		DefaultPlaybackProtocol: DefaultPlaybackProtocolConfig{Protocol: gbconfig.CurrentDefaultPlaybackProtocol()}, GlobalSubscriptions: GlobalSubscriptionConfig{Items: gbconfig.GlobalSubscriptionItems()},
 		DefaultChannelAudio: DefaultChannelAudioConfig{Enabled: gbconfig.DefaultChannelAudioEnabled()}, PlaybackSettings: gbconfig.CurrentPlaybackSettings(), FixedAddressPlayback: gbconfig.CurrentFixedAddressPlaybackSettings(),
-		PlayAuth: gbconfig.CurrentPlayAuthSettings(), RecordCacheTailToleranceSec: gbconfig.CurrentRecordCacheTailToleranceSec(), SIPLog: SIPLogUpdateResult{Enabled: gbconfig.SIPTraceEnabled(), Applied: sc.sipTraceApplied(gbconfig.SIPTraceEnabled())},
+		PlayAuth: gbconfig.CurrentPlayAuthSettings(), VideoShare: currentVideoShareConfig(), RecordCacheTailToleranceSec: gbconfig.CurrentRecordCacheTailToleranceSec(), SIPLog: SIPLogUpdateResult{Enabled: gbconfig.SIPTraceEnabled(), Applied: sc.sipTraceApplied(gbconfig.SIPTraceEnabled())},
 		Cascade: &cascade,
 	}
 }
@@ -208,8 +272,19 @@ func (sc *ServiceConfigController) UpdateServiceConfig(c *gin.Context) {
 		sc.Fail(c, "配置服务尚未初始化", nil, http.StatusServiceUnavailable)
 		return
 	}
+	current := sc.currentServiceConfig()
 	if !request.recordCacheTailTolerancePresent {
 		request.RecordCacheTailToleranceSec = gbconfig.CurrentRecordCacheTailToleranceSec()
+	}
+	if !request.videoSharePresent {
+		request.VideoShare = current.VideoShare
+	} else if request.VideoShare == nil {
+		sc.Fail(c, "保存国标服务配置失败：视频分享配置无效", nil, http.StatusBadRequest)
+		return
+	}
+	// 老客户端不带 alarmPopup 时保留现值，别让零值把默认开启的弹窗关掉。
+	if !request.alarmPopupPresent {
+		request.AlarmPopup = AlarmPopupConfig{Enabled: gbconfig.AlarmPopupEnabled()}
 	}
 	if err := validateServiceConfig(request); err != nil {
 		sc.Fail(c, "保存国标服务配置失败："+err.Error(), err, http.StatusBadRequest)
@@ -265,6 +340,9 @@ func validateServiceConfig(v ServiceConfig) error {
 	if err := gbconfig.ValidatePlayAuthSettings(v.PlayAuth, v.FixedAddressPlayback); err != nil {
 		return err
 	}
+	if v.VideoShare == nil || !v.VideoShare.fieldsPresent || !validVideoShareTTLSeconds(v.VideoShare.TTLSeconds) {
+		return errors.New("分享链接有效期必须为正整数分钟")
+	}
 	if err := gbconfig.ValidateRecordCacheTailToleranceSec(v.RecordCacheTailToleranceSec); err != nil {
 		return err
 	}
@@ -313,6 +391,7 @@ func applyServiceConfig(v ServiceConfig) {
 	app.ConfigYml.Set(gbconfig.SyncChannelsOnOnlineConfigKey, v.SyncChannelsOnOnline.Enabled)
 	app.ConfigYml.Set(gbconfig.OnlineOnHeartbeatConfigKey, v.OnlineOnHeartbeat.Enabled)
 	app.ConfigYml.Set(gbconfig.SaveAlarmMessagesConfigKey, v.SaveAlarmMessages.Enabled)
+	app.ConfigYml.Set(gbconfig.AlarmPopupEnabledConfigKey, v.AlarmPopup.Enabled)
 	app.ConfigYml.Set(gbconfig.SIPCommandTimeoutSecConfigKey, v.SIPCommandTimeout.TimeoutSec)
 	app.ConfigYml.Set(gbconfig.PreallocationModeConfigKey, v.PreallocationMode.Enabled)
 	app.ConfigYml.Set(gbconfig.IgnoreChannelOfflineStatusNotifyConfigKey, v.IgnoreChannelOfflineStatusNotify.Enabled)
@@ -329,6 +408,8 @@ func applyServiceConfig(v ServiceConfig) {
 	app.ConfigYml.Set(gbconfig.PlayAuthEnabledConfigKey, v.PlayAuth.Enabled)
 	app.ConfigYml.Set(gbconfig.PlayAuthBindClientIPConfigKey, v.PlayAuth.BindClientIP)
 	app.ConfigYml.Set(gbconfig.PlayAuthTTLSecondsConfigKey, v.PlayAuth.TTLSeconds)
+	app.ConfigYml.Set(gbconfig.VideoShareDefaultEnabledConfigKey, v.VideoShare.DefaultEnabled)
+	app.ConfigYml.Set(gbconfig.VideoShareTTLSecondsConfigKey, v.VideoShare.TTLSeconds)
 	app.ConfigYml.Set(gbconfig.RecordCacheTailToleranceSecConfigKey, v.RecordCacheTailToleranceSec)
 	app.ConfigYml.Set(gbconfig.SIPTraceEnabledConfigKey, v.SIPLog.Enabled)
 }

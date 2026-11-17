@@ -20,10 +20,14 @@ import (
 )
 
 const (
-	SDPExtensionConfigKey                     = "gb28181.sdp.extension_enabled"
-	SyncChannelsOnOnlineConfigKey             = "gb28181.device.sync_channels_on_online"
-	OnlineOnHeartbeatConfigKey                = "gb28181.device.online_on_heartbeat"
-	SaveAlarmMessagesConfigKey                = "gb28181.alarm.save_messages"
+	SDPExtensionConfigKey         = "gb28181.sdp.extension_enabled"
+	SyncChannelsOnOnlineConfigKey = "gb28181.device.sync_channels_on_online"
+	OnlineOnHeartbeatConfigKey    = "gb28181.device.online_on_heartbeat"
+	SaveAlarmMessagesConfigKey    = "gb28181.alarm.save_messages"
+	// AlarmPopupEnabledConfigKey 控制「设备告警实时弹出」：开启后平台把收到的报警
+	// 通过 SSE 推给前端的右侧浮层。与 SaveAlarmMessagesConfigKey 完全独立 ——
+	// 不存库也能提醒，存库也可以不弹窗。
+	AlarmPopupEnabledConfigKey                = "gb28181.alarm.popup_enabled"
 	SIPCommandTimeoutSecConfigKey             = "gb28181.sip_command_timeout_sec"
 	DeviceTimeSyncEnabledConfigKey            = "gb28181.sip.device_time_sync.enabled"
 	SIPUDPRecvBufferKBConfigKey               = "gb28181.sip.recvbuffer_kb"
@@ -42,6 +46,8 @@ const (
 	PlayAuthTTLSecondsConfigKey               = "gb28181.play.auth.ttl_seconds"
 	PlayAuthActiveKeyConfigKey                = "gb28181.play.auth.active_key"
 	PlayAuthPreviousKeyConfigKey              = "gb28181.play.auth.previous_key"
+	VideoShareDefaultEnabledConfigKey         = "gb28181.video_share.default_enabled"
+	VideoShareTTLSecondsConfigKey             = "gb28181.video_share.ttl_seconds"
 	GlobalSubscriptionItemsConfigKey          = "gb28181.subscribe.global_items"
 	SIPTraceEnabledConfigKey                  = "gb28181.trace.enabled"
 	SIPTraceRetentionDaysConfigKey            = "gb28181.trace.retention_days"
@@ -500,6 +506,20 @@ func SaveAlarmMessagesFrom(c valueSource) bool {
 // SaveAlarmMessages reads the live setting for the next alarm notification.
 func SaveAlarmMessages() bool {
 	return SaveAlarmMessagesFrom(app.ConfigYml)
+}
+
+// AlarmPopupEnabledFrom 返回是否把收到的报警实时推给前端浮层。
+//
+// 默认**开启**（缺省或未配置该键一律视为开启）：这是一条纯提示、不改任何数据，
+// 现场值班最需要的就是"报警进来马上看得见"；不想要的人到国标服务配置页关掉即可。
+// 与 SaveAlarmMessagesFrom 的默认值相反（那个默认关），两者别混。
+func AlarmPopupEnabledFrom(c valueSource) bool {
+	return c == nil || c.Get(AlarmPopupEnabledConfigKey) == nil || c.GetBool(AlarmPopupEnabledConfigKey)
+}
+
+// AlarmPopupEnabled 每次收到报警现读配置，保存后立即生效、无需重启。
+func AlarmPopupEnabled() bool {
+	return AlarmPopupEnabledFrom(app.ConfigYml)
 }
 
 // SIPCommandTimeoutSecFrom returns the default timeout for outbound SIP

@@ -3,6 +3,8 @@
     <s-lang-provider v-if="!leavingAfterPasswordChange">
       <component :is="layouts[resolvedLayoutType]" />
       <PlaybackConsoleHost v-if="!mustChangePassword" />
+      <!-- 设备告警实时浮层：全局挂一次，任何页面收到报警都从右侧滑入 -->
+      <AlarmPopupHost v-if="!mustChangePassword" />
       <InitialPasswordDialog v-if="mustChangePassword" @success="onInitialPasswordChanged" />
     </s-lang-provider>
   </div>
@@ -12,6 +14,7 @@
 import { storeToRefs } from "pinia";
 import { useThemeConfig } from "@/store/modules/theme-config";
 import PlaybackConsoleHost from "@/layout/components/PlaybackConsoleHost.vue";
+import AlarmPopupHost from "@/views/gb28181/components/AlarmPopupHost.vue";
 import InitialPasswordDialog from "@/views/login/components/InitialPasswordDialog.vue";
 import { useUserStoreHook } from "@/store/modules/user";
 import { useSysConfigStore } from "@/store/modules/sys-config";

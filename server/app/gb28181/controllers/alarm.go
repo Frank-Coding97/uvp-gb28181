@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -14,6 +15,8 @@ import (
 	"gorm.io/gorm"
 
 	basecontrollers "uvplatform.com/uvp-gb28181/app/controllers"
+	"uvplatform.com/uvp-gb28181/app/gb28181/alarmpopup"
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 	"uvplatform.com/uvp-gb28181/app/middleware"
@@ -111,16 +114,27 @@ type AlarmController struct {
 
 func NewAlarmController() *AlarmController {
 	// ⛔ 用app.DB()（按 usedbtype 分发到 MySQL/PG/SQLServer/SQLite），
-//   不能写死 app.GormDbMysql：那样在绿色包的 SQLite 模式下拿到 nil，
-//   设备/告警/地图等页面一律报「DB 未就绪」，而日志里看不出原因。
-return &AlarmController{db: func() *gorm.DB { return app.DB() }}
+	//   不能写死 app.GormDbMysql：那样在绿色包的 SQLite 模式下拿到 nil，
+	//   设备/告警/地图等页面一律报「DB 未就绪」，而日志里看不出原因。
+	return &AlarmController{db: func() *gorm.DB { return app.DB() }}
 }
 
 func (controller *AlarmController) SetDB(provider func() *gorm.DB) {
 	controller.db = provider
 }
 
+// List 查询告警列表。
+//
+// ⛔⛔ 实时弹窗的 SSE **复用本路径**（`?stream=1`），不是另开 `/alarms/stream`：
+// casbin 用 `c.Request.URL.Path` 精确匹配策略，新增一条路由就要同步补
+// sys_api + sys_menu_api + casbin 三处，漏一处线上立刻 403
+// （`topics/api-permission-governance.md` 的头号坑）。走查询参数分流时
+// URL.Path 不变 ⇒ 权限语义直接继承「查询告警列表」，不需要任何库改动。
 func (controller *AlarmController) List(c *gin.Context) {
+	if c.Query("stream") == "1" {
+		controller.Stream(c)
+		return
+	}
 	db := controller.database()
 	if db == nil {
 		alarmHTTPError(c, http.StatusServiceUnavailable, "ALARM_DB_UNAVAILABLE", "告警服务未就绪")
@@ -157,6 +171,96 @@ func (controller *AlarmController) List(c *gin.Context) {
 		list = append(list, row.listItem())
 	}
 	alarmHTTPSuccess(c, gin.H{"list": list, "total": total, "page": queryParams.Page, "pageSize": queryParams.PageSize})
+}
+
+// alarmStreamPingInterval 是 SSE 保活间隔。反代（nginx）默认 60s 无数据就断，
+// 25s 一次 ping 留足余量；与 dashboard/trace 两条既有 SSE 同一口径。
+const alarmStreamPingInterval = 25 * time.Second
+
+// Stream 把收到的设备报警实时推给当前用户（`event: alarm`）。
+//
+// 与「是否存储报警消息」无关：处理器在报文解析处广播，所以关闭落库时照样能弹。
+func (controller *AlarmController) Stream(c *gin.Context) {
+	db := controller.database()
+	if db == nil {
+		alarmHTTPError(c, http.StatusServiceUnavailable, "ALARM_DB_UNAVAILABLE", "告警服务未就绪")
+		return
+	}
+	events, unsubscribe := alarmpopup.Subscribe()
+	// ⛔ 必须 defer：否则连接断了通道还挂在 hub 里，每条报警都往死通道写。
+	defer unsubscribe()
+
+	header := c.Writer.Header()
+	header.Set("Content-Type", "text/event-stream")
+	header.Set("Cache-Control", "no-cache")
+	header.Set("Connection", "keep-alive")
+	header.Set("X-Accel-Buffering", "no") // nginx 不缓冲，否则要攒满才吐
+
+	// 首帧先把开关状态送出去：关着时前端可以明确提示"已在服务配置里关闭"，
+	// 而不是让用户对着一个永远没消息的连接猜。
+	fmt.Fprintf(c.Writer, "event: ready\ndata: {\"enabled\":%t}\n\n", gbconfig.AlarmPopupEnabled())
+	c.Writer.Flush()
+
+	// 可见部门集合在连接建立时算一次：告警是低频事件，但每条都重算要打
+	// 3~4 次角色/部门表。设备共享授权（gb_device_grant）仍按条走完整判据。
+	deptIDs, filterByDept := datascope.GetOwnerDeptIDsWithDB(c, db)
+	allowedDept := make(map[uint]bool, len(deptIDs))
+	for _, id := range deptIDs {
+		allowedDept[id] = true
+	}
+
+	ping := time.NewTicker(alarmStreamPingInterval)
+	defer ping.Stop()
+	ctx := c.Request.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ping.C:
+			if _, err := fmt.Fprint(c.Writer, "event: ping\ndata: {}\n\n"); err != nil {
+				return
+			}
+			c.Writer.Flush()
+		case event, ok := <-events:
+			if !ok {
+				return
+			}
+			if !controller.alarmEventVisible(c, db, event, filterByDept, allowedDept) {
+				continue
+			}
+			payload, err := json.Marshal(event)
+			if err != nil {
+				continue
+			}
+			if _, err := fmt.Fprintf(c.Writer, "event: alarm\ndata: %s\n\n", payload); err != nil {
+				return
+			}
+			c.Writer.Flush()
+		}
+	}
+}
+
+// alarmEventVisible 判断这条报警能不能推给当前连接的用户。
+//
+// 先走零查询的快路径（归属部门命中），没命中再按 `visibleScope` 查一次共享授权，
+// 与告警列表页完全同一套口径。⛔ 取不到设备主键时一律不推（fail-closed）。
+func (controller *AlarmController) alarmEventVisible(c *gin.Context, db *gorm.DB, event alarmpopup.Event, filterByDept bool, allowedDept map[uint]bool) bool {
+	// 无 claims / 全量权限（notcheckuser）时 datascope 明确表示"不必过滤"。
+	if !filterByDept {
+		return true
+	}
+	if event.DeviceDBID == 0 {
+		return false
+	}
+	if event.OwnerDeptID != 0 && allowedDept[event.OwnerDeptID] {
+		return true
+	}
+	var count int64
+	err := db.WithContext(c.Request.Context()).Model(&gbmodels.GbDevice{}).
+		Where("id = ?", event.DeviceDBID).
+		Scopes(visibleScope(c)).
+		Count(&count).Error
+	return err == nil && count > 0
 }
 
 func (controller *AlarmController) Detail(c *gin.Context) {
