@@ -50,9 +50,24 @@ func (c *Coordinator) releaseConsumer(claim *sourceLeaseClaim) {
 	}
 }
 
+// BackendOriginResolver is an internal dependency, never populated from an HTTP
+// request. It proves the media server's observed backend address after selection.
+type BackendOriginResolver func(context.Context, *Result) (string, error)
+
+func (s *Service) StartAuthorizedWithBackendOrigin(ctx context.Context, req AuthorizedRequest, registry *SourceLeaseRegistry, consumer string, origin BackendOriginResolver) (*Result, *SourceLease, error) {
+	if origin == nil {
+		return nil, nil, ErrPlayAuthorizationUnavailable
+	}
+	return s.startAuthorizedWithSourceLease(ctx, req, registry, consumer, origin)
+}
+
 // StartAuthorizedWithSourceLease atomically joins live ownership before Ready
 // becomes visible to none-reader cleanup. The caller releases only this lease.
 func (s *Service) StartAuthorizedWithSourceLease(ctx context.Context, req AuthorizedRequest, registry *SourceLeaseRegistry, consumer string) (result *Result, lease *SourceLease, err error) {
+	return s.startAuthorizedWithSourceLease(ctx, req, registry, consumer, nil)
+}
+
+func (s *Service) startAuthorizedWithSourceLease(ctx context.Context, req AuthorizedRequest, registry *SourceLeaseRegistry, consumer string, origin BackendOriginResolver) (result *Result, lease *SourceLease, err error) {
 	if registry == nil || consumer == "" {
 		return nil, nil, ErrPlayAuthorizationUnavailable
 	}
@@ -65,7 +80,7 @@ func (s *Service) StartAuthorizedWithSourceLease(ctx context.Context, req Author
 			s.coordinator().releaseConsumer(claim)
 		}
 	}()
-	result, err = s.startAuthorized(ctx, req, claim)
+	result, err = s.startAuthorizedWithOrigin(ctx, req, claim, origin)
 	if err != nil {
 		return nil, nil, err
 	}

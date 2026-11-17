@@ -54,8 +54,9 @@ type sipShutdownSnapshot struct {
 	security *gbsecurity.Runtime
 	cascade  cascadeRuntimeLifecycle
 
-	playback   *gbplayback.Service
-	videoShare *videoshare.Service
+	playback             *gbplayback.Service
+	videoShare           *videoshare.Service
+	videoShareOriginStop func()
 
 	recordQuery  *recordquery.Service
 	ptzService   *gbptz.Service
@@ -151,10 +152,11 @@ var (
 func captureSIPShutdownSnapshot() sipShutdownSnapshot {
 	return sipShutdownSnapshot{
 		server: sipServer, security: securityRuntime, cascade: cascadeRuntimeManager,
-		playback:    playbackService,
-		videoShare:  videoShareService,
-		recordQuery: recordQueryService,
-		ptzService:  ptzService, ptzScheduler: ptzScheduler, firmware: firmwareUpgradeService,
+		playback:             playbackService,
+		videoShare:           videoShareService,
+		videoShareOriginStop: captureVideoShareOriginStop(),
+		recordQuery:          recordQueryService,
+		ptzService:           ptzService, ptzScheduler: ptzScheduler, firmware: firmwareUpgradeService,
 		subscriptionScheduler: subscriptionScheduler,
 		offlineScanner:        offlineScanner, playReconciler: playReconciler,
 
@@ -464,6 +466,9 @@ func stopSIPDependenciesSnapshot(ctx context.Context, r sipShutdownSnapshot) err
 	ClearOpenAPIOperationAdapters()
 	var stopErr error
 	clearZLMManagementController()
+	if r.videoShareOriginStop != nil {
+		r.videoShareOriginStop()
+	}
 	if r.videoShare != nil {
 		r.videoShare.DrainViewers()
 	}
@@ -699,6 +704,7 @@ func clearControlPlaneGlobals() {
 	metricsPersistCancel, metricsPersistDone = nil, nil
 	dashboardRetentionCancel, dashboardRetentionDone = nil, nil
 	videoShareExpiryCancel, videoShareExpiryDone = nil, nil
+	videoShareBackendOrigins = nil
 	playLifecycleStore, playLifecycleRecorder = nil, nil
 	if zlmManagementCore != nil {
 		zlmManagementCore = nil

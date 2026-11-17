@@ -655,30 +655,34 @@ func configureVideoSharePlayback(service *play.Service) {
 		videoShareService.SetPlaybackPreparer(nil)
 		return
 	}
-	videoShareService.SetPlaybackPreparer(videoSharePlayPreparer{service: service, db: app.DB(), leases: videoShareLeases})
+	videoShareService.SetPlaybackPreparer(videoSharePlayPreparer{service: service, db: app.DB(), leases: videoShareLeases, origin: configureVideoShareBackendOrigin(service)})
 }
 
 type videoSharePlayPreparer struct {
 	service *play.Service
 	db      *gorm.DB
 	leases  *play.SourceLeaseRegistry
+	origin  play.BackendOriginResolver
 }
 
 func (p videoSharePlayPreparer) Prepare(ctx context.Context, share *gbmodels.GbChannelVideoShare) (videoshare.PlaybackSource, error) {
 	if p.service == nil || p.db == nil || p.leases == nil || zlmRegistry == nil || zlmServerConfigCache == nil || share == nil || share.DeviceEpoch == 0 {
 		return videoshare.PlaybackSource{}, videoshare.ErrViewerUnavailable
 	}
-	if gbconfig.CurrentPlayAuthSettings().BindClientIP {
-		return videoshare.PlaybackSource{}, fmt.Errorf("%w: IP-bound playback requires a verified backend-origin address", videoshare.ErrViewerUnavailable)
-	}
 	var channel gbmodels.GbChannel
 	if err := p.db.WithContext(ctx).Select("channel_id").Where("id = ? AND deleted_at IS NULL", share.ChannelPK).Take(&channel).Error; err != nil {
 		return videoshare.PlaybackSource{}, err
 	}
 	consumer := "video-share:" + share.PublicID + ":" + share.Generation + ":" + uuid.NewString()
-	result, lease, err := p.service.StartAuthorizedWithSourceLease(ctx, play.AuthorizedRequest{
-		DeviceID: share.DeviceID, ChannelID: channel.ChannelID, DeviceEpoch: int64(share.DeviceEpoch),
-	}, p.leases, consumer)
+	req := play.AuthorizedRequest{DeviceID: share.DeviceID, ChannelID: channel.ChannelID, DeviceEpoch: int64(share.DeviceEpoch)}
+	var result *play.Result
+	var lease *play.SourceLease
+	var err error
+	if gbconfig.CurrentPlayAuthSettings().BindClientIP {
+		result, lease, err = p.service.StartAuthorizedWithBackendOrigin(ctx, req, p.leases, consumer, p.origin)
+	} else {
+		result, lease, err = p.service.StartAuthorizedWithSourceLease(ctx, req, p.leases, consumer)
+	}
 	if err != nil {
 		return videoshare.PlaybackSource{}, err
 	}

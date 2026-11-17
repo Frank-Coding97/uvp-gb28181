@@ -206,6 +206,10 @@ func (s *Service) StartAuthorized(ctx context.Context, req AuthorizedRequest) (*
 }
 
 func (s *Service) startAuthorized(ctx context.Context, req AuthorizedRequest, claim *sourceLeaseClaim) (*Result, error) {
+	return s.startAuthorizedWithOrigin(ctx, req, claim, nil)
+}
+
+func (s *Service) startAuthorizedWithOrigin(ctx context.Context, req AuthorizedRequest, claim *sourceLeaseClaim, origin BackendOriginResolver) (*Result, error) {
 	deviceID, channelID, clientIP := req.DeviceID, req.ChannelID, req.ClientIP
 	settings := gbconfig.CurrentPlayAuthSettings()
 	openAPIRequest := req.OpenAPIClientID > 0 && req.OpenAPIGrantID != ""
@@ -223,7 +227,7 @@ func (s *Service) startAuthorized(ctx context.Context, req AuthorizedRequest, cl
 	if err := issuer.AuthorizeDeviceEpochContext(ctx, deviceID, req.DeviceEpoch); err != nil {
 		return nil, ErrPlayAuthorizationUnavailable
 	}
-	if settings.BindClientIP {
+	if settings.BindClientIP && origin == nil {
 		if _, err := playauth.NormalizeClientIP(clientIP); err != nil {
 			return nil, ErrPlayAuthorizationUnavailable
 		}
@@ -235,6 +239,16 @@ func (s *Service) startAuthorized(ctx context.Context, req AuthorizedRequest, cl
 	result, err := s.ensureLive(ctx, Request{DeviceID: deviceID, ChannelID: channelID, DeviceEpoch: req.DeviceEpoch, Trigger: "explicit", LifecycleID: req.LifecycleID}, claim)
 	if err != nil {
 		return nil, err
+	}
+	if settings.BindClientIP && origin != nil {
+		resolved, err := origin(ctx, result)
+		if err != nil {
+			return nil, ErrPlayAuthorizationUnavailable
+		}
+		req.ClientIP, err = playauth.NormalizeClientIP(resolved)
+		if err != nil {
+			return nil, ErrPlayAuthorizationUnavailable
+		}
 	}
 	if err := s.authorizePreparedResult(ctx, result, req, settings, issuer, prepared); err != nil {
 		// The generation may already serve another authorized caller even
@@ -264,7 +278,7 @@ func (s *Service) authorizePreparedResult(
 		return ErrPlayAuthorizationUnavailable
 	}
 	binding, err := s.ResolvePlaybackMediaContext(result.App, result.StreamID, mediaNode.MediaServerUUID)
-	if err != nil || binding.DeviceID != deviceID || binding.ChannelID != channelID {
+	if err != nil || binding.DeviceID != deviceID || binding.ChannelID != channelID || binding.MediaGeneration != result.Generation {
 		return ErrPlayAuthorizationUnavailable
 	}
 	binding.BindClientIP = settings.BindClientIP

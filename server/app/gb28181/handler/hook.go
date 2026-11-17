@@ -255,6 +255,7 @@ type HookController struct {
 	openAPIViewerBinder            OpenAPIViewerBinder
 	openAPIFlowObserver            OpenAPIFlowObserver
 	openAPIRuntimeIdentityResolver OpenAPIRuntimeIdentityResolver
+	backendOriginObserver          BackendOriginObserver
 	playAuthMu                     sync.RWMutex
 
 	previewClassifier management.PreviewClassifier
@@ -1024,6 +1025,9 @@ func (h *HookController) OnPlay(c *gin.Context) {
 	}
 	if !hookPayloadNodeMatches(c, playauth.HookOnPlay, body.MediaServerID) {
 		h.denyPlayback(c, body.Stream, "wrong_resource", "hook payload node mismatch")
+		return
+	}
+	if h.handleBackendOriginProbe(c, body) {
 		return
 	}
 	if classifier, verifier := h.previewDependencies(); classifier != nil && verifier != nil {
