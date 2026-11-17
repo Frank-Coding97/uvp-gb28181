@@ -16,6 +16,8 @@ import (
 	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 	"uvplatform.com/uvp-gb28181/app/global/app"
+	basemodels "uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/utils/authoritytx"
 )
 
 type pipelineTestYAML struct {
@@ -55,7 +57,11 @@ func newPipelineTestDB(t *testing.T) *gorm.DB {
 		&gbmodels.GbAlarmResource{},
 		&gbmodels.GbAlarmResourceParent{},
 		&gbmodels.GbAlarmBinding{},
+		&authoritytx.Gate{},
+		&gbmodels.GbChannelVideoShare{},
+		&basemodels.SysOperationLog{},
 	))
+	require.NoError(t, db.Create(&authoritytx.Gate{ID: 1}).Error)
 	return db
 }
 

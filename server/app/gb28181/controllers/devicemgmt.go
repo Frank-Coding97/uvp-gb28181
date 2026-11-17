@@ -27,6 +27,7 @@ import (
 	"uvplatform.com/uvp-gb28181/app/gb28181/recordquery"
 	"uvplatform.com/uvp-gb28181/app/gb28181/sdp"
 	"uvplatform.com/uvp-gb28181/app/gb28181/upgrade"
+	"uvplatform.com/uvp-gb28181/app/gb28181/videoshare"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 )
 
@@ -61,6 +62,8 @@ type DeviceMgmtController struct {
 	playbackSnapshots   PlaybackSnapshotResolver
 	captureRuntimeMu    sync.RWMutex
 	captureRegistry     *devicecapture.Registry
+	videoShareMu        sync.RWMutex
+	videoShareStatus    VideoShareBatchStatusProvider
 }
 
 // CatalogTrigger 由 handler 包实现,注入进来用于手动触发 Catalog 查询
@@ -78,6 +81,25 @@ func NewDeviceMgmtController() *DeviceMgmtController {
 }
 
 func (dc *DeviceMgmtController) SetDB(p func() *gorm.DB) { dc.db = p }
+
+type VideoShareBatchStatusProvider func(context.Context, []uint, uint) (map[uint]videoshare.StatusSummary, error)
+
+func (dc *DeviceMgmtController) SetVideoShareBatchStatus(provider VideoShareBatchStatusProvider) {
+	dc.videoShareMu.Lock()
+	dc.videoShareStatus = provider
+	dc.videoShareMu.Unlock()
+}
+
+func (dc *DeviceMgmtController) videoShareBatchStatus() VideoShareBatchStatusProvider {
+	dc.videoShareMu.RLock()
+	defer dc.videoShareMu.RUnlock()
+	return dc.videoShareStatus
+}
+
+type channelListRow struct {
+	*gbmodels.GbChannel
+	VideoShare *videoshare.StatusSummary `json:"videoShare,omitempty"`
+}
 
 type PlaybackSessionService interface {
 	Create(context.Context, gbplayback.CreateRequest) (gbplayback.CreateResult, error)
@@ -686,7 +708,29 @@ func (dc *DeviceMgmtController) ListChannels(c *gin.Context) {
 		return
 	}
 
-	dc.Success(c, gin.H{"list": list, "total": total, "page": page, "pageSize": pageSize})
+	rows := make([]channelListRow, len(list))
+	for i := range list {
+		rows[i].GbChannel = &list[i]
+	}
+	if provider, actorID := dc.videoShareBatchStatus(), dc.GetCurrentUserID(c); provider != nil && actorID != 0 && len(list) > 0 {
+		channelIDs := make([]uint, len(list))
+		for i := range list {
+			channelIDs[i] = list[i].ID
+		}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		states, err := provider(ctx, channelIDs, actorID)
+		cancel()
+		if err != nil {
+			dc.Fail(c, "读取视频分享状态失败", err, http.StatusServiceUnavailable)
+			return
+		}
+		for i := range rows {
+			if state, ok := states[rows[i].ID]; ok {
+				rows[i].VideoShare = &state
+			}
+		}
+	}
+	dc.Success(c, gin.H{"list": rows, "total": total, "page": page, "pageSize": pageSize})
 }
 
 // GetChannel 通道详情

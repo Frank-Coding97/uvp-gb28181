@@ -216,6 +216,9 @@ type Service struct {
 	recordingMu              sync.RWMutex
 	recording                PlaybackRecordingLifecycle
 
+	sourceLeaseMu      sync.RWMutex
+	sourceLeaseChecker SourceLeaseChecker
+
 	liveCoordinatorMu sync.Mutex
 	liveCoordinator   *Coordinator
 

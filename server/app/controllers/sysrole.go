@@ -217,15 +217,26 @@ func (sc *SysRoleController) Add(c *gin.Context) {
 	role.Description = req.Description
 	role.ParentID = req.ParentID
 
-	err = app.DBContext(c.Request.Context()).Create(role).Error
+	err = sc.CasbinService.Transaction(c.Request.Context(), func(tx *gorm.DB, permission *service.PermissionService) error {
+		if req.ParentID > 0 {
+			var count int64
+			if err := tx.Model(&models.SysRole{}).Where("id = ?", req.ParentID).Count(&count).Error; err != nil {
+				return err
+			}
+			if count != 1 {
+				return gorm.ErrRecordNotFound
+			}
+		}
+		if err := tx.Create(role).Error; err != nil {
+			return err
+		}
+		if req.ParentID > 0 {
+			return permission.AddRoleInheritance(c.Request.Context(), role.ID, req.ParentID)
+		}
+		return nil
+	})
 	if err != nil {
 		sc.FailAndAbort(c, "新增角色失败", err)
-	}
-	// casbin 添加角色继承关系
-	if req.ParentID > 0 {
-		if err = sc.CasbinService.AddRoleInheritance(c.Request.Context(), role.ID, req.ParentID); err != nil {
-			sc.FailAndAbort(c, "添加角色继承关系失败", err)
-		}
 	}
 	sc.SuccessWithMessage(c, "角色创建成功", role)
 }
@@ -309,7 +320,20 @@ func (sc *SysRoleController) Delete(c *gin.Context) {
 	}
 
 	// 使用事务删除角色和相关数据
-	err = app.DBContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+	err = sc.CasbinService.Transaction(c.Request.Context(), func(tx *gorm.DB, permission *service.PermissionService) error {
+		var count int64
+		if err := tx.Model(&models.SysUserRole{}).Where("role_id = ?", req.ID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != 0 {
+			return fmt.Errorf("存在用户关联此角色，无法删除")
+		}
+		if err := tx.Model(&models.SysRole{}).Where("parent_id = ?", req.ID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != 0 {
+			return fmt.Errorf("存在子角色，无法删除")
+		}
 		// 删除角色菜单关联
 		if err := tx.Where("role_id = ?", req.ID).Delete(&models.SysRoleMenu{}).Error; err != nil {
 			return err
@@ -320,19 +344,14 @@ func (sc *SysRoleController) Delete(c *gin.Context) {
 			return err
 		}
 
-		return nil
+		if err := permission.DeleteRoleInheritance(c.Request.Context(), role.ID, role.ParentID); err != nil {
+			return err
+		}
+		return permission.DeleteRoleApis(c.Request.Context(), role.ID)
 	})
 
 	if err != nil {
 		sc.FailAndAbort(c, "删除角色失败", err)
-	}
-	// 删除角色继承关系
-	if err := sc.CasbinService.DeleteRoleInheritance(c.Request.Context(), role.ID, role.ParentID); err != nil {
-		sc.FailAndAbort(c, "删除角色继承关系失败", err)
-	}
-	// 删除角色关联的api权限
-	if err := sc.CasbinService.DeleteRoleApis(c.Request.Context(), role.ID); err != nil {
-		sc.FailAndAbort(c, "删除角色关联的api权限失败", err)
 	}
 	sc.SuccessWithMessage(c, "角色删除成功", nil)
 }
@@ -389,7 +408,15 @@ func (sm *SysRoleController) AddRoleMenu(c *gin.Context) {
 	}
 
 	// 使用事务处理角色菜单权限分配
-	err = app.DBContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+	err = sm.CasbinService.Transaction(c.Request.Context(), func(tx *gorm.DB, permission *service.PermissionService) error {
+		var roleCount int64
+		if err := tx.Model(&models.SysRole{}).Where("id = ?", req.RoleID).Count(&roleCount).Error; err != nil {
+			return err
+		}
+		if roleCount != 1 {
+			return gorm.ErrRecordNotFound
+		}
+
 		// 先删除该角色的所有菜单权限
 		if err := tx.Where("role_id = ?", req.RoleID).Delete(&models.SysRoleMenu{}).Error; err != nil {
 			app.Log(c.Request.Context()).Warn("删除角色菜单权限失败", zap.String("event", "sysrole.role_menu_delete_failed"), logging.Error(err), zap.Uint("role_id", req.RoleID))
@@ -412,18 +439,20 @@ func (sm *SysRoleController) AddRoleMenu(c *gin.Context) {
 			}
 		}
 
-		return nil
+		var currentMenus models.SysMenuList
+		if err := tx.Preload("Apis").Where("id IN ?", req.MenuID).Find(&currentMenus).Error; err != nil {
+			return err
+		}
+		if len(currentMenus) != len(req.MenuID) {
+			return fmt.Errorf("菜单已变化，请刷新后重试")
+		}
+		return permission.AddPoliciesForRole(c.Request.Context(), req.RoleID, currentMenus.GetApis().Unique())
 	})
 
 	if err != nil {
 		sm.FailAndAbort(c, "分配角色菜单权限失败", err)
 	}
 
-	// // 调整casbin权限
-	apis := menuList.GetApis().Unique()
-	if err := sm.CasbinService.AddPoliciesForRole(c.Request.Context(), req.RoleID, apis); err != nil {
-		sm.FailAndAbort(c, "添加角色权限策略失败", err)
-	}
 	sm.SuccessWithMessage(c, "分配角色菜单权限成功", nil)
 }
 
@@ -461,7 +490,9 @@ func (sc *SysRoleController) UpdateDataScope(c *gin.Context) {
 	role.DataScope = req.DataScope
 	role.CheckedDepts = req.CheckedDepts
 
-	err = app.DBContext(c.Request.Context()).Save(role).Error
+	err = sc.CasbinService.Transaction(c.Request.Context(), func(tx *gorm.DB, _ *service.PermissionService) error {
+		return tx.Model(role).Select("data_scope", "checked_depts").Updates(role).Error
+	})
 	if err != nil {
 		sc.FailAndAbort(c, "更新角色数据权限失败", err)
 	}

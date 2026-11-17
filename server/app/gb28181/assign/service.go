@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"uvplatform.com/uvp-gb28181/app/utils/authoritytx"
 
 	"gorm.io/gorm"
 
@@ -163,6 +164,9 @@ func (s *Service) AssignOneWithReceipt(ctx context.Context, deviceID uint, targe
 	defer guard.Release()
 	var receipt *TransferReceipt
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := authoritytx.Acquire(ctx, tx); err != nil {
+			return err
+		}
 		device, err := lockAssignmentDevice(tx, deviceID, visibleDeptIDs, needFilter)
 		if err != nil {
 			return err
@@ -196,6 +200,9 @@ func (s *Service) assignOneV2WithReceipt(ctx context.Context, input AssignmentIn
 	defer guard.Release()
 	var receipt *TransferReceipt
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := authoritytx.Acquire(ctx, tx); err != nil {
+			return err
+		}
 		device, err := lockAssignmentDevice(tx, input.DeviceID, visibleDeptIDs, needFilter)
 		if err != nil {
 			return err

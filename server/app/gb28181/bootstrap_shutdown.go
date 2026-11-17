@@ -22,6 +22,7 @@ import (
 	"uvplatform.com/uvp-gb28181/app/gb28181/subscribe"
 	gbtalk "uvplatform.com/uvp-gb28181/app/gb28181/talk"
 	"uvplatform.com/uvp-gb28181/app/gb28181/upgrade"
+	"uvplatform.com/uvp-gb28181/app/gb28181/videoshare"
 	gbzlmsched "uvplatform.com/uvp-gb28181/app/gb28181/zlm/scheduler"
 	gbzlmsvc "uvplatform.com/uvp-gb28181/app/gb28181/zlm/service"
 	"uvplatform.com/uvp-gb28181/app/global/app"
@@ -53,7 +54,8 @@ type sipShutdownSnapshot struct {
 	security *gbsecurity.Runtime
 	cascade  cascadeRuntimeLifecycle
 
-	playback *gbplayback.Service
+	playback   *gbplayback.Service
+	videoShare *videoshare.Service
 
 	recordQuery  *recordquery.Service
 	ptzService   *gbptz.Service
@@ -97,13 +99,15 @@ type controlPlaneShutdownSnapshot struct {
 	schedulerLogDone   <-chan struct{}
 	schedulerLog       *gbzlmsched.LogService
 
-	metricsCleanupStop    context.CancelFunc
-	metricsCleanupDone    <-chan struct{}
-	metricsPersistCancel  context.CancelFunc
-	metricsPersistDone    <-chan struct{}
-	dashboardCancel       context.CancelFunc
-	dashboardDone         <-chan struct{}
-	playLifecycleRecorder interface{ Shutdown(context.Context) error }
+	metricsCleanupStop     context.CancelFunc
+	metricsCleanupDone     <-chan struct{}
+	metricsPersistCancel   context.CancelFunc
+	metricsPersistDone     <-chan struct{}
+	dashboardCancel        context.CancelFunc
+	dashboardDone          <-chan struct{}
+	videoShareExpiryCancel context.CancelFunc
+	videoShareExpiryDone   <-chan struct{}
+	playLifecycleRecorder  interface{ Shutdown(context.Context) error }
 
 	managementCore *zlmManagementCoreRuntime
 }
@@ -148,6 +152,7 @@ func captureSIPShutdownSnapshot() sipShutdownSnapshot {
 	return sipShutdownSnapshot{
 		server: sipServer, security: securityRuntime, cascade: cascadeRuntimeManager,
 		playback:    playbackService,
+		videoShare:  videoShareService,
 		recordQuery: recordQueryService,
 		ptzService:  ptzService, ptzScheduler: ptzScheduler, firmware: firmwareUpgradeService,
 		subscriptionScheduler: subscriptionScheduler,
@@ -180,6 +185,7 @@ func captureControlPlaneShutdownSnapshot() controlPlaneShutdownSnapshot {
 		metricsCleanupDone: metricsCleanupDone, metricsPersistCancel: metricsPersistCancel,
 		metricsPersistDone: metricsPersistDone, dashboardCancel: dashboardRetentionCancel,
 		dashboardDone: dashboardRetentionDone, playLifecycleRecorder: playLifecycleRecorder,
+		videoShareExpiryCancel: videoShareExpiryCancel, videoShareExpiryDone: videoShareExpiryDone,
 		managementCore: zlmManagementCore,
 	}
 }
@@ -254,6 +260,9 @@ func (r *bootstrapShutdownRun) waitControlGeneration(ctx context.Context) error 
 }
 
 func (c controlPlaneShutdownSnapshot) signal() {
+	if c.videoShareExpiryCancel != nil {
+		c.videoShareExpiryCancel()
+	}
 	if c.heartbeatCancel != nil {
 		c.heartbeatCancel()
 	}
@@ -455,6 +464,9 @@ func stopSIPDependenciesSnapshot(ctx context.Context, r sipShutdownSnapshot) err
 	ClearOpenAPIOperationAdapters()
 	var stopErr error
 	clearZLMManagementController()
+	if r.videoShare != nil {
+		r.videoShare.DrainViewers()
+	}
 	if r.playback != nil {
 		if err := r.playback.Close(ctx); err != nil {
 			return shutdownComponentError("playback", err)
@@ -642,6 +654,10 @@ func stopControlPlaneSnapshot(ctx context.Context, c controlPlaneShutdownSnapsho
 		c.dashboardCancel()
 	}
 	stopErr = errors.Join(stopErr, shutdownComponentError("dashboard.retention", waitShutdownDone(ctx, c.dashboardDone)))
+	if c.videoShareExpiryCancel != nil {
+		c.videoShareExpiryCancel()
+	}
+	stopErr = errors.Join(stopErr, shutdownComponentError("video_share.expiry", waitShutdownDone(ctx, c.videoShareExpiryDone)))
 	if c.playLifecycleRecorder != nil {
 		stopErr = errors.Join(stopErr, shutdownComponentError("play.lifecycle_recorder", c.playLifecycleRecorder.Shutdown(ctx)))
 	}
@@ -682,6 +698,7 @@ func clearControlPlaneGlobals() {
 	metricsCleanupStop, metricsCleanupDone = nil, nil
 	metricsPersistCancel, metricsPersistDone = nil, nil
 	dashboardRetentionCancel, dashboardRetentionDone = nil, nil
+	videoShareExpiryCancel, videoShareExpiryDone = nil, nil
 	playLifecycleStore, playLifecycleRecorder = nil, nil
 	if zlmManagementCore != nil {
 		zlmManagementCore = nil

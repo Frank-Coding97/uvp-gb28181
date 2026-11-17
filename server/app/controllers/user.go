@@ -4,7 +4,9 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 
+	gbvideoshare "uvplatform.com/uvp-gb28181/app/gb28181/videoshare"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 	"uvplatform.com/uvp-gb28181/app/models"
 	"uvplatform.com/uvp-gb28181/app/service"
@@ -52,6 +54,23 @@ func (uc *UserController) revokeUserSessionsTx(tx *gorm.DB, userID uint, reason 
 		return service.ErrSessionStore
 	}
 	return sessions.RevokeAllForUserTx(tx, userID, reason)
+}
+
+func sameUserRoles(current, next []uint) bool {
+	if len(current) != len(next) {
+		return false
+	}
+	set := make(map[uint]int, len(current))
+	for _, id := range current {
+		set[id]++
+	}
+	for _, id := range next {
+		set[id]--
+		if set[id] < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // GetProfile 获取当前登录用户信息
@@ -223,7 +242,7 @@ func (uc *UserController) Add(c *gin.Context) {
 	}
 
 	// 使用事务创建用户和角色关联
-	err = app.DBContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+	err = uc.CasbinService.Transaction(c.Request.Context(), func(tx *gorm.DB, permission *service.PermissionService) error {
 		// 创建用户
 		user.Username = req.UserName
 		user.NickName = req.NickName
@@ -253,14 +272,10 @@ func (uc *UserController) Add(c *gin.Context) {
 			}
 		}
 
-		return nil
+		return permission.AddRoleForUser(c.Request.Context(), user.ID, req.Roles)
 	})
 
 	if err != nil {
-		uc.FailAndAbort(c, "Failed to create user", err)
-	}
-
-	if err = uc.CasbinService.AddRoleForUser(c.Request.Context(), user.ID, req.Roles); err != nil {
 		uc.FailAndAbort(c, "Failed to create user", err)
 	}
 
@@ -330,7 +345,26 @@ func (uc *UserController) Update(c *gin.Context) {
 	}
 
 	// 使用事务更新用户、角色关联及停用后的会话撤销。
-	err = app.DBContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+	err = uc.CasbinService.Transaction(c.Request.Context(), func(tx *gorm.DB, permission *service.PermissionService) error {
+		current := models.User{}
+		found := tx.Where("id = ?", user.ID).Take(&current)
+		if found.Error != nil {
+			return found.Error
+		}
+		if found.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		*user = current
+		var currentRoles []uint
+		if err := tx.Model(&models.SysUserRole{}).Where("user_id = ?", user.ID).Pluck("role_id", &currentRoles).Error; err != nil {
+			return err
+		}
+		if req.Status != 1 || user.DeptID != req.DeptId || !sameUserRoles(currentRoles, req.Roles) {
+			if err := gbvideoshare.RevokeCreatorTx(c.Request.Context(), tx, user.ID, "creator_authority_changed", time.Time{}); err != nil {
+				return err
+			}
+		}
+
 		// 更新用户信息
 		user.Username = req.UserName
 		user.NickName = req.NickName
@@ -379,14 +413,10 @@ func (uc *UserController) Update(c *gin.Context) {
 			}
 		}
 
-		return nil
+		return permission.EditUserRoles(c.Request.Context(), user.ID, req.Roles)
 	})
 
 	if err != nil {
-		uc.FailAndAbort(c, "更新用户失败", err)
-	}
-
-	if err = uc.CasbinService.EditUserRoles(c.Request.Context(), user.ID, req.Roles); err != nil {
 		uc.FailAndAbort(c, "更新用户失败", err)
 	}
 
@@ -422,7 +452,10 @@ func (uc *UserController) Delete(c *gin.Context) {
 	}
 
 	// 使用事务删除用户和角色关联,并撤销该用户的全部会话。
-	err = app.DBContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+	err = uc.CasbinService.Transaction(c.Request.Context(), func(tx *gorm.DB, permission *service.PermissionService) error {
+		if err := gbvideoshare.RevokeCreatorTx(c.Request.Context(), tx, user.ID, "creator_deleted", time.Time{}); err != nil {
+			return err
+		}
 		if err := uc.revokeUserSessionsTx(tx, user.ID, "user_deleted"); err != nil {
 			return err
 		}
@@ -435,16 +468,13 @@ func (uc *UserController) Delete(c *gin.Context) {
 			return err
 		}
 
-		return nil
+		return permission.DeleteUserRoles(c.Request.Context(), user.ID, nil)
 	})
 
 	if err != nil {
 		uc.FailAndAbort(c, "删除用户失败", err)
 	}
 
-	if err = uc.CasbinService.DeleteUserRoles(c.Request.Context(), user.ID, nil); err != nil {
-		uc.FailAndAbort(c, "删除用户失败", err)
-	}
 	uc.SuccessWithMessage(c, "删除成功", nil)
 }
 
@@ -518,7 +548,7 @@ func (uc *UserController) UpdateAccount(c *gin.Context) {
 		user.Email = req.Email
 	}
 
-	if err := app.DBContext(c.Request.Context()).Save(user).Error; err != nil {
+	if err := app.DBContext(c.Request.Context()).Model(user).Select("password", "phone", "email").Updates(user).Error; err != nil {
 		uc.FailAndAbort(c, "更新用户信息失败", err)
 	}
 
@@ -576,7 +606,7 @@ func (uc *UserController) UploadAvatar(c *gin.Context) {
 
 	// 更新用户头像字段
 	user.Avatar = response.Url
-	if err := app.DBContext(c.Request.Context()).Save(user).Error; err != nil {
+	if err := app.DBContext(c.Request.Context()).Model(user).Select("avatar").Updates(user).Error; err != nil {
 		uc.FailAndAbort(c, "更新用户头像失败", err)
 	}
 
@@ -622,7 +652,7 @@ func (uc *UserController) UpdateBasicInfo(c *gin.Context) {
 	user.Sex = req.Sex
 	user.Description = req.Description
 
-	if err := app.DBContext(c.Request.Context()).Save(user).Error; err != nil {
+	if err := app.DBContext(c.Request.Context()).Model(user).Select("nick_name", "sex", "description").Updates(user).Error; err != nil {
 		uc.FailAndAbort(c, "更新用户基本信息失败", err)
 	}
 

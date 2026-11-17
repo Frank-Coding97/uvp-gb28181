@@ -220,7 +220,7 @@ func (s *Service) StopOnNoneReader(ctx context.Context, captured stream.LiveRef)
 			return false, nil
 		}
 	}
-	return s.StopIfCurrent(ctx, captured)
+	return s.coordinator().stopIfCurrent(ctx, captured, s.sourceHasLease)
 }
 
 // StopIfPersistedCurrent is the reconciler-safe stop entry point. When an

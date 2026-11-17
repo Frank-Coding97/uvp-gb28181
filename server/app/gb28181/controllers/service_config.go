@@ -145,29 +145,12 @@ func (v *VideoShareConfig) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-const defaultVideoShareTTLSeconds = 300
-
 func currentVideoShareConfig() *VideoShareConfig {
-	if app.ConfigYml == nil {
-		return &VideoShareConfig{TTLSeconds: defaultVideoShareTTLSeconds, fieldsPresent: true}
-	}
-	ttl := app.ConfigYml.GetInt(gbconfig.VideoShareTTLSecondsConfigKey)
-	if !validVideoShareTTLSeconds(ttl) {
-		ttl = defaultVideoShareTTLSeconds
-	}
 	return &VideoShareConfig{
-		DefaultEnabled: app.ConfigYml.GetBool(gbconfig.VideoShareDefaultEnabledConfigKey),
-		TTLSeconds:     ttl,
+		DefaultEnabled: gbconfig.VideoShareDefaultEnabled(),
+		TTLSeconds:     gbconfig.CurrentVideoShareTTLSeconds(),
 		fieldsPresent:  true,
 	}
-}
-
-func validVideoShareTTLSeconds(seconds int) bool {
-	if seconds <= 0 || seconds%60 != 0 {
-		return false
-	}
-	maxDurationSeconds := int64(^uint64(0)>>1) / int64(time.Second)
-	return int64(seconds) <= maxDurationSeconds
 }
 
 var playAuthRuntimeReady atomic.Bool
@@ -340,7 +323,7 @@ func validateServiceConfig(v ServiceConfig) error {
 	if err := gbconfig.ValidatePlayAuthSettings(v.PlayAuth, v.FixedAddressPlayback); err != nil {
 		return err
 	}
-	if v.VideoShare == nil || !v.VideoShare.fieldsPresent || !validVideoShareTTLSeconds(v.VideoShare.TTLSeconds) {
+	if v.VideoShare == nil || !v.VideoShare.fieldsPresent || !gbconfig.ValidVideoShareTTLSeconds(v.VideoShare.TTLSeconds) {
 		return errors.New("分享链接有效期必须为正整数分钟")
 	}
 	if err := gbconfig.ValidateRecordCacheTailToleranceSec(v.RecordCacheTailToleranceSec); err != nil {

@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 	basemodels "uvplatform.com/uvp-gb28181/app/models"
@@ -25,7 +26,7 @@ func TestHandleRegister_AutoCreatesDevice(t *testing.T) {
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbDeviceStatusEvent{}, &basemodels.SysDepartment{}))
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbDeviceStatusEvent{}, &gbmodels.GbDeviceVideoSharePolicy{}, &basemodels.SysDepartment{}))
 	app.GormDbMysql = db
 	app.ConfigYml = testConfig{}
 	require.NoError(t, db.Create(&basemodels.SysDepartment{
@@ -58,7 +59,7 @@ func TestHandleRegister_RejectsMissingDefaultOwnerDeptConfig(t *testing.T) {
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbDeviceStatusEvent{}, &basemodels.SysDepartment{}))
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbDeviceStatusEvent{}, &gbmodels.GbDeviceVideoSharePolicy{}, &basemodels.SysDepartment{}))
 	app.GormDbMysql = db
 	app.ConfigYml = testConfigWithoutDefaultDept{}
 
@@ -83,7 +84,7 @@ func TestHandleRegister_PreallocationRejectsUnknownDevice(t *testing.T) {
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbDeviceStatusEvent{}, &basemodels.SysDepartment{}))
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbDeviceStatusEvent{}, &gbmodels.GbDeviceVideoSharePolicy{}, &basemodels.SysDepartment{}))
 	app.GormDbMysql = db
 	app.ConfigYml = preallocationTestConfig{enabled: true}
 
@@ -105,7 +106,7 @@ func TestHandleRegister_PreallocationAllowsExistingDevice(t *testing.T) {
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbDeviceStatusEvent{}, &basemodels.SysDepartment{}))
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbDeviceStatusEvent{}, &gbmodels.GbDeviceVideoSharePolicy{}, &basemodels.SysDepartment{}))
 	app.GormDbMysql = db
 	app.ConfigYml = preallocationTestConfig{enabled: true}
 	require.NoError(t, db.Create(&gbmodels.GbDevice{DeviceID: "34020000002000000004", Status: gbmodels.DeviceStatusOffline, OwnerDeptID: 9}).Error)
@@ -120,6 +121,44 @@ func TestHandleRegister_PreallocationAllowsExistingDevice(t *testing.T) {
 }
 
 type testConfig struct{}
+
+func TestHandleRegisterSnapshotsVideoShareDefaultOnlyOnce(t *testing.T) {
+	prevDB := app.GormDbMysql
+	prevConfig := app.ConfigYml
+	t.Cleanup(func() { app.GormDbMysql, app.ConfigYml = prevDB, prevConfig })
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbDeviceStatusEvent{}, &gbmodels.GbDeviceVideoSharePolicy{}, &basemodels.SysDepartment{}))
+	app.GormDbMysql = db
+	app.ConfigYml = videoShareDefaultTestConfig{enabled: true}
+	require.NoError(t, db.Create(&basemodels.SysDepartment{BaseModel: basemodels.BaseModel{ID: 1}, Name: "接入池"}).Error)
+
+	deviceID := "34020000002000000005"
+	_, err = HandleRegister(context.Background(), RegisterInfo{DeviceID: deviceID, Expires: 3600}, 60)
+	require.NoError(t, err)
+	app.ConfigYml = videoShareDefaultTestConfig{enabled: false}
+	_, err = HandleRegister(context.Background(), RegisterInfo{DeviceID: deviceID, Expires: 3600}, 60)
+	require.NoError(t, err)
+
+	var policies []gbmodels.GbDeviceVideoSharePolicy
+	require.NoError(t, db.Find(&policies).Error)
+	require.Len(t, policies, 1)
+	require.True(t, policies[0].DefaultEnabled)
+	require.Equal(t, "config", policies[0].Source)
+	require.False(t, policies[0].InitializedAt.IsZero())
+}
+
+type videoShareDefaultTestConfig struct {
+	testConfig
+	enabled bool
+}
+
+func (c videoShareDefaultTestConfig) GetBool(key string) bool {
+	if key == gbconfig.VideoShareDefaultEnabledConfigKey {
+		return c.enabled
+	}
+	return false
+}
 
 func (testConfig) ConfigFileChangeListen(...func()) {}
 func (testConfig) Get(string) interface{}           { return nil }

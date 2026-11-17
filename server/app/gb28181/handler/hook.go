@@ -21,6 +21,7 @@ import (
 	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.com/uvp-gb28181/app/gb28181/recording"
 	"uvplatform.com/uvp-gb28181/app/gb28181/stream"
+	"uvplatform.com/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/management"
 	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 	"uvplatform.com/uvp-gb28181/app/global/app"
@@ -582,10 +583,13 @@ func (h *HookController) OnStreamNoneReader(c *gin.Context) {
 
 	_, _, fixedErr := play.ParseFixedStreamID(body.Stream)
 	isFixedLive := body.App == "rtp" && fixedErr == nil
+	_, generationAware := h.stopper.(GenerationPlayStopper)
+	_, decimalErr := strconv.ParseUint(body.Stream, 10, 32)
+	dynamicLive := (len(body.Stream) == 10 && decimalErr == nil) || zlm.IsSinglePortStreamID(body.Stream)
 	asyncContext := hookAsyncContext(c)
-	if closeStream && isFixedLive {
-		// 固定 stream ID 会跨代复用，不能让 ZLM 按裸 stream 名立即关闭。
-		// 捕获当前代并由 service 复查 readerCount 后执行条件清理。
+	if closeStream && body.App == "rtp" && (isFixedLive || (generationAware && dynamicLive)) {
+		// GB live sources use the same generation-bound stop and consumer
+		// lease check, including dynamic streams still completing a start.
 		closeStream = false
 		if !policyFailed {
 			if stopper, ok := h.stopper.(GenerationPlayStopper); ok {

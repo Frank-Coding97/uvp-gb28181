@@ -3,6 +3,7 @@ package assign
 import (
 	"context"
 	"testing"
+	"uvplatform.com/uvp-gb28181/app/utils/authoritytx"
 
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -23,6 +24,8 @@ func newAssignTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&authoritytx.Gate{}))
+	require.NoError(t, db.Create(&authoritytx.Gate{ID: 1}).Error)
 	require.NoError(t, db.AutoMigrate(
 		&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &gbmodels.GbRecordingFile{},
 		&gbmodels.GbAlarmResource{}, &gbmodels.GbAnomalyRecord{},

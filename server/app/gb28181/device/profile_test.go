@@ -97,7 +97,7 @@ func newProfileTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(
 		&gbmodels.GbDevice{}, &gbmodels.GbDeviceStatusEvent{}, &gbmodels.GbChannel{},
-		&gbmodels.GbPTZOperation{}, &basemodels.SysDepartment{},
+		&gbmodels.GbPTZOperation{}, &gbmodels.GbDeviceVideoSharePolicy{}, &basemodels.SysDepartment{},
 	))
 	app.GormDbMysql = db
 	app.ConfigYml = testConfig{}

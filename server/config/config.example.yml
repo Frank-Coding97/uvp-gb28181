@@ -497,6 +497,9 @@ gb28181:
       ttl_seconds: 120            # 播放凭证有效期，前端可配置 60-3600 秒
       active_key: ""              # 首次完成 SIP 引导时由服务端自动生成；不得复用 JWT/ZLM secret
       previous_key: ""            # 密钥轮换宽限期旧密钥，可留空
+  video_share:
+    default_enabled: false        # 新设备首次成功注册时是否默认开启通道分享
+    ttl_seconds: 300              # 分享链接统一有效期，正整数分钟，默认 5 分钟
   recording:
     # 云端录像计划总开关。⚠️ 缺省为 true —— 代码判 `Get()==nil || GetBool()`，
     # 只有显式写 false 才是关闭；想关必须写出来，删掉整行反而开启

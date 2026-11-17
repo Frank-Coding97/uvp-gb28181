@@ -3,6 +3,7 @@ package controllers
 import (
 	"errors"
 	"strconv"
+	"uvplatform.com/uvp-gb28181/app/utils/authoritytx"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -150,6 +151,9 @@ func (dc *DeviceMgmtController) BatchDeleteChannels(c *gin.Context) {
 // 唯一索引,设备再次 REGISTER 时 Upsert 会撞索引报 Duplicate entry。
 func (dc *DeviceMgmtController) deleteDeviceByID(c *gin.Context, db *gorm.DB, id uint) error {
 	return db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := authoritytx.Acquire(c.Request.Context(), tx); err != nil {
+			return err
+		}
 		// 1. 查设备(dept-scoped)
 		var dev gbmodels.GbDevice
 		res := tx.Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&dev)
@@ -268,6 +272,9 @@ func (dc *DeviceMgmtController) deleteDeviceByID(c *gin.Context, db *gorm.DB, id
 // deleteChannelByID 事务内物理删除单个通道及其级联数据
 func (dc *DeviceMgmtController) deleteChannelByID(c *gin.Context, db *gorm.DB, id uint) error {
 	return db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := authoritytx.Acquire(c.Request.Context(), tx); err != nil {
+			return err
+		}
 		// 1. 查通道(dept-scoped)
 		var ch gbmodels.GbChannel
 		res := tx.Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&ch)

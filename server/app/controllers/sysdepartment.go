@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"fmt"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 	"uvplatform.com/uvp-gb28181/app/models"
 	"uvplatform.com/uvp-gb28181/app/service"
@@ -195,7 +196,22 @@ func (sc *SysDepartmentController) Delete(c *gin.Context) {
 	}
 
 	// 软删除部门
-	err = dept.Delete(c.Request.Context())
+	err = service.NewPermissionService().Transaction(c.Request.Context(), func(tx *gorm.DB, _ *service.PermissionService) error {
+		var count int64
+		if err := tx.Model(&models.User{}).Where("dept_id = ?", req.ID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != 0 {
+			return fmt.Errorf("存在用户关联此部门，无法删除")
+		}
+		if err := tx.Model(&models.SysDepartment{}).Where("parent_id = ?", req.ID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != 0 {
+			return fmt.Errorf("存在子部门，无法删除")
+		}
+		return tx.Where("id = ?", req.ID).Delete(&models.SysDepartment{}).Error
+	})
 	if err != nil {
 		sc.FailAndAbort(c, "删除部门失败", err)
 	}

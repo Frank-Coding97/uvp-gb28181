@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
@@ -53,6 +54,7 @@ func HandleRegister(ctx context.Context, info RegisterInfo, keepaliveInterval in
 			return ErrDeviceNotPreallocated
 		}
 		isFirst = existing == nil || existing.Status != gbmodels.DeviceStatusOnline
+		firstSuccessfulRegister := existing == nil || existing.RegisterTime == nil || existing.RegisterTime.IsZero()
 		profile := resolveRegisterProfile(existing, info.ReportedVersion)
 
 		d := &gbmodels.GbDevice{
@@ -87,6 +89,15 @@ func HandleRegister(ctx context.Context, info RegisterInfo, keepaliveInterval in
 		}
 		if err := gbmodels.UpsertWithDB(ctx, tx, d); err != nil {
 			return fmt.Errorf("自动建档失败: %w", err)
+		}
+		if firstSuccessfulRegister {
+			policy := &gbmodels.GbDeviceVideoSharePolicy{
+				DevicePK: d.ID, DefaultEnabled: gbconfig.VideoShareDefaultEnabled(), Source: "config",
+				PolicyRevision: 0, InitializedAt: now,
+			}
+			if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "device_pk"}}, DoNothing: true}).Create(policy).Error; err != nil {
+				return fmt.Errorf("保存设备分享策略快照失败: %w", err)
+			}
 		}
 
 		eventType := gbmodels.DeviceEventRegisterRenewed

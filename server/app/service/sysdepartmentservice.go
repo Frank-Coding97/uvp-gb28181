@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+
 	"uvplatform.com/uvp-gb28181/app/models"
 
 	"gorm.io/gorm"
@@ -72,7 +73,33 @@ func (s *SysDepartmentService) Update(c context.Context, req *models.SysDepartme
 	dept.Sort = req.Sort
 	dept.Describe = req.Describe
 
-	err = dept.Update(c)
+	err = NewPermissionService().Transaction(c, func(tx *gorm.DB, _ *PermissionService) error {
+		var current models.SysDepartment
+		found := tx.Where("id = ?", req.ID).Take(&current)
+		if found.Error != nil {
+			return found.Error
+		}
+		if found.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		seen := map[uint]bool{req.ID: true}
+		for parent := req.ParentID; parent != nil && *parent != 0; {
+			if seen[*parent] {
+				return errors.New("不能设置为父级部门：会导致循环引用")
+			}
+			seen[*parent] = true
+			var row models.SysDepartment
+			result := tx.Select("id,parent_id").Where("id = ?", *parent).Take(&row)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return gorm.ErrRecordNotFound
+			}
+			parent = row.ParentID
+		}
+		return tx.Model(dept).Select("parent_id", "name", "status", "leader", "phone", "email", "sort", "describe").Updates(dept).Error
+	})
 	if err != nil {
 		return nil, err
 	}

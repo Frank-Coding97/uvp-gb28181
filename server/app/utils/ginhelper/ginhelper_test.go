@@ -34,3 +34,26 @@ func TestAccessLoggerRedactsPlaybackCredentialsWithoutChangingRequest(t *testing
 		t.Fatalf("access log retained query: %s", logged)
 	}
 }
+
+func TestAccessLoggerRedactsVideoShareViewerTokenWithoutChangingRequest(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router, output := loggingRouter(t)
+	router.GET("/api/public/video-share/viewers/:viewerToken/live.flv", func(c *gin.Context) {
+		if c.Param("viewerToken") != "viewer-secret" {
+			t.Fatalf("handler path was modified: %s", c.Request.URL.Path)
+		}
+		c.Status(http.StatusNoContent)
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/api/public/video-share/viewers/viewer-secret/live.flv", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	loggedBytes, _ := json.Marshal(output.rows(t))
+	if bytes.Contains(loggedBytes, []byte("viewer-secret")) {
+		t.Fatalf("access log leaked viewer token: %s", loggedBytes)
+	}
+	if got := redactAccessLogPath("/api/public/video-share/viewers/viewer-secret/live.flv"); got != "/api/public/video-share/viewers/REDACTED" {
+		t.Fatalf("unexpected redacted media path: %s", got)
+	}
+}

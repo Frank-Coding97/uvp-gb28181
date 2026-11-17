@@ -508,6 +508,28 @@ func SaveAlarmMessages() bool {
 	return SaveAlarmMessagesFrom(app.ConfigYml)
 }
 
+// VideoShareDefaultEnabled reads the global default used only when a device
+// completes its first successful registration.
+func VideoShareDefaultEnabled() bool {
+	return app.ConfigYml != nil && app.ConfigYml.GetBool(VideoShareDefaultEnabledConfigKey)
+}
+
+const DefaultVideoShareTTLSeconds = 300
+
+func ValidVideoShareTTLSeconds(seconds int) bool {
+	return seconds > 0 && seconds%60 == 0 && int64(seconds) <= int64(^uint64(0)>>1)/int64(time.Second)
+}
+
+// CurrentVideoShareTTLSeconds also supplies the default for upgraded config files.
+func CurrentVideoShareTTLSeconds() int {
+	if app.ConfigYml != nil {
+		if seconds := app.ConfigYml.GetInt(VideoShareTTLSecondsConfigKey); ValidVideoShareTTLSeconds(seconds) {
+			return seconds
+		}
+	}
+	return DefaultVideoShareTTLSeconds
+}
+
 // AlarmPopupEnabledFrom 返回是否把收到的报警实时推给前端浮层。
 //
 // 默认**开启**（缺省或未配置该键一律视为开启）：这是一条纯提示、不改任何数据，

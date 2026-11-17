@@ -3,6 +3,7 @@ package grant
 import (
 	"context"
 	"testing"
+	"uvplatform.com/uvp-gb28181/app/utils/authoritytx"
 
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -18,6 +19,8 @@ func newGrantServiceTestDB(t *testing.T) *gorm.DB {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	installNotDataMask(db)
+	require.NoError(t, db.AutoMigrate(&authoritytx.Gate{}))
+	require.NoError(t, db.Create(&authoritytx.Gate{ID: 1}).Error)
 	require.NoError(t, db.AutoMigrate(
 		&gbmodels.GbDevice{},
 		&gbmodels.GbDeviceGrant{},

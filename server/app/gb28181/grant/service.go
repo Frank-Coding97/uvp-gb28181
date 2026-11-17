@@ -56,12 +56,28 @@ type TargetPage struct {
 }
 
 type Service struct {
-	db    *gorm.DB
-	scope DeviceScope
+	db                  *gorm.DB
+	scope               DeviceScope
+	shareRevoker        ShareRevoker
+	ownerAccessResolver OwnerAccessResolver
 }
+
+type ShareRevoker func(context.Context, *gorm.DB, []uint) error
+
+type OwnerAccessResolver func(context.Context, *gorm.DB, uint) (datascope.OwnerDeptAccess, error)
 
 func NewService(db *gorm.DB, scope DeviceScope) *Service {
 	return &Service{db: db, scope: scope}
+}
+
+func (s *Service) SetShareRevoker(revoker ShareRevoker) {
+	s.shareRevoker = revoker
+}
+
+// SetOwnerAccessResolver enables authoritative add-target checks in the same
+// transaction and after the authority gate. Configure before using the service.
+func (s *Service) SetOwnerAccessResolver(resolver OwnerAccessResolver) {
+	s.ownerAccessResolver = resolver
 }
 
 func (s *Service) Query(ctx context.Context, deviceIDs []uint) (QueryResult, error) {

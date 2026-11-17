@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"uvplatform.com/uvp-gb28181/app/utils/authoritytx"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -113,6 +114,22 @@ func (s *Service) Apply(ctx context.Context, request ApplyRequest, access datasc
 func (s *Service) applyOne(ctx context.Context, input ApplyDevice, mode ApplyMode, targets []ApplyTarget, createdBy uint, access datascope.OwnerDeptAccess) ApplyResultItem {
 	item := ApplyResultItem{DeviceID: input.DeviceID, Status: applyStatusFailed}
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := authoritytx.Acquire(ctx, tx); err != nil {
+			return err
+		}
+		if mode == ApplyModeAdd && s.ownerAccessResolver != nil {
+			if createdBy == 0 {
+				return errApplyNotVisible
+			}
+			currentAccess, err := s.ownerAccessResolver(ctx, tx, createdBy)
+			if errors.Is(err, datascope.ErrOwnerDeptAccessDenied) {
+				return errApplyNotVisible
+			}
+			if err != nil {
+				return err
+			}
+			access = currentAccess
+		}
 		deviceQuery := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Model(&gbmodels.GbDevice{})
 		if s.scope != nil {
 			deviceQuery = deviceQuery.Scopes(s.scope)
@@ -142,6 +159,7 @@ func (s *Service) applyOne(ctx context.Context, input ApplyDevice, mode ApplyMod
 		if input.ExpectedRevision == "" || input.ExpectedRevision != item.Revision {
 			return errApplyStale
 		}
+		var affectedCreators []uint
 		if mode == ApplyModeAdd {
 			if err := validateAddTargets(tx, targets, access); err != nil {
 				return err
@@ -158,6 +176,11 @@ func (s *Service) applyOne(ctx context.Context, input ApplyDevice, mode ApplyMod
 				}
 			}
 		} else {
+			var err error
+			affectedCreators, err = creatorIDsForTargets(tx, targets)
+			if err != nil {
+				return err
+			}
 			for _, target := range targets {
 				removed, err := removeGrant(tx, input.DeviceID, target)
 				if err != nil {
@@ -167,6 +190,11 @@ func (s *Service) applyOne(ctx context.Context, input ApplyDevice, mode ApplyMod
 					item.Removed++
 				} else {
 					item.Skipped++
+				}
+			}
+			if s.shareRevoker != nil && item.Removed > 0 {
+				if err := s.shareRevoker(ctx, tx, affectedCreators); err != nil {
+					return err
 				}
 			}
 		}
@@ -201,6 +229,32 @@ func (s *Service) applyOne(ctx context.Context, input ApplyDevice, mode ApplyMod
 	item.Status = applyStatusSkipped
 	item.Message = "共享授权无需变更"
 	return item
+}
+
+func creatorIDsForTargets(tx *gorm.DB, targets []ApplyTarget) ([]uint, error) {
+	userIDs := make(map[uint]struct{})
+	departmentIDs := make([]uint, 0)
+	for _, target := range targets {
+		if target.Type == gbmodels.GrantTargetTypeUser {
+			userIDs[target.ID] = struct{}{}
+		} else if target.Type == gbmodels.GrantTargetTypeDept {
+			departmentIDs = append(departmentIDs, target.ID)
+		}
+	}
+	if len(departmentIDs) > 0 {
+		var members []uint
+		if err := tx.Model(&basemodels.User{}).Where("dept_id IN ?", departmentIDs).Pluck("id", &members).Error; err != nil {
+			return nil, err
+		}
+		for _, id := range members {
+			userIDs[id] = struct{}{}
+		}
+	}
+	result := make([]uint, 0, len(userIDs))
+	for id := range userIDs {
+		result = append(result, id)
+	}
+	return result, nil
 }
 
 func grantsForUpdate(tx *gorm.DB, deviceID uint) ([]gbmodels.GbDeviceGrant, error) {

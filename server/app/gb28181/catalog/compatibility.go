@@ -3,9 +3,11 @@ package catalog
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/videoshare"
 )
 
 // Parents are ingested before their children even when a device reverses the list.
@@ -122,6 +124,9 @@ func reconcileCatalogIdentity(tx *gorm.DB, sender Sender, it CatalogItem, cls Cl
 			if err := tx.Where("owner_dept_id = ? AND channel_id = ? AND mount_source = ?", sender.OwnerDeptID, ch.ID, gbmodels.MountSourceCatalog).Delete(&gbmodels.GbChannelMount{}).Error; err != nil {
 				return err
 			}
+			if err := revokeChannelShare(tx, ch.ID, "catalog_identity_changed"); err != nil {
+				return err
+			}
 			if err := tx.Delete(&ch).Error; err != nil {
 				return err
 			}
@@ -201,6 +206,31 @@ func reconcileCatalogIdentity(tx *gorm.DB, sender Sender, it CatalogItem, cls Cl
 			continue
 		}
 		if err := tx.Model(&node).Updates(map[string]any{"source_device_id": strings.TrimSpace(sender.SourceDeviceID), "node_type": cls.NodeType, "channel_id": nil, "device_id": nil, "parent_id": parentID, "path": path, "depth": DepthFromPath(parentPath)}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// The caller holds the authority gate before reading catalog identity. Retire
+// both activated and pending generations in the resource-removal transaction.
+func revokeChannelShare(tx *gorm.DB, channelPK uint, reason string) error {
+	now := time.Now().UTC()
+	var shares []gbmodels.GbChannelVideoShare
+	if err := tx.Where("channel_pk = ? AND enabled = ? AND revoked_at IS NULL", channelPK, true).Find(&shares).Error; err != nil {
+		return err
+	}
+	updated := tx.Model(&gbmodels.GbChannelVideoShare{}).
+		Where("channel_pk = ? AND enabled = ? AND revoked_at IS NULL", channelPK, true).
+		Updates(map[string]any{
+			"enabled": false, "revoked_at": now, "revoke_reason": reason,
+			"revision": gorm.Expr("revision + 1"), "updated_at": now,
+		}).Error
+	if updated != nil {
+		return updated
+	}
+	for i := range shares {
+		if err := videoshare.RecordAuditTx(tx.Statement.Context, tx, "video_share.revoked", 0, &shares[i]); err != nil {
 			return err
 		}
 	}

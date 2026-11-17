@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+	"uvplatform.com/uvp-gb28181/app/utils/authoritytx"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -64,6 +65,8 @@ func newDeviceMgmtRouter(t *testing.T, middlewares ...gin.HandlerFunc) (*gin.Eng
 	app.Response = response.NewResponseHandler()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&authoritytx.Gate{}))
+	require.NoError(t, db.Create(&authoritytx.Gate{ID: 1}).Error)
 	require.NoError(t, db.AutoMigrate(
 		&gbmodels.GbCatalogNode{},
 		&gbmodels.GbChannelMount{},
@@ -84,6 +87,7 @@ func newDeviceMgmtRouter(t *testing.T, middlewares ...gin.HandlerFunc) (*gin.Eng
 		&basemodels.SysUserRole{},
 		&basemodels.User{},
 		&gbmodels.GbDeviceGrant{},
+		&gbmodels.GbChannelVideoShare{},
 		&cascademodel.GbCascadePlatform{},
 		&cascademodel.GbCascadeDeviceProjection{},
 		&cascademodel.GbCascadeChannelProjection{},

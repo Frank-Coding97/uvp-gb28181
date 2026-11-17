@@ -30,6 +30,7 @@ import (
 	"uvplatform.com/uvp-gb28181/app/gb28181/streamprobe"
 	"uvplatform.com/uvp-gb28181/app/gb28181/talk"
 	"uvplatform.com/uvp-gb28181/app/gb28181/upgrade"
+	"uvplatform.com/uvp-gb28181/app/gb28181/videoshare"
 	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 	"uvplatform.com/uvp-gb28181/app/openapi/devicecatalog"
@@ -50,6 +51,8 @@ var mapController = gbcontrollers.NewMapController()
 var alarmController = gbcontrollers.NewAlarmController()
 var channelFavoriteController = gbcontrollers.NewChannelFavoriteController()
 var homeDashboardController = gbcontrollers.NewHomeDashboardController()
+var videoShareController atomic.Pointer[gbcontrollers.VideoShareController]
+var publicVideoShareController atomic.Pointer[gbcontrollers.PublicVideoShareController]
 
 // streamNotifier 全局流就绪事件分发器(hook 端点 publish,点播 service 订阅)
 var streamNotifier = stream.NewNotifier()
@@ -96,6 +99,7 @@ var sourceLeaseMu sync.Mutex
 var cascadeSourceLeaseChecker gbhandler.SourceLeaseChecker
 var recordingPlanSourceLeaseChecker gbhandler.SourceLeaseChecker
 var recordCacheSourceLeaseChecker gbhandler.SourceLeaseChecker
+var videoShareSourceLeaseChecker gbhandler.SourceLeaseChecker
 var streamObserverMu sync.Mutex
 var recordingStreamObserver gbhandler.StreamObserver
 var recordingPlanStreamObserver gbhandler.StreamObserver
@@ -117,6 +121,8 @@ func init() {
 	talkController.Store(gbcontrollers.NewTalkController(nil))
 	cloudRecordingCatalogController.Store(gbcontrollers.NewCloudRecordingCatalogController(nil))
 	deviceTrafficController.Store(gbcontrollers.NewDeviceTrafficController(nil, nil, nil, nil))
+	videoShareController.Store(gbcontrollers.NewVideoShareController(nil))
+	publicVideoShareController.Store(gbcontrollers.NewPublicVideoShareController(nil))
 }
 
 // zlmNodeController ZLM 节点 CRUD(注入式:bootstrap M1.6 装配 NodeService 后通过 SetZLMNodeController 注入)
@@ -150,6 +156,21 @@ func SetServiceConfigSIPTraceRuntimeProvider(provider gbcontrollers.SIPTraceRunt
 
 func SetServiceConfigPlayAuthTTLUpdater(updater gbcontrollers.PlayAuthTTLUpdater) {
 	serviceConfigController.SetPlayAuthTTLUpdater(updater)
+}
+
+func SetVideoShareManager(manager gbcontrollers.VideoShareManager) {
+	videoShareController.Store(gbcontrollers.NewVideoShareController(manager))
+	if batch, ok := manager.(interface {
+		BatchStatus(context.Context, []uint, uint) (map[uint]videoshare.StatusSummary, error)
+	}); ok {
+		deviceMgmtController.SetVideoShareBatchStatus(batch.BatchStatus)
+	} else {
+		deviceMgmtController.SetVideoShareBatchStatus(nil)
+	}
+}
+
+func SetPublicVideoShareResolver(resolver gbcontrollers.PublicVideoShareResolver) {
+	publicVideoShareController.Store(gbcontrollers.NewPublicVideoShareController(resolver))
 }
 
 func SetPlatformController(controller *gbcontrollers.PlatformController) {
@@ -246,6 +267,9 @@ func currentTraceController() *gbcontrollers.TraceController {
 // 同时把 service 注入到 hookController(无人观看 / RTP 超时 自动断流)
 func SetPlayService(svc *gbplay.Service) {
 	playService = svc
+	sourceLeaseMu.Lock()
+	applySourceLeaseCheckers()
+	sourceLeaseMu.Unlock()
 	rebuildPlayController()
 	if svc == nil {
 		hookController.SetPlayStopper(nil)
@@ -440,6 +464,13 @@ func SetRecordCacheSourceLeaseChecker(checker gbhandler.SourceLeaseChecker) {
 	sourceLeaseMu.Unlock()
 }
 
+func SetVideoShareSourceLeaseChecker(checker gbhandler.SourceLeaseChecker) {
+	sourceLeaseMu.Lock()
+	videoShareSourceLeaseChecker = checker
+	applySourceLeaseCheckers()
+	sourceLeaseMu.Unlock()
+}
+
 // OtherConsumerSourceLeaseChecker reports leases owned outside scheduled recording.
 // The plan orchestrator uses this before releasing its own lease.
 func OtherConsumerSourceLeaseChecker() gbhandler.SourceLeaseChecker {
@@ -450,16 +481,20 @@ type otherConsumerSourceLeaseChecker struct{}
 
 func (otherConsumerSourceLeaseChecker) HasLease(streamID string) bool {
 	sourceLeaseMu.Lock()
-	checkers := gbhandler.CombinedSourceLeaseChecker{cascadeSourceLeaseChecker, recordCacheSourceLeaseChecker}
+	checkers := gbhandler.CombinedSourceLeaseChecker{cascadeSourceLeaseChecker, recordCacheSourceLeaseChecker, videoShareSourceLeaseChecker}
 	sourceLeaseMu.Unlock()
 	return checkers.HasLease(streamID)
 }
 
 func applySourceLeaseCheckers() {
-	hookController.SetSourceLeaseChecker(gbhandler.CombinedSourceLeaseChecker{
-		cascadeSourceLeaseChecker, recordingPlanSourceLeaseChecker,
+	checkers := gbhandler.CombinedSourceLeaseChecker{
+		cascadeSourceLeaseChecker, recordingPlanSourceLeaseChecker, videoShareSourceLeaseChecker,
 		recordCacheSourceLeaseChecker,
-	})
+	}
+	hookController.SetSourceLeaseChecker(checkers)
+	if playService != nil {
+		playService.SetSourceLeaseChecker(checkers)
+	}
 }
 
 // SetDeviceMgmtCatalogTrigger 由 bootstrap 在 SIP UAC 就绪后注入
@@ -704,6 +739,13 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			favorites.POST("/:id/channels", channelFavoriteController.Append)
 			favorites.DELETE("/:id/channels", channelFavoriteController.Remove)
 			favorites.DELETE("/:id", channelFavoriteController.Delete)
+		}
+		channelShares := gb.Group("/channel-shares/:id")
+		{
+			channelShares.GET("", func(c *gin.Context) { videoShareController.Load().Status(c) })
+			channelShares.PUT("", func(c *gin.Context) { videoShareController.Load().SetEnabled(c) })
+			channelShares.POST("/link", func(c *gin.Context) { videoShareController.Load().AcquireLink(c) })
+			channelShares.POST("/regenerate", func(c *gin.Context) { videoShareController.Load().Regenerate(c) })
 		}
 		cloudRecordings := gb.Group("/cloud-recordings")
 		{
@@ -1076,6 +1118,9 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 // operation-log middleware. Capability verification is performed by the
 // controller on every request; JWT and query-logging middleware are omitted.
 func RegisterContentRoutes(engine *gin.Engine) {
+	engine.GET("/api/public/video-share/viewers/:viewerToken/live.flv", func(c *gin.Context) { publicVideoShareController.Load().ServeHTTPFLV(c) })
+	engine.GET("/api/public/video-share/viewers/:viewerToken/hls/index.m3u8", func(c *gin.Context) { publicVideoShareController.Load().ServeHLS(c) })
+	engine.GET("/api/public/video-share/viewers/:viewerToken/hls/:resourceID", func(c *gin.Context) { publicVideoShareController.Load().ServeHLS(c) })
 	engine.POST("/api/gb28181/cascade-snapshots/uploads/*token", serveCascadeSnapshotUpload)
 	engine.PUT("/api/gb28181/cascade-snapshots/uploads/*token", serveCascadeSnapshotUpload)
 	// ⛔ 上传路由必须**同时**吃下三种形状，否则真机的报文连路由都进不去：
@@ -1245,6 +1290,10 @@ func RegisterHookRoutes(engine *gin.Engine) {
 // JWT / Casbin.设备端没有登录态,一次性 token 是唯一凭据.
 func RegisterPublicRoutes(public *gin.RouterGroup) {
 	public.POST("/gb28181/sip/qr/exchange", func(c *gin.Context) { qrController.Exchange(c) })
+	public.POST("/public/video-share/resolve", gbcontrollers.PublicVideoShareAdmission(), func(c *gin.Context) { publicVideoShareController.Load().Resolve(c) })
+	public.POST("/public/video-share/viewers", gbcontrollers.PublicVideoShareAdmission(), func(c *gin.Context) { publicVideoShareController.Load().CreateViewer(c) })
+	public.POST("/public/video-share/viewers/status", func(c *gin.Context) { publicVideoShareController.Load().ViewerStatus(c) })
+	public.DELETE("/public/video-share/viewers/:viewerToken", func(c *gin.Context) { publicVideoShareController.Load().CloseViewer(c) })
 }
 
 // RegisterQRLandingRoute 注册扫码引导页到 engine 根(无 /api 前缀,无鉴权).

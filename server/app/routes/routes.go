@@ -68,6 +68,13 @@ func InitRoutes(engine *gin.Engine) *openapiauth.Gateway {
 	if app.ConfigYml.GetBool("httpserver.allowcrossdomain") {
 		engine.Use(middleware.CorsNext())
 	}
+	engine.Use(func(c *gin.Context) {
+		if c.Request.URL.Path == "/share.html" {
+			c.Header("Referrer-Policy", "no-referrer")
+			c.Header("Content-Security-Policy", "frame-ancestors *")
+		}
+		c.Next()
+	})
 
 	// 静态文件
 	engine.Static(app.ConfigYml.GetString("httpserver.serverrootpath"), app.ConfigYml.GetString("httpserver.serverroot"))

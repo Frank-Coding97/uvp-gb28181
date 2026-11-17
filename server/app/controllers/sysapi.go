@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"fmt"
 	"strconv"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 	"uvplatform.com/uvp-gb28181/app/models"
@@ -226,13 +227,18 @@ func (sc *SysApiController) Update(c *gin.Context) {
 	api.Method = req.Method
 	api.ApiGroup = req.ApiGroup
 
-	err = app.DBContext(c.Request.Context()).Save(api).Error
+	err = sc.CasbinService.Transaction(c.Request.Context(), func(tx *gorm.DB, permission *service.PermissionService) error {
+		updated := tx.Model(&models.SysApi{}).Where("id = ?", req.ID).Updates(map[string]any{"title": req.Title, "path": req.Path, "method": req.Method, "api_group": req.ApiGroup})
+		if updated.Error != nil {
+			return updated.Error
+		}
+		if updated.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		return permission.UpdateRoleApiPermissionsByApiID(c.Request.Context(), req.ID)
+	})
 	if err != nil {
 		sc.FailAndAbort(c, "更新API失败", err)
-	}
-	err = sc.CasbinService.UpdateRoleApiPermissionsByApiID(c.Request.Context(), req.ID)
-	if err != nil {
-		sc.FailAndAbort(c, "更新角色API权限失败", err)
 	}
 	sc.SuccessWithMessage(c, "API更新成功", api)
 }
@@ -277,23 +283,21 @@ func (sc *SysApiController) Delete(c *gin.Context) {
 		sc.FailAndAbort(c, "该API已被菜单关联，无法删除", nil)
 	}
 
-	// 软删除API
-	err = app.DBContext(c.Request.Context()).Where("id = ?", req.ID).Delete(api).Error
+	err = sc.CasbinService.Transaction(c.Request.Context(), func(tx *gorm.DB, permission *service.PermissionService) error {
+		var count int64
+		if err := tx.Model(&models.SysMenuApi{}).Where("api_id = ?", req.ID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != 0 {
+			return fmt.Errorf("该API已被菜单关联，无法删除")
+		}
+		if err := tx.Where("id = ?", req.ID).Delete(&models.SysApi{}).Error; err != nil {
+			return err
+		}
+		return permission.UpdateRoleApiPermissionsByApiID(c.Request.Context(), req.ID)
+	})
 	if err != nil {
 		sc.FailAndAbort(c, "删除API失败", err)
 	}
-
-	// 刷新角色API权限
-	err = sc.CasbinService.UpdateRoleApiPermissionsByApiID(c.Request.Context(), req.ID)
-	if err != nil {
-		sc.FailAndAbort(c, "更新角色API权限失败", err)
-	}
-
-	// 移除菜单与API的关联（虽然上面已经检查了没有关联，但为了安全起见还是执行一下）
-	err = app.DBContext(c.Request.Context()).Where("api_id = ?", req.ID).Delete(&models.SysMenuApi{}).Error
-	if err != nil {
-		sc.FailAndAbort(c, "删除菜单API关联失败", err)
-	}
-
 	sc.SuccessWithMessage(c, "API删除成功", nil)
 }

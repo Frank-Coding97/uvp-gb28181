@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 
 	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/gb28181/videoshare"
 )
 
 // CivilCodeLookup 行政区划字典查询接口(解耦 civilcode.Service)
@@ -215,6 +217,24 @@ func upsertChannel(
 		}
 		if err := db.WithContext(ctx).Model(&ch).UpdateColumns(postCreateUpdates).Error; err != nil {
 			return nil, nil, err
+		}
+		if db.Migrator().HasTable(&gbmodels.GbDeviceVideoSharePolicy{}) {
+			var policy gbmodels.GbDeviceVideoSharePolicy
+			if err := db.WithContext(ctx).Where("device_pk = (SELECT id FROM gb_device WHERE device_id = ?)", sourceDeviceID).Take(&policy).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil, err
+			} else if err == nil && policy.DefaultEnabled {
+				var device struct {
+					ID          uint
+					DeviceID    string
+					AccessEpoch uint64
+				}
+				if err := db.WithContext(ctx).Table("gb_device").Select("id, device_id, access_epoch").Where("device_id = ?", sourceDeviceID).Take(&device).Error; err != nil {
+					return nil, nil, err
+				}
+				if err := videoshare.EnsurePendingInTx(ctx, db, ch.ID, device.ID, device.DeviceID, device.AccessEpoch, policy.PolicyActorID, policy.PolicyRevision); err != nil {
+					return nil, nil, err
+				}
+			}
 		}
 	} else {
 		updates := map[string]any{

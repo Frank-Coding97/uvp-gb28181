@@ -262,7 +262,7 @@ func (s *SysMenuService) Import(c *gin.Context, menuList models.SysMenuList, use
 	newApis := make([]*models.SysApi, 0)
 
 	// 使用事务处理导入
-	err := app.DBContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+	err := NewPermissionService().Transaction(c.Request.Context(), func(tx *gorm.DB, _ *PermissionService) error {
 		// 创建ID映射，用于处理父子关系
 		idMap := make(map[uint]uint) // oldID -> newID
 
@@ -586,7 +586,14 @@ func (s *SysMenuService) BatchDelete(c *gin.Context, menuIDs []uint) error {
 	}
 
 	// 使用事务处理批量删除
-	err = app.DBContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+	err = NewPermissionService().Transaction(c.Request.Context(), func(tx *gorm.DB, _ *PermissionService) error {
+		var count int64
+		if err := tx.Model(&models.SysRoleMenu{}).Where("menu_id IN ?", allMenuIDs).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != 0 {
+			return fmt.Errorf("存在角色关联这些菜单，无法删除")
+		}
 		// 1. 删除菜单与角色的关联（虽然检查时已经无关联，但保险起见）
 		if err := tx.Where("menu_id IN ?", allMenuIDs).Delete(&models.SysRoleMenu{}).Error; err != nil {
 			return fmt.Errorf("删除菜单角色关联失败: %w", err)

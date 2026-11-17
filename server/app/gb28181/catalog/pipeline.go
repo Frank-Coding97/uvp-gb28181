@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	"uvplatform.com/uvp-gb28181/app/utils/authoritytx"
 )
 
 // Pipeline 入库管道(plan §3 / A3 核心)
@@ -137,6 +138,9 @@ func (p *Pipeline) ingest(ctx context.Context, sender Sender, items []CatalogIte
 			end = len(ordered)
 		}
 		err := p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := authoritytx.Acquire(ctx, tx); err != nil {
+				return err
+			}
 			for _, it := range ordered[start:end] {
 				if it.DeviceID == "" {
 					continue
@@ -458,6 +462,9 @@ func (p *Pipeline) softDelete(ctx context.Context, sender Sender, code string) e
 		return ErrOwnerDeptRequired
 	}
 	return p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := authoritytx.Acquire(ctx, tx); err != nil {
+			return err
+		}
 		var nodes []gbmodels.GbCatalogNode
 		q := tx.Where("code = ? AND owner_dept_id = ?", code, sender.OwnerDeptID).
 			Where("(source = ? OR source = ?)", gbmodels.NodeSourceCatalog, "").
@@ -483,6 +490,9 @@ func (p *Pipeline) softDelete(ctx context.Context, sender Sender, code string) e
 					return err
 				}
 				if remainingMounts == 0 {
+					if err := revokeChannelShare(tx, *node.ChannelID, "catalog_channel_deleted"); err != nil {
+						return err
+					}
 					if err := tx.Where("id = ? AND owner_dept_id = ?", *node.ChannelID, sender.OwnerDeptID).
 						Delete(&gbmodels.GbChannel{}).Error; err != nil {
 						return err

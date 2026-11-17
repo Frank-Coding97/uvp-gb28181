@@ -228,6 +228,11 @@ type baselineTableRequirement struct {
 }
 
 var baselineTableMigrations = map[string]baselineTableRequirement{
+	"2026-11-17-channel-video-share.sql":                          {tables: []string{"gb_channel_video_share", "gb_device_video_share_policy", "gb_video_share_authority"}},
+	"2026-11-17-channel-video-share-postgresql.sql":               {tables: []string{"gb_channel_video_share", "gb_device_video_share_policy", "gb_video_share_authority"}},
+	"2026-11-17-channel-video-share-sqlserver.sql":                {tables: []string{"gb_channel_video_share", "gb_device_video_share_policy", "gb_video_share_authority"}},
+	"2026-11-17-channel-video-share-sqlite.sql":                   {tables: []string{"gb_channel_video_share", "gb_device_video_share_policy", "gb_video_share_authority"}},
+	"2026-11-17-channel-video-share-dm.sql":                       {tables: []string{"gb_channel_video_share", "gb_device_video_share_policy", "gb_video_share_authority"}},
 	"2026-10-23-cascade-alarm-delivery.sql":                       {tables: []string{"gb_cascade_alarm_delivery"}},
 	"2026-10-23-cascade-alarm-delivery-postgresql.sql":            {tables: []string{"gb_cascade_alarm_delivery"}},
 	"2026-10-23-cascade-alarm-delivery-sqlserver.sql":             {tables: []string{"gb_cascade_alarm_delivery"}},

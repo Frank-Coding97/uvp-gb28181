@@ -128,6 +128,13 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 
 // shouldSkipLog 判断是否需要跳过日志记录
 func shouldSkipLog(c *gin.Context) bool {
+	// Anonymous share requests carry bearer credentials in their bodies and
+	// viewer paths. Skip before creating either audit capture buffer, including
+	// admission errors and DELETE requests that never reach the controller.
+	path := c.Request.URL.Path
+	if path == "/api/public/video-share" || strings.HasPrefix(path, "/api/public/video-share/") {
+		return true
+	}
 	// ZLM expands its complete INI into this callback, including api.secret.
 	// Skip the exact endpoint before reading the body; handler-time redaction is
 	// too late because this middleware captures requests before c.Next().
@@ -148,7 +155,6 @@ func shouldSkipLog(c *gin.Context) bool {
 		"/api/users/session/heartbeat", // 会话续活
 	}
 
-	path := c.Request.URL.Path
 	for _, skipPath := range skipPaths {
 		if strings.Contains(path, skipPath) {
 			return true

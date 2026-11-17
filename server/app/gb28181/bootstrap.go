@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -47,6 +48,7 @@ import (
 	"uvplatform.com/uvp-gb28181/app/gb28181/traffic"
 	"uvplatform.com/uvp-gb28181/app/gb28181/uac"
 	"uvplatform.com/uvp-gb28181/app/gb28181/upgrade"
+	"uvplatform.com/uvp-gb28181/app/gb28181/videoshare"
 	gbzlm "uvplatform.com/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/heartbeat"
 	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
@@ -313,6 +315,10 @@ var recordingCatalogService *gbrecording.CatalogService
 var recordingPlanEngine *recordingplan.Engine
 var recordingPlanLeases *play.SourceLeaseRegistry
 var recordCacheLeases *play.SourceLeaseRegistry
+var videoShareLeases *play.SourceLeaseRegistry
+var videoShareService *videoshare.Service
+var videoShareExpiryCancel context.CancelFunc
+var videoShareExpiryDone <-chan struct{}
 var talkSvc *gbtalk.Service
 var talkRepo *gbtalk.GormRepo
 var talkCleanupWorker *gbtalk.CleanupWorker
@@ -369,6 +375,7 @@ func startSIPRuntime(cfg gbconfig.Config, recorder metrics.Recorder, status *gbs
 
 func startControlPlane(cfg gbconfig.Config, authority *processauthority.Authority) bool {
 	app.ZapLog.Info("startControlPlane 开始执行", zap.String("event", "bootstrap.start"))
+	configureVideoShareManager()
 	setupCivilCodeService()
 	cascadeCipher, err := loadCascadeCredentialCipher()
 	credentialWarningReported := cascadeCredentialWarningNeeded(err, false)
@@ -602,6 +609,153 @@ func startControlPlane(cfg gbconfig.Config, authority *processauthority.Authorit
 		return credentialWarningReported
 	}
 	return credentialWarningReported
+}
+
+func configureVideoShareManager() {
+	db := app.DB()
+	configuredStateDir := ""
+	if app.ConfigYml != nil {
+		configuredStateDir = app.ConfigYml.GetString("processauthority.state_dir")
+	}
+	stateDir, err := processauthority.PrepareStateDir(configuredStateDir)
+	if err != nil {
+		gbroutes.SetVideoShareManager(nil)
+		app.ZapLog.Warn("视频分享持久目录不可用", zap.String("event", "video_share.state_unavailable"), logging.Error(err))
+		return
+	}
+	signer, err := videoshare.LoadOrCreateSigner(filepath.Join(stateDir, "video-share"))
+	if err != nil {
+		gbroutes.SetVideoShareManager(nil)
+		app.ZapLog.Warn("视频分享签名密钥不可用", zap.String("event", "video_share.signer_unavailable"), logging.Error(err))
+		return
+	}
+	service, err := videoshare.NewService(db, signer, videoShareLifetime, videoshare.NewTransactionalAuthorizer())
+	if err != nil {
+		gbroutes.SetVideoShareManager(nil)
+		app.ZapLog.Warn("视频分享服务不可用", zap.String("event", "video_share.service_unavailable"), logging.Error(err))
+		return
+	}
+	gbroutes.SetVideoShareManager(service)
+	gbroutes.SetPublicVideoShareResolver(service)
+	videoShareService = service
+	videoShareExpiryCancel, videoShareExpiryDone = startVideoShareExpiryRuntime(service, 5*time.Second)
+	videoShareLeases = play.NewSourceLeaseRegistry()
+	gbroutes.SetVideoShareSourceLeaseChecker(videoShareLeases)
+}
+
+func videoShareLifetime() time.Duration {
+	return time.Duration(gbconfig.CurrentVideoShareTTLSeconds()) * time.Second
+}
+
+func configureVideoSharePlayback(service *play.Service) {
+	if videoShareService == nil {
+		return
+	}
+	if service == nil {
+		videoShareService.SetPlaybackPreparer(nil)
+		return
+	}
+	videoShareService.SetPlaybackPreparer(videoSharePlayPreparer{service: service, db: app.DB(), leases: videoShareLeases})
+}
+
+type videoSharePlayPreparer struct {
+	service *play.Service
+	db      *gorm.DB
+	leases  *play.SourceLeaseRegistry
+}
+
+func (p videoSharePlayPreparer) Prepare(ctx context.Context, share *gbmodels.GbChannelVideoShare) (videoshare.PlaybackSource, error) {
+	if p.service == nil || p.db == nil || p.leases == nil || zlmRegistry == nil || zlmServerConfigCache == nil || share == nil || share.DeviceEpoch == 0 {
+		return videoshare.PlaybackSource{}, videoshare.ErrViewerUnavailable
+	}
+	if gbconfig.CurrentPlayAuthSettings().BindClientIP {
+		return videoshare.PlaybackSource{}, fmt.Errorf("%w: IP-bound playback requires a verified backend-origin address", videoshare.ErrViewerUnavailable)
+	}
+	var channel gbmodels.GbChannel
+	if err := p.db.WithContext(ctx).Select("channel_id").Where("id = ? AND deleted_at IS NULL", share.ChannelPK).Take(&channel).Error; err != nil {
+		return videoshare.PlaybackSource{}, err
+	}
+	consumer := "video-share:" + share.PublicID + ":" + share.Generation + ":" + uuid.NewString()
+	result, lease, err := p.service.StartAuthorizedWithSourceLease(ctx, play.AuthorizedRequest{
+		DeviceID: share.DeviceID, ChannelID: channel.ChannelID, DeviceEpoch: int64(share.DeviceEpoch),
+	}, p.leases, consumer)
+	if err != nil {
+		return videoshare.PlaybackSource{}, err
+	}
+	if result == nil || result.StreamID == "" || result.Generation == 0 {
+		_ = lease.Release()
+		return videoshare.PlaybackSource{}, videoshare.ErrViewerUnavailable
+	}
+	if result.Node == nil {
+		_ = lease.Release()
+		return videoshare.PlaybackSource{}, videoshare.ErrViewerUnavailable
+	}
+	mediaNode, exists := zlmRegistry.Get(result.Node.ID)
+	if !exists {
+		_ = lease.Release()
+		return videoshare.PlaybackSource{}, videoshare.ErrViewerUnavailable
+	}
+	config, err := zlmServerConfigCache.Refresh(ctx, result.Node.ID)
+	if err != nil {
+		_ = lease.Release()
+		return videoshare.PlaybackSource{}, videoshare.ErrViewerUnavailable
+	}
+	httpFLV, hls, err := videoShareInternalURLs(result, mediaNode, config, gbconfig.CurrentPlayAuthSettings().Enabled)
+	if err != nil {
+		_ = lease.Release()
+		return videoshare.PlaybackSource{}, err
+	}
+	return videoshare.PlaybackSource{
+		StreamID: result.StreamID, Generation: result.Generation, HTTPFLVURL: httpFLV, HLSURL: hls,
+		Release: func() { _ = lease.Release() },
+	}, nil
+}
+
+// ZLM serves its API and media on the same HTTP listener. Use the registered
+// API ingress (which may map the runtime listener port), never PlaybackHost.
+func videoShareInternalURLs(result *play.Result, mediaNode *node.Node, config node.ServerConfig, authRequired bool) (string, string, error) {
+	if result == nil || result.Node == nil || mediaNode == nil || mediaNode.ID <= 0 || result.Node.ID != mediaNode.ID ||
+		mediaNode.MediaServerUUID == "" || mediaNode.State == node.StateOffline || mediaNode.RecoveryRequired ||
+		result.App == "" || result.StreamID == "" || config.HTTPPort <= 0 || mediaNode.APIPort <= 0 || mediaNode.APIPort > 65535 {
+		return "", "", videoshare.ErrViewerUnavailable
+	}
+	host := strings.TrimSpace(mediaNode.Host)
+	if host == "" || strings.ContainsAny(host, "/?#@\\ \t\r\n") ||
+		(strings.ContainsAny(host, ":[]") && net.ParseIP(strings.Trim(host, "[]")) == nil) {
+		return "", "", videoshare.ErrViewerUnavailable
+	}
+	config.HTTPPort = mediaNode.APIPort
+	urls := play.BuildPlaybackURLs(host, config, result.App, result.StreamID)
+	token := ""
+	for _, raw := range []*string{result.URLs.HTTPFLV, result.URLs.HTTPSFLV, result.URLs.HLS, result.URLs.HTTPSHLS} {
+		if raw == nil || *raw == "" {
+			continue
+		}
+		parsed, err := url.Parse(*raw)
+		if err != nil {
+			return "", "", videoshare.ErrViewerUnavailable
+		}
+		current := parsed.Query().Get(playauth.QueryParameter)
+		if token != "" && current != token {
+			return "", "", videoshare.ErrViewerUnavailable
+		}
+		token = current
+	}
+	if authRequired && token == "" {
+		return "", "", videoshare.ErrViewerUnavailable
+	}
+	if token != "" {
+		var err error
+		urls, err = playauth.DecorateURLs(urls, token)
+		if err != nil {
+			return "", "", videoshare.ErrViewerUnavailable
+		}
+	}
+	hls := ""
+	if urls.HLS != nil {
+		hls = *urls.HLS
+	}
+	return *urls.HTTPFLV, hls, nil
 }
 
 func startDashboardRetentionRuntime(db *gorm.DB, interval time.Duration, report func(gbdashboard.RetentionResult, error)) context.CancelFunc {
@@ -1077,6 +1231,7 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 			}
 			playSvc.FinishRecovery()
 			gbroutes.SetPlayService(playSvc)
+			configureVideoSharePlayback(playSvc)
 			gbroutes.SetStreamMonitorService(streammonitor.NewService(zlmRegistry, zlmLocationMap, nil, time.Now))
 			setupStreamProbeRuntime(streamprobe.NewService(zlmRegistry, zlmLocationMap, nil, 5*time.Second, time.Now))
 			gbroutes.SetHookMultiNode(zlmRegistry, zlmLocationMap)
@@ -1097,6 +1252,7 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 			playSvc = play.NewWithScheduler(cfg, nil, nil, nil, u, playSessions, gbroutes.StreamNotifier(),
 				play.NewDeviceRepo(), play.NewChannelRepo(), opts...)
 			gbroutes.SetPlayService(playSvc)
+			configureVideoSharePlayback(playSvc)
 			app.ZapLog.Info("GB28181 点播 service 已装配(单节点 deprecated;通道快照仅多节点路径启用)")
 		}
 	} else {

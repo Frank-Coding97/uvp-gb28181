@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -12,6 +13,7 @@ import (
 	"uvplatform.com/uvp-gb28181/app/gb28181/assign"
 	"uvplatform.com/uvp-gb28181/app/gb28181/grant"
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
+	gbvideoshare "uvplatform.com/uvp-gb28181/app/gb28181/videoshare"
 	"uvplatform.com/uvp-gb28181/app/middleware"
 	basemodels "uvplatform.com/uvp-gb28181/app/models"
 	"uvplatform.com/uvp-gb28181/app/utils/common"
@@ -157,7 +159,27 @@ func (dc *DeviceMgmtController) ApplyPermissionWorkbenchGrants(c *gin.Context) {
 		}
 	}
 	request.CreatedBy = currentOperatorID(c)
-	result, err := grant.NewService(db, transactionalVisibleScope(c)).Apply(c.Request.Context(), request, access)
+	grantService := grant.NewService(db, transactionalVisibleScope(c))
+	grantService.SetOwnerAccessResolver(datascope.ResolveOwnerDeptAccessByUserID)
+	grantService.SetShareRevoker(func(ctx context.Context, tx *gorm.DB, actorIDs []uint) error {
+		if len(actorIDs) == 0 {
+			return nil
+		}
+		var active int64
+		if err := tx.WithContext(ctx).Model(&gbmodels.GbChannelVideoShare{}).
+			Where("created_by IN ? AND enabled = ? AND revoked_at IS NULL", actorIDs, true).Count(&active).Error; err != nil {
+			return err
+		}
+		if active == 0 {
+			return nil
+		}
+		permission, err := gbvideoshare.TransactionalPermissionChecker(tx)
+		if err != nil {
+			return err
+		}
+		return gbvideoshare.RevokeUnauthorizedSharesTx(ctx, tx, permission, actorIDs, "creator_device_access_removed", time.Time{})
+	})
+	result, err := grantService.Apply(c.Request.Context(), request, access)
 	if err != nil {
 		if errors.Is(err, grant.ErrApplyRequestInvalid) {
 			dc.Fail(c, err.Error(), err, http.StatusBadRequest)

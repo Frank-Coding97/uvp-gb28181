@@ -177,10 +177,11 @@ type coordinatorKey struct {
 }
 
 type coordinatorEntry struct {
-	state     LiveState
-	result    *Result
-	err       error
-	ownerNode int64
+	consumerClaims map[*sourceLeaseClaim]struct{}
+	state          LiveState
+	result         *Result
+	err            error
+	ownerNode      int64
 	// operationEpoch is the epoch returned by the admission lease which owns
 	// this generation.  Zero deliberately means unknown: recovered entries and
 	// starts admitted through a legacy coordinator must never be guessed into a
@@ -222,11 +223,11 @@ func NewCoordinatorWithStop(start StartFunc, stop StopFunc) *Coordinator {
 // operation and receive the same result or error. A waiting request's context
 // only controls its own wait.
 func (c *Coordinator) EnsureLive(ctx context.Context, req Request) (*Result, error) {
-	result, _, err := c.ensureLive(ctx, req)
+	result, _, err := c.ensureLive(ctx, req, nil)
 	return result, err
 }
 
-func (c *Coordinator) ensureLive(ctx context.Context, req Request) (*Result, bool, error) {
+func (c *Coordinator) ensureLive(ctx context.Context, req Request, claim *sourceLeaseClaim) (*Result, bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -246,6 +247,7 @@ func (c *Coordinator) ensureLive(ctx context.Context, req Request) (*Result, boo
 				done:      make(chan struct{}),
 			}
 			c.entries[key] = entry
+			c.registerConsumerLocked(entry, claim)
 			c.mu.Unlock()
 			result, err := c.runStart(ctx, req, key, entry)
 			return result, false, err
@@ -255,6 +257,9 @@ func (c *Coordinator) ensureLive(ctx context.Context, req Request) (*Result, boo
 		case LiveStateReady:
 			err := ownerNodeConflict(req, entry)
 			result := entry.result
+			if err == nil {
+				c.registerConsumerLocked(entry, claim)
+			}
 			c.mu.Unlock()
 			if err != nil {
 				return nil, true, err
@@ -265,6 +270,7 @@ func (c *Coordinator) ensureLive(ctx context.Context, req Request) (*Result, boo
 				c.mu.Unlock()
 				return nil, true, err
 			}
+			c.registerConsumerLocked(entry, claim)
 			done := entry.done
 			c.mu.Unlock()
 			if err := waitFor(ctx, done); err != nil {
@@ -387,6 +393,9 @@ func (c *Coordinator) runStart(ctx context.Context, req Request, key coordinator
 	entry.result = result
 	entry.err = err
 	if err == nil {
+		for claim := range entry.consumerClaims {
+			c.bindConsumerLocked(result, claim)
+		}
 		entry.state = LiveStateReady
 	} else if errors.Is(err, ErrLiveCleanupPending) && result != nil {
 		entry.state = LiveStateCleanupPending
@@ -398,6 +407,7 @@ func (c *Coordinator) runStart(ctx context.Context, req Request, key coordinator
 			delete(c.entries, key)
 		}
 	}
+	entry.consumerClaims = nil
 	close(entry.done)
 	c.mu.Unlock()
 	if retryCleanup {
@@ -540,6 +550,10 @@ func (c *Coordinator) ownerConflict(req Request) error {
 // Existing Start callers remain compatible; new REST/Hook integrations can
 // migrate to this method without changing the underlying Start transaction.
 func (s *Service) EnsureLive(ctx context.Context, req Request) (*Result, error) {
+	return s.ensureLive(ctx, req, nil)
+}
+
+func (s *Service) ensureLive(ctx context.Context, req Request, claim *sourceLeaseClaim) (*Result, error) {
 	if s.operationBarrierRequired && s.operationBarrier == nil {
 		return nil, ErrPlayAuthorizationUnavailable
 	}
@@ -588,7 +602,7 @@ func (s *Service) EnsureLive(ctx context.Context, req Request) (*Result, error) 
 			return nil, ErrPlayAuthorizationUnavailable
 		}
 	}
-	result, reused, err := c.ensureLive(ctx, req)
+	result, reused, err := c.ensureLive(ctx, req, claim)
 	if err != nil {
 		return nil, err
 	}

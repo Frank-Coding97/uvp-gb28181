@@ -92,6 +92,9 @@ func redactAccessLogPath(path string) string {
 	if isOpenAPIAccessLogPath(path) {
 		return "/openapi"
 	}
+	if strings.HasPrefix(path, "/api/public/video-share/viewers/") {
+		return "/api/public/video-share/viewers/REDACTED"
+	}
 
 	parsed, err := url.ParseRequestURI(path)
 	if err != nil {

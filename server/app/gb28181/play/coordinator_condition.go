@@ -84,6 +84,10 @@ func (c *Coordinator) cleanupPendingResult(streamID string) (*Result, bool) {
 // A known stream with an older ref is considered handled but must not affect
 // the newer generation.
 func (c *Coordinator) StopIfCurrent(ctx context.Context, ref stream.LiveRef) (bool, error) {
+	return c.stopIfCurrent(ctx, ref, nil)
+}
+
+func (c *Coordinator) stopIfCurrent(ctx context.Context, ref stream.LiveRef, leased func(string) bool) (bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -114,6 +118,10 @@ func (c *Coordinator) StopIfCurrent(ctx context.Context, ref stream.LiveRef) (bo
 		return true, nil
 	}
 
+	if leased != nil && leased(ref.StreamID) {
+		c.mu.Unlock()
+		return false, nil
+	}
 	failureState := entry.state
 	entry.state = LiveStateStopping
 	entry.done = make(chan struct{})

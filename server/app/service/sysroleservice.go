@@ -2,7 +2,6 @@ package service
 
 import (
 	"fmt"
-	"uvplatform.com/uvp-gb28181/app/global/app"
 	"uvplatform.com/uvp-gb28181/app/models"
 
 	"github.com/gin-gonic/gin"
@@ -71,13 +70,38 @@ func (s *SysRoleService) Update(c *gin.Context, req models.SysRoleUpdateRequest)
 	role.Description = req.Description
 	role.ParentID = req.ParentID
 
-	err = app.DB().WithContext(c.Request.Context()).Save(role).Error
-	if err != nil {
-		return nil, err
-	}
+	err = s.CasbinService.Transaction(c.Request.Context(), func(tx *gorm.DB, permission *PermissionService) error {
+		var current models.SysRole
+		found := tx.Where("id = ?", req.ID).Take(&current)
+		if found.Error != nil {
+			return found.Error
+		}
+		if found.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		seen := map[uint]bool{req.ID: true}
+		for parent := req.ParentID; parent != 0; {
+			if seen[parent] {
+				return fmt.Errorf("不能设置为父级角色：会导致循环引用")
+			}
+			seen[parent] = true
+			var row models.SysRole
+			result := tx.Select("id,parent_id").Where("id = ?", parent).Take(&row)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return gorm.ErrRecordNotFound
+			}
+			parent = row.ParentID
+		}
 
-	// 编辑角色继承关系
-	if err := s.CasbinService.EditRoleInheritance(c.Request.Context(), role.ID, req.ParentID); err != nil {
+		if err := tx.Model(role).Select("name", "sort", "status", "description", "parent_id").Updates(role).Error; err != nil {
+			return err
+		}
+		return permission.EditRoleInheritance(c.Request.Context(), role.ID, req.ParentID)
+	})
+	if err != nil {
 		return nil, err
 	}
 	return role, nil

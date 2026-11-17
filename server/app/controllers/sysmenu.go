@@ -374,7 +374,20 @@ func (sm *SysMenuController) Delete(c *gin.Context) {
 	}
 
 	// 使用事务删除菜单和相关数据
-	err = app.DBContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+	err = sm.CasbinService.Transaction(c.Request.Context(), func(tx *gorm.DB, _ *service.PermissionService) error {
+		var count int64
+		if err := tx.Model(&models.SysRoleMenu{}).Where("menu_id = ?", req.ID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != 0 {
+			return fmt.Errorf("存在角色关联此菜单，无法删除")
+		}
+		if err := tx.Model(&models.SysMenu{}).Where("parent_id = ?", req.ID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != 0 {
+			return fmt.Errorf("存在子菜单，无法删除")
+		}
 		// 删除菜单角色关联（保险起见，虽然上面已经检查过）
 		if err := tx.Where("menu_id = ?", req.ID).Delete(&models.SysRoleMenu{}).Error; err != nil {
 			return err
@@ -548,7 +561,23 @@ func (sm *SysMenuController) SetMenuApis(c *gin.Context) {
 	}
 
 	// 使用事务处理菜单API关联分配
-	err = app.DBContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+	err = sm.CasbinService.Transaction(c.Request.Context(), func(tx *gorm.DB, permission *service.PermissionService) error {
+		var count int64
+		if err := tx.Model(&models.SysMenu{}).Where("id = ?", req.MenuID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		if len(req.ApiIDs) > 0 {
+			if err := tx.Model(&models.SysApi{}).Where("id IN ?", req.ApiIDs).Count(&count).Error; err != nil {
+				return err
+			}
+			if count != int64(len(req.ApiIDs)) {
+				return fmt.Errorf("API已变化，请刷新后重试")
+			}
+		}
+
 		// 先删除该菜单的所有API关联
 		if err := tx.Where("menu_id = ?", req.MenuID).Delete(&models.SysMenuApi{}).Error; err != nil {
 			app.Log(c.Request.Context()).Warn("删除菜单API关联失败", zap.String("event", "sysmenu.menu_api_delete_failed"), logging.Error(err), zap.Uint("menu_id", req.MenuID))
@@ -572,18 +601,13 @@ func (sm *SysMenuController) SetMenuApis(c *gin.Context) {
 			}
 		}
 
-		return nil
+		return permission.UpdateRoleApiPermissionsByMenuID(c.Request.Context(), req.MenuID)
 	})
 
 	if err != nil {
 		sm.FailAndAbort(c, "设置菜单API关联失败", err)
 	}
 
-	// 调整与菜单关联的角色的API权限
-	if err = sm.CasbinService.UpdateRoleApiPermissionsByMenuID(c.Request.Context(), req.MenuID); err != nil {
-		sm.FailAndAbort(c, "更新角色API权限失败", err)
-	}
-	// 根据ApiIDs是否为空返回不同的成功消息
 	var successMsg string
 	if len(req.ApiIDs) == 0 {
 		successMsg = "菜单API关联已清空"

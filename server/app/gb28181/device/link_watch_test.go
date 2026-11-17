@@ -41,6 +41,7 @@ func newLinkWatchTestDB(t *testing.T) *gorm.DB {
 		&gbmodels.GbDevice{},
 		&gbmodels.GbChannel{},
 		&gbmodels.GbDeviceStatusEvent{},
+		&gbmodels.GbDeviceVideoSharePolicy{},
 		&basemodels.SysDepartment{},
 	))
 	app.GormDbMysql = db

@@ -3,13 +3,19 @@ package service
 import (
 	"context"
 	"go.uber.org/zap"
+	"time"
+	gbvideoshare "uvplatform.com/uvp-gb28181/app/gb28181/videoshare"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 	"uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/utils/authoritytx"
 
 	"gorm.io/gorm"
 )
 
-type PermissionService struct{}
+type PermissionService struct {
+	tx     *gorm.DB
+	helper app.CasbinInterf
+}
 
 // NewPermissionService 创建权限服务
 func NewPermissionService() *PermissionService {
@@ -21,20 +27,65 @@ func (ps *PermissionService) GetDomain(c context.Context) []string {
 	return nil
 }
 
+// Transaction owns the common authority gate, business writes, private Casbin
+// policy writes and permanent share revocation. Nested service calls reuse it.
+func (ps *PermissionService) Transaction(ctx context.Context, fn func(*gorm.DB, *PermissionService) error) error {
+	if ps.tx != nil {
+		return fn(ps.tx, ps)
+	}
+	err := app.DBContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := authoritytx.Acquire(ctx, tx); err != nil {
+			return err
+		}
+		helper, err := gbvideoshare.NewPolicyHelper(tx)
+		if err != nil {
+			return err
+		}
+		scoped := &PermissionService{tx: tx, helper: helper}
+		if err := fn(tx, scoped); err != nil {
+			return err
+		}
+		permission, err := gbvideoshare.TransactionalPermissionChecker(tx)
+		if err != nil {
+			return err
+		}
+		return gbvideoshare.RevokeAllUnauthorizedSharesTx(ctx, tx, permission, "creator_authority_changed", time.Time{})
+	})
+	if err == nil {
+		if loader, ok := app.CasbinV2.(interface{ ReloadPolicy() error }); ok {
+			if reloadErr := loader.ReloadPolicy(); reloadErr != nil {
+				app.Log(ctx).Error("权限事务已提交，缓存重载失败", zap.String("event", "casbin.policy_reload.commit_failed"), zap.Error(reloadErr))
+			}
+		}
+	}
+	return err
+}
+
 // 删除角色的所有权限
 func (ps *PermissionService) DeleteRoleApis(c context.Context, roleID uint) (err error) {
+	if ps.tx == nil {
+		return ps.Transaction(c, func(_ *gorm.DB, scoped *PermissionService) error { return scoped.DeleteRoleApis(c, roleID) })
+	}
 	domain := ps.GetDomain(c)
 
 	// 删除该角色的所有权限
-	return app.CasbinV2.RemoveAllPoliciesForRole(roleID, domain...)
+	if err = ps.helper.RemoveAllPoliciesForRole(roleID, domain...); err != nil {
+		return err
+	}
+	return nil
 }
 
 // 为角色分配资源权限，原有权限会被清除
 func (ps *PermissionService) AddPoliciesForRole(c context.Context, roleID uint, sysapilist models.SysApiList) (err error) {
+	if ps.tx == nil {
+		return ps.Transaction(c, func(_ *gorm.DB, scoped *PermissionService) error {
+			return scoped.AddPoliciesForRole(c, roleID, sysapilist)
+		})
+	}
 	domain := ps.GetDomain(c)
 
 	// 删除该角色的所有权限
-	if err = app.CasbinV2.RemoveAllPoliciesForRole(roleID, domain...); err != nil {
+	if err = ps.helper.RemoveAllPoliciesForRole(roleID, domain...); err != nil {
 		return
 	}
 	// 如果有API权限，则添加到casbin
@@ -62,15 +113,20 @@ func (ps *PermissionService) AddPoliciesForRole(c context.Context, roleID uint, 
 			}
 		}
 		// 批量添加权限策略
-		if err = app.CasbinV2.AddPoliciesForRole(roleID, deduplicatedPolicies, domain...); err != nil {
-			return
+		if err = ps.helper.AddPoliciesForRole(roleID, deduplicatedPolicies, domain...); err != nil {
+			return err
 		}
 	}
-	return
+	return nil
 }
 
 // 添加角色继承关系
 func (ps *PermissionService) AddRoleInheritance(c context.Context, roleID uint, parentRoleID uint) (err error) {
+	if ps.tx == nil {
+		return ps.Transaction(c, func(_ *gorm.DB, scoped *PermissionService) error {
+			return scoped.AddRoleInheritance(c, roleID, parentRoleID)
+		})
+	}
 
 	domain := ps.GetDomain(c)
 
@@ -85,12 +141,17 @@ func (ps *PermissionService) AddRoleInheritance(c context.Context, roleID uint, 
 	}
 
 	// 添加角色继承关系
-	err = app.CasbinV2.AddRoleInheritance(roleID, parentRoleID, domain...)
+	err = ps.helper.AddRoleInheritance(roleID, parentRoleID, domain...)
 	return
 }
 
 // 编辑角色继承关系
 func (ps *PermissionService) EditRoleInheritance(c context.Context, roleID uint, parentRoleID uint) (err error) {
+	if ps.tx == nil {
+		return ps.Transaction(c, func(_ *gorm.DB, scoped *PermissionService) error {
+			return scoped.EditRoleInheritance(c, roleID, parentRoleID)
+		})
+	}
 
 	domain := ps.GetDomain(c)
 
@@ -100,22 +161,27 @@ func (ps *PermissionService) EditRoleInheritance(c context.Context, roleID uint,
 		return nil
 	}
 	// 删除角色的所有继承关系
-	err = app.CasbinV2.DeleteRoleInheritance(roleID, 0, domain...)
+	err = ps.helper.DeleteRoleInheritance(roleID, 0, domain...)
 	if err != nil {
-		return
+		return err
 	}
 	if parentRoleID > 0 {
 		// 添加角色继承关系
-		err = app.CasbinV2.AddRoleInheritance(roleID, parentRoleID, domain...)
+		err = ps.helper.AddRoleInheritance(roleID, parentRoleID, domain...)
 		if err != nil {
-			return
+			return err
 		}
 	}
-	return
+	return nil
 }
 
 // 删除角色继承关系
 func (ps *PermissionService) DeleteRoleInheritance(c context.Context, roleID uint, parentRoleID uint) (err error) {
+	if ps.tx == nil {
+		return ps.Transaction(c, func(_ *gorm.DB, scoped *PermissionService) error {
+			return scoped.DeleteRoleInheritance(c, roleID, parentRoleID)
+		})
+	}
 
 	domain := ps.GetDomain(c)
 
@@ -126,46 +192,61 @@ func (ps *PermissionService) DeleteRoleInheritance(c context.Context, roleID uin
 		return nil
 	}
 	// 删除角色的继承关系
-	err = app.CasbinV2.DeleteRoleInheritance(roleID, parentRoleID, domain...)
+	err = ps.helper.DeleteRoleInheritance(roleID, parentRoleID, domain...)
+	if err == nil {
+		err = nil
+	}
 	return
 }
 
 // 为用户分配角色
 func (ps *PermissionService) AddRoleForUser(c context.Context, userID uint, roles []uint) (err error) {
+	if ps.tx == nil {
+		return ps.Transaction(c, func(_ *gorm.DB, scoped *PermissionService) error { return scoped.AddRoleForUser(c, userID, roles) })
+	}
 	domain := ps.GetDomain(c)
 	// 添加用户角色关系
-	err = app.CasbinV2.AddRolesForUserByID(userID, roles, domain...)
+	err = ps.helper.AddRolesForUserByID(userID, roles, domain...)
 	return
 }
 
 // 编辑用户的角色
 func (ps *PermissionService) EditUserRoles(c context.Context, userID uint, roles []uint) (err error) {
+	if ps.tx == nil {
+		return ps.Transaction(c, func(_ *gorm.DB, scoped *PermissionService) error { return scoped.EditUserRoles(c, userID, roles) })
+	}
 	domain := ps.GetDomain(c)
 	// 删除用户的所有角色
-	err = app.CasbinV2.DeleteRolesForUserByID(userID, nil, domain...)
+	err = ps.helper.DeleteRolesForUserByID(userID, nil, domain...)
 	if err != nil {
 		return
 	}
 	// 添加用户角色关系
-	err = app.CasbinV2.AddRolesForUserByID(userID, roles, domain...)
+	err = ps.helper.AddRolesForUserByID(userID, roles, domain...)
 	return
 }
 
 // 删除用户的角色关系
 func (ps *PermissionService) DeleteUserRoles(c context.Context, userID uint, roles []uint) (err error) {
+	if ps.tx == nil {
+		return ps.Transaction(c, func(_ *gorm.DB, scoped *PermissionService) error { return scoped.DeleteUserRoles(c, userID, roles) })
+	}
 	domain := ps.GetDomain(c)
 	// 删除用户角色关系
-	err = app.CasbinV2.DeleteRolesForUserByID(userID, roles, domain...)
+	err = ps.helper.DeleteRolesForUserByID(userID, roles, domain...)
 	return
 }
 
 // 根据菜单ID调整与该菜单关联的角色的API权限
 func (ps *PermissionService) UpdateRoleApiPermissionsByMenuID(c context.Context, menuID uint) (err error) {
+	if ps.tx == nil {
+		return ps.Transaction(c, func(_ *gorm.DB, scoped *PermissionService) error {
+			return scoped.UpdateRoleApiPermissionsByMenuID(c, menuID)
+		})
+	}
 	// 1. 查找与指定菜单ID关联的所有角色
 	var roleMenus models.SysRoleMenuList
-	if err = roleMenus.Find(c, func(db *gorm.DB) *gorm.DB {
-		return db.Where("menu_id = ?", menuID).Preload("Role")
-	}); err != nil {
+	if err = ps.tx.WithContext(c).Where("menu_id = ?", menuID).Preload("Role").Find(&roleMenus).Error; err != nil {
 		return
 	}
 
@@ -180,15 +261,13 @@ func (ps *PermissionService) UpdateRoleApiPermissionsByMenuID(c context.Context,
 	for _, role := range roles {
 		// 查找该角色关联的所有菜单
 		var roleMenusForRole models.SysRoleMenuList
-		if err = roleMenusForRole.Find(c, func(db *gorm.DB) *gorm.DB {
-			return db.Where("role_id = ?", role.ID)
-		}); err != nil {
+		if err = ps.tx.WithContext(c).Where("role_id = ?", role.ID).Find(&roleMenusForRole).Error; err != nil {
 			return
 		}
 		domain := ps.GetDomain(c)
 		// 如果角色没有关联任何菜单，则清除该角色的所有API权限
 		if roleMenusForRole.IsEmpty() {
-			if err = app.CasbinV2.RemoveAllPoliciesForRole(role.ID, domain...); err != nil {
+			if err = ps.helper.RemoveAllPoliciesForRole(role.ID, domain...); err != nil {
 				return
 			}
 			continue
@@ -202,9 +281,7 @@ func (ps *PermissionService) UpdateRoleApiPermissionsByMenuID(c context.Context,
 
 		// 查找这些菜单关联的所有API
 		var menus models.SysMenuList
-		if err = menus.Find(c, func(db *gorm.DB) *gorm.DB {
-			return db.Preload("Apis").Where("id IN ?", menuIDs)
-		}); err != nil {
+		if err = ps.tx.WithContext(c).Preload("Apis").Where("id IN ?", menuIDs).Find(&menus).Error; err != nil {
 			return
 		}
 
@@ -227,11 +304,16 @@ func (ps *PermissionService) UpdateRoleApiPermissionsByMenuID(c context.Context,
 
 // 根据API ID调整与该API关联的角色的权限
 func (ps *PermissionService) UpdateRoleApiPermissionsByApiID(c context.Context, apiID uint) (err error) {
+	if ps.tx == nil {
+		return ps.Transaction(c, func(_ *gorm.DB, scoped *PermissionService) error {
+			return scoped.UpdateRoleApiPermissionsByApiID(c, apiID)
+		})
+	}
 	domain := ps.GetDomain(c)
 
 	// 1. 通过api_id查找关联的menu_id
 	var menuIds []uint
-	err = app.DBContext(c).Model(&models.SysMenuApi{}).Where("api_id = ?", apiID).Pluck("menu_id", &menuIds).Error
+	err = ps.tx.WithContext(c).Model(&models.SysMenuApi{}).Where("api_id = ?", apiID).Pluck("menu_id", &menuIds).Error
 	if err != nil {
 		return
 	}
@@ -243,9 +325,7 @@ func (ps *PermissionService) UpdateRoleApiPermissionsByApiID(c context.Context, 
 
 	// 2. 通过menu_id查找关联的role_id
 	var roleMenus models.SysRoleMenuList
-	if err = roleMenus.Find(c, func(db *gorm.DB) *gorm.DB {
-		return db.Where("menu_id IN ?", menuIds)
-	}); err != nil {
+	if err = ps.tx.WithContext(c).Where("menu_id IN ?", menuIds).Find(&roleMenus).Error; err != nil {
 		return
 	}
 
@@ -264,15 +344,13 @@ func (ps *PermissionService) UpdateRoleApiPermissionsByApiID(c context.Context, 
 	for roleID := range roleIDSet {
 		// 查找该角色关联的所有菜单
 		var roleMenusForRole models.SysRoleMenuList
-		if err = roleMenusForRole.Find(c, func(db *gorm.DB) *gorm.DB {
-			return db.Where("role_id = ?", roleID)
-		}); err != nil {
+		if err = ps.tx.WithContext(c).Where("role_id = ?", roleID).Find(&roleMenusForRole).Error; err != nil {
 			return
 		}
 
 		// 如果角色没有关联任何菜单，则清除该角色的所有API权限
 		if roleMenusForRole.IsEmpty() {
-			if err = app.CasbinV2.RemoveAllPoliciesForRole(roleID, domain...); err != nil {
+			if err = ps.helper.RemoveAllPoliciesForRole(roleID, domain...); err != nil {
 				return
 			}
 			continue
@@ -286,9 +364,7 @@ func (ps *PermissionService) UpdateRoleApiPermissionsByApiID(c context.Context, 
 
 		// 查找这些菜单关联的所有API
 		var menus models.SysMenuList
-		if err = menus.Find(c, func(db *gorm.DB) *gorm.DB {
-			return db.Preload("Apis").Where("id IN ?", menuIDs)
-		}); err != nil {
+		if err = ps.tx.WithContext(c).Preload("Apis").Where("id IN ?", menuIDs).Find(&menus).Error; err != nil {
 			return
 		}
 

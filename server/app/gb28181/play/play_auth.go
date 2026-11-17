@@ -202,11 +202,15 @@ func (s *Service) terminateAuthorizationGeneration(generation uint64) {
 // StartAuthorized issues a fresh authorization for every explicit play call.
 // Randomness and optional client-IP validation happen before media side effects.
 func (s *Service) StartAuthorized(ctx context.Context, req AuthorizedRequest) (*Result, error) {
+	return s.startAuthorized(ctx, req, nil)
+}
+
+func (s *Service) startAuthorized(ctx context.Context, req AuthorizedRequest, claim *sourceLeaseClaim) (*Result, error) {
 	deviceID, channelID, clientIP := req.DeviceID, req.ChannelID, req.ClientIP
 	settings := gbconfig.CurrentPlayAuthSettings()
 	openAPIRequest := req.OpenAPIClientID > 0 && req.OpenAPIGrantID != ""
 	if !settings.Enabled && !openAPIRequest {
-		result, err := s.EnsureLive(ctx, Request{DeviceID: deviceID, ChannelID: channelID, DeviceEpoch: req.DeviceEpoch, Trigger: "explicit", LifecycleID: req.LifecycleID})
+		result, err := s.ensureLive(ctx, Request{DeviceID: deviceID, ChannelID: channelID, DeviceEpoch: req.DeviceEpoch, Trigger: "explicit", LifecycleID: req.LifecycleID}, claim)
 		if err == nil && result != nil {
 			s.recordLifecycle(ctx, Request{DeviceID: deviceID, ChannelID: channelID, LifecycleID: req.LifecycleID}, LifecycleEvent{Stage: StageAuthorization, EventName: EventPlayURLIssued, FactState: FactConfirmed, Source: SourcePlayService, StreamID: result.StreamID})
 		}
@@ -228,7 +232,7 @@ func (s *Service) StartAuthorized(ctx context.Context, req AuthorizedRequest) (*
 	if err != nil {
 		return nil, ErrPlayAuthorizationUnavailable
 	}
-	result, err := s.EnsureLive(ctx, Request{DeviceID: deviceID, ChannelID: channelID, DeviceEpoch: req.DeviceEpoch, Trigger: "explicit", LifecycleID: req.LifecycleID})
+	result, err := s.ensureLive(ctx, Request{DeviceID: deviceID, ChannelID: channelID, DeviceEpoch: req.DeviceEpoch, Trigger: "explicit", LifecycleID: req.LifecycleID}, claim)
 	if err != nil {
 		return nil, err
 	}
