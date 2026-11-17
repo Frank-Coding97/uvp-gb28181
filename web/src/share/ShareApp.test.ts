@@ -105,6 +105,31 @@ afterEach(async () => {
 });
 
 describe("ShareApp anonymous component integration", () => {
+  it("treats channel names as text in the page and copied iframe attributes", async () => {
+    const name = '\"><img src="x" onerror="window.shareInjected=true"></iframe><script>window.shareInjected=true</script>';
+    fetchMock.mockImplementationOnce(async () =>
+      response({
+        name,
+        online: true,
+        hasAudio: false,
+        expiresAt: expiry,
+        serverTime: new Date(now).toISOString()
+      })
+    );
+    const wrapper = mountShare();
+    await flushPromises();
+    expect(wrapper.text()).toContain(name);
+    expect(wrapper.find('img[src="x"], script, [onerror]').exists()).toBe(false);
+    const template = document.createElement("template");
+    template.innerHTML = (wrapper.get("#share-iframe").element as HTMLTextAreaElement).value;
+    expect(template.content.querySelectorAll("iframe")).toHaveLength(1);
+    expect(template.content.querySelectorAll("img, script, [onerror]")).toHaveLength(0);
+    expect(template.content.querySelector("iframe")?.getAttribute("title")).toBe(name);
+    expect(template.content.querySelector("iframe")?.getAttribute("src")).toContain(
+      "/share.html#id=public-id&sig=secret-signature&embed=1"
+    );
+  });
+
   it("erases credentials before the first exchange and never sends backend cookies", async () => {
     const pending = deferred<Response>();
     fetchMock.mockImplementationOnce(() => {

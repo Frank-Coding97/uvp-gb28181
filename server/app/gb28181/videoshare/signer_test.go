@@ -3,6 +3,7 @@ package videoshare
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -53,4 +54,18 @@ func TestLoadOrCreateSignerRejectsDirectoryAsKeyPath(t *testing.T) {
 	require.NoError(t, os.Mkdir(filepath.Join(directory, keyFile), 0700))
 	_, err := LoadOrCreateSigner(directory)
 	require.Error(t, err)
+}
+
+func TestLoadOrCreateSignerRejectsUnwritableKeyDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("requires Unix directory permissions and an unprivileged user")
+	}
+	directory := t.TempDir()
+	require.NoError(t, os.Chmod(directory, 0500))
+	t.Cleanup(func() { _ = os.Chmod(directory, 0700) })
+	signer, err := LoadOrCreateSigner(directory)
+	require.Error(t, err, "unwritable persistent storage must not fall back to an ephemeral key")
+	require.Nil(t, signer)
+	_, err = os.Stat(filepath.Join(directory, keyFile))
+	require.True(t, os.IsNotExist(err))
 }
