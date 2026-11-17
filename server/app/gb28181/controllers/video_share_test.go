@@ -121,7 +121,11 @@ func TestVideoShareControllerMarksCredentialResponsesSensitive(t *testing.T) {
 		}
 		r.Handle(method, "/audit/:id"+path, handler)
 		w := httptest.NewRecorder()
-		req := httptest.NewRequest(method, "/audit/42"+path, bytes.NewBufferString(`{"enabled":true,"revision":4}`))
+		body := `{"revision":4}`
+		if method == http.MethodPut {
+			body = `{"enabled":true,"revision":4}`
+		}
+		req := httptest.NewRequest(method, "/audit/42"+path, bytes.NewBufferString(body))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)

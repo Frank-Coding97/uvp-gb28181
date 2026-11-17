@@ -418,8 +418,22 @@ segDelay=0
         require(unauthenticated in (401, 403), "management endpoint allowed anonymous access")
         state = self.success(path, token=token)
         require(not state["enabled"], "new channel share must default off")
+        invalid_status, _ = self.request(path, "PUT",
+                                         {"enabled": True, "revision": state["revision"], "ttlSeconds": 600}, token)
+        require(invalid_status == 400, "channel-specific expiry override must be rejected")
+        unchanged = self.success(path, token=token)
+        require(not unchanged["enabled"] and unchanged["revision"] == state["revision"],
+                "rejected channel expiry override changed sharing state")
         enabled = self.success(path, "PUT", {"enabled": True, "revision": state["revision"]}, token)
         require(enabled["enabled"], "share did not enable")
+        for suffix in ("/link", "/regenerate"):
+            invalid_status, _ = self.request(path + suffix, "POST",
+                                             {"revision": enabled["revision"], "ttlMinutes": 10}, token)
+            require(invalid_status == 400, "link operations must reject channel-specific expiry override")
+            unchanged = self.success(path, token=token)
+            require(unchanged["enabled"] and unchanged["revision"] == enabled["revision"],
+                    "rejected link operation changed sharing state")
+        self.record("all three management writes rejected channel expiry overrides without lifecycle changes")
         link = self.success(path + "/link", "POST", {"revision": enabled["revision"]}, token)
         credential = {"publicId": link["publicId"], "signature": link["signature"]}
         expiry = dt.datetime.fromisoformat(link["expiresAt"].replace("Z", "+00:00"))

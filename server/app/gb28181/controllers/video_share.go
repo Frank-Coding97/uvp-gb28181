@@ -2,11 +2,14 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	basecontrollers "uvplatform.com/uvp-gb28181/app/controllers"
 	"uvplatform.com/uvp-gb28181/app/gb28181/videoshare"
 	"uvplatform.com/uvp-gb28181/app/middleware"
@@ -33,6 +36,20 @@ type videoShareMutation struct {
 	Revision uint64 `json:"revision"`
 }
 
+// Share management accepts only its declared fields; the global expiry cannot
+// be overridden by a channel request or hidden behind an extra JSON value.
+func bindVideoShareMutation(c *gin.Context, target any) error {
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return errors.New("expected a single sharing request")
+	}
+	return binding.Validator.ValidateStruct(target)
+}
+
 func (vc *VideoShareController) Status(c *gin.Context) {
 	channelID, actorID, ok := vc.requestIdentity(c)
 	if !ok {
@@ -53,7 +70,7 @@ func (vc *VideoShareController) SetEnabled(c *gin.Context) {
 		return
 	}
 	var body videoShareMutation
-	if err := c.ShouldBindJSON(&body); err != nil || body.Enabled == nil {
+	if err := bindVideoShareMutation(c, &body); err != nil || body.Enabled == nil {
 		vc.Fail(c, "分享参数不合法", err, http.StatusBadRequest)
 		return
 	}
@@ -73,7 +90,7 @@ func (vc *VideoShareController) AcquireLink(c *gin.Context) {
 	var body struct {
 		Revision uint64 `json:"revision" binding:"required"`
 	}
-	if err := c.ShouldBindJSON(&body); err != nil {
+	if err := bindVideoShareMutation(c, &body); err != nil {
 		vc.Fail(c, "分享参数不合法", err, http.StatusBadRequest)
 		return
 	}
@@ -93,7 +110,7 @@ func (vc *VideoShareController) Regenerate(c *gin.Context) {
 	var body struct {
 		Revision uint64 `json:"revision" binding:"required"`
 	}
-	if err := c.ShouldBindJSON(&body); err != nil {
+	if err := bindVideoShareMutation(c, &body); err != nil {
 		vc.Fail(c, "分享参数不合法", err, http.StatusBadRequest)
 		return
 	}
