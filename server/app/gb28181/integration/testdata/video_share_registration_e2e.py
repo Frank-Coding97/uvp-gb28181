@@ -11,11 +11,14 @@ import argparse
 import collections
 import datetime as dt
 import hashlib
+import ipaddress
 import json
+import os
 from pathlib import Path
 import queue
 import re
 import secrets
+import signal
 import socket
 import sqlite3
 import sys
@@ -27,6 +30,23 @@ DOMAIN, SERVER = "3402000000", "34020000002000000001"
 OLD, PRECREATED = "34020000002000000091", "34020000002000000092"
 PREFIX = "/api/gb28181/channel-shares/"
 CONFIG = "/api/gb28181/sip/service-config"
+
+
+def local_advertise_ip(requested):
+    if requested is None:
+        # UDP connect selects a local route without sending any datagram. The
+        # documentation-only destination is never used as a device or SIP peer.
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("192.0.2.1", 9))
+            requested = probe.getsockname()[0]
+    address = ipaddress.ip_address(requested)
+    require(address.version == 4 and not address.is_loopback and not address.is_unspecified
+            and not address.is_multicast, "advertise-ip must be a concrete local non-loopback IPv4 address")
+    # Refuse a guessed remote address: this process must be able to bind it on
+    # its own host. All test peers and application listeners remain loopback.
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        probe.bind((str(address), 0))
+    return str(address)
 
 
 def parse_packet(raw):
@@ -49,6 +69,7 @@ class Peer:
         self.port, self.sequence, self.catalog_sequence = self.socket.getsockname()[1], 0, 0
         self.lock, self.stopped = threading.Lock(), threading.Event()
         self.responses, self.methods, self.catalog_sn = {}, collections.Counter(), None
+        self.subscription = None
         self.thread = threading.Thread(target=self.receive, daemon=True)
         self.thread.start()
 
@@ -71,6 +92,8 @@ class Peer:
             method = first.split()[0]
             with self.lock:
                 self.methods[method] += 1
+                if method == "SUBSCRIBE" and headers.get("event", "").lower().startswith("catalog"):
+                    self.subscription = (headers["call-id"], headers["event"])
                 if "<CmdType>Catalog</CmdType>" in body:
                     sn = re.search(r"<SN>\s*(\d+)\s*</SN>", body)
                     if sn:
@@ -83,6 +106,9 @@ class Peer:
                 if name == "To" and ";tag=" not in value:
                     value += ";tag=registration-fixture"
                 response.append(name + ": " + value)
+            if method == "SUBSCRIBE":
+                response += ["Expires: " + headers.get("expires", "3600"),
+                             f"Contact: <sip:{self.device}@127.0.0.1:{self.port}>"]
             response += ["Content-Length: 0", "", ""]
             try:
                 self.socket.sendto("\r\n".join(response).encode(), sender)
@@ -121,23 +147,50 @@ class Peer:
             with self.lock:
                 self.responses.pop(key, None)
 
-    def register(self):
+    def challenge(self, expires=3600):
         call_id = secrets.token_hex(12) + "@registration-e2e"
-        status, headers = self.request("REGISTER", extra=["Expires: 3600"], call_id=call_id)
+        status, headers = self.request("REGISTER", extra=[f"Expires: {expires}"], call_id=call_id)
         require(status == 401, f"REGISTER must challenge before authentication, got {status}")
         challenge = dict(re.findall(r'(\w+)="([^"]*)"', headers.get("www-authenticate", "")))
         require(challenge.get("realm") == DOMAIN and challenge.get("nonce"), "invalid native Digest challenge")
         require("qop" not in challenge, "candidate changed Digest contract; update test explicitly")
+        return call_id, challenge
+
+    def authorization(self, challenge, password=None):
         md5 = lambda value: hashlib.md5(value.encode()).hexdigest()
         uri = f"sip:{SERVER}@{DOMAIN}"
-        response = md5(md5(f"{self.device}:{DOMAIN}:{self.check.sip_password}") + ":" +
+        password = self.check.sip_password if password is None else password
+        response = md5(md5(f"{self.device}:{DOMAIN}:{password}") + ":" +
                        challenge["nonce"] + ":" + md5("REGISTER:" + uri))
-        auth = (f'Digest username="{self.device}", realm="{DOMAIN}", nonce="{challenge["nonce"]}", '
+        return (f'Digest username="{self.device}", realm="{DOMAIN}", nonce="{challenge["nonce"]}", '
                 f'uri="{uri}", response="{response}", algorithm=MD5')
-        status, _ = self.request("REGISTER", extra=["Expires: 3600", "Authorization: " + auth], call_id=call_id)
+
+    def register(self, expires=3600):
+        call_id, challenge = self.challenge(expires)
+        auth = self.authorization(challenge)
+        status, _ = self.request("REGISTER", extra=[f"Expires: {expires}", "Authorization: " + auth], call_id=call_id)
         require(status == 200, f"authenticated REGISTER failed: SIP {status}; inspect private logs")
-        self.check.wait(lambda: self.check.one("SELECT status FROM gb_device WHERE device_id=?", self.device) == 1,
-                        "registered device online")
+        if expires:
+            self.check.wait(lambda: self.check.one("SELECT status FROM gb_device WHERE device_id=?", self.device) == 1,
+                            "registered device online")
+        return call_id, auth
+
+    def notify(self, channels, event):
+        self.check.wait(lambda: self.subscription is not None, "native Catalog SUBSCRIBE")
+        with self.lock:
+            call_id, subscription_event = self.subscription
+        self.catalog_sequence += 1
+        label = f"Notify E2E channel {self.catalog_sequence}"
+        items = "".join(f"<Item><DeviceID>{channel}</DeviceID><Name>{label}</Name><Event>{event}</Event>"
+                        f"<ParentID>{self.device}</ParentID><Parental>0</Parental>"
+                        "<CivilCode>340200</CivilCode><Status>ON</Status></Item>" for channel in channels)
+        body = (f'<Notify><CmdType>Catalog</CmdType><SN>{1000 + self.catalog_sequence}</SN>'
+                f'<DeviceID>{self.device}</DeviceID><DeviceList Num="{len(channels)}">{items}</DeviceList></Notify>')
+        status, _ = self.request("NOTIFY", body, ["Event: " + subscription_event,
+                                 "Subscription-State: active;expires=3600"], call_id)
+        require(status == 200, f"Catalog NOTIFY failed: SIP {status}")
+        self.check.wait(lambda: self.check.one("SELECT count(*) FROM gb_channel WHERE device_id=? AND name=?",
+                                             self.device, label) == len(channels), "NOTIFY ingestion completed")
 
     def catalog(self, channels):
         self.catalog_sequence += 1
@@ -171,6 +224,7 @@ class RegistrationCheck(Check):
         super().__init__(args)
         self.peers = []
         self.sip_password = secrets.token_urlsafe(24)
+        self.advertise_ip = local_advertise_ip(args.advertise_ip)
 
     def configure(self):
         super().configure()
@@ -193,8 +247,8 @@ class RegistrationCheck(Check):
                                      "AND v1=? AND v2=?", (path, method)).fetchone()[0] == 1,
                         "native migration did not seed sharing permissions; harness will not repair them")
             conn.execute("INSERT INTO gb_sip_config (id,deployment_mode,listen_ip,advertise_ip,port,domain,server_id,password,hook_ip,sdp_ip,stream_ip) "
-                         "VALUES (1,'lan','127.0.0.1','127.0.0.1',?,?,?,?,'127.0.0.1','127.0.0.1','127.0.0.1')",
-                         (self.sip_port, DOMAIN, SERVER, self.sip_password))
+                         "VALUES (1,'lan','127.0.0.1',?,?,?,?,?,'127.0.0.1','127.0.0.1','127.0.0.1')",
+                         (self.advertise_ip, self.sip_port, DOMAIN, SERVER, self.sip_password))
             for device, registered in ((OLD, True), (PRECREATED, False)):
                 conn.execute("INSERT INTO gb_device (device_id,name,status,owner_dept_id,transport,register_time,created_at,updated_at) "
                              "VALUES (?,'Explicit registration-history fixture',0,1,'UDP',?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
@@ -240,13 +294,54 @@ class RegistrationCheck(Check):
                 "pending share already activated or attributed to a fabricated creator")
         return state
 
-    def application(self):
-        self.start([self.args.server], "server")
+    def launch_application(self, name):
+        self.application_process = self.start([self.args.server], name)
         def listening():
             with socket.create_connection(("127.0.0.1", self.app_port), timeout=1):
                 return True
         self.wait(listening, "full application HTTP", 60)
         self.token = self.success("/api/login", "POST", {"username": "admin", "password": self.password})["accessToken"]
+
+    def restart_application(self):
+        os.killpg(self.application_process.pid, signal.SIGTERM)
+        self.application_process.wait(timeout=15)
+        self.processes.remove(self.application_process)
+        self.launch_application("server-restarted")
+
+    def rejected_registration(self):
+        peer = self.peer("34020000002000000014")
+        call_id, challenge = peer.challenge()
+        require(self.policy(peer) is None, "unauthenticated challenge created default share policy")
+        status, _ = peer.request("REGISTER", extra=["Expires: 3600", "Authorization: " +
+                                 peer.authorization(challenge, "deliberately-invalid-password")], call_id=call_id)
+        require(status == 401 and self.policy(peer) is None, "failed Digest initialized sharing policy")
+        security_path = "/api/gb28181/security/policy"
+        original = self.success(security_path, token=self.token)
+        short = dict(original, nonceTtl=1)
+        try:
+            self.success(security_path, "PUT", short, self.token)
+            call_id, challenge = peer.challenge()
+            # Exercise an actually expired server-issued nonce, without forging it
+            # or seeding policy rows. Only this isolated runtime's TTL is shortened.
+            time.sleep(2)
+            status, _ = peer.request("REGISTER", extra=["Expires: 3600", "Authorization: " +
+                                     peer.authorization(challenge)], call_id=call_id)
+            require(status == 401 and self.policy(peer) is None, "expired nonce initialized sharing policy")
+        finally:
+            self.success(security_path, "PUT", original, self.token)
+        call_id, challenge = peer.challenge(expires=0)
+        status, _ = peer.request("REGISTER", extra=["Expires: 0", "Authorization: " +
+                                 peer.authorization(challenge)], call_id=call_id)
+        require(status == 500, f"unregister of a nonexistent device must preserve native SIP 500, got {status}")
+        require(self.policy(peer) is None, "authenticated unregister created first-register share policy")
+        require(self.one("SELECT count(*) FROM gb_device WHERE device_id=?", peer.device) == 0,
+                "rejected registration or nonexistent unregister created a device")
+        require(self.one("SELECT count(*) FROM gb_channel WHERE device_id=?", peer.device) == 0,
+                "rejected registration or unregister fabricated channels")
+        self.record("challenge, bad Digest, actually expired nonce and authenticated unregister create no device sharing policy")
+
+    def application(self):
+        self.launch_application("server")
         initial = self.success(CONFIG, token=self.token)["videoShare"]
         require(initial == {"defaultEnabled": False, "ttlSeconds": 300}, "initial sharing defaults must be off/five minutes")
         self.global_default(False)
@@ -257,21 +352,34 @@ class RegistrationCheck(Check):
                 "registration without Catalog unexpectedly created channels")
         off_snapshot = self.policy(off)
         self.global_default(True)
+        self.rejected_registration()
         off.catalog(["34020000001320000011"])
         require(not self.state("34020000001320000011")["enabled"], "delayed Catalog used live global flag instead of off snapshot")
         self.record("real UDP 401/Digest/200 default-off registration stays off after global enable and delayed Catalog")
         enabled = self.peer("34020000002000000012")
-        enabled.register()
+        enabled_call_id, enabled_auth = enabled.register()
         enabled_snapshot = self.policy(enabled)
         require(enabled_snapshot and enabled_snapshot[0] == 1, "default-on REGISTER did not snapshot enabled")
         require(self.one("SELECT count(*) FROM gb_channel WHERE device_id=?", enabled.device) == 0, "unexpected pre-Catalog channels")
         self.global_default(False)
+        # A different CSeq/branch is a new transaction, not a same-transaction
+        # retransmission; an already consumed qopless nonce must be rejected.
+        status, _ = enabled.request("REGISTER", extra=["Expires: 3600", "Authorization: " + enabled_auth],
+                                    call_id=enabled_call_id)
+        require(status == 401 and self.policy(enabled) == enabled_snapshot,
+                "replayed Digest updated the device sharing snapshot")
+        enabled.register(expires=0)
+        require(self.policy(enabled) == enabled_snapshot, "unregister modified existing device sharing snapshot")
+        enabled.register()
+        self.restart_application()
+        require(self.success(CONFIG, token=self.token)["videoShare"] == {"defaultEnabled": False, "ttlSeconds": 300},
+                "sharing configuration did not survive application restart")
         channels = ["34020000001320000021", "34020000001320000022"]
         enabled.catalog(channels)
         for code in channels:
             self.assert_pending(code)
         require(self.policy(enabled) == enabled_snapshot, "delayed Catalog rewrote first-register snapshot")
-        self.record("default-on first REGISTER snapshot survives global-off and delayed Catalog; pending has no expiry/creator")
+        self.record("used-nonce replay and unregister preserve existing snapshot; global-off and real restart before delayed Catalog preserve first-register policy")
         self.global_default(True)
         old, precreated = self.peer(OLD), self.peer(PRECREATED)
         old.register()
@@ -313,6 +421,23 @@ class RegistrationCheck(Check):
         require(not self.state(channels[1])["enabled"] and self.state(channels[1])["revision"] == closed["revision"],
                 "re-registration or Catalog reopened a manually closed share")
         self.assert_pending(channels[2])
+        device_pk = self.one("SELECT id FROM gb_device WHERE device_id=?", enabled.device)
+        self.success(f"/api/gb28181/device-mgmt/device/{device_pk}/subscriptions/catalog", "PATCH",
+                     {"enabled": True, "expiresSeconds": 3600}, self.token)
+        # Establish the dialog through the actual protected API and real UDP
+        # SUBSCRIBE/200; an unsolicited NOTIFY ACK alone is not ingestion proof.
+        for event in ("ADD", "UPDATE", "ADD"):
+            enabled.notify(channels[:2], event)
+            after_notify = self.state(channels[0])
+            require(all(after_notify[key] == issued[key] for key in ("expiresAt", "generation", "revision")),
+                    "Catalog NOTIFY renewed an issued share")
+            closed_notify = self.state(channels[1])
+            require(not closed_notify["enabled"] and closed_notify["revision"] == closed["revision"],
+                    "Catalog NOTIFY reopened a manually closed share")
+        notified = "34020000001320000024"
+        enabled.notify([notified], "ADD")
+        self.assert_pending(notified)
+        self.record("real SUBSCRIBE/200 and repeated ADD/UPDATE NOTIFY neither reopen closed shares nor renew active links; NOTIFY-discovered channel inherits snapshot")
         require(self.policy(enabled) == enabled_snapshot, "renewed REGISTER rewrote enabled policy")
         off.register()
         off.catalog(["34020000001320000011", "34020000001320000013"])
@@ -353,6 +478,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("root", "server", "setup", "baseline"):
         parser.add_argument("--" + name, required=True)
+    parser.add_argument("--advertise-ip", help="local non-loopback IPv4; default uses a no-packet UDP route probe")
     args = parser.parse_args()
     for name in ("server", "setup", "baseline"):
         setattr(args, name, str(Path(getattr(args, name)).resolve(strict=True)))
@@ -363,7 +489,7 @@ def main():
         check.initialize()
         check.application()
         print(json.dumps({"status": "PASS", "checks": check.checks, "root": str(check.root),
-                          "scope": "full candidate process, real UDP REGISTER/Digest and Catalog; no media"}))
+                          "scope": "full candidate and restart, real UDP REGISTER/Digest, Catalog and subscribed NOTIFY; no media"}))
         return 0
     except Exception as error:
         # No credentials, Digest values, raw SIP or bearer links are printed.

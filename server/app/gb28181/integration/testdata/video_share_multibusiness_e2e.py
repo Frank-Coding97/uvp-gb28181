@@ -8,6 +8,11 @@ Use --self-test for the SIP/RTP wire helpers without starting any application.
 import argparse
 import datetime as dt
 import json
+import hashlib
+import os
+import signal
+import urllib.error
+import urllib.request
 from pathlib import Path
 import queue
 import re
@@ -59,6 +64,20 @@ def rtp_payload(data):
     require(end >= offset, 'truncated RTP payload')
     seq, stamp, ssrc = struct.unpack('!HII', data[2:12])
     return data[1] & 127, ssrc, seq, stamp, data[offset:end]
+
+
+def durable_share_state(database, key):
+    with sqlite3.connect(database) as connection:
+        shares = connection.execute('SELECT * FROM gb_channel_video_share ORDER BY id').fetchall()
+        require(shares and connection.execute('SELECT count(*) FROM gb_channel_video_share WHERE enabled<>0').fetchone()[0] == 0,
+                'sharing must remain revoked throughout rollback')
+        migrations = connection.execute('SELECT * FROM gb_schema_migrations ORDER BY version').fetchall()
+    return {'shares': shares, 'migrations': migrations, 'key': key.read_bytes()}
+
+
+def require_retained_state(database, key, before):
+    require(durable_share_state(database, key) == before,
+            'previous version changed revoked shares, migration ledger or persistent signing key')
 
 
 class UpperPeer:
@@ -142,7 +161,11 @@ class UpperPeer:
 
     def observe_after_revocation(self, path):
         with self.lock:
+            if self.after_output is not None:
+                self.after_output.close()
             self.after_output = path.open('wb')
+            self.sequences.clear()
+            self.timestamps.clear()
 
     def snapshot(self):
         with self.lock:
@@ -217,6 +240,7 @@ def candidate_check(args):
             self.cloud_started = False
             self.cascade_started = False
             self.revoked_at = None
+            self.proof_prefix = ''
 
         def start(self, argv, name):
             if name == 'zlm':
@@ -293,6 +317,8 @@ def candidate_check(args):
                 except Exception as error:
                     self.results['cascade'] = {'status': 'FAIL', 'error': str(error)}
             result = super().success(path, method, body, token)
+            if path == f'/api/gb28181/channel-shares/{self.channel_pk}/link':
+                self.issued_credentials = {key: result[key] for key in ('publicId', 'signature')}
             if (path == f'/api/gb28181/channel-shares/{self.channel_pk}' and method == 'PUT'
                     and body and body.get('enabled') is False):
                 self.revoked_at = time.monotonic()
@@ -396,8 +422,8 @@ def candidate_check(args):
                     break
             require(selected is not None, 'no real MP4 segment covers three seconds after sharing was revoked')
             path, offset, duration, size, delay = selected
-            output = self.decode_frame(path, 'cloud-after-revocation.jpg',
-                                       'cloud-decode-after-revocation', offset)
+            output = self.decode_frame(path, self.proof_prefix + 'cloud-after-revocation.jpg',
+                                       self.proof_prefix + 'cloud-decode-after-revocation', offset)
             self.results['cloudRecording'] = {'status': 'PASS', 'fileBytes': size, 'durationSeconds': duration,
                 'decodedFrameAfterRevocationSeconds': round(delay, 3), 'artifact': output.name}
             self.record('actual recorded MP4 decoded a video frame after sharing was revoked; recorder stopped independently')
@@ -409,8 +435,8 @@ def candidate_check(args):
                     'cascade supplied no sustained RTP bytes across share disable')
             require(after['sequences'] > self.rtp_before['sequences'] and after['timestamps'] > self.rtp_before['timestamps'],
                     'cascade RTP sequence/timestamp did not advance across share disable')
-            frame = self.decode_frame(self.root / 'cascade-after-revocation.ps',
-                                      'cascade-decoded.jpg', 'cascade-decode')
+            frame = self.decode_frame(self.root / (self.proof_prefix + 'cascade-after-revocation.ps'),
+                                      self.proof_prefix + 'cascade-decoded.jpg', self.proof_prefix + 'cascade-decode')
             self.peer.transaction('BYE', timeout=10)
             def closed():
                 with sqlite3.connect(self.db) as connection:
@@ -444,6 +470,145 @@ def candidate_check(args):
             require(all(item['status'] == 'PASS' for item in self.results.values()),
                     'one or more multi-business checks failed; inspect private multi-business-results.json')
 
+        def previous_version(self):
+            require(hashlib.sha256(Path(self.args.server).read_bytes()).digest() !=
+                    hashlib.sha256(Path(self.args.previous_server).read_bytes()).digest(),
+                    '--previous-server must be a different binary from the candidate')
+            keys = list(self.root.rglob('video-share.key'))
+            require(len(keys) == 1, 'persistent signing key was not found uniquely')
+            key = keys[0]
+            retained = durable_share_state(self.db, key)
+            candidate_results = self.results
+            candidate_marker = self.revoked_at, self.revoked_wall
+            self.results = {name: {'status': 'NOT_RUN'} for name in
+                            ('ordinaryPlayback', 'cloudRecording', 'cascade', 'persistentSafety')}
+            self.proof_prefix = 'previous-'
+            ordinary_reader = None
+            error = None
+            try:
+                # Candidate application() deliberately ended its recorder and SIP
+                # dialog independently. Re-establish business sessions on the old
+                # process; no claim that app-owned sessions survive process exit.
+                os.killpg(self.application_process.pid, signal.SIGTERM)
+                self.application_process.wait(timeout=15)
+                self.processes.remove(self.application_process)
+                self.application_process = self.start([self.args.previous_server], 'previous-server')
+                def ready():
+                    with socket.create_connection(('127.0.0.1', self.app_port), timeout=1):
+                        return True
+                self.wait(ready, 'previous-version application listener on the migrated DB', 60)
+                login = super().success('/api/login', 'POST', {'username': 'admin', 'password': self.password})
+                self.admin = login['accessToken']
+                require(login.get('mustChangePassword') is not True, 'previous version unexpectedly requires password change')
+                require_retained_state(self.db, key, retained)
+                self.private_record_paths()
+                try:
+                    super().success(f'/api/gb28181/device-mgmt/channel/{self.channel_pk}/cloud-recording',
+                                    'PATCH', {'enabled': True}, self.admin)
+                    self.results['cloudRecording'] = {'status': 'STARTING'}
+                except Exception as failure:
+                    self.results['cloudRecording'] = {'status': 'FAIL', 'error': str(failure)}
+                play = super().success(f'/api/gb28181/play/{DEVICE}/{CHANNEL}', 'POST', token=self.admin)
+                media = play.get('httpFlvUrl') or play.get('urls', {}).get('httpFlv')
+                parsed = urllib.parse.urlsplit(media or '')
+                require(parsed.scheme == 'http' and parsed.hostname == '127.0.0.1' and parsed.port == self.zlm_port
+                        and urllib.parse.parse_qs(parsed.query).get('play_token'),
+                        'previous version returned no isolated authenticated ordinary FLV URL')
+                response = self.opener.open(media, timeout=15)
+                try:
+                    require(response.status == 200 and response.read(3) == b'FLV',
+                            'previous version ordinary FLV did not play')
+                except Exception:
+                    response.close()
+                    raise
+                ordinary_reader = self.observe_flv(response)
+                self.wait(lambda: self.flv_snapshot(ordinary_reader)[0] > 0, 'previous-version ordinary FLV bytes', 10)
+                initial_bytes = self.flv_snapshot(ordinary_reader)[0]
+                self.revoked_at, self.revoked_wall = time.monotonic(), time.time()
+                try:
+                    self.wait(self.recording, 'previous-version actual ZLM cloud recorder', 15)
+                    self.results['cloudRecording'] = {'status': 'RECORDING'}
+                except Exception as failure:
+                    self.results['cloudRecording'] = {'status': 'FAIL', 'error': str(failure)}
+                try:
+                    require(self.peer is not None, 'candidate did not configure the isolated cascade peer')
+                    # Reuse the persisted platform/projection and real loopback
+                    # endpoint; a new dialog must be accepted by the old process.
+                    def registered():
+                        value = self.raw_api(f'/{self.platform_id}')
+                        return value.get('registerAt') is not None and value.get('registerExpiresAt') is not None
+                    self.wait(registered, 'previous-version persisted cascade platform registration', 20)
+                    self.peer.invite()
+                    def active():
+                        with sqlite3.connect(self.db) as connection:
+                            row = connection.execute('SELECT state FROM gb_cascade_media_session WHERE call_id=?',
+                                                     (self.peer.call_id,)).fetchone()
+                        return row is not None and row[0] == 'active'
+                    self.wait(active, 'previous-version new SIP INVITE/ACK dialog', 15)
+                    self.peer.observe_after_revocation(self.root / 'previous-cascade-after-revocation.ps')
+                    self.rtp_before = self.peer.snapshot()
+                    self.results['cascade'] = {'status': 'STREAMING'}
+                except Exception as failure:
+                    self.results['cascade'] = {'status': 'FAIL', 'error': str(failure)}
+                # Ten fresh seconds on the old process, independently of how
+                # long the candidate's original share has already been revoked.
+                until = time.monotonic() + 10
+                while time.monotonic() < until:
+                    if self.results['cloudRecording']['status'] == 'RECORDING' and not self.recording():
+                        self.results['cloudRecording'] = {'status': 'FAIL', 'error': 'previous-version recorder stopped unexpectedly'}
+                    time.sleep(min(.5, max(0, until - time.monotonic())))
+                for name, proof in [('cascade', self.prove_cascade), ('cloudRecording', self.prove_cloud)]:
+                    if self.results[name]['status'] not in ('STREAMING', 'RECORDING'):
+                        continue
+                    try:
+                        proof()
+                    except Exception as failure:
+                        self.results[name] = {'status': 'FAIL', 'error': str(failure)}
+                require(not ordinary_reader['ended'].is_set() and self.flv_snapshot(ordinary_reader)[0] > initial_bytes,
+                        'previous-version authenticated FLV did not continue during its cloud recording and SIP cascade')
+                self.results['ordinaryPlayback'] = {'status': 'PASS', 'reestablishedAfterRestart': True,
+                                                   'receivedNewFLVBytes': True}
+                request = urllib.request.Request(self.base + '/api/public/video-share/resolve',
+                    data=json.dumps(self.issued_credentials).encode(),
+                    headers={'Content-Type': 'application/json'}, method='POST')
+                try:
+                    denied = self.opener.open(request, timeout=10)
+                except urllib.error.HTTPError as failure:
+                    denied = failure
+                with denied:
+                    require(denied.status in (401, 403, 404, 405, 410),
+                            'previous version unexpectedly accepted the revoked public share')
+                    public_status = denied.status
+                require_retained_state(self.db, key, retained)
+                self.results['persistentSafety'] = {'status': 'PASS', 'sameDatabase': True, 'noDownRun': True,
+                    'revokedSharesRetained': True, 'migrationLedgerRetained': True, 'signingKeyRetained': True,
+                    'revokedPublicResolveHTTP': public_status}
+            except Exception as failure:
+                error = str(failure)
+            finally:
+                if ordinary_reader:
+                    ordinary_reader['stop'].set()
+                    ordinary_reader['ended'].wait(5)
+                previous_results = self.results
+                for item in previous_results.values():
+                    if item.get('status') == 'PASS':
+                        if 'decodedFrameAfterRevocationSeconds' in item:
+                            item['decodedFrameAfterOldPlaybackStartSeconds'] = item.pop('decodedFrameAfterRevocationSeconds')
+                        if 'keptStreamingAfterDisableSeconds' in item:
+                            item['streamedAfterOldPlaybackStartSeconds'] = item.pop('keptStreamingAfterDisableSeconds')
+                passed = error is None and all(item['status'] == 'PASS' for item in previous_results.values())
+                self.results = candidate_results
+                self.results['rollback'] = {'status': 'PASS' if passed else 'FAIL', 'businesses': previous_results,
+                    'sessionContinuity': 'New business sessions verified after restart; cross-process continuity not claimed'}
+                if error:
+                    self.results['rollback']['error'] = error
+                self.proof_prefix = ''
+                self.revoked_at, self.revoked_wall = candidate_marker
+                if passed:
+                    self.record('previous binary reopened the same migrated DB and passed authenticated playback, real MP4 and SIP/RTP')
+                self.save_report()
+            require(passed, 'previous-version business rollback checks failed; inspect private results')
+
         def save_report(self):
             report = {'status': 'PASS' if all(item['status'] == 'PASS' for item in self.results.values()) else 'FAIL',
                       'businesses': self.results, 'checks': self.checks}
@@ -475,6 +640,37 @@ def candidate_check(args):
 
 def self_test():
     import tempfile
+    with tempfile.TemporaryDirectory(prefix='uvp-rollback-state-') as temporary:
+        root = Path(temporary)
+        database, key = root / 'test.db', root / 'video-share.key'
+        key.write_bytes(b'private-test-signing-key')
+        with sqlite3.connect(database) as connection:
+            connection.execute('CREATE TABLE gb_channel_video_share (id INTEGER, enabled INTEGER, public_id TEXT)')
+            connection.execute('CREATE TABLE gb_schema_migrations (version TEXT, applied_at TEXT)')
+            connection.execute("INSERT INTO gb_channel_video_share VALUES (1,0,'issued-id')")
+            connection.execute("INSERT INTO gb_schema_migrations VALUES ('new-share-migration','now')")
+        before = durable_share_state(database, key)
+        require_retained_state(database, key, before)
+        def rejected():
+            try:
+                require_retained_state(database, key, before)
+            except RuntimeError:
+                return True
+            return False
+        with sqlite3.connect(database) as connection:
+            connection.execute('UPDATE gb_channel_video_share SET enabled=1')
+        require(rejected(), 'rollback guard failed to reject revived sharing')
+        with sqlite3.connect(database) as connection:
+            connection.execute('UPDATE gb_channel_video_share SET enabled=0')
+            connection.execute('DELETE FROM gb_schema_migrations')
+        require(rejected(), 'rollback guard failed to reject a destructive Down/ledger removal')
+        with sqlite3.connect(database) as connection:
+            connection.execute("INSERT INTO gb_schema_migrations VALUES ('new-share-migration','now')")
+        key.write_bytes(b'replaced-key')
+        require(rejected(), 'rollback guard failed to reject signing-key replacement')
+        key.write_bytes(before['key'])
+        require_retained_state(database, key, before)
+        print('PASS rollback guards reject revived shares, removed migrations and replaced signing keys')
     with tempfile.TemporaryDirectory(prefix='uvp-wire-check-') as temporary:
         fake = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         fake.bind(('127.0.0.1', 0))
@@ -540,6 +736,7 @@ def self_test():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--self-test', action='store_true')
+    parser.add_argument('--previous-server', help='optional prior-version binary for same-DB business rollback checks')
     for name in ('root', 'server', 'setup', 'baseline', 'zlm', 'ffmpeg', 'sample'):
         parser.add_argument('--' + name)
     args = parser.parse_args()
@@ -551,6 +748,8 @@ def main():
         if name != 'root':
             value = value.resolve(strict=True)
         setattr(args, name, str(value))
+    if args.previous_server:
+        args.previous_server = str(Path(args.previous_server).resolve(strict=True))
     check = None
     try:
         check = candidate_check(args)
@@ -558,6 +757,9 @@ def main():
         check.initialize()
         check.media()
         check.application()
+        if args.previous_server:
+            check.results['rollback'] = {'status': 'NOT_RUN'}
+            check.previous_version()
         return 0
     except Exception as error:
         message = str(error)
