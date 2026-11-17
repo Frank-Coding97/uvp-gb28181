@@ -371,9 +371,28 @@ class RegistrationCheck(Check):
         enabled.register(expires=0)
         require(self.policy(enabled) == enabled_snapshot, "unregister modified existing device sharing snapshot")
         enabled.register()
+        # Persist non-default values so a restart falling back to defaults cannot
+        # accidentally pass. A real filesystem failure must roll back both fields.
+        self.global_default(True, 420)
+        config = self.success(CONFIG, token=self.token)
+        config["videoShare"] = {"defaultEnabled": False, "ttlSeconds": 180}
+        directory, filename = self.root / "config", self.root / "config/config.yml"
+        directory_mode, file_mode = directory.stat().st_mode & 0o777, filename.stat().st_mode & 0o777
+        try:
+            filename.chmod(0o400)
+            directory.chmod(0o500)
+            status, _ = self.request(CONFIG, "PUT", config, self.token)
+            require(status == 500, f"unwritable isolated config must fail atomically, got HTTP {status}")
+        finally:
+            directory.chmod(directory_mode)
+            filename.chmod(file_mode)
+        require(self.success(CONFIG, token=self.token)["videoShare"] == {"defaultEnabled": True, "ttlSeconds": 420},
+                "failed config persistence published half of the sharing settings")
         self.restart_application()
-        require(self.success(CONFIG, token=self.token)["videoShare"] == {"defaultEnabled": False, "ttlSeconds": 300},
-                "sharing configuration did not survive application restart")
+        require(self.success(CONFIG, token=self.token)["videoShare"] == {"defaultEnabled": True, "ttlSeconds": 420},
+                "non-default sharing configuration did not survive failed save and real restart")
+        self.record("real unwritable config save fails atomically and both non-default share settings survive restart")
+        self.global_default(False)
         channels = ["34020000001320000021", "34020000001320000022"]
         enabled.catalog(channels)
         for code in channels:
