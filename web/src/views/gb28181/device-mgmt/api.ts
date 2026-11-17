@@ -1,6 +1,7 @@
 import { http } from "@/utils/http";
 import { baseUrlApi } from "@/api/utils";
 import type { BaseResult } from "@/api/types";
+import type { ChannelVideoShareState } from "@/api/gb28181";
 import {
   mockQueryDeviceRecords,
   mockRecordQueryOptions,
@@ -291,6 +292,7 @@ export interface DeviceSubscription {
 
 export interface ChannelVO {
   id: number;
+  videoShare?: ChannelVideoShareState;
   channelId: string;
   deviceId: string;
   name: string;

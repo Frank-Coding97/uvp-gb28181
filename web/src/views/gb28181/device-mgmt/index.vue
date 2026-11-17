@@ -134,6 +134,7 @@ import {
 } from "./mapTrajectory";
 import MapTrajectoryControls from "./MapTrajectoryControls.vue";
 import ChannelLocationPicker from "./ChannelLocationPicker.vue";
+import ChannelVideoShareControl from "./components/ChannelVideoShareControl.vue";
 import PlayWindow from "../components/PlayWindow.vue";
 import {
   createDirectoryState,
@@ -514,6 +515,7 @@ const canAddDevice = computed(() => hasPermission("gb28181:device:add"));
 const canEditDevice = computed(() => hasPermission("gb28181:device:edit"));
 const canDeleteDevice = computed(() => hasPermission("gb28181:device:delete"));
 const canDeleteChannel = computed(() => hasPermission("gb28181:channel:delete"));
+const canManageVideoShare = computed(() => hasPermission("gb28181:video-share:manage") && canStartPlayback.value);
 const canRefreshCatalog = computed(() => hasPermission("gb28181:device:catalog:refresh"));
 const canManageSubscriptions = computed(() => hasPermission("gb28181:device:subscription:manage"));
 const canEditChannel = computed(() => hasPermission("gb28181:channel:edit"));
@@ -4260,15 +4262,17 @@ onUnmounted(() => {
                   </div>
                 </template>
               </a-table-column>
-              <!-- 操作列宽必须放得下「最多动作数」这一行：通道最多 7 个动作
-                   (播放/录像/操作/停止/详情/编辑/删除)，单个动作 50px(4+13+3+26+4)、动作间 1px、
-                   单元格左右各 16px 内边距 ⇒ 7×50+6×1+32 = 388px。
-                   旧值 350 只够 6 个：任一通道「直播中」时多出「停止」，该行比列宽多出 38px，
-                   会把「删除」顶出列外被表格右缘裁掉。列宽改动后同步维护 :scroll.x
-                   (上面通道表的 scroll.x = Σ列宽 2090 + 勾选列 40 = 2130)。 -->
-              <a-table-column title="操作" :width="400" align="center" :fixed="stickTableActions ? 'right' : ''">
+              <!-- 操作列宽必须放得下分享滑钮和最多 7 个现有动作。 -->
+              <a-table-column title="操作" :width="448" align="center" :fixed="stickTableActions ? 'right' : ''">
                 <template #cell="{ record }">
                   <div class="uvp-table-actions">
+                    <ChannelVideoShareControl
+                      v-if="canManageVideoShare && record.videoShare"
+                      :channel-id="record.id"
+                      :channel-name="displayName(record)"
+                      :initial-state="record.videoShare"
+                      @change="record.videoShare = $event"
+                    />
                     <a-link
                       :disabled="!canStartPlayback"
                       class="uvp-table-action uvp-table-action--preview"
@@ -4870,6 +4874,13 @@ onUnmounted(() => {
                     <span class="channel-card-status" :class="{ online: item.status === 1 }">{{
                       deviceStatusLabel(item.status === 1)
                     }}</span>
+                    <ChannelVideoShareControl
+                      v-if="canManageVideoShare && item.videoShare"
+                      :channel-id="item.id"
+                      :channel-name="displayName(item)"
+                      :initial-state="item.videoShare"
+                      @change="item.videoShare = $event"
+                    />
                     <a-tooltip content="点播" position="top">
                       <button
                         class="icon-btn small framed primary"

@@ -220,6 +220,36 @@ export const listDevices = (params: { page?: number; pageSize?: number } = {}) =
 export const listChannels = (deviceId: string) =>
   http.request<ChannelListResult>("get", baseUrlApi(`gb28181/device/${deviceId}/channels`));
 
+export interface ChannelVideoShareState {
+  enabled: boolean;
+  publicId?: string;
+  expiresAt?: string;
+  pending: boolean;
+  generation?: string;
+  revision: number;
+  serverTime?: string;
+}
+
+export interface ChannelVideoShareLink extends ChannelVideoShareState {
+  signature?: string;
+}
+
+const channelVideoSharePath = (channelId: number) => `gb28181/channel-shares/${channelId}`;
+export const getChannelVideoShare = (channelId: number) =>
+  http.request<BaseResult<ChannelVideoShareState>>("get", baseUrlApi(channelVideoSharePath(channelId)));
+export const setChannelVideoShare = (channelId: number, enabled: boolean, revision: number) =>
+  http.request<BaseResult<ChannelVideoShareLink>>("put", baseUrlApi(channelVideoSharePath(channelId)), {
+    data: { enabled, revision }
+  });
+export const acquireChannelVideoShareLink = (channelId: number, revision: number) =>
+  http.request<BaseResult<ChannelVideoShareLink>>("post", baseUrlApi(`${channelVideoSharePath(channelId)}/link`), {
+    data: { revision }
+  });
+export const regenerateChannelVideoShare = (channelId: number, revision: number) =>
+  http.request<BaseResult<ChannelVideoShareLink>>("post", baseUrlApi(`${channelVideoSharePath(channelId)}/regenerate`), {
+    data: { revision }
+  });
+
 /** 发起点播 */
 export const startPlay = (deviceId: string, channelId: string, options: { silent?: boolean } = {}) => {
   const url = baseUrlApi(`gb28181/play/${deviceId}/${channelId}`);
@@ -1899,6 +1929,8 @@ export interface ServiceConfigAggregate {
   syncChannelsOnOnline: { enabled: boolean };
   onlineOnHeartbeat: { enabled: boolean };
   saveAlarmMessages: { enabled: boolean };
+  // 设备告警实时弹出（右侧浮层），与 saveAlarmMessages 相互独立；默认开启。
+  alarmPopup?: { enabled: boolean };
   sipCommandTimeout: { timeoutSec: number };
   preallocationMode: { enabled: boolean };
   ignoreChannelOfflineStatusNotify: { enabled: boolean };
@@ -1910,6 +1942,7 @@ export interface ServiceConfigAggregate {
   playbackSettings: PlaybackSettingsConfig;
   fixedAddressPlayback: FixedAddressPlaybackConfig;
   playAuth: PlayAuthConfig;
+  videoShare: { defaultEnabled: boolean; ttlSeconds: number };
   recordCacheTailToleranceSec: number;
   sipLog: SIPLogConfig;
   cascade?: CascadeSettingsConfig;

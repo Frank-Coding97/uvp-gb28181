@@ -20,7 +20,9 @@ import {
   createCascadeSettingsDraft,
   createStaticServiceConfigDraft,
   normalizePlayAuthConfig,
-  validateCascadeSettings
+  validateCascadeSettings,
+  resolveVideoShareTTLSeconds,
+  videoShareTTLChoiceFromSeconds
 } from "./serviceConfigState";
 
 const { isMobile } = useDevicesSize();
@@ -87,6 +89,8 @@ const aggregateReady = ref(false);
 const aggregateSaving = ref(false);
 const cloudRecordingRetentionReady = ref(false);
 const savedPositionHistoryEnabled = ref(true);
+const savedVideoShareDefaultEnabled = ref(false);
+const savedVideoShareTTLSeconds = ref(300);
 const savedPositionHistoryRetentionDays = ref(7);
 const savedSDPExtensionEnabled = ref(false);
 const savedDeviceTimeSync = ref(false);
@@ -113,6 +117,8 @@ const savedDefaultChannelAudioEnabled = ref(true);
 const savedSyncChannelsOnOnline = ref(true);
 const savedOnlineOnHeartbeat = ref(true);
 const savedSaveAlarmMessages = ref(true);
+// 设备告警实时弹出默认开启（后端 gb28181.alarm.popup_enabled 缺省即 true）。
+const savedAlarmPopup = ref(true);
 const savedSIPCommandTimeoutSec = ref(10);
 const savedPreallocationMode = ref(false);
 const savedIgnoreChannelOfflineStatusNotify = ref(false);
@@ -123,6 +129,15 @@ const savedCascadeSettings = reactive(createCascadeSettingsDraft());
 const cascadeChanged = computed(() => JSON.stringify(draft.cascade) !== JSON.stringify(savedCascadeSettings));
 const cascadeErrors = computed(() => validateCascadeSettings(draft.cascade));
 const cascadeValid = computed(() => Object.keys(cascadeErrors.value).length === 0);
+const videoShareTTLSeconds = computed(() =>
+  resolveVideoShareTTLSeconds(draft.videoShare.ttlChoice, draft.videoShare.customMinutes)
+);
+const videoShareConfigValid = computed(() => videoShareTTLSeconds.value !== undefined);
+const videoShareConfigChanged = computed(
+  () =>
+    draft.videoShare.defaultEnabled !== savedVideoShareDefaultEnabled.value ||
+    videoShareTTLSeconds.value !== savedVideoShareTTLSeconds.value
+);
 type NumberFieldInstance = InstanceType<typeof SNumberField>;
 const positionHistoryRetentionField = ref<NumberFieldInstance | null>(null);
 const cloudRecordingRetentionField = ref<NumberFieldInstance | null>(null);
@@ -175,6 +190,7 @@ const defaultChannelAudioChanged = computed(() => draft.defaultChannelAudioEnabl
 const syncChannelsOnOnlineChanged = computed(() => draft.syncChannelsOnOnline !== savedSyncChannelsOnOnline.value);
 const onlineOnHeartbeatChanged = computed(() => draft.onlineOnHeartbeat !== savedOnlineOnHeartbeat.value);
 const saveAlarmMessagesChanged = computed(() => draft.saveAlarmMessages !== savedSaveAlarmMessages.value);
+const alarmPopupChanged = computed(() => draft.alarmPopup !== savedAlarmPopup.value);
 const sipCommandTimeoutChanged = computed(() => draft.sipTimeoutSec !== savedSIPCommandTimeoutSec.value);
 const preallocationModeChanged = computed(() => draft.preallocationMode !== savedPreallocationMode.value);
 const ignoreChannelOfflineStatusNotifyChanged = computed(
@@ -215,6 +231,7 @@ const playAuthTTLValid = computed(
 const hasChanges = computed(
   () =>
     positionHistoryChanged.value ||
+    videoShareConfigChanged.value ||
     sdpExtensionChanged.value ||
     deviceTimeSyncChanged.value ||
     ptzDefaultSpeedChanged.value ||
@@ -228,6 +245,7 @@ const hasChanges = computed(
     syncChannelsOnOnlineChanged.value ||
     onlineOnHeartbeatChanged.value ||
     saveAlarmMessagesChanged.value ||
+    alarmPopupChanged.value ||
     sipCommandTimeoutChanged.value ||
     preallocationModeChanged.value ||
     ignoreChannelOfflineStatusNotifyChanged.value ||
@@ -314,6 +332,8 @@ async function loadPlaybackProtocolOptions() {
 
 function resetDraft() {
   Object.assign(draft.cascade, savedCascadeSettings);
+  draft.videoShare.defaultEnabled = savedVideoShareDefaultEnabled.value;
+  Object.assign(draft.videoShare, videoShareTTLChoiceFromSeconds(savedVideoShareTTLSeconds.value));
   draft.saveMobilePositionHistory = savedPositionHistoryEnabled.value;
   draft.positionHistoryRetentionDays = savedPositionHistoryRetentionDays.value;
   draft.recordCacheTailToleranceSec = savedRecordCacheTailToleranceSec.value;
@@ -330,6 +350,7 @@ function resetDraft() {
   draft.syncChannelsOnOnline = savedSyncChannelsOnOnline.value;
   draft.onlineOnHeartbeat = savedOnlineOnHeartbeat.value;
   draft.saveAlarmMessages = savedSaveAlarmMessages.value;
+  draft.alarmPopup = savedAlarmPopup.value;
   draft.sipTimeoutSec = savedSIPCommandTimeoutSec.value;
   draft.preallocationMode = savedPreallocationMode.value;
   draft.ignoreChannelOfflineStatusNotify = savedIgnoreChannelOfflineStatusNotify.value;
@@ -365,6 +386,7 @@ async function saveConfig() {
   }
   if (
     !cloudRecordingRetentionValid.value ||
+    !videoShareConfigValid.value ||
     !recordCacheTailToleranceValid.value ||
     !playTimeoutValid.value ||
     !playAuthTTLValid.value
@@ -384,6 +406,7 @@ async function saveConfig() {
       syncChannelsOnOnline: { enabled: draft.syncChannelsOnOnline },
       onlineOnHeartbeat: { enabled: draft.onlineOnHeartbeat },
       saveAlarmMessages: { enabled: draft.saveAlarmMessages },
+      alarmPopup: { enabled: draft.alarmPopup },
       sipCommandTimeout: { timeoutSec: draft.sipTimeoutSec },
       preallocationMode: { enabled: draft.preallocationMode },
       ignoreChannelOfflineStatusNotify: { enabled: draft.ignoreChannelOfflineStatusNotify },
@@ -406,6 +429,10 @@ async function saveConfig() {
         authBindClientIP: draft.playback.authBindClientIP,
         authTTLSeconds: draft.playback.authTTLSeconds
       },
+      videoShare: {
+        defaultEnabled: draft.videoShare.defaultEnabled,
+        ttlSeconds: videoShareTTLSeconds.value!
+      },
       sipLog: {
         enabled: draft.sipLogEnabled,
         applied: sipLogApplied.value
@@ -415,6 +442,8 @@ async function saveConfig() {
     if (response.code !== 0) throw new Error(response.message || "保存配置失败");
     const v = response.data;
     applyCascadeSettings(v.cascade);
+    draft.videoShare.defaultEnabled = v.videoShare.defaultEnabled;
+    Object.assign(draft.videoShare, videoShareTTLChoiceFromSeconds(v.videoShare.ttlSeconds));
     draft.saveMobilePositionHistory = v.positionHistory.enabled;
     draft.positionHistoryRetentionDays = v.positionHistory.retentionDays ?? 7;
     draft.cloudRecordingRetentionDays = v.cloudRecordingRetention.retentionDays ?? 7;
@@ -424,6 +453,7 @@ async function saveConfig() {
     draft.syncChannelsOnOnline = v.syncChannelsOnOnline.enabled;
     draft.onlineOnHeartbeat = v.onlineOnHeartbeat.enabled;
     draft.saveAlarmMessages = v.saveAlarmMessages.enabled;
+    draft.alarmPopup = v.alarmPopup?.enabled ?? true;
     draft.sipTimeoutSec = v.sipCommandTimeout.timeoutSec;
     draft.preallocationMode = v.preallocationMode.enabled;
     draft.ignoreChannelOfflineStatusNotify = v.ignoreChannelOfflineStatusNotify.enabled;
@@ -438,6 +468,8 @@ async function saveConfig() {
     draft.sipLogEnabled = v.sipLog.enabled;
     sipLogApplied.value = v.sipLog.applied ?? true;
     savedPositionHistoryEnabled.value = v.positionHistory.enabled;
+    savedVideoShareDefaultEnabled.value = v.videoShare.defaultEnabled;
+    savedVideoShareTTLSeconds.value = v.videoShare.ttlSeconds;
     savedPositionHistoryRetentionDays.value = v.positionHistory.retentionDays ?? 7;
     savedCloudRecordingRetentionDays.value = v.cloudRecordingRetention.retentionDays ?? 7;
     savedRecordCacheTailToleranceSec.value = v.recordCacheTailToleranceSec ?? 2;
@@ -451,6 +483,7 @@ async function saveConfig() {
     savedSyncChannelsOnOnline.value = v.syncChannelsOnOnline.enabled;
     savedOnlineOnHeartbeat.value = v.onlineOnHeartbeat.enabled;
     savedSaveAlarmMessages.value = v.saveAlarmMessages.enabled;
+    savedAlarmPopup.value = v.alarmPopup?.enabled ?? true;
     savedSIPCommandTimeoutSec.value = v.sipCommandTimeout.timeoutSec;
     savedPreallocationMode.value = v.preallocationMode.enabled;
     savedIgnoreChannelOfflineStatusNotify.value = v.ignoreChannelOfflineStatusNotify.enabled;
@@ -492,9 +525,13 @@ async function loadServiceConfig() {
     if (response.code !== 0) throw new Error(response.message || "加载配置失败");
     const v = response.data;
     applyCascadeSettings(v.cascade);
+    draft.videoShare.defaultEnabled = v.videoShare.defaultEnabled;
+    Object.assign(draft.videoShare, videoShareTTLChoiceFromSeconds(v.videoShare.ttlSeconds));
     draft.saveMobilePositionHistory = v.positionHistory.enabled;
     draft.positionHistoryRetentionDays = v.positionHistory.retentionDays ?? 7;
     savedPositionHistoryEnabled.value = v.positionHistory.enabled;
+    savedVideoShareDefaultEnabled.value = v.videoShare.defaultEnabled;
+    savedVideoShareTTLSeconds.value = v.videoShare.ttlSeconds;
     savedPositionHistoryRetentionDays.value = v.positionHistory.retentionDays ?? 7;
     draft.cloudRecordingRetentionDays = v.cloudRecordingRetention.retentionDays ?? 7;
     draft.recordCacheTailToleranceSec = v.recordCacheTailToleranceSec ?? 2;
@@ -519,7 +556,9 @@ async function loadServiceConfig() {
     draft.onlineOnHeartbeat = v.onlineOnHeartbeat.enabled;
     savedOnlineOnHeartbeat.value = v.onlineOnHeartbeat.enabled;
     draft.saveAlarmMessages = v.saveAlarmMessages.enabled;
+    draft.alarmPopup = v.alarmPopup?.enabled ?? true;
     savedSaveAlarmMessages.value = v.saveAlarmMessages.enabled;
+    savedAlarmPopup.value = v.alarmPopup?.enabled ?? true;
     draft.sipTimeoutSec = v.sipCommandTimeout.timeoutSec;
     savedSIPCommandTimeoutSec.value = v.sipCommandTimeout.timeoutSec;
     draft.preallocationMode = v.preallocationMode.enabled;
@@ -629,6 +668,7 @@ onMounted(async () => {
               !configReady ||
               !hasChanges ||
               !cascadeValid ||
+              !videoShareConfigValid ||
               !numberFieldsValid ||
               !recordCacheTailToleranceValid ||
               !playTimeoutValid ||
@@ -645,6 +685,50 @@ onMounted(async () => {
         <a-card :bordered="false" class="uvp-system-panel uvp-system-panel--dense mb-4">
           <a-form class="uvp-system-form" :layout="formLayout" :model="draft" auto-label-width>
             <a-row :gutter="24">
+              <a-col :span="isMobile ? 24 : 12">
+                <a-form-item
+                  field="videoShare.defaultEnabled"
+                  label="新设备默认开启分享"
+                  tooltip="仅影响新注册设备；既有设备和通道的分享状态不变。自动开启的通道在首次取得分享链接时才开始计时。"
+                >
+                  <a-switch
+                    v-model="draft.videoShare.defaultEnabled"
+                    :loading="aggregateLoading || aggregateSaving"
+                    :disabled="!configReady || aggregateSaving"
+                  >
+                    <template #checked>开启</template>
+                    <template #unchecked>关闭</template>
+                  </a-switch>
+                </a-form-item>
+              </a-col>
+              <a-col :span="isMobile ? 24 : 12">
+                <a-form-item
+                  field="videoShare.ttlSeconds"
+                  label="分享链接有效期"
+                  tooltip="所有通道统一使用该有效期；修改后只影响之后生成的链接。"
+                  :validate-status="videoShareConfigValid ? undefined : 'error'"
+                  :help="videoShareConfigValid ? undefined : '自定义有效期请输入正整数分钟'"
+                >
+                  <div class="video-share-expiry-control">
+                    <a-select v-model="draft.videoShare.ttlChoice" :disabled="!configReady || aggregateSaving">
+                      <a-option value="180">3 分钟</a-option>
+                      <a-option value="300">5 分钟</a-option>
+                      <a-option value="1800">30 分钟</a-option>
+                      <a-option value="3600">1 小时</a-option>
+                      <a-option value="custom">自定义</a-option>
+                    </a-select>
+                    <a-input-number
+                      v-if="draft.videoShare.ttlChoice === 'custom'"
+                      v-model="draft.videoShare.customMinutes"
+                      :min="1"
+                      :max="153722867"
+                      :precision="0"
+                      :disabled="!configReady || aggregateSaving"
+                      aria-label="自定义分享有效期（分钟）"
+                    />
+                  </div>
+                </a-form-item>
+              </a-col>
               <a-col :span="isMobile ? 24 : 12">
                 <a-form-item
                   field="saveMobilePositionHistory"
@@ -893,6 +977,22 @@ onMounted(async () => {
                     v-model="draft.saveAlarmMessages"
                     :loading="saveAlarmMessagesLoading || saveAlarmMessagesSaving"
                     :disabled="saveAlarmMessagesLoading || saveAlarmMessagesSaving || !saveAlarmMessagesReady"
+                  >
+                    <template #checked>开启</template>
+                    <template #unchecked>关闭</template>
+                  </a-switch>
+                </a-form-item>
+              </a-col>
+              <a-col :span="isMobile ? 24 : 12">
+                <a-form-item
+                  field="alarmPopup"
+                  label="设备告警实时弹出"
+                  tooltip="开启后，设备上报报警时在页面右侧弹出提示，几秒后自动消失。与「是否存储报警消息」互不影响：不存库也能弹。默认开启。"
+                >
+                  <a-switch
+                    v-model="draft.alarmPopup"
+                    :loading="aggregateLoading || aggregateSaving"
+                    :disabled="aggregateLoading || aggregateSaving || !aggregateReady"
                   >
                     <template #checked>开启</template>
                     <template #unchecked>关闭</template>
@@ -1232,6 +1332,34 @@ onMounted(async () => {
 
 :deep(.service-config-text-input) {
   width: min(100%, 360px);
+}
+
+.video-share-expiry-control {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: min(100%, 360px);
+
+  :deep(.arco-select) {
+    flex: 1;
+    min-width: 0;
+  }
+
+  :deep(.arco-input-number) {
+    flex: 0 0 128px;
+    width: 128px;
+  }
+}
+
+@media (width <= 480px) {
+  .video-share-expiry-control {
+    width: 100%;
+
+    :deep(.arco-input-number) {
+      flex-basis: 112px;
+      width: 112px;
+    }
+  }
 }
 
 .ptz-default-speed {

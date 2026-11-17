@@ -76,6 +76,10 @@ export default defineConfig(({ mode }) => {
       assetsInlineLimit: 50 * 1024,
       chunkSizeWarningLimit: 50000,
       rollupOptions: {
+        input: {
+          main: resolve(__dirname, "index.html"),
+          share: resolve(__dirname, "share.html")
+        },
         output: {
           chunkFileNames: "static/js/[name]-[hash].js",
           entryFileNames: "static/js/[name]-[hash].js",

@@ -1,6 +1,11 @@
 import type { CascadeSettingsConfig } from "@/api/gb28181";
 
 export interface StaticServiceConfigDraft {
+  videoShare: {
+    defaultEnabled: boolean;
+    ttlChoice: "180" | "300" | "1800" | "3600" | "custom";
+    customMinutes: number;
+  };
   defaultChannelStreamTransport: "UDP" | "TCP-Active" | "TCP-Passive";
   globalSubscriptionItems: Array<"catalog" | "mobile_position" | "alarm" | "ptz_precise_position">;
   defaultChannelAudioEnabled: boolean;
@@ -15,6 +20,9 @@ export interface StaticServiceConfigDraft {
   ignoreChannelOfflineStatusNotify: boolean;
   onlineOnHeartbeat: boolean;
   saveAlarmMessages: boolean;
+  // 设备告警实时弹出（右侧浮层）。与 saveAlarmMessages 相互独立：
+  // 不落库也能弹，落库也可以不弹。默认开启。
+  alarmPopup: boolean;
   sipTimeoutSec: number;
   preallocationMode: boolean;
   recordCacheTailToleranceSec: number;
@@ -47,6 +55,7 @@ export const staticServiceConfigLabels = [
   "忽略通道离线/异常通知",
   "心跳恢复设备在线状态",
   "是否存储报警消息",
+  "设备告警实时弹出",
   "SIP 命令超时时间（秒）",
   "预分配模式",
   "录像缓存尾部容差（秒）"
@@ -95,6 +104,7 @@ export function validateCascadeSettings(settings: CascadeSettingsConfig): Partia
 
 export function createStaticServiceConfigDraft(): StaticServiceConfigDraft {
   return {
+    videoShare: { defaultEnabled: false, ttlChoice: "300", customMinutes: 5 },
     defaultChannelStreamTransport: "TCP-Passive",
     globalSubscriptionItems: [],
     defaultChannelAudioEnabled: true,
@@ -109,6 +119,7 @@ export function createStaticServiceConfigDraft(): StaticServiceConfigDraft {
     ignoreChannelOfflineStatusNotify: false,
     onlineOnHeartbeat: true,
     saveAlarmMessages: false,
+    alarmPopup: true,
     sipTimeoutSec: 10,
     preallocationMode: false,
     recordCacheTailToleranceSec: 2,
@@ -125,6 +136,25 @@ export function createStaticServiceConfigDraft(): StaticServiceConfigDraft {
     },
     cascade: createCascadeSettingsDraft()
   };
+}
+
+export type VideoShareTTLChoice = StaticServiceConfigDraft["videoShare"]["ttlChoice"];
+
+const maxVideoShareMinutes = Math.floor(Number.MAX_SAFE_INTEGER / 60);
+
+export function videoShareTTLChoiceFromSeconds(
+  seconds: number
+): Pick<StaticServiceConfigDraft["videoShare"], "ttlChoice" | "customMinutes"> {
+  if ([180, 300, 1800, 3600].includes(seconds)) {
+    return { ttlChoice: String(seconds) as VideoShareTTLChoice, customMinutes: seconds / 60 };
+  }
+  return { ttlChoice: "custom", customMinutes: seconds / 60 };
+}
+
+export function resolveVideoShareTTLSeconds(choice: VideoShareTTLChoice, customMinutes: number): number | undefined {
+  if (choice !== "custom") return Number(choice);
+  if (!Number.isSafeInteger(customMinutes) || customMinutes < 1 || customMinutes > maxVideoShareMinutes) return undefined;
+  return customMinutes * 60;
 }
 
 export interface PlayAuthDraft {

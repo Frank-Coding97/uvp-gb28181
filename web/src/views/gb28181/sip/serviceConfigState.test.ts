@@ -5,22 +5,29 @@ import {
   normalizePlayAuthConfig,
   validateCascadeSettings,
   playbackServiceConfigLabels,
-  staticServiceConfigLabels
+  staticServiceConfigLabels,
+  resolveVideoShareTTLSeconds,
+  videoShareTTLChoiceFromSeconds
 } from "./serviceConfigState";
 
 describe("static service config draft", () => {
   it("matches the reference controls without SIP access identity fields", () => {
     const draft = createStaticServiceConfigDraft();
+    expect(draft.videoShare).toEqual({ defaultEnabled: false, ttlChoice: "300", customMinutes: 5 });
     expect(draft.defaultChannelStreamTransport).toBe("TCP-Passive");
     expect(draft.globalSubscriptionItems).toEqual([]);
     expect(draft.defaultChannelAudioEnabled).toBe(true);
     expect(draft.cloudRecordingRetentionDays).toBe(7);
 
-    expect(staticServiceConfigLabels).toHaveLength(17);
+    expect(staticServiceConfigLabels).toHaveLength(18);
     expect(staticServiceConfigLabels).not.toContain("扫码配网地址");
     expect(staticServiceConfigLabels).not.toContain("抓拍回传地址");
     expect(draft).not.toHaveProperty("qrProvisionBaseUrl");
     expect(draft).not.toHaveProperty("snapshotUploadBaseUrl");
+    expect(staticServiceConfigLabels).toContain("设备告警实时弹出");
+    // 弹窗与落库是两个独立开关，弹窗默认开启（后端缺省即 true）
+    expect(draft.alarmPopup).toBe(true);
+    expect(draft.saveAlarmMessages).toBe(false);
     expect(staticServiceConfigLabels).toContain("云端录像默认保留天数（天）");
     expect(staticServiceConfigLabels).toContain("新通道默认流传输模式");
     expect(staticServiceConfigLabels).toContain("全局订阅项目");
@@ -82,6 +89,20 @@ describe("static service config draft", () => {
     expect(staticServiceConfigLabels).not.toContain("SIP端口");
     expect(staticServiceConfigLabels).not.toContain("SIP域");
     expect(staticServiceConfigLabels).not.toContain("SIP密码");
+  });
+
+  it("resolves the global video-share expiry options and validates custom minutes", () => {
+    expect([180, 300, 1800, 3600].map(seconds => videoShareTTLChoiceFromSeconds(seconds).ttlChoice)).toEqual([
+      "180",
+      "300",
+      "1800",
+      "3600"
+    ]);
+    expect(videoShareTTLChoiceFromSeconds(420)).toEqual({ ttlChoice: "custom", customMinutes: 7 });
+    expect(resolveVideoShareTTLSeconds("custom", 7)).toBe(420);
+    for (const invalid of [0, -1, 1.5, Number.MAX_SAFE_INTEGER]) {
+      expect(resolveVideoShareTTLSeconds("custom", invalid)).toBeUndefined();
+    }
   });
 
   it("validates shared cascade identity and administrative codes before saving", () => {
