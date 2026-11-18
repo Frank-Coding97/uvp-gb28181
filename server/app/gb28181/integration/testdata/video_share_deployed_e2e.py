@@ -109,7 +109,14 @@ class Deployed(Check):
         try:
             ordinary=self.success('/api/gb28181/play/'+self.args.device+'/'+self.args.channel,'POST',token=self.token)
             self.private('ordinary-play.private.json',ordinary)
-            normal=self.reader(ordinary['httpFlvUrl']); self.record('normal authenticated camera playback is delivering FLV')
+            ordinary_url=ordinary['httpFlvUrl']
+            if self.args.local_media_host:
+                source=urllib.parse.urlsplit(ordinary_url)
+                require(source.scheme=='http' and source.port,'local media override requires an explicit HTTP media port')
+                ordinary_url=urllib.parse.urlunsplit(source._replace(netloc=self.args.local_media_host+':'+str(source.port)))
+                self.report['ordinaryPlaybackTransport']='same returned FLV path, query and port via explicit deployment-local media host'
+            else:self.report['ordinaryPlaybackTransport']='returned public FLV URL'
+            normal=self.reader(ordinary_url); self.record('normal authenticated camera playback is delivering FLV')
             self.enabled(True); link,cred=self.link(); require(self.link()[0]['expiresAt']==link['expiresAt'],'reacquiring extended expiry')
             meta=self.success('/api/public/video-share/resolve','POST',cred)
             viewer=self.success('/api/public/video-share/viewers','POST',cred)
@@ -205,7 +212,9 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     for n in ['base','public-base','device','channel']:p.add_argument('--'+n,required=True)
     for n in ['session','output','ffmpeg']:p.add_argument('--'+n,type=Path,required=True)
-    p.add_argument('--channel-pk',type=int,required=True); a=p.parse_args(); c=Deployed(a)
+    p.add_argument('--channel-pk',type=int,required=True)
+    p.add_argument('--local-media-host',help='Explicit local media host for a same-stream ordinary control; leaves the returned path, query and port unchanged')
+    a=p.parse_args(); c=Deployed(a)
     try:c.run_acceptance()
     except Exception as e:
         c.report['status']='FAIL'; c.report['errorType']=type(e).__name__; c.report['error']=__import__('re').sub(r'https?://[^ ]+', '[private-url]',str(e))[:600]; c.save(); print('FAIL '+type(e).__name__+'; inspect private report/logs',flush=True); raise SystemExit(1)
