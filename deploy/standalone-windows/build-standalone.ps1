@@ -16,6 +16,10 @@
       <OutDir>\uvp-gb28181-windows-amd64-<版本>.zip
       <OutDir>\uvp-gb28181-windows-amd64-<版本>.zip.sha256
 
+  客户双击包根的 UVP-GB28181.exe 即可启动：它拉起全部服务并常驻系统托盘，
+  右键托盘可打开管理页 / 查状态 / 重启 / 停止 / 退出（退出会先停服务）。
+  老入口 start.cmd / stop.cmd / status.cmd 仍保留，行为不变。
+
   -VendorDir 里必须有四样（Linux 版对应 deploy/standalone/bin/{redis,nginx,zlm,ffmpeg}，
   Windows 版不入库，按平台单独准备）：
       redis\redis-server.exe  redis\redis-cli.exe  redis\*.dll   （Cygwin 版 redis）
@@ -25,7 +29,8 @@
       nginx\nginx.exe         nginx\conf\  nginx\html\ ...       （nginx for Windows 发行包）
 
   ⛔⛔ 包内契约与 Linux 版**逐条对齐**（deploy/standalone/uvp-gb28181-ctl.sh 顶部注释）：
-      bin\      只放我们自己编的程序（uvp-server.exe / uvp-setup.exe）
+      bin\      只放我们自己编的程序（uvp-server.exe / uvp-setup.exe / uvp-updater.exe
+                 / uvp-tray.exe，编好后 tray 会被复制一份到包根当双击入口）
       vendor\   第三方运行时，每个组件自成一体（redis / nginx / zlm）
       config\   config.yml（后端读）+ config.env（只走环境变量，ctl 注入子进程）
       data\     uvp.db + redis AOF + process-authority\
@@ -289,6 +294,7 @@ $ServerExeOut = Join-Path $ServerDir 'bin\uvp-server.exe'
 $SetupExeOut  = Join-Path $ServerDir 'bin\uvp-setup.exe'
 # 升级助手：与 Linux 版同一个 main，Windows 侧另外补了平台实现（AF_UNIX + 就地替换适配器）。
 $UpdaterExeOut = Join-Path $ServerDir 'bin\uvp-updater.exe'
+$TrayExeOut    = Join-Path $ServerDir 'bin\uvp-tray.exe'
 $DistIndex    = Join-Path $WebDir 'dist\index.html'
 
 if ($SkipBuild) {
@@ -306,8 +312,12 @@ if ($SkipBuild) {
             -Arguments @('build', '-ldflags', '-s -w', '-o', $SetupExeOut, '.\cmd\uvp-setup')
         Invoke-Native -FilePath $goExe -What '升级助手编译（uvp-updater）' `
             -Arguments @('build', '-ldflags', '-s -w', '-o', $UpdaterExeOut, '.\cmd\uvp-updater')
+        # 托盘启动器：必须用 -H=windowsgui 只留 GUI 子系统，否则双击会闪一个控制台黑窗。
+        # systray 在 Windows 上是纯 Win32 调用，CGO_ENABLED=0 也能交叉编译（已在 mac 上验证）。
+        Invoke-Native -FilePath $goExe -What '托盘启动器编译（uvp-tray）' `
+            -Arguments @('build', '-ldflags', '-s -w -H=windowsgui', '-o', $TrayExeOut, '.\cmd\uvp-tray')
     } finally { Pop-Location }
-    Ok "uvp-server.exe $(Format-Size (Get-Item $ServerExeOut).Length) · uvp-setup.exe $(Format-Size (Get-Item $SetupExeOut).Length) · uvp-updater.exe $(Format-Size (Get-Item $UpdaterExeOut).Length)"
+    Ok "uvp-server.exe $(Format-Size (Get-Item $ServerExeOut).Length) · uvp-setup.exe $(Format-Size (Get-Item $SetupExeOut).Length) · uvp-updater.exe $(Format-Size (Get-Item $UpdaterExeOut).Length) · uvp-tray.exe $(Format-Size (Get-Item $TrayExeOut).Length)"
 
     # ⛔⛔ -SkipFrontend 原先**只在 param 里声明、没有任何地方判断它**：
     #   传了等于没传，脚本照样把 web\dist 删掉重建。2026-10-28 在 52 上就是被这坑
@@ -428,6 +438,7 @@ function Assert-Fresh {
 Log '阶段 1/4 · 产物新鲜度断言'
 Assert-Fresh -Artifact $ServerExeOut -Label '后端二进制'
 Assert-Fresh -Artifact $SetupExeOut  -Label 'uvp-setup 二进制'
+Assert-Fresh -Artifact $TrayExeOut   -Label 'uvp-tray 二进制'
 Assert-Fresh -Artifact $DistIndex    -Label '前端产物'
 
 # ------------------------------------------------------------------ 装配 ----
@@ -456,6 +467,11 @@ if (-not (Test-Path -LiteralPath $UpdaterExeOut)) {
 }
 Copy-Item -LiteralPath $UpdaterExeOut -Destination (Join-Path $Pkg 'updater\uvp-updater.exe') -Force
 Det "updater\uvp-updater.exe $(Format-Size (Get-Item $UpdaterExeOut).Length)"
+
+# 托盘启动器放在**包根**、起一个直白的名字：这是客户双击的入口。
+# 名字不叫 uvp-tray.exe 是为了让客户一眼就知道「双击这个启动」。
+Copy-Item -LiteralPath $TrayExeOut -Destination (Join-Path $Pkg 'UVP-GB28181.exe') -Force
+Det "UVP-GB28181.exe（托盘启动器）$(Format-Size (Get-Item $TrayExeOut).Length)"
 
 # ---- vendor\redis：包内自带，只连回环 ----
 Copy-Tree -Source $VendorRedis -Destination (Join-Path $Pkg 'vendor\redis')
@@ -834,7 +850,8 @@ foreach ($item in @(
         @{ P = 'vendor\nginx\nginx.exe';             N = 'nginx' },
         @{ P = 'vendor\nginx\conf\nginx.conf.template'; N = 'nginx 配置模板' },
         @{ P = 'uvp-gb28181-ctl.ps1';                N = '控制脚本' },
-        @{ P = 'reset-password.cmd';                 N = '忘记口令时的入口' }
+        @{ P = 'reset-password.cmd';                 N = '忘记口令时的入口' },
+        @{ P = 'UVP-GB28181.exe';                    N = '托盘启动器（双击入口）' }
     )) {
     if (-not (Test-Path -LiteralPath (Join-Path $Pkg $item.P))) { Fail "包内缺少 $($item.N)：$($item.P)" }
 }

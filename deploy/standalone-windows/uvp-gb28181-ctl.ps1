@@ -1682,6 +1682,18 @@ function Invoke-ResetPassword {
     Write-Host ''
 }
 
+# 供托盘程序（uvp-tray.exe）读取管理页访问地址。
+# 只往 stdout 打一行 `UVP_ENTRY_URL=<scheme>://<host>:<port>`，其余诊断一律走 stderr，
+# 这样托盘不必解析中文日志、也不必自己复算 HTTPS 分支 —— 地址逻辑只有这一份。
+function Invoke-EntryUrl {
+    $config = Get-Config
+    $ports = $config.Ports
+    $scheme = 'https'; $entryPort = $ports.HTTPS
+    if (-not $script:HttpsEnabled) { $scheme = 'http'; $entryPort = $ports.NGINX_HTTP }
+    $lanIp = Get-LanIP
+    Write-Output ("UVP_ENTRY_URL={0}://{1}:{2}" -f $scheme, $lanIp, $entryPort)
+}
+
 function Show-Usage {
     Write-Banner
     Write-Host '用法: .\uvp-gb28181-ctl.ps1 <start|stop|restart|status|reset-password>'
@@ -1699,5 +1711,6 @@ switch ($Action.ToLower()) {
     # 仅供升级助手调用（停服之后、替换程序之前），客户不需要手工执行。
     'migrate'        { Invoke-Migrate -Binary $ServerBinary }
     'updater-status' { Invoke-UpdaterStatus }
+    'entry-url'      { Invoke-EntryUrl }
     default          { Show-Usage; exit 2 }
 }
