@@ -107,9 +107,16 @@ try:
   require(admin.locator('.arco-modal:visible').count()==0,'renewal opened an extra modal')
   require('请关闭后重新开启' not in admin.locator('body').inner_text(),'renewal retained the old warning')
   for target in [page,frame]:
-   before=target.evaluate(FRAME_STATE);target.wait_for_timeout(2000);after=target.evaluate(FRAME_STATE)
-   advanced=after['canvas']['draws']>before['canvas']['draws'] or any(v['time']>before['videos'][i]['time']+.1 for i,v in enumerate(after['videos']) if i<len(before['videos']))
-   require(advanced,'renewing the link stopped an old playback page')
+   (target.page if target is frame else target).bring_to_front()
+   before=target.evaluate(FRAME_STATE)
+   try:
+    target.wait_for_function("""before => {
+     const videos = [...document.querySelectorAll('.share-player__screen video')];
+     return (window.__shareFrames?.draws || 0) > before.canvas.draws || videos.some((v,i) => v.currentTime > (before.videos[i]?.time || 0) + .1);
+    }""",arg=before,timeout=20000)
+   except PlaywrightTimeoutError:
+    report['oldPageContinuationFailure']={'before':before,'after':target.evaluate(FRAME_STATE),'body':redact(target.locator('body').inner_text(),bootstrap)}
+    raise RuntimeError('old playback did not resume decoded frames in foreground within 20 seconds')
   report['expiredIconRenewal']={'singleClick':True,'switchStayedEnabled':True,'switchWriteRequests':len(switch_requests),'newLinkPlayed':True,'oldPagesContinued':True,'globalFiveMinuteTTL':True}
   print('PASS expired icon: one click opened a fresh playing link, no switch request; old page and iframe continued',flush=True)
   for target in [page,frame,renewed_page]:

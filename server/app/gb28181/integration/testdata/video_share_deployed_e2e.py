@@ -187,7 +187,9 @@ class Deployed(Check):
             require(not new_anon['ended'].is_set(),'renewed link did not retain live playback')
             self.report['measurements']['postRenewalHlsNewSegments']=hls_state['segments']-before_hls
             self.record('expired icon renewed the public link without toggling sharing; old FLV/HLS continued and old link stayed invalid')
-            time.sleep(20)
+            if self.args.browser_renewal_ready:
+                self.wait(lambda:self.args.browser_renewal_ready.is_file(),'browser confirmation of old and renewed playback',150)
+            else:time.sleep(20)
             hls_state['stop'].set();hls_thread.join(12)
             self.enabled(False);revoked=time.monotonic();require(anon['ended'].wait(30),'post-expiry manual disable exceeded 30 seconds')
             require(new_anon['ended'].wait(30),'manual disable did not stop the renewed viewer')
@@ -214,6 +216,7 @@ def main():
     for n in ['session','output','ffmpeg']:p.add_argument('--'+n,type=Path,required=True)
     p.add_argument('--channel-pk',type=int,required=True)
     p.add_argument('--local-media-host',help='Explicit local media host for a same-stream ordinary control; leaves the returned path, query and port unchanged')
+    p.add_argument('--browser-renewal-ready',type=Path,help='Optional external browser acknowledgement file; prevents premature cleanup during browser frame checks')
     a=p.parse_args(); c=Deployed(a)
     try:c.run_acceptance()
     except Exception as e:
