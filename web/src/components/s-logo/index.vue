@@ -21,7 +21,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import uvpMark from "@/assets/logo/uvp-mark.svg";
+import uvpMark from "@/assets/logo/uvp-mark.png";
 
 interface Props {
   // 图片URL

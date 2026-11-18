@@ -77,6 +77,16 @@
     </svg>
 
     <header class="page-meta">
+      <div class="brand-heading">
+        <img class="brand-mark" :src="uvpMark" alt="统一视频接入平台" />
+        <div class="brand-copy">
+          <div class="brand-eyebrow">Unified Video Platform</div>
+          <div class="brand-title" aria-label="统一视频接入平台-GB28181">
+            <span>统一视频接入平台</span>
+            <span>GB28181</span>
+          </div>
+        </div>
+      </div>
       <span class="version-text">{{ APP_VERSION_TEXT }} · GB/T 28181-2022</span>
     </header>
 
@@ -97,17 +107,9 @@
         </button>
         <!-- LEFT: brand / slogan -->
         <aside class="brand-side">
-          <div class="brand-heading">
-            <img class="brand-mark" :src="uvpMark" alt="统一视频接入平台" />
-            <div class="brand-eyebrow">Unified Video Platform</div>
-          </div>
-          <div class="brand-title" aria-label="统一视频接入平台-GB28181">
-            <span>统一视频接入平台</span>
-            <span>GB28181</span>
-          </div>
-          <p class="brand-lede">
-            以国标接入为核心，集中管理设备、视频、录像与平台级联，结合信令追踪和媒体诊断，让运行状态与问题定位有据可依。
-          </p>
+          <p class="brand-lede">国标设备统一接入，视频资源集中管理。</p>
+
+          <LoginArchitecture />
 
           <div class="brand-features">
             <div class="feature">
@@ -116,7 +118,7 @@
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
               </span>
-              <span>视频业务：实时预览 · 录像回放 · 级联共享</span>
+              <span>实时预览 · 录像回放 · 级联共享</span>
             </div>
             <div class="feature">
               <span class="ic">
@@ -124,15 +126,7 @@
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
               </span>
-              <span>资源管理：通道授权 · 多媒体节点调度</span>
-            </div>
-            <div class="feature">
-              <span class="ic">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-              </span>
-              <span>运行追溯：SIP 追踪 · 媒体探针 · 日志审计</span>
+              <span>通道授权 · 多节点调度 · 信令追踪</span>
             </div>
           </div>
 
@@ -169,11 +163,12 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import LoginForm from "@/views/login/components/login-form.vue";
+import LoginArchitecture from "@/views/login/components/LoginArchitecture.vue";
 import { useSysConfigStore } from "@/store/modules/sys-config";
 import { storeToRefs } from "pinia";
 import { getDisplaySystemCopyright, getDisplaySystemRecordNo } from "@/utils/system-footer";
 import { APP_VERSION_TEXT } from "@/config/version";
-import uvpMark from "@/assets/logo/uvp-mark.svg";
+import uvpMark from "@/assets/logo/uvp-mark.png";
 import { Sun, Moon } from "lucide-vue-next";
 import { useThemeConfig } from "@/store/modules/theme-config";
 import { useThemeMethods } from "@/hooks/useThemeMethods";
@@ -252,6 +247,7 @@ $primary-light: #69c0ff;
   --login-bg: linear-gradient(135deg, #0a1424 0%, #0f1d33 50%, #122242 100%);
   --login-overlay: rgb(15 29 51 / 55%);
   --login-page-muted: #a5b5ca;
+  --login-brand-text: #f0f6ff;
   --login-card-shadow: 0 24px 64px rgb(0 0 0 / 28%), 0 8px 24px rgb(0 0 0 / 10%);
 
   color-scheme: dark;
@@ -312,10 +308,9 @@ $primary-light: #69c0ff;
   flex-shrink: 0;
   gap: 16px;
   align-items: center;
-  justify-content: flex-end;
-  height: 64px;
-  padding: 0 32px;
-  font-family: "JetBrains Mono", SFMono-Regular, Menlo, monospace;
+  justify-content: space-between;
+  min-height: 88px;
+  padding: 16px 32px;
   font-size: 12px;
   color: var(--login-page-muted);
   letter-spacing: 0;
@@ -350,19 +345,19 @@ $primary-light: #69c0ff;
   }
 }
 
-/* Card branding */
+/* Page branding */
 .brand-heading {
   position: relative;
   display: flex;
   gap: 12px;
   align-items: center;
-  margin-bottom: 18px;
+  min-width: 0;
 }
 .brand-mark {
   display: block;
   flex-shrink: 0;
-  width: 36px;
-  height: 36px;
+  width: 48px;
+  height: 48px;
   object-fit: contain;
 }
 
@@ -397,7 +392,8 @@ $primary-light: #69c0ff;
   position: relative;
   display: flex;
   flex-direction: column;
-  padding: 52px 40px 36px;
+  gap: 22px;
+  padding: 38px 32px 30px;
   overflow: hidden;
   color: #ffffff;
   background:
@@ -410,8 +406,8 @@ $primary-light: #69c0ff;
     pointer-events: none;
     content: "";
     background-image:
-      linear-gradient(rgb(255 255 255 / 4%) 1px, transparent 1px),
-      linear-gradient(90deg, rgb(255 255 255 / 4%) 1px, transparent 1px);
+      linear-gradient(rgb(255 255 255 / 2%) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(255 255 255 / 2%) 1px, transparent 1px);
     background-size: 32px 32px;
   }
 }
@@ -419,43 +415,52 @@ $primary-light: #69c0ff;
   position: relative;
   font-family: "JetBrains Mono", SFMono-Regular, Menlo, monospace;
   font-size: 11px;
-  color: rgb(255 255 255 / 70%);
+  color: var(--login-page-muted);
   text-transform: uppercase;
   letter-spacing: 0;
 }
 .brand-title {
   position: relative;
-  margin-bottom: 14px;
-  font-size: 32px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+  margin-top: 4px;
+  font-size: 20px;
   font-weight: 700;
   line-height: 1.3;
+  color: var(--login-brand-text, var(--login-text));
   letter-spacing: 0;
 
   span {
-    display: block;
     white-space: nowrap;
+  }
+
+  span + span {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--login-page-muted);
   }
 }
 .brand-lede {
   position: relative;
-  max-width: 360px;
-  margin-bottom: auto;
-  font-size: 14px;
-  line-height: 1.7;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.8;
   color: rgb(255 255 255 / 82%);
 }
 .brand-features {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-top: 32px;
+  gap: 9px;
+  margin-top: auto;
 
   .feature {
     display: flex;
-    gap: 10px;
+    gap: 8px;
     align-items: center;
-    font-size: 13px;
+    font-size: 12px;
     color: rgb(255 255 255 / 88%);
 
     .ic {
@@ -463,8 +468,8 @@ $primary-light: #69c0ff;
       flex-shrink: 0;
       align-items: center;
       justify-content: center;
-      width: 22px;
-      height: 22px;
+      width: 18px;
+      height: 18px;
       color: $primary-light;
       background: rgb(105 192 255 / 16%);
       border: 1px solid rgb(105 192 255 / 32%);
@@ -477,17 +482,16 @@ $primary-light: #69c0ff;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding-top: 20px;
-  margin-top: 28px;
-  border-top: 1px solid rgb(255 255 255 / 16%);
+  padding-top: 18px;
+  border-top: 1px solid rgb(255 255 255 / 10%);
 
   .chip {
-    padding: 3px 9px;
-    font-size: 11px;
-    color: rgb(255 255 255 / 86%);
+    padding: 3px 8px;
+    font-size: 10px;
+    color: rgb(255 255 255 / 76%);
     letter-spacing: 0.3px;
-    background: rgb(255 255 255 / 8%);
-    border: 1px solid rgb(255 255 255 / 18%);
+    background: rgb(255 255 255 / 4%);
+    border: 1px solid rgb(255 255 255 / 12%);
     border-radius: 99px;
   }
 }
@@ -567,8 +571,12 @@ $primary-light: #69c0ff;
 
 /* Responsive —— 手机竖屏：从"营销落地页"收成"登录卡"，一屏就能看到登录按钮 */
 @media (width <= 880px) {
-  /* 版本条在手机上只剩一条空白（文字早被隐藏），整条让位给内容 */
   .page-meta {
+    min-height: 80px;
+    padding: 16px 18px;
+  }
+
+  .version-text {
     display: none;
   }
 
@@ -583,26 +591,18 @@ $primary-light: #69c0ff;
     border-radius: 16px;
   }
 
-  /* 品牌区收成标题条：logo + 一行平台名 + GB28181 标号，
-     长介绍与功能点整块收掉（手机上它们只把登录按钮挤到屏幕外） */
+  /* 品牌已移到页头，窄屏只保留登录表单。 */
   .brand-side {
-    padding: 20px 22px 18px;
-
-    .brand-features,
-    .brand-foot,
-    .brand-lede {
-      display: none;
-    }
+    display: none;
   }
 
   .brand-heading {
     gap: 10px;
-    margin-bottom: 10px;
   }
 
   .brand-mark {
-    width: 30px;
-    height: 30px;
+    width: 40px;
+    height: 40px;
   }
 
   .brand-eyebrow {
@@ -614,7 +614,6 @@ $primary-light: #69c0ff;
     flex-wrap: wrap;
     gap: 4px 8px;
     align-items: baseline;
-    margin-bottom: 0;
     font-size: 19px;
     line-height: 1.35;
 
@@ -627,7 +626,7 @@ $primary-light: #69c0ff;
     span + span {
       font-size: 12px;
       font-weight: 600;
-      color: rgb(255 255 255 / 58%);
+      color: var(--login-page-muted);
       letter-spacing: 0.6px;
     }
   }
@@ -637,14 +636,6 @@ $primary-light: #69c0ff;
     right: 14px;
     width: 34px;
     height: 34px;
-    color: #ffffff;
-    background: rgb(255 255 255 / 8%);
-    border-color: rgb(255 255 255 / 22%);
-
-    &:hover {
-      background: rgb(255 255 255 / 16%);
-      border-color: rgb(255 255 255 / 40%);
-    }
   }
 
   .form-side {
@@ -689,10 +680,6 @@ $primary-light: #69c0ff;
 @media (width <= 360px) {
   .stage {
     padding: 12px 12px 8px;
-  }
-
-  .brand-side {
-    padding: 18px 18px 16px;
   }
 
   .brand-title {

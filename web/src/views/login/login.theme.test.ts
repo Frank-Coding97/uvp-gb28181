@@ -47,6 +47,28 @@ afterEach(() => {
 });
 
 describe("login theme", () => {
+  it("places the architecture between the introduction and feature summary in the brand panel", () => {
+    const { wrapper } = createPage();
+    const panel = wrapper.get(".brand-side");
+    expect(panel.find('svg.architecture[role="img"]').exists()).toBe(true);
+    const children = Array.from(panel.element.children);
+    expect(children.indexOf(panel.get(".brand-lede").element)).toBeLessThan(children.indexOf(panel.get(".architecture").element));
+    expect(children.indexOf(panel.get(".architecture").element)).toBeLessThan(
+      children.indexOf(panel.get(".brand-features").element)
+    );
+    wrapper.unmount();
+  });
+
+  it("places the complete brand in the page header outside the login card", () => {
+    const { wrapper } = createPage();
+    expect(wrapper.find(".page-meta .brand-heading .brand-mark").exists()).toBe(true);
+    expect(wrapper.get(".page-meta .brand-title").text()).toContain("统一视频接入平台");
+    expect(wrapper.get(".page-meta .brand-title").text()).toContain("GB28181");
+    expect(wrapper.get(".float-card").find(".brand-heading").exists()).toBe(false);
+    expect(wrapper.get(".float-card").find(".brand-title").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("places the theme toggle inside the login card and keeps the page version", () => {
     const { wrapper } = createPage();
     expect(wrapper.get(".float-card").find("#login-theme-toggle").exists()).toBe(true);

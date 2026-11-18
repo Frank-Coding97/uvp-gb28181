@@ -44,9 +44,10 @@ describe("login page scrolls on short viewports", () => {
 describe("login page mobile layout stays compact", () => {
   // 手机端把"营销长文案"收成标题条：改前整页 976px 高，按钮落在 667px 视口之外；
   // 光靠能滚只是兜底，真正好用的是让它在常见手机上根本不用滚。
-  it("collapses the marketing block into a title bar and frees the version strip", () => {
-    expect(mobileBlock).toMatch(/\.brand-lede\s*\{\s*display:\s*none/);
-    expect(mobileBlock).toMatch(/\.page-meta\s*\{\s*display:\s*none/);
+  it("keeps the page brand visible and hides the marketing panel on mobile", () => {
+    expect(mobileBlock).toMatch(/\.brand-side\s*\{\s*display:\s*none/);
+    expect(mobileBlock).toMatch(/\.version-text\s*\{\s*display:\s*none/);
+    expect(mobileBlock).not.toMatch(/\.page-meta\s*\{\s*display:\s*none/);
     expect(mobileBlock).toMatch(/\.brand-title\s*\{[^}]*font-size:\s*19px/s);
   });
 

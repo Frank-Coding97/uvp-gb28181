@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import { Copy, ExternalLink, Pause, Play, RefreshCw } from "@lucide/vue";
 import QRCode from "qrcode";
-import uvpLogo from "@/assets/logo/uvp-mark.svg";
+import uvpLogo from "@/assets/logo/uvp-mark.png";
 import { preparePlayerDecoder } from "@/views/gb28181/components/playerDecoderResources";
 import {
   closeViewer,
