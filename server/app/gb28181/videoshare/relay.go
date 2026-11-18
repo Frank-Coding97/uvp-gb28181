@@ -147,6 +147,12 @@ func (s *Service) watchViewer(ctx context.Context, cancel context.CancelFunc, to
 			_, err := s.LookupViewer(checkCtx, token)
 			checkCancel()
 			if err != nil {
+				// A completed or canceled media request also cancels its in-flight
+				// authorization query. It is not a revocation of the viewer shared
+				// by subsequent HLS requests; the idle lease still bounds cleanup.
+				if ctx.Err() != nil {
+					return
+				}
 				_ = s.CloseViewer(token)
 				cancel()
 				return
