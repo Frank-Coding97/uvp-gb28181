@@ -5,7 +5,7 @@ only that channel's sharing lifecycle and restores it to disabled in finally.
 No global configuration, device, source stream or database row is modified here.
 Credentials and media URLs remain in chmod-0600 files in the supplied directory.
 """
-import argparse,datetime as dt,json,os,subprocess,threading,time,urllib.parse,urllib.request
+import argparse,datetime as dt,http.client,json,os,subprocess,threading,time,urllib.parse,urllib.request
 from pathlib import Path
 from video_share_full_app_e2e import Check,require
 
@@ -46,6 +46,21 @@ class Deployed(Check):
     def reader(self,url):
         r=self.opener.open(url,timeout=20); require(r.status==200 and r.read(3)==b'FLV','expected real FLV')
         state=self.observe_flv(r); self.wait(lambda:self.flv_snapshot(state)[0]>65536,'progressing media',15); return state
+    def observe_flv(self,response):
+        state={'last_byte':time.monotonic(),'bytes':0,'ended':threading.Event(),'stop':threading.Event(),'lock':threading.Lock(),'error':None}
+        def consume():
+            try:
+                while not state['stop'].is_set():
+                    chunk=response.read1(32*1024)
+                    if not chunk:break
+                    with state['lock']:state['last_byte']=time.monotonic();state['bytes']+=len(chunk)
+            except http.client.IncompleteRead as error:
+                state['error']=type(error).__name__
+                if error.partial:
+                    with state['lock']:state['last_byte']=time.monotonic();state['bytes']+=len(error.partial)
+            except (OSError,ValueError) as error:state['error']=type(error).__name__
+            finally:response.close();state['ended'].set()
+        thread=threading.Thread(target=consume,daemon=True);self.media_readers.append((response,thread,state));thread.start();return state
     def decode(self,path):
         output=self.root/'decoded-frame.jpg'; log=self.root/'ffmpeg.private.log'
         env=os.environ.copy(); env['LD_LIBRARY_PATH']=str(self.args.ffmpeg.parent.parent/'lib')+':'+env.get('LD_LIBRARY_PATH','')
@@ -133,7 +148,9 @@ class Deployed(Check):
             require(not anon['ended'].is_set() and self.flv_snapshot(anon)[0]>before_anon,'existing FLV stopped at link expiry')
             require(not hls_state['error'] and hls_state['segments']>before_hls,'existing HLS failed to fetch new post-expiry segments')
             self.report['measurements']['postExpiryHlsNewSegments']=hls_state['segments']-before_hls
-            before=self.flv_snapshot(normal)[0]; self.wait(lambda:self.flv_snapshot(normal)[0]>before,'ordinary playback survives expiry',10)
+            before=self.flv_snapshot(normal)[0]
+            self.report['ordinaryConnectionAtExpiry']={'ended':normal['ended'].is_set(),'error':normal['error'],'bytes':before,'secondsSinceLastByte':round(time.monotonic()-self.flv_snapshot(normal)[1],3)};self.save()
+            self.wait(lambda:self.flv_snapshot(normal)[0]>before,'ordinary playback survives expiry',10)
             self.record('real five-minute expiry rejected new visits while active FLV/HLS and ordinary playback continued')
             # The independent browser must click the expired share icon. Do not
             # call /link here until the UI has performed that renewal itself.

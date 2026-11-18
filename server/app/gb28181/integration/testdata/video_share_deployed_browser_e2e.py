@@ -77,14 +77,16 @@ try:
   admin.goto(bootstrap['origin']+'/#/gb28181/device-mgmt/index',wait_until='domcontentloaded')
   admin.wait_for_selector('.arco-menu',timeout=90000)
   admin.keyboard.press('Escape');admin.locator('.driver-overlay').wait_for(state='hidden',timeout=15000)
-  channel_tab=admin.locator('button[data-asset-kind="channel"]');channel_tab.wait_for(state='visible',timeout=45000)
-  for attempt in range(5):
-   admin.keyboard.press('Escape');admin.locator('.driver-overlay').wait_for(state='hidden',timeout=15000)
-   try:
-    channel_tab.click(timeout=3000);break
-   except PlaywrightTimeoutError:
-    if not admin.locator('.driver-overlay:visible').count() or attempt==4:raise
-  admin.get_by_role('button',name='卡片视图',exact=True).click()
+  def click_after_guide(target):
+   target.wait_for(state='visible',timeout=45000)
+   for attempt in range(5):
+    admin.keyboard.press('Escape');admin.locator('.driver-overlay').wait_for(state='hidden',timeout=15000)
+    try:
+     target.click(timeout=3000);return
+    except PlaywrightTimeoutError:
+     if not admin.locator('.driver-overlay:visible').count() or attempt==4:raise
+  click_after_guide(admin.locator('button[data-asset-kind="channel"]'))
+  click_after_guide(admin.get_by_role('button',name='卡片视图',exact=True))
   search=admin.get_by_role('textbox',name='搜索设备名称或通道名称或编码');search.fill(args.channel);search.press('Enter')
   row=admin.get_by_role('article').filter(has_text=args.device).filter(has_text=args.channel)
   switch=row.get_by_role('switch',name='开启通道视频分享');switch.wait_for(timeout=45000)
@@ -92,7 +94,7 @@ try:
   require(switch.get_attribute('aria-checked')=='true','expired sharing switch was not left enabled')
   link_endpoint='/api/gb28181/channel-shares/'+str(args.channel_pk)+'/link'
   with admin.expect_popup() as popup,admin.expect_response(lambda response:response.request.method=='POST' and urllib.parse.urlsplit(response.url).path==link_endpoint and response.status==200) as renewed_response:
-   row.get_by_role('button',name='打开通道分享页',exact=True).click()
+   click_after_guide(row.get_by_role('button',name='打开通道分享页',exact=True))
   renewed_link=renewed_response.value.json()['data']
   new_expiry=dt.datetime.fromisoformat(renewed_link['expiresAt'].replace('Z','+00:00'))
   new_time=dt.datetime.fromisoformat(renewed_link['serverTime'].replace('Z','+00:00'))
