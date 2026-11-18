@@ -46,16 +46,20 @@ const slotNumber = computed(() => String(props.index + 1).padStart(2, "0"));
 .slot-number {
   font-family: var(--zlm-font-mono);
   font-variant-numeric: tabular-nums;
+  color: #64748b; /* 槽号是定位信息，弱一档 */
 }
 .idle-state {
   display: inline-flex;
   gap: 6px;
   align-items: center;
+  font-size: 11px;
+  font-weight: 500;
+  color: #cbd5e1; /* 待接入才是这块真正要读的信息，提到主位 */
 }
 .idle-dot {
   width: 6px;
   height: 6px;
-  background: #6b7280;
+  background: #94a3b8;
   border-radius: 50%;
 }
 .brand-lockup {
@@ -66,27 +70,30 @@ const slotNumber = computed(() => String(props.index + 1).padStart(2, "0"));
 }
 .cover-brand {
   font-family: var(--zlm-font-display);
-  font-size: 52px;
+  font-size: 31px;
   font-weight: 700;
   line-height: 1;
   color: transparent;
   letter-spacing: 0;
-  background: linear-gradient(110deg, #f8fafc 8%, #c7d7f2 54%, #72a2f5 100%);
+
+  /* 品牌字标只作水印：暗端收进背景，亮端不过白，避免四块黑砖里冒出四个广告牌 */
+  background: linear-gradient(110deg, #6d86ad 6%, #5c789f 52%, #4a6c93 100%);
   background-clip: text;
-  filter: drop-shadow(0 8px 18px rgb(37 99 235 / 16%));
+  opacity: 0.5;
   -webkit-text-fill-color: transparent;
 }
 .brand-caption {
   font-size: 10px;
   font-weight: 500;
   line-height: 1.4;
-  color: #778397;
+  color: #5b6b80;
   letter-spacing: 0;
+  opacity: 0.85;
 }
 
 @container (max-width: 220px) {
   .cover-brand {
-    font-size: 38px;
+    font-size: 24px;
   }
   .brand-caption {
     font-size: 9px;
@@ -95,7 +102,7 @@ const slotNumber = computed(() => String(props.index + 1).padStart(2, "0"));
 
 @container (min-width: 520px) {
   .cover-brand {
-    font-size: 68px;
+    font-size: 40px;
   }
   .brand-caption {
     font-size: 11px;

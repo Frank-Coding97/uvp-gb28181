@@ -1045,10 +1045,16 @@ onBeforeUnmount(() => {
   gap: 1px;
   min-height: 0;
   overflow: hidden;
-  background: #4b5563;
-  border: 1px solid #4b5563;
+
+  /* 缝线压到只比窗口底色亮一档：太亮会在纯黑上显成硬网格 */
+  background: #232a36;
+  border: 1px solid #232a36;
   border-radius: var(--zlm-radius-md);
-  box-shadow: 0 8px 24px rgb(15 23 42 / 10%);
+
+  /* 浅色页面上这块深色区域要有自己的边界，否则四块黑砖直接糊在白底上 */
+  box-shadow:
+    0 0 0 1px rgb(15 23 42 / 8%),
+    0 10px 26px rgb(15 23 42 / 14%);
 }
 .slot-grid.layout-1 {
   grid-template-rows: minmax(0, 1fr);
