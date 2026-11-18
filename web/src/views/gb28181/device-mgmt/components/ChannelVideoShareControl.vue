@@ -20,11 +20,12 @@ const state = ref<ChannelVideoShareState>({ enabled: false, pending: false, revi
 const busy = ref(true);
 const blockedPageURL = ref("");
 const expiresText = computed(() => {
-  if (state.value.expired) return "链接已到期，已有观看可继续；关闭后重新开启可生成新链接";
+  if (state.value.expired) return "链接已到期，已有观看可继续；点击分享图标获取新链接";
   if (!state.value.expiresAt) return state.value.pending ? "取得分享页时开始计时" : "开启通道视频分享";
   return `链接有效期至 ${new Date(state.value.expiresAt).toLocaleString()}`;
 });
 let expiryTimer: ReturnType<typeof setTimeout> | undefined;
+let receivedInitialState = false;
 watch(state, current => {
   clearTimeout(expiryTimer);
   if (props.mode !== "switch" || !current.enabled || current.expired || !current.expiresAt) return;
@@ -37,7 +38,8 @@ watch(
   value => {
     if (value) {
       applyState(value);
-      busy.value = false;
+      if (!receivedInitialState) busy.value = false;
+      receivedInitialState = true;
     }
   },
   { immediate: true }
@@ -90,20 +92,34 @@ async function changeEnabled(enabled: boolean) {
   }
 }
 
+async function requestShareLink() {
+  const response = await acquireChannelVideoShareLink(props.channelId, state.value.revision);
+  if (response.code === 409 || response.code === 410) throw { response: { status: response.code } };
+  const link = response.data;
+  if (response.code !== 0 || !link?.publicId || !link.signature) throw new Error(response.message || "取得分享链接失败");
+  return { ...link, publicId: link.publicId, signature: link.signature };
+}
+
+async function acquireCurrentLink() {
+  try {
+    return await requestShareLink();
+  } catch (error: any) {
+    if (error?.response?.status !== 409) throw error;
+    const response = await getChannelVideoShare(props.channelId);
+    if (response.code !== 0 || !response.data) throw new Error(response.message || "读取分享状态失败");
+    applyState(response.data);
+    if (!state.value.enabled) throw { response: { status: 410 } };
+    return requestShareLink();
+  }
+}
+
 async function openShare() {
   if (busy.value || !state.value.enabled) return;
-  if (state.value.expired) {
-    Message.warning("分享链接已到期，请关闭后重新开启分享以生成新链接；当前观看不受链接到期影响。");
-    return;
-  }
   const page = window.open("", "_blank");
   if (page) page.opener = null;
   busy.value = true;
   try {
-    const response = await acquireChannelVideoShareLink(props.channelId, state.value.revision);
-    if (response.code === 409 || response.code === 410) throw { response: { status: response.code } };
-    const link = response.data;
-    if (response.code !== 0 || !link?.publicId || !link.signature) throw new Error(response.message || "取得分享链接失败");
+    const link = await acquireCurrentLink();
     const fragment = new URLSearchParams({ id: link.publicId, sig: link.signature });
     const sharePagePath = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/share.html`;
     const url = new URL(`${sharePagePath}#${fragment.toString()}`, window.location.origin).toString();
@@ -115,12 +131,13 @@ async function openShare() {
     }
   } catch (error: any) {
     page?.close();
-    if (error?.response?.status === 410) Message.warning("分享链接已到期，请关闭后重新开启分享以生成新链接。");
-    else Message.error(error?.message || "取得分享链接失败");
-    if (error?.response?.status === 409 || error?.response?.status === 410) {
-      blockedPageURL.value = "";
-      await load();
-    }
+    blockedPageURL.value = "";
+    if (error?.response?.status === 410) {
+      Message.warning("分享已关闭或访问权限已变更，无法取得分享链接。");
+      if (state.value.enabled) await load();
+    } else if (error?.response?.status === 409) {
+      Message.error("分享状态正在更新，请稍后再试");
+    } else Message.error(error?.message || "取得分享链接失败");
   } finally {
     busy.value = false;
   }

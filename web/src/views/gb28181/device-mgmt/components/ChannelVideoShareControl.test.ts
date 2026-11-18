@@ -119,20 +119,40 @@ describe("ChannelVideoShareControl separated switch and action", () => {
     wrapper.unmount();
   });
 
-  it("keeps an expired share enabled for explicit closing and does not renew it from the icon", async () => {
-    const initialState = { enabled: true, pending: false, expired: true, revision: 7 };
-    const control = mountControl("switch", initialState);
-    expect(control.get('[data-testid="share-switch"]').text()).toBe("true");
-    await control.get('[data-testid="share-switch"]').trigger("click");
+  it("renews an enabled expired link from one click without touching the switch", async () => {
+    const page = { opener: window, location: { replace: vi.fn() }, close: vi.fn() };
+    vi.mocked(window.open).mockReturnValue(page as unknown as Window);
+    const wrapper = mountControl("action", { enabled: true, pending: false, expired: true, revision: 7 });
+    await wrapper.get('[aria-label="打开通道分享页"]').trigger("click");
     await flushPromises();
-    expect(shareApi.setChannelVideoShare).toHaveBeenCalledExactlyOnceWith(42, false, 7);
-    const action = mountControl("action", initialState);
-    await action.get('[aria-label="打开通道分享页"]').trigger("click");
-    expect(message.warning).toHaveBeenCalledWith(expect.stringContaining("关闭后重新开启"));
+    expect(window.open).toHaveBeenCalledOnce();
+    expect(shareApi.acquireChannelVideoShareLink).toHaveBeenCalledExactlyOnceWith(42, 7);
+    expect(page.location.replace).toHaveBeenCalledWith(expect.stringContaining("share.html#id=share-id&sig=sig-value"));
+    expect(shareApi.setChannelVideoShare).not.toHaveBeenCalled();
+    expect(message.warning).not.toHaveBeenCalled();
+    expect(modalConfirm).not.toHaveBeenCalled();
+    expect(wrapper.emitted("change")?.at(-1)?.[0]).toEqual(expect.objectContaining({ enabled: true, revision: 4 }));
+    wrapper.unmount();
+  });
+
+  it("does not acquire or open a page when sharing is disabled", async () => {
+    const wrapper = mountControl("action", { enabled: false, pending: false, expired: true, revision: 7 });
+    expect(wrapper.find('[aria-label="打开通道分享页"]').exists()).toBe(false);
     expect(window.open).not.toHaveBeenCalled();
     expect(shareApi.acquireChannelVideoShareLink).not.toHaveBeenCalled();
-    control.unmount();
-    action.unmount();
+    expect(shareApi.setChannelVideoShare).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("keeps a newly issued expired-share link clickable when the browser blocks the popup", async () => {
+    const wrapper = mountControl("action", { enabled: true, pending: false, expired: true, revision: 7 });
+    await wrapper.get('[aria-label="打开通道分享页"]').trigger("click");
+    await flushPromises();
+    expect(shareApi.acquireChannelVideoShareLink).toHaveBeenCalledExactlyOnceWith(42, 7);
+    expect(wrapper.get('a[aria-label="手动打开分享页"]').attributes("href")).toContain("share.html#id=share-id&sig=sig-value");
+    expect(message.warning).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("拦截"));
+    expect(shareApi.setChannelVideoShare).not.toHaveBeenCalled();
+    wrapper.unmount();
   });
 
   it("uses server time to refresh once on expiry and does not repeatedly schedule already expired state", async () => {
@@ -191,7 +211,7 @@ describe("ChannelVideoShareControl separated switch and action", () => {
     wrapper.unmount();
   });
 
-  it.each(["request", "response"])("refreshes stale link state after a conflict without retrying (%s)", async failure => {
+  it.each(["request", "response"])("stops acquisition after a conflict refresh finds sharing disabled (%s)", async failure => {
     if (failure === "request") shareApi.acquireChannelVideoShareLink.mockRejectedValue({ response: { status: 409 } });
     else shareApi.acquireChannelVideoShareLink.mockResolvedValue({ code: 409, message: "分享已更新" });
     shareApi.getChannelVideoShare.mockResolvedValue({ code: 0, data: { enabled: false, pending: false, revision: 5 } });
@@ -201,6 +221,65 @@ describe("ChannelVideoShareControl separated switch and action", () => {
     expect(shareApi.getChannelVideoShare).toHaveBeenCalledTimes(1);
     expect(shareApi.acquireChannelVideoShareLink).toHaveBeenCalledExactlyOnceWith(42, 3);
     expect(wrapper.find('[aria-label="打开通道分享页"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+  it.each(["request", "response"])(
+    "refreshes a conflicted revision and retries once in the original popup (%s)",
+    async failure => {
+      const page = { opener: window, location: { replace: vi.fn() }, close: vi.fn() };
+      vi.mocked(window.open).mockReturnValue(page as unknown as Window);
+      if (failure === "request") shareApi.acquireChannelVideoShareLink.mockRejectedValueOnce({ response: { status: 409 } });
+      else shareApi.acquireChannelVideoShareLink.mockResolvedValueOnce({ code: 409, message: "分享已更新" });
+      shareApi.getChannelVideoShare.mockResolvedValue({
+        code: 0,
+        data: { enabled: true, expired: true, pending: false, revision: 8 }
+      });
+      const wrapper = mountControl("action", { enabled: true, pending: false, expired: true, revision: 7 });
+      await wrapper.get('[aria-label="打开通道分享页"]').trigger("click");
+      await flushPromises();
+      expect(shareApi.getChannelVideoShare).toHaveBeenCalledOnce();
+      expect(shareApi.acquireChannelVideoShareLink.mock.calls).toEqual([
+        [42, 7],
+        [42, 8]
+      ]);
+      expect(window.open).toHaveBeenCalledOnce();
+      expect(page.location.replace).toHaveBeenCalledWith(expect.stringContaining("sig=sig-value"));
+      expect(page.close).not.toHaveBeenCalled();
+      expect(message.error).not.toHaveBeenCalled();
+      expect(shareApi.setChannelVideoShare).not.toHaveBeenCalled();
+      wrapper.unmount();
+    }
+  );
+
+  it("does not retry indefinitely when the refreshed revision also conflicts", async () => {
+    const page = { opener: window, location: { replace: vi.fn() }, close: vi.fn() };
+    vi.mocked(window.open).mockReturnValue(page as unknown as Window);
+    shareApi.acquireChannelVideoShareLink.mockResolvedValue({ code: 409, message: "分享已更新" });
+    shareApi.getChannelVideoShare.mockResolvedValue({ code: 0, data: { enabled: true, pending: false, revision: 8 } });
+    const wrapper = mountControl("action", { enabled: true, pending: false, revision: 7 });
+    await wrapper.get('[aria-label="打开通道分享页"]').trigger("click");
+    await flushPromises();
+    expect(shareApi.acquireChannelVideoShareLink).toHaveBeenCalledTimes(2);
+    expect(shareApi.getChannelVideoShare).toHaveBeenCalledOnce();
+    expect(page.close).toHaveBeenCalledOnce();
+    expect(page.location.replace).not.toHaveBeenCalled();
+    expect(shareApi.setChannelVideoShare).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+  it("does not retry a revoked link and refreshes the disabled state without asking to toggle", async () => {
+    const page = { opener: window, location: { replace: vi.fn() }, close: vi.fn() };
+    vi.mocked(window.open).mockReturnValue(page as unknown as Window);
+    shareApi.acquireChannelVideoShareLink.mockRejectedValueOnce({ response: { status: 410 } });
+    shareApi.getChannelVideoShare.mockResolvedValue({ code: 0, data: { enabled: false, pending: false, revision: 8 } });
+    const wrapper = mountControl("action", { enabled: true, pending: false, revision: 7 });
+    await wrapper.get('[aria-label="打开通道分享页"]').trigger("click");
+    await flushPromises();
+    expect(shareApi.acquireChannelVideoShareLink).toHaveBeenCalledExactlyOnceWith(42, 7);
+    expect(shareApi.getChannelVideoShare).toHaveBeenCalledOnce();
+    expect(message.warning).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("分享已关闭或访问权限已变更"));
+    expect(page.close).toHaveBeenCalledOnce();
+    expect(wrapper.find('[aria-label="打开通道分享页"]').exists()).toBe(false);
+    expect(shareApi.setChannelVideoShare).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 });
