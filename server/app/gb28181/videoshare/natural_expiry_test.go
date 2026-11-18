@@ -63,8 +63,6 @@ func TestNaturalExpiryPreservesStartedViewerAndManualClose(t *testing.T) {
 			require.True(t, status.Enabled, "administrator must retain an explicit close operation")
 			require.True(t, status.Expired)
 			require.Equal(t, link.ExpiresAt, status.ExpiresAt)
-			_, err = s.AcquireLink(context.Background(), channel, 9, status.Revision)
-			require.ErrorIs(t, err, ErrExpired, "expired links must not renew implicitly")
 			closed, err := s.SetEnabled(context.Background(), channel, 9, false, status.Revision)
 			require.NoError(t, err)
 			require.False(t, closed.Enabled)

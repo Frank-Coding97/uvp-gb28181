@@ -293,8 +293,8 @@ func (s *Service) setEnabled(ctx context.Context, channelPK uint, actorID uint, 
 	return result, err
 }
 
-// AcquireLink activates an automatically enabled pending share once. Repeated
-// requests reproduce the same signature and never extend expires_at.
+// AcquireLink activates a pending share or renews an expired link within the
+// same share authorization. Requests during its TTL reproduce the same link.
 func (s *Service) AcquireLink(ctx context.Context, channelPK uint, actorID uint, expectedRevision uint64) (Link, error) {
 	var result Link
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -323,7 +323,45 @@ func (s *Service) AcquireLink(ctx context.Context, channelPK uint, actorID uint,
 			return ErrExpired
 		}
 		if share.ExpiresAt != nil && !share.ExpiresAt.After(s.now()) {
-			return ErrExpired
+			if share.ActivatedAt == nil || share.CreatedBy == nil {
+				return ErrExpired
+			}
+			// A new operator may renew the credential, but cannot replace the
+			// original authority that still owns every continuing viewer.
+			owner, err := s.authorize(ctx, tx, *share.CreatedBy, channelPK)
+			if err != nil {
+				return err
+			}
+			if !matchesDevice(owner, share.DevicePK, share.DeviceID, share.DeviceEpoch) {
+				return ErrExpired
+			}
+			duration, err := s.validTTL()
+			if err != nil {
+				return err
+			}
+			publicID, err := s.randomID()
+			if err != nil {
+				return err
+			}
+			now := s.now().UTC()
+			expires := now.Add(duration)
+			updated := tx.Model(&gbmodels.GbChannelVideoShare{}).Where("id = ? AND revision = ?", share.ID, share.Revision).Updates(map[string]any{
+				"public_id": publicID, "activated_at": now, "expires_at": expires, "key_id": KeyID,
+				"revoke_reason": "", "revision": share.Revision + 1,
+			})
+			if updated.Error != nil {
+				return updated.Error
+			}
+			if updated.RowsAffected != 1 {
+				return ErrConflict
+			}
+			if err := tx.Where("id = ?", share.ID).Take(&share).Error; err != nil {
+				return err
+			}
+			if err := RecordAuditTx(ctx, tx, "video_share.renewed", actorID, &share); err != nil {
+				return err
+			}
+			return s.link(&share, &result)
 		}
 		if share.ActivatedAt == nil {
 			var channel gbmodels.GbChannel

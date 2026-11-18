@@ -70,7 +70,7 @@ func RecordAuditTx(ctx context.Context, tx *gorm.DB, event string, operatorID ui
 		return errors.New("video share audit requires an explicit transaction")
 	}
 	switch event {
-	case "video_share.enabled", "video_share.disabled", "video_share.regenerated", "video_share.activated", "video_share.expired", "video_share.revoked", "video_share.auto_pending":
+	case "video_share.renewed", "video_share.enabled", "video_share.disabled", "video_share.regenerated", "video_share.activated", "video_share.expired", "video_share.revoked", "video_share.auto_pending":
 	default:
 		return errors.New("unknown video share audit event")
 	}

@@ -196,7 +196,13 @@ func (s *Service) LookupViewer(ctx context.Context, token string) (ViewerAccess,
 			}
 			return err
 		}
-		if share.PublicID != session.publicID || share.Generation != session.generation || !share.Enabled || share.RevokedAt != nil || share.ExpiresAt == nil || !share.ExpiresAt.Equal(session.expiresAt) || share.CreatedBy == nil || *share.CreatedBy != session.createdBy {
+		if share.Generation != session.generation || !share.Enabled || share.RevokedAt != nil || share.ExpiresAt == nil || share.CreatedBy == nil || *share.CreatedBy != session.createdBy {
+			return ErrExpired
+		}
+		s.viewerMu.Lock()
+		started := session.started
+		s.viewerMu.Unlock()
+		if !started && (share.PublicID != session.publicID || !share.ExpiresAt.Equal(session.expiresAt)) {
 			return ErrExpired
 		}
 		snapshot, err := s.authorize(ctx, tx, session.createdBy, share.ChannelPK)
