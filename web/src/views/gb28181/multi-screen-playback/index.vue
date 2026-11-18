@@ -797,10 +797,16 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 12px;
   min-height: 0;
-  padding: 0;
+
+  /* 对齐设备列表/云录像/设备回放这些页面：根容器透明 + 主区内边距，
+     卡片浮在 layout 的 --uvp-workspace-bg 上（暗色 #101923）才对得上。
+     ⛔ 原来这里是 padding:0 + --uvp-navigation-bg（暗色 #0b1118，导航壳色）：
+     卡片顶到边、外面一圈既没留白又是另一个更黑的外壳色 ——
+     亮色下 #f3f7fb 与白只差几个点看不出来，暗色下一眼就分叉。 */
+  padding: var(--uvp-main-padding);
   font-family: var(--zlm-font-body);
   color: var(--zlm-text-1);
-  background: var(--uvp-navigation-bg);
+  background: transparent;
 }
 
 .monitor-toolbar,
@@ -832,7 +838,10 @@ onBeforeUnmount(() => {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--uvp-navigation-bg);
+
+  /* 同 .multi-screen-page：源树区的缝隙不该露出导航壳色（暗色 #0b1118），
+     要跟树/云台两张卡片的 --zlm-card 同色，否则暗色下两条 12px 的黑缝特别显眼。 */
+  background: var(--zlm-card);
   border-right: 1px solid var(--zlm-border);
 }
 .text-action {
