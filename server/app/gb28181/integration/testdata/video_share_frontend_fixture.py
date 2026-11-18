@@ -19,7 +19,7 @@ def main():
     if not ffmpeg:
         parser.error("FFmpeg executable was not found")
     lock, stopped = threading.RLock(), threading.Event()
-    expires, sessions, processes, revoked = time.time() + 300, set(), {}, False
+    expires, sessions, processes, revoked = time.time() + 300, {}, {}, False
     def stamp(value):
         return datetime.fromtimestamp(value, timezone.utc).isoformat().replace("+00:00", "Z")
     def finish(process):
@@ -37,13 +37,17 @@ def main():
                 revoked = True
                 sessions.clear()
             else:
-                sessions.discard(token)
+                sessions.pop(token, None)
             targets = [p for p, owner in processes.items() if token is None or owner == token]
         for process in targets:
             finish(process)
     def valid(token=None):
         with lock:
-            return not revoked and time.time() < expires and (token is None or token in sessions)
+            if revoked:
+                return False
+            if token is None:
+                return time.time() < expires
+            return token in sessions and (sessions[token] or time.time() < expires)
     class Handler(SimpleHTTPRequestHandler):
         def __init__(self, *a, **kw):
             super().__init__(*a, directory=str(args.dist), **kw)
@@ -73,17 +77,17 @@ def main():
             except (ValueError, OSError):
                 return self.reply(400)
             with lock:
-                if not valid():
-                    return self.reply(410)
                 prefix = "/api/public/video-share/"
                 if self.path == prefix + "viewers/status":
                     return self.reply(200 if valid(body.get("viewerToken", "")) else 410,
                                       {"expiresAt": stamp(expires), "serverTime": stamp(time.time())})
+                if not valid():
+                    return self.reply(410)
                 if body.get("publicId") != "frontend-fixture" or body.get("signature") != "fixture":
                     return self.reply(410)
                 if self.path == prefix + "viewers":
                     token = secrets.token_urlsafe(24)
-                    sessions.add(token)
+                    sessions[token] = False
                     return self.reply(200, {"viewerToken": token, "expiresAt": stamp(expires),
                                            "httpFlvPath": prefix + "viewers/" + token + "/live.flv"})
                 if self.path == prefix + "resolve":
@@ -106,6 +110,7 @@ def main():
             with lock:
                 if not valid(match[1]):
                     return self.reply(410)
+                sessions[match[1]] = True
                 process = subprocess.Popen([ffmpeg, "-nostdin", "-loglevel", "error", "-re", "-stream_loop", "-1",
                     "-i", str(args.sample), "-map", "0:v:0", "-map", "0:a:0", "-c", "copy", "-f", "flv", "pipe:1"],
                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
@@ -130,9 +135,6 @@ def main():
                 with lock:
                     processes.pop(process, None)
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    timer = threading.Timer(300, retire)
-    timer.daemon = True
-    timer.start()
     def interrupt(*_):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, interrupt)
@@ -143,7 +145,6 @@ def main():
         pass
     finally:
         stopped.set()
-        timer.cancel()
         retire()
         server.server_close()
 if __name__ == "__main__":

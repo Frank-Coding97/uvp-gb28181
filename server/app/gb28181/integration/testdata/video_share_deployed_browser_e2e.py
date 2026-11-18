@@ -3,10 +3,10 @@
 Run while its real five-minute sharing window is active. QR, cross-site iframe,
 real decoded frames and expiry are required; no physical-phone result is implied.
 """
-import argparse,base64,html,io,json,re,sys,threading,time
+import argparse,base64,datetime as dt,html,io,json,re,sys,threading,time
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
-from video_share_browser_e2e import FRAME_OBSERVER,first_frame,fit,require,redact
+from video_share_browser_e2e import FRAME_OBSERVER,FRAME_STATE,first_frame,fit,require,redact
 from playwright.sync_api import sync_playwright
 from PIL import Image
 import zxingcpp
@@ -28,11 +28,17 @@ try:
   context=browser.new_context(viewport={'width':1280,'height':800});context.add_init_script(FRAME_OBSERVER)
   page=context.new_page();page.goto(bootstrap['url'],wait_until='domcontentloaded')
   report['firstFrame']=first_frame(page);require(page.evaluate('location.hash===""'),'fragment remains')
+  require(page.title()=='UVP-GB28181-视频分享','share tab title differs')
+  require('UVP-GB28181' in page.locator('.share-brand').inner_text(),'share product brand differs')
+  require(page.locator('.share-brand img').evaluate('img=>img.complete && img.naturalWidth>0'),'share logo failed to load')
   require(page.locator('#share-link').input_value()==bootstrap['url'],'link differs')
   code=page.locator('#share-iframe').input_value();embed=html.unescape(re.search(r'src="([^"]+)"',code).group(1))
   qr=page.locator('.share-tool--qr img');qr.wait_for(state='visible');data=base64.b64decode(qr.get_attribute('src').split(',',1)[1])
   decoded=zxingcpp.read_barcode(Image.open(io.BytesIO(data)));require(decoded and decoded.text==bootstrap['url'],'QR differs')
   report['materials']={'link':True,'iframe':True,'qrDecoded':True,'fragmentCleared':True}
+  link_box=page.locator('.share-tool').filter(has=page.locator('#share-link')).bounding_box()
+  iframe_box=page.locator('.share-tool').filter(has=page.locator('#share-iframe')).bounding_box()
+  require(link_box and iframe_box and iframe_box['y']>=link_box['y']+link_box['height']-1,'link and iframe do not occupy separate rows')
   # Screenshots crop to video so capability link and QR never enter the report.
   page.locator('.share-player').screenshot(path=str(root/'camera-player.png'))
   report['layouts']={}
@@ -46,10 +52,21 @@ try:
   page.get_by_role('button',name='继续播放',exact=True).click();report['resumedFrame']=first_frame(page)
   report['status']='PLAYBACK_PASS_WAITING_EXPIRY';(root/'browser-result.json').write_text(json.dumps(report,indent=2))
   print('PASS desktop Chrome hardware camera playback, QR decode, link, cross-site iframe, responsive layouts, pause/resume',flush=True)
+  expiry=dt.datetime.fromisoformat(bootstrap['expiresAt'].replace('Z','+00:00'))
+  while dt.datetime.now(dt.timezone.utc)<expiry+dt.timedelta(seconds=14):page.wait_for_timeout(1000)
   for target in [page,frame]:
-   target.wait_for_function("document.body.innerText.includes('分享已失效')",timeout=340000)
-   require(target.locator('video, canvas, .share-tools').count()==0,'expiry retains media/materials')
-  report['expiryPageAndIframe']=True;report['status']='PASS';browser.close()
+   before=target.evaluate(FRAME_STATE);target.wait_for_timeout(2000);after=target.evaluate(FRAME_STATE)
+   advanced=after['canvas']['draws']>before['canvas']['draws'] or any(v['time']>before['videos'][i]['time']+.1 for i,v in enumerate(after['videos']) if i<len(before['videos']))
+   require(advanced,'existing playback stopped when link expired')
+  fresh=context.new_page();fresh.goto(bootstrap['url'],wait_until='domcontentloaded')
+  fresh.get_by_text('分享已失效',exact=False).first.wait_for(timeout=20000)
+  require(fresh.locator('video, canvas').count()==0,'expired link created a fresh player');fresh.close()
+  report['expiryAdmissionAndContinuation']=True
+  print('PASS natural expiry: main page and iframe keep rendering new frames; fresh visit refused',flush=True)
+  for target in [page,frame]:
+   target.wait_for_function("document.body.innerText.includes('分享已失效')",timeout=70000)
+   require(target.locator('video, canvas, .share-tools').count()==0,'manual disable retains media/materials')
+  report['manualDisableAfterExpiry']=True;report['status']='PASS';browser.close()
 except Exception as e:
  report['status']='FAIL';report['error']=redact(e,bootstrap)
  print('FAIL '+type(e).__name__+'; inspect local report',flush=True)

@@ -5,7 +5,7 @@ only that channel's sharing lifecycle and restores it to disabled in finally.
 No global configuration, device, source stream or database row is modified here.
 Credentials and media URLs remain in chmod-0600 files in the supplied directory.
 """
-import argparse,datetime as dt,json,os,subprocess,time,urllib.parse,urllib.request
+import argparse,datetime as dt,json,os,subprocess,threading,time,urllib.parse,urllib.request
 from pathlib import Path
 from video_share_full_app_e2e import Check,require
 
@@ -35,7 +35,12 @@ class Deployed(Check):
             try:
                 if action():return
             except (OSError,ValueError) as e:
-                self.report['lastWaitError']={'type':type(e).__name__,'http':getattr(e,'code',None),'description':description}; self.save()
+                failure={'type':type(e).__name__,'http':getattr(e,'code',None),'description':description}
+                self.report['lastWaitError']=failure
+                history=self.report.setdefault('waitErrors',[])
+                if not history or failure!=history[-1]:
+                    history.append(failure);del history[:-12]
+                self.save()
             time.sleep(.2)
         raise RuntimeError('timed out waiting for '+description)
     def reader(self,url):
@@ -55,12 +60,35 @@ class Deployed(Check):
         for suffix,body in [('resolve',cred),('viewers',cred),('viewers/status',{'viewerToken':viewer['viewerToken']})]:
             code,_=self.request('/api/public/video-share/'+suffix,'POST',body); require(code==410,'retired anonymous endpoint must return 410')
         for p in paths:self.expect_gone(p,'retired anonymous media must return 410')
+    def observe_hls(self,viewer):
+        state={'stop':threading.Event(),'segments':0,'last':None,'error':None,'paths':set()}
+        def consume():
+            try:
+                while not state['stop'].is_set():
+                    with self.opener.open(self.base+viewer['hlsPath'],timeout=10) as response:
+                        text=response.read(1<<20).decode()
+                    paths=[line.strip() for line in text.splitlines() if line.strip() and not line.startswith('#')]
+                    require(paths,'continuous HLS manifest has no media')
+                    path=paths[-1]
+                    require(path.startswith('/api/public/video-share/viewers/'+viewer['viewerToken']+'/hls/'),'HLS escaped viewer relay')
+                    with self.opener.open(self.base+path,timeout=10) as response:
+                        data=response.read((8<<20)+1)
+                    require(3*188<=len(data)<=8<<20 and len(data)%188==0 and data[0]==0x47,'continuous HLS segment is not MPEG-TS')
+                    if path not in state['paths']:
+                        state['paths'].add(path); state['segments']+=1
+                    state['last']=time.monotonic()
+                    state['stop'].wait(2)
+            except Exception as error:
+                state['error']=type(error).__name__
+        thread=threading.Thread(target=consume,daemon=True); thread.start()
+        return state,thread
     def run_acceptance(self):
         initial=self.status(); require(not initial['enabled'],'selected channel is already shared; refusing to revoke it')
         self.private('initial-share.private.json',initial)
         config=self.success('/api/gb28181/sip/service-config',token=self.token)
         require(config['videoShare']=={'defaultEnabled':False,'ttlSeconds':300},'expected existing-instance defaults false/300')
         self.record('deployed global defaults are off and five minutes; old channel remains unshared')
+        hls_state=None; hls_thread=None
         try:
             ordinary=self.success('/api/gb28181/play/'+self.args.device+'/'+self.args.channel,'POST',token=self.token)
             self.private('ordinary-play.private.json',ordinary)
@@ -83,23 +111,42 @@ class Deployed(Check):
             viewer=self.success('/api/public/video-share/viewers','POST',cred)
             anon=self.reader(self.base+viewer['httpFlvPath'])
             hls_viewer=self.success('/api/public/video-share/viewers','POST',cred); self.private('hls-viewer.private.json',hls_viewer); hls,segment=self.read_hls(hls_viewer)
+            hls_state,hls_thread=self.observe_hls(hls_viewer)
             expiry=dt.datetime.fromisoformat(link['expiresAt'].replace('Z','+00:00')); now=dt.datetime.fromisoformat(link['serverTime'].replace('Z','+00:00'))
             ttl=(expiry-now).total_seconds(); require(295<=ttl<=300,'five minute expiry not applied')
             public=self.args.public_base.rstrip('/')
             url=public+'/share.html#'+urllib.parse.urlencode({'id':link['publicId'],'sig':link['signature']})
             self.private('browser-bootstrap.private.json',{'url':url,'origin':public,'expiresAt':link['expiresAt']})
             self.record('five-minute share ready for anonymous deployed browser acceptance')
-            # No status polling by this reader: server must enforce the deadline.
-            remaining=max(0,(expiry-dt.datetime.now(dt.timezone.utc)).total_seconds())
-            require(anon['ended'].wait(remaining+30),'natural expiry did not terminate FLV')
-            last=self.flv_snapshot(anon)[1]; deadline=time.monotonic()+(expiry-dt.datetime.now(dt.timezone.utc)).total_seconds()
-            self.report['measurements']['expiryLastByteSeconds']=round(max(0,last-deadline),3)
-            require(last-deadline<=30,'media arrived beyond expiry budget')
-            self.gone(cred,viewer,[viewer['httpFlvPath'],hls,segment])
+            while dt.datetime.now(dt.timezone.utc)<expiry+dt.timedelta(seconds=12):
+                require(not anon['ended'].is_set(),'FLV ended before natural expiry continuation check')
+                require(not hls_state['error'],'continuous HLS failed: '+str(hls_state['error']))
+                time.sleep(1)
+            for endpoint in ('resolve','viewers'):
+                require(self.request('/api/public/video-share/'+endpoint,'POST',cred)[0]==410,'expired link admitted a new visit')
+            require(self.request(self.path+'/link','POST',{'revision':self.status()['revision']},self.token)[0]==410,'expired link acquisition silently renewed')
+            self.success('/api/public/video-share/viewers/status','POST',{'viewerToken':viewer['viewerToken']})
+            state=self.status();require(state['enabled'] and state['expired'],'expired share must retain the explicit disable control')
+            before_anon=self.flv_snapshot(anon)[0]; before_hls=hls_state['segments']
+            time.sleep(12)
+            require(not anon['ended'].is_set() and self.flv_snapshot(anon)[0]>before_anon,'existing FLV stopped at link expiry')
+            require(not hls_state['error'] and hls_state['segments']>before_hls,'existing HLS failed to fetch new post-expiry segments')
+            self.report['measurements']['postExpiryHlsNewSegments']=hls_state['segments']-before_hls
             before=self.flv_snapshot(normal)[0]; self.wait(lambda:self.flv_snapshot(normal)[0]>before,'ordinary playback survives expiry',10)
-            self.record('real five-minute natural expiry terminated media and returned 410; same ordinary camera stream continues')
+            self.record('real five-minute expiry rejected new visits while active FLV/HLS and ordinary playback continued')
+            # Leave time for the independent browser to prove advancing frames
+            # after expiry, then exercise the remaining administrative kill switch.
+            remaining=(expiry+dt.timedelta(seconds=45)-dt.datetime.now(dt.timezone.utc)).total_seconds()
+            if remaining>0:time.sleep(remaining)
+            hls_state['stop'].set();hls_thread.join(12)
+            self.enabled(False);revoked=time.monotonic();require(anon['ended'].wait(30),'post-expiry manual disable exceeded 30 seconds')
+            self.report['measurements']['postExpiryDisableLastByteSeconds']=round(max(0,self.flv_snapshot(anon)[1]-revoked),3)
+            self.gone(cred,viewer,[viewer['httpFlvPath'],hls,segment])
+            self.record('manual disable after natural expiry stopped existing viewers and invalidated all old relay paths')
             self.report['status']='PASS'
         finally:
+            if hls_state is not None:hls_state['stop'].set()
+            if hls_thread is not None:hls_thread.join(12)
             try:
                 if self.status()['enabled']: self.enabled(False)
                 self.report['restoredSharingDisabled']=not self.status()['enabled']
