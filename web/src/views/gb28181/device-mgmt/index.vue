@@ -4232,6 +4232,18 @@ onUnmounted(() => {
                   </div>
                 </template>
               </a-table-column>
+              <a-table-column v-if="canManageVideoShare" title="视频分享" :width="100" align="center">
+                <template #cell="{ record }">
+                  <ChannelVideoShareControl
+                    v-if="record.videoShare"
+                    mode="switch"
+                    :channel-id="record.id"
+                    :channel-name="displayName(record)"
+                    :initial-state="record.videoShare"
+                    @change="record.videoShare = $event"
+                  />
+                </template>
+              </a-table-column>
               <a-table-column title="位置信息" :width="200">
                 <template #cell="{ record }">
                   <!-- 铅笔 = 直接改坐标的入口：补坐标是高频小动作，不该被迫开整张编辑表单。
@@ -4262,12 +4274,13 @@ onUnmounted(() => {
                   </div>
                 </template>
               </a-table-column>
-              <!-- 操作列宽必须放得下分享滑钮和最多 7 个现有动作。 -->
-              <a-table-column title="操作" :width="448" align="center" :fixed="stickTableActions ? 'right' : ''">
+              <!-- 操作列容纳分享图标及现有动作。 -->
+              <a-table-column title="操作" :width="390" align="center" :fixed="stickTableActions ? 'right' : ''">
                 <template #cell="{ record }">
                   <div class="uvp-table-actions">
                     <ChannelVideoShareControl
-                      v-if="canManageVideoShare && record.videoShare"
+                      v-if="canManageVideoShare && record.videoShare?.enabled"
+                      mode="action"
                       :channel-id="record.id"
                       :channel-name="displayName(record)"
                       :initial-state="record.videoShare"
@@ -4535,7 +4548,7 @@ onUnmounted(() => {
             class="card-empty"
             :description="assetKind === 'device' ? '暂无符合条件的设备' : '暂无符合条件的通道'"
           />
-          <div v-else class="card-grid">
+          <div v-else class="card-grid" :class="{ 'card-grid--channel-sharing': assetKind === 'channel' && canManageVideoShare }">
             <template v-if="assetKind === 'device'">
               <article
                 v-for="item in devices"
@@ -4869,13 +4882,24 @@ onUnmounted(() => {
                         />
                       </template>
                     </div>
+                    <div v-if="canManageVideoShare && item.videoShare" class="switch-item">
+                      <span>分享</span>
+                      <ChannelVideoShareControl
+                        mode="switch"
+                        :channel-id="item.id"
+                        :channel-name="displayName(item)"
+                        :initial-state="item.videoShare"
+                        @change="item.videoShare = $event"
+                      />
+                    </div>
                   </div>
                   <div class="card-actions channel-card-actions">
                     <span class="channel-card-status" :class="{ online: item.status === 1 }">{{
                       deviceStatusLabel(item.status === 1)
                     }}</span>
                     <ChannelVideoShareControl
-                      v-if="canManageVideoShare && item.videoShare"
+                      v-if="canManageVideoShare && item.videoShare?.enabled"
+                      mode="action"
                       :channel-id="item.id"
                       :channel-name="displayName(item)"
                       :initial-state="item.videoShare"
@@ -7176,6 +7200,9 @@ onUnmounted(() => {
   padding-right: 4px;
   overflow: hidden auto;
 }
+.card-grid--channel-sharing {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+}
 .card-empty {
   display: flex;
   flex: 1;
@@ -7435,7 +7462,7 @@ onUnmounted(() => {
 }
 .channel-card-switches {
   display: flex;
-  gap: 12px;
+  gap: 8px;
   align-items: center;
   justify-content: space-between;
   padding-top: 2px;
@@ -7444,7 +7471,7 @@ onUnmounted(() => {
 }
 .channel-card-switches .switch-item {
   display: inline-flex;
-  gap: 6px;
+  gap: 4px;
   align-items: center;
   min-width: 0;
   white-space: nowrap;

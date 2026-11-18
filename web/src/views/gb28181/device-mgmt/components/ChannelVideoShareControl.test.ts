@@ -1,34 +1,22 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ChannelVideoShareControl from "./ChannelVideoShareControl.vue";
+import type { ChannelVideoShareState } from "@/api/gb28181";
 
 const shareApi = vi.hoisted(() => ({
   acquireChannelVideoShareLink: vi.fn(),
   getChannelVideoShare: vi.fn(),
-  setChannelVideoShare: vi.fn(),
-  regenerateChannelVideoShare: vi.fn()
+  setChannelVideoShare: vi.fn()
 }));
 const modalConfirm = vi.hoisted(() => vi.fn());
-
+const message = vi.hoisted(() => ({ error: vi.fn(), warning: vi.fn(), success: vi.fn() }));
+vi.mock("@/components/s-qrcode-draw/index.vue", () => ({ default: { template: "<img />" } }));
 vi.mock("@/api/gb28181", () => shareApi);
-vi.mock("@arco-design/web-vue", async importOriginal => {
-  const actual = await importOriginal<typeof import("@arco-design/web-vue")>();
-  return { ...actual, Modal: { ...actual.Modal, confirm: modalConfirm } };
-});
-vi.mock("@/components/s-qrcode-draw/index.vue", () => ({
-  default: { props: ["text"], template: '<img data-testid="share-qrcode" :alt="text" />' }
-}));
+vi.mock("@arco-design/web-vue", () => ({ Modal: { confirm: modalConfirm }, Message: message }));
 
-function mountControl(initialState?: {
-  enabled: boolean;
-  pending: boolean;
-  revision: number;
-  expiresAt?: string;
-  serverTime?: string;
-  expired?: boolean;
-}) {
+function mountControl(mode: "switch" | "action", initialState?: ChannelVideoShareState) {
   return mount(ChannelVideoShareControl, {
-    props: { channelId: 42, channelName: "门岗摄像头", initialState },
+    props: { channelId: 42, channelName: "门岗摄像头", initialState, mode },
     global: {
       stubs: {
         "a-tooltip": { template: "<span><slot /></span>" },
@@ -37,52 +25,52 @@ function mountControl(initialState?: {
           emits: ["change"],
           template: '<button data-testid="share-switch" @click="$emit(\'change\', !modelValue)">{{ modelValue }}</button>'
         },
-        "a-modal": { template: '<div v-if="visible"><slot /></div>', props: ["visible"] },
-        "a-button": { emits: ["click"], template: '<button @click="$emit(\'click\')"><slot /><slot name="icon" /></button>' }
+        "a-modal": { template: '<div role="dialog"><slot /></div>' }
       }
     }
   });
 }
 
-describe("ChannelVideoShareControl", () => {
-  let renewedExpiry: string;
-  beforeEach(() => {
-    vi.spyOn(window, "open").mockReturnValue(null);
-    renewedExpiry = new Date(Date.now() + 600_000).toISOString();
-    modalConfirm.mockReset().mockImplementation(({ onOk }: { onOk: () => void }) => onOk());
-    shareApi.getChannelVideoShare.mockReset().mockResolvedValue({
-      code: 0,
-      data: { enabled: true, pending: true, revision: 3 }
-    });
-    shareApi.setChannelVideoShare.mockReset().mockResolvedValue({
-      code: 0,
-      data: { enabled: false, pending: false, revision: 4 }
-    });
-    shareApi.regenerateChannelVideoShare.mockReset().mockResolvedValue({
-      code: 0,
-      data: {
-        enabled: true,
-        pending: false,
-        publicId: "share-id",
-        signature: "new-signature",
-        expiresAt: renewedExpiry,
-        revision: 5
-      }
-    });
-    shareApi.acquireChannelVideoShareLink.mockReset().mockResolvedValue({
-      code: 0,
-      data: {
-        enabled: true,
-        pending: false,
-        publicId: "share-id",
-        signature: "sig-value",
-        expiresAt: new Date(Date.now() + 300_000).toISOString(),
-        revision: 4
-      }
-    });
+beforeEach(() => {
+  vi.spyOn(window, "open").mockReturnValue(null);
+  modalConfirm.mockReset().mockImplementation(({ onOk }: { onOk: () => void }) => onOk());
+  shareApi.getChannelVideoShare.mockReset().mockResolvedValue({ code: 0, data: { enabled: true, pending: true, revision: 3 } });
+  shareApi.setChannelVideoShare.mockReset().mockResolvedValue({ code: 0, data: { enabled: false, pending: false, revision: 4 } });
+  shareApi.acquireChannelVideoShareLink.mockReset().mockResolvedValue({
+    code: 0,
+    data: {
+      enabled: true,
+      pending: false,
+      publicId: "share-id",
+      signature: "sig-value",
+      expiresAt: new Date(Date.now() + 300_000).toISOString(),
+      revision: 4
+    }
+  });
+});
+
+describe("ChannelVideoShareControl separated switch and action", () => {
+  it("shows the switch without action buttons in the settings row", () => {
+    const wrapper = mountControl("switch", { enabled: true, pending: true, revision: 3 });
+    expect(wrapper.find('[data-testid="share-switch"]').exists()).toBe(true);
+    expect(wrapper.find('[aria-label="打开通道分享页"]').exists()).toBe(false);
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    wrapper.unmount();
   });
 
-  it("opens a detached page synchronously before link acquisition completes", async () => {
+  it("shows only the share icon in action mode while enabled and reacts to parent state", async () => {
+    const wrapper = mountControl("action", { enabled: false, pending: false, revision: 3 });
+    expect(wrapper.find('[data-testid="share-switch"]').exists()).toBe(false);
+    expect(wrapper.find('[aria-label="打开通道分享页"]').exists()).toBe(false);
+    await wrapper.setProps({ initialState: { enabled: true, pending: true, revision: 4 } });
+    expect(wrapper.find('[aria-label="打开通道分享页"]').exists()).toBe(true);
+    await wrapper.setProps({ initialState: { enabled: false, pending: false, revision: 5 } });
+    expect(wrapper.find('[aria-label="打开通道分享页"]').exists()).toBe(false);
+    expect(shareApi.getChannelVideoShare).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("opens a detached page synchronously and never opens a materials dialog", async () => {
     const page = { opener: window, location: { replace: vi.fn() }, close: vi.fn() };
     vi.mocked(window.open).mockReturnValue(page as unknown as Window);
     let resolveLink!: (value: unknown) => void;
@@ -92,7 +80,7 @@ describe("ChannelVideoShareControl", () => {
           resolveLink = resolve;
         })
     );
-    const wrapper = mountControl({ enabled: true, pending: true, revision: 3 });
+    const wrapper = mountControl("action", { enabled: true, pending: true, revision: 3 });
     await wrapper.get('[aria-label="打开通道分享页"]').trigger("click");
     expect(window.open).toHaveBeenCalledWith("", "_blank");
     expect(page.opener).toBeNull();
@@ -100,6 +88,9 @@ describe("ChannelVideoShareControl", () => {
     resolveLink({ code: 0, data: { enabled: true, pending: false, revision: 4, publicId: "share-id", signature: "sig-value" } });
     await flushPromises();
     expect(page.location.replace).toHaveBeenCalledWith(expect.stringContaining("share.html#id=share-id&sig=sig-value"));
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("iframe");
+    expect(modalConfirm).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 
@@ -107,49 +98,58 @@ describe("ChannelVideoShareControl", () => {
     const page = { opener: window, location: { replace: vi.fn() }, close: vi.fn() };
     vi.mocked(window.open).mockReturnValue(page as unknown as Window);
     shareApi.acquireChannelVideoShareLink.mockRejectedValueOnce(new Error("取得失败"));
-    const wrapper = mountControl({ enabled: true, pending: true, revision: 3 });
+    const wrapper = mountControl("action", { enabled: true, pending: true, revision: 3 });
     await wrapper.get('[aria-label="打开通道分享页"]').trigger("click");
     await flushPromises();
     expect(page.close).toHaveBeenCalledOnce();
     expect(page.location.replace).not.toHaveBeenCalled();
+    expect(message.error).toHaveBeenCalledWith("取得失败");
     wrapper.unmount();
   });
 
-  it("keeps a clickable link when the browser blocks the new page", async () => {
-    const wrapper = mountControl({ enabled: true, pending: true, revision: 3 });
+  it("keeps a clickable fallback with a clear message when popup is blocked", async () => {
+    const wrapper = mountControl("action", { enabled: true, pending: true, revision: 3 });
     await wrapper.get('[aria-label="打开通道分享页"]').trigger("click");
     await flushPromises();
     expect(wrapper.get('a[aria-label="手动打开分享页"]').attributes("href")).toContain("share.html#id=share-id&sig=sig-value");
+    expect(message.warning).toHaveBeenCalledWith(expect.stringContaining("拦截"));
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    await wrapper.setProps({ initialState: { enabled: false, pending: false, revision: 5 } });
+    expect(wrapper.find('a[aria-label="手动打开分享页"]').exists()).toBe(false);
     wrapper.unmount();
   });
 
-  it("shows pending, expiry and expired lifecycle state in the channel row", async () => {
-    const wrapper = mountControl({ enabled: true, pending: true, revision: 3 });
-    expect(wrapper.get('[data-testid="share-lifecycle"]').text()).toContain("待取得链接");
-    await wrapper.setProps({ initialState: { enabled: true, pending: false, revision: 4, expiresAt: renewedExpiry } });
-    expect(wrapper.get('[data-testid="share-lifecycle"]').text()).toContain("有效期至");
-    await wrapper.setProps({ initialState: { enabled: false, pending: false, revision: 5, expired: true } });
-    expect(wrapper.get('[data-testid="share-lifecycle"]').text()).toBe("已过期");
-    expect(wrapper.find('[aria-label="打开通道分享页"]').exists()).toBe(false);
-    await wrapper.setProps({ initialState: { enabled: false, pending: false, revision: 6 } });
-    expect(wrapper.find('[data-testid="share-lifecycle"]').exists()).toBe(false);
-    wrapper.unmount();
-  });
-
-  it("uses the batch list state without a request for each row and accepts refreshed parent state", async () => {
-    const wrapper = mountControl({ enabled: true, pending: true, revision: 8 });
+  it("keeps an expired share enabled for explicit closing and does not renew it from the icon", async () => {
+    const initialState = { enabled: true, pending: false, expired: true, revision: 7 };
+    const control = mountControl("switch", initialState);
+    expect(control.get('[data-testid="share-switch"]').text()).toBe("true");
+    await control.get('[data-testid="share-switch"]').trigger("click");
     await flushPromises();
-    expect(shareApi.getChannelVideoShare).not.toHaveBeenCalled();
-    expect(wrapper.find('[aria-label="打开通道分享页"]').exists()).toBe(true);
-    await wrapper.setProps({ initialState: { enabled: false, pending: false, revision: 9 } });
-    expect(wrapper.find('[aria-label="打开通道分享页"]').exists()).toBe(false);
-    wrapper.unmount();
+    expect(shareApi.setChannelVideoShare).toHaveBeenCalledExactlyOnceWith(42, false, 7);
+    const action = mountControl("action", initialState);
+    await action.get('[aria-label="打开通道分享页"]').trigger("click");
+    expect(message.warning).toHaveBeenCalledWith(expect.stringContaining("关闭后重新开启"));
+    expect(window.open).not.toHaveBeenCalled();
+    expect(shareApi.acquireChannelVideoShareLink).not.toHaveBeenCalled();
+    control.unmount();
+    action.unmount();
   });
 
-  it("uses server time for expiry and clears old materials when refreshed state changes", async () => {
+  it("uses server time to refresh once on expiry and does not repeatedly schedule already expired state", async () => {
     vi.useFakeTimers();
     try {
-      const wrapper = mountControl({
+      shareApi.getChannelVideoShare.mockResolvedValue({
+        code: 0,
+        data: {
+          enabled: true,
+          pending: false,
+          expired: true,
+          revision: 4,
+          serverTime: "2026-01-01T00:05:00Z",
+          expiresAt: "2026-01-01T00:05:00Z"
+        }
+      });
+      const wrapper = mountControl("switch", {
         enabled: true,
         pending: false,
         revision: 3,
@@ -161,139 +161,46 @@ describe("ChannelVideoShareControl", () => {
       expect(shareApi.getChannelVideoShare).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1_100);
       expect(shareApi.getChannelVideoShare).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(shareApi.getChannelVideoShare).toHaveBeenCalledOnce();
       wrapper.unmount();
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("loads pending state and acquires one-time share material from the share icon", async () => {
-    const wrapper = mountControl();
-    await flushPromises();
-
-    expect(shareApi.getChannelVideoShare).toHaveBeenCalledWith(42);
-    expect(wrapper.find('[aria-label="打开通道分享页"]').exists()).toBe(true);
-    await wrapper.find('[aria-label="打开通道分享页"]').trigger("click");
-    await flushPromises();
-
-    expect(shareApi.acquireChannelVideoShareLink).toHaveBeenCalledWith(42, 3);
-    expect(wrapper.text()).toContain("iframe 嵌入代码");
-    expect(wrapper.text()).toContain("share.html#id=share-id&sig=sig-value");
-    expect(wrapper.find('[data-testid="share-qrcode"]').exists()).toBe(true);
-    const embed = wrapper.find("pre").text();
-    const template = document.createElement("template");
-    template.innerHTML = embed;
-    const src = template.content.querySelector("iframe")?.getAttribute("src");
-    expect(src).toBeTruthy();
-    const fragment = new URLSearchParams(new URL(src!).hash.slice(1));
-    expect(fragment.get("embed")).toBe("1");
-    expect(fragment.get("id")).toBe("share-id");
-    expect(fragment.get("sig")).toBe("sig-value");
-    wrapper.unmount();
-  });
-
-  it("sends the latest revision when the operator disables sharing", async () => {
-    const wrapper = mountControl();
-    await flushPromises();
-    await wrapper.find('[data-testid="share-switch"]').trigger("click");
-    await flushPromises();
-
-    expect(shareApi.setChannelVideoShare).toHaveBeenCalledWith(42, false, 3);
-    expect(wrapper.find('[aria-label="打开通道分享页"]').exists()).toBe(false);
-    wrapper.unmount();
-  });
-
-  async function openMaterials() {
-    const wrapper = mountControl();
-    await flushPromises();
-    await wrapper.get('[aria-label="打开通道分享页"]').trigger("click");
-    await flushPromises();
-    return wrapper;
-  }
-
-  it("confirms global expiry and immediate timing before enabling, and supports cancellation", async () => {
-    shareApi.getChannelVideoShare.mockResolvedValue({ code: 0, data: { enabled: false, pending: false, revision: 3 } });
+  it("confirms global timing before enabling and supports cancellation", async () => {
     modalConfirm.mockImplementation(({ onCancel }: { onCancel: () => void }) => onCancel());
-    const wrapper = mountControl();
-    await flushPromises();
+    const wrapper = mountControl("switch", { enabled: false, pending: false, revision: 3 });
     await wrapper.get('[data-testid="share-switch"]').trigger("click");
     await flushPromises();
     expect(modalConfirm).toHaveBeenCalledWith(
       expect.objectContaining({ title: "开启视频分享", content: expect.stringContaining("全局配置") })
     );
-    expect(modalConfirm.mock.calls[0][0].content).toContain("立即开始计时");
     expect(shareApi.setChannelVideoShare).not.toHaveBeenCalled();
-    expect(wrapper.find("input").exists()).toBe(false);
     wrapper.unmount();
   });
 
-  it("enables with the latest revision after confirmation without a channel expiry input", async () => {
-    shareApi.getChannelVideoShare.mockResolvedValue({ code: 0, data: { enabled: false, pending: false, revision: 3 } });
+  it("enables only after confirmation and emits updated state for the action control", async () => {
     shareApi.setChannelVideoShare.mockResolvedValue({ code: 0, data: { enabled: true, pending: false, revision: 4 } });
-    const wrapper = mountControl();
-    await flushPromises();
+    const wrapper = mountControl("switch", { enabled: false, pending: false, revision: 3 });
     await wrapper.get('[data-testid="share-switch"]').trigger("click");
     await flushPromises();
     expect(shareApi.setChannelVideoShare).toHaveBeenCalledExactlyOnceWith(42, true, 3);
-    expect(wrapper.find('[aria-label="打开通道分享页"]').exists()).toBe(true);
-    expect(wrapper.find("input").exists()).toBe(false);
+    expect(wrapper.emitted("change")?.at(-1)).toEqual([{ enabled: true, pending: false, revision: 4 }]);
     wrapper.unmount();
   });
 
-  it("does not regenerate when permanent invalidation confirmation is cancelled", async () => {
-    const wrapper = await openMaterials();
-    modalConfirm.mockImplementation(({ onCancel }: { onCancel: () => void }) => onCancel());
-    await wrapper.get('[aria-label="重新生成分享链接"]').trigger("click");
+  it.each(["request", "response"])("refreshes stale link state after a conflict without retrying (%s)", async failure => {
+    if (failure === "request") shareApi.acquireChannelVideoShareLink.mockRejectedValue({ response: { status: 409 } });
+    else shareApi.acquireChannelVideoShareLink.mockResolvedValue({ code: 409, message: "分享已更新" });
+    shareApi.getChannelVideoShare.mockResolvedValue({ code: 0, data: { enabled: false, pending: false, revision: 5 } });
+    const wrapper = mountControl("action", { enabled: true, pending: true, revision: 3 });
+    await wrapper.get('[aria-label="打开通道分享页"]').trigger("click");
     await flushPromises();
-    expect(modalConfirm).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining("永久失效") }));
-    expect(shareApi.regenerateChannelVideoShare).not.toHaveBeenCalled();
-    expect(wrapper.get("code").text()).toContain("sig-value");
-    wrapper.unmount();
-  });
-
-  it("replaces link, iframe, QR and expiry only after regeneration succeeds", async () => {
-    const wrapper = await openMaterials();
-    await wrapper.get('[aria-label="重新生成分享链接"]').trigger("click");
-    await flushPromises();
-    expect(shareApi.regenerateChannelVideoShare).toHaveBeenCalledExactlyOnceWith(42, 4);
-    expect(wrapper.get("code").text()).toContain("new-signature");
-    expect(wrapper.get("pre").text()).toContain("new-signature");
-    expect(wrapper.get('[data-testid="share-qrcode"]').attributes("alt")).toContain("new-signature");
-    expect(wrapper.text()).toContain(new Date(renewedExpiry).toLocaleString());
-    expect(wrapper.text()).not.toContain("sig-value");
-    expect(wrapper.text()).toContain("打开分享页");
-    wrapper.unmount();
-  });
-
-  it.each(["request", "response"])("preserves existing materials when regeneration fails (%s)", async failure => {
-    const wrapper = await openMaterials();
-    const material = wrapper.get("code").text();
-    const embed = wrapper.get("pre").text();
-    const expiry = wrapper.get(".share-dialog__heading span").text();
-    if (failure === "request") shareApi.regenerateChannelVideoShare.mockRejectedValue(new Error("网络中断"));
-    else shareApi.regenerateChannelVideoShare.mockResolvedValue({ code: 500, message: "保存失败" });
-    await wrapper.get('[aria-label="重新生成分享链接"]').trigger("click");
-    await flushPromises();
-    expect(wrapper.get("code").text()).toBe(material);
-    expect(wrapper.get("pre").text()).toBe(embed);
-    expect(wrapper.get(".share-dialog__heading span").text()).toBe(expiry);
     expect(shareApi.getChannelVideoShare).toHaveBeenCalledTimes(1);
-    expect(shareApi.regenerateChannelVideoShare).toHaveBeenCalledTimes(1);
-    wrapper.unmount();
-  });
-
-  it.each(["request", "response"])("refreshes state after conflict without retrying (%s)", async failure => {
-    const wrapper = await openMaterials();
-    shareApi.getChannelVideoShare.mockResolvedValue({ code: 0, data: { enabled: false, pending: false, revision: 6 } });
-    if (failure === "request") shareApi.regenerateChannelVideoShare.mockRejectedValue({ response: { status: 409 } });
-    else shareApi.regenerateChannelVideoShare.mockResolvedValue({ code: 409, message: "分享已更新" });
-    await wrapper.get('[aria-label="重新生成分享链接"]').trigger("click");
-    await flushPromises();
-    expect(shareApi.getChannelVideoShare).toHaveBeenCalledTimes(2);
-    expect(shareApi.regenerateChannelVideoShare).toHaveBeenCalledTimes(1);
-    expect(shareApi.acquireChannelVideoShareLink).toHaveBeenCalledTimes(1);
+    expect(shareApi.acquireChannelVideoShareLink).toHaveBeenCalledExactlyOnceWith(42, 3);
     expect(wrapper.find('[aria-label="打开通道分享页"]').exists()).toBe(false);
-    expect(wrapper.find("code").exists()).toBe(false);
     wrapper.unmount();
   });
 });

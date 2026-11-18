@@ -39,12 +39,16 @@ textarea {
   background: #172126;
 }
 .share-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
   color: #65c8b4;
   font-size: 15px;
   font-weight: 700;
 }
 .share-brand span {
-  margin-left: 10px;
+  margin-left: 2px;
   color: #c2cdd2;
   font-weight: 500;
 }
@@ -174,7 +178,7 @@ textarea {
 }
 .share-tools {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 160px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px;
   align-items: start;
   padding: 18px 0 8px;
@@ -218,6 +222,7 @@ textarea {
   overflow-wrap: anywhere;
 }
 .share-tool--qr {
+  justify-self: center;
   justify-items: center;
 }
 .share-tool--qr img {
@@ -235,13 +240,14 @@ textarea {
 @media (max-width: 760px) {
   .share-header {
     min-height: 48px;
-    padding: 0 14px;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 14px;
   }
   .share-content {
     padding: 14px;
   }
   .share-tools {
-    grid-template-columns: minmax(0, 1fr) 136px;
     gap: 16px;
   }
   .share-tool--link,

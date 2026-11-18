@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import { Copy, ExternalLink, Pause, Play, RefreshCw } from "@lucide/vue";
 import QRCode from "qrcode";
+import uvpLogo from "@/assets/logo/uvp-mark.svg";
 import { preparePlayerDecoder } from "@/views/gb28181/components/playerDecoderResources";
 import {
   closeViewer,
@@ -43,6 +44,7 @@ const manualPlayErrors = new Set(["videoElementPlayingFailed", "videoElementPlay
 const credentials = ref<ShareCredentials | null>(null);
 const share = ref<PublicShare | null>(null);
 const viewer = ref<ViewerSession | null>(null);
+const playbackStarted = ref(false);
 const state = ref<ViewState>("loading");
 const errorText = ref("");
 const playerRoot = ref<HTMLDivElement | null>(null);
@@ -127,7 +129,10 @@ async function createPlaybackSession() {
     viewer.value = nextViewer;
     await nextTick();
     if (!(await startPlayer(nextViewer, generation)) || disposed || generation !== requestGeneration) return;
-    if (state.value === "loading") state.value = "playing";
+    if (state.value === "loading") {
+      playbackStarted.value = true;
+      state.value = "playing";
+    }
   } catch (error) {
     if (!disposed && generation === requestGeneration) showRequestError(error);
   }
@@ -171,6 +176,7 @@ async function startPlayer(session: ViewerSession, generation: number): Promise<
   });
   nextPlayer.on("play", () => {
     if (isCurrent()) {
+      playbackStarted.value = true;
       state.value = "playing";
       errorText.value = "";
     }
@@ -222,6 +228,7 @@ async function playManually() {
     const nativePlayback = Array.from(playerRoot.value?.querySelectorAll("video") || []).map(video => video.play());
     await Promise.all([...nativePlayback, current.play(chooseMediaPath(active))]);
     if (!disposed && generation === requestGeneration && player === current && state.value === "loading") {
+      playbackStarted.value = true;
       state.value = "playing";
     }
   } catch (error) {
@@ -238,6 +245,10 @@ function chooseMediaPath(session: ViewerSession): string {
 
 async function pause() {
   await releaseViewer();
+  if (!disposed && remainingSeconds.value <= 0) {
+    await expire();
+    return;
+  }
   if (!disposed && state.value !== "expired") {
     state.value = "paused";
     errorText.value = "";
@@ -276,6 +287,7 @@ async function releaseViewer() {
   stopStatusPolling();
   const active = viewer.value;
   viewer.value = null;
+  playbackStarted.value = false;
   await destroyPlayer();
   if (active) await closeViewer(active.viewerToken).catch(() => undefined);
 }
@@ -306,9 +318,10 @@ function startStatusPolling() {
     try {
       const status = await getViewerStatus(active.viewerToken);
       if (disposed || generation !== requestGeneration || viewer.value !== active) return;
-      if (Date.parse(status.expiresAt) <= Date.parse(status.serverTime)) {
-        await expire();
+      if (share.value) {
+        updateShare({ ...share.value, expiresAt: status.expiresAt, serverTime: status.serverTime });
       }
+      if (remainingSeconds.value <= 0 && !playbackStarted.value) await expire();
     } catch (error) {
       if (disposed || generation !== requestGeneration || viewer.value !== active) return;
       showRequestError(error);
@@ -348,7 +361,7 @@ async function createQRCode() {
 onMounted(() => {
   clockTimer = window.setInterval(() => {
     currentTime.value = Date.now();
-    if (remainingSeconds.value <= 0 && state.value !== "expired" && share.value) {
+    if (remainingSeconds.value <= 0 && state.value !== "expired" && share.value && !playbackStarted.value) {
       void expire();
     }
   }, 1000);
@@ -365,8 +378,10 @@ onUnmounted(() => {
 <template>
   <main :class="['share-page', { 'share-page--embed': embedMode }]">
     <header v-if="!embedMode" class="share-header">
-      <div class="share-brand">UVP <span>实时视频分享</span></div>
-      <div v-if="share" class="share-expiry">有效期至 {{ expiryLabel }}</div>
+      <div class="share-brand">
+        <img :src="uvpLogo" alt="UVP-GB28181" width="28" height="28" />UVP-GB28181 <span>实时视频分享</span>
+      </div>
+      <div v-if="share" class="share-expiry">链接{{ remainingSeconds <= 0 ? "已到期" : "有效期至" }} {{ expiryLabel }}</div>
     </header>
 
     <section class="share-content">
@@ -408,10 +423,13 @@ onUnmounted(() => {
 
       <div v-if="!embedMode && share && state !== 'expired'" class="share-actions">
         <button v-if="state === 'playing'" type="button" class="icon-text-button" @click="pause"><Pause :size="15" />暂停</button>
-        <span class="share-remaining">剩余 {{ Math.floor(remainingSeconds / 60) }} 分 {{ remainingSeconds % 60 }} 秒</span>
+        <span v-if="remainingSeconds <= 0" class="share-remaining">链接已到期，当前观看不受影响</span>
+        <span v-else class="share-remaining"
+          >链接剩余 {{ Math.floor(remainingSeconds / 60) }} 分 {{ remainingSeconds % 60 }} 秒</span
+        >
       </div>
 
-      <section v-if="!embedMode && state === 'playing'" class="share-tools" aria-label="分享方式">
+      <section v-if="!embedMode && state === 'playing' && remainingSeconds > 0" class="share-tools" aria-label="分享方式">
         <div class="share-tool share-tool--link">
           <label for="share-link">分享链接</label>
           <div class="share-link-row">
@@ -451,6 +469,6 @@ onUnmounted(() => {
         </div>
       </section>
     </section>
-    <footer v-if="!embedMode" class="share-footer">链接失效时间 {{ expiryLabel }}</footer>
+    <footer v-if="!embedMode" class="share-footer">链接到期时间 {{ expiryLabel }}；到期后无法新访问，已开始的观看可继续。</footer>
   </main>
 </template>

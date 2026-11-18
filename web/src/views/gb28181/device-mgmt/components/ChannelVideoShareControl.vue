@@ -1,40 +1,33 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { Message, Modal } from "@arco-design/web-vue";
-import { Copy, ExternalLink, Share2 } from "@lucide/vue";
-import SQRCodeDraw from "@/components/s-qrcode-draw/index.vue";
-import { escapeHTMLAttribute } from "@/share/shareSession";
+import { Share2 } from "@lucide/vue";
 import {
   acquireChannelVideoShareLink,
   getChannelVideoShare,
-  regenerateChannelVideoShare,
   setChannelVideoShare,
-  type ChannelVideoShareLink,
   type ChannelVideoShareState
 } from "@/api/gb28181";
 
-const props = defineProps<{ channelId: number; channelName: string; initialState?: ChannelVideoShareState }>();
+const props = defineProps<{
+  channelId: number;
+  channelName: string;
+  initialState?: ChannelVideoShareState;
+  mode: "switch" | "action";
+}>();
 const emit = defineEmits<{ change: [state: ChannelVideoShareState] }>();
 const state = ref<ChannelVideoShareState>({ enabled: false, pending: false, revision: 0 });
 const busy = ref(true);
-const dialogVisible = ref(false);
-const shareUrl = ref("");
-const iframeCode = computed(() => {
-  if (!shareUrl.value) return "";
-  const url = new URL(shareUrl.value);
-  const fragment = new URLSearchParams(url.hash.slice(1));
-  fragment.set("embed", "1");
-  url.hash = fragment.toString();
-  return `<iframe src="${escapeHTMLAttribute(url.toString())}" title="${escapeHTMLAttribute(props.channelName)}" allow="autoplay; fullscreen" allowfullscreen></iframe>`;
-});
+const blockedPageURL = ref("");
 const expiresText = computed(() => {
-  if (!state.value.expiresAt) return state.value.pending ? "取得分享页时开始计时" : "未开启";
-  return `有效期至 ${new Date(state.value.expiresAt).toLocaleString()}`;
+  if (state.value.expired) return "链接已到期，已有观看可继续；关闭后重新开启可生成新链接";
+  if (!state.value.expiresAt) return state.value.pending ? "取得分享页时开始计时" : "开启通道视频分享";
+  return `链接有效期至 ${new Date(state.value.expiresAt).toLocaleString()}`;
 });
 let expiryTimer: ReturnType<typeof setTimeout> | undefined;
 watch(state, current => {
   clearTimeout(expiryTimer);
-  if (!current.enabled || !current.expiresAt) return;
+  if (props.mode !== "switch" || !current.enabled || current.expired || !current.expiresAt) return;
   const now = current.serverTime ? Date.parse(current.serverTime) : Date.now();
   const delay = Math.max(0, Date.parse(current.expiresAt) - now);
   expiryTimer = setTimeout(() => void load(), Math.min(delay + 50, 2_147_483_647));
@@ -51,10 +44,7 @@ watch(
 );
 
 function applyState(value: ChannelVideoShareState) {
-  if (value.revision !== state.value.revision || !value.enabled) {
-    shareUrl.value = "";
-    dialogVisible.value = false;
-  }
+  if (value.revision !== state.value.revision || !value.enabled || value.expired) blockedPageURL.value = "";
   state.value = value;
   emit("change", value);
 }
@@ -73,21 +63,19 @@ async function load() {
 
 async function changeEnabled(enabled: boolean) {
   if (busy.value) return;
-  if (enabled || state.value.enabled) {
-    const confirmed = await new Promise<boolean>(resolve => {
-      Modal.confirm({
-        title: enabled ? "开启视频分享" : "关闭视频分享",
-        content: enabled
-          ? "开启后立即开始计时，有效期采用统一全局配置，通道不可单独调整。"
-          : "关闭后，已发出的链接、二维码和嵌入页面将失效。",
-        okText: enabled ? "开启分享" : "关闭分享",
-        cancelText: "取消",
-        onOk: () => resolve(true),
-        onCancel: () => resolve(false)
-      });
+  const confirmed = await new Promise<boolean>(resolve => {
+    Modal.confirm({
+      title: enabled ? "开启视频分享" : "关闭视频分享",
+      content: enabled
+        ? "开启后立即开始计时，有效期采用统一全局配置，通道不可单独调整。"
+        : "关闭后，已发出的链接、二维码和嵌入页面将失效，正在观看的会话也会停止。",
+      okText: enabled ? "开启分享" : "关闭分享",
+      cancelText: "取消",
+      onOk: () => resolve(true),
+      onCancel: () => resolve(false)
     });
-    if (!confirmed) return;
-  }
+  });
+  if (!confirmed) return;
   busy.value = true;
   try {
     const response = await setChannelVideoShare(props.channelId, enabled, state.value.revision);
@@ -104,85 +92,42 @@ async function changeEnabled(enabled: boolean) {
 
 async function openShare() {
   if (busy.value || !state.value.enabled) return;
+  if (state.value.expired) {
+    Message.warning("分享链接已到期，请关闭后重新开启分享以生成新链接；当前观看不受链接到期影响。");
+    return;
+  }
   const page = window.open("", "_blank");
   if (page) page.opener = null;
   busy.value = true;
   try {
     const response = await acquireChannelVideoShareLink(props.channelId, state.value.revision);
-    if (response.code === 409) throw { response: { status: 409 } };
+    if (response.code === 409 || response.code === 410) throw { response: { status: response.code } };
     const link = response.data;
     if (response.code !== 0 || !link?.publicId || !link.signature) throw new Error(response.message || "取得分享链接失败");
-    updateShareMaterial(link);
-    if (page) page.location.replace(shareUrl.value);
-    dialogVisible.value = true;
+    const fragment = new URLSearchParams({ id: link.publicId, sig: link.signature });
+    const sharePagePath = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/share.html`;
+    const url = new URL(`${sharePagePath}#${fragment.toString()}`, window.location.origin).toString();
+    applyState(link);
+    if (page) page.location.replace(url);
+    else {
+      blockedPageURL.value = url;
+      Message.warning("浏览器拦截了新窗口，请点击旁边的“打开分享页”。");
+    }
   } catch (error: any) {
     page?.close();
-    Message.error(error?.message || "取得分享链接失败");
-    if (error?.response?.status === 409) {
-      shareUrl.value = "";
-      dialogVisible.value = false;
+    if (error?.response?.status === 410) Message.warning("分享链接已到期，请关闭后重新开启分享以生成新链接。");
+    else Message.error(error?.message || "取得分享链接失败");
+    if (error?.response?.status === 409 || error?.response?.status === 410) {
+      blockedPageURL.value = "";
       await load();
     }
   } finally {
     busy.value = false;
-  }
-}
-
-function updateShareMaterial(link: ChannelVideoShareLink) {
-  if (!link.publicId || !link.signature) throw new Error("取得分享链接失败");
-  const fragment = new URLSearchParams({ id: link.publicId, sig: link.signature });
-  const sharePagePath = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/share.html`;
-  const url = new URL(`${sharePagePath}#${fragment.toString()}`, window.location.origin).toString();
-  applyState(link);
-  shareUrl.value = url;
-  dialogVisible.value = true;
-}
-
-async function regenerateShare() {
-  if (busy.value) return;
-  const confirmed = await new Promise<boolean>(resolve => {
-    Modal.confirm({
-      title: "重新生成分享链接",
-      content: "重新生成后，旧链接、二维码和 iframe 嵌入页面将永久失效。新链接按全局配置重新计时。",
-      okText: "重新生成",
-      cancelText: "取消",
-      onOk: () => resolve(true),
-      onCancel: () => resolve(false)
-    });
-  });
-  if (!confirmed) return;
-  busy.value = true;
-  try {
-    const response = await regenerateChannelVideoShare(props.channelId, state.value.revision);
-    if (response.code === 409) throw { response: { status: 409 } };
-    if (response.code !== 0 || !response.data) throw new Error(response.message || "重新生成分享链接失败");
-    updateShareMaterial(response.data);
-    Message.success("已重新生成分享链接");
-  } catch (error: any) {
-    if (error?.response?.status === 409) {
-      dialogVisible.value = false;
-      shareUrl.value = "";
-      Message.error("分享状态已更新，请重新打开分享窗口");
-      await load();
-    } else {
-      Message.error(error?.message || "重新生成分享链接失败");
-    }
-  } finally {
-    busy.value = false;
-  }
-}
-
-async function copy(value: string) {
-  try {
-    await navigator.clipboard.writeText(value);
-    Message.success("已复制");
-  } catch {
-    Message.error("复制失败，请检查浏览器剪贴板权限");
   }
 }
 
 function refreshWhenVisible() {
-  if (document.visibilityState === "visible" && !busy.value) void load();
+  if (props.mode === "switch" && document.visibilityState === "visible" && !busy.value) void load();
 }
 onMounted(() => {
   if (!props.initialState) void load();
@@ -195,8 +140,8 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="channel-video-share-control" @click.stop>
-    <a-tooltip content="开启通道视频分享" position="top">
+  <div class="channel-video-share-control" :data-share-mode="mode" @click.stop @dblclick.stop>
+    <a-tooltip v-if="mode === 'switch'" :content="expiresText" position="top">
       <a-switch
         :model-value="state.enabled"
         :loading="busy"
@@ -205,41 +150,16 @@ onUnmounted(() => {
         @change="(value: boolean) => changeEnabled(value)"
       />
     </a-tooltip>
-    <a-tooltip v-if="state.enabled" content="分享页" position="top">
-      <button class="share-page-button" type="button" aria-label="打开通道分享页" :disabled="busy" @click="openShare">
-        <Share2 :size="14" />
-      </button>
-    </a-tooltip>
-    <span v-if="state.enabled || state.expired" class="share-lifecycle" data-testid="share-lifecycle">
-      {{ state.expired ? "已过期" : state.pending ? "待取得链接" : expiresText }}
-    </span>
-    <a-modal v-model:visible="dialogVisible" title="通道分享" :footer="false" :width="520">
-      <div class="share-dialog">
-        <div class="share-dialog__heading">
-          <strong>{{ channelName }}</strong>
-          <span>{{ expiresText }}</span>
-        </div>
-        <div class="share-dialog__url">
-          <code>{{ shareUrl }}</code>
-          <a-button size="small" aria-label="复制分享链接" @click="copy(shareUrl)"><Copy :size="14" /></a-button>
-        </div>
-        <div class="share-dialog__embed">
-          <div class="share-dialog__label">iframe 嵌入代码</div>
-          <pre>{{ iframeCode }}</pre>
-          <a-button size="small" @click="copy(iframeCode)"
-            ><template #icon><Copy :size="14" /></template>复制代码</a-button
-          >
-        </div>
-        <div v-if="dialogVisible" class="share-dialog__qr">
-          <SQRCodeDraw :text="shareUrl" :options="{ width: 168, margin: 1 }" />
-          <span>扫码观看实时画面</span>
-        </div>
-        <a :href="shareUrl" target="_blank" rel="noopener noreferrer" aria-label="手动打开分享页">
-          <ExternalLink :size="14" />打开分享页
-        </a>
-        <a-button aria-label="重新生成分享链接" :loading="busy" :disabled="busy" @click="regenerateShare">重新生成</a-button>
-      </div>
-    </a-modal>
+    <template v-else-if="state.enabled">
+      <a-tooltip :content="state.expired ? expiresText : '分享页'" position="top">
+        <button class="share-page-button" type="button" aria-label="打开通道分享页" :disabled="busy" @click="openShare">
+          <Share2 :size="14" />
+        </button>
+      </a-tooltip>
+      <a v-if="blockedPageURL" :href="blockedPageURL" target="_blank" rel="noopener noreferrer" aria-label="手动打开分享页"
+        >打开分享页</a
+      >
+    </template>
   </div>
 </template>
 
@@ -249,9 +169,9 @@ onUnmounted(() => {
   gap: 6px;
   align-items: center;
 }
-.share-lifecycle {
+.channel-video-share-control a {
   font-size: 12px;
-  color: var(--uvp-text-tertiary);
+  color: var(--uvp-brand);
 }
 .share-page-button {
   display: inline-grid;
@@ -272,50 +192,5 @@ onUnmounted(() => {
 .share-page-button:disabled {
   cursor: wait;
   opacity: 0.55;
-}
-.share-dialog {
-  display: grid;
-  gap: 16px;
-}
-.share-dialog__heading,
-.share-dialog__qr {
-  display: grid;
-  gap: 5px;
-  justify-items: center;
-}
-.share-dialog__heading span,
-.share-dialog__qr span {
-  font-size: 12px;
-  color: var(--uvp-text-tertiary);
-}
-.share-dialog__url {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  min-width: 0;
-}
-.share-dialog__url code {
-  flex: 1;
-  min-width: 0;
-  padding: 8px;
-  overflow-wrap: anywhere;
-  background: var(--uvp-page-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 5px;
-}
-.share-dialog__embed pre {
-  max-height: 80px;
-  padding: 8px;
-  overflow: auto;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-  background: var(--uvp-page-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 5px;
-}
-.share-dialog__label {
-  margin-bottom: 6px;
-  font-size: 12px;
-  font-weight: 600;
 }
 </style>

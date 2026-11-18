@@ -105,6 +105,43 @@ afterEach(async () => {
 });
 
 describe("ShareApp anonymous component integration", () => {
+  it("shows the product brand and existing logo", async () => {
+    const wrapper = mountShare();
+    await flushPromises();
+    expect(wrapper.get(".share-brand").text()).toContain("UVP-GB28181");
+    expect(wrapper.get(".share-brand img").attributes("alt")).toBe("UVP-GB28181");
+  });
+
+  it("does not create a new viewer when resuming a paused page after link expiry", async () => {
+    expiry = new Date(now + 3000).toISOString();
+    const wrapper = mountShare();
+    await flushPromises();
+    await wrapper
+      .findAll("button")
+      .find(button => button.text().includes("暂停"))!
+      .trigger("click");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(wrapper.text()).toContain("分享已失效");
+    expect(wrapper.text()).not.toContain("继续播放");
+    expect(requests("/api/public/video-share/viewers")).toHaveLength(1);
+    expect(playerDestroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not start media when decoder preparation crosses the admission expiry", async () => {
+    expiry = new Date(now + 3000).toISOString();
+    const pending = deferred<string>();
+    decoder.mockReturnValueOnce(pending.promise);
+    const wrapper = mountShare();
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(3000);
+    pending.resolve("");
+    await flushPromises();
+    expect(playerPlay).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain("分享已失效");
+    expect(deleteURLs()).toEqual(["/api/public/video-share/viewers/viewer-1"]);
+  });
+
   it("treats channel names as text in the page and copied iframe attributes", async () => {
     const name = '\"><img src="x" onerror="window.shareInjected=true"></iframe><script>window.shareInjected=true</script>';
     fetchMock.mockImplementationOnce(async () =>
@@ -174,7 +211,7 @@ describe("ShareApp anonymous component integration", () => {
     expect(wrapper.find("input, textarea, img").exists()).toBe(false);
   });
 
-  it("counts down to expiry, destroys playback and never offers renewal or resume", async () => {
+  it("counts down link expiry while keeping existing playback and status checks alive", async () => {
     expiry = new Date(now + 3000).toISOString();
     const wrapper = mountShare();
     await flushPromises();
@@ -183,15 +220,39 @@ describe("ShareApp anonymous component integration", () => {
     expect(wrapper.text()).toContain("2 秒");
     await vi.advanceTimersByTimeAsync(2000);
     await flushPromises();
-    expect(wrapper.text()).toContain("分享已失效");
-    expect(wrapper.text()).not.toContain("已暂停");
-    expect(wrapper.text()).not.toContain("继续播放");
-    expect(wrapper.find("button").exists()).toBe(false);
-    expect(playerDestroy).toHaveBeenCalledTimes(1);
-    expect(deleteURLs()).toEqual(["/api/public/video-share/viewers/viewer-1"]);
+    expect(wrapper.text()).toContain("链接已到期，当前观看不受影响");
+    expect(wrapper.text()).toContain("暂停");
+    expect(wrapper.find(".share-tools").exists()).toBe(false);
+    expect(playerDestroy).not.toHaveBeenCalled();
+    expect(deleteURLs()).toEqual([]);
     await vi.advanceTimersByTimeAsync(30_000);
     expect(requests("/api/public/video-share/viewers")).toHaveLength(1);
-    expect(requests("/api/public/video-share/viewers/status")).toHaveLength(0);
+    expect(requests("/api/public/video-share/viewers/status")).toHaveLength(6);
+  });
+
+  it("keeps an embedded viewer playing across natural link expiry", async () => {
+    expiry = new Date(now + 3000).toISOString();
+    const wrapper = mountShare("#id=public-id&sig=secret-signature&embed=1");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(wrapper.find(".player-message").exists()).toBe(false);
+    expect(wrapper.find(".share-tools").exists()).toBe(false);
+    expect(playerDestroy).not.toHaveBeenCalled();
+    expect(requests("/api/public/video-share/viewers/status")).toHaveLength(2);
+  });
+
+  it("still stops an already expired ongoing viewer when the server revokes it", async () => {
+    expiry = new Date(now + 3000).toISOString();
+    const wrapper = mountShare();
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(playerDestroy).not.toHaveBeenCalled();
+    statusFailure = 410;
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushPromises();
+    expect(wrapper.text()).toContain("分享已失效");
+    expect(playerDestroy).toHaveBeenCalledTimes(1);
+    expect(deleteURLs()).toEqual(["/api/public/video-share/viewers/viewer-1"]);
   });
 
   it("treats a status 410 as terminal and releases the current viewer", async () => {
@@ -210,16 +271,15 @@ describe("ShareApp anonymous component integration", () => {
     expect(requests("/api/public/video-share/viewers/status")).toHaveLength(1);
   });
 
-  it("stops playback when status reports server-side expiry before the local clock", async () => {
+  it("keeps playback when status reports link expiry before the local clock", async () => {
     const wrapper = mountShare();
     await flushPromises();
     expiry = new Date(now + 1000).toISOString();
     await vi.advanceTimersByTimeAsync(5000);
     await flushPromises();
-    expect(wrapper.text()).toContain("分享已失效");
-    expect(wrapper.find("button").exists()).toBe(false);
-    expect(playerDestroy).toHaveBeenCalledTimes(1);
-    expect(deleteURLs()).toEqual(["/api/public/video-share/viewers/viewer-1"]);
+    expect(wrapper.text()).toContain("链接已到期，当前观看不受影响");
+    expect(playerDestroy).not.toHaveBeenCalled();
+    expect(deleteURLs()).toEqual([]);
   });
 
   it("retries a failed initial anonymous exchange without renewing the expiry", async () => {
@@ -282,8 +342,8 @@ describe("ShareApp anonymous component integration", () => {
     expect(wrapper.text()).toContain("0 分 3 秒");
     await vi.advanceTimersByTimeAsync(3000);
     await flushPromises();
-    expect(wrapper.text()).toContain("分享已失效");
-    expect(playerDestroy).toHaveBeenCalledTimes(1);
+    expect(wrapper.text()).toContain("链接已到期，当前观看不受影响");
+    expect(playerDestroy).not.toHaveBeenCalled();
   });
 
   it("ignores an old status response after a retry creates another viewer", async () => {
