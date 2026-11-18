@@ -1,0 +1,60 @@
+{
+  "status": "preview-only; no project resource replacement",
+  "generation": "Existing imagegen CLI gpt-image-2 master reused; no extra generation call this round",
+  "wordmark_source": "output/imagegen/uvp-gb28181-family-v2/uvp-server-master.png",
+  "uniform_palette": {
+    "blue": "#1687F8",
+    "white": "#FFFFFF",
+    "ink": "#10233F"
+  },
+  "common_wordmark_bounds": [
+    132,
+    500,
+    892,
+    775
+  ],
+  "header_font": "Helvetica Regular 79px at 1024px source size",
+  "products": {
+    "mobile": {
+      "title": "手机模拟器",
+      "name": "UVP GB28181 Mobile",
+      "badge": "手机图标",
+      "main_wordmark_sha256": "0d5b04a0c1121a21c885a3cc1bb44947e5d1fcc7c9e41655b1f79f5dcfc8fb7e",
+      "header_bounds": [
+        202,
+        252,
+        822,
+        352
+      ],
+      "header_text": "GB28181-Sim"
+    },
+    "desktop": {
+      "title": "桌面模拟器",
+      "name": "UVP GB28181 Desktop",
+      "badge": "显示器图标",
+      "main_wordmark_sha256": "0d5b04a0c1121a21c885a3cc1bb44947e5d1fcc7c9e41655b1f79f5dcfc8fb7e",
+      "header_bounds": [
+        202,
+        252,
+        822,
+        352
+      ],
+      "header_text": "GB28181-Sim"
+    },
+    "server": {
+      "title": "服务端平台",
+      "name": "UVP-GB28181",
+      "badge": "服务器图标",
+      "main_wordmark_sha256": "0d5b04a0c1121a21c885a3cc1bb44947e5d1fcc7c9e41655b1f79f5dcfc8fb7e",
+      "header_bounds": [
+        283,
+        252,
+        741,
+        352
+      ],
+      "header_text": "GB28181"
+    }
+  },
+  "processing": "Shared UVP/aperture alpha mask extracted from generated master; shared exact text typography; device badge geometry composed locally; flat palette; common rounding and positioning.",
+  "header_rule": "Simulators: GB28181-Sim. Server: GB28181. Same font/size/vertical alignment; each header group centered."
+}
