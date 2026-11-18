@@ -6,6 +6,7 @@ import {
   ALARM_POPUP_LEAVE_MS,
   ALARM_POPUP_TTL_MS,
   alarmPopupDetail,
+  alarmPopupIdentifiers,
   alarmPopupKey,
   alarmPopupPriority,
   alarmPopupSubtitle,
@@ -138,6 +139,12 @@ onBeforeUnmount(() => {
         <p v-if="alarmPopupSubtitle(item.event)" class="uvp-alarm-popup__subtitle">
           {{ alarmPopupSubtitle(item.event) }}
         </p>
+        <div class="uvp-alarm-popup__ids">
+          <span v-for="identifier in alarmPopupIdentifiers(item.event)" :key="identifier.label" class="uvp-alarm-popup__id">
+            <span class="uvp-alarm-popup__id-label">{{ identifier.label }}</span>
+            <code class="uvp-alarm-popup__id-value" :title="identifier.value">{{ identifier.value }}</code>
+          </span>
+        </div>
         <p v-if="alarmPopupDetail(item.event)" class="uvp-alarm-popup__detail">
           {{ alarmPopupDetail(item.event) }}
         </p>
@@ -249,6 +256,38 @@ onBeforeUnmount(() => {
 
 .uvp-alarm-popup__detail {
   color: var(--uvp-text-tertiary);
+}
+
+/* 设备 ID / 通道 ID：等宽字体 + 可整段选中，方便直接复制去搜设备树。 */
+.uvp-alarm-popup__ids {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 4px;
+}
+
+.uvp-alarm-popup__id {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.uvp-alarm-popup__id-label {
+  flex: none;
+  color: var(--uvp-text-tertiary);
+}
+
+.uvp-alarm-popup__id-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--uvp-text-secondary);
+  white-space: nowrap;
+  user-select: all;
 }
 
 .uvp-alarm-popup__close {

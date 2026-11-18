@@ -100,6 +100,32 @@ describe("AlarmPopupHost 设备告警实时浮层", () => {
     expect(wrapper.classes()).toContain("uvp-alarm-popups");
   });
 
+  it("卡片上直接显示设备 ID 与通道 ID", async () => {
+    const { wrapper, source } = await mountHost();
+    source.emit("alarm", alarmEvent({ alarmId: 13, channelCode: "34020000001320000002", channelName: "三号通道" }));
+    await nextTick();
+
+    const card = wrapper.get('[data-testid="alarm-popup"]');
+    const ids = card.findAll(".uvp-alarm-popup__id");
+    expect(ids).toHaveLength(2);
+    expect(ids[0].text()).toContain("设备 ID");
+    expect(ids[0].text()).toContain("34020000001320000001");
+    expect(ids[1].text()).toContain("通道 ID");
+    expect(ids[1].text()).toContain("34020000001320000002");
+    // 长编码截断时靠 title 看全
+    expect(ids[1].get(".uvp-alarm-popup__id-value").attributes("title")).toBe("34020000001320000002");
+  });
+
+  it("耐性：没有通道信息时通道 ID 显示占位而不是留空", async () => {
+    const { wrapper, source } = await mountHost();
+    source.emit("alarm", alarmEvent({ alarmId: 17, sourceCode: "34020000001320000009" }));
+    await nextTick();
+
+    const ids = wrapper.get('[data-testid="alarm-popup"]').findAll(".uvp-alarm-popup__id");
+    expect(ids[1].text()).toContain("—");
+    expect(ids[2].text()).toContain("34020000001320000009");
+  });
+
   it("停留数秒后自动消失（先离场再移除）", async () => {
     const { wrapper, source } = await mountHost();
     source.emit("alarm", alarmEvent({ alarmId: 9 }));

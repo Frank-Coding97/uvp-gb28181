@@ -4,6 +4,7 @@ import {
   MAX_ALARM_POPUPS,
   alarmPopupDetail,
   alarmPopupEntityName,
+  alarmPopupIdentifiers,
   alarmPopupKey,
   alarmPopupPriority,
   alarmPopupSubtitle,
@@ -90,6 +91,25 @@ describe("alarmPopupQueue", () => {
     expect(alarmPopupPriority(event({ priority: 4 }))).toBe(4);
     expect(alarmPopupPriority(event({ priority: 9 }))).toBe(0);
     expect(alarmPopupPriority(event())).toBe(0);
+  });
+
+  it("卡片带设备 ID 与通道 ID，缺通道时补来源编码", () => {
+    expect(alarmPopupIdentifiers(event({ channelCode: "34020000001320000002" }))).toEqual([
+      { label: "设备 ID", value: "34020000001320000001" },
+      { label: "通道 ID", value: "34020000001320000002" }
+    ]);
+
+    // 报警 SourceID 没匹配到通道表：通道 ID 给占位，来源编码单独列出（排查用）
+    expect(alarmPopupIdentifiers(event({ channelCode: "  ", sourceCode: "34020000001320000009" }))).toEqual([
+      { label: "设备 ID", value: "34020000001320000001" },
+      { label: "通道 ID", value: "—" },
+      { label: "来源编码", value: "34020000001320000009" }
+    ]);
+
+    // 来源编码与设备编码相同（设备级报警）时不重复出一行
+    expect(alarmPopupIdentifiers(event({ sourceCode: "34020000001320000001" }))).toHaveLength(2);
+    // 设备编码缺失也要有占位，卡片高度不能因为某条异常数据而跳动
+    expect(alarmPopupIdentifiers(event({ deviceCode: "" }))[0]).toEqual({ label: "设备 ID", value: "—" });
   });
 
   it("时间格式化失败返回空串，不显示 Invalid Date", () => {

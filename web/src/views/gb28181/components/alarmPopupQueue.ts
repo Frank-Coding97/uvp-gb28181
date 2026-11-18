@@ -85,6 +85,33 @@ export function alarmPopupDetail(event: AlarmPopupEvent): string {
   return description;
 }
 
+export interface AlarmPopupIdentifier {
+  label: string;
+  value: string;
+}
+
+/**
+ * 卡片上的国标编码：设备 ID / 通道 ID。
+ *
+ * ⛔ 名称是给人看的，编码才是能拿去设备树里定位、能报给现场的那个东西 ——
+ * 卡片只有名称时，现场说「几号通道」根本对不上。
+ * 通道匹配不上（报警 SourceID 不在通道表里）时补一行「来源编码」，
+ * 那正是设备实际上报的编码，也是排查为什么没匹配到通道的唯一线索。
+ */
+export function alarmPopupIdentifiers(event: AlarmPopupEvent): AlarmPopupIdentifier[] {
+  const device = event.deviceCode?.trim() || "";
+  const channel = event.channelCode?.trim() || "";
+  const identifiers: AlarmPopupIdentifier[] = [
+    { label: "设备 ID", value: device || "—" },
+    { label: "通道 ID", value: channel || "—" }
+  ];
+  const source = event.sourceCode?.trim() || "";
+  if (!channel && source && source !== device) {
+    identifiers.push({ label: "来源编码", value: source });
+  }
+  return identifiers;
+}
+
 /** 报警级别：1 最严重，4 最轻；缺值返回 0（灰色）。 */
 export function alarmPopupPriority(event: AlarmPopupEvent): number {
   const priority = event.priority;
