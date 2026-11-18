@@ -124,7 +124,6 @@ class Deployed(Check):
                 time.sleep(1)
             for endpoint in ('resolve','viewers'):
                 require(self.request('/api/public/video-share/'+endpoint,'POST',cred)[0]==410,'expired link admitted a new visit')
-            require(self.request(self.path+'/link','POST',{'revision':self.status()['revision']},self.token)[0]==410,'expired link acquisition silently renewed')
             self.success('/api/public/video-share/viewers/status','POST',{'viewerToken':viewer['viewerToken']})
             state=self.status();require(state['enabled'] and state['expired'],'expired share must retain the explicit disable control')
             before_anon=self.flv_snapshot(anon)[0]; before_hls=hls_state['segments']
@@ -134,15 +133,42 @@ class Deployed(Check):
             self.report['measurements']['postExpiryHlsNewSegments']=hls_state['segments']-before_hls
             before=self.flv_snapshot(normal)[0]; self.wait(lambda:self.flv_snapshot(normal)[0]>before,'ordinary playback survives expiry',10)
             self.record('real five-minute expiry rejected new visits while active FLV/HLS and ordinary playback continued')
-            # Leave time for the independent browser to prove advancing frames
-            # after expiry, then exercise the remaining administrative kill switch.
-            remaining=(expiry+dt.timedelta(seconds=45)-dt.datetime.now(dt.timezone.utc)).total_seconds()
-            if remaining>0:time.sleep(remaining)
+            # The independent browser must click the expired share icon. Do not
+            # call /link here until the UI has performed that renewal itself.
+            renewed=[]
+            def renewed_from_ui():
+                require(not anon['ended'].is_set(),'old FLV stopped while waiting for icon renewal')
+                require(not hls_state['error'],'old HLS stopped while waiting for icon renewal')
+                current=self.status()
+                require(current['enabled'],'renewal unexpectedly toggled sharing off')
+                if current.get('expiresAt')!=link['expiresAt']:
+                    renewed[:]=[current];return True
+                return False
+            self.wait(renewed_from_ui,'expired share icon renewal by the browser',150)
+            new_link,new_cred=self.link()
+            require(new_link['publicId']!=link['publicId'],'renewal reused the expired public identifier')
+            require(new_link['generation']==link['generation'],'ordinary renewal changed the sharing authorization generation')
+            require(new_link['expiresAt']==renewed[0]['expiresAt'],'reacquiring renewed link extended its expiry')
+            self.success('/api/public/video-share/resolve','POST',new_cred)
+            for endpoint in ('resolve','viewers'):
+                require(self.request('/api/public/video-share/'+endpoint,'POST',cred)[0]==410,'renewal revived the expired link')
+            new_viewer=self.success('/api/public/video-share/viewers','POST',new_cred)
+            new_anon=self.reader(self.base+new_viewer['httpFlvPath'])
+            before_anon=self.flv_snapshot(anon)[0];before_hls=hls_state['segments']
+            time.sleep(12)
+            require(not anon['ended'].is_set() and self.flv_snapshot(anon)[0]>before_anon,'link renewal interrupted old FLV')
+            require(not hls_state['error'] and hls_state['segments']>before_hls,'link renewal interrupted old HLS')
+            require(not new_anon['ended'].is_set(),'renewed link did not retain live playback')
+            self.report['measurements']['postRenewalHlsNewSegments']=hls_state['segments']-before_hls
+            self.record('expired icon renewed the public link without toggling sharing; old FLV/HLS continued and old link stayed invalid')
+            time.sleep(20)
             hls_state['stop'].set();hls_thread.join(12)
             self.enabled(False);revoked=time.monotonic();require(anon['ended'].wait(30),'post-expiry manual disable exceeded 30 seconds')
+            require(new_anon['ended'].wait(30),'manual disable did not stop the renewed viewer')
             self.report['measurements']['postExpiryDisableLastByteSeconds']=round(max(0,self.flv_snapshot(anon)[1]-revoked),3)
             self.gone(cred,viewer,[viewer['httpFlvPath'],hls,segment])
-            self.record('manual disable after natural expiry stopped existing viewers and invalidated all old relay paths')
+            self.gone(new_cred,new_viewer,[new_viewer['httpFlvPath']])
+            self.record('manual disable after renewal stopped both old and new viewers and invalidated both links')
             self.report['status']='PASS'
         finally:
             if hls_state is not None:hls_state['stop'].set()
