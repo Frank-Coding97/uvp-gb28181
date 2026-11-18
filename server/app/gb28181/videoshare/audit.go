@@ -85,7 +85,9 @@ func RecordAuditTx(ctx context.Context, tx *gorm.DB, event string, operatorID ui
 }
 
 // ScanExpired records missed expirations in bounded, idempotent batches. Media
-// authorization compares expires_at directly and never waits for this scanner.
+// admission compares expires_at directly and never waits for this scanner.
+// Natural expiry is not revocation: already-started viewers may keep receiving
+// media, and enabled remains true so administrators can explicitly close them.
 func (s *Service) ScanExpired(ctx context.Context, limit int) (int, error) {
 	if ctx == nil || s == nil || s.db == nil || s.now == nil {
 		return 0, errors.New("video share expiry scan requires context and service")
@@ -103,23 +105,23 @@ func (s *Service) ScanExpired(ctx context.Context, limit int) (int, error) {
 			return err
 		}
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("enabled = ? AND revoked_at IS NULL AND expires_at <= ?", true, now).
+			Where("enabled = ? AND revoked_at IS NULL AND revoke_reason <> 'expired' AND expires_at <= ?", true, now).
 			Order("id ASC").Limit(limit).Find(&expired).Error; err != nil {
 			return err
 		}
 		for i := range expired {
 			share := &expired[i]
 			updated := tx.Model(&gbmodels.GbChannelVideoShare{}).
-				Where("id = ? AND revision = ? AND generation = ? AND enabled = ? AND revoked_at IS NULL AND expires_at <= ?",
+				Where("id = ? AND revision = ? AND generation = ? AND enabled = ? AND revoked_at IS NULL AND revoke_reason <> 'expired' AND expires_at <= ?",
 					share.ID, share.Revision, share.Generation, true, now).
-				Updates(map[string]any{"enabled": false, "revoked_at": now, "revoke_reason": "expired", "revision": share.Revision + 1, "updated_at": now})
+				Updates(map[string]any{"revoke_reason": "expired", "revision": share.Revision + 1, "updated_at": now})
 			if updated.Error != nil {
 				return updated.Error
 			}
 			if updated.RowsAffected != 1 {
 				return ErrConflict
 			}
-			share.Enabled, share.RevokedAt, share.RevokeReason, share.Revision = false, &now, "expired", share.Revision+1
+			share.RevokeReason, share.Revision = "expired", share.Revision+1
 			if err := RecordAuditTx(ctx, tx, "video_share.expired", 0, share); err != nil {
 				return err
 			}

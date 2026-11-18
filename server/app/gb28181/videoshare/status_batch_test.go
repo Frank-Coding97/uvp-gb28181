@@ -86,7 +86,8 @@ func TestBatchStatusReturnsOnlyAuthorizedListSafeLifecycleState(t *testing.T) {
 	require.True(t, states[ids[1]].Enabled)
 	require.True(t, states[ids[1]].Pending)
 	require.Nil(t, states[ids[1]].ExpiresAt)
-	for _, index := range []int{2, 3, 4, 5} {
+	require.True(t, states[ids[2]].Enabled)
+	for _, index := range []int{3, 4, 5} {
 		require.False(t, states[ids[index]].Enabled)
 		require.False(t, states[ids[index]].Pending)
 	}
@@ -179,7 +180,7 @@ func TestStatusDistinguishesNaturalExpiryFromOtherRevocations(t *testing.T) {
 		t.Run(reason, func(t *testing.T) {
 			service, ids, now := batchStatusFixture(t)
 			updates := map[string]interface{}{"revoke_reason": reason}
-			if reason != "" {
+			if reason != "" && reason != "expired" {
 				updates["revoked_at"] = now
 				updates["enabled"] = false
 			}
@@ -194,7 +195,7 @@ func TestStatusDistinguishesNaturalExpiryFromOtherRevocations(t *testing.T) {
 				var fields map[string]interface{}
 				require.NoError(t, json.Unmarshal(encoded, &fields))
 				require.Equal(t, reason == "" || reason == "expired", fields["expired"])
-				require.Equal(t, false, fields["enabled"])
+				require.Equal(t, reason == "" || reason == "expired", fields["enabled"])
 			}
 		})
 	}

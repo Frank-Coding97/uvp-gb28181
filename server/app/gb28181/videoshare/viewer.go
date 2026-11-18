@@ -1,6 +1,7 @@
 package videoshare
 
 import (
+	"container/list"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -44,23 +45,30 @@ type ViewerAccess struct {
 	Context    context.Context
 }
 
+type hlsResource struct {
+	id   string
+	path string
+}
+
 type viewerSession struct {
-	shareID     uint
-	publicID    string
-	generation  string
-	createdBy   uint
-	devicePK    uint
-	deviceID    string
-	deviceEpoch uint64
-	expiresAt   time.Time
-	source      PlaybackSource
-	ctx         context.Context
-	cancel      context.CancelFunc
-	closeOnce   sync.Once
-	resourceMu  sync.Mutex
-	resources   map[string]string
-	resourceIDs map[string]string
+	shareID       uint
+	publicID      string
+	generation    string
+	createdBy     uint
+	devicePK      uint
+	deviceID      string
+	deviceEpoch   uint64
+	expiresAt     time.Time
+	source        PlaybackSource
+	ctx           context.Context
+	cancel        context.CancelFunc
+	closeOnce     sync.Once
+	resourceMu    sync.Mutex
+	resources     map[string]*list.Element
+	resourceIDs   map[string]string
+	resourceOrder list.List
 	// Activity fields are protected by Service.viewerMu.
+	started        bool
 	activeRequests int
 	idleDeadline   time.Time
 	idleTimer      *time.Timer
@@ -130,12 +138,12 @@ func (s *Service) CreateViewer(ctx context.Context, publicID, signature string) 
 		return Viewer{}, fmt.Errorf("%w: playback source incomplete", ErrViewerUnavailable)
 	}
 	digest := sha256.Sum256([]byte(token))
-	ctxWithDeadline, cancel := context.WithDeadline(context.Background(), *share.ExpiresAt)
+	viewerCtx, cancel := context.WithCancel(context.Background())
 	session := &viewerSession{
 		shareID: share.ID, publicID: share.PublicID, generation: share.Generation,
 		createdBy: *share.CreatedBy, devicePK: share.DevicePK, deviceID: share.DeviceID,
 		deviceEpoch: share.DeviceEpoch, expiresAt: *share.ExpiresAt, source: source,
-		ctx: ctxWithDeadline, cancel: cancel, resources: make(map[string]string), resourceIDs: make(map[string]string),
+		ctx: viewerCtx, cancel: cancel, resources: make(map[string]*list.Element), resourceIDs: make(map[string]string),
 	}
 	s.viewerMu.Lock()
 	if s.viewerEpoch != epoch || s.prepare == nil {
@@ -173,8 +181,9 @@ func (s *Service) LookupViewer(ctx context.Context, token string) (ViewerAccess,
 	digest := sha256.Sum256([]byte(token))
 	s.viewerMu.Lock()
 	session := s.viewers[digest]
+	admitted := session != nil && (session.started || session.expiresAt.After(s.now()))
 	s.viewerMu.Unlock()
-	if session == nil || !session.expiresAt.After(s.now()) || session.ctx.Err() != nil {
+	if !admitted || session.ctx.Err() != nil {
 		_ = s.CloseViewer(token)
 		return ViewerAccess{}, ErrExpired
 	}
@@ -187,7 +196,7 @@ func (s *Service) LookupViewer(ctx context.Context, token string) (ViewerAccess,
 			}
 			return err
 		}
-		if share.PublicID != session.publicID || share.Generation != session.generation || !share.Enabled || share.RevokedAt != nil || share.ExpiresAt == nil || !share.ExpiresAt.After(s.now()) || !share.ExpiresAt.Equal(session.expiresAt) || share.CreatedBy == nil || *share.CreatedBy != session.createdBy {
+		if share.PublicID != session.publicID || share.Generation != session.generation || !share.Enabled || share.RevokedAt != nil || share.ExpiresAt == nil || !share.ExpiresAt.Equal(session.expiresAt) || share.CreatedBy == nil || *share.CreatedBy != session.createdBy {
 			return ErrExpired
 		}
 		snapshot, err := s.authorize(ctx, tx, session.createdBy, share.ChannelPK)
@@ -226,16 +235,23 @@ func (s *Service) mapHLSResource(token, resourcePath string) (string, error) {
 	session.resourceMu.Lock()
 	defer session.resourceMu.Unlock()
 	if existing := session.resourceIDs[resourcePath]; existing != "" {
+		session.resourceOrder.MoveToBack(session.resources[existing])
 		return existing, nil
-	}
-	if len(session.resources) >= 4096 {
-		return "", ErrViewerUnavailable
 	}
 	resourceID, err := s.randomID()
 	if err != nil {
 		return "", err
 	}
-	session.resources[resourceID] = resourcePath
+	// Live playlists keep advancing after link expiry. Keep a bounded LRU
+	// window so active child playlists survive while obsolete segments retire.
+	if len(session.resources) >= 4096 {
+		oldest := session.resourceOrder.Front()
+		resource := oldest.Value.(hlsResource)
+		delete(session.resourceIDs, resource.path)
+		delete(session.resources, resource.id)
+		session.resourceOrder.Remove(oldest)
+	}
+	session.resources[resourceID] = session.resourceOrder.PushBack(hlsResource{id: resourceID, path: resourcePath})
 	session.resourceIDs[resourcePath] = resourceID
 	return resourceID, nil
 }
@@ -247,8 +263,12 @@ func (s *Service) resolveHLSResource(token, resourceID string) (string, bool) {
 	}
 	session.resourceMu.Lock()
 	defer session.resourceMu.Unlock()
-	resourcePath, ok := session.resources[resourceID]
-	return resourcePath, ok
+	resource, ok := session.resources[resourceID]
+	if !ok {
+		return "", false
+	}
+	session.resourceOrder.MoveToBack(resource)
+	return resource.Value.(hlsResource).path, true
 }
 
 func hlsResourcePrefix(playlistURL *url.URL) string {
@@ -280,7 +300,7 @@ func (s *Service) beginViewerRequest(token string) (func(bool), error) {
 	digest := sha256.Sum256([]byte(token))
 	s.viewerMu.Lock()
 	session := s.viewers[digest]
-	if session == nil || session.ctx.Err() != nil {
+	if session == nil || session.ctx.Err() != nil || (!session.started && !session.expiresAt.After(s.now())) {
 		s.viewerMu.Unlock()
 		return nil, ErrExpired
 	}
@@ -307,6 +327,21 @@ func (s *Service) beginViewerRequest(token string) (func(bool), error) {
 			closeViewerSession(session)
 		}
 	}, nil
+}
+
+// confirmViewerMedia admits a viewer only after a successful upstream response.
+// Failed requests and requests still awaiting their first media response at the
+// link cutoff must not become continuing viewers.
+func (s *Service) confirmViewerMedia(token string) bool {
+	digest := sha256.Sum256([]byte(token))
+	s.viewerMu.Lock()
+	defer s.viewerMu.Unlock()
+	session := s.viewers[digest]
+	if session == nil || session.ctx.Err() != nil || session.activeRequests == 0 || (!session.started && !session.expiresAt.After(s.now())) {
+		return false
+	}
+	session.started = true
+	return true
 }
 
 func (s *Service) armViewerIdleLocked(digest [32]byte, session *viewerSession) {

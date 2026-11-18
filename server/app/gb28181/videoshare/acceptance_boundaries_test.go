@@ -78,7 +78,7 @@ func TestAcceptanceExactExpiryBoundary(t *testing.T) {
 			} else {
 				require.ErrorIs(t, resolveErr, ErrExpired)
 				require.ErrorIs(t, viewerErr, ErrExpired)
-				require.False(t, status.Enabled)
+				require.True(t, status.Enabled)
 				require.True(t, status.Expired)
 			}
 		})

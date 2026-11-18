@@ -63,7 +63,7 @@ func (s *Service) BatchStatus(ctx context.Context, channelIDs []uint, actorID ui
 			return err
 		}
 		for _, share := range shares {
-			enabled := share.Enabled && share.RevokedAt == nil && matchesDevice(snapshots[share.ChannelPK], share.DevicePK, share.DeviceID, share.DeviceEpoch) && (share.ExpiresAt == nil || share.ExpiresAt.After(now))
+			enabled := share.Enabled && share.RevokedAt == nil && matchesDevice(snapshots[share.ChannelPK], share.DevicePK, share.DeviceID, share.DeviceEpoch)
 			status := StatusSummary{Expired: matchesDevice(snapshots[share.ChannelPK], share.DevicePK, share.DeviceID, share.DeviceEpoch) && naturallyExpired(share, now), Enabled: enabled, Pending: enabled && share.ActivatedAt == nil, Revision: share.Revision, ServerTime: now}
 			if enabled {
 				status.ExpiresAt = share.ExpiresAt

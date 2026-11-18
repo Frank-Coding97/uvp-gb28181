@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -126,17 +127,13 @@ func TestProductionRelayBehindNginx(t *testing.T) {
 			if tc.slow {
 				time.Sleep(500 * time.Millisecond)
 			}
-			if !tc.expires {
-				_, err = service.SetEnabled(context.Background(), channelPK, 9, false, link.Revision)
-				require.NoError(t, err)
-				cutoff = time.Now() // SetEnabled returned only after the revocation committed.
-			}
 			type observedRead struct {
 				last  time.Time
 				bytes int
 				err   error
 			}
 			reads := make(chan observedRead, 1)
+			var latestMedia atomic.Int64
 			go func() {
 				result := observedRead{last: time.Now()}
 				buffer := make([]byte, 1024)
@@ -144,6 +141,7 @@ func TestProductionRelayBehindNginx(t *testing.T) {
 					n, err := response.Body.Read(buffer)
 					if n > 0 {
 						result.last = time.Now()
+						latestMedia.Store(result.last.UnixNano())
 						result.bytes += n
 					}
 					if err != nil {
@@ -162,6 +160,25 @@ func TestProductionRelayBehindNginx(t *testing.T) {
 					}
 				}
 			}()
+			if tc.expires {
+				select {
+				case <-reads:
+					t.Fatal("media ended before link expiry")
+				case <-time.After(time.Until(cutoff.Add(time.Second))):
+				}
+				require.Greater(t, latestMedia.Load(), cutoff.UnixNano(), "proxy must deliver new media after natural link expiry")
+				_, err = service.Resolve(context.Background(), link.PublicID, link.Signature)
+				require.ErrorIs(t, err, ErrExpired)
+				_, err = service.LookupViewer(context.Background(), viewer.Token)
+				require.NoError(t, err)
+				_, err = service.ScanExpired(context.Background(), 100)
+				require.NoError(t, err)
+			}
+			state, err := service.Status(context.Background(), channelPK, 9)
+			require.NoError(t, err)
+			_, err = service.SetEnabled(context.Background(), channelPK, 9, false, state.Revision)
+			require.NoError(t, err)
+			cutoff = time.Now() // Explicit close committed, including an already-expired link.
 			timeout := time.NewTimer(time.Until(cutoff.Add(cutoffBudget)))
 			defer timeout.Stop()
 			select {

@@ -50,7 +50,7 @@ func newServiceFixture(t *testing.T) (*Service, uint, time.Time) {
 		return AuthorizationSnapshot{DevicePK: device.ID, DeviceID: device.DeviceID, DeviceEpoch: device.AccessEpoch}, nil
 	})
 	require.NoError(t, err)
-	// Viewer deadlines use the real clock; keep the frozen business clock current.
+	// Keep the frozen business clock current for issued-link timestamps.
 	now := time.Now().UTC()
 	service.now = func() time.Time { return now }
 	var randomSequence atomic.Uint32

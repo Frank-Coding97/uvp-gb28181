@@ -81,6 +81,11 @@ func (s *Service) RelayHTTPFLV(requestCtx context.Context, w http.ResponseWriter
 		http.Error(w, "video share media unavailable", http.StatusBadGateway)
 		return
 	}
+	if !s.confirmViewerMedia(token) {
+		_ = s.CloseViewer(token)
+		writeRelayError(w, ErrExpired)
+		return
+	}
 	w.Header().Set("Content-Type", "video/x-flv")
 	w.Header().Set("Cache-Control", "no-store, private")
 	w.Header().Set("X-Accel-Buffering", "no")

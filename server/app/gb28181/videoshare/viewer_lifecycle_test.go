@@ -55,7 +55,11 @@ func TestViewerWithoutMediaActivityReleasesItsLease(t *testing.T) {
 	}))
 	viewer, err := service.CreateViewer(context.Background(), link.PublicID, link.Signature)
 	require.NoError(t, err)
-	require.Eventually(t, func() bool { return released.Load() == 1 }, time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool {
+		// Status checks must neither admit media nor refresh the idle lease.
+		_, _ = service.LookupViewer(context.Background(), viewer.Token)
+		return released.Load() == 1
+	}, time.Second, 10*time.Millisecond)
 	_, err = service.LookupViewer(context.Background(), viewer.Token)
 	require.ErrorIs(t, err, ErrExpired)
 	// The public link remains reusable: idle cleanup only retires this viewer.

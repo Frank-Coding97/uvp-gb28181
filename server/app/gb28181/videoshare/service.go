@@ -84,7 +84,7 @@ func (s *Service) Status(ctx context.Context, channelPK uint, actorID uint) (Lin
 		return Link{Revision: share.Revision, ServerTime: s.now().UTC()}, nil
 	}
 	if share.ExpiresAt != nil && !share.ExpiresAt.After(s.now()) {
-		return Link{Expired: naturallyExpired(share, s.now()), Revision: share.Revision, ServerTime: s.now().UTC()}, nil
+		return Link{Enabled: share.Enabled && share.RevokedAt == nil, Expired: naturallyExpired(share, s.now()), ExpiresAt: share.ExpiresAt, Revision: share.Revision, ServerTime: s.now().UTC()}, nil
 	}
 	return Link{
 		Enabled:    share.Enabled && share.RevokedAt == nil,

@@ -67,7 +67,7 @@ func TestHTTPFLVRelayCancelsWhenViewerIsRevoked(t *testing.T) {
 	}
 }
 
-func TestHTTPFLVRelayStopsAtNaturalShareExpiry(t *testing.T) {
+func TestHTTPFLVRelayContinuesAtNaturalShareExpiry(t *testing.T) {
 	started := make(chan struct{})
 	upstreamStopped := make(chan struct{})
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -92,6 +92,7 @@ func TestHTTPFLVRelayStopsAtNaturalShareExpiry(t *testing.T) {
 	defer upstream.Close()
 
 	service, channelPK, _ := newServiceFixture(t)
+	defer service.DrainViewers()
 	link, expiresAt := shortLivedShare(t, service, channelPK, 900*time.Millisecond)
 	service.SetPlaybackPreparer(playbackPreparerFunc(func(context.Context, *gbmodels.GbChannelVideoShare) (PlaybackSource, error) {
 		return PlaybackSource{StreamID: "stream-1", Generation: 3, HTTPFLVURL: upstream.URL}, nil
@@ -110,19 +111,36 @@ func TestHTTPFLVRelayStopsAtNaturalShareExpiry(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("upstream request did not start")
 	}
+	time.Sleep(time.Until(expiresAt.Add(150 * time.Millisecond)))
 	select {
 	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("relay remained active after the share expired")
+		t.Fatal("active media stopped at natural link expiry")
+	default:
+	}
+	count, err := service.ScanExpired(context.Background(), 100)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	_, err = service.LookupViewer(context.Background(), viewer.Token)
+	require.NoError(t, err)
+	_, err = service.Resolve(context.Background(), link.PublicID, link.Signature)
+	require.ErrorIs(t, err, ErrExpired)
+	state, err := service.Status(context.Background(), channelPK, 9)
+	require.NoError(t, err)
+	_, err = service.SetEnabled(context.Background(), channelPK, 9, false, state.Revision)
+	require.NoError(t, err)
+	_, err = service.LookupViewer(context.Background(), viewer.Token)
+	require.ErrorIs(t, err, ErrExpired)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("media did not stop after explicit close")
 	}
 	select {
 	case <-upstreamStopped:
 	case <-time.After(time.Second):
-		t.Fatal("upstream body remained open after the share expired")
+		t.Fatal("upstream body remained open after explicit close")
 	}
-	require.WithinDuration(t, expiresAt, writer.lastWriteAt, 350*time.Millisecond)
-	_, err = service.LookupViewer(context.Background(), viewer.Token)
-	require.ErrorIs(t, err, ErrExpired)
+	require.True(t, writer.lastWriteAt.After(expiresAt), "media bytes must continue after link expiry")
 }
 
 func TestHTTPFLVRelayReturnsUnavailableWhenAuthorizationStoreFails(t *testing.T) {
@@ -250,6 +268,7 @@ func TestHLSRelayStopsInFlightSegmentAtNaturalShareExpiry(t *testing.T) {
 	defer upstream.Close()
 
 	service, channelPK, _ := newServiceFixture(t)
+	defer service.DrainViewers()
 	link, expiresAt := shortLivedShare(t, service, channelPK, 900*time.Millisecond)
 	service.SetPlaybackPreparer(playbackPreparerFunc(func(context.Context, *gbmodels.GbChannelVideoShare) (PlaybackSource, error) {
 		return PlaybackSource{StreamID: "stream-1", Generation: 3, HLSURL: upstream.URL + "/rtp/stream-1/hls.m3u8"}, nil
@@ -269,19 +288,36 @@ func TestHLSRelayStopsInFlightSegmentAtNaturalShareExpiry(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("HLS segment request did not start")
 	}
+	time.Sleep(time.Until(expiresAt.Add(150 * time.Millisecond)))
 	select {
 	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("HLS segment relay remained active after the share expired")
+		t.Fatal("active media stopped at natural link expiry")
+	default:
+	}
+	count, err := service.ScanExpired(context.Background(), 100)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	_, err = service.LookupViewer(context.Background(), viewer.Token)
+	require.NoError(t, err)
+	_, err = service.Resolve(context.Background(), link.PublicID, link.Signature)
+	require.ErrorIs(t, err, ErrExpired)
+	state, err := service.Status(context.Background(), channelPK, 9)
+	require.NoError(t, err)
+	_, err = service.SetEnabled(context.Background(), channelPK, 9, false, state.Revision)
+	require.NoError(t, err)
+	_, err = service.LookupViewer(context.Background(), viewer.Token)
+	require.ErrorIs(t, err, ErrExpired)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("media did not stop after explicit close")
 	}
 	select {
 	case <-upstreamStopped:
 	case <-time.After(time.Second):
-		t.Fatal("HLS segment body remained open after the share expired")
+		t.Fatal("upstream body remained open after explicit close")
 	}
-	require.WithinDuration(t, expiresAt, writer.lastWriteAt, 350*time.Millisecond)
-	_, err = service.LookupViewer(context.Background(), viewer.Token)
-	require.ErrorIs(t, err, ErrExpired)
+	require.True(t, writer.lastWriteAt.After(expiresAt), "media bytes must continue after link expiry")
 }
 
 func shortLivedShare(t *testing.T, service *Service, channelPK uint, lifetime time.Duration) (Link, time.Time) {

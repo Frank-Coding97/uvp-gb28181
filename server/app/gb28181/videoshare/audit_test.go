@@ -72,9 +72,9 @@ func TestVideoShareScanExpiredBoundaryAndIdempotency(t *testing.T) {
 	require.Equal(t, 1, count)
 	var retired gbmodels.GbChannelVideoShare
 	require.NoError(t, s.db.Where("channel_pk = ?", channel).Take(&retired).Error)
-	require.False(t, retired.Enabled)
+	require.True(t, retired.Enabled)
 	require.Equal(t, "expired", retired.RevokeReason)
-	require.Equal(t, boundary, *retired.RevokedAt)
+	require.Nil(t, retired.RevokedAt)
 	require.Equal(t, link.Revision+1, retired.Revision)
 	var active []gbmodels.GbChannelVideoShare
 	require.NoError(t, s.db.Where("channel_pk IN ?", []uint{second.ID, third.ID}).Find(&active).Error)

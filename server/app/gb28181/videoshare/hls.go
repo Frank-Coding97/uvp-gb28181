@@ -106,6 +106,11 @@ func (s *Service) RelayHLS(requestCtx context.Context, w http.ResponseWriter, to
 			writeRelayError(w, ctx.Err())
 			return
 		}
+		if !s.confirmViewerMedia(token) {
+			_ = s.CloseViewer(token)
+			writeRelayError(w, ErrExpired)
+			return
+		}
 		setHLSHeaders(w, "application/vnd.apple.mpegurl")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(manifest)
@@ -114,6 +119,11 @@ func (s *Service) RelayHLS(requestCtx context.Context, w http.ResponseWriter, to
 	contentType := response.Header.Get("Content-Type")
 	if !supportedHLSContentType(contentType) {
 		http.Error(w, "video share media unavailable", http.StatusBadGateway)
+		return
+	}
+	if !s.confirmViewerMedia(token) {
+		_ = s.CloseViewer(token)
+		writeRelayError(w, ErrExpired)
 		return
 	}
 	setHLSHeaders(w, contentType)
