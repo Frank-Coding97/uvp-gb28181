@@ -119,6 +119,16 @@ describe("multi-screen playback page", () => {
     expect(wrapper.find("[data-test=my-favorites] .lucide-star").exists()).toBe(true);
   });
 
+  it("places the source panel and monitor directly in the page without another workspace shell", () => {
+    const wrapper = mount(MultiScreenPlayback);
+    const page = wrapper.get(".multi-screen-page");
+
+    expect(page.find(".workspace").exists()).toBe(false);
+    expect(wrapper.get(".source-panel").element.parentElement).toBe(page.element);
+    expect(wrapper.get(".monitor-area").element.parentElement).toBe(page.element);
+    wrapper.unmount();
+  });
+
   it("keeps guest batch viewing and polling while hiding favorite persistence and PTZ", async () => {
     account.permissions = [
       "gb28181:device:view",

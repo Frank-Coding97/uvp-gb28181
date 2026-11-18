@@ -359,10 +359,7 @@ onBeforeUnmount(() => {
 .basic-ptz {
   flex: 0 0 auto;
   color: var(--zlm-text-2);
-  background: var(--zlm-card);
-  border: 1px solid var(--zlm-border);
-  border-radius: var(--zlm-radius-md);
-  box-shadow: var(--zlm-shadow-sm);
+  border-top: 1px solid var(--zlm-border);
 }
 .ptz-head,
 .ptz-head-info,
@@ -459,7 +456,7 @@ onBeforeUnmount(() => {
   touch-action: none;
   cursor: pointer;
   user-select: none;
-  background: var(--zlm-bg);
+  background: transparent;
   border: 1px solid var(--zlm-border);
   border-radius: 6px;
 }

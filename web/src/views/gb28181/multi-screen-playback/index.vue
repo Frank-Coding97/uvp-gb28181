@@ -534,258 +534,255 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="snow-fill gb28181-page multi-screen-page">
-    <div class="workspace">
-      <section class="source-panel" aria-label="设备树和云台控制">
-        <PlaybackSourceTree
-          ref="sourceTreeRef"
-          v-model:view="sourceView"
-          :used-channel-ids="usedChannelIds"
-          @select="assignChannel"
-          @select-group="playFavoriteGroup"
-          @favorite-saved="handleFavoriteSaved"
-        />
-        <BasicPtzPanel v-if="canRenderPtz" :channel="focusedSlot?.channel || null" @action-change="handlePtzActionChange" />
-      </section>
+    <section class="source-panel" aria-label="设备树和云台控制">
+      <PlaybackSourceTree
+        ref="sourceTreeRef"
+        v-model:view="sourceView"
+        :used-channel-ids="usedChannelIds"
+        @select="assignChannel"
+        @select-group="playFavoriteGroup"
+        @favorite-saved="handleFavoriteSaved"
+      />
+      <BasicPtzPanel v-if="canRenderPtz" :channel="focusedSlot?.channel || null" @action-change="handlePtzActionChange" />
+    </section>
 
-      <main ref="monitorAreaRef" class="monitor-area" :class="{ fullscreen: isFullscreen }">
-        <!-- 全屏时操作栏默认滑出屏幕外，靠这条顶部感应带把鼠标「接」回来 -->
-        <div v-if="isFullscreen" class="toolbar-reveal-zone" aria-hidden="true" />
-        <div class="monitor-toolbar">
-          <div class="layout-switcher" role="group" aria-label="选择分屏布局">
-            <button
-              v-for="option in layoutOptions"
-              :key="option.value"
-              type="button"
-              :data-test="`layout-${option.value}`"
-              :class="{ active: layout === option.value }"
-              :aria-label="option.label"
-              :aria-pressed="layout === option.value"
-              :title="option.label"
-              @click="setLayout(option.value)"
-            >
-              <span class="layout-glyph" :class="`glyph-${option.value}`" aria-hidden="true"
-                ><i v-for="cell in option.cells" :key="cell"
-              /></span>
-            </button>
-          </div>
-          <span class="toolbar-divider" aria-hidden="true" />
-          <div class="playback-actions" role="group" aria-label="批量播放控制">
-            <button
-              :disabled="!canManageFavorites"
-              type="button"
-              data-test="my-favorites"
-              aria-label="收藏当前播放通道"
-              title="收藏当前播放通道"
-              @click="openFavorites"
-            >
-              <Star :size="17" aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              data-test="play-all"
-              :disabled="playAllLoading || pollingSaving"
-              :aria-label="playAllLoading ? '正在播放全部' : '播放全部'"
-              :title="playAllLoading ? '正在加载在线通道' : '播放全部'"
-              @click="playAll"
-            >
-              <RefreshCw v-if="playAllLoading" :size="17" class="spin" aria-hidden="true" /><Play
-                v-else
-                :size="17"
-                aria-hidden="true"
-              />
-            </button>
-            <button
-              type="button"
-              data-test="stop-all"
-              :disabled="!hasPlayingSlots"
-              aria-label="停止全部"
-              title="停止全部"
-              @click="stopAll"
-            >
-              <CircleStop :size="17" aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              data-test="fullscreen"
-              :aria-label="isFullscreen ? '退出全屏' : '视频墙全屏'"
-              :title="isFullscreen ? '退出全屏' : '视频墙全屏'"
-              @click="toggleFullscreen"
-            >
-              <Minimize2 v-if="isFullscreen" :size="17" aria-hidden="true" /><Maximize2 v-else :size="17" aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              class="polling-control"
-              data-test="polling-settings"
-              :class="{ active: pollingSettings.enabled, counting: pollingRemainingSeconds > 0 }"
-              :aria-label="
-                pollingSettings.enabled
-                  ? pollingRemainingSeconds > 0
-                    ? `停止轮询，距离下一轮还有 ${pollingRemainingSeconds} 秒`
-                    : '停止轮询'
-                  : '轮询设置'
-              "
-              :title="pollingSettings.enabled ? '停止轮询' : '轮询设置'"
-              @click="togglePolling"
-            >
-              <span
-                v-if="pollingSettings.enabled && pollingRemainingSeconds > 0"
-                class="polling-countdown"
-                data-test="polling-countdown"
-                role="timer"
-                aria-live="off"
-                :aria-label="`距离下一轮轮询还有 ${pollingRemainingSeconds} 秒`"
-                :data-remaining-seconds="pollingRemainingSeconds"
-              >
-                <span class="countdown-ring" :style="{ '--polling-progress': `${pollingProgressDegrees}deg` }" aria-hidden="true"
-                  ><strong>{{ pollingRemainingSeconds }}</strong></span
-                >
-              </span>
-              <RefreshCw
-                v-else-if="pollingSettings.enabled"
-                data-test="polling-starting"
-                :size="17"
-                class="spin"
-                aria-hidden="true"
-              />
-              <Repeat2 v-else :size="17" aria-hidden="true" />
-            </button>
-          </div>
-        </div>
-
-        <div :class="slotGridClass()" aria-label="多屏播放格子">
-          <article
-            v-for="slot in visibleSlots"
-            :key="slot.index"
-            class="screen-slot"
-            :class="{ focused: focusedIndex === slot.index, empty: !slot.channel }"
-            data-test="screen-slot"
-            tabindex="0"
-            @click="focusSlot(slot)"
-            @keydown.enter="focusSlot(slot)"
+    <main ref="monitorAreaRef" class="monitor-area" :class="{ fullscreen: isFullscreen }">
+      <!-- 全屏时操作栏默认滑出屏幕外，靠这条顶部感应带把鼠标「接」回来 -->
+      <div v-if="isFullscreen" class="toolbar-reveal-zone" aria-hidden="true" />
+      <div class="monitor-toolbar">
+        <div class="layout-switcher" role="group" aria-label="选择分屏布局">
+          <button
+            v-for="option in layoutOptions"
+            :key="option.value"
+            type="button"
+            :data-test="`layout-${option.value}`"
+            :class="{ active: layout === option.value }"
+            :aria-label="option.label"
+            :aria-pressed="layout === option.value"
+            :title="option.label"
+            @click="setLayout(option.value)"
           >
-            <template v-if="slot.channel">
-              <div class="slot-topline">
-                <div class="slot-title">
-                  <span class="status-dot" :class="statusTone(slot)" aria-hidden="true" /><span class="slot-channel-name">{{
-                    slot.channel.name || slot.channel.alias || slot.channel.channelId
-                  }}</span
-                  ><span class="slot-status">{{ statusLabel(slot) }}</span
-                  ><span v-if="slot.result?.node" class="slot-node-name">节点 {{ slot.result.node.name }}</span>
-                </div>
-                <div class="slot-actions">
-                  <button
-                    class="slot-action"
-                    type="button"
-                    :data-test="`slot-console-${slot.index}`"
-                    aria-label="打开通道控制台"
-                    title="打开通道控制台"
-                    @click.stop="openConsole(slot)"
-                  >
-                    <SlidersHorizontal :size="15" aria-hidden="true" />
-                  </button>
-                  <button
-                    class="slot-action danger"
-                    type="button"
-                    :data-test="`slot-remove-${slot.index}`"
-                    aria-label="关闭当前播放"
-                    title="关闭当前播放"
-                    @click.stop="removeSlot(slot)"
-                  >
-                    <X :size="15" aria-hidden="true" />
-                  </button>
-                </div>
+            <span class="layout-glyph" :class="`glyph-${option.value}`" aria-hidden="true"
+              ><i v-for="cell in option.cells" :key="cell"
+            /></span>
+          </button>
+        </div>
+        <span class="toolbar-divider" aria-hidden="true" />
+        <div class="playback-actions" role="group" aria-label="批量播放控制">
+          <button
+            :disabled="!canManageFavorites"
+            type="button"
+            data-test="my-favorites"
+            aria-label="收藏当前播放通道"
+            title="收藏当前播放通道"
+            @click="openFavorites"
+          >
+            <Star :size="17" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            data-test="play-all"
+            :disabled="playAllLoading || pollingSaving"
+            :aria-label="playAllLoading ? '正在播放全部' : '播放全部'"
+            :title="playAllLoading ? '正在加载在线通道' : '播放全部'"
+            @click="playAll"
+          >
+            <RefreshCw v-if="playAllLoading" :size="17" class="spin" aria-hidden="true" /><Play
+              v-else
+              :size="17"
+              aria-hidden="true"
+            />
+          </button>
+          <button
+            type="button"
+            data-test="stop-all"
+            :disabled="!hasPlayingSlots"
+            aria-label="停止全部"
+            title="停止全部"
+            @click="stopAll"
+          >
+            <CircleStop :size="17" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            data-test="fullscreen"
+            :aria-label="isFullscreen ? '退出全屏' : '视频墙全屏'"
+            :title="isFullscreen ? '退出全屏' : '视频墙全屏'"
+            @click="toggleFullscreen"
+          >
+            <Minimize2 v-if="isFullscreen" :size="17" aria-hidden="true" /><Maximize2 v-else :size="17" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            class="polling-control"
+            data-test="polling-settings"
+            :class="{ active: pollingSettings.enabled, counting: pollingRemainingSeconds > 0 }"
+            :aria-label="
+              pollingSettings.enabled
+                ? pollingRemainingSeconds > 0
+                  ? `停止轮询，距离下一轮还有 ${pollingRemainingSeconds} 秒`
+                  : '停止轮询'
+                : '轮询设置'
+            "
+            :title="pollingSettings.enabled ? '停止轮询' : '轮询设置'"
+            @click="togglePolling"
+          >
+            <span
+              v-if="pollingSettings.enabled && pollingRemainingSeconds > 0"
+              class="polling-countdown"
+              data-test="polling-countdown"
+              role="timer"
+              aria-live="off"
+              :aria-label="`距离下一轮轮询还有 ${pollingRemainingSeconds} 秒`"
+              :data-remaining-seconds="pollingRemainingSeconds"
+            >
+              <span class="countdown-ring" :style="{ '--polling-progress': `${pollingProgressDegrees}deg` }" aria-hidden="true"
+                ><strong>{{ pollingRemainingSeconds }}</strong></span
+              >
+            </span>
+            <RefreshCw
+              v-else-if="pollingSettings.enabled"
+              data-test="polling-starting"
+              :size="17"
+              class="spin"
+              aria-hidden="true"
+            />
+            <Repeat2 v-else :size="17" aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+
+      <div :class="slotGridClass()" aria-label="多屏播放格子">
+        <article
+          v-for="slot in visibleSlots"
+          :key="slot.index"
+          class="screen-slot"
+          :class="{ focused: focusedIndex === slot.index, empty: !slot.channel }"
+          data-test="screen-slot"
+          tabindex="0"
+          @click="focusSlot(slot)"
+          @keydown.enter="focusSlot(slot)"
+        >
+          <template v-if="slot.channel">
+            <div class="slot-topline">
+              <div class="slot-title">
+                <span class="status-dot" :class="statusTone(slot)" aria-hidden="true" /><span class="slot-channel-name">{{
+                  slot.channel.name || slot.channel.alias || slot.channel.channelId
+                }}</span
+                ><span class="slot-status">{{ statusLabel(slot) }}</span
+                ><span v-if="slot.result?.node" class="slot-node-name">节点 {{ slot.result.node.name }}</span>
               </div>
-              <div class="slot-body">
-                <PlayWindow
-                  v-if="slot.status === 'playing' && slot.source"
-                  :url="slot.source.url"
-                  :zlm-webrtc="slot.source.zlmWebrtc"
-                  :has-audio="slot.channel.audioEnabled"
-                  @error="onPlayerError(slot, $event)"
-                  @first-frame="reportClientPlaybackFact(slot, $event)"
-                  @player-error="reportClientPlaybackFact(slot, $event)"
-                />
-                <div v-else-if="slot.status === 'requesting'" class="slot-state">
-                  <RefreshCw :size="24" class="spin" aria-hidden="true" /><strong>正在建立媒体链路</strong
-                  ><span>{{ slot.channel.deviceId }} / {{ slot.channel.channelId }}</span>
-                </div>
-                <div v-else-if="slot.status === 'error'" class="slot-state error-state" role="alert">
-                  <AlertTriangle :size="24" aria-hidden="true" /><strong>{{ slot.error }}</strong
-                  ><button class="uvp-refresh-text text-action" type="button" @click.stop="retrySlot(slot)">
-                    <RefreshCw :size="14" aria-hidden="true" />重试
-                  </button>
-                </div>
-                <div v-else-if="slot.status === 'offline'" class="slot-state offline-state" role="status">
-                  <AlertTriangle :size="24" aria-hidden="true" /><strong>{{ slot.error || "通道离线" }}</strong
-                  ><span>{{ slot.channel.deviceId }} / {{ slot.channel.channelId }}</span>
-                </div>
-                <div v-else class="slot-state"><Square :size="24" aria-hidden="true" /><strong>画面暂不可用</strong></div>
-                <div
-                  v-if="slot.status === 'playing' && ptzMotion?.channelId === slot.channel.id"
-                  class="ptz-direction-indicator"
-                  data-test="ptz-direction-indicator"
-                  :data-direction="ptzMotion.direction"
-                  role="status"
-                  :aria-label="`云台正在向${ptzMotion.direction}移动`"
+              <div class="slot-actions">
+                <button
+                  class="slot-action"
+                  type="button"
+                  :data-test="`slot-console-${slot.index}`"
+                  aria-label="打开通道控制台"
+                  title="打开通道控制台"
+                  @click.stop="openConsole(slot)"
                 >
-                  <span class="ptz-direction-stack">
-                    <span class="ptz-direction-chevron front" aria-hidden="true" />
-                    <span class="ptz-direction-chevron middle" aria-hidden="true" />
-                    <span class="ptz-direction-chevron back" aria-hidden="true" />
-                  </span>
-                </div>
+                  <SlidersHorizontal :size="15" aria-hidden="true" />
+                </button>
+                <button
+                  class="slot-action danger"
+                  type="button"
+                  :data-test="`slot-remove-${slot.index}`"
+                  aria-label="关闭当前播放"
+                  title="关闭当前播放"
+                  @click.stop="removeSlot(slot)"
+                >
+                  <X :size="15" aria-hidden="true" />
+                </button>
               </div>
-            </template>
-            <UnplayedCover v-else :index="slot.index" />
-          </article>
-        </div>
-        <div v-if="pollingVisible" class="polling-backdrop" @click.self="pollingVisible = false">
-          <section class="polling-settings" role="dialog" aria-modal="true" aria-labelledby="polling-title">
-            <header>
-              <div><Repeat2 :size="18" aria-hidden="true" /><strong id="polling-title">轮询设置</strong></div>
-              <button type="button" aria-label="关闭轮询设置" title="关闭" @click="pollingVisible = false">
-                <X :size="17" aria-hidden="true" />
-              </button>
-            </header>
-            <div class="polling-form">
-              <label class="checkbox-row polling-enabled-row"
-                ><input v-model="pollingDraft.enabled" data-test="polling-enabled" type="checkbox" /><span>启用轮询</span></label
-              >
-              <label for="polling-interval">轮询间隔</label>
-              <div class="interval-input">
-                <input
-                  id="polling-interval"
-                  v-model.number="pollingDraft.intervalSeconds"
-                  data-test="polling-interval"
-                  type="number"
-                  min="5"
-                  max="3600"
-                  step="5"
-                /><span>秒</span>
-              </div>
-              <label class="checkbox-row"
-                ><input v-model="pollingDraft.skipOffline" type="checkbox" /><span>跳过离线通道</span></label
-              >
-              <p v-if="pollingError" class="polling-error" role="alert">{{ pollingError }}</p>
             </div>
-            <footer>
-              <button type="button" class="dialog-secondary" :disabled="pollingSaving" @click="pollingVisible = false">
-                取消</button
-              ><button
-                type="button"
-                class="dialog-primary"
-                data-test="save-polling"
-                :disabled="pollingSaving"
-                @click="savePollingSettings"
+            <div class="slot-body">
+              <PlayWindow
+                v-if="slot.status === 'playing' && slot.source"
+                :url="slot.source.url"
+                :zlm-webrtc="slot.source.zlmWebrtc"
+                :has-audio="slot.channel.audioEnabled"
+                @error="onPlayerError(slot, $event)"
+                @first-frame="reportClientPlaybackFact(slot, $event)"
+                @player-error="reportClientPlaybackFact(slot, $event)"
+              />
+              <div v-else-if="slot.status === 'requesting'" class="slot-state">
+                <RefreshCw :size="24" class="spin" aria-hidden="true" /><strong>正在建立媒体链路</strong
+                ><span>{{ slot.channel.deviceId }} / {{ slot.channel.channelId }}</span>
+              </div>
+              <div v-else-if="slot.status === 'error'" class="slot-state error-state" role="alert">
+                <AlertTriangle :size="24" aria-hidden="true" /><strong>{{ slot.error }}</strong
+                ><button class="uvp-refresh-text text-action" type="button" @click.stop="retrySlot(slot)">
+                  <RefreshCw :size="14" aria-hidden="true" />重试
+                </button>
+              </div>
+              <div v-else-if="slot.status === 'offline'" class="slot-state offline-state" role="status">
+                <AlertTriangle :size="24" aria-hidden="true" /><strong>{{ slot.error || "通道离线" }}</strong
+                ><span>{{ slot.channel.deviceId }} / {{ slot.channel.channelId }}</span>
+              </div>
+              <div v-else class="slot-state"><Square :size="24" aria-hidden="true" /><strong>画面暂不可用</strong></div>
+              <div
+                v-if="slot.status === 'playing' && ptzMotion?.channelId === slot.channel.id"
+                class="ptz-direction-indicator"
+                data-test="ptz-direction-indicator"
+                :data-direction="ptzMotion.direction"
+                role="status"
+                :aria-label="`云台正在向${ptzMotion.direction}移动`"
               >
-                {{ pollingSaving ? "加载中" : "保存" }}
-              </button>
-            </footer>
-          </section>
-        </div>
-      </main>
-    </div>
+                <span class="ptz-direction-stack">
+                  <span class="ptz-direction-chevron front" aria-hidden="true" />
+                  <span class="ptz-direction-chevron middle" aria-hidden="true" />
+                  <span class="ptz-direction-chevron back" aria-hidden="true" />
+                </span>
+              </div>
+            </div>
+          </template>
+          <UnplayedCover v-else :index="slot.index" />
+        </article>
+      </div>
+      <div v-if="pollingVisible" class="polling-backdrop" @click.self="pollingVisible = false">
+        <section class="polling-settings" role="dialog" aria-modal="true" aria-labelledby="polling-title">
+          <header>
+            <div><Repeat2 :size="18" aria-hidden="true" /><strong id="polling-title">轮询设置</strong></div>
+            <button type="button" aria-label="关闭轮询设置" title="关闭" @click="pollingVisible = false">
+              <X :size="17" aria-hidden="true" />
+            </button>
+          </header>
+          <div class="polling-form">
+            <label class="checkbox-row polling-enabled-row"
+              ><input v-model="pollingDraft.enabled" data-test="polling-enabled" type="checkbox" /><span>启用轮询</span></label
+            >
+            <label for="polling-interval">轮询间隔</label>
+            <div class="interval-input">
+              <input
+                id="polling-interval"
+                v-model.number="pollingDraft.intervalSeconds"
+                data-test="polling-interval"
+                type="number"
+                min="5"
+                max="3600"
+                step="5"
+              /><span>秒</span>
+            </div>
+            <label class="checkbox-row"
+              ><input v-model="pollingDraft.skipOffline" type="checkbox" /><span>跳过离线通道</span></label
+            >
+            <p v-if="pollingError" class="polling-error" role="alert">{{ pollingError }}</p>
+          </div>
+          <footer>
+            <button type="button" class="dialog-secondary" :disabled="pollingSaving" @click="pollingVisible = false">取消</button
+            ><button
+              type="button"
+              class="dialog-primary"
+              data-test="save-polling"
+              :disabled="pollingSaving"
+              @click="savePollingSettings"
+            >
+              {{ pollingSaving ? "加载中" : "保存" }}
+            </button>
+          </footer>
+        </section>
+      </div>
+    </main>
   </div>
 </template>
 
@@ -793,20 +790,12 @@ onBeforeUnmount(() => {
 @import "@/styles/zlm-tokens.css";
 
 .multi-screen-page {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
   min-height: 0;
-
-  /* 对齐设备列表/云录像/设备回放这些页面：根容器透明 + 主区内边距，
-     卡片浮在 layout 的 --uvp-workspace-bg 上（暗色 #101923）才对得上。
-     ⛔ 原来这里是 padding:0 + --uvp-navigation-bg（暗色 #0b1118，导航壳色）：
-     卡片顶到边、外面一圈既没留白又是另一个更黑的外壳色 ——
-     亮色下 #f3f7fb 与白只差几个点看不出来，暗色下一眼就分叉。 */
-  padding: var(--uvp-main-padding);
+  padding: 0;
   font-family: var(--zlm-font-body);
   color: var(--zlm-text-1);
-  background: transparent;
 }
 
 .monitor-toolbar,
@@ -820,17 +809,6 @@ onBeforeUnmount(() => {
   align-items: center;
 }
 
-.workspace {
-  display: grid;
-  flex: 1 1 auto;
-  grid-template-columns: 280px minmax(0, 1fr);
-  min-height: 0;
-  overflow: hidden;
-  background: var(--zlm-card);
-  border: 1px solid var(--zlm-border);
-  border-radius: var(--zlm-radius-lg);
-  box-shadow: var(--zlm-shadow-sm);
-}
 .source-panel {
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
@@ -838,10 +816,6 @@ onBeforeUnmount(() => {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-
-  /* 同 .multi-screen-page：源树区的缝隙不该露出导航壳色（暗色 #0b1118），
-     要跟树/云台两张卡片的 --zlm-card 同色，否则暗色下两条 12px 的黑缝特别显眼。 */
-  background: var(--zlm-card);
   border-right: 1px solid var(--zlm-border);
 }
 .text-action {
@@ -861,7 +835,6 @@ onBeforeUnmount(() => {
   min-width: 0;
   min-height: 0;
   padding: 16px;
-  background: var(--zlm-bg);
 }
 .monitor-area:fullscreen {
   padding: 16px;
@@ -1054,16 +1027,10 @@ onBeforeUnmount(() => {
   gap: 1px;
   min-height: 0;
   overflow: hidden;
-
-  /* 缝线压到只比窗口底色亮一档：太亮会在纯黑上显成硬网格 */
-  background: #232a36;
-  border: 1px solid #232a36;
+  background: #4b5563;
+  border: 1px solid #4b5563;
   border-radius: var(--zlm-radius-md);
-
-  /* 浅色页面上这块深色区域要有自己的边界，否则四块黑砖直接糊在白底上 */
-  box-shadow:
-    0 0 0 1px rgb(15 23 42 / 8%),
-    0 10px 26px rgb(15 23 42 / 14%);
+  box-shadow: 0 8px 24px rgb(15 23 42 / 10%);
 }
 .slot-grid.layout-1 {
   grid-template-rows: minmax(0, 1fr);
@@ -1496,15 +1463,8 @@ onBeforeUnmount(() => {
   }
 }
 
-@media (width <= 1024px) {
-  .workspace {
-    grid-template-columns: 280px minmax(0, 1fr);
-  }
-}
-
 @media (width <= 768px) {
-  .workspace,
-  .workspace.source-collapsed {
+  .multi-screen-page {
     grid-template-columns: 1fr;
     overflow: hidden auto;
   }

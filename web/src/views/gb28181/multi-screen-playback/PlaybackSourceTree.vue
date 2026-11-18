@@ -1084,8 +1084,6 @@ defineExpose({ openFavoriteDialogForChannels });
   min-width: 0;
   min-height: 0;
   color: var(--uvp-text-secondary);
-  background: var(--zlm-card);
-  border: 1px solid var(--zlm-border);
 }
 .tree-head,
 .tree-head-actions,
@@ -1168,7 +1166,6 @@ defineExpose({ openFavoriteDialogForChannels });
   min-width: 0;
   padding: 2px;
   margin: 10px 12px 8px;
-  background: var(--uvp-list-toolbar-bg);
   border: 1px solid var(--uvp-panel-border);
   border-radius: 6px;
 }
@@ -1239,7 +1236,6 @@ defineExpose({ openFavoriteDialogForChannels });
   flex: 0 0 auto;
   padding: 6px;
   margin: 0 12px 8px;
-  background: var(--uvp-list-toolbar-bg);
   border: 1px solid var(--uvp-panel-border);
   border-radius: 6px;
 }
