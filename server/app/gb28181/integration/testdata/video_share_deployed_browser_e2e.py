@@ -99,7 +99,9 @@ try:
   new_expiry=dt.datetime.fromisoformat(renewed_link['expiresAt'].replace('Z','+00:00'))
   new_time=dt.datetime.fromisoformat(renewed_link['serverTime'].replace('Z','+00:00'))
   require(295<=(new_expiry-new_time).total_seconds()<=300,'renewed link did not use the global five-minute lifetime')
-  renewed_page=popup.value;report['renewedFirstFrame']=first_frame(renewed_page)
+  renewed_page=popup.value
+  renewed_page.wait_for_url('**/share.html*',wait_until='domcontentloaded',timeout=45000)
+  report['renewedFirstFrame']=first_frame(renewed_page)
   require(renewed_page.locator('#share-link').input_value()!=bootstrap['url'],'expired icon opened the old link')
   require(switch.get_attribute('aria-checked')=='true' and not switch_requests,'renewal changed the share switch')
   require(admin.locator('.arco-modal:visible').count()==0,'renewal opened an extra modal')
