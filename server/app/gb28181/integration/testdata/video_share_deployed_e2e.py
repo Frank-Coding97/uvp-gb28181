@@ -61,12 +61,14 @@ class Deployed(Check):
             code,_=self.request('/api/public/video-share/'+suffix,'POST',body); require(code==410,'retired anonymous endpoint must return 410')
         for p in paths:self.expect_gone(p,'retired anonymous media must return 410')
     def observe_hls(self,viewer):
-        state={'stop':threading.Event(),'segments':0,'last':None,'error':None,'paths':set()}
+        state={'stop':threading.Event(),'segments':0,'last':None,'error':None,'paths':set(),'targetDuration':0}
         def consume():
             try:
                 while not state['stop'].is_set():
                     with self.opener.open(self.base+viewer['hlsPath'],timeout=10) as response:
                         text=response.read(1<<20).decode()
+                    durations=[float(line.split(':',1)[1]) for line in text.splitlines() if line.startswith('#EXT-X-TARGETDURATION:')]
+                    if durations:state['targetDuration']=durations[0]
                     paths=[line.strip() for line in text.splitlines() if line.strip() and not line.startswith('#')]
                     require(paths,'continuous HLS manifest has no media')
                     path=paths[-1]
@@ -127,7 +129,7 @@ class Deployed(Check):
             self.success('/api/public/video-share/viewers/status','POST',{'viewerToken':viewer['viewerToken']})
             state=self.status();require(state['enabled'] and state['expired'],'expired share must retain the explicit disable control')
             before_anon=self.flv_snapshot(anon)[0]; before_hls=hls_state['segments']
-            time.sleep(12)
+            self.wait(lambda:hls_state['error'] or hls_state['segments']>before_hls,'new HLS segment after natural expiry',max(30,2*hls_state['targetDuration']+10))
             require(not anon['ended'].is_set() and self.flv_snapshot(anon)[0]>before_anon,'existing FLV stopped at link expiry')
             require(not hls_state['error'] and hls_state['segments']>before_hls,'existing HLS failed to fetch new post-expiry segments')
             self.report['measurements']['postExpiryHlsNewSegments']=hls_state['segments']-before_hls
@@ -155,7 +157,7 @@ class Deployed(Check):
             new_viewer=self.success('/api/public/video-share/viewers','POST',new_cred)
             new_anon=self.reader(self.base+new_viewer['httpFlvPath'])
             before_anon=self.flv_snapshot(anon)[0];before_hls=hls_state['segments']
-            time.sleep(12)
+            self.wait(lambda:hls_state['error'] or hls_state['segments']>before_hls,'new HLS segment after link renewal',max(30,2*hls_state['targetDuration']+10))
             require(not anon['ended'].is_set() and self.flv_snapshot(anon)[0]>before_anon,'link renewal interrupted old FLV')
             require(not hls_state['error'] and hls_state['segments']>before_hls,'link renewal interrupted old HLS')
             require(not new_anon['ended'].is_set(),'renewed link did not retain live playback')

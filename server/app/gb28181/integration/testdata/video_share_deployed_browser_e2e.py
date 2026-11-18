@@ -7,7 +7,7 @@ import argparse,base64,datetime as dt,html,io,json,re,sys,threading,time,urllib.
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
 from video_share_browser_e2e import FRAME_OBSERVER,FRAME_STATE,first_frame,fit,require,redact
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright,TimeoutError as PlaywrightTimeoutError
 from PIL import Image
 import zxingcpp
 parser=argparse.ArgumentParser(description=__doc__)
@@ -77,7 +77,13 @@ try:
   admin.goto(bootstrap['origin']+'/#/gb28181/device-mgmt/index',wait_until='domcontentloaded')
   admin.wait_for_selector('.arco-menu',timeout=90000)
   admin.keyboard.press('Escape');admin.locator('.driver-overlay').wait_for(state='hidden',timeout=15000)
-  admin.locator('button[data-asset-kind="channel"]').click()
+  channel_tab=admin.locator('button[data-asset-kind="channel"]');channel_tab.wait_for(state='visible',timeout=45000)
+  for attempt in range(5):
+   admin.keyboard.press('Escape');admin.locator('.driver-overlay').wait_for(state='hidden',timeout=15000)
+   try:
+    channel_tab.click(timeout=3000);break
+   except PlaywrightTimeoutError:
+    if not admin.locator('.driver-overlay:visible').count() or attempt==4:raise
   admin.get_by_role('button',name='卡片视图',exact=True).click()
   search=admin.get_by_role('textbox',name='搜索设备名称或通道名称或编码');search.fill(args.channel);search.press('Enter')
   row=admin.get_by_role('article').filter(has_text=args.device).filter(has_text=args.channel)
