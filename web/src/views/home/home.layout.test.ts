@@ -43,6 +43,15 @@ describe("editable realtime dashboard layout", () => {
     expect(source).not.toContain("platformInfo?.version ?");
     expect(source).toContain("平台运行时间");
     expect(source).toContain("当前时间");
+    // 首页平台信息卡片展示只读运行环境三项（部署方式 / 操作系统 / 数据库）。
+    expect(source).toContain("getSystemEnvironment");
+    expect(source).toContain("systemEnvironment");
+    expect(source).toContain("<small>部署方式</small>");
+    expect(source).toContain("<small>操作系统</small>");
+    expect(source).toContain("<small>数据库</small>");
+    expect(source).toContain("environmentDeployment");
+    expect(source).toContain("environmentOS");
+    expect(source).toContain("environmentDatabase");
     expect(source).toContain("platformClockDate");
     expect(source).toContain("platformClockTime");
     expect(source).toContain(':key="platformClockHour"');

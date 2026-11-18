@@ -127,6 +127,9 @@ func InitRoutes(engine *gin.Engine) *openapiauth.Gateway {
 		sessionOnly.Use(middleware.JWTAuthMiddleware())
 		sessionOnly.POST("/users/session/heartbeat", sysOnlineUserControllers.Heartbeat)
 		sessionOnly.PUT("/users/changeInitialPassword", middleware.PasswordValidatorMiddleware(), userControllers.ChangeInitialPassword)
+		// 首页「平台信息」卡片用的只读运行环境信息：部署方式 / 操作系统 / 架构 / 数据库。
+		// 无敏感字段，任何登录会话可见，不挂业务权限点。
+		sessionOnly.GET("/system/environment", serviceUpgradeControllers.Environment)
 		// 受保护的路由
 		protected := api.Group("")
 		protected.Use(middleware.JWTAuthMiddleware())

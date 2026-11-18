@@ -12,6 +12,7 @@ import {
   getServiceUpgradeMigrationPlan,
   getServiceUpgradeImport,
   getServiceUpgradeNotice,
+  getSystemEnvironment,
   ignoreServiceUpgradeNotice,
   importServiceUpgrade,
   rollbackServiceUpgradeTask,
@@ -34,6 +35,11 @@ describe("服务升级 API", () => {
 
     await rollbackServiceUpgradeTask("task/1");
     expect(request).toHaveBeenLastCalledWith("post", "/api/system/upgrade/tasks/task%2F1/rollback");
+  });
+
+  it("运行环境信息走只读独立 API，失败不弹全局错误", async () => {
+    await getSystemEnvironment();
+    expect(request).toHaveBeenLastCalledWith("get", "/api/system/environment", undefined, { showErrorMessage: false });
   });
 
   it("迁移计划走独立 API，离线包通过 multipart 上传并查询异步任务", async () => {

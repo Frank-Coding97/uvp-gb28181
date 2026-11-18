@@ -1186,6 +1186,32 @@ func (c *ServiceUpgradeController) deployment() string {
 	return "standalone"
 }
 
+// normalizeEnvironmentDatabase 把 GORM 方言名收敛到前端展示用的规范名。
+// postgres 与 postgresql 是同一数据库，统一成 postgresql，与迁移计划口径一致。
+func normalizeEnvironmentDatabase(dialect string) string {
+	value := strings.ToLower(strings.TrimSpace(dialect))
+	if value == "postgres" {
+		return "postgresql"
+	}
+	return value
+}
+
+// Environment 返回只读的运行环境信息（部署方式 / 操作系统 / 架构 / 数据库）。
+// 只用于首页「平台信息」卡片展示，不涉及任何敏感配置或凭据，
+// 因此挂在仅要求登录会话的路由上，不引入新的业务权限点。
+func (c *ServiceUpgradeController) Environment(ctx *gin.Context) {
+	database := ""
+	if db := app.DB(); db != nil && db.Dialector != nil {
+		database = normalizeEnvironmentDatabase(db.Dialector.Name())
+	}
+	c.Success(ctx, gin.H{
+		"deployment": c.deployment(),
+		"os":         runtime.GOOS,
+		"arch":       runtime.GOARCH,
+		"database":   database,
+	})
+}
+
 func (c *ServiceUpgradeController) currentVersion() string {
 	version, _, err := c.currentReleaseIdentity()
 	if err != nil {

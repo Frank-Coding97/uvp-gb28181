@@ -94,6 +94,18 @@ export interface UpgradeMigrationPlan {
   block_reason?: string;
 }
 
+/** 首页「平台信息」卡片用的只读运行环境信息。任何登录会话可见，无敏感字段。 */
+export interface SystemEnvironment {
+  deployment: string;
+  os: string;
+  arch: string;
+  database: string;
+}
+
+/** 与升级状态探针同策略：失败不弹全局红 toast，由页面自行兜底显示 --。 */
+export const getSystemEnvironment = () =>
+  http.request<BaseResult<SystemEnvironment>>("get", baseUrlApi("system/environment"), undefined, { showErrorMessage: false });
+
 /**
  * 离线升级包导入是独立于升级任务的持久任务。
  * 上传请求只负责把文件安全写入助手收件目录，校验结果由状态接口异步返回。

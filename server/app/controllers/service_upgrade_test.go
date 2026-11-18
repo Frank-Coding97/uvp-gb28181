@@ -810,3 +810,59 @@ func invokeServiceUpgradeApply(t *testing.T, controller *ServiceUpgradeControlle
 	}()
 	return recorder
 }
+
+func TestNormalizeEnvironmentDatabase(t *testing.T) {
+	cases := map[string]string{
+		"mysql":      "mysql",
+		"MySQL":      "mysql",
+		" postgres ": "postgresql",
+		"postgres":   "postgresql",
+		"PostgreSQL": "postgresql",
+		"sqlserver":  "sqlserver",
+		"sqlite":     "sqlite",
+		"":           "",
+	}
+	for in, want := range cases {
+		require.Equal(t, want, normalizeEnvironmentDatabase(in), "input=%q", in)
+	}
+}
+
+func TestEnvironmentReturnsDeploymentOSArchAndDatabase(t *testing.T) {
+	t.Setenv("UVP_UPGRADE_DEPLOYMENT", "")
+	oldConfig, oldMySQL, oldSQLite := app.ConfigYml, app.GormDbMysql, app.GormDbSqlite
+	t.Cleanup(func() { app.ConfigYml, app.GormDbMysql, app.GormDbSqlite = oldConfig, oldMySQL, oldSQLite })
+
+	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	app.GormDbSqlite, app.GormDbMysql = db, nil
+	app.ConfigYml = &configControllerYML{values: map[string]interface{}{
+		"gormv2.usedbtype":   "sqlite",
+		"upgrade.deployment": "standalone",
+	}}
+
+	oldResponse, oldLog := app.Response, app.ZapLog
+	app.Response, app.ZapLog = response.NewResponseHandler(), zap.NewNop()
+	t.Cleanup(func() { app.Response, app.ZapLog = oldResponse, oldLog })
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("GET", "/api/system/environment", nil)
+
+	controller := newServiceUpgradeController(serviceUpgradeOptions{})
+	controller.Environment(ctx)
+	require.Equal(t, 200, recorder.Code)
+
+	var envelope struct {
+		Data struct {
+			Deployment string `json:"deployment"`
+			OS         string `json:"os"`
+			Arch       string `json:"arch"`
+			Database   string `json:"database"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &envelope))
+	require.Equal(t, "standalone", envelope.Data.Deployment)
+	require.Equal(t, runtime.GOOS, envelope.Data.OS)
+	require.Equal(t, runtime.GOARCH, envelope.Data.Arch)
+	require.Equal(t, "sqlite", envelope.Data.Database)
+}

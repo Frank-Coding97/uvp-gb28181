@@ -176,6 +176,15 @@
                   ></span
                 ></span
               >
+              <span class="platform-env-cell"
+                ><small>部署方式</small><strong>{{ environmentDeployment }}</strong></span
+              >
+              <span class="platform-env-cell"
+                ><small>操作系统</small><strong>{{ environmentOS }}</strong></span
+              >
+              <span class="platform-env-cell"
+                ><small>数据库</small><strong>{{ environmentDatabase }}</strong></span
+              >
             </div>
           </template>
           <template v-else-if="widget.id === 'media-rate'">
@@ -259,6 +268,7 @@ import { GripHorizontal, LayoutDashboard, LoaderCircle, Pencil, RefreshCw, Rotat
 import "gridstack/dist/gridstack.min.css";
 import { fetchSipDashboardSnapshot, fetchSipPlatformInfo, type DashboardSnapshot, type SipPlatformInfo } from "@/api/gb28181";
 import { getZLMOverview, type ZLMMediaRateSample, type ZLMOverview } from "@/api/gb28181-zlm-runtime";
+import { getSystemEnvironment, type SystemEnvironment } from "@/api/service-upgrade";
 import {
   getHomeDashboardLayout,
   getHomeDashboardSummary,
@@ -307,6 +317,7 @@ const updatedAt = ref<Date | null>(null),
 const mediaRuntimeStatus = ref<"loading" | "complete" | "partial" | "unavailable">("loading");
 const clockNow = ref(new Date());
 const platformInfo = ref<SipPlatformInfo | null>(null);
+const systemEnvironment = ref<SystemEnvironment | null>(null);
 const dashboardSummary = ref<HomeDashboardSummary | null>(null);
 const devices = ref({ total: 0, online: 0 }),
   channels = ref({ total: 0, online: 0 });
@@ -424,6 +435,34 @@ const platformUptime = computed(() => {
   if (!Number.isFinite(startedAt)) return platformInfo.value?.runtime.state === "running" ? "等待启动时间" : "未运行";
   return duration(Math.max(0, (updatedAt.value?.getTime() ?? Date.now()) - startedAt));
 });
+// 平台信息卡片的运行环境三项：与「服务升级」页保持同一套中文口径，无数据时统一 --
+const DEPLOYMENT_LABELS: Record<string, string> = {
+  standalone: "绿色包部署",
+  systemd: "系统服务部署",
+  compose: "Docker Compose 部署",
+  docker: "Docker 部署"
+};
+const OS_LABELS: Record<string, string> = { linux: "Linux", windows: "Windows", darwin: "macOS" };
+const DATABASE_LABELS: Record<string, string> = {
+  mysql: "MySQL",
+  postgresql: "PostgreSQL",
+  sqlserver: "SQL Server",
+  sqlite: "SQLite"
+};
+const environmentDeployment = computed(() => {
+  const value = systemEnvironment.value?.deployment;
+  return (value && DEPLOYMENT_LABELS[value]) || value || "--";
+});
+const environmentOS = computed(() => {
+  const env = systemEnvironment.value;
+  if (!env?.os) return "--";
+  const name = OS_LABELS[env.os] || env.os;
+  return env.arch ? `${name} ${env.arch}` : name;
+});
+const environmentDatabase = computed(() => {
+  const value = systemEnvironment.value?.database;
+  return (value && DATABASE_LABELS[value]) || value || "--";
+});
 const platformClockDate = computed(() => dayjs(clockNow.value).format("YYYY年MM月DD日"));
 const platformClockTime = computed(() => dayjs(clockNow.value).format("HH:mm:ss"));
 const platformClockHour = computed(() => dayjs(clockNow.value).format("HH"));
@@ -527,9 +566,10 @@ async function refreshData() {
     fetchSipDashboardSnapshot({ window: "60s", precision: "1s" }),
     getZLMOverview(),
     canViewSipConfig.value ? fetchSipPlatformInfo() : Promise.resolve(null),
-    getHomeDashboardSummary(["assets", "aggregate"])
+    getHomeDashboardSummary(["assets", "aggregate"]),
+    getSystemEnvironment()
   ]);
-  const [sip, overview, platform, summary] = results;
+  const [sip, overview, platform, summary, environment] = results;
   if (sip.status === "fulfilled") sipSnapshot.value = sip.value.data;
   if (overview.status === "fulfilled") {
     mediaOverview.value = overview.value.data;
@@ -538,6 +578,7 @@ async function refreshData() {
   } else mediaRuntimeStatus.value = "unavailable";
   if (!canViewSipConfig.value) platformInfo.value = null;
   else if (platform.status === "fulfilled" && platform.value) platformInfo.value = platform.value.data;
+  if (environment.status === "fulfilled" && environment.value) systemEnvironment.value = environment.value.data;
   if (summary.status === "fulfilled") {
     dashboardSummary.value = summary.value.data;
     const assets = dashboardSummary.value.assets;
@@ -902,9 +943,16 @@ onBeforeUnmount(() => {
   display: grid;
   flex: 1;
   grid-template-columns: 0.8fr 0.9fr 1.3fr;
-  gap: 18px;
+  gap: 12px 18px;
+  align-content: center;
   align-items: center;
   margin-top: 7px;
+}
+.platform-env-cell strong {
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 .platform-info > span {
   display: flex;
