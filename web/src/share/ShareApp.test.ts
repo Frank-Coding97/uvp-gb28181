@@ -105,6 +105,49 @@ afterEach(async () => {
 });
 
 describe("ShareApp anonymous component integration", () => {
+  it.each([
+    ["复制分享链接", "#share-link", "分享链接已复制"],
+    ["复制 iframe 代码", "#share-iframe", "iframe 嵌入代码已复制"]
+  ])("confirms %s only after the clipboard write succeeds", async (name, selector, message) => {
+    const pending = deferred<void>();
+    const writeText = vi.fn().mockReturnValue(pending.promise);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const wrapper = mountShare();
+    await flushPromises();
+    await wrapper.get(`button[aria-label="${name}"]`).trigger("click");
+    expect(writeText).toHaveBeenCalledWith((wrapper.get(selector).element as HTMLInputElement).value);
+    expect(wrapper.text()).not.toContain(message);
+    pending.resolve();
+    await flushPromises();
+    expect(wrapper.get('[role="status"]').text()).toBe(message);
+    expect(wrapper.find(".share-player__screen").exists()).toBe(true);
+  });
+
+  it("shows a visible copy failure and allows a successful retry without interrupting playback", async () => {
+    const writeText = vi.fn().mockRejectedValueOnce(new Error("permission denied")).mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const wrapper = mountShare();
+    await flushPromises();
+    const button = wrapper.get('button[aria-label="复制分享链接"]');
+    await button.trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[role="status"]').text()).toBe("复制失败，请手动选择复制");
+    expect(playerDestroy).not.toHaveBeenCalled();
+    await button.trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[role="status"]').text()).toBe("分享链接已复制");
+  });
+
+  it("shows manual copy guidance when the browser has no clipboard API", async () => {
+    vi.stubGlobal("navigator", {});
+    const wrapper = mountShare();
+    await flushPromises();
+    await wrapper.get('button[aria-label="复制 iframe 代码"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[role="status"]').text()).toBe("复制失败，请手动选择复制");
+    expect(playerDestroy).not.toHaveBeenCalled();
+  });
+
   it("shows the product brand and existing logo", async () => {
     const wrapper = mountShare();
     await flushPromises();

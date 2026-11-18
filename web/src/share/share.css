@@ -225,6 +225,13 @@ textarea {
   justify-self: center;
   justify-items: center;
 }
+.copy-feedback {
+  color: #7ee2b8;
+  font-size: 12px;
+}
+.copy-feedback--error {
+  color: #ffb4ab;
+}
 .share-tool--qr img {
   display: block;
   width: 136px;

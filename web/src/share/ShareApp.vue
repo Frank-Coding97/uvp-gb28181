@@ -53,6 +53,8 @@ const currentTime = ref(Date.now());
 const serverTimeOffset = ref(0);
 const shareURL = ref("");
 const embedMode = ref(false);
+const copyFeedback = ref({ link: "", iframe: "" });
+const copyFailed = ref({ link: false, iframe: false });
 let player: any;
 let statusTimer: number | undefined;
 let clockTimer: number | undefined;
@@ -343,10 +345,16 @@ function showRequestError(error: unknown) {
   errorText.value = message;
 }
 
-function copy(text: string) {
-  navigator.clipboard.writeText(text).catch(() => {
-    errorText.value = "复制失败，请检查浏览器剪贴板权限";
-  });
+async function copy(text: string, target: "link" | "iframe") {
+  copyFeedback.value[target] = "";
+  copyFailed.value[target] = false;
+  try {
+    await navigator.clipboard.writeText(text);
+    copyFeedback.value[target] = target === "link" ? "分享链接已复制" : "iframe 嵌入代码已复制";
+  } catch {
+    copyFailed.value[target] = true;
+    copyFeedback.value[target] = "复制失败，请手动选择复制";
+  }
 }
 
 async function createQRCode() {
@@ -434,7 +442,13 @@ onUnmounted(() => {
           <label for="share-link">分享链接</label>
           <div class="share-link-row">
             <input id="share-link" :value="shareURL" readonly />
-            <button type="button" class="icon-button" aria-label="复制分享链接" title="复制分享链接" @click="copy(shareURL)">
+            <button
+              type="button"
+              class="icon-button"
+              aria-label="复制分享链接"
+              title="复制分享链接"
+              @click="copy(shareURL, 'link')"
+            >
               <Copy :size="16" />
             </button>
             <a
@@ -447,6 +461,13 @@ onUnmounted(() => {
               ><ExternalLink :size="16"
             /></a>
           </div>
+          <span
+            v-if="copyFeedback.link"
+            role="status"
+            class="copy-feedback"
+            :class="{ 'copy-feedback--error': copyFailed.link }"
+            >{{ copyFeedback.link }}</span
+          >
         </div>
         <div class="share-tool share-tool--embed">
           <label for="share-iframe">iframe 嵌入代码</label>
@@ -457,11 +478,18 @@ onUnmounted(() => {
               class="icon-button"
               aria-label="复制 iframe 代码"
               title="复制 iframe 代码"
-              @click="copy(iframeCode)"
+              @click="copy(iframeCode, 'iframe')"
             >
               <Copy :size="16" />
             </button>
           </div>
+          <span
+            v-if="copyFeedback.iframe"
+            role="status"
+            class="copy-feedback"
+            :class="{ 'copy-feedback--error': copyFailed.iframe }"
+            >{{ copyFeedback.iframe }}</span
+          >
         </div>
         <div class="share-tool share-tool--qr">
           <img v-if="qrDataURL" :src="qrDataURL" alt="视频分享二维码" width="136" height="136" />
