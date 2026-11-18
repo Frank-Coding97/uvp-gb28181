@@ -231,6 +231,100 @@ func TestComposeVerifyImageRejectsMismatchedConfigIDBeforeDigest(t *testing.T) {
 	}
 }
 
+// writeWebAssetsUpgradeTar 造一个带前端静态文件的升级包。文件用 0600 写入，
+// 模拟 extractPackage 解包后的权限（所有普通文件强制仅属主可读）——这正是
+// 在线升级后 nginx worker 读不到前端、返回 403 Forbidden 的起点。
+func writeWebAssetsUpgradeTar(t *testing.T, path string, publicDir string) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tw := tar.NewWriter(f)
+	entries := []struct {
+		name string
+		body string
+	}{
+		{filepath.ToSlash(filepath.Join("release", publicDir, "index.html")), "<html>uvp</html>"},
+		{filepath.ToSlash(filepath.Join("release", publicDir, "static", "app.js")), "console.log(1)"},
+	}
+	for _, entry := range entries {
+		body := entry.body
+		if err := tw.WriteHeader(&tar.Header{Name: entry.name, Mode: 0600, Size: int64(len(body))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// assertWebAssetsReadableByWebServer 断言 cd 视角下的前端文件具备 other-read 位。
+// nginx worker 以 nobody/www-data 运行、不是文件属主，少了这一位就是 403。
+func assertWebAssetsReadableByWebServer(t *testing.T, publicDir string) {
+	t.Helper()
+	for _, rel := range []string{"index.html", filepath.Join("static", "app.js")} {
+		info, err := os.Stat(filepath.Join(publicDir, rel))
+		if err != nil {
+			t.Fatalf("stat web asset %s: %v", rel, err)
+		}
+		if info.Mode().Perm()&0004 == 0 {
+			t.Fatalf("web asset %s mode %v is not world-readable (nginx worker cannot read it)", rel, info.Mode().Perm())
+		}
+	}
+}
+
+func TestStandaloneActivateMakesWebAssetsReadable(t *testing.T) {
+	root := t.TempDir()
+	layout := RegisteredLayout{Root: root, Control: filepath.Join(root, "ctl")}
+	artifact := filepath.Join(root, "upgrade.tar")
+	writeWebAssetsUpgradeTar(t, artifact, filepath.Join("resource", "public"))
+	a := &StandaloneAdapter{Layout: layout, Runner: &fakeCommandRunner{}}
+	record := TaskRecord{TaskID: strings.Repeat("a", 32), StagingPath: artifact}
+	if err := a.Activate(context.Background(), record); err != nil {
+		t.Fatal(err)
+	}
+	target, err := a.CurrentTarget()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertWebAssetsReadableByWebServer(t, filepath.Join(target, "resource", "public"))
+}
+
+func TestSystemdActivateMakesWebAssetsReadable(t *testing.T) {
+	root := t.TempDir()
+	for _, path := range []string{
+		filepath.Join(root, "config"),
+		filepath.Join(root, "data", "logs"),
+		filepath.Join(root, "data", "uploads"),
+	} {
+		if err := os.MkdirAll(path, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	artifact := filepath.Join(root, "upgrade.tar")
+	writeWebAssetsUpgradeTar(t, artifact, filepath.Join("backend", "resource", "public"))
+	a := &SystemdAdapter{
+		StandaloneAdapter: StandaloneAdapter{Layout: RegisteredLayout{Root: root}, Runner: &fakeCommandRunner{}},
+		Unit:              "uvp-backend.service",
+	}
+	record := TaskRecord{TaskID: strings.Repeat("b", 32), StagingPath: artifact}
+	if err := a.Activate(context.Background(), record); err != nil {
+		t.Fatal(err)
+	}
+	target, err := a.CurrentTarget()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertWebAssetsReadableByWebServer(t, filepath.Join(target, "backend", "resource", "public"))
+}
+
 func writeUpgradeTar(t *testing.T, path string) {
 	t.Helper()
 	f, err := os.Create(path)

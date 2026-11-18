@@ -555,6 +555,22 @@ func (a *StandaloneAdapter) activate(record TaskRecord, prepare func(string) err
 			return err
 		}
 	}
+	// 在线升级解包时 extractPackage 把所有普通文件强制设成 0600（仅属主可读），
+	// 但前端静态文件要由以 nobody/www-data 身份运行的 nginx worker 直接读取。
+	// 首发包是直接铺目录、权限 0644 正常；只有走升级助手的部署会在升级后
+	// 因为读不到 index.html / *.js 而对用户返回 403 Forbidden。
+	// 在切换 current 之前把候选版本的网页目录补成 world-readable；两种部署形态
+	// 的网页根不同（绿色包在 resource/public，systemd 在 backend/resource/public），
+	// makeTreeWorldReadable 对不存在的路径是 no-op，全部列上即可。
+	for _, webRoot := range []string{
+		filepath.Join(tmp, "resource", "public"),
+		filepath.Join(tmp, systemdBackendRelativePath, "resource", "public"),
+	} {
+		if err := makeTreeWorldReadable(webRoot); err != nil {
+			_ = os.RemoveAll(tmp)
+			return fmt.Errorf("make web assets world-readable: %w", err)
+		}
+	}
 	if err := syncTree(tmp); err != nil {
 		_ = os.RemoveAll(tmp)
 		return fmt.Errorf("sync candidate release: %w", err)
@@ -886,7 +902,10 @@ func (a *SystemdAdapter) prepareRelease(release string) error {
 			return fmt.Errorf("link systemd persistent directory: %w", err)
 		}
 	}
-	return makeTreeWorldReadable(filepath.Join(release, "frontend"))
+	// 网页目录的可读权限已在共用 activate 流程里统一处理（见 activate()），
+	// 这里不再单独 chmod。旧实现写的是 release/frontend —— 包里根本没有这个
+	// 目录（前端在 backend/resource/public），所以那行一直是 no-op。
+	return nil
 }
 
 func makeTreeWorldReadable(root string) error {
