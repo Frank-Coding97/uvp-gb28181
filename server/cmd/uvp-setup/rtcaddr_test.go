@@ -245,3 +245,59 @@ func TestRunRTExternIPRequiresIni(t *testing.T) {
 		t.Fatal("缺 --ini 应报错")
 	}
 }
+
+// ⛔⛔ 回归用例（2026-11-20）：ini 里已经有值就**不许动**。
+//   以前每次启动都拿探测值覆盖 ⇒ 页面里设好的地址重启/升级后消失，
+//   现场只看到"对讲又没声了"。改值只有两条路：显式 --ip，或页面里改。
+func TestRunRTExternIPKeepsExistingValue(t *testing.T) {
+	path := writeTestINI(t)
+	if _, _, err := syncExternIPIni(path, "203.0.113.7"); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runRTExternIP([]string{"--ini", path}); err != nil {
+		t.Fatalf("rc=%v", err)
+	}
+	if got := lookupExternIP(t, path); got != "203.0.113.7" {
+		t.Fatalf("已有值被改掉了：%q", got)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Fatal("值没变却重写了文件")
+	}
+}
+
+// 显式指定（config.env 的 UVP_ZLM_EXTERN_IP）必须压过 ini 里的旧值：
+// 换 EIP / 换网卡之后，这是客户唯一能一步改对的入口。
+func TestRunRTExternIPExplicitOverridesExisting(t *testing.T) {
+	path := writeTestINI(t)
+	if _, _, err := syncExternIPIni(path, "203.0.113.7"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runRTExternIP([]string{"--ini", path, "--ip", "198.51.100.9"}); err != nil {
+		t.Fatalf("rc=%v", err)
+	}
+	if got := lookupExternIP(t, path); got != "198.51.100.9" {
+		t.Fatalf("显式值未生效：%q", got)
+	}
+}
+
+func TestReadExternIPIni(t *testing.T) {
+	path := writeTestINI(t)
+	if v, found, err := readExternIPIni(path); err != nil || !found || v != "" {
+		t.Fatalf("空值：v=%q found=%v err=%v", v, found, err)
+	}
+	if _, _, err := syncExternIPIni(path, "203.0.113.7"); err != nil {
+		t.Fatal(err)
+	}
+	if v, found, err := readExternIPIni(path); err != nil || !found || v != "203.0.113.7" {
+		t.Fatalf("读回：v=%q found=%v err=%v", v, found, err)
+	}
+}

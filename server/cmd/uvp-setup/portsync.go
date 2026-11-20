@@ -536,7 +536,10 @@ func syncZLMIni(path string, z zlmPorts, secret, mediaServerID string) error {
 		edits = append(edits, zlmIniEdit{section: "onvif", key: "port", value: strconv.Itoa(z.onvif)})
 	}
 	if z.ffmpegBin != "" {
-		edits = append(edits, zlmIniEdit{section: "ffmpeg", key: "bin", value: z.ffmpegBin})
+		// ⛔ soft：这个键是 2026-10-20 才随包内置的（模板里固定成包内路径）。
+		//   极老的 ini 若压根没有 [ffmpeg] bin，硬失败会让整个平台起不来 ——
+		//   而它只影响通道抓拍，交给 zlm_ffmpeg_check 明确告警即可。
+		edits = append(edits, zlmIniEdit{section: "ffmpeg", key: "bin", value: z.ffmpegBin, soft: true})
 	}
 
 	applied, missed, softMissed := 0, []string{}, []string{}

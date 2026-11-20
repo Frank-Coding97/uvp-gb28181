@@ -51,6 +51,8 @@ func main() {
 		err = runSecretSync(os.Args[2:])
 	case "rtc-externip":
 		err = runRTExternIP(os.Args[2:])
+	case "ini-fill":
+		err = runINIFill(os.Args[2:])
 	case "https-state":
 		err = runHTTPSState(os.Args[2:])
 	case "https-repair-port":
@@ -86,6 +88,8 @@ func usage() {
 		"  uvp-setup ports-sync --env <config.env> --yml <config.yml> --ini <config.ini> \\",
 		"      --http P --redis P --https P --nginx-http P --zlm-http P --zlm-rtp-proxy P [--user-set K1,K2]",
 		"  uvp-setup secret-sync --ini <config.ini> --yml <config.yml>   # 以 ZLM 为准对齐 zlm.secret",
+		"  uvp-setup ini-fill --template <发布包 config.ini> --target <config/zlm.ini> [--dry-run]",
+		"      # 把模板里有、现场那份没有的键补进去（只增不改），升级带来新配置项时用",
 		"  uvp-setup rtc-externip --ini <config.ini> [--ip A] [--dry-run]",
 		"      # 把「WebRTC 对外地址」写进 [rtc] externIP：优先 --ip，其次云元数据公网 IP，",
 		"      # 最后本机默认出口网卡 IPv4（局域网/直连公网都对）。留空=自动探测。",

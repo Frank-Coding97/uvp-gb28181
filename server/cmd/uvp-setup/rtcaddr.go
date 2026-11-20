@@ -277,11 +277,22 @@ func isVirtualIface(name string) bool {
 // 失败**不返回 error 也要说清楚**：跨网段对讲是附加能力，探测失败不该拦住
 // 平台启动（那会把"对讲不通"升级成"平台起不来"），但也不能静默 —— 否则
 // 现场只会看到"对讲点了没反应"，毫无线索。
+//
+// ⛔⛔ 取值规则（2026-11-20 改，别再退回"每次启动无条件覆盖"）：
+//
+//	① --ip 显式指定（= config.env 的 UVP_ZLM_EXTERN_IP）⇒ 一定写入；
+//	② ini 里已有值 ⇒ **原样保留**，只做一次「探测值是否漂移」的提示；
+//	③ ini 里是空值 ⇒ 自动探测后写入。
+//
+// 为什么改成这样：以前每次启动都拿探测值覆盖，现场在页面上填好的地址，
+// 一次重启/一次升级就没了；客户看到的只是"对讲又没声了"，没有任何提示。
+// Docker 版的 zlm-entrypoint 早就是"没给值就不动 ini、也不清空"，
+// 这里与之对齐 —— 自动探测只负责**第一次**把空值填上，之后以文件为准。
 func runRTExternIP(args []string) error {
 	fs := newFlagSet("rtc-externip")
 	iniPath := fs.String("ini", "", "ZLM config.ini 路径")
-	explicit := fs.String("ip", "", "显式指定的对外地址（留空=自动探测）")
-	dryRun := fs.Bool("dry-run", false, "只打印探测结果，不改文件")
+	explicit := fs.String("ip", "", "显式指定的对外地址（留空=空值时自动探测）")
+	dryRun := fs.Bool("dry-run", false, "只打印结论，不改文件")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -292,11 +303,28 @@ func runRTExternIP(args []string) error {
 	if err != nil {
 		return err
 	}
+	existing, _, err := readExternIPIni(resolved)
+	if err != nil {
+		return err
+	}
 
-	res := detectExternIP(detectInput{
+	in := detectInput{
 		Explicit: *explicit,
 		LocalIP:  defaultRouteIPv4,
-	})
+	}
+
+	// ② 已有值且没被显式指定 ⇒ 保持原样。
+	if normalizeIPv4(*explicit) == "" && existing != "" {
+		note("沿用已配置的 rtc.externIP=%s（不覆盖；要改写请设 config.env 的 UVP_ZLM_EXTERN_IP）", existing)
+		if res := detectExternIP(in); res.IP != "" && res.IP != existing {
+			// 本机换过 IP（换 EIP / 换网卡）时旧值就失效了 —— 这种情况只能提示，
+			// 不能替客户改：分不清是"地址过期"还是"他就是要填那个地址"。
+			warn("本机对外地址探测为 %s，与已配置值不同；若本机已换地址，请同步更新 UVP_ZLM_EXTERN_IP", res.IP)
+		}
+		return nil
+	}
+
+	res := detectExternIP(in)
 	if res.IP == "" {
 		warn("没探测到本机对外地址（网卡上没有可用 IPv4）—— 跨网段对讲需手工设置 rtc.externIP")
 		return nil
@@ -317,12 +345,24 @@ func runRTExternIP(args []string) error {
 	if old == "" {
 		note("已写入 rtc.externIP=%s", res.IP)
 	} else {
-		// ⛔ 覆盖了旧值必须说出来：页面里手填过一个地址的人，重启后看到
-		//   "自己改的值又变了"但没有任何提示，只会认为是程序在乱改配置。
-		//   想钉死自己的值就写到 config.env 的 UVP_ZLM_EXTERN_IP。
-		note("已更新 rtc.externIP：%s → %s（如需固定，请设 config.env 的 UVP_ZLM_EXTERN_IP）", old, res.IP)
+		// ⛔ 覆盖了旧值必须说出来：页面里手填过一个地址的人，看到"自己改的值又变了"
+		//   但没有任何提示，只会认为是程序在乱改配置。
+		note("已更新 rtc.externIP：%s → %s", old, res.IP)
 	}
 	return nil
+}
+
+// readExternIPIni 只读当前 ini 的 [rtc] externIP，不写文件。
+// 键不存在时返回空串：调用方会在真正需要写入时由 syncExternIPIni 报错，
+// 这里不必提前失败（"不写入"的场景下键缺失无所谓）。
+func readExternIPIni(path string) (value string, found bool, err error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", false, fmt.Errorf("读取 ZLM config.ini 失败: %w", err)
+	}
+	eol := detectEOL(string(raw))
+	v, ok := readINIScalar(splitLines(string(raw), eol), rtcSection, rtcExternIPKey)
+	return v, ok, nil
 }
 
 // syncExternIPIni 把 ip 写进 config.ini 的 [rtc] externIP，返回旧值与是否改动。
