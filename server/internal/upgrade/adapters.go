@@ -525,6 +525,12 @@ func (a *StandaloneAdapter) activate(record TaskRecord, prepare func(string) err
 	if record.StagingPath == "" {
 		return errors.New("staged artifact path is missing")
 	}
+	// 翻转 current 之前先把现场调过的 ZLM 配置搬进持久目录：新发布目录里的
+	// vendor/zlm/config.ini 是出厂模板，直接换上就会把 [rtc] externIP 等
+	// 现场设置重置掉（见 operator_config.go 的长注释）。
+	if err := preserveZLMConfig(a.Layout.Root, a.Layout.Current); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(a.Layout.Releases, 0755); err != nil {
 		return err
 	}

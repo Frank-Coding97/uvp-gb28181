@@ -284,6 +284,11 @@ func (a *WindowsStandaloneAdapter) Activate(_ context.Context, record TaskRecord
 	if err := a.Layout.validate(); err != nil {
 		return err
 	}
+	// 绿色包是原地覆盖，vendor\zlm\config.ini 就躺在安装根里 ⇒ 旧位置 =
+	// 安装根自身。必须在 replacePath 之前搬走，否则新包那份会把现场设置盖掉。
+	if err := preserveZLMConfig(a.Layout.Root, a.Layout.Root); err != nil {
+		return err
+	}
 	packageRoot, err := a.stageCandidate(record)
 	if err != nil {
 		return err
