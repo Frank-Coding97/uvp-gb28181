@@ -382,19 +382,14 @@ function Assert-FrontendSipPort {
               "$($foreign[0].Path)。多半是 -SkipFrontend 复用了 Linux 构建的 web\dist，" +
               "去掉该开关重新构建前端。")
     }
-    # ② 正查：vite 把 validPort(import.meta.env.VITE_DEFAULT_SIP_PORT) 压成 A("15564") 形态。
-    $injected = @{}
-    foreach ($f in $jsFiles) {
-        $hits = Select-String -LiteralPath $f.FullName -Pattern 'A\("(\d{4,5})"\)' -AllMatches -ErrorAction SilentlyContinue
-        foreach ($h in $hits) { foreach ($m in $h.Matches) { $injected[$m.Groups[1].Value] = $true } }
-    }
-    if (-not $injected.ContainsKey($expected)) {
+    # ② 正查：判据是**带引号的端口字面量**，⛔ 不要写死函数名。
+    #   vite 把 validPort(import.meta.env.VITE_DEFAULT_SIP_PORT) 折叠成 `<压缩名>("15564")`，
+    #   而压缩标识符由 chunk 排布决定 —— 实测同一份源码出过 A("15564") 与 U("15564") 两种形态。
+    #   1.1.25 出包就是照旧匹配 A(...) 才误报"VITE_DEFAULT_SIP_PORT 未生效"而卡住的。
+    $distText = @($jsFiles | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -ErrorAction SilentlyContinue }) -join "`n"
+    if (-not $distText.Contains('"' + $expected + '"')) {
         Fail ("前端产物里读不到注入的 SIP 默认端口 $SipPort —— VITE_DEFAULT_SIP_PORT 未生效" +
-              "或 vite 产物形态已变。探测到的注入值：$($injected.Keys -join ',')")
-    }
-    $wrong = @($injected.Keys | Where-Object { $_ -ne $expected })
-    if ($wrong.Count -gt 0) {
-        Fail "前端产物里混入非 Windows 段的 SIP 默认端口：$($wrong -join ',')（应为 $SipPort）"
+              "（web\dist 里找不到该端口的字面量）。")
     }
     Ok "前端产物 SIP 默认端口 $SipPort 读回校验通过（-SkipFrontend 同样校验）"
 }
