@@ -49,6 +49,66 @@ func TestOpenAPISystemLiveUsesStableSnapshotWithoutUpgradingCaller(t *testing.T)
 	}
 }
 
+func TestAutoOnDemandEnsurerUsesCurrentEpochWhenPlaybackAuthIsDisabled(t *testing.T) {
+	db := newDeviceOperationSQLFixture(t)
+	var captured Request
+	s := &Service{operationBarrier: playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db))}
+	s.liveCoordinator = NewCoordinator(func(_ context.Context, req Request) (*Result, error) {
+		captured = req
+		return &Result{StreamID: "auto-on-demand-test", Generation: 1}, nil
+	})
+	ensurer := NewAutoOnDemandEnsurer(s, playauth.NewDeviceSecurityStore(db))
+
+	result, err := ensurer.EnsureLive(context.Background(), Request{
+		DeviceID: onlineDevice().DeviceID, ChannelID: aChannel().ChannelID,
+		RequiredNode: 7, Trigger: "on_stream_not_found",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.EqualValues(t, 1, captured.DeviceEpoch)
+	require.Equal(t, int64(7), captured.RequiredNode)
+}
+
+func TestAutoOnDemandEnsurerRejectsPendingDeviceCleanup(t *testing.T) {
+	db := newDeviceOperationSQLFixture(t)
+	require.NoError(t, db.Exec("UPDATE gb_device SET cleanup_completed_epoch=0 WHERE id=1").Error)
+	called := false
+	s := &Service{}
+	s.liveCoordinator = NewCoordinator(func(context.Context, Request) (*Result, error) {
+		called = true
+		return &Result{StreamID: "must-not-start"}, nil
+	})
+	ensurer := NewAutoOnDemandEnsurer(s, playauth.NewDeviceSecurityStore(db))
+
+	_, err := ensurer.EnsureLive(context.Background(), Request{
+		DeviceID: onlineDevice().DeviceID, ChannelID: aChannel().ChannelID,
+		RequiredNode: 7,
+	})
+
+	require.ErrorIs(t, err, ErrPlayAuthorizationUnavailable)
+	require.False(t, called)
+}
+
+func TestAutoOnDemandEnsurerDoesNotRefreshExplicitDeviceEpoch(t *testing.T) {
+	db := newDeviceOperationSQLFixture(t)
+	require.NoError(t, db.Exec("UPDATE gb_device SET access_epoch=2, cleanup_completed_epoch=2 WHERE id=1").Error)
+	called := false
+	s := &Service{operationBarrier: playauth.NewDeviceOperationBarrier(playauth.NewDeviceSecurityStore(db))}
+	s.liveCoordinator = NewCoordinator(func(context.Context, Request) (*Result, error) {
+		called = true
+		return &Result{StreamID: "must-not-start"}, nil
+	})
+	ensurer := NewAutoOnDemandEnsurer(s, playauth.NewDeviceSecurityStore(db))
+
+	_, err := ensurer.EnsureLive(context.Background(), Request{
+		DeviceID: onlineDevice().DeviceID, ChannelID: aChannel().ChannelID, DeviceEpoch: 1,
+	})
+
+	require.ErrorIs(t, err, ErrPlayAuthorizationUnavailable)
+	require.False(t, called)
+}
+
 func TestOpenAPISystemLivePendingOrCorruptStateNeverCallsPlayer(t *testing.T) {
 	for _, sql := range []string{
 		"UPDATE gb_device SET access_epoch=2",

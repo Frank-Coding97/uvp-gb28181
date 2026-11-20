@@ -1001,6 +1001,7 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, authority *processauth
 	if err != nil {
 		return err
 	}
+	gbroutes.SetAutoOnDemandDeviceSecurityStore(deviceSecurity)
 	securityRuntime = setupSecurityRuntime()
 	defer func() {
 		if err != nil {

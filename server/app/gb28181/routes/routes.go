@@ -76,6 +76,7 @@ var talkController atomic.Pointer[gbcontrollers.TalkController]
 var playService *gbplay.Service
 var autoOnDemandMu sync.Mutex
 var autoOnDemandPlayService *gbplay.Service
+var autoOnDemandDeviceSecurity *playauth.DeviceSecurityStore
 var autoOnDemandRegistry autoOnDemandNodeRegistry
 var autoOnDemandDispatcher *gbplay.AutoStartDispatcher
 var recordingService *gbrecording.Service
@@ -287,6 +288,15 @@ func SetPlayService(svc *gbplay.Service) {
 	hookController.SetNoneReaderPolicy(svc)
 	hookController.SetPlaybackMediaContextResolver(svc)
 	configureAutoOnDemandService(svc)
+}
+
+// SetAutoOnDemandDeviceSecurityStore injects the epoch authority for trusted
+// fixed-address Hook starts.
+func SetAutoOnDemandDeviceSecurityStore(store *playauth.DeviceSecurityStore) {
+	autoOnDemandMu.Lock()
+	defer autoOnDemandMu.Unlock()
+	autoOnDemandDeviceSecurity = store
+	configureAutoOnDemandRuntimeLocked(autoOnDemandPlayService, autoOnDemandRegistry)
 }
 
 func SetPlayAttemptStore(store gbcontrollers.PlayAttemptStore) {
@@ -599,6 +609,7 @@ func configureAutoOnDemandService(service *gbplay.Service) {
 	registry := autoOnDemandRegistry
 	if service == nil {
 		registry = nil
+		autoOnDemandDeviceSecurity = nil
 	}
 	configureAutoOnDemandRuntimeLocked(service, registry)
 }
@@ -627,7 +638,8 @@ func configureAutoOnDemandRuntimeLocked(service *gbplay.Service, registry autoOn
 			knownNodeIDs = append(knownNodeIDs, mediaNode.ID)
 		}
 	}
-	dispatcher := gbplay.NewAutoStartDispatcher(service, gbplay.AutoStartDispatcherOptions{
+	ensurer := gbplay.NewAutoOnDemandEnsurer(service, autoOnDemandDeviceSecurity)
+	dispatcher := gbplay.NewAutoStartDispatcher(ensurer, gbplay.AutoStartDispatcherOptions{
 		KnownNodeIDs: knownNodeIDs,
 		NodeAllowed: func(nodeID int64) bool {
 			return autoOnDemandNodeAllowed(registry, nodeID)

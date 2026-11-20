@@ -6,9 +6,9 @@ import (
 	"uvplatform.com/uvp-gb28181/app/gb28181/playauth"
 )
 
-// SystemLiveEnsurer is the capability passed only to internal recording-plan
-// orchestration. HTTP/Hook callers keep the ordinary Service interface and
-// must supply their original authorized epoch or queued authorization.
+// SystemLiveEnsurer authorizes trusted platform-originated intents against the
+// current device epoch. It must not be exposed to arbitrary HTTP callers;
+// external requests must retain their original epoch or queued authorization.
 type SystemLiveEnsurer struct {
 	service   *Service
 	authority *playauth.DeviceSecurityStore
@@ -31,5 +31,30 @@ func (s *SystemLiveEnsurer) EnsureLive(ctx context.Context, req Request) (*Resul
 	// authority. The owner operation barrier will validate this same snapshot
 	// again after waiting; it must not replace it with a newer epoch.
 	req.DeviceEpoch = state.AccessEpoch
+	return s.service.EnsureLive(ctx, req)
+}
+
+// AutoOnDemandEnsurer fills the current device epoch only for fixed-address
+// Hook requests that do not carry caller authorization. Authenticated requests
+// retain their original authorization snapshot.
+type AutoOnDemandEnsurer struct {
+	service *Service
+	system  *SystemLiveEnsurer
+}
+
+func NewAutoOnDemandEnsurer(service *Service, authority *playauth.DeviceSecurityStore) *AutoOnDemandEnsurer {
+	return &AutoOnDemandEnsurer{
+		service: service,
+		system:  NewSystemLiveEnsurer(service, authority),
+	}
+}
+
+func (s *AutoOnDemandEnsurer) EnsureLive(ctx context.Context, req Request) (*Result, error) {
+	if s == nil || s.service == nil || s.system == nil {
+		return nil, ErrPlayAuthorizationUnavailable
+	}
+	if req.DeviceEpoch == 0 && req.AuthorizationID == "" {
+		return s.system.EnsureLive(ctx, req)
+	}
 	return s.service.EnsureLive(ctx, req)
 }
