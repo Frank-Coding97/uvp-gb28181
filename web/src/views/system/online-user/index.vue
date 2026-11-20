@@ -40,7 +40,8 @@ const canForce = computed(() => {
 });
 const tableScroll = computed(() => ({
   x: "100%",
-  minWidth: canForce.value ? 1280 : 1160
+  minWidth: canForce.value ? 1280 : 1160,
+  ...(sessions.value.length ? { y: "100%" } : {})
 }));
 
 let requestVersion = 0;
@@ -167,8 +168,8 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
 </script>
 
 <template>
-  <div class="snow-page online-user-page">
-    <div class="snow-inner uvp-page-shell-flat online-user-page__inner">
+  <div class="snow-fill online-user-page">
+    <div class="snow-fill-inner uvp-page-shell-flat online-user-page__inner">
       <s-layout-search>
         <template #fields>
           <div class="online-user-filter">
@@ -206,63 +207,64 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
         <a-button size="small" @click="load()" class="uvp-refresh-btn">重试</a-button>
       </div>
 
-      <a-table
-        v-else
-        class="uvp-data-table online-user-table"
-        row-key="sid"
-        :data="sessions"
-        :loading="loading"
-        :pagination="pagination"
-        :scroll="tableScroll"
-        :bordered="false"
-        @page-change="handlePageChange"
-        @page-size-change="handlePageSizeChange"
-      >
-        <template #columns>
-          <a-table-column title="用户" :width="160">
-            <template #cell="{ record }">
-              <div class="online-user-primary">
-                <strong>{{ record.username }}</strong
-                ><span class="online-user-secondary">{{ record.nickName || "-" }}</span>
-              </div>
-            </template>
-          </a-table-column>
-          <a-table-column title="部门" data-index="departmentName" :width="150" :ellipsis="true" :tooltip="true" />
-          <a-table-column title="IP / 地点" :width="180">
-            <template #cell="{ record }">
-              <div class="online-user-primary">
-                <span class="online-user-primary-text">{{ record.clientIp }}</span
-                ><span class="online-user-secondary">{{ record.loginLocation || "-" }}</span>
-              </div>
-            </template>
-          </a-table-column>
-          <a-table-column title="终端" :width="180">
-            <template #cell="{ record }">
-              <div class="online-user-primary">
-                <span class="online-user-primary-text">{{ record.browser || "未知浏览器" }}</span
-                ><span class="online-user-secondary">{{ record.os || "未知系统" }}</span>
-              </div>
-            </template>
-          </a-table-column>
-          <a-table-column title="登录时间" :width="180"
-            ><template #cell="{ record }">{{ formatTime(record.loginAt) }}</template></a-table-column
-          >
-          <a-table-column title="最后活跃" :width="180"
-            ><template #cell="{ record }">{{ formatTime(record.lastActiveAt) }}</template></a-table-column
-          >
-          <a-table-column title="状态" :width="100" align="center">
-            <template #cell>
-              <span class="online-user-status online-user-status--active"><i />活跃</span>
-            </template>
-          </a-table-column>
-          <a-table-column v-if="canForce" title="操作" :width="144" align="center" fixed="right">
-            <template #cell="{ record }">
-              <OnlineUserAction :session="record" :current-sid="currentSid" :can-force="canForce" @success="removeSession" />
-            </template>
-          </a-table-column>
-        </template>
-        <template #empty><a-empty description="暂无符合条件的在线用户" /></template>
-      </a-table>
+      <div v-else class="online-user-table-wrap">
+        <a-table
+          class="uvp-data-table online-user-table"
+          row-key="sid"
+          :data="sessions"
+          :loading="loading"
+          :pagination="pagination"
+          :scroll="tableScroll"
+          :bordered="false"
+          @page-change="handlePageChange"
+          @page-size-change="handlePageSizeChange"
+        >
+          <template #columns>
+            <a-table-column title="用户" :width="160">
+              <template #cell="{ record }">
+                <div class="online-user-primary">
+                  <strong>{{ record.username }}</strong
+                  ><span class="online-user-secondary">{{ record.nickName || "-" }}</span>
+                </div>
+              </template>
+            </a-table-column>
+            <a-table-column title="部门" data-index="departmentName" :width="150" :ellipsis="true" :tooltip="true" />
+            <a-table-column title="IP / 地点" :width="180">
+              <template #cell="{ record }">
+                <div class="online-user-primary">
+                  <span class="online-user-primary-text">{{ record.clientIp }}</span
+                  ><span class="online-user-secondary">{{ record.loginLocation || "-" }}</span>
+                </div>
+              </template>
+            </a-table-column>
+            <a-table-column title="终端" :width="180">
+              <template #cell="{ record }">
+                <div class="online-user-primary">
+                  <span class="online-user-primary-text">{{ record.browser || "未知浏览器" }}</span
+                  ><span class="online-user-secondary">{{ record.os || "未知系统" }}</span>
+                </div>
+              </template>
+            </a-table-column>
+            <a-table-column title="登录时间" :width="180"
+              ><template #cell="{ record }">{{ formatTime(record.loginAt) }}</template></a-table-column
+            >
+            <a-table-column title="最后活跃" :width="180"
+              ><template #cell="{ record }">{{ formatTime(record.lastActiveAt) }}</template></a-table-column
+            >
+            <a-table-column title="状态" :width="100" align="center">
+              <template #cell>
+                <span class="online-user-status online-user-status--active"><i />活跃</span>
+              </template>
+            </a-table-column>
+            <a-table-column v-if="canForce" title="操作" :width="144" align="center" fixed="right">
+              <template #cell="{ record }">
+                <OnlineUserAction :session="record" :current-sid="currentSid" :can-force="canForce" @success="removeSession" />
+              </template>
+            </a-table-column>
+          </template>
+          <template #empty><a-empty description="暂无符合条件的在线用户" /></template>
+        </a-table>
+      </div>
     </div>
   </div>
 </template>
@@ -270,9 +272,37 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
 <style scoped>
 .online-user-page,
 .online-user-page__inner {
+  box-sizing: border-box;
+  width: 100%;
   min-width: 0;
   max-width: 100%;
-  overflow-x: hidden;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.online-user-page__inner {
+  display: flex;
+  flex-direction: column;
+}
+
+.online-user-page__inner > :deep(.uvp-search-panel) {
+  flex: 0 0 auto;
+}
+
+.online-user-table-wrap {
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 6px;
+  contain: inline-size;
+}
+
+.online-user-table-wrap :deep(.uvp-data-table) {
+  height: 100%;
+  min-height: 0;
 }
 
 .online-user-filter {
@@ -324,10 +354,11 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
 
 .online-user-error {
   display: flex;
+  flex: 1;
   gap: 12px;
   align-items: center;
   justify-content: center;
-  min-height: 280px;
+  min-height: 0;
   color: rgb(var(--danger-6));
   text-align: center;
 }
