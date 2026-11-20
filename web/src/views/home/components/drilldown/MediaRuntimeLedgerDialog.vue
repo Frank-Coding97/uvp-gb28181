@@ -557,7 +557,7 @@ function changeNetworkPageSize(value: number) {
           >
           <a-table-column title="会话类型" :width="120"
             ><template #cell="{ record }"
-              ><a-tag size="small" :title="record.typeId || undefined">{{
+              ><a-tag size="small" class="media-ledger-session-type" :title="record.typeId || undefined">{{
                 networkSessionTypeLabel(record.typeId)
               }}</a-tag></template
             ></a-table-column
@@ -617,7 +617,7 @@ function changeNetworkPageSize(value: number) {
           >
           <a-table-column title="会话类型" :width="170"
             ><template #cell="{ record }"
-              ><a-tag size="small" :title="record.typeId || undefined">{{
+              ><a-tag size="small" class="media-ledger-session-type" :title="record.typeId || undefined">{{
                 networkSessionTypeLabel(record.typeId)
               }}</a-tag></template
             ></a-table-column
@@ -808,6 +808,17 @@ function changeNetworkPageSize(value: number) {
 .media-ledger-table small {
   margin-top: 3px;
   color: var(--uvp-text-tertiary);
+}
+
+/* 会话类型兜底：未知类型会原样回显 ZLM 的 C++ 类型名（可能带 SSL 模板包装），
+   a-tag 默认不省略 ⇒ 会横向压到「会话标识」列上。这里就地省略，全文走 title。 */
+.media-ledger-session-type {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
 }
 .media-ledger-actions {
   white-space: nowrap;

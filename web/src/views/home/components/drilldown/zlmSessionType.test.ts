@@ -3,6 +3,7 @@ import {
   DICT_CODE_ZLM_SESSION_TYPE,
   ZLM_SESSION_TYPE_EMPTY_TEXT,
   ZLM_SESSION_TYPE_LABEL_FALLBACK,
+  ZLM_SESSION_TYPE_TLS_SUFFIX,
   zlmSessionTypeLabel
 } from "./zlmSessionType";
 
@@ -27,6 +28,27 @@ describe("zlmSessionTypeLabel", () => {
   it("⛔ 未命中回显原值（排障要看得见 ZLM 到底报了什么）", () => {
     expect(zlmSessionTypeLabel("mediakit::FutureSession")).toBe("mediakit::FutureSession");
     expect(zlmSessionTypeLabel("Weird")).toBe("Weird");
+  });
+
+  it("TLS 包装（toolkit::SessionWithSSL<X>）剥壳后查表并追标 TLS", () => {
+    expect(zlmSessionTypeLabel("toolkit::SessionWithSSL<mediakit::HttpSession>")).toBe("HTTP 会话 · TLS");
+    expect(zlmSessionTypeLabel("toolkit::SessionWithSSL<mediakit::RtmpSession>")).toBe("RTMP 会话 · TLS");
+    // 内层也可能只给短名
+    expect(zlmSessionTypeLabel("SessionWithSSL<RtpSession>")).toBe("RTP 会话 · TLS");
+    // 前后空格不影响剥壳
+    expect(zlmSessionTypeLabel("  toolkit::SessionWithSSL< mediakit::RtspSession >  ")).toBe("RTSP 会话 · TLS");
+  });
+
+  it("TLS 包装的内层未命中时整串回显（不把未知类型误报成已知）", () => {
+    expect(zlmSessionTypeLabel("toolkit::SessionWithSSL<mediakit::FutureSession>")).toBe(
+      "toolkit::SessionWithSSL<mediakit::FutureSession>"
+    );
+  });
+
+  it("TLS 追标常量固定（字典只改内层协议名）", () => {
+    expect(ZLM_SESSION_TYPE_TLS_SUFFIX).toBe(" · TLS");
+    const labels = { ...ZLM_SESSION_TYPE_LABEL_FALLBACK, "mediakit::HttpSession": "HTTP 专线" };
+    expect(zlmSessionTypeLabel("toolkit::SessionWithSSL<mediakit::HttpSession>", labels)).toBe("HTTP 专线 · TLS");
   });
 
   it("值域锁定：兜底表恰好这 9 档 ZLM 会话类型", () => {
