@@ -102,7 +102,16 @@ $RedisExe    = Join-Path $RedisDir 'redis-server.exe'
 $RedisCli    = Join-Path $RedisDir 'redis-cli.exe'
 $ZlmDir      = Join-Path $VendorDir 'zlm'
 $ZlmExe      = Join-Path $ZlmDir 'MediaServer.exe'
-$ZlmIni      = Join-Path $ZlmDir 'config.ini'
+# ---- ZLM 配置文件（两份，职责必须分开）----
+#   $ZlmIniPkg 随包发布的**模板**（vendor\zlm\config.ini），升级时原地覆盖；
+#   $ZlmIni    MediaServer **真正加载**的那份（config\zlm.ini），在持久目录里，
+#              升级不动它。
+# ⛔⛔ 以前 ZLM 直接读包内那份 ⇒ 每次在线升级都被换成出厂模板，现场在平台页面里
+#   设过的 [rtc] externIP（以及其它调过的键）全部被重置，表现是「升级完对讲又没声
+#   了」且没有任何提示。Linux 版与 Docker 版都是持久副本，这里对齐。
+# ⚠️ ZLM 收到 setServerConfig 会写回它加载的那个文件 ⇒ 只能有一份真源。
+$ZlmIniPkg   = Join-Path $ZlmDir 'config.ini'
+$ZlmIni      = Join-Path $ConfDir 'zlm.ini'
 $NginxDir    = Join-Path $VendorDir 'nginx'
 $NginxExe    = Join-Path $NginxDir 'nginx.exe'
 $NginxConf   = Join-Path $NginxDir 'conf\nginx.conf'
@@ -883,7 +892,7 @@ function Test-Preconditions {
             @{ Path = $Baseline;  Name = 'resource\baseline\baseline.sql' },
             @{ Path = $RedisExe;  Name = 'vendor\redis\redis-server.exe' },
             @{ Path = $ZlmExe;    Name = 'vendor\zlm\MediaServer.exe' },
-            @{ Path = $ZlmIni;    Name = 'vendor\zlm\config.ini' },
+            @{ Path = $ZlmIniPkg; Name = 'vendor\zlm\config.ini' },
             @{ Path = $NginxExe;  Name = 'vendor\nginx\nginx.exe' }
         )) {
         if (-not (Test-Path -LiteralPath $item.Path)) { $missing += $item.Name }
@@ -1054,6 +1063,36 @@ function Invoke-DatabaseInit {
     if ($LASTEXITCODE -ne 0) { Fail "数据库初始化失败（uvp-setup 退出码 $LASTEXITCODE）" }
 }
 
+# Initialize-ZlmIni 保证 config\zlm.ini 存在：没有就从发布包模板种子一份。
+#
+# ⛔ 只在**缺失**时种子，已经存在就一个字都不改 —— 里面有现场调过的端口、
+#   [rtc] externIP、以及平台页面写入的其它键。这也正是"升级不再重置配置"的
+#   全部秘密：持久目录不在升级替换范围内（升级只换 bin / vendor / resource 等程序目录）。
+# ⛔ 老装机升级上来时，升级助手会先把旧 vendor\zlm\config.ini 复制过来
+#   （见 server/internal/upgrade/operator_config.go），正常情况下不会走到种子分支。
+function Initialize-ZlmIni {
+    if (-not (Test-Path -LiteralPath $ZlmIniPkg)) { return }
+    if (Test-Path -LiteralPath $ZlmIni) {
+        # ⛔ 已经有了就只**补齐新键**（只增不改）：升级带来的新配置项要能到老现场，
+        #   但现场改过的值一个都不能动。缺键的硬后果是 ports-sync 直接失败
+        #   （"ZLM config.ini 里没找到这些键"）⇒ 平台起不来，所以这一步不能省。
+        if (Test-Path -LiteralPath $SetupExe) {
+            & $SetupExe 'ini-fill' '--template' $ZlmIniPkg '--target' $ZlmIni
+            if ($LASTEXITCODE -ne 0) {
+                Write-UvpWarn 'ZLM 配置补齐失败（不阻塞启动；新版本新增的配置项可能没生效）'
+            }
+        }
+        return
+    }
+    if (-not (Test-Path -LiteralPath $ConfDir)) { New-Item -ItemType Directory -Force -Path $ConfDir | Out-Null }
+    try {
+        Copy-Item -LiteralPath $ZlmIniPkg -Destination $ZlmIni -Force
+        Write-UvpDet 'ZLM 配置已固化为 config\zlm.ini（此后升级不再覆盖）'
+    } catch {
+        Write-UvpWarn "ZLM 配置副本创建失败（$ZlmIni）—— 跨网段对讲/端口改动可能不生效"
+    }
+}
+
 function Invoke-PortsSync {
     param([hashtable]$Config)
     $ports = $Config.Ports
@@ -1071,6 +1110,19 @@ function Invoke-PortsSync {
         '--zlm-onvif', [string]$ports.ZLM_ONVIF, '--zlm-ice', [string]$ports.ZLM_ICE,
         '--zlm-rtp-proxy', [string]$ports.ZLM_RTP_PROXY, '--zlm-rtp-range', $ZlmRtpRange
     )
+    # [ffmpeg] bin 属于"包内自管"：出包时固定成 ./ffmpeg.exe（见 build-standalone.ps1），
+    # 每次启动跟**发布模板**对齐。持久副本里可能还留着老包的路径，不覆盖就是
+    # 「升级后通道抓拍静默不可用」（ZLM getSnap 只返回占位图，平台只报"未返回 JPEG"）。
+    if (Test-Path -LiteralPath $ZlmIniPkg) {
+        $inFfmpeg = $false
+        foreach ($line in Get-Content -LiteralPath $ZlmIniPkg) {
+            if ($line -match '^\[') { $inFfmpeg = ($line -match '^\[ffmpeg\]'); continue }
+            if ($inFfmpeg -and $line -match '^\s*bin\s*=\s*(.+?)\s*$') {
+                $syncArgs += @('--zlm-ffmpeg', $Matches[1])
+                break
+            }
+        }
+    }
     # ⛔⛔ `--user-set` 必须**非空才追加**：PowerShell 在拼原生命令行时会把
     #   **空字符串参数整条丢掉**，于是 uvp-setup 收到一个没有值的 `--user-set`，
     #   Go 的 flag 包直接报 `flag needs an argument: -user-set` 退出 ——
@@ -1327,7 +1379,12 @@ function Start-Zlm {
     #   （客户的 `D:\接活\…` 就是），绝对路径会静默开错文件甚至起不来。
     #   （UVP-REN/deploy/windows/zlm-probe 就是这么拉的，并专门在
     #     「含中文和空格的路径」下验收过。）
-    $args = @('-c', 'config.ini')
+    # ⛔ 配置读**持久副本** config\zlm.ini（见 $ZlmIni 定义处）；没有副本时才退回包内那份。
+    #   仍然只传**相对路径**（工作目录是 vendor\zlm）：MediaServer.exe 用窄字符开文件，
+    #   绝对路径一旦含中文/空格就出事。
+    $iniArg = 'config.ini'
+    if (Test-Path -LiteralPath $ZlmIni) { $iniArg = '..\config\zlm.ini' }
+    $args = @('-c', $iniArg)
     # ZLM 的 SSL 只从 `-s` 指定的**单个** PEM 读（私钥+证书合一，由 certgen 合成）。
     # 同样只给裸文件名 —— 它就在 vendor\zlm\ 下。
     if (Test-Path -LiteralPath $ZlmSslPem) { $args += @('-s', [System.IO.Path]::GetFileName($ZlmSslPem)) }
@@ -1360,7 +1417,8 @@ function Start-Zlm {
     # ffmpeg 自检（2026-10-20 起，与 Linux 线同一天加）：缺它的现场症状极具
     # 迷惑性——ZLM getSnap 每次都 execv 失败、返回占位 PNG，平台只报
     # 「未返回 JPEG」，通道抓拍从装机起静默不可用。启动时就点破，不阻断。
-    $zlmIni = Join-Path $ZlmDir 'config.ini'
+    $zlmIni = $ZlmIni
+    if (-not (Test-Path -LiteralPath $zlmIni)) { $zlmIni = $ZlmIniPkg }
     $bin = $null
     if (Test-Path -LiteralPath $zlmIni) {
         $inFfmpeg = $false
@@ -1553,6 +1611,8 @@ function Invoke-Start {
         if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
     }
     Invoke-DatabaseInit
+    # ⛔ 必须先有持久副本：下面的端口同步、secret 对齐、对外地址三步都改它。
+    Initialize-ZlmIni
     Invoke-PortsSync -Config $config
     Invoke-RtcExternIP
     Invoke-NginxConfRender

@@ -1005,11 +1005,25 @@ ZLM_LOG="$LOGS/zlm.log"
 #   所以即使 cd 走了也照样落在 vendor/zlm/log ⇒ 必须显式指到 logs/zlm。
 ZLM_NATIVE_LOG_DIR="$LOGS/zlm"
 # ---- ZLM 端口 ----
-# ⛔⛔ ZLM 端口的**唯一真源是 vendor/zlm/config.ini**，下面这些变量只是"探测用镜像"。
+# ⛔⛔ ZLM 端口的**唯一真源是配置文件**（见下面的 ZLM_INI），这些变量只是"探测用镜像"。
 #   只改变量不改 ini ⇒ 脚本探测 18081、MediaServer 却仍听 80 ⇒ 报「ZLM 启动失败」，
 #   而真实原因是端口没写进配置文件。⚠️ 实测踩过这个（设了 18081 仍起不来）。
 #   ⇒ sync_zlm_ports_ini() 负责写进去。
-ZLM_INI="$ZLM_DIR/config.ini"
+#
+# ---- ZLM 配置文件（两份，职责必须分开）----
+#   ZLM_INI_PKG  随包发布的**模板**：$ACTIVE_ROOT/vendor/zlm/config.ini，
+#                升级时随发布目录整体换新，只在首次初始化时被读一次；
+#   ZLM_INI      MediaServer **真正加载**的那份：$ROOT/config/zlm.ini，
+#                放在持久化目录里，升级不动它。
+# ⛔⛔ 为什么必须这样分（2026-11-20 客户现场踩到）：以前 ZLM 直接读发布目录里
+#   那份，而在线升级是「解包到 releases/<taskID>/ 再翻转 current」⇒ vendor/
+#   整个换新，现场在平台页面里设过的 [rtc] externIP（以及其它调过的键）每次
+#   升级都被重置成出厂值，表现是「升级完对讲又没声了」，而且没有任何提示。
+#   Docker 版一直是持久副本（/opt/zlm/run/config.ini），单机版与之对齐。
+# ⚠️ ZLM 收到 setServerConfig 会**写回它加载的那个文件**，所以只读/写这一份
+#   才不会出现"页面改了、重启就没了"。
+ZLM_INI_PKG="$ZLM_DIR/config.ini"
+ZLM_INI="$ROOT/config/zlm.ini"
 ZLM_HTTP_PORT="${UVP_ZLM_HTTP_PORT:-$(read_port_env UVP_ZLM_HTTP_PORT)}"
 # ⛔ 默认值一律选**高位端口**，不用 ZLM 自带的 80/443/554。
 #   1024 以下需要 CAP_NET_BIND_SERVICE，非 root 起不来（实测：
@@ -2372,16 +2386,37 @@ stop_nginx() {
   rm -f "$NGINX_PID_FILE"
 }
 
-# ---------------------------------------------------- ZLM 端口同步到 config.ini ----
+# ------------------------------------------------- ZLM 配置文件（持久副本）----
 
-# sync_zlm_ports_ini 把端口写进 vendor/zlm/config.ini 的对应段。
+# ensure_zlm_ini 保证 $ROOT/config/zlm.ini 存在：没有就从发布包模板种子一份。
 #
-# ⛔⛔ 必须**按段落**改，绝不能全局替换 `port=` —— config.ini 里有 11 个段各带
-#   port/sslport（http / rtmp / rtp_proxy / rtc / srt / rtsp / shell / onvif …），
-#   全局替换会把它们全改成同一个值，表现为「一堆协议抢同一个端口」。
-# ⛔ 不能用 configparser：这份 ini **有重名段**（[general] 出现两次），
-#   标准库直接抛 DuplicateSectionError —— 实测过。
-#   ⇒ 行扫描：记住当前段名，只在目标段内改目标键。
+# ⛔ 只在**缺失**时种子，已经存在就一个字都不改 —— 里面有现场调过的端口、
+#   [rtc] externIP、以及平台页面写入的其它键。这也正是"升级不再重置配置"的
+#   全部秘密：持久目录里的文件根本不在升级替换范围内（升级只换 releases/）。
+# ⛔ 老装机升级上来时，升级助手会先把旧发布目录里那份复制过来（见
+#   server/internal/upgrade/operator_config.go），正常情况下这里不会触发。
+#   只有"手工解压整包覆盖"这种不走升级助手的路径才会走种子分支。
+ensure_zlm_ini() {
+  [ -f "$ZLM_INI_PKG" ] || return 0        # 没有模板就让 ZLM 用它自己的默认值
+  if [ -f "$ZLM_INI" ]; then
+    # ⛔ 已经有了就只**补齐新键**（只增不改）：升级带来的新配置项要能到老现场，
+    #   但现场改过的值一个都不能动。缺键的硬后果是 ports-sync 直接 fail
+    #   （"ZLM config.ini 里没找到这些键"）⇒ 平台起不来，所以这一步不能省。
+    if [ -x "$SETUP_BIN" ]; then
+      "$SETUP_BIN" ini-fill --template "$ZLM_INI_PKG" --target "$ZLM_INI" \
+        || det "⚠️  ZLM 配置补齐失败（不阻塞启动；新版本新增的配置项可能没生效）"
+    fi
+    return 0
+  fi
+  mkdir -p "$(dirname "$ZLM_INI")" 2>/dev/null || return 0
+  if cp "$ZLM_INI_PKG" "$ZLM_INI" 2>/dev/null; then
+    chmod 0644 "$ZLM_INI" 2>/dev/null || true
+    det "ZLM 配置已固化为 ${ZLM_INI#"$ROOT"/}（此后升级不再覆盖）"
+  else
+    det "⚠️  ZLM 配置副本创建失败（${ZLM_INI}）—— 跨网段对讲/端口改动可能不生效"
+  fi
+}
+
 # ------------------------------------------------------ ZLM secret 对齐 ----
 
 # sync_zlm_secret 把平台侧与 ZLM 侧的 API secret 对齐。
@@ -2391,7 +2426,7 @@ stop_nginx() {
 #   「**部署时填 ZLM 实际 secret**」—— 而绿色包**从来没做过这一步**。
 #
 #   为什么它比看起来严重得多：
-#   · ZLM 侧 secret 在 vendor/zlm/config.ini 里（构建 ZLM 时随机生成）；
+#   · ZLM 侧 secret 在 ZLM 自己的配置文件里（构建时随机生成，现为 config/zlm.ini）；
 #   · 平台侧在 config.yml 里（种子/示例给的是 CHANGE_ME）；
 #   · 两者对不上 ⇒ ZLM 每次 API 调用都返回 `{"code":-100,"msg":"Please login first"}`。
 #
@@ -2420,7 +2455,7 @@ sync_zlm_secret() {
 
 # ---------------------------------------------------- ZLM 端口同步到 config.ini ----
 
-# sync_zlm_ports_ini 把端口写进 vendor/zlm/config.ini 的对应段。
+# sync_zlm_ports_ini 把端口写进 ZLM 配置文件（$ZLM_INI，持久副本）的对应段。
 #
 # ⛔⛔ 必须**按段落**改，绝不能全局替换 `port=` —— config.ini 里有 11 个段各带
 #   port/sslport（http / rtmp / rtp_proxy / rtc / srt / rtsp / shell / onvif …），
@@ -2429,6 +2464,23 @@ sync_zlm_secret() {
 #   标准 ini 库会直接抛"重复段"错误（Linux 版当年用 Python configparser 实测踩过）。
 #   ⇒ uvp-setup 里同样是行扫描：记住当前段名，只在目标段内改目标键
 #     （实现见 server/cmd/uvp-setup/portsync.go 的 syncZLMIni）。
+# zlm_template_ffmpeg_bin 读**发布模板**里的 [ffmpeg] bin。
+#
+# ⛔ 读模板而不是持久副本：这个值由打包脚本按**本包布局**固定
+#   （Linux `./bin/ffmpeg`、Windows `./ffmpeg.exe`，见 build-standalone.sh），
+#   持久副本里可能还留着老包的 `/usr/bin/ffmpeg`。不跟着包走就是
+#   「升级后通道抓拍静默不可用」—— ZLM getSnap execv 失败只返回占位图，
+#   平台侧只报「未返回 JPEG」，没人会想到是配置里那行老路径。
+zlm_template_ffmpeg_bin() {
+  [ -f "$ZLM_INI_PKG" ] || return 0
+  tr -d '\r' < "$ZLM_INI_PKG" 2>/dev/null | awk '
+    /^\[/ { sec=$0; gsub(/[[:space:]]/, "", sec); next }
+    sec=="[ffmpeg]" && /^[[:space:]]*bin[[:space:]]*=/ {
+      line=$0; sub(/^[^=]*=/, "", line); gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+      print line; exit
+    }' || true
+}
+
 sync_zlm_ports_ini() {
   [ -f "$ZLM_INI" ] || return 0      # 没有 ini 就用 ZLM 默认值，不阻塞启动
 
@@ -2436,6 +2488,11 @@ sync_zlm_ports_ini() {
   #   漏一个的后果是「平台按 A 端口调它、它却听 B 端口」⇒ 推流/取流静默失败。
   #   ⛔ [rtc] 的两个媒体键不叫 port（是 tcpPort / signalingPort），
   #     RTP 段的真源是 [rtp_proxy] 而不是 [rtp] —— 这些都由 uvp-setup 处理。
+  # [ffmpeg] bin 属于"包内自管"，每次跟模板对齐（理由见上面那个函数）。
+  local ffmpeg_bin ffmpeg_args=()
+  ffmpeg_bin="$(zlm_template_ffmpeg_bin)"
+  if [ -n "$ffmpeg_bin" ]; then ffmpeg_args=(--ffmpeg-bin "$ffmpeg_bin"); fi
+
   local rc=0
   "$SETUP_BIN" ports-sync --ini "$ZLM_INI" \
     --zlm-http "$ZLM_HTTP_PORT" \
@@ -2449,16 +2506,19 @@ sync_zlm_ports_ini() {
     --zlm-onvif "$ZLM_ONVIF_PORT" \
     --zlm-ice "$ZLM_ICE_PORT" \
     --zlm-rtp-proxy "$ZLM_RTP_PROXY_PORT" \
-    --zlm-rtp-range "$ZLM_RTP_RANGE" || rc=$?
+    --zlm-rtp-range "$ZLM_RTP_RANGE" \
+    ${ffmpeg_args[@]+"${ffmpeg_args[@]}"} || rc=$?
   [ "$rc" -eq 0 ] || fail "ZLM 端口同步失败（退出码 ${rc}）—— 端口跑出规划段会导致收流全废"
 }
 
-# sync_zlm_externip 把 WebRTC 对外地址写进 vendor/zlm/config.ini 的 [rtc] externIP。
+# sync_zlm_externip 把 WebRTC 对外地址写进 ZLM 配置文件（$ZLM_INI）的 [rtc] externIP。
 #
 # 为什么必须由部署脚本写：这个键是跨网段/公网用 WebRTC 的**唯一开关**，
 # 出厂是空值（ZLM 只能给本机网卡地址），而浏览器拿到的候选地址一旦是
 # 内网 10.x/192.168.x，公网侧根本连不上 —— 表现就是"对讲点了没反应"。
 #
+# ⛔ 已有值就**不覆盖**（只有 config.env 显式给 UVP_ZLM_EXTERN_IP 才改写）：
+#   现场在平台页面里填好的地址，不能因为一次重启/升级就被探测值顶掉。
 # ⛔ 不阻断启动：对讲是附加能力，探测失败不该把"对讲不通"升级成"平台起不来"。
 #   但也绝不静默 —— 否则现场只剩"没反应"这一个线索。函数内部会打一行结论。
 sync_zlm_externip() {
@@ -2523,14 +2583,15 @@ zlm_healthy() {
 zlm_ffmpeg_check() {
   # [ffmpeg] bin 的值可能是绝对路径（老包：/usr/bin/ffmpeg）或相对路径
   # （新包：./bin/ffmpeg，按 ZLM 的 exeDir=vendor/zlm 解析）。
-  local bin path
-  bin="$(tr -d '\r' < "$ZLM_INI" | awk '
+  local bin path ini="$ZLM_INI"
+  [ -f "$ini" ] || ini="$ZLM_INI_PKG"
+  bin="$(tr -d '\r' < "$ini" | awk '
     /^\[/ { sec=$0; next }
     sec=="[ffmpeg]" && /^[[:space:]]*bin[[:space:]]*=/ {
       sub(/^[^=]*=/, ""); gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print; exit
     }')"
   if [ -z "$bin" ]; then
-    log "⚠️  ${ZLM_INI} 里没有 [ffmpeg] bin —— 通道抓拍不可用（ZLM getSnap 无执行器）"
+    log "⚠️  ${ini} 里没有 [ffmpeg] bin —— 通道抓拍不可用（ZLM getSnap 无执行器）"
     return 0
   fi
   case "$bin" in
@@ -2575,8 +2636,12 @@ start_zlm() {
   #   ⇒ HTTPS(51007)/WSS(51010) 握手失败。文件不存在就退化成不传（不硬给）。
   local zlm_ssl=()
   if [ -f "$ZLM_SSL_PEM" ]; then zlm_ssl=(-s "$ZLM_SSL_PEM"); fi
+  # ⛔ 配置用**持久副本**（$ZLM_INI），不是发布目录里那份模板 —— 见 ZLM_INI 定义处。
+  #   副本万一没建起来（模板缺失等），退回发布目录那份，别让 ZLM 起不来。
+  local zlm_ini="$ZLM_INI"
+  [ -f "$zlm_ini" ] || zlm_ini="$ZLM_INI_PKG"
   ( cd "$ZLM_DIR" && LD_LIBRARY_PATH="$ZLM_DIR/lib" \
-      "$ZLM_BIN" -c "$ZLM_DIR/config.ini" -l 0 --log-dir "$ZLM_NATIVE_LOG_DIR/" \
+      "$ZLM_BIN" -c "$zlm_ini" -l 0 --log-dir "$ZLM_NATIVE_LOG_DIR/" \
         ${zlm_ssl[@]+"${zlm_ssl[@]}"} >"$ZLM_LOG" 2>&1 </dev/null &
     echo $! > "$ZLM_PID_FILE" ) >/dev/null 2>&1
 
@@ -2907,6 +2972,8 @@ case "${1:-start}" in
     #   不对齐时平台调 ZLM 全被拒（-100 Please login first），
     #   后端启动会「成功」但录像缓存/点播/录像查询/hook 全部装配失败，
     #   页面报的是「录像缓存服务未装配」—— 与真因完全无关。
+    # ⛔ 但先要有那份**持久副本**：下面三步（secret / 端口 / 对外地址）都改它。
+    ensure_zlm_ini
     sync_zlm_secret
     # ⛔ ZLM 端口也要同步：它的真源是 config.ini，不是本脚本里的变量。
     sync_zlm_ports_ini
@@ -2942,7 +3009,8 @@ case "${1:-start}" in
     stop_zlm
     # ⛔ 这里也同步一次对外地址：换网卡 / 换公网 IP 之后，现场最自然的动作
     #   就是 restart-zlm，不同步的话新地址要等到下一次全量 start 才生效。
-    #   幂等：值没变就不动 ini，不会造成无谓的文件改写。
+    #   幂等：已经有值就不动 ini（要改请设 config.env 的 UVP_ZLM_EXTERN_IP）。
+    ensure_zlm_ini
     sync_zlm_externip
     start_zlm
     ;;

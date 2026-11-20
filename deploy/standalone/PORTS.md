@@ -131,7 +131,7 @@
 #              ⚠️ 这是**设备把流推到平台**的入口，防火墙必须开 UDP
 #              ⭐ 默认 50 个；不够时改 UVP_ZLM_RTP_RANGE 放大，
 #                但**别越过 51063**（51064 是 SIP 预留位，放不进去）。
-#              ⛔⛔ 真源是 `vendor/zlm/config.ini` 的 **[rtp_proxy] port_range**
+#              ⛔⛔ 真源是 ZLM 配置文件（`config/zlm.ini`，随包的 vendor/zlm/config.ini 只是模板）的 **[rtp_proxy] port_range**
 #                （ZLM 源码 `src/Common/config.cpp`: `RtpProxy::kPortRange`），
 #                由 `uvp-gb28181-ctl.sh` 的 `sync_zlm_ports_ini()` 写入 ——
 #                写的是 **[rtp_proxy] 段**，不是 [rtp] 段（后者压根没有这个键，
@@ -273,7 +273,7 @@
 #   改它在**引导页**里改（存 gb_sip_config 表）；改了要重启后端生效，
 #   而且存量设备必须逐台改成同一端口。
 #
-# ⭐ 其他组件不用你操心：ZLM 的端口由启动脚本同步写进 `vendor/zlm/config.ini`，
+# ⭐ 其他组件不用你操心：ZLM 的端口由启动脚本同步写进 `config/zlm.ini`（持久副本），
 #   后端的 `config.yml`（httpserver/redis/zlm.httpport/zlm.rtpport/media.hookport）
 #   也一并改 —— 这三处永远同源，不存在"只改了一半"。
 #
@@ -317,8 +317,9 @@
 #  3. 门禁 = 节点登记了 `rtc.externIP`（顺带当"跨网段开关"）：没填就**直接不发**。
 #     ✅ 2026-11-12 起这个值由部署脚本**自动写**（`uvp-setup rtc-externip`）：
 #        局网部署填本机内网 IP，公网部署填公网 IP（云主机弹性 IP 从元数据取）。
-#        想钉死自己的值就写 config/config.env 的 `UVP_ZLM_EXTERN_IP`；
-#        页面里改的值下次启动会被自动值覆盖。
+#        ⛔ 2026-11-20 起**已有值不再被覆盖**：页面里设过的地址重启/升级都保留，
+#        只有 ini 里是空值时才自动探测填入（与 Docker 版 zlm-entrypoint 同一套语义）；
+#        要批量钉死自己的值就写 config/config.env 的 `UVP_ZLM_EXTERN_IP`。
 #     ⇒ 但外网侧仍需放行 51013（UDP/TCP，STUN）以及 51008（WebRTC 媒体），
 #       且 NAT 上的映射端口必须与内部端口**同号** —— 这两件事脚本不做。
 #
@@ -343,9 +344,10 @@
 ## 附：ZLM secret（启动时自动对齐，无需人工填）
 
 `config.yml` 的 `gb28181.zlm.secret`在示例里是占位符 `CHANGE_ME`，
-而 ZLM 真正的密钥在 `vendor/zlm/config.ini` 的 `[api] secret=`（构建时随机生成）。
+而 ZLM 真正的密钥在 ZLM 配置文件（`config/zlm.ini`，随包的 `vendor/zlm/config.ini` 只是模板）
+的 `[api] secret=`（构建时随机生成）。
 
-**`uvp-gb28181-ctl.sh start` 会自动对齐**：以 `config.ini` 为准，把真值写进 `config.yml`。
+**`uvp-gb28181-ctl.sh start` 会自动对齐**：以 `config/zlm.ini` 为准，把真值写进 `config.yml`。
 两条硬规则：
 
 - 只在原值是占位符（`CHANGE_ME` / `TODO` / 空）时才写 ⇒ 运维手工填过的真值不被覆盖，重复启动也幂等。
@@ -355,6 +357,30 @@
 平台调 ZLM 全被拒 `{"code":-100,"msg":"Please login first"}`
 → ZLM 节点配置恢复失败 → 录像缓存/点播/录像查询 runtime 全部跳过装配
 → 页面报「**录像缓存服务未装配**」，而 ZLM 进程本身活得好好的。
+
+## 附：ZLM 的配置文件在哪（`config/zlm.ini`，升级不覆盖）
+
+| 文件 | 角色 |
+|---|---|
+| `vendor/zlm/config.ini`（发布目录里） | **模板**，随包发布，升级时整目录换新；只在首次初始化时被读一次 |
+| `config/zlm.ini`（安装根） | MediaServer **真正加载**的配置，持久化，升级不动 |
+
+⭐ 为什么要分两份（2026-11-20 客户现场反馈"每次在线升级 rtc.externIP 都被重置"）：
+在线升级是「解包到 `releases/<task_id>/` 再翻转 `current`」，`vendor/` 整个换新 ⇒
+以前 ZLM 直接读发布目录那份，现场在平台页面里调过的键（`[rtc] externIP`、
+超时、码率……）每次升级都被换成出厂值，而且没有任何提示。Docker 版一直是持久副本
+（`/opt/zlm/run/config.ini`），单机版现在与之对齐。
+
+规则：
+
+- 首次启动时从模板种子一份 `config/zlm.ini`；**已存在就一个字都不改**。
+- 老装机升上来时，升级助手会先把旧 `vendor/zlm/config.ini` 复制过去
+  （`server/internal/upgrade/operator_config.go`），现场设置不丢。
+- 只有"程序自己管"的键会每次被重写：端口、`[general] mediaServerId`、
+  `[http] dirMenu`、`[rtc] enableTurn`、`[ffmpeg] bin`（跟随包内布局）。
+  其余键以文件为准 —— 平台页面里改了就留在文件里，重启/升级都在。
+- ⛔ 手改就用页面改（ZLM 自己会把 `setServerConfig` 的结果 dump 回这份文件）；
+  直接编辑 `releases/*/vendor/zlm/config.ini` 是无效的，那份文件根本不会被加载。
 
 ## ⛔⛔⛔ 绝不能用 ZLMediaKit 的官方默认 secret
 
