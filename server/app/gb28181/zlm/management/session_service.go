@@ -143,7 +143,8 @@ func (s *SessionService) ListNetworkSessions(ctx context.Context, request Networ
 	if err != nil {
 		return result, normalizeRuntimeReadError(err, request.NodeID)
 	}
-	sessions = boundedPageInput(sessions)
+	// 明细与卡片数字同口径：都不含平台自身调 API 的回环 HTTP 短连接。
+	sessions = boundedPageInput(visibleSessions(sessions))
 	items := make([]NetworkSession, 0, len(sessions))
 	for _, session := range sessions {
 		items = append(items, NetworkSession{
@@ -180,7 +181,7 @@ func (s *SessionService) ListAllNetworkSessions(ctx context.Context, request Net
 			result.Errors = append(result.Errors, streamNodeError(current.ID, err))
 			continue
 		}
-		for _, session := range boundedPageInput(sessions) {
+		for _, session := range boundedPageInput(visibleSessions(sessions)) {
 			if len(items) >= MaxResponseItems+1 {
 				break
 			}

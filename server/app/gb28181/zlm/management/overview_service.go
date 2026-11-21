@@ -698,7 +698,8 @@ func (s *OverviewService) collectActiveNodeView(ctx context.Context, current *no
 	wg.Wait()
 
 	if statisticErr == nil && sessionsErr == nil && netLoadErr == nil && workLoadErr == nil {
-		view.Metrics = runtimeMetrics(statistic, len(sessions), netLoad, workLoad, eventThreadLoads)
+		// 剔除平台自己调 API 留下的回环 HTTP 连接，否则数字会随采样抖动。
+		view.Metrics = runtimeMetrics(statistic, businessSessionCount(sessions), netLoad, workLoad, eventThreadLoads)
 		if mediaTrafficErr == nil {
 			applyMediaTraffic(&view.Metrics, mediaTraffic)
 		} else {
