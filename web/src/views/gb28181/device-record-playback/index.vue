@@ -1015,6 +1015,9 @@ onUnmounted(() => {
   max-width: 240px;
   min-height: 0;
   overflow: hidden;
+
+  /* 与「设备列表」页的 .directory-panel 一致：左栏是面板底色，不是页面底色 */
+  background: var(--uvp-panel-bg);
   border-right: 1px solid var(--uvp-list-panel-border);
 }
 .record-playback-permission-state {

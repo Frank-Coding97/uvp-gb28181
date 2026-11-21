@@ -3,9 +3,9 @@ import { computed, onBeforeUnmount, onMounted, ref, watch, type Component } from
 import {
   Camera,
   Cctv,
-  ChevronLeft,
   ChevronRight,
   Folder,
+  FolderTree,
   ListFilter,
   MapPin,
   Play,
@@ -158,7 +158,6 @@ const favoriteDialogMode = ref<"existing" | "new">("new");
 const favoriteDialogGroupId = ref("");
 const favoriteGroupName = ref("");
 const favoriteDialogError = ref("");
-const viewTabsRef = ref<HTMLElement | null>(null);
 
 const favoriteGroups = ref<FavoriteChannelGroup[]>([]);
 
@@ -608,12 +607,6 @@ async function changeView(nextView: SourceView) {
   await loadRoot(nextView);
 }
 
-function scrollViewTabs(direction: -1 | 1) {
-  const tabs = viewTabsRef.value;
-  if (!tabs) return;
-  tabs.scrollLeft += direction * Math.max(80, Math.floor(tabs.clientWidth * 0.75));
-}
-
 async function changeDevicePage(page: number) {
   if (!canViewDevices.value || page === devicePage.value) return;
   devicePage.value = page;
@@ -750,17 +743,7 @@ defineExpose({ openFavoriteDialogForChannels });
 <template>
   <aside class="playback-source-tree" aria-label="设备树">
     <header class="tree-head">
-      <div
-        class="tree-summary"
-        :aria-label="
-          deviceStatsLoaded ? `设备状态：在线 ${onlineDeviceTotal} 台，离线 ${offlineDeviceTotal} 台` : '设备状态加载中'
-        "
-      >
-        <template v-if="deviceStatsLoaded">
-          <span><i class="summary-dot online" aria-hidden="true" />在线 {{ onlineDeviceTotal }}</span>
-          <span><i class="summary-dot offline" aria-hidden="true" />离线 {{ offlineDeviceTotal }}</span>
-        </template>
-      </div>
+      <div class="tree-title"><FolderTree :size="14" aria-hidden="true" /><span>设备目录</span></div>
       <div class="tree-head-actions">
         <button
           v-if="view !== 'favorites'"
@@ -788,40 +771,45 @@ defineExpose({ openFavoriteDialogForChannels });
       </div>
     </header>
 
-    <div class="tree-views">
+    <div class="tree-views" role="tablist" aria-label="设备树视图">
       <button
-        class="tree-view-arrow"
-        data-test="source-view-scroll-left"
+        v-for="option in viewOptions"
+        :key="option.value"
+        :data-test="`source-view-${option.value}`"
         type="button"
-        aria-label="显示前面的设备树视图"
-        title="显示前面的视图"
-        @click="scrollViewTabs(-1)"
+        role="tab"
+        :aria-selected="view === option.value"
+        :class="{ active: view === option.value }"
+        @click="changeView(option.value)"
       >
-        <ChevronLeft :size="14" aria-hidden="true" />
+        <component :is="option.icon" :size="13" aria-hidden="true" /><span>{{ option.label }}</span>
       </button>
-      <div ref="viewTabsRef" class="tree-view-scroll" role="tablist" aria-label="设备树视图">
-        <button
-          v-for="option in viewOptions"
-          :key="option.value"
-          :data-test="`source-view-${option.value}`"
-          type="button"
-          role="tab"
-          :aria-selected="view === option.value"
-          :class="{ active: view === option.value }"
-          @click="changeView(option.value)"
-        >
-          <component :is="option.icon" :size="13" aria-hidden="true" />{{ option.label }}
-        </button>
-      </div>
+    </div>
+
+    <div class="tree-search">
+      <!-- label 只包住「图标 + 输入框」：button 属于 labelable 元素，塞进 label 里
+           点清空会连带激活输入框，标准里也不允许。 -->
+      <label class="tree-search-field">
+        <Search :size="13" aria-hidden="true" />
+        <input
+          v-model="deviceKeyword"
+          data-test="device-search"
+          type="search"
+          aria-label="搜索设备名称或国标编号"
+          placeholder="搜索设备名称或国标编号"
+          @input="scheduleDeviceSearch"
+          @keydown.enter.prevent="applyDeviceSearch"
+        />
+      </label>
       <button
-        class="tree-view-arrow"
-        data-test="source-view-scroll-right"
+        v-if="deviceKeyword"
+        data-test="clear-device-search"
         type="button"
-        aria-label="显示后面的设备树视图"
-        title="显示后面的视图"
-        @click="scrollViewTabs(1)"
+        aria-label="清空设备搜索"
+        title="清空设备搜索"
+        @click="clearDeviceSearch"
       >
-        <ChevronRight :size="14" aria-hidden="true" />
+        <X :size="13" />
       </button>
     </div>
 
@@ -853,28 +841,6 @@ defineExpose({ openFavoriteDialogForChannels });
           @click="changeDeviceStatus('offline')"
         >
           <i class="filter-status-dot offline" aria-hidden="true" />离线
-        </button>
-      </div>
-      <div class="tree-search">
-        <Search :size="13" aria-hidden="true" />
-        <input
-          v-model="deviceKeyword"
-          data-test="device-search"
-          type="text"
-          aria-label="搜索设备名称或国标编号"
-          placeholder="搜索设备名称或国标编号"
-          @input="scheduleDeviceSearch"
-          @keydown.enter.prevent="applyDeviceSearch"
-        />
-        <button
-          v-if="deviceKeyword"
-          data-test="clear-device-search"
-          type="button"
-          aria-label="清空设备搜索"
-          title="清空设备搜索"
-          @click="clearDeviceSearch"
-        >
-          <X :size="13" />
         </button>
       </div>
     </div>
@@ -1001,6 +967,14 @@ defineExpose({ openFavoriteDialogForChannels });
       :aria-label="`共 ${deviceListTotal} 台设备`"
     >
       <span class="device-total">共 {{ deviceListTotal }} 台</span>
+      <span
+        v-if="deviceStatsLoaded"
+        class="tree-summary"
+        :aria-label="`设备状态：在线 ${onlineDeviceTotal} 台，离线 ${offlineDeviceTotal} 台`"
+      >
+        <span><i class="summary-dot online" aria-hidden="true" />在线 {{ onlineDeviceTotal }}</span>
+        <span><i class="summary-dot offline" aria-hidden="true" />离线 {{ offlineDeviceTotal }}</span>
+      </span>
       <a-pagination
         v-if="deviceListTotal > devicePageSize"
         simple
@@ -1117,9 +1091,21 @@ defineExpose({ openFavoriteDialogForChannels });
 }
 .tree-head {
   justify-content: space-between;
-  min-height: 44px;
-  padding: 7px 10px 7px 14px;
+  height: 42px;
+  min-height: 42px;
+  padding: 0 10px 0 14px;
   border-bottom: 1px solid var(--uvp-panel-border);
+}
+
+/* 与「设备列表」页的 .directory-head 同构：标题 + 操作按钮，观感保持一致 */
+.tree-title {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 7px;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 620;
+  color: var(--uvp-text-primary);
 }
 .device-total {
   font-size: 10px;
@@ -1127,9 +1113,10 @@ defineExpose({ openFavoriteDialogForChannels });
   color: var(--uvp-text-tertiary);
 }
 .tree-summary {
-  gap: 12px;
-  font-size: 10px;
+  gap: 10px;
+  font-size: 11px;
   color: var(--uvp-text-tertiary);
+  white-space: nowrap;
 }
 .tree-summary span {
   gap: 5px;
@@ -1182,78 +1169,57 @@ defineExpose({ openFavoriteDialogForChannels });
   border: 1px solid var(--zlm-card);
   border-radius: 50%;
 }
+
+/* 页签不再横向滚动：窄栏里滚成两个 + 箭头的观感最差（见 2026-11-21 老板截图）。
+   改成自适应等分网格，240px 下排 3 列两行，宽栏（多屏播放）自动排成一行。 */
 .tree-views {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(54px, 1fr));
   gap: 2px;
-  align-items: center;
-  min-width: 0;
   padding: 2px;
   margin: 10px 12px 8px;
+  background: var(--uvp-list-toolbar-bg);
   border: 1px solid var(--uvp-panel-border);
   border-radius: 6px;
 }
-.tree-view-scroll {
-  display: flex;
-  flex: 1;
-  gap: 2px;
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-.tree-view-scroll::-webkit-scrollbar {
-  display: none;
-}
 .tree-views button {
+  position: relative;
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
   height: 28px;
-  padding: 0 8px;
-  font-size: 12px;
+  padding: 0 3px;
+  font-size: 11px;
   color: var(--uvp-text-tertiary);
   white-space: nowrap;
   cursor: pointer;
   background: transparent;
-  border: 0;
-  border-radius: 4px;
-}
-.tree-view-scroll button {
-  flex: 0 0 auto;
-}
-.tree-view-scroll [role="tab"] {
-  position: relative;
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
   border: 1px solid transparent;
+  border-radius: 4px;
   transition:
     color 0.15s ease,
     background 0.15s ease,
     border-color 0.15s ease,
     box-shadow 0.15s ease;
 }
-.tree-view-scroll [role="tab"] > svg {
+.tree-views button > svg {
   flex: 0 0 auto;
 }
-.tree-view-scroll [role="tab"]:hover:not(.active) {
+.tree-views button:hover:not(.active) {
   color: var(--uvp-text-primary);
   background: var(--uvp-sidebar-active-bg);
 }
-.tree-view-scroll [role="tab"]:focus-visible {
+.tree-views button:focus-visible {
   outline: 2px solid var(--uvp-brand);
   outline-offset: 1px;
 }
-.tree-view-scroll [role="tab"].active {
+.tree-views button.active {
   font-weight: 650;
   color: var(--uvp-brand-strong, var(--uvp-brand));
-}
-.tree-view-arrow {
-  display: inline-grid;
-  flex: 0 0 24px;
-  place-items: center;
-  width: 24px;
-  padding: 0;
-}
-.tree-view-arrow:hover {
-  color: var(--uvp-text-primary);
   background: var(--uvp-panel-bg);
+  box-shadow: 0 0 0 1px var(--uvp-panel-border);
 }
 .tree-filters {
   flex: 0 0 auto;
@@ -1306,23 +1272,30 @@ defineExpose({ openFavoriteDialogForChannels });
 .filter-status-dot.offline {
   background: #ef4444;
 }
+
+/* 与「设备列表」页的 .directory-search 同构：整行常显，不再藏进筛选面板 */
 .tree-search {
   display: flex;
-  flex: 0 0 30px;
+  flex: 0 0 32px;
   gap: 7px;
   align-items: center;
-  height: 30px;
-  padding: 0 8px;
+  height: 32px;
+  padding: 0 9px;
+  margin: 0 12px 8px;
   color: var(--uvp-text-tertiary);
-  background: var(--uvp-panel-bg);
+  background: var(--uvp-page-bg);
   border: 1px solid var(--uvp-panel-border);
-  border-radius: 5px;
+  border-radius: 6px;
 }
-.tree-search:focus-within {
-  color: var(--uvp-brand);
-  border-color: var(--uvp-brand);
+.tree-search-field {
+  display: flex;
+  flex: 1;
+  gap: 7px;
+  align-items: center;
+  min-width: 0;
+  height: 100%;
 }
-.tree-search input {
+.tree-search-field input {
   flex: 1;
   min-width: 0;
   height: 100%;
@@ -1333,6 +1306,10 @@ defineExpose({ openFavoriteDialogForChannels });
   outline: 0;
   background: transparent;
   border: 0;
+}
+.tree-search:focus-within {
+  color: var(--uvp-brand);
+  border-color: var(--uvp-brand);
 }
 .tree-search input::placeholder {
   color: var(--uvp-text-tertiary);
@@ -1719,12 +1696,16 @@ defineExpose({ openFavoriteDialogForChannels });
 }
 .tree-pagination {
   display: flex;
-  flex: 0 0 38px;
-  gap: 12px;
+
+  /* 不能写死 flex-basis：窄栏里「共 N 台 + 在线/离线 + 分页器」会换行，
+     锁死 38px 会把第二行裁掉 */
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 4px 12px;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   min-height: 38px;
-  padding: 4px 8px;
+  padding: 4px 12px;
   border-top: 1px solid var(--uvp-panel-border);
 }
 .spin {
