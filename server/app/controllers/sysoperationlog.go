@@ -50,16 +50,26 @@ func (c *SysOperationLogController) List(ctx *gin.Context) {
 	}
 
 	logList := models.NewSysOperationLogList()
-	total, err := logList.GetTotal(ctx.Request.Context(), req.Handle())
-	if err != nil {
-		c.FailAndAbort(ctx, "获取日志总数失败", err)
+	if err := logList.Find(ctx.Request.Context(), req.Paginate(), req.Handle(), func(db *gorm.DB) *gorm.DB {
+		return db.Order("created_at DESC")
+	}); err != nil {
+		c.FailAndAbort(ctx, "获取日志列表失败", err)
 	}
 
-	err = logList.Find(ctx.Request.Context(), req.Paginate(), req.Handle(), func(db *gorm.DB) *gorm.DB {
-		return db.Order("created_at DESC")
-	})
-	if err != nil {
-		c.FailAndAbort(ctx, "获取日志列表失败", err)
+	// total 只在"确实可能有下一页"时才去数。
+	//
+	// 线上实测（54 万行）：列表本身 0ms，而带模糊筛选的 count(*) 要 4 秒 ——
+	// username/module/path 全是左模糊 LIKE '%x%'，用不上索引，必须整表扫一遍。
+	// 但只要这一页没满，就说明后面没有数据了，总数直接等于当前行数，
+	// 那次全表扫完全可以省掉（搜具体用户名是最常见的用法，命中通常不足一页）。
+	total := int64(len(logList))
+	needsTotal := req.PageSize > 0 && (req.PageNum > 1 || len(logList) >= req.PageSize)
+	if needsTotal {
+		counted, err := logList.GetTotal(ctx.Request.Context(), req.Handle())
+		if err != nil {
+			c.FailAndAbort(ctx, "获取日志总数失败", err)
+		}
+		total = counted
 	}
 
 	c.Success(ctx, gin.H{
