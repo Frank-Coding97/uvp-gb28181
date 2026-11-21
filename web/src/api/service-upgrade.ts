@@ -44,6 +44,17 @@ export interface UpgradeTask {
   updated_at?: string;
 }
 
+/**
+ * 升级包下载的字节进度。由升级助手在内存里按秒级节流上报，**只做展示**：
+ * 老助手不报这块时字段缺席，页面退回「不确定进度」，不要当成 0%。
+ */
+export interface UpgradeTransfer {
+  task_id: string;
+  downloaded_bytes: number;
+  total_bytes: number;
+  updated_at?: string;
+}
+
 export interface UpgradeStatus {
   current: { name?: string; version?: string; build_id?: string };
   deployment: string;
@@ -52,6 +63,7 @@ export interface UpgradeStatus {
   activeTask?: UpgradeTask;
   tasks: UpgradeTask[];
   events?: UpgradeEvent[];
+  transfer?: UpgradeTransfer;
 }
 
 /**

@@ -45,4 +45,76 @@ describe("升级进度展示", () => {
     expect(wrapper.find("script").exists()).toBe(false);
     wrapper.unmount();
   });
+
+  it("有字节数时显示真实下载百分比，不再是静止的阶段条", () => {
+    const wrapper = mount(UpgradeProgress, {
+      props: {
+        title: "服务升级",
+        detail: "下载中",
+        steps: ["准备与授权", "备份数据"],
+        current: 0,
+        state: "active",
+        transfer: { downloaded_bytes: 25, total_bytes: 100 }
+      }
+    });
+    const bar = wrapper.get('[role="progressbar"]');
+    expect(bar.attributes("aria-label")).toBe("升级包下载进度");
+    expect(bar.attributes("aria-valuenow")).toBe("25");
+    expect(bar.attributes("aria-busy")).toBe("false");
+    expect(wrapper.text()).toContain("已下载 25 B / 100 B");
+    expect(wrapper.text()).toContain("25%");
+    wrapper.unmount();
+  });
+
+  it("⛔ 拿不到总量时不能显示 0%，要退回不确定进度", () => {
+    const wrapper = mount(UpgradeProgress, {
+      props: {
+        title: "服务升级",
+        detail: "下载中",
+        steps: ["准备与授权", "备份数据"],
+        current: 0,
+        state: "active",
+        indeterminate: true
+      }
+    });
+    const bar = wrapper.get('[role="progressbar"]');
+    expect(bar.attributes("aria-valuenow")).toBeUndefined();
+    expect(bar.attributes("aria-busy")).toBe("true");
+    expect(wrapper.find(".unknown-track").exists()).toBe(true);
+    expect(wrapper.text()).not.toContain("0%");
+    wrapper.unmount();
+  });
+
+  it("显示本阶段已用时，用来区分「慢」和「卡死」", () => {
+    const wrapper = mount(UpgradeProgress, {
+      props: {
+        title: "服务升级",
+        detail: "下载中",
+        steps: ["准备与授权"],
+        current: 0,
+        state: "active",
+        elapsed: "本阶段已用时 3 分 20 秒"
+      }
+    });
+    expect(wrapper.get(".progress-detail").text()).toBe("下载中 · 本阶段已用时 3 分 20 秒");
+    wrapper.unmount();
+  });
+
+  it("字节越界与非法值都夹紧到 0~100", async () => {
+    const wrapper = mount(UpgradeProgress, {
+      props: {
+        title: "服务升级",
+        detail: "下载中",
+        steps: ["准备与授权"],
+        current: 0,
+        state: "active",
+        transfer: { downloaded_bytes: 300, total_bytes: 100 }
+      }
+    });
+    expect(wrapper.get('[role="progressbar"]').attributes("aria-valuenow")).toBe("100");
+    await wrapper.setProps({ transfer: { downloaded_bytes: Number.NaN, total_bytes: 100 } });
+    expect(wrapper.get('[role="progressbar"]').attributes("aria-valuenow")).toBe("0");
+    expect(wrapper.text()).not.toContain("NaN");
+    wrapper.unmount();
+  });
 });

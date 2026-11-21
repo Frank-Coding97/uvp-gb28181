@@ -5,7 +5,9 @@
       <span v-if="reconnecting" class="reconnect-state">正在重连 · 显示上次状态</span>
       <slot name="action" />
     </div>
-    <p class="progress-detail" aria-live="polite">{{ detail }}</p>
+    <p class="progress-detail" aria-live="polite">
+      {{ detail }}<span v-if="elapsed" class="progress-elapsed"> · {{ elapsed }}</span>
+    </p>
     <div v-if="upload" class="upload-info">
       <span class="upload-filename" :title="upload.filename">{{ upload.filename }}</span>
       <template v-if="showUploadBar">
@@ -32,6 +34,31 @@
           />
         </div>
       </template>
+    </div>
+    <div v-if="transfer || indeterminate" class="transfer-info">
+      <div class="transfer-numbers">
+        <span>{{ transferText }}</span>
+        <strong v-if="transferPercent !== undefined">{{ transferPercent }}%</strong>
+      </div>
+      <div
+        role="progressbar"
+        aria-label="升级包下载进度"
+        :aria-valuenow="transferPercent"
+        :aria-valuemin="transferPercent === undefined ? undefined : 0"
+        :aria-valuemax="transferPercent === undefined ? undefined : 100"
+        :aria-valuetext="transferText"
+        :aria-busy="transferPercent === undefined"
+      >
+        <!-- 拿不到总量（老助手）时不能显示 0%，否则看起来比不动更像坏了。 -->
+        <div v-if="transferPercent === undefined" class="unknown-track"><span /></div>
+        <a-progress
+          v-else
+          :percent="transferPercent / 100"
+          :show-text="false"
+          :status="state === 'error' ? 'danger' : 'normal'"
+          aria-hidden="true"
+        />
+      </div>
     </div>
     <ol class="progress-steps" aria-label="处理步骤">
       <li
@@ -82,11 +109,30 @@ export interface ProgressDisplay {
 import { computed, ref } from "vue";
 import AProgress from "@arco-design/web-vue/es/progress/progress";
 
-const props = defineProps<ProgressDisplay & { reconnecting?: boolean; upload?: UploadTransfer; showUploadBar?: boolean }>();
+const props = defineProps<
+  ProgressDisplay & {
+    reconnecting?: boolean;
+    upload?: UploadTransfer;
+    showUploadBar?: boolean;
+    /** 助手上报的下载字节数；缺席表示这个阶段给不出真实进度。 */
+    transfer?: { downloaded_bytes: number; total_bytes: number };
+    /** 处于「下载/校验/准备」但没有任何字节可报时，用流动条表示还活着。 */
+    indeterminate?: boolean;
+    /** 当前阶段已经耗了多久，用来区分「慢」和「卡死」。 */
+    elapsed?: string;
+  }
+>();
 const errorExpanded = ref(false);
 const percentage = computed(() => {
   if (!props.upload?.total || !Number.isFinite(props.upload.total) || props.upload.total <= 0) return undefined;
   return Math.min(100, Math.max(0, Math.floor((props.upload.loaded / props.upload.total) * 100)));
+});
+const transferPercent = computed(() => {
+  const total = props.transfer?.total_bytes;
+  if (!total || !Number.isFinite(total) || total <= 0) return undefined;
+  const downloaded = Number(props.transfer?.downloaded_bytes);
+  const loaded = Number.isFinite(downloaded) && downloaded > 0 ? downloaded : 0;
+  return Math.min(100, Math.max(0, Math.floor((loaded / total) * 100)));
 });
 const formatBytes = (bytes: number) => {
   if (!Number.isFinite(bytes) || bytes < 0) return "未知";
@@ -98,6 +144,11 @@ const sizeText = computed(() =>
     ? `${formatBytes(Math.min(props.upload.loaded, props.upload.total))} / ${formatBytes(props.upload.total)}`
     : `已传 ${formatBytes(props.upload?.loaded || 0)}`
 );
+const transferText = computed(() => {
+  const transfer = props.transfer;
+  if (!transfer || transferPercent.value === undefined) return "正在下载升级包…";
+  return `已下载 ${formatBytes(Math.min(transfer.downloaded_bytes, transfer.total_bytes))} / ${formatBytes(transfer.total_bytes)}`;
+});
 const stepState = (index: number) => {
   if (index < props.current || (props.state === "success" && index === props.current)) return "已完成";
   if (index !== props.current) return "待处理";
@@ -137,7 +188,14 @@ const stepState = (index: number) => {
   color: var(--color-text-2);
   overflow-wrap: anywhere;
 }
+.progress-elapsed {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-3);
+}
 .upload-info {
+  margin-bottom: 18px;
+}
+.transfer-info {
   margin-bottom: 18px;
 }
 .upload-filename {
@@ -146,7 +204,8 @@ const stepState = (index: number) => {
   color: var(--color-text-3);
   overflow-wrap: anywhere;
 }
-.upload-numbers {
+.upload-numbers,
+.transfer-numbers {
   display: flex;
   gap: 12px;
   justify-content: space-between;

@@ -86,6 +86,9 @@
         v-bind="showImportProgress ? { ...importProgress, title: '服务升级' } : taskProgress(progressTask!)"
         :upload="showImportProgress ? uploadTransfer : undefined"
         :show-upload-bar="Boolean(showImportProgress && uploadTransfer && !importJob)"
+        :transfer="showImportProgress ? undefined : transferFor(progressTask)"
+        :indeterminate="showImportProgress ? false : indeterminateFor(progressTask)"
+        :elapsed="showImportProgress ? undefined : elapsedFor(progressTask)"
         :reconnecting="showImportProgress ? Boolean(importJobError && !importJobFinished) : Boolean(statusError)"
       >
         <template v-if="(showImportProgress && importFailed) || (!showImportProgress && progressTask)" #action
@@ -274,10 +277,13 @@
       @cancel="selectedTaskID = ''"
     >
       <template #title>任务详情</template>
-      <template v-if="selectedTask"
-        ><UpgradeProgress
+      <template v-if="selectedTask">
+        <UpgradeProgress
           data-testid="task-detail-progress"
           v-bind="taskProgress(selectedTask)"
+          :transfer="transferFor(selectedTask)"
+          :indeterminate="indeterminateFor(selectedTask)"
+          :elapsed="elapsedFor(selectedTask)"
           :reconnecting="Boolean(statusError)"
         />
         <p class="task-hint">{{ taskHint(selectedTask) }}</p>
@@ -554,6 +560,40 @@ const taskStepIndex: Record<string, number> = {
   validating: 3,
   committing: 3,
   succeeded: 4
+};
+/** 只有这三个阶段是「包还没就绪」，页面才有下载进度可谈。 */
+const transferPhases = ["fetching", "verifying", "preparing"];
+/**
+ * 助手只在内存里按秒级节流上报下载字节数，且**只针对当前活动任务**；
+ * 这里再做一次归属与阶段校验，免得历史任务或准备阶段之后复用一条过期进度。
+ */
+const transferFor = (task?: UpgradeTask) => {
+  if (!task || !transferPhases.includes(task.phase)) return undefined;
+  if (status.value?.activeTask?.task_id !== task.task_id) return undefined;
+  const transfer = status.value?.transfer;
+  if (!transfer || transfer.task_id !== task.task_id || !(transfer.total_bytes > 0)) return undefined;
+  return transfer;
+};
+/**
+ * 拿不到字节（老助手、或正在校验/准备）时给一个流动条：
+ * ⛔ 不能什么都不画 —— 99MB 的包在这几个阶段可能待上十几分钟，
+ *    静止的界面分不清「在下载」和「卡死」。
+ */
+const indeterminateFor = (task?: UpgradeTask) => Boolean(task && transferPhases.includes(task.phase) && !transferFor(task));
+/**
+ * 「本阶段已用时」直接按 updated_at 算：助手每次推进阶段都会刷新它，所以它等价于
+ * 「在这个阶段停了多久」。⛔ 不要另起一个秒表定时器 —— 状态本来每 5 秒刷一次，
+ * 每次轮询都会让模板重新求值，这里读到的就是当前时间。
+ */
+const elapsedFor = (task?: UpgradeTask) => {
+  if (!task || !task.updated_at || task.phase === "succeeded" || !(task.phase in taskStepIndex)) return "";
+  const startedAt = Date.parse(task.updated_at);
+  if (!Number.isFinite(startedAt)) return "";
+  const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+  if (seconds < 60) return `本阶段已用时 ${seconds} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `本阶段已用时 ${minutes} 分 ${seconds % 60} 秒`;
+  return `本阶段已用时 ${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分`;
 };
 const taskProgress = (task: UpgradeTask): ProgressDisplay => {
   const interrupted = ["failed", "rolled_back", "recovery_required"].includes(task.phase);

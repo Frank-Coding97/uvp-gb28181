@@ -408,10 +408,54 @@ describe("service upgrade page", () => {
     const current = progress.find('[aria-current="step"]');
     if (index < 0) expect(current.exists()).toBe(false);
     else expect(current.attributes("data-step")).toBe(String(index));
-    expect(progress.find('[role="progressbar"]').exists()).toBe(false);
+    // 「不虚构进度」的契约不变：下载/校验/准备这几个阶段即使拿不到字节，也只能是
+    // 「不确定进度」——可以有进度条，但**不能有数值**；其余阶段一律不该出现进度条。
+    if (["fetching", "verifying", "preparing"].includes(phase)) {
+      const bar = progress.find('[role="progressbar"]');
+      expect(bar.exists()).toBe(true);
+      expect(bar.attributes("aria-valuenow")).toBeUndefined();
+      expect(progress.text()).not.toMatch(/\d+%/);
+    } else {
+      expect(progress.find('[role="progressbar"]').exists()).toBe(false);
+    }
     if (phase !== "succeeded") expect(progress.text()).not.toContain("升级成功");
     expect(api.applyTask).not.toHaveBeenCalled();
     wrapper.unmount();
+  });
+
+  it("助手报来字节数时按真实进度显示，且只认当前任务", async () => {
+    const task = { task_id: "current", phase: "fetching", version: "1.2.0", committed: false };
+    api.getStatus.mockResolvedValue({
+      data: {
+        ...status(),
+        activeTask: task,
+        tasks: [task],
+        transfer: { task_id: "current", downloaded_bytes: 41, total_bytes: 99, updated_at: "2026-11-21T08:10:00Z" }
+      }
+    });
+    const wrapper = mountPage();
+    await flushPromises();
+    const progress = wrapper.get('[data-testid="task-progress"]');
+    const bar = progress.get('[role="progressbar"]');
+    expect(bar.attributes("aria-valuenow")).toBe("41");
+    expect(progress.text()).toContain("已下载 41 B / 99 B");
+    wrapper.unmount();
+
+    // 归属不符（历史任务、或助手还没切到新任务）时不能借用别人的进度。
+    api.getStatus.mockResolvedValue({
+      data: {
+        ...status(),
+        activeTask: { ...task },
+        tasks: [{ ...task }],
+        transfer: { task_id: "another-task", downloaded_bytes: 41, total_bytes: 99 }
+      }
+    });
+    const other = mountPage();
+    await flushPromises();
+    const otherProgress = other.get('[data-testid="task-progress"]');
+    expect(otherProgress.get('[role="progressbar"]').attributes("aria-valuenow")).toBeUndefined();
+    expect(otherProgress.text()).not.toMatch(/\d+%/);
+    other.unmount();
   });
 
   it("开始升级先确认业务中断风险，任务准备完成后自动应用", async () => {
