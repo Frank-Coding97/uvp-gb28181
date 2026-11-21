@@ -2652,8 +2652,6 @@ BEGIN
     [summary] NVARCHAR(MAX)
   );
 END;
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'sys_job_results') AND name=N'idx_created_at')
-  CREATE INDEX [idx_created_at] ON [sys_job_results] ([created_at]);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'sys_job_results') AND name=N'idx_job_id')
   CREATE INDEX [idx_job_id] ON [sys_job_results] ([job_id]);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'sys_job_results') AND name=N'idx_start_time')

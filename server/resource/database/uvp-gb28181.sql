@@ -2344,7 +2344,6 @@ CREATE TABLE `sys_job_results` (
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
   `summary` text NULL,
   PRIMARY KEY (`id`),
-  KEY `idx_created_at` (`created_at`),
   KEY `idx_job_id` (`job_id`),
   KEY `idx_start_time` (`start_time`),
   KEY `idx_status` (`status`)

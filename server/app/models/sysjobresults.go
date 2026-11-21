@@ -19,7 +19,10 @@ type SysJobResults struct {
 	EndTime    *time.Time `gorm:"column:end_time;not null" json:"endTime"`                 // 结束时间
 	Duration   int64      `gorm:"column:duration;not null" json:"duration"`                // 执行时长(纳秒)
 	RetryCount int        `gorm:"column:retry_count;not null;default:0" json:"retryCount"` // 重试次数
-	CreatedAt  *time.Time `gorm:"column:created_at;not null;index" json:"createdAt"`       // 记录创建时间
+	// ⛔ created_at 上**不要**加 index：列表只按 job_id/status/start_time 过滤，
+	//    清理按 end_time 删，仓储层从没按 created_at 查过这张表。线上实测这棵
+	//    没人用的 B 树占了 26MB，还要为每次任务结果写入多维护一次（2026-11-21 删除）。
+	CreatedAt *time.Time `gorm:"column:created_at;not null" json:"createdAt"` // 记录创建时间
 }
 
 // SysJobResultsList sys_job_results 列表
@@ -73,8 +76,9 @@ func (l *SysJobResultsList) Find(c context.Context, funcs ...func(*gorm.DB) *gor
 // ClearAll 清空sys_job_results全部记录（硬删除），返回删除行数
 //
 // ⛔ 本表没有 deleted_at 列，Delete 就是物理删除；GORM 对「无 where 的全局删除」默认
-//   返回 ErrMissingWhereClause，这里必须显式给一个恒真条件（不用 AllowGlobalUpdate，
-//   全仓没有先例，恒真 where 的语义更直白）。
+//
+//	返回 ErrMissingWhereClause，这里必须显式给一个恒真条件（不用 AllowGlobalUpdate，
+//	全仓没有先例，恒真 where 的语义更直白）。
 func (l *SysJobResultsList) ClearAll(c context.Context) (int64, error) {
 	result := app.DB().WithContext(c).Where("1 = 1").Delete(&SysJobResults{})
 	if result.Error != nil {

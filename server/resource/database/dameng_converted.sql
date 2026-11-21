@@ -2533,7 +2533,6 @@ COMMENT ON COLUMN "sys_job_results"."end_time" IS '结束时间';
 COMMENT ON COLUMN "sys_job_results"."duration" IS '执行时长(纳秒)';
 COMMENT ON COLUMN "sys_job_results"."retry_count" IS '重试次数';
 COMMENT ON COLUMN "sys_job_results"."created_at" IS '记录创建时间';
-CREATE INDEX "sys_job_results__idx_created_at" ON "sys_job_results" ("created_at");
 CREATE INDEX "sys_job_results__idx_job_id" ON "sys_job_results" ("job_id");
 CREATE INDEX "sys_job_results__idx_start_time" ON "sys_job_results" ("start_time");
 CREATE INDEX "sys_job_results__idx_status" ON "sys_job_results" ("status");
