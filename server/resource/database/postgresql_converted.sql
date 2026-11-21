@@ -1,7 +1,7 @@
 -- UVP-GB28181 PostgreSQL release initialization script
 -- Generated from the development schema by
 -- server/resource/database/baseline/generate_sql.py. Do not edit by hand.
--- Schema fingerprint: a5cf4560e5db23ea398965802ee75465b3e7a2c85f48a4c5e61916538dde7729
+-- Schema fingerprint: affb01a6f4442ee7d49c565b25edc29849deb559cac515cdfd472ec056bc11fa
 -- Contains production table structures and release baseline data only.
 
 SET client_min_messages TO WARNING;
@@ -604,6 +604,7 @@ CREATE TABLE "gb_device" (
   "name" VARCHAR(255) NOT NULL DEFAULT '',
   "alias" VARCHAR(255) NOT NULL DEFAULT '',
   "device_type" VARCHAR(16) NOT NULL DEFAULT 'ipc',
+  "talk_audio_codec" VARCHAR(16) NOT NULL DEFAULT 'pcma',
   "password" VARCHAR(255) NOT NULL DEFAULT '',
   "transport" VARCHAR(8) NOT NULL DEFAULT '',
   "manufacturer" VARCHAR(255) NOT NULL DEFAULT '',
@@ -648,6 +649,7 @@ COMMENT ON COLUMN "gb_device"."device_id" IS '20位国标编码';
 COMMENT ON COLUMN "gb_device"."name" IS '设备名称';
 COMMENT ON COLUMN "gb_device"."alias" IS '用户自定义别名(用户可编辑,不被设备上报覆盖)';
 COMMENT ON COLUMN "gb_device"."device_type" IS '设备类型 ipc/nvr/platform(用户维护)';
+COMMENT ON COLUMN "gb_device"."talk_audio_codec" IS '对讲音频编码 pcma/pcmu(用户维护)';
 COMMENT ON COLUMN "gb_device"."password" IS '按设备独立密码(本期用统一密码,留空)';
 COMMENT ON COLUMN "gb_device"."transport" IS '传输模式 UDP/TCP';
 COMMENT ON COLUMN "gb_device"."manufacturer" IS '厂商';
@@ -1999,6 +2001,7 @@ CREATE TABLE "gb_talk_session" (
   "openapi_idempotency_key" VARCHAR(128),
   "openapi_request_hash" VARCHAR(64) NOT NULL DEFAULT '',
   "mode" VARCHAR(16) NOT NULL DEFAULT 'talk',
+  "audio_codec" VARCHAR(16) NOT NULL DEFAULT 'pcma',
   "broadcast_sn" BIGINT NOT NULL DEFAULT 0,
   "broadcast_reply_status" VARCHAR(32) NOT NULL DEFAULT '',
   "signal_phase" VARCHAR(40) NOT NULL DEFAULT '',
@@ -2038,6 +2041,7 @@ CREATE TABLE "gb_talk_session" (
   CONSTRAINT "uk_talk_session_ssrc_key" UNIQUE ("ssrc_key")
 );
 COMMENT ON TABLE "gb_talk_session" IS 'GB28181 语音对讲会话历史';
+COMMENT ON COLUMN "gb_talk_session"."audio_codec" IS '对讲会话音频编码 pcma/pcmu';
 CREATE INDEX "idx_talk_session_broadcast_match" ON "gb_talk_session" ("device_id", "target_id", "state");
 CREATE INDEX "idx_talk_session_broadcast_sn" ON "gb_talk_session" ("broadcast_sn");
 CREATE INDEX "idx_talk_session_call_id" ON "gb_talk_session" ("call_id");

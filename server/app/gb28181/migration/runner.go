@@ -219,6 +219,15 @@ var baselineColumnMigrations = map[string]baselineColumnRequirement{
 	"2026-11-16-device-type-postgresql.sql": {table: "gb_device", column: "device_type"},
 	"2026-11-16-device-type-sqlserver.sql":  {table: "gb_device", column: "device_type"},
 	"2026-11-16-device-type-sqlite.sql":     {table: "gb_device", column: "device_type"},
+	// 对讲音频编码分两列为两条迁移：设备列存用户配置，会话列存本次协商快照。
+	"2026-11-21-talk-audio-codec-device.sql":             {table: "gb_device", column: "talk_audio_codec"},
+	"2026-11-21-talk-audio-codec-device-postgresql.sql":  {table: "gb_device", column: "talk_audio_codec"},
+	"2026-11-21-talk-audio-codec-device-sqlserver.sql":   {table: "gb_device", column: "talk_audio_codec"},
+	"2026-11-21-talk-audio-codec-device-sqlite.sql":      {table: "gb_device", column: "talk_audio_codec"},
+	"2026-11-21-talk-audio-codec-session.sql":            {table: "gb_talk_session", column: "audio_codec"},
+	"2026-11-21-talk-audio-codec-session-postgresql.sql": {table: "gb_talk_session", column: "audio_codec"},
+	"2026-11-21-talk-audio-codec-session-sqlserver.sql":  {table: "gb_talk_session", column: "audio_codec"},
+	"2026-11-21-talk-audio-codec-session-sqlite.sql":     {table: "gb_talk_session", column: "audio_codec"},
 }
 
 // baselineTableMigrations lists additive table migrations that must still run

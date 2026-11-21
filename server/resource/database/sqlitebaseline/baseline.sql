@@ -479,6 +479,7 @@ CREATE TABLE IF NOT EXISTS "gb_device" (
   "name" TEXT NOT NULL CHECK ("name" IS NULL OR length("name") <= 255) DEFAULT '',
   "alias" TEXT NOT NULL CHECK ("alias" IS NULL OR length("alias") <= 255) DEFAULT '',
   "device_type" TEXT NOT NULL CHECK ("device_type" IS NULL OR length("device_type") <= 16) DEFAULT 'ipc',
+  "talk_audio_codec" TEXT NOT NULL CHECK ("talk_audio_codec" IS NULL OR length("talk_audio_codec") <= 16) DEFAULT 'pcma',
   "password" TEXT NOT NULL CHECK ("password" IS NULL OR length("password") <= 255) DEFAULT '',
   "transport" TEXT NOT NULL CHECK ("transport" IS NULL OR length("transport") <= 8) DEFAULT '',
   "manufacturer" TEXT NOT NULL CHECK ("manufacturer" IS NULL OR length("manufacturer") <= 255) DEFAULT '',
@@ -519,6 +520,7 @@ CREATE TABLE IF NOT EXISTS "gb_device" (
   -- "name": 设备名称
   -- "alias": 用户自定义别名(用户可编辑,不被设备上报覆盖)
   -- "device_type": 设备类型 ipc/nvr/platform(用户维护)
+  -- "talk_audio_codec": 对讲音频编码 pcma/pcmu(用户维护)
   -- "password": 按设备独立密码(本期用统一密码,留空)
   -- "transport": 传输模式 UDP/TCP
   -- "manufacturer": 厂商
@@ -1570,6 +1572,7 @@ CREATE TABLE IF NOT EXISTS "gb_talk_session" (
   "openapi_idempotency_key" TEXT NULL CHECK ("openapi_idempotency_key" IS NULL OR length("openapi_idempotency_key") <= 128),
   "openapi_request_hash" TEXT NOT NULL CHECK ("openapi_request_hash" IS NULL OR length("openapi_request_hash") <= 64) DEFAULT '',
   "mode" TEXT NOT NULL CHECK ("mode" IS NULL OR length("mode") <= 16) DEFAULT 'talk',
+  "audio_codec" TEXT NOT NULL CHECK ("audio_codec" IS NULL OR length("audio_codec") <= 16) DEFAULT 'pcma',
   "broadcast_sn" INTEGER NOT NULL CHECK ("broadcast_sn" IS NULL OR (typeof("broadcast_sn") = 'integer' AND "broadcast_sn" >= 0)) DEFAULT 0,
   "broadcast_reply_status" TEXT NOT NULL CHECK ("broadcast_reply_status" IS NULL OR length("broadcast_reply_status") <= 32) DEFAULT '',
   "signal_phase" TEXT NOT NULL CHECK ("signal_phase" IS NULL OR length("signal_phase") <= 40) DEFAULT '',
@@ -1603,6 +1606,7 @@ CREATE TABLE IF NOT EXISTS "gb_talk_session" (
   "created_at" DATETIME NULL,
   "updated_at" DATETIME NULL
 );
+  -- "audio_codec": 对讲会话音频编码 pcma/pcmu
 CREATE TABLE IF NOT EXISTS "gb_zlm_managed_resource" (
   "id" INTEGER PRIMARY KEY AUTOINCREMENT CHECK ("id" IS NULL OR (typeof("id") = 'integer' AND "id" >= 0)),
   "node_id" INTEGER NOT NULL CHECK ("node_id" IS NULL OR typeof("node_id") = 'integer'),

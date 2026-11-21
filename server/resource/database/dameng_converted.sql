@@ -1,7 +1,7 @@
 -- UVP-GB28181 达梦 DM8 release initialization script
 -- Generated from the development schema by
 -- server/resource/database/baseline/generate_sql.py. Do not edit by hand.
--- Schema fingerprint: a5cf4560e5db23ea398965802ee75465b3e7a2c85f48a4c5e61916538dde7729
+-- Schema fingerprint: affb01a6f4442ee7d49c565b25edc29849deb559cac515cdfd472ec056bc11fa
 -- Contains production table structures and release baseline data only.
 
 -- 方言差异（由 profile 消化，阅读时注意）：
@@ -641,6 +641,7 @@ CREATE TABLE "gb_device" (
   "name" VARCHAR(765) NOT NULL DEFAULT '',
   "alias" VARCHAR(765) NOT NULL DEFAULT '',
   "device_type" VARCHAR(48) NOT NULL DEFAULT 'ipc',
+  "talk_audio_codec" VARCHAR(48) NOT NULL DEFAULT 'pcma',
   "password" VARCHAR(765) NOT NULL DEFAULT '',
   "transport" VARCHAR(24) NOT NULL DEFAULT '',
   "manufacturer" VARCHAR(765) NOT NULL DEFAULT '',
@@ -686,6 +687,7 @@ COMMENT ON COLUMN "gb_device"."device_id" IS '20位国标编码';
 COMMENT ON COLUMN "gb_device"."name" IS '设备名称';
 COMMENT ON COLUMN "gb_device"."alias" IS '用户自定义别名(用户可编辑,不被设备上报覆盖)';
 COMMENT ON COLUMN "gb_device"."device_type" IS '设备类型 ipc/nvr/platform(用户维护)';
+COMMENT ON COLUMN "gb_device"."talk_audio_codec" IS '对讲音频编码 pcma/pcmu(用户维护)';
 COMMENT ON COLUMN "gb_device"."password" IS '按设备独立密码(本期用统一密码,留空)';
 COMMENT ON COLUMN "gb_device"."transport" IS '传输模式 UDP/TCP';
 COMMENT ON COLUMN "gb_device"."manufacturer" IS '厂商';
@@ -2081,6 +2083,7 @@ CREATE TABLE "gb_talk_session" (
   "openapi_idempotency_key" VARCHAR(384),
   "openapi_request_hash" VARCHAR(192) NOT NULL DEFAULT '',
   "mode" VARCHAR(48) NOT NULL DEFAULT 'talk',
+  "audio_codec" VARCHAR(48) NOT NULL DEFAULT 'pcma',
   "broadcast_sn" BIGINT NOT NULL DEFAULT 0,
   "broadcast_reply_status" VARCHAR(96) NOT NULL DEFAULT '',
   "signal_phase" VARCHAR(120) NOT NULL DEFAULT '',
@@ -2121,6 +2124,7 @@ CREATE TABLE "gb_talk_session" (
   CONSTRAINT "gb_talk_session__uk_talk_session_ssrc_key" UNIQUE ("ssrc_key")
 );
 COMMENT ON TABLE "gb_talk_session" IS 'GB28181 语音对讲会话历史';
+COMMENT ON COLUMN "gb_talk_session"."audio_codec" IS '对讲会话音频编码 pcma/pcmu';
 CREATE INDEX "gb_talk_session__idx_talk_session_broadcast_match" ON "gb_talk_session" ("device_id", "target_id", "state");
 CREATE INDEX "gb_talk_session__idx_talk_session_broadcast_sn" ON "gb_talk_session" ("broadcast_sn");
 CREATE INDEX "gb_talk_session__idx_talk_session_call_id" ON "gb_talk_session" ("call_id");

@@ -1,7 +1,7 @@
 -- UVP-GB28181 SQL Server release initialization script
 -- Generated from the development schema by
 -- server/resource/database/baseline/generate_sql.py. Do not edit by hand.
--- Schema fingerprint: a5cf4560e5db23ea398965802ee75465b3e7a2c85f48a4c5e61916538dde7729
+-- Schema fingerprint: affb01a6f4442ee7d49c565b25edc29849deb559cac515cdfd472ec056bc11fa
 -- Contains production table structures and release baseline data only.
 
 -- 方言差异（由 profile 消化，阅读时注意）：
@@ -666,6 +666,7 @@ BEGIN
     [name] NVARCHAR(255) NOT NULL DEFAULT N'',
     [alias] NVARCHAR(255) NOT NULL DEFAULT N'',
     [device_type] NVARCHAR(16) NOT NULL DEFAULT N'ipc',
+    [talk_audio_codec] NVARCHAR(16) NOT NULL DEFAULT N'pcma',
     [password] NVARCHAR(255) NOT NULL DEFAULT N'',
     [transport] NVARCHAR(8) NOT NULL DEFAULT N'',
     [manufacturer] NVARCHAR(255) NOT NULL DEFAULT N'',
@@ -2257,6 +2258,7 @@ BEGIN
     [openapi_idempotency_key] NVARCHAR(128),
     [openapi_request_hash] NVARCHAR(64) NOT NULL DEFAULT N'',
     [mode] NVARCHAR(16) NOT NULL DEFAULT N'talk',
+    [audio_codec] NVARCHAR(16) NOT NULL DEFAULT N'pcma',
     [broadcast_sn] BIGINT NOT NULL DEFAULT 0,
     [broadcast_reply_status] NVARCHAR(32) NOT NULL DEFAULT N'',
     [signal_phase] NVARCHAR(40) NOT NULL DEFAULT N'',

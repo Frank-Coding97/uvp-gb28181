@@ -6,7 +6,7 @@
     "live_table_count": 118,
     "included_table_count": 117,
     "excluded_table_count": 20,
-    "schema_fingerprint": "a5cf4560e5db23ea398965802ee75465b3e7a2c85f48a4c5e61916538dde7729",
+    "schema_fingerprint": "affb01a6f4442ee7d49c565b25edc29849deb559cac515cdfd472ec056bc11fa",
     "policy_rev": 1
   },
   "excluded_tables": {
@@ -4620,6 +4620,15 @@
           "default": "ipc",
           "extra": "",
           "comment": "设备类型 ipc/nvr/platform(用户维护)",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "talk_audio_codec",
+          "type": "varchar(16)",
+          "nullable": false,
+          "default": "pcma",
+          "extra": "",
+          "comment": "对讲音频编码 pcma/pcmu(用户维护)",
           "collation": "utf8mb4_general_ci"
         },
         {
@@ -15965,6 +15974,15 @@
           "default": "talk",
           "extra": "",
           "comment": "",
+          "collation": "utf8mb4_general_ci"
+        },
+        {
+          "name": "audio_codec",
+          "type": "varchar(16)",
+          "nullable": false,
+          "default": "pcma",
+          "extra": "",
+          "comment": "对讲会话音频编码 pcma/pcmu",
           "collation": "utf8mb4_general_ci"
         },
         {

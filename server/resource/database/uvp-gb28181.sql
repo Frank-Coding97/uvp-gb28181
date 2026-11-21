@@ -1,7 +1,7 @@
 -- UVP-GB28181 MySQL 8.0 release initialization script
 -- Generated from the development schema (8.0.46) by
 -- server/resource/database/baseline/generate_sql.py. Do not edit by hand.
--- Schema fingerprint: a5cf4560e5db23ea398965802ee75465b3e7a2c85f48a4c5e61916538dde7729
+-- Schema fingerprint: affb01a6f4442ee7d49c565b25edc29849deb559cac515cdfd472ec056bc11fa
 -- Contains production table structures and release baseline data only.
 -- Excludes demo content and all environment-specific device, media-node,
 -- SIP, cascade, alarm, trace, and operation data.
@@ -580,6 +580,7 @@ CREATE TABLE `gb_device` (
   `name` varchar(255) NOT NULL DEFAULT '' COMMENT '设备名称',
   `alias` varchar(255) NOT NULL DEFAULT '' COMMENT '用户自定义别名(用户可编辑,不被设备上报覆盖)',
   `device_type` varchar(16) NOT NULL DEFAULT 'ipc' COMMENT '设备类型 ipc/nvr/platform(用户维护)',
+  `talk_audio_codec` varchar(16) NOT NULL DEFAULT 'pcma' COMMENT '对讲音频编码 pcma/pcmu(用户维护)',
   `password` varchar(255) NOT NULL DEFAULT '' COMMENT '按设备独立密码(本期用统一密码,留空)',
   `transport` varchar(8) NOT NULL DEFAULT '' COMMENT '传输模式 UDP/TCP',
   `manufacturer` varchar(255) NOT NULL DEFAULT '' COMMENT '厂商',
@@ -1986,6 +1987,7 @@ CREATE TABLE `gb_talk_session` (
   `openapi_idempotency_key` varchar(128) NULL,
   `openapi_request_hash` varchar(64) NOT NULL DEFAULT '',
   `mode` varchar(16) NOT NULL DEFAULT 'talk',
+  `audio_codec` varchar(16) NOT NULL DEFAULT 'pcma' COMMENT '对讲会话音频编码 pcma/pcmu',
   `broadcast_sn` bigint unsigned NOT NULL DEFAULT 0,
   `broadcast_reply_status` varchar(32) NOT NULL DEFAULT '',
   `signal_phase` varchar(40) NOT NULL DEFAULT '',
