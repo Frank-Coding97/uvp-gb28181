@@ -35,6 +35,8 @@ type recordingUpgradeRPC struct {
 	watch       *upgrade.UpdateWatchState
 	onlineCheck bool
 	statusErr   error
+	// transfer 是助手侧（内存里）的下载字节快照，用来验证它会被原样透出。
+	transfer *upgrade.TaskTransferProgress
 }
 
 func (f *recordingUpgradeRPC) Call(_ context.Context, _ string, request upgrade.ProtocolRequest) (upgrade.ProtocolResponse, error) {
@@ -47,7 +49,7 @@ func (f *recordingUpgradeRPC) Call(_ context.Context, _ string, request upgrade.
 		}
 		response.Status = &upgrade.ControlStatus{
 			Deployment: "standalone", Tasks: []upgrade.TaskRecord{f.task}, ActiveTask: &f.task,
-			OnlineCheck: f.onlineCheck, UpdateCheck: f.watch,
+			OnlineCheck: f.onlineCheck, UpdateCheck: f.watch, Transfer: f.transfer,
 		}
 	case upgrade.ActionCheck:
 		response.Check = &upgrade.ControlCheckResult{CurrentVersion: "1.1.0", HasUpdate: true, Artifact: upgrade.Artifact{Filename: "uvp.tar.gz"}}
@@ -381,4 +383,55 @@ func TestProductionUpgradeStatusUsesHelperOnlineCapability(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
 	require.False(t, payload.Data.Capabilities.OnlineCheck)
+}
+
+func TestProductionUpgradeStatusExposesDownloadTransfer(t *testing.T) {
+	root := t.TempDir()
+	taskID := strings.Repeat("c", 32)
+	fixture := &recordingUpgradeRPC{
+		task: upgrade.TaskRecord{TaskID: taskID, Phase: upgrade.PhaseFetching},
+		transfer: &upgrade.TaskTransferProgress{
+			TaskID: taskID, DownloadedBytes: 41 << 20, TotalBytes: 99 << 20,
+			UpdatedAt: "2026-11-21T08:10:00Z",
+		},
+	}
+	controller := newServiceUpgradeController(serviceUpgradeOptions{VersionPath: filepath.Join(root, "version.json"), RPC: fixture})
+	oldResponse, oldLog := app.Response, app.ZapLog
+	app.Response, app.ZapLog = response.NewResponseHandler(), zap.NewNop()
+	t.Cleanup(func() { app.Response, app.ZapLog = oldResponse, oldLog })
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/system/upgrade/status", nil)
+
+	controller.Status(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var payload struct {
+		Data struct {
+			Transfer *upgrade.TaskTransferProgress `json:"transfer"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
+	require.NotNil(t, payload.Data.Transfer)
+	require.Equal(t, taskID, payload.Data.Transfer.TaskID)
+	require.EqualValues(t, 41<<20, payload.Data.Transfer.DownloadedBytes)
+	require.EqualValues(t, 99<<20, payload.Data.Transfer.TotalBytes)
+}
+
+// 老助手不报字节时必须保持字段缺席，页面才知道要退回「不确定进度」。
+func TestProductionUpgradeStatusOmitsTransferWhenHelperHasNone(t *testing.T) {
+	root := t.TempDir()
+	fixture := &recordingUpgradeRPC{task: upgrade.TaskRecord{TaskID: strings.Repeat("c", 32), Phase: upgrade.PhaseFetching}}
+	controller := newServiceUpgradeController(serviceUpgradeOptions{VersionPath: filepath.Join(root, "version.json"), RPC: fixture})
+	oldResponse, oldLog := app.Response, app.ZapLog
+	app.Response, app.ZapLog = response.NewResponseHandler(), zap.NewNop()
+	t.Cleanup(func() { app.Response, app.ZapLog = oldResponse, oldLog })
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/system/upgrade/status", nil)
+
+	controller.Status(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.NotContains(t, recorder.Body.String(), `"transfer"`)
 }

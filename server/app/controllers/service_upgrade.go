@@ -310,7 +310,7 @@ func (c *ServiceUpgradeController) Status(ctx *gin.Context) {
 			version["build_id"] = status.CurrentBuildID
 		}
 		_, updaterErr := os.Stat(c.updaterSocket())
-		c.Success(ctx, gin.H{
+		payload := gin.H{
 			"current":                 version,
 			"deployment":              status.Deployment,
 			"releaseSourceConfigured": status.ReleaseSourceConfigured,
@@ -318,7 +318,13 @@ func (c *ServiceUpgradeController) Status(ctx *gin.Context) {
 			"activeTask":              publicUpgradeTask(status.ActiveTask),
 			"tasks":                   publicUpgradeTasks(status.Tasks),
 			"events":                  status.Events,
-		})
+		}
+		// 下载字节数只做展示。老助手不报这块时**整个键都不下发**，
+		// 页面据此退回「不确定进度」的流动条，而不是显示 0%。
+		if status.Transfer != nil {
+			payload["transfer"] = status.Transfer
+		}
+		c.Success(ctx, payload)
 		return
 	}
 	store, err := c.ensureStore()

@@ -54,6 +54,12 @@ type ControlService struct {
 	prepareMu  sync.Mutex
 	sequenceMu sync.Mutex
 
+	// transfer is the in-memory download snapshot for the active preparation
+	// task. See transfer.go: it must stay out of TaskRecord so that rolling back
+	// to an older helper cannot break the durable task index.
+	transferMu sync.Mutex
+	transfer   *TaskTransferProgress
+
 	workerMu       sync.Mutex
 	prepareCancel  context.CancelFunc
 	prepareWake    chan struct{}
@@ -87,6 +93,10 @@ type ControlStatus struct {
 	ActiveTask              *TaskRecord    `json:"active_task,omitempty"`
 	Tasks                   []TaskRecord   `json:"tasks"`
 	Events                  []UpgradeEvent `json:"events"`
+	// Transfer carries byte-level download progress for ActiveTask. It is
+	// optional and cosmetic: older helpers simply omit it, and older business
+	// processes ignore it because the response decoder is tolerant.
+	Transfer *TaskTransferProgress `json:"transfer,omitempty"`
 	// UpdateCheck is the last background probe result. It is absent when the
 	// helper has never completed a check, which is not an error.
 	UpdateCheck *UpdateWatchState `json:"update_check,omitempty"`
@@ -201,6 +211,9 @@ func (s *ControlService) Status(ctx context.Context) (ControlStatus, error) {
 		Events:                  events,
 		ActiveTask:              activeTaskRecord(records),
 	}
+	if status.ActiveTask != nil {
+		status.Transfer = s.TransferFor(status.ActiveTask.TaskID)
+	}
 	if s != nil && s.UpdateWatch != nil {
 		if snapshot := s.UpdateWatch.Snapshot(); !snapshot.CheckedAt.IsZero() {
 			status.UpdateCheck = &snapshot
@@ -296,7 +309,7 @@ func (s *ControlService) PrepareOnlineRelease(ctx context.Context, manifest Mani
 	} else if !errors.Is(findErr, errControlStagedArtifactNotFound) {
 		return StagedArtifact{}, findErr
 	}
-	if err := s.downloadArtifact(ctx, manifest, artifact); err != nil {
+	if err := s.downloadArtifact(ctx, "", manifest, artifact); err != nil {
 		return StagedArtifact{}, err
 	}
 	staged, err := s.findStagedArtifact(artifact.SHA256)
@@ -557,7 +570,7 @@ func (s *ControlService) prepareCreatedTask(ctx context.Context, taskID string) 
 		}
 		return
 	}
-	staged, source, err := s.prepareArtifact(ctx, record.TargetDigest, preflight)
+	staged, source, err := s.prepareArtifact(ctx, taskID, record.TargetDigest, preflight)
 	if err != nil {
 		if !controlWorkerCanceled(ctx, err) {
 			s.failPendingTask(taskID, err)
@@ -747,7 +760,7 @@ func (s *ControlService) nextPreparationTask() (string, bool) {
 	return "", false
 }
 
-func (s *ControlService) prepareArtifact(ctx context.Context, digest string, preflight PreflightSnapshot) (StagedArtifact, string, error) {
+func (s *ControlService) prepareArtifact(ctx context.Context, taskID, digest string, preflight PreflightSnapshot) (StagedArtifact, string, error) {
 	staged, err := s.findStagedArtifact(digest)
 	if err == nil {
 		verified, verifyErr := s.verifyStagedArtifact(ctx, staged, digest, s.StagingRoot, preflight)
@@ -770,7 +783,7 @@ func (s *ControlService) prepareArtifact(ctx context.Context, digest string, pre
 	if err := validateReleaseUpgrade(manifest, preflight.CurrentVersion); err != nil {
 		return StagedArtifact{}, "", err
 	}
-	if err := s.downloadArtifact(ctx, manifest, artifact); err != nil {
+	if err := s.downloadArtifact(ctx, taskID, manifest, artifact); err != nil {
 		return StagedArtifact{}, "", err
 	}
 	staged, err = s.findStagedArtifact(digest)
@@ -1008,7 +1021,7 @@ type controlSequenceState struct {
 	Digest   string `json:"digest"`
 }
 
-func (s *ControlService) downloadArtifact(ctx context.Context, manifest Manifest, artifact Artifact) error {
+func (s *ControlService) downloadArtifact(ctx context.Context, taskID string, manifest Manifest, artifact Artifact) error {
 	if len(manifest.Envelope) == 0 {
 		return errors.New("verified manifest envelope is required before staging an online artifact")
 	}
@@ -1024,7 +1037,15 @@ func (s *ControlService) downloadArtifact(ctx context.Context, manifest Manifest
 		_ = temporary.Close()
 		_ = os.Remove(temporaryPath)
 	}()
-	if _, err := DownloadArtifactWithRedirects(ctx, s.HTTPClient, artifact, temporary, DefaultReleaseRedirectHosts); err != nil {
+	// Byte-level progress is best effort and stays in memory; it must never
+	// change what the download itself does or writes.
+	reporter := s.beginTransfer(taskID, artifact.Size)
+	dst := io.Writer(temporary)
+	if reporter != nil {
+		dst = &transferWriter{dst: temporary, reporter: reporter}
+		defer reporter.Finish()
+	}
+	if _, err := DownloadArtifactWithRedirects(ctx, s.HTTPClient, artifact, dst, DefaultReleaseRedirectHosts); err != nil {
 		return err
 	}
 	if err := temporary.Sync(); err != nil {
