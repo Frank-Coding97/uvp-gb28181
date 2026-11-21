@@ -320,3 +320,31 @@ func automaticPreflightForTest() PreflightSnapshot {
 		MigrationDigest: strings.Repeat("a", 64),
 	}
 }
+
+// 侧边栏徽标的「还有没有更新」用运行中的版本重算：口径必须与 Check 里的
+// isNewerRelease 一致，且任何一侧版本号解析不了都要显式告诉调用方「别拿这个结论」。
+func TestHasNewerReleaseMatchesCheckSemantics(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		latest  string
+		current string
+		want    bool
+		ok      bool
+	}{
+		{"升级后已追平", "1.1.25", "1.1.25", false, true},
+		{"确实有新版本", "1.2.0", "1.1.25", true, true},
+		{"回滚到旧版会重新提示", "1.1.25", "1.1.24", true, true},
+		{"版本更高时不该提示", "1.1.24", "1.1.25", false, true},
+		{"rc 排在同一正式版之前", "1.2.0", "1.2.0-rc.2", true, true},
+		{"空白会被裁掉", " 1.2.0 ", "1.1.0", true, true},
+		{"dev 构建不参与判定", "1.2.0", "dev", false, false},
+		{"latest 缺失不参与判定", "", "1.1.0", false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, ok := HasNewerRelease(test.latest, test.current)
+			if ok != test.ok || got != test.want {
+				t.Fatalf("HasNewerRelease(%q, %q) = (%v, %v), want (%v, %v)", test.latest, test.current, got, ok, test.want, test.ok)
+			}
+		})
+	}
+}

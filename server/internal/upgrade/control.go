@@ -1215,6 +1215,22 @@ func isNewerRelease(manifest Manifest, current string) bool {
 	return current == "" || (manifest.Version != current && IsVersionAtLeast(manifest.Version, current))
 }
 
+// HasNewerRelease 用「运行中的版本」重算还有没有更新，给侧边栏徽标用。
+//
+// 助手缓存里的 has_update 是**上次探测那一刻**的结论；升级装完、业务端换成新包
+// 之后，那份缓存要等下一轮探测（最长 15 分钟）才会改口。所以读徽标时得拿磁盘上
+// 的版本重算一次，否则「升级成功」和「菜单还挂着新版本」会同时出现。
+//
+// 第二个返回值为 false 表示两侧有版本号解析不了（dev 构建、被改坏的文件等）：
+// 调用方必须保留缓存里的结论 —— 宁可多提醒一次，也不要因为解析失败把徽标吞掉。
+func HasNewerRelease(latest, current string) (bool, bool) {
+	latest, current = strings.TrimSpace(latest), strings.TrimSpace(current)
+	if !isSupportedVersion(latest) || !isSupportedVersion(current) {
+		return false, false
+	}
+	return latest != current && compareVersions(latest, current) > 0, true
+}
+
 func validateReleaseUpgrade(manifest Manifest, current string) error {
 	if current == "" {
 		return errors.New("current release version is missing")

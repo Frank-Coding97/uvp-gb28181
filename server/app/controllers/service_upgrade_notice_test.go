@@ -209,3 +209,37 @@ func TestSetAutoCheckRejectsMissingValue(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 	require.NoFileExists(t, filepath.Join(stateRoot, upgrade.AutoCheckPreferenceFilename))
 }
+
+// 升级装完之后，助手缓存里的 has_update 还是「上次探测时」的结论；徽标必须按
+// 磁盘上的当前版本重算，否则「升级成功」和「菜单还挂着新版本」会同时出现，
+// 而且要等助手下一轮探测（最长 15 分钟）才肯消失。
+func TestUpgradeNoticeDropsBadgeOnceRunningVersionCatchesUp(t *testing.T) {
+	controller, fixture, _ := newNoticeFixture(t)
+	fixture.onlineCheck = true
+	// 助手缓存停在升级前：当时确实有 1.2.0。
+	fixture.watch = &upgrade.UpdateWatchState{
+		CheckedAt: time.Now().Add(-20 * time.Minute), CurrentVersion: "1.1.0", LatestVersion: "1.2.0", HasUpdate: true,
+	}
+	// 升级已落地：磁盘上的版本就是 1.2.0。
+	require.NoError(t, os.WriteFile(controller.versionPath, []byte(`{"name":"uvp-gb28181","version":"1.2.0"}`), 0600))
+
+	payload := noticePayload(t, callNotice(t, controller, http.MethodGet, "/api/system/upgrade/notice", nil))
+
+	require.Equal(t, false, payload["hasUpdate"])
+	require.Equal(t, "1.2.0", payload["currentVersion"])
+	require.Equal(t, "1.2.0", payload["latestVersion"])
+}
+
+// 版本号解析不了时（dev 构建、文件被改坏）不能拿 false 当结论，否则徽标会被
+// 悄悄吞掉。此时必须保留助手缓存里的判断。
+func TestUpgradeNoticeKeepsCachedResultForUnreadableLiveVersion(t *testing.T) {
+	controller, fixture, _ := newNoticeFixture(t)
+	fixture.onlineCheck = true
+	fixture.watch = &upgrade.UpdateWatchState{CheckedAt: time.Now(), CurrentVersion: "1.1.0", LatestVersion: "1.2.0", HasUpdate: true}
+	require.NoError(t, os.WriteFile(controller.versionPath, []byte(`{"name":"uvp-gb28181","version":"dev"}`), 0600))
+
+	payload := noticePayload(t, callNotice(t, controller, http.MethodGet, "/api/system/upgrade/notice", nil))
+
+	require.Equal(t, true, payload["hasUpdate"])
+	require.Equal(t, "1.1.0", payload["currentVersion"])
+}

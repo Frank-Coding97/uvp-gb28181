@@ -62,7 +62,36 @@ func (c *ServiceUpgradeController) Notice(ctx *gin.Context) {
 	}
 	ignored := c.readIgnoredUpdate()
 	notice.Ignored = ignored != "" && ignored == notice.LatestVersion
+	// ⛔ 徽标要跟着升级结果立刻消失：state 里的 has_update 是上次探测时的结论，
+	// 而当前版本刚刚变了（升级装完、业务端已换成新包）。用磁盘上的版本重算，
+	// 否则「升级成功」之后菜单还要挂着新版本提示，直到助手下一轮探测。
+	// 版本号解析不了时 HasNewerRelease 返回 ok=false，此时保留缓存的结论。
+	if live := c.liveVersion(); live != "" {
+		if hasUpdate, ok := upgrade.HasNewerRelease(notice.LatestVersion, live); ok {
+			notice.CurrentVersion = live
+			notice.HasUpdate = hasUpdate
+		}
+	}
 	c.Success(ctx, notice)
+}
+
+// liveVersion 读部署里 version.json 的版本号。升级落地的那一刻这个文件就已经
+// 是新版本了，而助手缓存里的 current_version 还停在探测时那一刻。
+func (c *ServiceUpgradeController) liveVersion() string {
+	if c == nil {
+		return ""
+	}
+	data, err := os.ReadFile(c.versionPath)
+	if err != nil {
+		return ""
+	}
+	var loaded struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(loaded.Version)
 }
 
 // IgnoreNotice hides the badge for the release currently offered. It refuses
