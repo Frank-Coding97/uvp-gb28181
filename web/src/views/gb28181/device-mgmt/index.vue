@@ -1028,8 +1028,16 @@ function keepaliveIntervalText(seconds?: number) {
   const s = seconds % 60;
   return s === 0 ? `${m} 分钟` : `${m} 分 ${s} 秒`;
 }
-function showDeviceChannels(record: DeviceVO) {
-  if (!canViewDevices.value) return;
+/**
+ * 进入「某台设备的通道」之前统一做两件事：记住设备列表现场、清掉列表残留的搜索/状态筛选。
+ *
+ * ⛔ 卡片/表格入口和左侧设备树入口必须共用这一份 —— 只给卡片入口留快照，两条路的表现就不一样：
+ * 卡片入口顶部是「所属设备: xxx ←（返回设备列表）」，点一下原样回到刚才那一页（页码、目录、
+ * 关键词、状态筛选全在）；树入口没有快照，顶部只剩一个 X「清除所属设备筛选」，点下去等于把
+ * 页码和筛选一起清空，用户回不到进入前的现场。同理，`hasFilters` 把「有待返回快照的
+ * deviceIdFilter」排除在外，所以清干净以后也不会冒出那个「清除筛选」按钮。
+ */
+function prepareDeviceChannelDrilldown() {
   if (assetKind.value === "device") {
     deviceListReturnSnapshot.value = {
       assetKind: assetKind.value,
@@ -1053,10 +1061,14 @@ function showDeviceChannels(record: DeviceVO) {
       selectedRowKeys: [...selectedRowKeys.value]
     };
   }
-  drawerVisible.value = false;
   setKeywordWithoutSearch("");
   statusFilter.value = undefined;
   assetKind.value = "channel";
+}
+function showDeviceChannels(record: DeviceVO) {
+  if (!canViewDevices.value) return;
+  prepareDeviceChannelDrilldown();
+  drawerVisible.value = false;
   onDeviceSelect(record);
 }
 async function returnToDeviceList() {
@@ -1118,7 +1130,9 @@ function onDeviceSelect(device: DeviceVO | null) {
 }
 async function onDirectoryDeviceSelect(device: DirectoryDevice) {
   if (!canViewDevices.value) return;
-  assetKind.value = "channel";
+  // 和设备卡片双击「进入通道」走同一份准备逻辑（留返回快照 + 清列表残留筛选），
+  // 顶层筛选条才会是「所属设备: xxx ←」而不是一个 X「清除所属设备筛选」。
+  prepareDeviceChannelDrilldown();
   const requestVersion = ++directoryDeviceRequestVersion;
   navigationMode.value = "device";
   selectedDevice.value = null;

@@ -936,6 +936,51 @@ describe("device-mgmt round-2 修复回归", () => {
     wrapper.unmount();
   });
 
+  it("从左侧设备树进入通道与卡片入口一致：给的是返回原设备列表，不是清除筛选", async () => {
+    api.listDevices.mockResolvedValue(
+      okList(150, [
+        {
+          id: 31,
+          deviceId: "34020000002000000031",
+          name: "园区 NVR",
+          online: true,
+          status: 1,
+          channelCount: 4,
+          channelOnlineCount: 3
+        }
+      ])
+    );
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get('[data-testid="select-online"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-testid="go-page-10"]').trigger("click");
+    await flushPromises();
+
+    wrapper.findComponent({ name: "DirectoryPanel" }).vm.$emit("deviceSelect", {
+      id: 31,
+      name: "园区 NVR",
+      alias: "",
+      deviceId: "34020000002000000031",
+      online: true
+    });
+    await flushPromises();
+
+    // 与设备卡片双击进入后同一套界面：能返回原页，而不是一个会把页码和筛选一起清掉的 X。
+    expect(wrapper.find('[aria-label="返回设备列表"]').exists()).toBe(true);
+    expect(wrapper.find('[aria-label="清除所属设备筛选"]').exists()).toBe(false);
+    expect(wrapper.find(".clear-all").exists()).toBe(false);
+    expect(api.listChannels.mock.calls.at(-1)?.[0]).toMatchObject({ deviceId: "34020000002000000031" });
+
+    await wrapper.get('.filter-chips [aria-label="返回设备列表"]').trigger("click");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(500);
+    await flushPromises();
+    expect(wrapper.get('[data-asset-kind="device"]').classes()).toContain("active");
+    expect(lastDevicePageRequest()).toMatchObject({ status: "online", page: 10, pageSize: 12 });
+    wrapper.unmount();
+  });
+
   it("clearing channel filters after device drilldown returns to the original device page", async () => {
     api.listDevices.mockResolvedValue(
       okList(150, [{ id: 31, deviceId: "34020000002000000031", name: "园区 NVR", online: true }])
@@ -1313,7 +1358,11 @@ describe("device-mgmt round-2 修复回归", () => {
         : Promise.resolve(okList(1, [{ id: 2, channelId: "new-channel", name: "全部通道结果" }]))
     );
     await wrapper.get('[data-testid="select-device-a"]').trigger("click");
-    await wrapper.get('[aria-label="清除所属设备筛选"]').trigger("click");
+    // 从设备树进入设备通道后，顶部是「返回设备列表」而不是 X；切到「设备」再切回「通道」
+    // 才是换一次 scope（此时 assetKind 已经是 channel，直接点通道页签是空操作）。
+    await wrapper.get('[data-asset-kind="device"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-asset-kind="channel"]').trigger("click");
     await flushPromises();
     resolveOld(okList(1, [{ id: 1, channelId: "old-channel", name: "迟到的设备通道" }]));
     await flushPromises();
@@ -1348,7 +1397,11 @@ describe("device-mgmt round-2 修复回归", () => {
     await flushPromises();
     expect(api.listChannels).toHaveBeenLastCalledWith(expect.objectContaining({ deviceId: "34020000002000000031" }));
     expect(api.listChannels.mock.calls.at(-1)?.[0].directoryKey).toBeUndefined();
-    await wrapper.get('[aria-label="清除所属设备筛选"]').trigger("click");
+    // 设备树入口现在和卡片入口一致：顶部是「返回设备列表」。放弃设备口径要切「设备」页签，
+    // 再切回「通道」——此时 assetKind 已是 channel，直接点通道页签不会触发重新加载。
+    await wrapper.get('[data-asset-kind="device"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-asset-kind="channel"]').trigger("click");
     await flushPromises();
     expect(api.listChannels.mock.calls.some(([params]) => !params.deviceId && !params.directoryKey && !params.status)).toBe(true);
     wrapper.unmount();
