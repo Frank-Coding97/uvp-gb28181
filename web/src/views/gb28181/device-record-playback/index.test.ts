@@ -358,17 +358,31 @@ describe("device record playback workspace", () => {
   });
 
   it("uses the device-list search panel language for the query area", () => {
-    expect(playbackPageSource).toContain("background: var(--uvp-search-panel-bg);");
-    expect(playbackPageSource).toContain("border: 1px solid var(--uvp-list-panel-border);");
-    expect(playbackPageSource).toContain("border-radius: var(--uvp-panel-radius);");
-    expect(playbackPageSource).toContain("box-shadow: var(--uvp-search-panel-shadow);");
+    // 查询条件已从顶部 query-bar 搬进「录像段」面板：控件皮肤仍与设备列表的搜索区同源。
     expect(
-      hasRuleBlock(playbackPageSource, ".channel-context", "display: flex", "align-items: center", "gap: 9px", "min-width: 260px")
+      hasRuleBlock(playbackPageSource, ".segment-query", "display: flex", "flex-direction: column", "padding: 8px 10px")
+    ).toBe(true);
+    expect(playbackPageSource).toContain("background: var(--uvp-search-control-bg) !important;");
+    expect(playbackPageSource).toContain("border: 1px solid var(--uvp-search-secondary-btn-border) !important;");
+    expect(playbackPageSource).toContain("box-shadow: var(--uvp-search-control-focus-shadow) !important;");
+    // 左栏无边界：不画自己的底色，直接透出页面背景（与设备列表的 .directory-panel 同构）
+    expect(
+      hasRuleBlock(
+        playbackPageSource,
+        ".channel-panel",
+        "background: transparent",
+        "border-right: 1px solid var(--uvp-panel-border)"
+      )
     ).toBe(true);
   });
 
   it("aligns and rounds the query, playback, and timeline regions", () => {
-    expect(hasRuleBlock(playbackPageSource, ".query-bar", "min-height: 72px", "margin: 0 8px 10px")).toBe(true);
+    // 顶部那条 query-bar 已整块去掉：整页跟「设备列表」一样贴窗口边，
+    // 只有右侧工作区自己留 12px（树贴边 = 老板要的观感）。
+    expect(hasRuleBlock(playbackPageSource, ".record-playback-page", "height: 100%", "padding: 0")).toBe(true);
+    expect(hasRuleBlock(playbackPageSource, ".record-playback-layout", "display: flex", "height: 100%", "padding: 0")).toBe(true);
+    expect(hasRuleBlock(playbackPageSource, ".playback-workspace", "padding: 12px 12px 0")).toBe(true);
+    expect(playbackPageSource).not.toContain("min-height: 72px");
     expect(
       hasRuleBlock(
         playbackPageSource,
@@ -377,7 +391,7 @@ describe("device record playback workspace", () => {
         "grid-template-columns: minmax(0, 1fr) 312px",
         "flex: 1",
         "min-height: 0",
-        "margin: 0 8px"
+        "margin: 0"
       )
     ).toBe(true);
     expect(
@@ -395,7 +409,7 @@ describe("device record playback workspace", () => {
         playbackPageSource,
         ".timeline-panel",
         "flex: none",
-        "margin: 10px 8px 12px",
+        "margin: 10px 0 12px",
         "border-radius: var(--uvp-panel-radius)",
         "overflow: hidden"
       )
@@ -421,13 +435,12 @@ describe("device record playback workspace", () => {
     expect(playbackPageSource).not.toContain("box-shadow: inset 3px 0 0 var(--uvp-brand)");
   });
 
-  it("returns to the dynamic device management route with its saved state key", async () => {
-    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
-    await wrapper.get('[aria-label="返回设备管理"]').trigger("click");
-    expect(api.routerPush).toHaveBeenCalledWith({
-      name: "device-mgmt-list",
-      query: { returnKey: "return-key" }
-    });
+  // 2026-11-21：顶部 query-bar 整体移除，其中的「返回设备管理」按钮一并删掉
+  // （页面是独立菜单页，回设备列表走顶部页签）。这里补一条反向断言，防止有人
+  // 又把一个孤零零的返回按钮塞回播放区顶上。
+  it("不再渲染顶部 query-bar 与返回按钮", () => {
+    expect(playbackPageSource).not.toContain("返回设备管理");
+    expect(playbackPageSource).not.toContain('class="query-bar"');
   });
 
   it("cleans up the session with the channel it was created on", () => {
@@ -473,9 +486,11 @@ describe("device record playback workspace", () => {
     await flushPromises();
 
     expect(api.getRecordQueryOptions).not.toHaveBeenCalled();
-    expect(wrapper.text()).toContain("未选择通道");
-    expect(wrapper.text()).toContain("从左侧通道树选择一路通道");
-    // 没有通道就没有查询条件，查询按钮不该出现
+    // 顶部 query-bar 删掉后，"请先选通道"落在播放区空态与录像段面板里，
+    // 通道名/在线状态交给左侧设备树（那边本来就有）。
+    expect(wrapper.text()).toContain("从左侧设备树选择一路通道");
+    // 没有通道就没有查询条件：查询区整块不渲染
+    expect(wrapper.find('[data-testid="playback-query-bar"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="record-query-submit"]').exists()).toBe(false);
   });
 

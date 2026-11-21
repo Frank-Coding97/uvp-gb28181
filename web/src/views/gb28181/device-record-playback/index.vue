@@ -2,8 +2,6 @@
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
-  ArrowLeft,
-  CalendarRange,
   CircleAlert,
   Clock3,
   Download,
@@ -11,7 +9,6 @@ import {
   LoaderCircle,
   Pause,
   Play,
-  RotateCcw,
   Search,
   Square,
   Video,
@@ -62,12 +59,9 @@ import {
   type PlaybackActionRequest,
   type PlaybackSession
 } from "./api";
-import { useDeviceStatusLabel } from "../useDeviceStatusDict";
 
 const route = useRoute();
 const router = useRouter();
-/** 设备在线状态文案（`device_status` 字典）。 */
-const deviceStatusLabel = useDeviceStatusLabel();
 // 当前通道：优先取路由参数（设备列表点进来、老书签），其次取 ?channel=（录像中心菜单点进来）。
 // 之后由左侧设备树切换 —— 树只改这个 ref，不再走路由，避免整页重新挂载把树的状态也重置掉。
 // 解析见 parsePlaybackChannelId：0 表示还没选通道，页面显示「从左侧选择通道」。
@@ -686,18 +680,6 @@ async function switchChannel(channel: { id?: number } | null) {
   await loadOptions();
 }
 
-function goBack() {
-  const registeredRoutes = router.getRoutes();
-  const target =
-    registeredRoutes.find((item: { name?: string | symbol }) => item.name === "device-mgmt-list") ??
-    registeredRoutes.find((item: { name?: string | symbol }) => item.name === "device-mgmt");
-  if (!target?.name) {
-    router.back();
-    return;
-  }
-  router.push({ name: target.name, query: route.query.returnKey ? { returnKey: String(route.query.returnKey) } : undefined });
-}
-
 onMounted(() => {
   loadOptions();
 });
@@ -731,65 +713,6 @@ onUnmounted(() => {
           无权查询设备录像，请联系管理员分配设备录像查询权限。
         </div>
         <template v-else>
-          <header class="query-bar" data-testid="playback-query-bar">
-            <a-button class="icon-command back-command" aria-label="返回设备管理" title="返回设备管理" @click="goBack">
-              <template #icon><ArrowLeft :size="18" /></template>
-            </a-button>
-            <div class="channel-context">
-              <span class="channel-icon"><Video :size="17" /></span>
-              <div>
-                <strong>{{ options?.channel.name || (channelId ? `通道 ${channelId}` : "未选择通道") }}</strong>
-                <span v-if="options">{{ options.device.name }} · {{ options.channel.code || "--" }}</span>
-                <span v-else>{{ channelId ? "正在加载设备" : "从左侧通道树选择一路通道" }}</span>
-              </div>
-              <i v-if="options" :class="['online-indicator', { offline: !options.device.online }]">{{
-                deviceStatusLabel(options.device.online !== false)
-              }}</i>
-            </div>
-
-            <!-- ⛔ 查询栏里不要用 <label> 包 Arco 控件。label 没写 for 时浏览器会把里面
-               第一个可标注控件当成它的关联控件,于是把点击**再转发一次**;而 Arco 的下拉
-               点击目标是 view 那个 span、关联控件却是另一个隐藏的 readonly input,一次点击
-               变成两次开合 ⇒ 面板弹出来立刻就收回去。原生 select 不看重复 click,所以这个
-               坑只在换成 Arco 之后才出现。控件自身带 aria-label,语义不依赖 label。 -->
-            <div v-if="form" class="query-fields">
-              <div class="query-field time-field">
-                <span><CalendarRange :size="13" />录像时间</span>
-                <a-range-picker
-                  v-model="timeRange"
-                  class="time-picker"
-                  aria-label="录像时间范围"
-                  show-time
-                  value-format="YYYY-MM-DDTHH:mm:ss"
-                  format="YYYY-MM-DD HH:mm:ss"
-                  :allow-clear="false"
-                  :disabled="queryState === 'querying'"
-                />
-              </div>
-              <div class="query-field type-field">
-                <span>录像类型</span>
-                <a-select v-model="form.type" class="type-select" aria-label="录像类型" :disabled="queryState === 'querying'">
-                  <a-option v-for="item in recordQueryRequestTypes" :key="item.value" :value="item.value">{{
-                    item.label
-                  }}</a-option>
-                </a-select>
-              </div>
-              <a-button
-                data-testid="record-query-submit"
-                class="query-submit"
-                type="primary"
-                :loading="queryState === 'querying'"
-                :disabled="queryState === 'querying'"
-                @click="runQuery"
-              >
-                <template #icon><Search :size="15" /></template>
-                查询录像
-              </a-button>
-            </div>
-            <div v-else-if="!channelId" class="query-loading">从左侧通道树选择一路通道后可查询录像</div>
-            <div v-else class="query-loading"><LoaderCircle :size="16" class="spin" />正在加载查询条件</div>
-          </header>
-
           <main class="playback-main">
             <section class="player-column">
               <div ref="viewport" class="playback-viewport" data-testid="playback-viewport">
@@ -824,7 +747,10 @@ onUnmounted(() => {
                     <span>{{ statusText }}</span>
                   </div>
                   <CircleAlert v-else-if="playback.status === 'failed'" :size="48" aria-hidden="true" />
-                  <Videotape v-else :size="64" :stroke-width="1.35" aria-hidden="true" />
+                  <div v-else class="playback-idle-empty">
+                    <Videotape :size="64" :stroke-width="1.35" aria-hidden="true" />
+                    <span v-if="!channelId">从左侧设备树选择一路通道</span>
+                  </div>
                 </div>
                 <span class="playback-status-sr" data-testid="playback-status" aria-live="polite">{{ statusText }}</span>
                 <div v-if="downloadNotice" class="download-notice" data-testid="download-notice">
@@ -890,16 +816,48 @@ onUnmounted(() => {
                 <div>
                   <strong>录像段</strong><span>{{ querySummary }}</span>
                 </div>
-                <a-button
-                  class="icon-command"
-                  aria-label="重新查询"
-                  title="重新查询"
-                  :disabled="queryState === 'querying'"
-                  @click="runQuery"
-                >
-                  <template #icon><RotateCcw :size="14" /></template>
-                </a-button>
               </div>
+
+              <!-- 查询条件跟着结果走：录像段面板自己就是「查询 → 结果」一体的。
+                   ⛔ 这里不要用 <label> 包 Arco 控件。label 没写 for 时浏览器会把里面
+                   第一个可标注控件当成它的关联控件,于是把点击**再转发一次**;而 Arco 的下拉
+                   点击目标是 view 那个 span、关联控件却是另一个隐藏的 readonly input,一次点击
+                   变成两次开合 ⇒ 面板弹出来立刻就收回去。控件自身带 aria-label,语义不依赖 label。
+                   ⚠️ 栏宽只有 312px ⇒ 日期只显示到分钟（value-format 仍是秒级，后端要秒）。
+                       写 `YYYY-MM-DD HH:mm` 实测两段各被截成 "2026-11-21 00:…"；
+                       `MM-DD HH:mm` 才放得下，完整日期在弹出面板里仍可见。 -->
+              <div v-if="form" class="segment-query" data-testid="playback-query-bar">
+                <a-range-picker
+                  v-model="timeRange"
+                  class="time-picker"
+                  aria-label="录像时间范围"
+                  show-time
+                  value-format="YYYY-MM-DDTHH:mm:ss"
+                  format="MM-DD HH:mm"
+                  :allow-clear="false"
+                  :disabled="queryState === 'querying'"
+                />
+                <div class="segment-query-row">
+                  <a-select v-model="form.type" class="type-select" aria-label="录像类型" :disabled="queryState === 'querying'">
+                    <a-option v-for="item in recordQueryRequestTypes" :key="item.value" :value="item.value">{{
+                      item.label
+                    }}</a-option>
+                  </a-select>
+                  <a-button
+                    data-testid="record-query-submit"
+                    class="query-submit"
+                    type="primary"
+                    :loading="queryState === 'querying'"
+                    :disabled="queryState === 'querying'"
+                    @click="runQuery"
+                  >
+                    <template #icon><Search :size="14" /></template>
+                    查询
+                  </a-button>
+                </div>
+              </div>
+              <div v-else-if="!channelId" class="segment-query-hint">从左侧设备树选择一路通道后可查询录像</div>
+              <div v-else class="segment-query-hint"><LoaderCircle :size="14" class="spin" />正在加载查询条件</div>
               <div v-if="records.length" class="segment-list">
                 <div
                   v-for="(record, index) in records"
@@ -983,27 +941,35 @@ onUnmounted(() => {
 .record-playback-page {
   height: 100%;
   min-height: 0;
+
+  /* ⛔ .snow-fill 自带 --uvp-main-padding（24px）—— 这一页要跟「设备列表」一样贴窗口边 */
+  padding: 0;
   overflow: hidden;
   color: var(--uvp-text-primary);
 }
 .playback-workspace {
+  box-sizing: border-box;
   display: flex;
   flex: 1;
   flex-direction: column;
   min-width: 0;
   height: 100%;
   min-height: 0;
-  padding: 0;
+  padding: 12px 12px 0;
   overflow: hidden;
 }
 
 /* 左侧通道树 + 右侧原回放区。
    ⛔ min-width:0 不能省：flex 项默认 min-width:auto，会被树里的内容（五个视图页签 + 搜索框）
-      顶宽，实测 240px 会被撑到 310px —— 这就是「树和播放区比例不对」的根因。 */
+      顶宽，实测 240px 会被撑到 310px —— 这就是「树和播放区比例不对」的根因。
+   ⛔ padding 必须显式清零：外层 .snow-fill 带 --uvp-main-padding(24px)、这层带着
+      .uvp-page-shell-flat 的 4px 8px。两笔叠起来，左树会浮在页面中间，跟「设备列表」页
+      那个贴着窗口左上角的目录树完全两个观感（2026-11-21 老板截图）。 */
 .record-playback-layout {
   display: flex;
   height: 100%;
   min-height: 0;
+  padding: 0;
   overflow: hidden;
 }
 .channel-panel {
@@ -1016,9 +982,10 @@ onUnmounted(() => {
   min-height: 0;
   overflow: hidden;
 
-  /* 与「设备列表」页的 .directory-panel 一致：左栏是面板底色，不是页面底色 */
-  background: var(--uvp-panel-bg);
-  border-right: 1px solid var(--uvp-list-panel-border);
+  /* 无边界：左栏不画自己的底色，直接透出页面背景（「设备列表」页的 .directory-panel
+     也是 transparent + 一条 border-right），只剩一条分界线。 */
+  background: transparent;
+  border-right: 1px solid var(--uvp-panel-border);
 }
 .record-playback-permission-state {
   padding: 18px;
@@ -1027,19 +994,6 @@ onUnmounted(() => {
   background: var(--uvp-search-panel-bg);
   border: 1px solid var(--uvp-list-panel-border);
   border-radius: var(--uvp-panel-radius);
-}
-.query-bar {
-  display: flex;
-  flex: none;
-  gap: 14px;
-  align-items: center;
-  min-height: 72px;
-  padding: 10px 16px;
-  margin: 0 8px 10px;
-  background: var(--uvp-search-panel-bg);
-  border: 1px solid var(--uvp-list-panel-border);
-  border-radius: var(--uvp-panel-radius);
-  box-shadow: var(--uvp-search-panel-shadow);
 }
 
 /* 图标按钮统一 32×32 的方格尺寸。Arco 默认按钮是靠 padding 撑开的,固定成方格
@@ -1050,102 +1004,13 @@ onUnmounted(() => {
   height: 32px;
   padding: 0;
 }
-.channel-context {
-  display: flex;
-  gap: 9px;
-  align-items: center;
-  min-width: 260px;
-}
-.channel-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  color: var(--uvp-brand);
-  background: var(--uvp-brand-soft);
-  border-radius: 6px;
-}
-.channel-context div {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.channel-context strong {
-  font-size: 14px;
-  line-height: 20px;
-}
-.channel-context span:not(.channel-icon) {
-  font-size: 11px;
-  line-height: 17px;
-  color: var(--uvp-text-tertiary);
-  white-space: nowrap;
-}
-.online-indicator {
-  padding: 2px 7px;
-  margin-left: auto;
-  font-size: 11px;
-  font-style: normal;
-  color: #168456;
-  background: rgb(22 132 86 / 10%);
-  border-radius: 4px;
-}
-.online-indicator.offline {
-  color: var(--uvp-danger);
-  background: var(--uvp-danger-soft);
-}
-.query-fields {
-  display: flex;
-  gap: 8px;
-  align-items: flex-end;
-  min-width: 0;
-  margin-left: auto;
-}
-.query-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 11px;
-  color: var(--uvp-text-tertiary);
-}
-.query-field > span:first-child {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-}
-
-/* 查询控件沿用 s-layout-search 的搜索区皮肤，保留回放工作区的紧凑布局。 */
-.query-field :deep(.time-picker),
-.query-field :deep(.type-select) {
-  box-sizing: border-box;
-  background: var(--uvp-search-control-bg) !important;
-  border: 1px solid var(--uvp-search-secondary-btn-border) !important;
-  border-radius: 10px !important;
-  box-shadow: var(--uvp-search-control-shadow) !important;
-}
-.query-field :deep(.time-picker:hover),
-.query-field :deep(.time-picker.arco-picker-focused),
-.query-field :deep(.type-select:hover),
-.query-field :deep(.type-select.arco-select-view-focus) {
-  border-color: var(--uvp-brand) !important;
-  box-shadow: var(--uvp-search-control-focus-shadow) !important;
-}
-
-/* ⛔ 作用在 a-select / a-date-picker 上的规则必须用 :deep():scoped 样式不会给
-   这两个组件的根元素加父 scopeId,直接写类名编译得过、运行时永远匹配不到。 */
-.query-field :deep(.time-picker) {
-  width: 360px;
-}
-.query-field :deep(.type-select) {
-  width: 108px;
-}
 .playback-main {
   display: grid;
   flex: 1;
   grid-template-columns: minmax(0, 1fr) 312px;
   min-height: 0;
   padding: 12px;
-  margin: 0 8px;
+  margin: 0;
   overflow: hidden;
   background: var(--uvp-shell-muted);
   border: 1px solid var(--uvp-panel-border);
@@ -1199,6 +1064,19 @@ onUnmounted(() => {
 }
 .playback-idle-cover .lucide-circle-alert {
   color: #e05d5d;
+}
+
+/* 没选通道时的空态：原来这句提示挂在顶部 query-bar 里，栏目删掉后落到播放区中间。 */
+.playback-idle-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: center;
+  color: #89939d;
+}
+.playback-idle-empty span {
+  font-size: 12px;
+  color: #9aa4ae;
 }
 .playback-status-sr {
   position: absolute;
@@ -1301,6 +1179,62 @@ onUnmounted(() => {
   font-size: 10px;
   color: var(--uvp-text-tertiary);
   white-space: nowrap;
+}
+
+/* 查询条件跟着结果走：原来顶部那条 72px 的 query-bar 已去掉（返回按钮、通道名在
+   左侧设备树里都有），日期范围与「查询」落到「录像段」面板顶上 —— 查询和结果是同一件事。
+   栏宽固定 312px ⇒ 日期选择器必须 100% 自适应；写死 360px 会把面板撑破。 */
+.segment-query {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--uvp-list-toolbar-bg);
+  border-bottom: 1px solid var(--uvp-list-panel-border);
+}
+.segment-query-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.segment-query-row .query-submit {
+  flex: 0 0 auto;
+}
+
+/* ⛔ 作用在 a-select / a-date-picker 上的规则必须用 :deep()：scoped 样式不会给这两个
+   组件的根元素加父 scopeId，直接写类名编译得过、运行时永远匹配不到。 */
+.segment-query :deep(.time-picker),
+.segment-query :deep(.type-select) {
+  box-sizing: border-box;
+  background: var(--uvp-search-control-bg) !important;
+  border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-search-control-shadow) !important;
+}
+.segment-query :deep(.time-picker) {
+  width: 100%;
+}
+.segment-query :deep(.type-select) {
+  flex: 1;
+  min-width: 0;
+}
+.segment-query :deep(.time-picker:hover),
+.segment-query :deep(.time-picker.arco-picker-focused),
+.segment-query :deep(.type-select:hover),
+.segment-query :deep(.type-select.arco-select-view-focus) {
+  border-color: var(--uvp-brand) !important;
+  box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
+.segment-query-hint {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  align-items: center;
+  padding: 10px 12px;
+  font-size: 11px;
+  color: var(--uvp-text-tertiary);
+  border-bottom: 1px solid var(--uvp-list-panel-border);
 }
 .segment-list {
   flex: 1;
@@ -1445,7 +1379,7 @@ onUnmounted(() => {
 }
 .timeline-panel {
   flex: none;
-  margin: 10px 8px 12px;
+  margin: 10px 0 12px;
   overflow: hidden;
   border-radius: var(--uvp-panel-radius);
 }
@@ -1460,16 +1394,6 @@ onUnmounted(() => {
 }
 
 @media (width <= 1180px) {
-  .query-bar {
-    flex-wrap: wrap;
-  }
-  .channel-context {
-    flex: 1;
-  }
-  .query-fields {
-    flex-basis: 100%;
-    justify-content: flex-end;
-  }
   .playback-main {
     grid-template-columns: minmax(0, 1fr) 280px;
   }
@@ -1484,40 +1408,15 @@ onUnmounted(() => {
   .playback-workspace {
     height: auto;
     min-height: 100%;
+    padding: 8px 8px 0;
     border-radius: 0;
-  }
-  .query-bar {
-    align-items: flex-start;
-    padding: 10px 12px;
-    margin: 0 8px 8px;
-  }
-  .channel-context {
-    min-width: 0;
-  }
-  .online-indicator {
-    display: none;
-  }
-  .query-fields {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    width: 100%;
-  }
-
-  /* 时间范围选择器在窄屏独占一行:两个日期输入挤在半列里会把时间文本截断。 */
-  .time-field {
-    grid-column: 1 / -1;
-  }
-  .query-field :deep(.time-picker),
-  .query-field :deep(.type-select),
-  .query-submit {
-    width: 100%;
   }
   .playback-main {
     display: flex;
     flex: none;
     flex-direction: column;
     padding: 8px;
-    margin: 0 8px;
+    margin: 0;
   }
   .playback-viewport {
     flex: none;
@@ -1529,28 +1428,11 @@ onUnmounted(() => {
     margin: 8px 0 0;
   }
   .timeline-panel {
-    margin: 8px;
+    margin: 8px 0;
   }
 }
 
 @media (width <= 430px) {
-  .back-command {
-    width: 36px;
-    height: 36px;
-  }
-  .channel-context span:not(.channel-icon) {
-    max-width: 220px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .query-fields {
-    grid-template-columns: 1fr;
-  }
-  .query-field :deep(.time-picker),
-  .query-field :deep(.type-select),
-  .query-submit {
-    height: 44px;
-  }
   .playback-controls {
     height: 52px;
   }
