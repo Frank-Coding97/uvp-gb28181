@@ -98,6 +98,8 @@ export interface DeviceVO {
   alias: string;
   /** ipc / nvr / platform（用户手动维护，默认 ipc）。 */
   deviceType?: string;
+  /** pcma（G.711A，默认）/ pcmu（G.711U）。 */
+  talkAudioCodec?: "pcma" | "pcmu";
   transport: string;
   manufacturer: string;
   model: string;
@@ -784,6 +786,8 @@ export interface CreateDeviceDTO {
   transport?: "UDP" | "TCP";
   /** ipc / nvr / platform；留空按 ipc。 */
   deviceType?: string;
+  /** pcma / pcmu；留空按 pcma（G.711A）。 */
+  talkAudioCodec?: string;
 }
 
 export const createDevice = (data: CreateDeviceDTO) =>
@@ -867,6 +871,8 @@ export const updateDevice = (
     alias?: string;
     /** ipc / nvr / platform（用户手动维护的展示类型）。 */
     deviceType?: string;
+    /** pcma（G.711A，默认）/ pcmu（G.711U）。 */
+    talkAudioCodec?: string;
     manufacturer?: string;
     model?: string;
     firmware?: string;

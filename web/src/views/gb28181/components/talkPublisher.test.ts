@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   assertPCMA8000,
+  assertTalkCodec,
   createAudioLevelMeter,
   describeMicError,
   preferPCMA8000,
+  preferTalkCodec,
   talkIceGatheringTimeoutMs,
   TALK_ACTIVE_POLL_INTERVAL_MS,
   waitForIceGatheringComplete
@@ -66,6 +68,30 @@ describe("talkPublisher", () => {
     } as unknown as RTCPeerConnection;
 
     await expect(waitForIceGatheringComplete(connection, 20)).resolves.toBe(false);
+  });
+
+  it("G.711U 会话把 PCMU/8000 设为首选编码", () => {
+    const setCodecPreferences = vi.fn();
+    const transceiver = { setCodecPreferences } as unknown as RTCRtpTransceiver;
+    const codecs = [
+      { mimeType: "audio/opus", clockRate: 48000, channels: 2 },
+      { mimeType: "audio/PCMA", clockRate: 8000, channels: 1 },
+      { mimeType: "audio/PCMU", clockRate: 8000, channels: 1 }
+    ];
+
+    preferTalkCodec(transceiver, "pcmu", codecs);
+
+    expect(setCodecPreferences).toHaveBeenCalledWith([codecs[2]]);
+  });
+
+  it("G.711U 会话拒绝把 G.711A 的协商结果当成成功", () => {
+    const pcmaAnswer = "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 8\r\na=rtpmap:8 PCMA/8000\r\n";
+    const pcmuAnswer = "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 0\r\na=rtpmap:0 PCMU/8000\r\n";
+
+    expect(() => assertTalkCodec(pcmaAnswer, "pcmu")).toThrow("PCMU/8000");
+    expect(() => assertTalkCodec(pcmuAnswer, "pcmu")).not.toThrow();
+    // 反向也要成立：PCMA 会话里混进 PCMU 同样是错的。
+    expect(() => assertTalkCodec(pcmuAnswer, "pcma")).toThrow("PCMA/8000");
   });
 });
 

@@ -25,6 +25,8 @@ func (dc *DeviceMgmtController) CreateDevice(c *gin.Context) {
 		Password   string `json:"password"`
 		Transport  string `json:"transport"`
 		DeviceType string `json:"deviceType"`
+		// TalkAudioCodec 留空 = 默认 G.711A；只有设备不支持 A-law 时才传 pcmu。
+		TalkAudioCodec string `json:"talkAudioCodec"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		dc.FailAndAbort(c, "请求体不合法", err)
@@ -57,6 +59,13 @@ func (dc *DeviceMgmtController) CreateDevice(c *gin.Context) {
 	deviceType, ok := gbmodels.NormalizeDeviceType(body.DeviceType)
 	if !ok {
 		dc.FailAndAbort(c, "设备类型只能是 ipc、nvr 或 platform", nil)
+		return
+	}
+
+	// 校验对讲音频编码(留空 = 默认 G.711A)
+	talkAudioCodec, ok := gbmodels.NormalizeTalkAudioCodec(body.TalkAudioCodec)
+	if !ok {
+		dc.FailAndAbort(c, "对讲音频编码只能是 pcma（G.711A）或 pcmu（G.711U）", nil)
 		return
 	}
 
@@ -112,6 +121,7 @@ func (dc *DeviceMgmtController) CreateDevice(c *gin.Context) {
 		Password:            strings.TrimSpace(body.Password),
 		Transport:           body.Transport,
 		DeviceType:          deviceType,
+		TalkAudioCodec:      talkAudioCodec,
 		Status:              gbmodels.DeviceStatusOffline,
 		KeepaliveInterval:   60,
 		CreatedBy:           createdBy,

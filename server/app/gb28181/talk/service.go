@@ -14,6 +14,7 @@ import (
 
 	"uvplatform.com/uvp-gb28181/app/gb28181/models"
 	"uvplatform.com/uvp-gb28181/app/gb28181/play"
+	"uvplatform.com/uvp-gb28181/app/gb28181/sdp"
 	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 )
 
@@ -107,7 +108,10 @@ type CreateResult struct {
 	Mode      models.TalkSessionMode `json:"mode"`
 	State     string                 `json:"state"`
 	ExpiresAt time.Time              `json:"expiresAt"`
-	Uplink    UplinkDescriptor       `json:"uplink"`
+	// AudioCodec 告诉调用方「上行音频必须用哪种编码推」：浏览器要在推流前
+	// 锁 codec（WebRTC 协商后 ZLM 不会转码），所以它必须在 Create 响应里。
+	AudioCodec string           `json:"audioCodec"`
+	Uplink     UplinkDescriptor `json:"uplink"`
 }
 
 type PublishAuthorization struct {
@@ -162,13 +166,19 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (*CreateRes
 	if err != nil {
 		return nil, err
 	}
+	// 设备的对讲编码是用户维护值；库里出现脏值时回退默认 G.711A，
+	// 不因为一个枚举值写错就让整条对讲链路不可用。
+	codec, ok := sdp.NormalizeAudioCodec(request.Device.TalkAudioCodec)
+	if !ok {
+		codec = sdp.DefaultAudioCodec
+	}
 	expiresAt := s.now().UTC().Add(30 * time.Second)
 	session := &models.GbTalkSession{
 		SessionID: sessionID, ChannelID: request.Channel.ID, DeviceID: request.Device.DeviceID,
 		TargetID: request.Channel.ChannelID,
 		ActorID:  request.ActorID, ActorDeptID: request.ActorDeptID,
 		OpenAPIClientID: request.OpenAPIClientID, OpenAPIRequestHash: request.OpenAPIRequestHash,
-		Mode:   request.Mode,
+		Mode: request.Mode, AudioCodec: string(codec),
 		NodeID: mediaNode.ID, App: "talk", SourceStream: sourceStream, RecvStream: recvStream, SSRC: ssrc,
 		State: models.TalkSessionReserved, ExpiresAt: expiresAt,
 	}
@@ -183,6 +193,7 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (*CreateRes
 	// 在转发前轮换掉 —— 明文令牌永不离开后端,响应里也没有它的位置。
 	return &CreateResult{
 		SessionID: session.SessionID, Mode: session.Mode, State: string(session.State), ExpiresAt: session.ExpiresAt,
+		AudioCodec: session.AudioCodec,
 		Uplink: UplinkDescriptor{
 			Protocol:    "whip",
 			Path:        uplinkPathPrefix + session.SessionID + "/uplink",

@@ -22,6 +22,9 @@ type TalkSendRtpRequest struct {
 	RecvStreamID string
 	SSRC         string
 	CloseDelayMS int
+	// PayloadType 是 RTP 头里的载荷类型（G.711A=8、G.711U=0）。
+	// nil 保持历史默认 8；⛔ 不能用 0 当「未指定」，PCMU 的合法值就是 0。
+	PayloadType *int
 }
 
 type StartSendRtpPassiveResult struct {
@@ -36,6 +39,8 @@ type BroadcastSendRtpRequest struct {
 	RemoteIP     string
 	RemotePort   int
 	IsUDP        bool
+	// PayloadType 同 TalkSendRtpRequest：nil = 8，0 是 PCMU 的合法值。
+	PayloadType *int
 }
 
 type StartBroadcastSendRtpResult struct {
@@ -55,6 +60,10 @@ func (c *Client) StartBroadcastSendRtp(ctx context.Context, in BroadcastSendRtpR
 	if in.IsUDP {
 		isUDP = "1"
 	}
+	pt, err := payloadTypeParam(in.PayloadType)
+	if err != nil {
+		return nil, err
+	}
 	var response struct {
 		baseResp
 		LocalPort int `json:"local_port"`
@@ -62,7 +71,7 @@ func (c *Client) StartBroadcastSendRtp(ctx context.Context, in BroadcastSendRtpR
 	params := map[string]string{
 		"vhost": in.VHost, "app": in.App, "stream": in.SourceStream, "ssrc": in.SSRC,
 		"dst_url": ip.String(), "dst_port": strconv.Itoa(in.RemotePort), "is_udp": isUDP,
-		"only_audio": "1", "pt": "8", "use_ps": "0",
+		"only_audio": "1", "pt": pt, "use_ps": "0",
 	}
 	if err := c.call(ctx, "startSendRtp", params, &response); err != nil {
 		return nil, err
@@ -88,6 +97,10 @@ func (c *Client) StartSendRtpPassive(ctx context.Context, in TalkSendRtpRequest)
 		return nil, fmt.Errorf("startSendRtpPassive close_delay_ms 必须在 %d..%d", minTalkCloseDelayMS, maxTalkCloseDelayMS)
 	}
 
+	pt, err := payloadTypeParam(in.PayloadType)
+	if err != nil {
+		return nil, err
+	}
 	var response struct {
 		baseResp
 		LocalPort int `json:"local_port"`
@@ -99,7 +112,7 @@ func (c *Client) StartSendRtpPassive(ctx context.Context, in TalkSendRtpRequest)
 		"ssrc":                     in.SSRC,
 		"type":                     "0",
 		"only_audio":               "1",
-		"pt":                       "8",
+		"pt":                       pt,
 		"is_udp":                   "0",
 		"recv_stream_id":           in.RecvStreamID,
 		"enable_origin_recv_limit": "1",
@@ -178,4 +191,19 @@ func (c *Client) CloseTalkSource(ctx context.Context, vhost, appName, stream str
 		return fmt.Errorf("close_streams code=%d(%s) msg=%s", response.Code, zlmCodeLabel(response.Code), response.Msg)
 	}
 	return nil
+}
+
+// payloadTypeParam 把请求里的载荷类型转成 startSendRtp 的 `pt` 参数。
+//
+// ⛔ 不能用「零值」判断未指定：PCMU 的合法载荷类型就是 0。
+// ⛔ 国标对讲只有两个静态值（PCMA=8 / PCMU=0）；这里仍做范围校验，
+// 是为了让调用方传错时在平台侧就报错，而不是让 ZLM 发出一串没人认识的包。
+func payloadTypeParam(pt *int) (string, error) {
+	if pt == nil {
+		return "8", nil
+	}
+	if *pt < 0 || *pt > 127 {
+		return "", fmt.Errorf("RTP 载荷类型不合法: %d", *pt)
+	}
+	return strconv.Itoa(*pt), nil
 }

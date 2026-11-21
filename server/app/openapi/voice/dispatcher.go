@@ -78,13 +78,16 @@ type SessionView struct {
 	Mode      gbmodels.TalkSessionMode `json:"mode"`
 	State     string                   `json:"state"`
 	Phase     string                   `json:"phase"`
-	HasError  bool                     `json:"hasError"`
-	CreatedAt time.Time                `json:"createdAt"`
-	UpdatedAt time.Time                `json:"updatedAt"`
-	ExpiresAt time.Time                `json:"expiresAt"`
-	StartedAt *time.Time               `json:"startedAt"`
-	EndedAt   *time.Time               `json:"endedAt"`
-	Media     *MediaResource           `json:"media,omitempty"`
+	// AudioCodec 是上行音频必须使用的 G.711 变体（pcma/pcmu）。
+	// 外部推流端必须在 WHIP offer 里锁定它，平台侧不做转码。
+	AudioCodec string         `json:"audioCodec"`
+	HasError   bool           `json:"hasError"`
+	CreatedAt  time.Time      `json:"createdAt"`
+	UpdatedAt  time.Time      `json:"updatedAt"`
+	ExpiresAt  time.Time      `json:"expiresAt"`
+	StartedAt  *time.Time     `json:"startedAt"`
+	EndedAt    *time.Time     `json:"endedAt"`
+	Media      *MediaResource `json:"media,omitempty"`
 }
 
 type MediaAnswer struct {
@@ -379,8 +382,12 @@ func ownsTarget(session *gbmodels.GbTalkSession, target Target, mode gbmodels.Ta
 }
 
 func sessionView(session *gbmodels.GbTalkSession, target Target) SessionView {
+	codec := session.AudioCodec
+	if codec == "" {
+		codec = gbmodels.TalkAudioCodecPCMA
+	}
 	view := SessionView{SessionID: session.SessionID, DeviceID: session.DeviceID, ChannelID: session.TargetID,
-		Mode: session.Mode, State: string(session.State), Phase: string(session.SignalPhase), HasError: session.Error != "",
+		Mode: session.Mode, State: string(session.State), Phase: string(session.SignalPhase), AudioCodec: codec, HasError: session.Error != "",
 		CreatedAt: session.CreatedAt, UpdatedAt: session.UpdatedAt, ExpiresAt: session.ExpiresAt,
 		StartedAt: session.StartedAt, EndedAt: session.EndedAt}
 	if !session.State.IsTerminal() {

@@ -33,7 +33,7 @@ var (
 	ErrTalkActivationUnavailable = errors.New("对讲激活服务未装配")
 	ErrTalkSessionNotFound       = errors.New("对讲会话不存在")
 	ErrTalkSourceUnavailable     = errors.New("对讲发布源不可用")
-	ErrTalkCodecUnsupported      = errors.New("对讲发布源不是 PCMA/8000")
+	ErrTalkCodecUnsupported      = errors.New("对讲发布源编码与会话不一致")
 )
 
 type TalkMediaClient interface {
@@ -135,6 +135,7 @@ func (s *Service) OnPublished(ctx context.Context, nodeID int64, appName, source
 	if client == nil {
 		return s.failActivation(ctx, session, nil, "", false, ErrTalkActivationUnavailable)
 	}
+	codec := talkAudioCodec(session)
 	info, err := client.GetMediaInfo(ctx, "rtsp", defaultTalkVHost, session.App, session.SourceStream)
 	if err != nil || info == nil || !info.Online {
 		if err == nil {
@@ -142,16 +143,18 @@ func (s *Service) OnPublished(ctx context.Context, nodeID int64, appName, source
 		}
 		return s.failActivation(ctx, session, client, "", false, fmt.Errorf("%w: %v", ErrTalkSourceUnavailable, err))
 	}
-	if !hasReadyPCMA(info.Tracks) {
-		return s.failActivation(ctx, session, client, "", false, ErrTalkCodecUnsupported)
+	if !hasReadyAudio(info.Tracks, codec) {
+		return s.failActivation(ctx, session, client, "", false, fmt.Errorf("%w: 需要 %s", ErrTalkCodecUnsupported, codec.Label()))
 	}
 	if _, changed, err := s.activationState(ctx, session.SessionID, models.TalkSessionPublishing); err != nil || changed {
 		return err
 	}
 
+	pt := codec.PayloadType()
 	sender, err := client.StartSendRtpPassive(ctx, zlm.TalkSendRtpRequest{
 		VHost: defaultTalkVHost, App: session.App, SourceStream: session.SourceStream,
 		RecvStreamID: session.RecvStream, SSRC: session.SSRC, CloseDelayMS: defaultTalkCloseDelay,
+		PayloadType: &pt,
 	})
 	if err != nil {
 		return s.failActivation(ctx, session, client, "", true, err)
@@ -171,7 +174,7 @@ func (s *Service) OnPublished(ctx context.Context, nodeID int64, appName, source
 
 	talkSDP := sdp.BuildTalkSDP(sdp.TalkParams{
 		ServerID: s.activation.deps.Platform.ServerID, RecvIP: mediaNode.EffectiveSDPIP(),
-		RecvPort: sender.LocalPort, SSRC: session.SSRC,
+		RecvPort: sender.LocalPort, SSRC: session.SSRC, Codec: codec,
 	})
 	metadata, err := s.activation.deps.Inviter.InviteTalk(ctx, uac.TalkInviteRequest{
 		DeviceID: session.DeviceID, ChannelID: channel.ChannelID,
@@ -234,9 +237,38 @@ func (s *Service) failActivation(ctx context.Context, session *models.GbTalkSess
 	return cause
 }
 
-func hasReadyPCMA(tracks []zlm.MediaTrack) bool {
+// talkAudioCodec 取会话的音频编码；历史行（空串）按 G.711A 处理。
+func talkAudioCodec(session *models.GbTalkSession) sdp.AudioCodec {
+	if session == nil {
+		return sdp.DefaultAudioCodec
+	}
+	codec, ok := sdp.NormalizeAudioCodec(session.AudioCodec)
+	if !ok {
+		return sdp.DefaultAudioCodec
+	}
+	return codec
+}
+
+// describeCodecs 把设备 offer 里的编码列表拼成现场能读懂的一句话。
+func describeCodecs(codecs []sdp.AudioCodec) string {
+	if len(codecs) == 0 {
+		return "无"
+	}
+	labels := make([]string, 0, len(codecs))
+	for _, codec := range codecs {
+		labels = append(labels, codec.Label())
+	}
+	return strings.Join(labels, "、")
+}
+
+// hasReadyAudio 回答「发布源里有没有该编码的就绪音轨」。
+//
+// ⛔ 只认 8kHz：G.711 的采样率是固定 8000，16000 的 PCMA 属于 RTP 里另一种
+// 载体（宽带变体），设备侧不会按 G.711 解，放过它等于把噪声送到喇叭。
+func hasReadyAudio(tracks []zlm.MediaTrack, codec sdp.AudioCodec) bool {
+	want := codec.EncodingName()
 	for _, track := range tracks {
-		if track.CodecType == 1 && track.Ready && strings.EqualFold(strings.TrimSpace(track.CodecIDName), "PCMA") &&
+		if track.CodecType == 1 && track.Ready && strings.EqualFold(strings.TrimSpace(track.CodecIDName), want) &&
 			(track.SampleRate == 0 || track.SampleRate == 8000) {
 			return true
 		}

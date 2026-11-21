@@ -29,6 +29,28 @@ const (
 	DeviceTypePlatform = "platform" // 下级国标平台
 )
 
+// 对讲/广播的音频编码。由用户在设备编辑里手动维护（默认 G.711A）。
+//
+// 为什么必须按设备维护：设备 offer 里声明的音频能力各不相同，而平台侧的
+// 音频源（浏览器 WHIP 推流）在推流前就要定编码，ZLM 的 startSendRtp 只管
+// 按 PT 打包、不做转码 —— 所以「这台设备用什么编码」必须在会话建立前知道，
+// 不能靠事后协商再补救。
+const (
+	TalkAudioCodecPCMA = "pcma" // G.711A，载荷类型 8（国标默认）
+	TalkAudioCodecPCMU = "pcmu" // G.711U，载荷类型 0
+)
+
+// NormalizeTalkAudioCodec 归一用户/接口传入的对讲编码，空串视为默认 G.711A。
+func NormalizeTalkAudioCodec(raw string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", TalkAudioCodecPCMA, "g711a", "g711_a", "a-law", "alaw":
+		return TalkAudioCodecPCMA, true
+	case TalkAudioCodecPCMU, "g711u", "g711_u", "u-law", "ulaw":
+		return TalkAudioCodecPCMU, true
+	}
+	return "", false
+}
+
 // NormalizeDeviceType 归一用户/接口传入的类型值，返回标准值与是否合法。
 // 空串视为「未指定」，合法并归一为 IPC。
 func NormalizeDeviceType(raw string) (string, bool) {
@@ -77,7 +99,10 @@ type GbDevice struct {
 	Alias    string `gorm:"column:alias;size:255;default:'';comment:用户自定义别名(不被上报覆盖)" json:"alias"`
 	// DeviceType 用户手动维护的设备类型(ipc/nvr/platform)。默认 IPC，
 	// 绝不会被设备上报覆盖 —— 平台从注册报文推不出真实形态。
-	DeviceType        string     `gorm:"column:device_type;size:16;not null;default:ipc;comment:设备类型 ipc/nvr/platform(用户维护)" json:"deviceType"`
+	DeviceType string `gorm:"column:device_type;size:16;not null;default:ipc;comment:设备类型 ipc/nvr/platform(用户维护)" json:"deviceType"`
+	// TalkAudioCodec 是对讲/广播使用的音频编码（pcma/pcmu），由用户维护。
+	// 默认 G.711A；只有设备确实不支持 A-law 时才改成 G.711U。
+	TalkAudioCodec    string     `gorm:"column:talk_audio_codec;size:16;not null;default:pcma;comment:对讲音频编码 pcma/pcmu(用户维护)" json:"talkAudioCodec"`
 	Password          string     `gorm:"column:password;size:255;comment:按设备独立密码(本期用统一密码,留空)" json:"-"`
 	Transport         string     `gorm:"column:transport;size:8;comment:传输模式 UDP/TCP" json:"transport"`
 	Manufacturer      string     `gorm:"column:manufacturer;size:255;comment:厂商" json:"manufacturer"`
@@ -143,6 +168,9 @@ func (GbDevice) TableName() string {
 func (d *GbDevice) BeforeCreate(tx *gorm.DB) error {
 	if strings.TrimSpace(d.DeviceType) == "" {
 		d.DeviceType = DeviceTypeIPC
+	}
+	if strings.TrimSpace(d.TalkAudioCodec) == "" {
+		d.TalkAudioCodec = TalkAudioCodecPCMA
 	}
 	return nil
 }

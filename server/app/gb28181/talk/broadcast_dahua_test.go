@@ -46,9 +46,10 @@ func TestPrepareBroadcastInviteDahuaCapture(t *testing.T) {
 	require.Contains(t, prepared.AnswerSDP, "a=sendonly")
 	require.NotContains(t, prepared.AnswerSDP, "PS/90000")
 	require.NotContains(t, prepared.AnswerSDP, "a=setup:")
+	wantPT := 8
 	require.Equal(t, zlm.BroadcastSendRtpRequest{
 		VHost: defaultTalkVHost, App: session.App, SourceStream: session.SourceStream,
-		SSRC: session.SSRC, RemoteIP: "192.168.10.204", RemotePort: 9732, IsUDP: true,
+		SSRC: session.SSRC, RemoteIP: "192.168.10.204", RemotePort: 9732, IsUDP: true, PayloadType: &wantPT,
 	}, media.request)
 	repeated, err := service.PrepareBroadcastInvite(ctx, invite)
 	require.NoError(t, err)

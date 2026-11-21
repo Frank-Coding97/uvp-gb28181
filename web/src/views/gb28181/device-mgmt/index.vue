@@ -122,6 +122,12 @@ import {
   normalizeDeviceType,
   type DeviceType
 } from "./deviceType";
+import {
+  DEFAULT_TALK_AUDIO_CODEC,
+  normalizeTalkAudioCodec,
+  TALK_AUDIO_CODEC_OPTIONS,
+  type TalkAudioCodec
+} from "./talkAudioCodec";
 import { positionSourceText } from "./channelPositionForm";
 import { buildMapCenter, formatMapCenter, normalizeMapCenter, type MapCenter } from "./mapView";
 import {
@@ -739,6 +745,7 @@ const editDeviceForm = ref<{
   deviceId: string;
   alias: string;
   deviceType: DeviceType;
+  talkAudioCodec: TalkAudioCodec;
   name: string;
   zlmNodeId: number;
   protocolOverride: ProtocolOverride;
@@ -747,6 +754,7 @@ const editDeviceForm = ref<{
   deviceId: "",
   alias: "",
   deviceType: DEFAULT_DEVICE_TYPE,
+  talkAudioCodec: DEFAULT_TALK_AUDIO_CODEC,
   name: "",
   zlmNodeId: 0,
   protocolOverride: "auto",
@@ -3186,7 +3194,8 @@ const createDeviceForm = reactive<CreateDeviceDTO>({
   deviceId: "",
   name: "",
   password: "",
-  deviceType: DEFAULT_DEVICE_TYPE
+  deviceType: DEFAULT_DEVICE_TYPE,
+  talkAudioCodec: DEFAULT_TALK_AUDIO_CODEC
 });
 const createDeviceFormRef = ref();
 const creatingDevice = ref(false);
@@ -3237,6 +3246,7 @@ function openCreateDeviceModal() {
   createDeviceForm.name = "";
   createDeviceForm.password = "";
   createDeviceForm.deviceType = DEFAULT_DEVICE_TYPE;
+  createDeviceForm.talkAudioCodec = DEFAULT_TALK_AUDIO_CODEC;
   createDeviceVisible.value = true;
   createDeviceFormRef.value?.clearValidate?.();
 }
@@ -3251,7 +3261,8 @@ async function handleCreateDevice() {
       deviceId: createDeviceForm.deviceId.trim(),
       name: createDeviceForm.name?.trim() || undefined,
       password: createDeviceForm.password?.trim() || undefined,
-      deviceType: createDeviceForm.deviceType || DEFAULT_DEVICE_TYPE
+      deviceType: createDeviceForm.deviceType || DEFAULT_DEVICE_TYPE,
+      talkAudioCodec: normalizeTalkAudioCodec(createDeviceForm.talkAudioCodec)
     });
     if (res.code === 0) {
       Message.success("设备已创建");
@@ -3277,6 +3288,7 @@ function openEditDeviceModal(record: DeviceVO) {
     deviceId: record.deviceId,
     alias: record.alias || "",
     deviceType: normalizeDeviceType(record.deviceType),
+    talkAudioCodec: normalizeTalkAudioCodec(record.talkAudioCodec),
     name: record.name || "",
     zlmNodeId: record.zlmNodeId || 0,
     protocolOverride: originalProtocolOverride,
@@ -3360,6 +3372,7 @@ function cancelEditDevice() {
     deviceId: "",
     alias: "",
     deviceType: DEFAULT_DEVICE_TYPE,
+    talkAudioCodec: DEFAULT_TALK_AUDIO_CODEC,
     name: "",
     zlmNodeId: 0,
     protocolOverride: "auto",
@@ -3398,6 +3411,7 @@ async function handleEditDevice() {
     const res = await updateDevice(editingDeviceId.value, {
       alias: editDeviceForm.value.alias,
       deviceType: editDeviceForm.value.deviceType,
+      talkAudioCodec: editDeviceForm.value.talkAudioCodec,
       protocolOverride: editDeviceForm.value.protocolOverride,
       ...zlmNodeUpdate,
       ...passwordUpdate
@@ -5773,6 +5787,12 @@ onUnmounted(() => {
             <span class="form-hint">默认 IPC，创建后仍可在「编辑设备」里修改。</span>
           </template>
         </a-form-item>
+        <a-form-item field="talkAudioCodec" label="对讲音频编码">
+          <a-select v-model="createDeviceForm.talkAudioCodec" :options="TALK_AUDIO_CODEC_OPTIONS" />
+          <template #extra>
+            <span class="form-hint">默认 G.711A；设备不支持 A-law（对讲没声音）时才改成 G.711U。</span>
+          </template>
+        </a-form-item>
         <a-form-item field="password" label="设备密码">
           <a-input-password v-model="createDeviceForm.password" placeholder="选填，留空则沿用平台统一接入密码" allow-clear />
           <template #extra>
@@ -5817,6 +5837,12 @@ onUnmounted(() => {
           <a-select v-model="editDeviceForm.deviceType" :options="DEVICE_TYPE_OPTIONS" />
           <template #extra>
             <span class="form-hint">仅用于列表/卡片的图标与分类展示，不影响接入协议；默认 IPC。</span>
+          </template>
+        </a-form-item>
+        <a-form-item field="talkAudioCodec" label="对讲音频编码">
+          <a-select v-model="editDeviceForm.talkAudioCodec" :options="TALK_AUDIO_CODEC_OPTIONS" />
+          <template #extra>
+            <span class="form-hint">语音对讲/广播使用的编码，对下一次会话生效；设备不支持 A-law 时改成 G.711U。</span>
           </template>
         </a-form-item>
         <a-form-item field="password" label="设备密码">

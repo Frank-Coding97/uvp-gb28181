@@ -43,10 +43,11 @@ import { buildProbeOverview, probeBucketHeight } from "../probeOverview";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
 import { evaluateProtocolCompatibility, readBrowserCodecCapabilities } from "../playbackCompatibility";
 import {
-  assertPCMA8000,
+  assertTalkCodec,
   createAudioLevelMeter,
   describeMicError,
-  preferPCMA8000,
+  normalizeTalkAudioCodec,
+  preferTalkCodec,
   TALK_ACTIVE_POLL_INTERVAL_MS,
   talkIceGatheringTimeoutMs,
   waitForIceGatheringComplete,
@@ -5033,7 +5034,10 @@ async function startTalk() {
     });
     const transceiver = talkConnection.addTransceiver(audioTrack, { direction: "sendonly", streams: [talkStream] });
     const audioCodecs = typeof RTCRtpSender === "undefined" ? [] : RTCRtpSender.getCapabilities?.("audio")?.codecs || [];
-    preferPCMA8000(transceiver, audioCodecs);
+    // 编码由平台按设备配置下发（G.711A 默认，设备只认 G.711U 时是 pcmu）。
+    // ⛔ 必须在 createOffer 之前锁定：ZLM 按协商结果原样打包，不会转码。
+    const audioCodec = normalizeTalkAudioCodec(response.data.audioCodec);
+    preferTalkCodec(transceiver, audioCodec, audioCodecs);
     const offer = await talkConnection.createOffer();
     await talkConnection.setLocalDescription(offer);
     // 收集超时不致命：按已收集到的候选继续发布，同网段靠 host candidate 就能建连。
@@ -5042,7 +5046,7 @@ async function startTalk() {
       console.warn("[talk] ICE 收集未在预算内完成，按已有候选发布（STUN 可能不可达）");
     }
     const offerSdp = talkConnection.localDescription?.sdp || "";
-    assertPCMA8000(offerSdp);
+    assertTalkCodec(offerSdp, audioCodec);
     if (token !== talkToken) return;
     // 上行发给平台自己，由平台转发到媒体节点：媒体节点地址与自签证书不再经手浏览器。
     // 带上 Authorization 是因为平台侧要认人，而这条裸 fetch 不走 http 封装。
@@ -5057,7 +5061,7 @@ async function startTalk() {
     });
     if (!answer.ok) throw new Error(`WHIP 发布失败(${answer.status})`);
     const answerSdp = await answer.text();
-    assertPCMA8000(answerSdp);
+    assertTalkCodec(answerSdp, audioCodec);
     await talkConnection.setRemoteDescription({ type: "answer", sdp: answerSdp });
     if (!(await waitTalkActive(channelId, response.data.sessionId, token))) return;
     if (token !== talkToken) return;

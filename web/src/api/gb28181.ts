@@ -1761,6 +1761,8 @@ export interface TalkCreateResult {
   mode: "broadcast" | "talk";
   state: string;
   expiresAt: string;
+  /** 上行音频必须使用的编码：pcma（G.711A，默认）或 pcmu（G.711U）。 */
+  audioCodec: "pcma" | "pcmu";
   uplink: TalkUplinkDescriptor;
 }
 
@@ -1769,6 +1771,7 @@ export interface TalkSessionView {
   mode: "broadcast" | "talk";
   state: string;
   phase?: string;
+  audioCodec?: "pcma" | "pcmu";
   expiresAt: string;
   startedAt?: string;
   endedAt?: string;

@@ -51,10 +51,13 @@ type TalkSessionView struct {
 	Mode      gbmodels.TalkSessionMode  `json:"mode"`
 	State     gbmodels.TalkSessionState `json:"state"`
 	Phase     gbmodels.TalkSignalPhase  `json:"phase,omitempty"`
-	ExpiresAt time.Time                 `json:"expiresAt"`
-	StartedAt *time.Time                `json:"startedAt,omitempty"`
-	EndedAt   *time.Time                `json:"endedAt,omitempty"`
-	Error     string                    `json:"error,omitempty"`
+	// AudioCodec 是本次会话使用的 G.711 变体。前端重连/续期时靠它重新锁定
+	// WebRTC 编码（Create 响应里也给一份，两处必须一致）。
+	AudioCodec string     `json:"audioCodec"`
+	ExpiresAt  time.Time  `json:"expiresAt"`
+	StartedAt  *time.Time `json:"startedAt,omitempty"`
+	EndedAt    *time.Time `json:"endedAt,omitempty"`
+	Error      string     `json:"error,omitempty"`
 	// Warning 是「信令已通但媒体大概率到不了设备」的现场提示，不阻断会话。
 	// 与 Error 分开：这是可用性提示，不是失败原因，前端在 talking 态一直展示。
 	Warning string `json:"warning,omitempty"`
@@ -358,9 +361,14 @@ func (c *TalkController) logUplinkFailure(ctx *gin.Context, err error, code stri
 // talkSessionView 组装会话视图。deviceIP 是设备的 SIP 信令来源地址，
 // 只用于判断「设备报的媒体地址平台是否够得着」（见 talk.BroadcastTransportWarning）。
 func talkSessionView(session *gbmodels.GbTalkSession, deviceIP string) TalkSessionView {
+	codec := session.AudioCodec
+	if codec == "" {
+		codec = gbmodels.TalkAudioCodecPCMA
+	}
 	return TalkSessionView{
 		SessionID: session.SessionID, Mode: session.Mode, State: session.State, Phase: session.SignalPhase, ExpiresAt: session.ExpiresAt,
-		StartedAt: session.StartedAt, EndedAt: session.EndedAt, Error: session.Error,
+		AudioCodec: codec,
+		StartedAt:  session.StartedAt, EndedAt: session.EndedAt, Error: session.Error,
 		Warning: talk.BroadcastTransportWarning(session.Mode, session.SenderMode, session.RemoteMediaIP, deviceIP),
 	}
 }

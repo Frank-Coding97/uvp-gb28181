@@ -1,3 +1,8 @@
+import { normalizeTalkAudioCodec, type TalkAudioCodec } from "../device-mgmt/talkAudioCodec";
+
+export type { TalkAudioCodec };
+export { normalizeTalkAudioCodec };
+
 export interface AudioCodecCapability {
   mimeType: string;
   clockRate: number;
@@ -5,25 +10,53 @@ export interface AudioCodecCapability {
   sdpFmtpLine?: string;
 }
 
-export function preferPCMA8000(
+const TALK_CODEC_SPEC: Record<TalkAudioCodec, { mime: string; rtpmap: string }> = {
+  pcma: { mime: "audio/pcma", rtpmap: "PCMA/8000" },
+  pcmu: { mime: "audio/pcmu", rtpmap: "PCMU/8000" }
+};
+
+/**
+ * 把 WebRTC 的音频编码锁到平台会话指定的 G.711 变体。
+ *
+ * ⛔ 必须在 createOffer 之前调用：ZLM 只按协商出的编码接收上行，事后再改
+ * 等于让设备听到另一种压扩表的噪声。
+ */
+export function preferTalkCodec(
   transceiver: RTCRtpTransceiver,
+  codec: TalkAudioCodec = "pcma",
   codecs: AudioCodecCapability[] = RTCRtpSender.getCapabilities?.("audio")?.codecs || []
 ) {
-  const pcma = codecs.filter(codec => codec.mimeType.toLowerCase() === "audio/pcma" && codec.clockRate === 8000);
-  if (!pcma.length) throw new Error("当前浏览器不支持 PCMA/8000 音频编码");
+  const spec = TALK_CODEC_SPEC[normalizeTalkAudioCodec(codec)];
+  const matched = codecs.filter(item => item.mimeType.toLowerCase() === spec.mime && item.clockRate === 8000);
+  if (!matched.length) throw new Error(`当前浏览器不支持 ${spec.rtpmap} 音频编码`);
   if (typeof transceiver.setCodecPreferences !== "function") {
-    throw new Error("当前浏览器无法锁定 PCMA/8000 音频编码");
+    throw new Error(`当前浏览器无法锁定 ${spec.rtpmap} 音频编码`);
   }
-  transceiver.setCodecPreferences(pcma as any);
+  transceiver.setCodecPreferences(matched as any);
+}
+
+/**
+ * 校验协商结果里真的有平台要求的那条 G.711 映射，且 m 行选中了它的 PT。
+ *
+ * 只看 rtpmap 不够：浏览器可能把两种 G.711 都列在 offer 里，而 m 行只选了另一种。
+ */
+export function assertTalkCodec(sdp: string, codec: TalkAudioCodec = "pcma") {
+  const spec = TALK_CODEC_SPEC[normalizeTalkAudioCodec(codec)];
+  const normalized = String(sdp || "").replace(/\r\n/g, "\n");
+  const match = normalized.match(new RegExp(`^a=rtpmap:(\\d+)\\s+${spec.rtpmap.replace("/", "\\/")}(?:\\/1)?\\s*$`, "im"));
+  if (!match) throw new Error(`WebRTC 实际协商结果不是 ${spec.rtpmap}`);
+  const audioLine = normalized.split("\n").find(line => line.startsWith("m=audio ")) || "";
+  const payloads = audioLine.trim().split(/\s+/).slice(3);
+  if (!payloads.includes(match[1])) throw new Error(`WebRTC 音频媒体未选择 ${spec.rtpmap}`);
+}
+
+// 兼容旧调用点（G.711A 是历史默认）。
+export function preferPCMA8000(transceiver: RTCRtpTransceiver, codecs?: AudioCodecCapability[]) {
+  preferTalkCodec(transceiver, "pcma", codecs);
 }
 
 export function assertPCMA8000(sdp: string) {
-  const normalized = String(sdp || "").replace(/\r\n/g, "\n");
-  const match = normalized.match(/^a=rtpmap:(\d+)\s+PCMA\/8000(?:\/1)?\s*$/im);
-  if (!match) throw new Error("WebRTC 实际协商结果不是 PCMA/8000");
-  const audioLine = normalized.split("\n").find(line => line.startsWith("m=audio ")) || "";
-  const payloads = audioLine.trim().split(/\s+/).slice(3);
-  if (!payloads.includes(match[1])) throw new Error("WebRTC 音频媒体未选择 PCMA/8000");
+  assertTalkCodec(sdp, "pcma");
 }
 
 export interface AudioLevelMeter {

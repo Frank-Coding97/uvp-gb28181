@@ -107,6 +107,7 @@ func (dc *DeviceController) Update(c *gin.Context) {
 	var body struct {
 		Alias            *string `json:"alias"`
 		DeviceType       *string `json:"deviceType"`
+		TalkAudioCodec   *string `json:"talkAudioCodec"`
 		Manufacturer     *string `json:"manufacturer"`
 		Model            *string `json:"model"`
 		Firmware         *string `json:"firmware"`
@@ -149,6 +150,15 @@ func (dc *DeviceController) Update(c *gin.Context) {
 			return
 		}
 		updates["device_type"] = deviceType
+	}
+	// 对讲音频编码同样由用户维护；设备重新注册不会覆盖（Upsert 只更新事实字段）。
+	if body.TalkAudioCodec != nil {
+		codec, ok := gbmodels.NormalizeTalkAudioCodec(*body.TalkAudioCodec)
+		if !ok {
+			app.Response.Fail(c, "对讲音频编码只能是 pcma（G.711A）或 pcmu（G.711U）", http.StatusUnprocessableEntity)
+			return
+		}
+		updates["talk_audio_codec"] = codec
 	}
 	if body.Manufacturer != nil {
 		updates["manufacturer"] = *body.Manufacturer

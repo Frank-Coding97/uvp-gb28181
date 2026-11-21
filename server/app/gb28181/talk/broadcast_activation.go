@@ -77,7 +77,7 @@ func (s *Service) onBroadcastPublished(ctx context.Context, session *models.GbTa
 		}
 		return s.failActivation(ctx, session, client, "", false, err)
 	}
-	if !hasReadyPCMA(info.Tracks) {
+	if !hasReadyAudio(info.Tracks, talkAudioCodec(session)) {
 		return s.failActivation(ctx, session, client, "", false, ErrTalkCodecUnsupported)
 	}
 	sn := nextBroadcastSN()
@@ -169,6 +169,16 @@ func (s *Service) PrepareBroadcastInvite(ctx context.Context, invite BroadcastIn
 	if err != nil {
 		return PreparedBroadcastInvite{}, &BroadcastSIPError{Status: 488, Reason: err.Error()}
 	}
+	// 平台只能发会话配置的那一种编码（ZLM 按 PT 打包、不转码），所以设备
+	// offer 里必须真的包含它；否则回 488 并在 reason 里写清楚差在哪，
+	// 现场照着改设备编码即可，不用再猜「为什么没声音」。
+	codec := talkAudioCodec(session)
+	if !media.Supports(codec) {
+		return PreparedBroadcastInvite{}, &BroadcastSIPError{
+			Status: 488,
+			Reason: fmt.Sprintf("设备 offer 不含会话编码 %s（设备提供：%s）", codec.Label(), describeCodecs(media.Codecs)),
+		}
+	}
 	claimed, err := s.repo.ClaimBroadcastDialog(ctx, session.SessionID, invite.CallID, invite.CSeq)
 	if err != nil {
 		return PreparedBroadcastInvite{}, err
@@ -181,7 +191,7 @@ func (s *Service) PrepareBroadcastInvite(ctx context.Context, invite BroadcastIn
 		if current == nil || current.CallID != strings.TrimSpace(invite.CallID) || current.LocalPort <= 0 {
 			return PreparedBroadcastInvite{}, &BroadcastSIPError{Status: 486, Reason: "Broadcast dialog 已被其他 INVITE 认领"}
 		}
-		answer, answerErr := sdp.BuildBroadcastAnswer(sdp.BroadcastAnswerParams{ServerID: s.activation.deps.Platform.ServerID, LocalIP: s.broadcastLocalIP(current.NodeID), LocalPort: current.LocalPort, SSRC: current.SSRC, SenderMode: sdp.BroadcastSenderMode(current.SenderMode)})
+		answer, answerErr := sdp.BuildBroadcastAnswer(sdp.BroadcastAnswerParams{ServerID: s.activation.deps.Platform.ServerID, LocalIP: s.broadcastLocalIP(current.NodeID), LocalPort: current.LocalPort, SSRC: current.SSRC, SenderMode: sdp.BroadcastSenderMode(current.SenderMode), Codec: talkAudioCodec(current)})
 		return PreparedBroadcastInvite{SessionID: current.SessionID, AnswerSDP: answer}, answerErr
 	}
 	mediaNode, ok := s.nodes.Get(session.NodeID)
@@ -194,18 +204,19 @@ func (s *Service) PrepareBroadcastInvite(ctx context.Context, invite BroadcastIn
 		return PreparedBroadcastInvite{}, s.failActivation(ctx, session, client, "", false, ErrTalkActivationUnavailable)
 	}
 	info, err := client.GetMediaInfo(ctx, "rtsp", defaultTalkVHost, session.App, session.SourceStream)
-	if err != nil || info == nil || !info.Online || !hasReadyPCMA(info.Tracks) {
+	if err != nil || info == nil || !info.Online || !hasReadyAudio(info.Tracks, codec) {
 		return PreparedBroadcastInvite{}, s.failActivation(ctx, session, client, "", false, ErrTalkSourceUnavailable)
 	}
+	pt := codec.PayloadType()
 	localPort := 0
 	if media.SenderMode == sdp.BroadcastSenderTCPPassive {
-		result, startErr := client.StartSendRtpPassive(ctx, zlm.TalkSendRtpRequest{VHost: defaultTalkVHost, App: session.App, SourceStream: session.SourceStream, RecvStreamID: session.RecvStream, SSRC: session.SSRC, CloseDelayMS: defaultTalkCloseDelay})
+		result, startErr := client.StartSendRtpPassive(ctx, zlm.TalkSendRtpRequest{VHost: defaultTalkVHost, App: session.App, SourceStream: session.SourceStream, RecvStreamID: session.RecvStream, SSRC: session.SSRC, CloseDelayMS: defaultTalkCloseDelay, PayloadType: &pt})
 		if startErr != nil {
 			return PreparedBroadcastInvite{}, s.failActivation(ctx, session, client, "", false, startErr)
 		}
 		localPort = result.LocalPort
 	} else {
-		result, startErr := broadcastClient.StartBroadcastSendRtp(ctx, zlm.BroadcastSendRtpRequest{VHost: defaultTalkVHost, App: session.App, SourceStream: session.SourceStream, SSRC: session.SSRC, RemoteIP: media.RemoteIP, RemotePort: media.RemotePort, IsUDP: media.SenderMode == sdp.BroadcastSenderUDP})
+		result, startErr := broadcastClient.StartBroadcastSendRtp(ctx, zlm.BroadcastSendRtpRequest{VHost: defaultTalkVHost, App: session.App, SourceStream: session.SourceStream, SSRC: session.SSRC, RemoteIP: media.RemoteIP, RemotePort: media.RemotePort, IsUDP: media.SenderMode == sdp.BroadcastSenderUDP, PayloadType: &pt})
 		if startErr != nil {
 			return PreparedBroadcastInvite{}, s.failActivation(ctx, session, client, "", false, startErr)
 		}
@@ -255,7 +266,7 @@ func (s *Service) PrepareBroadcastInvite(ctx context.Context, invite BroadcastIn
 		_ = client.StopSendRtp(ctx, defaultTalkVHost, session.App, session.SourceStream, session.SSRC)
 		return PreparedBroadcastInvite{}, &BroadcastSIPError{Status: 480, Reason: "Broadcast 会话状态已变化"}
 	}
-	answer, err := sdp.BuildBroadcastAnswer(sdp.BroadcastAnswerParams{ServerID: s.activation.deps.Platform.ServerID, LocalIP: mediaNode.EffectiveSDPIP(), LocalPort: localPort, SSRC: session.SSRC, SenderMode: media.SenderMode})
+	answer, err := sdp.BuildBroadcastAnswer(sdp.BroadcastAnswerParams{ServerID: s.activation.deps.Platform.ServerID, LocalIP: mediaNode.EffectiveSDPIP(), LocalPort: localPort, SSRC: session.SSRC, SenderMode: media.SenderMode, Codec: codec})
 	if err != nil {
 		_ = client.StopSendRtp(ctx, defaultTalkVHost, session.App, session.SourceStream, session.SSRC)
 		return PreparedBroadcastInvite{}, err
