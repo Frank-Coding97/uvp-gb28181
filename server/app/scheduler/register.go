@@ -24,6 +24,7 @@ func RegisterExecutors() {
 	app.JobScheduler.RegisterExecutor(&executors.SessionCleanupExecutor{})
 	app.JobScheduler.RegisterExecutor(&executors.LoginLogCleanupExecutor{})
 	app.JobScheduler.RegisterExecutor(&executors.LogCleanupExecutor{})
+	app.JobScheduler.RegisterExecutor(&executors.DatabaseCompactExecutor{})
 	app.JobScheduler.RegisterExecutor(&executors.RecordingPlanDispatchExecutor{})
 	app.JobScheduler.RegisterExecutor(&executors.RecordingPlanHealExecutor{})
 
@@ -100,6 +101,15 @@ func systemJobDefinitions() []*schedulerhelper.Job {
 			ExecutorName: executors.LogCleanupExecutorName, ExecutionPolicy: schedulerhelper.PolicyRepeat,
 			Status: schedulerhelper.StatusEnabled, CronExpression: "0 0 3 * * *",
 			Parameters:     map[string]interface{}{"kind": "scheduler"},
+			BlockingPolicy: schedulerhelper.BlockDiscard, Timeout: 10 * time.Minute,
+		},
+		{
+			// 排在日志清理（03:00）之后：先删行腾出 freelist，再小步把这些页还给磁盘。
+			// 每天搬一点而不是一次大 VACUUM —— 长时间独占写锁会挡住设备心跳与录像写入。
+			ID: "system-db-compact", Group: "system", Name: "数据库空间回收",
+			Description:  "每日把日志清理腾出的空闲页分块归还磁盘（仅 SQLite 且 auto_vacuum=INCREMENTAL）",
+			ExecutorName: executors.DatabaseCompactExecutorName, ExecutionPolicy: schedulerhelper.PolicyRepeat,
+			Status: schedulerhelper.StatusEnabled, CronExpression: "0 30 4 * * *",
 			BlockingPolicy: schedulerhelper.BlockDiscard, Timeout: 10 * time.Minute,
 		},
 	}

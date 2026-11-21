@@ -131,4 +131,27 @@ func TestDBInitBuildsUsableDatabaseFromRealBaseline(t *testing.T) {
 	if strings.Contains(out2, "建表 ") {
 		t.Errorf("第二次不该重新建表\n--- stdout ---\n%s", out2)
 	}
+
+	// 新装库必须自带 auto_vacuum=INCREMENTAL(2)。
+	//
+	// ⛔⛔ 库是这个命令建的：一旦它以 0 建出来，后端连接串里的
+	//   _pragma=auto_vacuum(2) 就是空操作（SQLite 只允许在建库那一刻设定），
+	//   于是「每日空间回收」任务永远跳过 —— 日志删了几百万行，磁盘一兆都不回。
+	if mode := dbAutoVacuum(t, dbPath); mode != 2 {
+		t.Errorf("新装库的 auto_vacuum = %d，期望 2(INCREMENTAL) —— 增量回收会永远失效", mode)
+	}
+}
+
+func dbAutoVacuum(t *testing.T, dbPath string) int {
+	t.Helper()
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("打开建好的库失败: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	var mode int
+	if err := db.QueryRow("PRAGMA auto_vacuum").Scan(&mode); err != nil {
+		t.Fatalf("读取 auto_vacuum 失败: %v", err)
+	}
+	return mode
 }

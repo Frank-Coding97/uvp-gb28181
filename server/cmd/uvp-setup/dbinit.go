@@ -56,6 +56,11 @@ func runDBInit(args []string) error {
 }
 
 // sqliteDSN 与后端 gormhelper.sqliteDSN 保持同一组 PRAGMA（每一项都有原因，见那里的注释）。
+//
+// ⛔⛔ 这里的 PRAGMA 顺序与后端**必须一致**，auto_vacuum(2) 同样排第一：
+// 新装实例的库是**这个函数**建出来的，后端再打开时库已非空，改不动 auto-vacuum 了。
+// 漏了这条，后端连接串里写再多也没用 —— 2026-11-21 起新装默认开增量回收，
+// 就是为了让日志删掉的空间能自己还给磁盘。
 func sqliteDSN(path string) string {
 	base := filepath.ToSlash(path)
 	sep := "?"
@@ -63,6 +68,7 @@ func sqliteDSN(path string) string {
 		sep = "&"
 	}
 	return base + sep + strings.Join([]string{
+		"_pragma=auto_vacuum(2)",
 		"_pragma=busy_timeout(5000)",
 		"_pragma=journal_mode(WAL)",
 		"_pragma=foreign_keys(1)",

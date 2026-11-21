@@ -17,7 +17,10 @@ import (
 	"uvplatform.com/uvp-gb28181/app/utils/ymlconfig"
 )
 
-func TestLoginLogCleanupExecutorUsesStrict180DayCutoff(t *testing.T) {
+// 保留期由配置决定（2026-10-19 起出厂默认 7 天），这里显式配成 180 天，
+// 只为验证**截止时间的严格边界**：恰好等于 cutoff 的保留、早一秒的删掉。
+// ⛔ 别把 180 写死在代码里当默认值 —— 那条已经被移除，写死会让用例和产品脱节。
+func TestLoginLogCleanupExecutorUsesStrictCutoffBoundary(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&models.SysLoginLog{}))
@@ -28,6 +31,11 @@ func TestLoginLogCleanupExecutorUsesStrict180DayCutoff(t *testing.T) {
 		{Username: "boundary", Result: service.LoginResultFailure, IP: "10.0.0.1", Location: "内网", UserAgent: "ua", Browser: "x", OS: "x", CreatedAt: cutoff},
 	}
 	require.NoError(t, db.Create(&rows).Error)
+	previous := app.ConfigYml
+	app.ConfigYml = &cleanupExecutorConfig{values: map[string]interface{}{
+		logcleanup.ConfiguredConfigKey: true, logcleanup.LoginRetentionDaysConfigKey: 180,
+	}}
+	t.Cleanup(func() { app.ConfigYml = previous })
 	executor := &LoginLogCleanupExecutor{Service: service.NewLoginLogService(db), Now: func() time.Time { return now }}
 	require.NoError(t, executor.Execute(context.Background(), nil))
 	var remaining []models.SysLoginLog

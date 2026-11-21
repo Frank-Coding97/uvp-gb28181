@@ -40,7 +40,17 @@ import (
 //     代价：操作系统掉电可能丢**最后若干个已提交事务**（数据库本身不会损坏）——
 //     与 MySQL 缺省语义一致，对监控平台完全可接受。
 //     ⛔ 不要"为了安全"改回 FULL / 或干脆不写（=默认 FULL）：那会直接把千路容量砍到几十路。
+//   - auto_vacuum(2)：⛔⛔ 这一项**必须排在最前面**，且只对**新建的空库**生效。
+//     SQLite 把 auto-vacuum 模式记在文件头（第 1 页偏移 52），只有在建库那一刻
+//     设置才会写进去；库一旦有数据，再执行这个 PRAGMA 就是空操作（必须整库 VACUUM 才行）。
+//     所以它必须排在 journal_mode 之前 —— journal_mode 会先把文件头写出来，
+//     一旦文件非空，这条就白写了。
+//     值 2 = INCREMENTAL：删行只把页记进 freelist，由每日「数据库空间回收」
+//     任务分块调用 PRAGMA incremental_vacuum 逐步缩小文件。
+//     ⛔ 不开 FULL(1)：FULL 每次提交都搬页，写放大明显，本项目是持续高频写入。
+//     ⛔ 光开这个不会自动缩文件：不调 incremental_vacuum 文件永不缩小。
 var sqlitePragmas = []string{
+	"_pragma=auto_vacuum(2)",
 	"_pragma=busy_timeout(5000)",
 	"_pragma=journal_mode(WAL)",
 	"_pragma=foreign_keys(1)",

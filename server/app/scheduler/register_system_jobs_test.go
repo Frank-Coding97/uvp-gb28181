@@ -28,7 +28,8 @@ func TestRegisterSystemJobsPersistsParentsBeforeScheduling(t *testing.T) {
 
 	var persisted []models.SysJobs
 	require.NoError(t, db.Order("id").Find(&persisted).Error)
-	require.Len(t, persisted, 9)
+	// 数量从定义取，不写死：加内置任务不该顺带改这些用例的数字。
+	require.Len(t, persisted, len(systemJobDefinitions()))
 
 	for _, job := range app.JobScheduler.ListJobs() {
 		var count int64
@@ -55,7 +56,7 @@ func TestRegisterSystemJobsIsIdempotentAndPreservesDisabledStatus(t *testing.T) 
 
 	var count int64
 	require.NoError(t, db.Model(&models.SysJobs{}).Count(&count).Error)
-	require.Equal(t, int64(9), count)
+	require.Equal(t, int64(len(systemJobDefinitions())), count)
 
 	var registered *schedulerhelper.Job
 	for _, job := range app.JobScheduler.ListJobs() {

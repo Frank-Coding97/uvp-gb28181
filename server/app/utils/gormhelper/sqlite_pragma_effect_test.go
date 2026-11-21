@@ -52,4 +52,51 @@ func TestSQLiteDSNPragmasTakeEffect(t *testing.T) {
 	if fk != 1 {
 		t.Fatalf("foreign_keys 应为 1，实得 %d", fk)
 	}
+
+	// auto_vacuum 只有 2(INCREMENTAL) 才符合预期。
+	// ⛔ 0(NONE) 说明这条 PRAGMA 没能在建库那一刻生效 —— 它必须排在
+	//   journal_mode 之前，否则文件头已经被写成 NONE 了。
+	var autoVacuum int
+	if err := db.QueryRow("PRAGMA auto_vacuum").Scan(&autoVacuum); err != nil {
+		t.Fatalf("读取 auto_vacuum 失败: %v", err)
+	}
+	if autoVacuum != 2 {
+		t.Fatalf("auto_vacuum 应为 2(INCREMENTAL)，实得 %d —— 该 PRAGMA 必须在建库前生效\nDSN: %s", autoVacuum, sqliteDSN(path))
+	}
+}
+
+// TestSQLiteAutoVacuumSurvivesReopen 证明这个模式是**写进文件头**的，不是连接态。
+//
+// 关心点：重开连接后如果退回 0，说明只是当前连接记得，文件其实还是 NONE，
+// 那么第二天重启服务，增量回收就全失效了（而且不会报错）。
+func TestSQLiteAutoVacuumSurvivesReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reopen.db")
+
+	first, err := sql.Open("sqlite", sqliteDSN(path))
+	if err != nil {
+		t.Fatalf("首次打开失败: %v", err)
+	}
+	first.SetMaxOpenConns(1)
+	if _, err := first.Exec("CREATE TABLE probe (id INTEGER PRIMARY KEY, body TEXT)"); err != nil {
+		t.Fatalf("建表失败: %v", err)
+	}
+	if _, err := first.Exec("INSERT INTO probe (body) VALUES ('x')"); err != nil {
+		t.Fatalf("写数据失败: %v", err)
+	}
+	_ = first.Close()
+
+	second, err := sql.Open("sqlite", sqliteDSN(path))
+	if err != nil {
+		t.Fatalf("再次打开失败: %v", err)
+	}
+	t.Cleanup(func() { _ = second.Close() })
+	second.SetMaxOpenConns(1)
+
+	var autoVacuum int
+	if err := second.QueryRow("PRAGMA auto_vacuum").Scan(&autoVacuum); err != nil {
+		t.Fatalf("重开后读取 auto_vacuum 失败: %v", err)
+	}
+	if autoVacuum != 2 {
+		t.Fatalf("重开后 auto_vacuum 应为 2，实得 %d —— 模式没写进文件头", autoVacuum)
+	}
 }
