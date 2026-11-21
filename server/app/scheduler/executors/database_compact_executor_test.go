@@ -96,6 +96,9 @@ func TestDatabaseCompactExecutorReclaimsFreePages(t *testing.T) {
 func TestDatabaseCompactExecutorSkipsWithoutIncrementalMode(t *testing.T) {
 	db, _ := openCompactTestDB(t, false)
 	fillThenDelete(t, db, 100, 8192, 10)
+	// 先把统计信息建好：ANALYZE 自己会占用/释放少量页，
+	// 不先做掉就会和"本用例只关心有没有搬页"的判据混在一起。
+	require.NoError(t, db.Exec("ANALYZE").Error)
 
 	var mode int
 	require.NoError(t, db.Raw("PRAGMA auto_vacuum").Scan(&mode).Error)
@@ -111,9 +114,40 @@ func TestDatabaseCompactExecutorSkipsWithoutIncrementalMode(t *testing.T) {
 func TestDatabaseCompactExecutorSkipsBelowThreshold(t *testing.T) {
 	db, _ := openCompactTestDB(t, true)
 	fillThenDelete(t, db, 60, 4096, 55)
+	// 同上：先把统计信息建好，避免 ANALYZE 自身的页变动干扰"没搬页"的判据。
+	require.NoError(t, db.Exec("ANALYZE").Error)
 
 	before := freePages(t, db)
 	executor := &DatabaseCompactExecutor{DB: db, MinFreePages: 100000}
 	require.NoError(t, executor.Execute(context.Background(), nil))
 	require.Equal(t, before, freePages(t, db))
+}
+
+// 从未 ANALYZE 过的库（线上就是这个状态）：执行器必须把 sqlite_stat1 建出来。
+//
+// 关心点：这一步跟空闲页多少、auto_vacuum 是不是 2 都无关 —— 它排在最前面，
+// 所以哪怕库里一个空闲页都没有，统计信息也必须被建立。少了它，优化器只能
+// 按内置默认假设估行数，多索引表上会选错索引。
+func TestDatabaseCompactExecutorSeedsPlannerStats(t *testing.T) {
+	db, _ := openCompactTestDB(t, true)
+	fillThenDelete(t, db, 40, 4096, 35)
+
+	require.False(t, hasPlannerStats(t, db), "样本库不该自带统计信息")
+
+	// MinFreePages 设得极大 ⇒ 一定走"空闲页不足"的跳过分支，
+	// 用来证明统计信息维护不依赖回收真的发生。
+	executor := &DatabaseCompactExecutor{DB: db, MinFreePages: 1000000}
+	require.NoError(t, executor.Execute(context.Background(), nil))
+	require.True(t, hasPlannerStats(t, db), "首次运行应生成 sqlite_stat1，否则优化器永远在猜行数")
+
+	// 第二次走 PRAGMA optimize 分支，不能报错。
+	require.NoError(t, executor.Execute(context.Background(), nil))
+}
+
+func hasPlannerStats(t *testing.T, db *gorm.DB) bool {
+	t.Helper()
+	var n int
+	require.NoError(t, db.Raw(
+		"SELECT count(*) FROM sqlite_master WHERE type='table' AND name='sqlite_stat1'").Scan(&n).Error)
+	return n > 0
 }

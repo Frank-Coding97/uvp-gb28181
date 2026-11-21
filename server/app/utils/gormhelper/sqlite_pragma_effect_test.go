@@ -53,6 +53,35 @@ func TestSQLiteDSNPragmasTakeEffect(t *testing.T) {
 		t.Fatalf("foreign_keys 应为 1，实得 %d", fk)
 	}
 
+	// 页缓存必须真的从默认的 2MB(-2000) 抬上去。
+	// ⛔ 读到 -2000 说明这条没落地 —— 对 GB 级库等于每次查询都从磁盘要页。
+	var cacheSize int
+	if err := db.QueryRow("PRAGMA cache_size").Scan(&cacheSize); err != nil {
+		t.Fatalf("读取 cache_size 失败: %v", err)
+	}
+	if cacheSize != -65536 {
+		t.Fatalf("cache_size 应为 -65536(64MB)，实得 %d", cacheSize)
+	}
+
+	// WAL 必须有截断上限。
+	// ⛔ 读到 -1 说明没设：一次批量删除会把 -wal 撑到与库同量级，且长期占盘。
+	var journalSizeLimit int64
+	if err := db.QueryRow("PRAGMA journal_size_limit").Scan(&journalSizeLimit); err != nil {
+		t.Fatalf("读取 journal_size_limit 失败: %v", err)
+	}
+	if journalSizeLimit != 67108864 {
+		t.Fatalf("journal_size_limit 应为 67108864(64MB)，实得 %d", journalSizeLimit)
+	}
+
+	// mmap 必须被驱动接受（读到 0 说明该 PRAGMA 被忽略）。
+	var mmapSize int64
+	if err := db.QueryRow("PRAGMA mmap_size").Scan(&mmapSize); err != nil {
+		t.Fatalf("读取 mmap_size 失败: %v", err)
+	}
+	if mmapSize != 268435456 {
+		t.Fatalf("mmap_size 应为 268435456(256MB)，实得 %d", mmapSize)
+	}
+
 	// auto_vacuum 只有 2(INCREMENTAL) 才符合预期。
 	// ⛔ 0(NONE) 说明这条 PRAGMA 没能在建库那一刻生效 —— 它必须排在
 	//   journal_mode 之前，否则文件头已经被写成 NONE 了。

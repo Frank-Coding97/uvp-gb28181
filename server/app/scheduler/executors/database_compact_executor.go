@@ -65,10 +65,15 @@ func (e *DatabaseCompactExecutor) Execute(ctx context.Context, _ *schedulerhelpe
 	if err != nil {
 		return fmt.Errorf("读取 auto_vacuum 失败: %w", err)
 	}
+	// 统计信息维护排在模式判断之前：它跟回收无关，任何 SQLite 库都该做。
+	// 线上库实测 sqlite_stat1 根本不存在 —— 从装机到现在一次 ANALYZE 都没跑过，
+	// 优化器对"这张表多少行、这个条件筛掉多少"全靠内置默认猜测，
+	// 多索引表（如 gb_sip_trace_message 有 4 个）很容易选错索引。
+	statsNote := refreshPlannerStats(ctx, db)
 	if mode != 2 {
 		// 0=NONE / 1=FULL。这里刻意不动手：整库 VACUUM 会长时间占写锁，必须由人挑时机。
-		schedulerhelper.ReportSummary(ctx, fmt.Sprintf(
-			"跳过=auto_vacuum=%d，未启用增量回收（需一次 PRAGMA auto_vacuum=2 后执行 VACUUM 才切换，且必须停机）", mode))
+		schedulerhelper.ReportSummary(ctx, withStats(statsNote, fmt.Sprintf(
+			"跳过=auto_vacuum=%d，未启用增量回收（需一次 PRAGMA auto_vacuum=2 后执行 VACUUM 才切换，且必须停机）", mode)))
 		return nil
 	}
 
@@ -93,8 +98,8 @@ func (e *DatabaseCompactExecutor) Execute(ctx context.Context, _ *schedulerhelpe
 		minFree = compactMinFreePages
 	}
 	if freePages < minFree {
-		schedulerhelper.ReportSummary(ctx, fmt.Sprintf(
-			"跳过=空闲页 %d（约 %s）低于阈值 %d 页", freePages, humanBytes(int64(freePages)*int64(pageSize)), minFree))
+		schedulerhelper.ReportSummary(ctx, withStats(statsNote, fmt.Sprintf(
+			"跳过=空闲页 %d（约 %s）低于阈值 %d 页", freePages, humanBytes(int64(freePages)*int64(pageSize)), minFree)))
 		return nil
 	}
 
@@ -110,7 +115,7 @@ func (e *DatabaseCompactExecutor) Execute(ctx context.Context, _ *schedulerhelpe
 	for freePages > 0 {
 		if err := ctx.Err(); err != nil {
 			// 取消/超时：已搬的部分都已提交，直接把进度写进摘要，别丢掉成绩。
-			reportCompact(ctx, startPages, freePages, pageSize, reclaimed, "任务被取消")
+			reportCompact(ctx, statsNote, startPages, freePages, pageSize, reclaimed, "任务被取消")
 			return err
 		}
 		if !time.Now().Before(deadline) {
@@ -123,17 +128,17 @@ func (e *DatabaseCompactExecutor) Execute(ctx context.Context, _ *schedulerhelpe
 		}
 		if err := db.WithContext(ctx).Exec(fmt.Sprintf("PRAGMA incremental_vacuum(%d)", thisChunk)).Error; err != nil {
 			// 写锁竞争（database is locked）不该让整晚算失败：已回收的已经生效。
-			reportCompact(ctx, startPages, freePages, pageSize, reclaimed, "执行中断："+err.Error())
+			reportCompact(ctx, statsNote, startPages, freePages, pageSize, reclaimed, "执行中断："+err.Error())
 			return fmt.Errorf("增量回收空闲页失败: %w", err)
 		}
 		next, err := pragmaInt(ctx, db, "freelist_count")
 		if err != nil {
-			reportCompact(ctx, startPages, freePages, pageSize, reclaimed, "读取进度失败")
+			reportCompact(ctx, statsNote, startPages, freePages, pageSize, reclaimed, "读取进度失败")
 			return fmt.Errorf("读取回收进度失败: %w", err)
 		}
 		if next >= freePages {
 			// 一页都没搬动：尾部页可能被长读事务占着，下一晚再试，绝不死循环。
-			reportCompact(ctx, startPages, freePages, pageSize, reclaimed, "本轮无法继续搬页（可能被读事务占用）")
+			reportCompact(ctx, statsNote, startPages, freePages, pageSize, reclaimed, "本轮无法继续搬页（可能被读事务占用）")
 			return nil
 		}
 		reclaimed += freePages - next
@@ -147,17 +152,62 @@ func (e *DatabaseCompactExecutor) Execute(ctx context.Context, _ *schedulerhelpe
 	case stoppedByBudget:
 		note = "预算用尽，下次继续"
 	}
-	reportCompact(ctx, startPages, freePages, pageSize, reclaimed, note)
+	reportCompact(ctx, statsNote, startPages, freePages, pageSize, reclaimed, note)
 	return nil
 }
 
-func reportCompact(ctx context.Context, startPages, freePages, pageSize, reclaimed int, note string) {
+func reportCompact(ctx context.Context, statsNote string, startPages, freePages, pageSize, reclaimed int, note string) {
 	summary := fmt.Sprintf("空闲页 %d→%d（归还约 %s，每页 %d 字节）",
 		startPages, freePages, humanBytes(int64(reclaimed)*int64(pageSize)), pageSize)
 	if note != "" {
 		summary += "；" + note
 	}
-	schedulerhelper.ReportSummary(ctx, summary)
+	schedulerhelper.ReportSummary(ctx, withStats(statsNote, summary))
+}
+
+// withStats 把统计信息维护的结果并进任务摘要。
+//
+// 为什么非并不可：这一步是"顺手做的"，如果只在日志里留一行，没人会注意到它
+// 失败了 —— 而失败的后果（查询计划退化）是几周后才显形的慢查询。
+func withStats(statsNote, summary string) string {
+	if statsNote == "" {
+		return summary
+	}
+	return summary + "；" + statsNote
+}
+
+// refreshPlannerStats 让查询优化器有统计信息可用。
+//
+// 线上库实测（2026-11-21）：sqlite_stat1 表不存在 —— 装机至今没跑过 ANALYZE，
+// 优化器只能按内置默认假设估行数。对 gb_sip_trace_message（438MB、4 个索引）
+// 这种表，选错索引就是几十倍的差距。
+//
+// 两条路径：
+//   - 从未统计过（sqlite_stat1 不存在）：跑一次 ANALYZE。用 analysis_limit 采样的
+//     方式限制每索引只扫 400 行，百万行表也能在秒级完成，不会拖住任务。
+//   - 已有统计：PRAGMA optimize。它会按内部变更计数器自行判断哪些表需要重算，
+//     大部分时候是空操作，代价可以忽略。
+func refreshPlannerStats(ctx context.Context, db *gorm.DB) string {
+	var statTables int
+	if err := db.WithContext(ctx).Raw(
+		"SELECT count(*) FROM sqlite_master WHERE type='table' AND name='sqlite_stat1'").Scan(&statTables).Error; err != nil {
+		return "统计信息跳过=读取 sqlite_master 失败"
+	}
+	// analysis_limit 必须贴在 ANALYZE 前：它限制每个索引采样多少行，
+	// 是"近似统计"而不是全表扫，这是能在生产库上跑的前提。
+	if err := db.WithContext(ctx).Exec("PRAGMA analysis_limit=400").Error; err != nil {
+		return "统计信息跳过=analysis_limit 设置失败"
+	}
+	if statTables == 0 {
+		if err := db.WithContext(ctx).Exec("ANALYZE").Error; err != nil {
+			return "统计信息失败=首次 ANALYZE 报错：" + err.Error()
+		}
+		return "查询统计信息=首次生成（ANALYZE，每索引采样 400 行）"
+	}
+	if err := db.WithContext(ctx).Exec("PRAGMA optimize").Error; err != nil {
+		return "统计信息失败=PRAGMA optimize 报错：" + err.Error()
+	}
+	return "查询统计信息=已刷新（PRAGMA optimize）"
 }
 
 func pragmaInt(ctx context.Context, db *gorm.DB, name string) (int, error) {

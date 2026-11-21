@@ -40,6 +40,16 @@ import (
 //     代价：操作系统掉电可能丢**最后若干个已提交事务**（数据库本身不会损坏）——
 //     与 MySQL 缺省语义一致，对监控平台完全可接受。
 //     ⛔ 不要"为了安全"改回 FULL / 或干脆不写（=默认 FULL）：那会直接把千路容量砍到几十路。
+//   - cache_size(-65536)：页缓存 64MB（负值单位是 KiB，-2000 才是默认的 2MB）。
+//     默认 2MB 对动辄上 GB 的库等于没有缓存：每次查询都要重新向操作系统要页、
+//     反序列化 B 树节点。64MB 能覆盖热点索引与近期日志页，扫描类查询受益最明显。
+//     ⛔ 不要设成 -1048576 这类"越大越好"的值：单连接吃 1GB 内存，
+//     现场机（4GB 内存的工控机）会被直接拖进 swap。
+//   - mmap_size(268435456)：把库的只读映射到进程地址空间，省掉 read() 的拷贝。
+//     256MB 覆盖不了整个 GB 级库，但足以覆盖最热的那部分页。
+//   - journal_size_limit(67108864)：WAL 在 checkpoint 之后截断到 64MB。
+//     ⛔ 默认值 -1 = 不截断：一次大批量删除会把 -wal 撑到与库同量级，
+//     之后即使 checkpoint 过也一直占着磁盘（现场排查磁盘占用时极易被忽略）。
 //   - auto_vacuum(2)：⛔⛔ 这一项**必须排在最前面**，且只对**新建的空库**生效。
 //     SQLite 把 auto-vacuum 模式记在文件头（第 1 页偏移 52），只有在建库那一刻
 //     设置才会写进去；库一旦有数据，再执行这个 PRAGMA 就是空操作（必须整库 VACUUM 才行）。
@@ -53,6 +63,9 @@ var sqlitePragmas = []string{
 	"_pragma=auto_vacuum(2)",
 	"_pragma=busy_timeout(5000)",
 	"_pragma=journal_mode(WAL)",
+	"_pragma=cache_size(-65536)",
+	"_pragma=mmap_size(268435456)",
+	"_pragma=journal_size_limit(67108864)",
 	"_pragma=foreign_keys(1)",
 	"_pragma=synchronous(NORMAL)",
 }
