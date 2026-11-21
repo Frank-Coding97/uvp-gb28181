@@ -1,4 +1,4 @@
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import {
   clearIgnoredServiceUpgradeNotice,
   getServiceUpgradeNotice,
@@ -20,6 +20,21 @@ import { hasPermission } from "@/hooks/usePermission";
  * 「没有新版本」，侧边栏什么都不画（版本号在服务升级页首屏）。
  */
 const NOTICE_REFRESH_INTERVAL = 2 * 60 * 1000;
+
+/**
+ * 跨组件的「现在就去重取一次」信号。
+ *
+ * 升级落地那一刻当前版本就变了，可徽标是 2 分钟轮询一次才更新 —— 于是会出现
+ * 「升级成功」和「菜单还挂着新版本」同屏。升级页看到任务成功、且正在跑的构建
+ * 就是目标构建时拨一下这个计数，挂在布局上的实例立刻重取，不必等轮询。
+ *
+ * ⛔ 只是一个自增计数，不携带数据：取数口径仍然只有 `refresh()` 一处。
+ */
+const noticeEpoch = ref(0);
+
+export function invalidateUpgradeNotice() {
+  noticeEpoch.value += 1;
+}
 
 /** 能进服务升级页的人就看到提示；接口按这条权限放行，否则会 403。 */
 const NOTICE_PERMISSION = "system:upgrade:read";
@@ -114,6 +129,10 @@ export function useUpgradeNotice() {
   onMounted(() => {
     void refresh();
     timer = setInterval(refresh, NOTICE_REFRESH_INTERVAL);
+  });
+  // 别的页面宣布「版本变了」：立刻重取，不等下一次轮询。
+  watch(noticeEpoch, () => {
+    void refresh();
   });
   onUnmounted(() => {
     if (timer) clearInterval(timer);

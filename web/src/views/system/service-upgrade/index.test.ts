@@ -458,6 +458,24 @@ describe("service upgrade page", () => {
     other.unmount();
   });
 
+  // 升级落地的那一刻侧边栏还挂着 2 分钟轮询来的旧结论：页面要主动拨一下信号，
+  // 让徽标立刻重取，否则「升级成功」和「菜单还提示有新版本」会同屏。
+  it("升级落地后立刻让侧边栏重取徽标", async () => {
+    api.getStatus.mockResolvedValue({
+      code: 0,
+      data: {
+        ...status(),
+        current: { version: "1.9.1", build_id: "badge-refresh-build" },
+        tasks: [{ task_id: "done-1", phase: "succeeded", committed: true, version: "1.9.1", build_id: "badge-refresh-build" }]
+      }
+    });
+    const wrapper = mountPage();
+    await flushPromises();
+    // 挂载时读一次，收到信号后再读一次。
+    expect(api.getNotice.mock.calls.length).toBeGreaterThanOrEqual(2);
+    wrapper.unmount();
+  });
+
   it("开始升级先确认业务中断风险，任务准备完成后自动应用", async () => {
     const task = {
       task_id: "ready",

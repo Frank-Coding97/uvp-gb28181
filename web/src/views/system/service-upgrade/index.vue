@@ -357,7 +357,7 @@ import {
   type UpgradeTask
 } from "@/api/service-upgrade";
 import { hasPermission } from "@/hooks/usePermission";
-import { useUpgradeNotice } from "@/hooks/useUpgradeNotice";
+import { useUpgradeNotice, invalidateUpgradeNotice } from "@/hooks/useUpgradeNotice";
 import { APP_BUILD_ID, APP_VERSION, checkRuntimeBuildIdentity } from "@/config/version";
 import UpgradeProgress, { type ProgressDisplay, type UploadTransfer } from "./UpgradeProgress.vue";
 
@@ -872,6 +872,22 @@ const latestCommittedBuildID = (currentBuildID: string) =>
     .filter(task => task.phase === "succeeded" && task.committed && task.build_id === currentBuildID)
     .sort((left, right) => (right.updated_at || "").localeCompare(left.updated_at || ""))[0]?.build_id || "";
 
+/**
+ * 升级刚落地时让侧边栏立刻摘掉「有新版本」徽标。
+ *
+ * 徽标本身是 2 分钟轮询来的，而升级完成的一刻当前版本就变了 —— 不拨这一下，
+ * 「升级成功」和「菜单还挂着新版本」会同屏。只在「正在跑的构建 = 刚成功的任务
+ * 的目标构建」时拨，并且**每个构建只拨一次**，否则 5 秒一次的轮询会把它变成刷接口。
+ */
+let noticeRefreshedBuild = "";
+const refreshNoticeForCommittedBuild = () => {
+  const currentBuildID = status.value?.current?.build_id?.trim() || "";
+  if (!currentBuildID || noticeRefreshedBuild === currentBuildID) return;
+  if (latestCommittedBuildID(currentBuildID) !== currentBuildID) return;
+  noticeRefreshedBuild = currentBuildID;
+  invalidateUpgradeNotice();
+};
+
 const productVersionPattern = /^(\d+)\.(\d+)\.(\d+)(?:-rc\.(\d+))?$/;
 const compareProductVersions = (left: string, right: string) => {
   const leftMatch = productVersionPattern.exec(left.trim());
@@ -1032,6 +1048,8 @@ const loadStatus = async () => {
       reconcileUpdate();
       if (!runtimeIdentityMismatch.value) clearClientRefreshTarget();
       else maybeRefreshClient();
+      // 升级已经生效：顺手让侧边栏摘掉徽标，别等下一轮 2 分钟轮询。
+      refreshNoticeForCommittedBuild();
     } else {
       statusError.value = describeUpgradeError(statusResult.reason, "读取升级状态失败，正在等待服务恢复");
     }

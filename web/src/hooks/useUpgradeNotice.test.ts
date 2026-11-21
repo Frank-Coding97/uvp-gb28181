@@ -21,7 +21,7 @@ vi.mock("@/hooks/usePermission", () => ({
   hasPermission: (permission: string) => permissions.value.includes("*:*:*") || permissions.value.includes(permission)
 }));
 
-import { useUpgradeNotice } from "./useUpgradeNotice";
+import { invalidateUpgradeNotice, useUpgradeNotice } from "./useUpgradeNotice";
 
 const Host = defineComponent({
   setup() {
@@ -178,4 +178,20 @@ describe("useUpgradeNotice", () => {
     expect((wrapper.vm as any).canSetAutoCheck).toBe(false);
     wrapper.unmount();
   });
+});
+
+// 升级页在任务落地后拨这个信号：徽标必须立刻重取，而不是等 2 分钟轮询。
+it("收到「版本变了」的信号后立刻重取", async () => {
+  const wrapper = await mountHost();
+  expect(api.getNotice).toHaveBeenCalledTimes(1);
+  api.getNotice.mockResolvedValue({ data: notice({ currentVersion: "1.2.0", latestVersion: "1.2.0", hasUpdate: false }) });
+
+  invalidateUpgradeNotice();
+  await nextTick();
+  await Promise.resolve();
+  await nextTick();
+
+  expect(api.getNotice).toHaveBeenCalledTimes(2);
+  expect((wrapper.vm as any).pending).toBe(false);
+  wrapper.unmount();
 });
