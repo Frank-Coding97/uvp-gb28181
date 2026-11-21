@@ -44,6 +44,20 @@ WHERE path IN ('/gb28181/cloud-recordings','/gb28181/record-cache','/gb28181/rec
 UPDATE sys_menu SET component='recording-center/device/index'
 WHERE path='/gb28181/device-record-playback/:channelId' AND deleted_at IS NULL;
 
+-- 4b) 三个播放权限点挂到「设备录像」下（原本挂在设备列表与旧隐藏路由下，勾选时找不到）
+--     ⛔ sys_role_menu 记的是**菜单 id 的具体集合、父子不继承**，所以换父节点只改变
+--        「角色管理里勾选框出现在哪」，不影响任何角色已经拿到的权限。
+UPDATE sys_menu
+SET parent_id=(SELECT id FROM (SELECT MIN(id) AS id FROM sys_menu WHERE path='/recording-center/device' AND type=2 AND deleted_at IS NULL) device_menu),
+    sort=CASE permission
+           WHEN 'gb28181:device-record:query' THEN 1
+           WHEN 'gb28181:device-record:play' THEN 2
+           ELSE 3
+         END
+WHERE permission IN ('gb28181:device-record:query','gb28181:device-record:play','gb28181:device-record:download')
+  AND deleted_at IS NULL
+  AND (SELECT id FROM (SELECT MIN(id) AS id FROM sys_menu WHERE path='/recording-center/device' AND type=2 AND deleted_at IS NULL) device_menu) IS NOT NULL;
+
 -- 5a) 给「已经拥有任一录像子菜单」的角色补父目录授权（老库升级不丢菜单）
 INSERT INTO sys_role_menu (role_id,menu_id)
 SELECT DISTINCT rm.role_id,p.id
