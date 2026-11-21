@@ -333,7 +333,8 @@ describe("device record playback workspace", () => {
     ).toBe(true);
     // ⛔ 左侧通道树必须钉死宽度：flex 项默认 min-width:auto，会被树里的内容（五个视图页签 +
     //    搜索框）顶宽 —— 实测写了 240px 却渲染成 310px，播放区被挤窄，看起来「比例不对」。
-    expect(hasRuleBlock(playbackPageSource, ".channel-panel", "flex: 0 0 240px", "min-width: 0", "max-width: 240px")).toBe(true);
+    //    280px 是老板要求的「放宽一档」（原 240 太窄，设备名/通道名常被截断）。
+    expect(hasRuleBlock(playbackPageSource, ".channel-panel", "flex: 0 0 280px", "min-width: 0", "max-width: 280px")).toBe(true);
     expect(hasRuleBlock(playbackPageSource, ".timeline-panel", "flex: none")).toBe(true);
     expect(playbackPageSource).not.toContain("min-height: 100vh");
   });
@@ -376,12 +377,14 @@ describe("device record playback workspace", () => {
     ).toBe(true);
   });
 
-  it("aligns and rounds the query, playback, and timeline regions", () => {
-    // 顶部那条 query-bar 已整块去掉：整页跟「设备列表」一样贴窗口边，
-    // 只有右侧工作区自己留 12px（树贴边 = 老板要的观感）。
+  it("lays the playback regions out edge-to-edge, separated by hairlines", () => {
+    // 无界布局：树 / 播放区 / 录像段 / 时间轴 全部铺到窗口边缘，块与块之间只留 1px 分隔线。
+    // 老板明确要求「上下左右的间距都不要」⇒ padding/margin 只能是 0，
+    // 分隔靠 .channel-panel 的 border-right、.segment-panel 的 border-left、
+    // 时间轴自己的 border-top（在 RecordTimeline.vue 里）。
     expect(hasRuleBlock(playbackPageSource, ".record-playback-page", "height: 100%", "padding: 0")).toBe(true);
     expect(hasRuleBlock(playbackPageSource, ".record-playback-layout", "display: flex", "height: 100%", "padding: 0")).toBe(true);
-    expect(hasRuleBlock(playbackPageSource, ".playback-workspace", "padding: 12px 12px 0")).toBe(true);
+    expect(hasRuleBlock(playbackPageSource, ".playback-workspace", "padding: 0")).toBe(true);
     expect(playbackPageSource).not.toContain("min-height: 72px");
     expect(
       hasRuleBlock(
@@ -391,29 +394,19 @@ describe("device record playback workspace", () => {
         "grid-template-columns: minmax(0, 1fr) 312px",
         "flex: 1",
         "min-height: 0",
+        "padding: 0",
         "margin: 0"
       )
     ).toBe(true);
-    expect(
-      hasRuleBlock(
-        playbackPageSource,
-        ".playback-main",
-        "background: var(--uvp-shell-muted)",
-        "border: 1px solid var(--uvp-panel-border)",
-        "border-radius: var(--uvp-panel-radius)",
-        "overflow: hidden"
-      )
-    ).toBe(true);
-    expect(
-      hasRuleBlock(
-        playbackPageSource,
-        ".timeline-panel",
-        "flex: none",
-        "margin: 10px 0 12px",
-        "border-radius: var(--uvp-panel-radius)",
-        "overflow: hidden"
-      )
-    ).toBe(true);
+    // ⛔ 回归门禁：播放区不许再退化成卡片（底色 + 外框 + 圆角），那正是「有界感」的来源。
+    expect(hasRuleBlock(playbackPageSource, ".playback-main", "background: var(--uvp-shell-muted)")).toBe(false);
+    expect(hasRuleBlock(playbackPageSource, ".playback-main", "border: 1px solid var(--uvp-panel-border)")).toBe(false);
+    expect(hasRuleBlock(playbackPageSource, ".playback-main", "border-radius: var(--uvp-panel-radius)")).toBe(false);
+    // 录像段：只留左边一条线，不再自带整圈外框和 10px 间距
+    expect(hasRuleBlock(playbackPageSource, ".segment-panel", "border-left: 1px solid var(--uvp-list-panel-border)")).toBe(true);
+    expect(hasRuleBlock(playbackPageSource, ".segment-panel", "margin-left: 10px")).toBe(false);
+    expect(hasRuleBlock(playbackPageSource, ".timeline-panel", "flex: none", "margin: 0", "overflow: hidden")).toBe(true);
+    expect(hasRuleBlock(playbackPageSource, ".timeline-panel", "border-radius: var(--uvp-panel-radius)")).toBe(false);
     // 窄屏改成纵向堆叠：同样要求这几条同处一块（宽屏那块是 grid，不会被误判）。
     expect(hasRuleBlock(playbackPageSource, ".playback-main", "display: flex", "flex: none", "flex-direction: column")).toBe(
       true

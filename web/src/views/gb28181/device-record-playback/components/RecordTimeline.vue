@@ -365,10 +365,11 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/* 无界：时间轴不是一张独立卡片，而是贴着工作区底部的一条区域 ——
+   底色透出页面背景，四周不描边，只跟上方（播放控件条）用一条 border-top 分隔。 */
 .record-timeline {
-  padding: 10px 12px 12px;
-  background: var(--uvp-panel-bg);
-  border: 1px solid var(--uvp-panel-border);
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--uvp-panel-border);
 }
 .timeline-header {
   display: flex;

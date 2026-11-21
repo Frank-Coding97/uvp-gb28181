@@ -955,7 +955,10 @@ onUnmounted(() => {
   min-width: 0;
   height: 100%;
   min-height: 0;
-  padding: 12px 12px 0;
+
+  /* 无界：工作区不再自己留边距，播放区/录像段/时间轴全部铺到窗口边缘，
+     块与块之间只用 1px 分隔线（左树 border-right、录像段 border-left、时间轴 border-top）。 */
+  padding: 0;
   overflow: hidden;
 }
 
@@ -974,11 +977,11 @@ onUnmounted(() => {
 }
 .channel-panel {
   display: flex;
-  flex: 0 0 240px;
+  flex: 0 0 280px;
   flex-direction: column;
-  width: 240px;
+  width: 280px;
   min-width: 0;
-  max-width: 240px;
+  max-width: 280px;
   min-height: 0;
   overflow: hidden;
 
@@ -1004,17 +1007,18 @@ onUnmounted(() => {
   height: 32px;
   padding: 0;
 }
+
+/* 无界：播放区不再是一张卡片（原 padding 12px + 底色 + 圆角 + 外框全部去掉），
+   播放器直接贴住左树分界线与窗口右缘；它和录像段之间只剩录像段自己的 border-left。
+   ⛔ 312px 是录像段栏宽，改成 300 会让「查询」按钮换行，别随手调。 */
 .playback-main {
   display: grid;
   flex: 1;
   grid-template-columns: minmax(0, 1fr) 312px;
   min-height: 0;
-  padding: 12px;
+  padding: 0;
   margin: 0;
   overflow: hidden;
-  background: var(--uvp-shell-muted);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: var(--uvp-panel-radius);
 }
 .player-column {
   display: flex;
@@ -1136,8 +1140,9 @@ onUnmounted(() => {
   padding: 0 10px;
   color: var(--uvp-text-secondary);
   background: var(--uvp-panel-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-top: 0;
+
+  /* 无界：控件条只跟上方视频分一条线，左右两侧贴边不描边（否则会跟左树/录像段的分界线叠成双线） */
+  border-top: 1px solid var(--uvp-panel-border);
 }
 .control-spacer {
   flex: 1;
@@ -1147,13 +1152,15 @@ onUnmounted(() => {
 .playback-controls :deep(.scale-select) {
   width: 78px;
 }
+
+/* 录像段不再是一张浮在播放区里的卡片：贴住播放器右缘，只用一条 border-left 分隔。
+   内部 header / 查询区 / 底部统计条各自保留 border-bottom / border-top 细线。 */
 .segment-panel {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  margin-left: 10px;
   background: var(--uvp-list-panel-bg);
-  border: 1px solid var(--uvp-list-panel-border);
+  border-left: 1px solid var(--uvp-list-panel-border);
 }
 .segment-header {
   display: flex;
@@ -1377,11 +1384,12 @@ onUnmounted(() => {
   background: var(--uvp-list-toolbar-bg);
   border-top: 1px solid var(--uvp-list-panel-border);
 }
+
+/* 时间轴贴底铺满，只跟上方用一条线分隔（自身皮肤在 RecordTimeline 里改成了 border-top）。 */
 .timeline-panel {
   flex: none;
-  margin: 10px 0 12px;
+  margin: 0;
   overflow: hidden;
-  border-radius: var(--uvp-panel-radius);
 }
 .spin {
   animation: spin 900ms linear infinite;
@@ -1408,14 +1416,13 @@ onUnmounted(() => {
   .playback-workspace {
     height: auto;
     min-height: 100%;
-    padding: 8px 8px 0;
-    border-radius: 0;
+    padding: 0;
   }
   .playback-main {
     display: flex;
     flex: none;
     flex-direction: column;
-    padding: 8px;
+    padding: 0;
     margin: 0;
   }
   .playback-viewport {
@@ -1425,10 +1432,12 @@ onUnmounted(() => {
   }
   .segment-panel {
     height: 280px;
-    margin: 8px 0 0;
+    margin: 0;
+    border-top: 1px solid var(--uvp-list-panel-border);
+    border-left: 0;
   }
   .timeline-panel {
-    margin: 8px 0;
+    margin: 0;
   }
 }
 
