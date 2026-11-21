@@ -7766,7 +7766,7 @@ INSERT INTO "sys_menu" ("id", "parent_id", "path", "name", "redirect", "componen
 (140361, 140369, '', '', NULL, '', '修改 SIP 配置', 0, 0, 0, 0, 0, '', 0, '', '', 0, 3, 0, 'gb28181:sip:config:update', '2026-07-20 09:24:46.000000', '2026-07-20 09:24:46.000000', NULL, 1),
 (140362, 140507, '/gb28181/sip-traces', 'gb28181-sip-traces', '', 'gb28181/sip-log-v2/index', 'SIP 日志', 0, 0, 0, 0, 0, '', 0, '', 'lucide:FileText', 10, 2, 0, '', '2026-07-20 13:46:36.000000', '2026-09-17 14:40:02.000000', NULL, 0),
 (140364, 140358, '', '', NULL, NULL, '管理自定义分组', 0, 0, 0, 0, 0, '', 0, '', '', 0, 3, 0, 'gb28181:device-group:manage', '2026-08-02 16:32:06.000000', '2026-08-02 16:32:06.000000', NULL, 1),
-(140365, 0, '/gb28181/device-record-playback/:channelId', 'gb28181-device-record-playback', '', 'recording-center/device/index', '设备录像回放', 0, 1, 0, 0, 0, '', 0, '', 'lucide:History', 210, 2, 0, '', '2026-08-04 15:41:09.000000', '2026-09-15 18:59:24.000000', NULL, 1),
+(140365, 0, '/gb28181/device-record-playback/:channelId', 'gb28181-device-record-playback', '', 'gb28181/device-record-playback/index', '设备录像回放', 0, 1, 0, 0, 0, '', 0, '', 'lucide:History', 210, 2, 0, '', '2026-08-04 15:41:09.000000', '2026-09-15 18:59:24.000000', NULL, 1),
 (140366, 0, '/gb28181/alarm-management', 'gb28181-alarm-management', '', 'gb28181/alarm-management/index', '告警管理', 0, 0, 0, 0, 0, '', 0, '', 'lucide:BellRing', 80, 2, 0, 'gb28181:alarm:view', '2026-08-04 22:41:38.000000', '2026-09-15 18:59:24.000000', NULL, 1),
 (140367, 140366, '', '', NULL, '', '物理删除告警', 0, 0, 0, 0, 0, '', 0, '', '', 0, 3, 0, 'gb28181:alarm:delete', '2026-08-04 22:41:38.000000', '2026-08-04 22:41:38.000000', NULL, 1),
 (140368, 0, '/gb28181/multi-screen-playback', 'gb28181-multi-screen-playback', NULL, 'gb28181/multi-screen-playback/index', '多屏播放', 0, 0, 0, 0, 0, '', 0, '', 'lucide:MonitorPlay', 30, 2, 0, '', '2026-08-06 17:33:14.000000', '2026-09-15 18:59:24.000000', NULL, 1),
@@ -7904,7 +7904,7 @@ INSERT INTO "sys_menu" ("id", "parent_id", "path", "name", "redirect", "componen
 (140620, 140509, '', '', NULL, '', '批量下载图像', 0, 0, 0, 1, 0, '', 0, '', '', 1, 3, 0, 'gb28181:snapshot:download', '2026-11-04 19:14:43.000000', '2026-11-04 19:14:43.000000', NULL, 1),
 (140621, 140509, '', '', NULL, '', '删除图像', 0, 0, 0, 1, 0, '', 0, '', '', 2, 3, 0, 'gb28181:snapshot:delete', '2026-11-04 19:14:43.000000', '2026-11-04 19:14:43.000000', NULL, 1),
 (140700, 0, '/recording-center', 'RecordingCenter', '/recording-center/device', '', '录像中心', 0, 0, 0, 1, 0, '', 0, '', 'lucide:Video', 40, 1, 0, '', '2026-11-21 12:00:00.000000', '2026-11-21 12:00:00.000000', NULL, 1),
-(140701, 140700, '/recording-center/device', 'recording-center-device', '', 'recording-center/device/index', '设备录像', 0, 0, 0, 0, 0, '', 0, '', 'lucide:History', 10, 2, 0, '', '2026-11-21 12:00:00.000000', '2026-11-21 12:00:00.000000', NULL, 1);
+(140701, 140700, '/recording-center/device', 'recording-center-device', '', 'gb28181/device-record-playback/index', '设备录像', 0, 0, 0, 0, 0, '', 0, '', 'lucide:History', 10, 2, 0, '', '2026-11-21 12:00:00.000000', '2026-11-21 12:00:00.000000', NULL, 1);
 INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (1, 5),
 (1, 6),

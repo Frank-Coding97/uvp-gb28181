@@ -88,6 +88,14 @@ const props = defineProps<{
    * 只负责视觉，不参与"能不能点"的判断 —— 那是 `usedChannelIds` 的事。
    */
   selectedChannelId?: number | null;
+  /**
+   * 离线通道是否也能选中。
+   *
+   * 多屏播放不传（离线通道开不了实时流，点上去也没用，干脆不响应）；
+   * 设备录像页要传 —— 设备离线时它的历史录像仍然可能查得到（部分设备断电重启后
+   * 目录还在），而且「点了没反应」比「提示设备离线」糟糕得多。
+   */
+  allowOfflineSelect?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -566,9 +574,20 @@ async function toggle(node: SourceTreeNode) {
   node.expanded = !node.expanded;
 }
 
+/**
+ * 通道行能不能点。
+ * ⛔ 模板里的 `:disabled` 和 `choose()` 里的判断必须共用这一个函数 ——
+ *    按钮 disabled 之后 click 根本不触发，只改 choose 是死代码。
+ */
+function channelSelectable(node: SourceTreeNode) {
+  if (node.kind !== "channel") return true;
+  if (node.channel && isUsed(node.channel)) return false;
+  return props.allowOfflineSelect === true || node.status === 1;
+}
+
 async function choose(node: SourceTreeNode) {
   if (node.kind === "channel") {
-    if (node.channel && node.status === 1 && !isUsed(node.channel)) emit("select", node.channel);
+    if (node.channel && channelSelectable(node)) emit("select", node.channel);
     return;
   }
   await toggle(node);
@@ -890,12 +909,7 @@ defineExpose({ openFavoriteDialogForChannels });
           >
             <ChevronRight :size="12" />
           </button>
-          <button
-            class="tree-node"
-            type="button"
-            :disabled="node.kind === 'channel' && (node.status !== 1 || Boolean(node.channel && isUsed(node.channel)))"
-            @click="choose(node)"
-          >
+          <button class="tree-node" type="button" :disabled="!channelSelectable(node)" @click="choose(node)">
             <component :is="nodeIcon(node)" :size="13" aria-hidden="true" />
             <span class="node-name">{{ node.name }}</span>
             <span v-if="node.kind === 'directory' || node.kind === 'favorite-group'" class="node-status">{{

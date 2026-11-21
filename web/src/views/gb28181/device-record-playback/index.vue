@@ -48,6 +48,7 @@ import {
 import { positionToTime } from "./timeline";
 import RecordTimeline, { type TimelineLocateEvent } from "./components/RecordTimeline.vue";
 import PlayWindow from "../components/PlayWindow.vue";
+import ChannelSourceTree from "../components/channel-tree/ChannelSourceTree.vue";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
 import { hasPermission } from "@/hooks/usePermission";
 import { Message } from "@arco-design/web-vue";
@@ -67,9 +68,13 @@ const route = useRoute();
 const router = useRouter();
 /** 设备在线状态文案（`device_status` 字典）。 */
 const deviceStatusLabel = useDeviceStatusLabel();
-// 路由参数解析见 parsePlaybackChannelId：0 表示参数不可用，由 loadOptions 给提示。
-const channelId = computed(() => parsePlaybackChannelId(route.params.channelId));
-const playbackChannelId = channelId.value;
+// 当前通道：优先取路由参数（设备列表点进来、老书签），其次取 ?channel=（录像中心菜单点进来）。
+// 之后由左侧设备树切换 —— 树只改这个 ref，不再走路由，避免整页重新挂载把树的状态也重置掉。
+// 解析见 parsePlaybackChannelId：0 表示还没选通道，页面显示「从左侧选择通道」。
+const currentChannelId = ref(parsePlaybackChannelId(route.params.channelId) || parsePlaybackChannelId(route.query.channel));
+const channelId = computed(() => currentChannelId.value);
+const playbackChannelId = channelId;
+const recordTreeSelectedId = computed(() => (currentChannelId.value > 0 ? currentChannelId.value : null));
 const options = ref<RecordQueryOptions | null>(null);
 const form = ref<RecordQueryForm | null>(null);
 const queryState = ref<RecordQueryUiState>("idle");
@@ -211,23 +216,28 @@ function recordIdentity(record: Pick<RecordQueryItem, "startTime" | "endTime">) 
 
 function readLastRecordIdentity() {
   if (typeof window === "undefined") return "";
-  return window.sessionStorage.getItem(`uvp:gb28181:playback:${playbackChannelId}`) || "";
+  return window.sessionStorage.getItem(`uvp:gb28181:playback:${playbackChannelId.value}`) || "";
 }
 
 function saveLastRecordIdentity(record: RecordQueryItem) {
   if (typeof window === "undefined") return;
-  window.sessionStorage.setItem(`uvp:gb28181:playback:${playbackChannelId}`, recordIdentity(record));
+  window.sessionStorage.setItem(`uvp:gb28181:playback:${playbackChannelId.value}`, recordIdentity(record));
 }
 
 async function loadOptions() {
   if (!canQuery.value) return;
-  if (!playbackChannelId) {
-    queryState.value = "error";
-    queryMessage.value = "通道参数无效，请从「设备列表 → 查看通道」进入回放，不要手工拼接地址";
+  if (!playbackChannelId.value) {
+    // 还没选通道（从录像中心菜单直接进来就是这样）——不是错误，右侧显示「从左侧选择通道」。
+    options.value = null;
+    form.value = null;
+    result.value = null;
+    records.value = [];
+    queryState.value = "idle";
+    queryMessage.value = "";
     return;
   }
   try {
-    const response = await getRecordQueryOptions(playbackChannelId);
+    const response = await getRecordQueryOptions(playbackChannelId.value);
     options.value = response.data;
     form.value = createDefaultRecordQueryForm(response.data);
     await nextTick();
@@ -255,7 +265,7 @@ async function runQuery() {
   queryMessage.value = "";
   try {
     const response = await queryDeviceRecords(
-      playbackChannelId,
+      playbackChannelId.value,
       serializeRecordQueryForm(form.value),
       queryAbort.signal,
       recordQueryTimeoutMs(options.value)
@@ -319,7 +329,7 @@ async function queueDownload(record: RecordQueryItem | null = selectedRecord.val
   downloadNotice.value = "";
   try {
     const response = await createRecordCacheTask({
-      channelId: playbackChannelId,
+      channelId: playbackChannelId.value,
       recordKey: record.recordKey,
       playFrom: record.startTime
     });
@@ -352,7 +362,7 @@ function goRecordCachePage() {
 }
 
 function createIdempotencyKey(record: RecordQueryItem) {
-  return `playback-${encodeURIComponent(`${playbackChannelId}|${recordIdentity(record)}`)}`;
+  return `playback-${encodeURIComponent(`${playbackChannelId.value}|${recordIdentity(record)}`)}`;
 }
 
 function playbackErrorMessage(error: unknown) {
@@ -413,7 +423,7 @@ function scheduleSessionPoll(sessionId: string, token: number) {
     try {
       // 会话被后台收尾后这里会拿到 404「回放会话不存在」——那是正常收流,
       // 不该弹全局错误提示,状态由下面的 catch 落到「回放失败」即可。
-      const response = await getPlaybackSession(playbackChannelId, sessionId, { showErrorMessage: false });
+      const response = await getPlaybackSession(playbackChannelId.value, sessionId, { showErrorMessage: false });
       if (token !== sessionToken) return;
       applySession(response.data, token);
     } catch (error) {
@@ -475,7 +485,7 @@ async function createSessionAfterChannelRelease(record: RecordQueryItem, token: 
   for (let attempt = 0; ; attempt += 1) {
     try {
       return await createPlaybackSession(
-        playbackChannelId,
+        playbackChannelId.value,
         {
           recordKey: record.recordKey,
           playFrom: playback.value.currentTime || record.startTime || ""
@@ -528,7 +538,7 @@ async function sendPlaybackAction(action: PlaybackActionRequest, syncPosition = 
   const token = sessionToken;
   controlPending.value = true;
   try {
-    const response = await actionPlaybackSession(playbackChannelId, sessionId, action);
+    const response = await actionPlaybackSession(playbackChannelId.value, sessionId, action);
     applySession(response.data, token, syncPosition);
   } catch (error) {
     if (token === sessionToken) playback.value = { ...playback.value, error: playbackErrorMessage(error) };
@@ -551,7 +561,7 @@ type TeardownOutcome = { state: "released" } | { state: "superseded" } | { state
 // 所以失败后转为「观察会话是否已从平台消失」,释放了就继续用户原本的操作。
 async function teardownSession(sessionId: string, token: number): Promise<TeardownOutcome> {
   try {
-    await deletePlaybackSession(playbackChannelId, sessionId, { showErrorMessage: false });
+    await deletePlaybackSession(playbackChannelId.value, sessionId, { showErrorMessage: false });
     return { state: "released" };
   } catch (error) {
     if (token !== sessionToken) return { state: "superseded" };
@@ -563,7 +573,7 @@ async function teardownSession(sessionId: string, token: number): Promise<Teardo
   try {
     const released = await waitForChannelRelease(async () => {
       try {
-        await getPlaybackSession(playbackChannelId, sessionId, { showErrorMessage: false });
+        await getPlaybackSession(playbackChannelId.value, sessionId, { showErrorMessage: false });
         return false; // 还查得到 = 占位仍在,通道没释放
       } catch (error) {
         return isSessionReleased(error);
@@ -646,6 +656,36 @@ async function toggleFullscreen() {
   else await viewport.value.requestFullscreen?.();
 }
 
+/**
+ * 左侧设备树选中一个通道：把旧通道的状态收干净，再加载新通道。
+ *
+ * ⛔ 顺序不能反：拆除会话必须发生在 currentChannelId 改变**之前**。
+ *    反过来的话 deletePlaybackSession 会拿新通道的 id 去删旧通道的会话，
+ *    旧会话没人释放，新通道点播立刻撞 429 playback_busy。
+ */
+async function switchChannel(channel: { id?: number } | null) {
+  const next = Number(channel?.id || 0);
+  if (!next || next === currentChannelId.value) return;
+  queryAbort?.abort();
+  queryAbort = null;
+  downloadNotice.value = "";
+  downloadPending.value = false;
+  playbackBuffering.value = false;
+  channelReleasePending.value = false;
+  await stopPlayback(false, false);
+  currentChannelId.value = next;
+  playback.value = createPlaybackState();
+  playbackMediaUrl.value = "";
+  playbackSource.value = null;
+  options.value = null;
+  form.value = null;
+  result.value = null;
+  records.value = [];
+  queryState.value = "idle";
+  queryMessage.value = "";
+  await loadOptions();
+}
+
 function goBack() {
   const registeredRoutes = router.getRoutes();
   const target =
@@ -667,252 +707,267 @@ onUnmounted(() => {
   ++sessionToken;
   clearPlaybackTimers();
   // 离开页面时的收尾属于后台行为,失败不该再弹提示。
-  if (sessionId) void deletePlaybackSession(playbackChannelId, sessionId, { showErrorMessage: false }).catch(() => undefined);
+  if (sessionId)
+    void deletePlaybackSession(playbackChannelId.value, sessionId, { showErrorMessage: false }).catch(() => undefined);
   if (downloadTimer !== null) window.clearTimeout(downloadTimer);
 });
 </script>
 
 <template>
   <div class="snow-fill record-playback-page">
-    <div class="snow-fill-inner uvp-page-shell-flat playback-workspace">
-      <div v-if="!canQuery" class="record-playback-permission-state" data-testid="record-playback-permission-denied">
-        无权查询设备录像，请联系管理员分配设备录像查询权限。
-      </div>
-      <template v-else>
-        <header class="query-bar" data-testid="playback-query-bar">
-          <a-button class="icon-command back-command" aria-label="返回设备管理" title="返回设备管理" @click="goBack">
-            <template #icon><ArrowLeft :size="18" /></template>
-          </a-button>
-          <div class="channel-context">
-            <span class="channel-icon"><Video :size="17" /></span>
-            <div>
-              <strong>{{ options?.channel.name || `通道 ${channelId}` }}</strong>
-              <span>{{ options?.device.name || "正在加载设备" }} · {{ options?.channel.code || "--" }}</span>
+    <div class="snow-fill-inner uvp-page-shell-flat record-playback-layout">
+      <!-- 左侧通道树：选通道不再跳路由，直接换右侧内容（树的状态不会被重置） -->
+      <aside v-if="canQuery" class="channel-panel" aria-label="通道选择">
+        <ChannelSourceTree
+          :selected-channel-id="recordTreeSelectedId"
+          allow-offline-select
+          @select="switchChannel"
+          @select-group="() => undefined"
+          @favorite-saved="() => undefined"
+        />
+      </aside>
+      <div class="playback-workspace">
+        <div v-if="!canQuery" class="record-playback-permission-state" data-testid="record-playback-permission-denied">
+          无权查询设备录像，请联系管理员分配设备录像查询权限。
+        </div>
+        <template v-else>
+          <header class="query-bar" data-testid="playback-query-bar">
+            <a-button class="icon-command back-command" aria-label="返回设备管理" title="返回设备管理" @click="goBack">
+              <template #icon><ArrowLeft :size="18" /></template>
+            </a-button>
+            <div class="channel-context">
+              <span class="channel-icon"><Video :size="17" /></span>
+              <div>
+                <strong>{{ options?.channel.name || (channelId ? `通道 ${channelId}` : "未选择通道") }}</strong>
+                <span v-if="options">{{ options.device.name }} · {{ options.channel.code || "--" }}</span>
+                <span v-else>{{ channelId ? "正在加载设备" : "从左侧通道树选择一路通道" }}</span>
+              </div>
+              <i v-if="options" :class="['online-indicator', { offline: !options.device.online }]">{{
+                deviceStatusLabel(options.device.online !== false)
+              }}</i>
             </div>
-            <i :class="['online-indicator', { offline: options && !options.device.online }]">{{
-              deviceStatusLabel(options?.device.online !== false)
-            }}</i>
-          </div>
 
-          <!-- ⛔ 查询栏里不要用 <label> 包 Arco 控件。label 没写 for 时浏览器会把里面
+            <!-- ⛔ 查询栏里不要用 <label> 包 Arco 控件。label 没写 for 时浏览器会把里面
                第一个可标注控件当成它的关联控件,于是把点击**再转发一次**;而 Arco 的下拉
                点击目标是 view 那个 span、关联控件却是另一个隐藏的 readonly input,一次点击
                变成两次开合 ⇒ 面板弹出来立刻就收回去。原生 select 不看重复 click,所以这个
                坑只在换成 Arco 之后才出现。控件自身带 aria-label,语义不依赖 label。 -->
-          <div v-if="form" class="query-fields">
-            <div class="query-field time-field">
-              <span><CalendarRange :size="13" />录像时间</span>
-              <a-range-picker
-                v-model="timeRange"
-                class="time-picker"
-                aria-label="录像时间范围"
-                show-time
-                value-format="YYYY-MM-DDTHH:mm:ss"
-                format="YYYY-MM-DD HH:mm:ss"
-                :allow-clear="false"
-                :disabled="queryState === 'querying'"
-              />
-            </div>
-            <div class="query-field type-field">
-              <span>录像类型</span>
-              <a-select v-model="form.type" class="type-select" aria-label="录像类型" :disabled="queryState === 'querying'">
-                <a-option v-for="item in recordQueryRequestTypes" :key="item.value" :value="item.value">{{
-                  item.label
-                }}</a-option>
-              </a-select>
-            </div>
-            <a-button
-              data-testid="record-query-submit"
-              class="query-submit"
-              type="primary"
-              :loading="queryState === 'querying'"
-              :disabled="queryState === 'querying'"
-              @click="runQuery"
-            >
-              <template #icon><Search :size="15" /></template>
-              查询录像
-            </a-button>
-          </div>
-          <div v-else class="query-loading"><LoaderCircle :size="16" class="spin" />正在加载查询条件</div>
-        </header>
-
-        <main class="playback-main">
-          <section class="player-column">
-            <div ref="viewport" class="playback-viewport" data-testid="playback-viewport">
-              <PlayWindow
-                v-if="playbackMediaUrl"
-                data-testid="playback-player"
-                :data-media-url="playbackMediaUrl"
-                :url="playbackMediaUrl"
-                :zlm-webrtc="playbackSource?.zlmWebrtc || false"
-                :has-audio="playbackHasAudio"
-                playback
-                @error="handlePlayerError"
-                @timeupdate="handlePlayerTimeUpdate"
-                @loading="handlePlayerLoading"
-              />
-              <div v-if="playbackMediaUrl && playbackBuffering" class="playback-buffering" data-testid="playback-buffering">
-                <LoaderCircle :size="22" class="spin" aria-hidden="true" />
-                <span>画面缓冲中</span>
+            <div v-if="form" class="query-fields">
+              <div class="query-field time-field">
+                <span><CalendarRange :size="13" />录像时间</span>
+                <a-range-picker
+                  v-model="timeRange"
+                  class="time-picker"
+                  aria-label="录像时间范围"
+                  show-time
+                  value-format="YYYY-MM-DDTHH:mm:ss"
+                  format="YYYY-MM-DD HH:mm:ss"
+                  :allow-clear="false"
+                  :disabled="queryState === 'querying'"
+                />
               </div>
-              <div v-if="playbackMediaUrl" class="video-overlay top-overlay">
-                <span>CH-01 {{ options?.channel.name || "东门出入口" }}</span>
+              <div class="query-field type-field">
+                <span>录像类型</span>
+                <a-select v-model="form.type" class="type-select" aria-label="录像类型" :disabled="queryState === 'querying'">
+                  <a-option v-for="item in recordQueryRequestTypes" :key="item.value" :value="item.value">{{
+                    item.label
+                  }}</a-option>
+                </a-select>
               </div>
-              <div
-                v-else
-                class="playback-idle-cover"
-                data-testid="playback-idle-cover"
-                role="img"
-                :aria-label="isPlaybackLoading ? statusText : '录像未播放'"
-              >
-                <div v-if="isPlaybackLoading" class="playback-loading" data-testid="playback-loading">
-                  <LoaderCircle :size="42" class="spin" aria-hidden="true" />
-                  <span>{{ statusText }}</span>
-                </div>
-                <CircleAlert v-else-if="playback.status === 'failed'" :size="48" aria-hidden="true" />
-                <Videotape v-else :size="64" :stroke-width="1.35" aria-hidden="true" />
-              </div>
-              <span class="playback-status-sr" data-testid="playback-status" aria-live="polite">{{ statusText }}</span>
-              <div v-if="downloadNotice" class="download-notice" data-testid="download-notice">
-                <Download :size="14" />{{ downloadNotice }}
-              </div>
-            </div>
-
-            <div class="playback-controls" data-testid="playback-controls">
               <a-button
-                data-testid="playback-primary-action"
-                class="control-primary"
+                data-testid="record-query-submit"
+                class="query-submit"
                 type="primary"
-                shape="circle"
-                :disabled="!canStartPlayback"
-                :aria-label="isPlaying ? '暂停' : '播放'"
-                @click="isPlaying ? pausePlayback() : startPlayback()"
-              >
-                <template #icon>
-                  <Pause v-if="isPlaying" :size="17" fill="currentColor" />
-                  <Play v-else :size="17" fill="currentColor" />
-                </template>
-              </a-button>
-              <a-button
-                class="control-icon"
-                aria-label="停止"
-                title="停止"
-                :disabled="!selectedRecord || !canPlayPermission"
-                @click="stopPlayback()"
-              >
-                <template #icon><Square :size="15" fill="currentColor" /></template>
-              </a-button>
-              <div class="control-spacer"></div>
-              <a-select
-                v-model="playbackScale"
-                class="scale-select"
-                data-testid="playback-scale"
-                title="播放倍速"
-                :disabled="!canPlayPermission"
-              >
-                <a-option v-for="scale in playbackScaleOptions" :key="scale" :value="scale">{{ scale }}x</a-option>
-              </a-select>
-              <a-button
-                data-testid="playback-download"
-                class="control-icon"
-                aria-label="缓存到服务器"
-                title="缓存到服务器"
-                :disabled="!selectedRecord || downloadPending || !canDownload"
-                @click="queueDownload()"
-              >
-                <template #icon>
-                  <LoaderCircle v-if="downloadPending" :size="16" class="spin" />
-                  <Download v-else :size="16" />
-                </template>
-              </a-button>
-              <a-button class="control-icon" aria-label="全屏" title="全屏" @click="toggleFullscreen">
-                <template #icon><Fullscreen :size="16" /></template>
-              </a-button>
-            </div>
-          </section>
-
-          <aside class="segment-panel" data-testid="record-segment-list">
-            <div class="segment-header">
-              <div>
-                <strong>录像段</strong><span>{{ querySummary }}</span>
-              </div>
-              <a-button
-                class="icon-command"
-                aria-label="重新查询"
-                title="重新查询"
+                :loading="queryState === 'querying'"
                 :disabled="queryState === 'querying'"
                 @click="runQuery"
               >
-                <template #icon><RotateCcw :size="14" /></template>
+                <template #icon><Search :size="15" /></template>
+                查询录像
               </a-button>
             </div>
-            <div v-if="records.length" class="segment-list">
-              <div
-                v-for="(record, index) in records"
-                :key="record.recordKey"
-                :class="['segment-row', { selected: playback.recordKey === record.recordKey }]"
-              >
-                <button
-                  :data-testid="`record-segment-${index}`"
-                  :class="['segment-item', { selected: playback.recordKey === record.recordKey }]"
-                  :aria-current="playback.recordKey === record.recordKey ? 'true' : undefined"
-                  :aria-disabled="!canPlayPermission ? 'true' : undefined"
-                  :disabled="!canPlayPermission"
-                  type="button"
-                  @click="playRecord(record)"
+            <div v-else-if="!channelId" class="query-loading">从左侧通道树选择一路通道后可查询录像</div>
+            <div v-else class="query-loading"><LoaderCircle :size="16" class="spin" />正在加载查询条件</div>
+          </header>
+
+          <main class="playback-main">
+            <section class="player-column">
+              <div ref="viewport" class="playback-viewport" data-testid="playback-viewport">
+                <PlayWindow
+                  v-if="playbackMediaUrl"
+                  data-testid="playback-player"
+                  :data-media-url="playbackMediaUrl"
+                  :url="playbackMediaUrl"
+                  :zlm-webrtc="playbackSource?.zlmWebrtc || false"
+                  :has-audio="playbackHasAudio"
+                  playback
+                  @error="handlePlayerError"
+                  @timeupdate="handlePlayerTimeUpdate"
+                  @loading="handlePlayerLoading"
+                />
+                <div v-if="playbackMediaUrl && playbackBuffering" class="playback-buffering" data-testid="playback-buffering">
+                  <LoaderCircle :size="22" class="spin" aria-hidden="true" />
+                  <span>画面缓冲中</span>
+                </div>
+                <div v-if="playbackMediaUrl" class="video-overlay top-overlay">
+                  <span>CH-01 {{ options?.channel.name || "东门出入口" }}</span>
+                </div>
+                <div
+                  v-else
+                  class="playback-idle-cover"
+                  data-testid="playback-idle-cover"
+                  role="img"
+                  :aria-label="isPlaybackLoading ? statusText : '录像未播放'"
                 >
-                  <span class="segment-content">
-                    <strong>{{ record.name || `录像段 ${index + 1}` }}</strong>
-                    <span class="segment-time"
-                      ><Clock3 :size="12" />{{ shortTime(record.startTime) }} - {{ shortTime(record.endTime) }}</span
-                    >
-                    <span class="segment-meta">
-                      <i class="segment-type"
-                        ><span class="segment-marker" :class="record.type || 'unknown'"></span
-                        >{{ recordQueryTypeText(record.type) }}</i
-                      >
-                      <i>{{ durationText(record) }}</i>
-                      <i v-if="record.fileSize != null && record.fileSize >= 0" :data-testid="`record-segment-size-${index}`">{{
-                        fileSizeText(record.fileSize)
-                      }}</i>
-                    </span>
-                  </span>
-                </button>
+                  <div v-if="isPlaybackLoading" class="playback-loading" data-testid="playback-loading">
+                    <LoaderCircle :size="42" class="spin" aria-hidden="true" />
+                    <span>{{ statusText }}</span>
+                  </div>
+                  <CircleAlert v-else-if="playback.status === 'failed'" :size="48" aria-hidden="true" />
+                  <Videotape v-else :size="64" :stroke-width="1.35" aria-hidden="true" />
+                </div>
+                <span class="playback-status-sr" data-testid="playback-status" aria-live="polite">{{ statusText }}</span>
+                <div v-if="downloadNotice" class="download-notice" data-testid="download-notice">
+                  <Download :size="14" />{{ downloadNotice }}
+                </div>
+              </div>
+
+              <div class="playback-controls" data-testid="playback-controls">
                 <a-button
-                  :data-testid="`record-segment-download-${index}`"
-                  class="icon-command segment-download"
-                  type="text"
-                  :aria-label="`缓存 ${record.name || `录像段 ${index + 1}`} 到服务器`"
-                  :title="`缓存 ${record.name || `录像段 ${index + 1}`} 到服务器`"
-                  :disabled="downloadPending || !canDownload"
-                  @click="queueDownload(record)"
+                  data-testid="playback-primary-action"
+                  class="control-primary"
+                  type="primary"
+                  shape="circle"
+                  :disabled="!canStartPlayback"
+                  :aria-label="isPlaying ? '暂停' : '播放'"
+                  @click="isPlaying ? pausePlayback() : startPlayback()"
                 >
-                  <template #icon><Download :size="15" /></template>
+                  <template #icon>
+                    <Pause v-if="isPlaying" :size="17" fill="currentColor" />
+                    <Play v-else :size="17" fill="currentColor" />
+                  </template>
+                </a-button>
+                <a-button
+                  class="control-icon"
+                  aria-label="停止"
+                  title="停止"
+                  :disabled="!selectedRecord || !canPlayPermission"
+                  @click="stopPlayback()"
+                >
+                  <template #icon><Square :size="15" fill="currentColor" /></template>
+                </a-button>
+                <div class="control-spacer"></div>
+                <a-select
+                  v-model="playbackScale"
+                  class="scale-select"
+                  data-testid="playback-scale"
+                  title="播放倍速"
+                  :disabled="!canPlayPermission"
+                >
+                  <a-option v-for="scale in playbackScaleOptions" :key="scale" :value="scale">{{ scale }}x</a-option>
+                </a-select>
+                <a-button
+                  data-testid="playback-download"
+                  class="control-icon"
+                  aria-label="缓存到服务器"
+                  title="缓存到服务器"
+                  :disabled="!selectedRecord || downloadPending || !canDownload"
+                  @click="queueDownload()"
+                >
+                  <template #icon>
+                    <LoaderCircle v-if="downloadPending" :size="16" class="spin" />
+                    <Download v-else :size="16" />
+                  </template>
+                </a-button>
+                <a-button class="control-icon" aria-label="全屏" title="全屏" @click="toggleFullscreen">
+                  <template #icon><Fullscreen :size="16" /></template>
                 </a-button>
               </div>
-            </div>
-            <div v-else class="segment-empty">
-              <LoaderCircle v-if="queryState === 'querying'" :size="26" class="spin" />
-              <Video v-else :size="28" />
-              <strong>{{ querySummary }}</strong>
-              <span v-if="['timeout', 'offline', 'error'].includes(queryState)">{{ queryMessage }}</span>
-            </div>
-            <div v-if="result" class="segment-footer">
-              <span>{{ result.receivedCount }} / {{ result.declaredTotal }} 段</span>
-              <span>耗时 {{ result.elapsedMs }} ms</span>
-            </div>
-          </aside>
-        </main>
+            </section>
 
-        <RecordTimeline
-          class="timeline-panel"
-          :range="queryRange"
-          :records="records"
-          :selected-record-key="playback.recordKey"
-          :current-time="playback.currentTime"
-          @locate="handleTimelineLocate"
-        />
-      </template>
+            <aside class="segment-panel" data-testid="record-segment-list">
+              <div class="segment-header">
+                <div>
+                  <strong>录像段</strong><span>{{ querySummary }}</span>
+                </div>
+                <a-button
+                  class="icon-command"
+                  aria-label="重新查询"
+                  title="重新查询"
+                  :disabled="queryState === 'querying'"
+                  @click="runQuery"
+                >
+                  <template #icon><RotateCcw :size="14" /></template>
+                </a-button>
+              </div>
+              <div v-if="records.length" class="segment-list">
+                <div
+                  v-for="(record, index) in records"
+                  :key="record.recordKey"
+                  :class="['segment-row', { selected: playback.recordKey === record.recordKey }]"
+                >
+                  <button
+                    :data-testid="`record-segment-${index}`"
+                    :class="['segment-item', { selected: playback.recordKey === record.recordKey }]"
+                    :aria-current="playback.recordKey === record.recordKey ? 'true' : undefined"
+                    :aria-disabled="!canPlayPermission ? 'true' : undefined"
+                    :disabled="!canPlayPermission"
+                    type="button"
+                    @click="playRecord(record)"
+                  >
+                    <span class="segment-content">
+                      <strong>{{ record.name || `录像段 ${index + 1}` }}</strong>
+                      <span class="segment-time"
+                        ><Clock3 :size="12" />{{ shortTime(record.startTime) }} - {{ shortTime(record.endTime) }}</span
+                      >
+                      <span class="segment-meta">
+                        <i class="segment-type"
+                          ><span class="segment-marker" :class="record.type || 'unknown'"></span
+                          >{{ recordQueryTypeText(record.type) }}</i
+                        >
+                        <i>{{ durationText(record) }}</i>
+                        <i v-if="record.fileSize != null && record.fileSize >= 0" :data-testid="`record-segment-size-${index}`">{{
+                          fileSizeText(record.fileSize)
+                        }}</i>
+                      </span>
+                    </span>
+                  </button>
+                  <a-button
+                    :data-testid="`record-segment-download-${index}`"
+                    class="icon-command segment-download"
+                    type="text"
+                    :aria-label="`缓存 ${record.name || `录像段 ${index + 1}`} 到服务器`"
+                    :title="`缓存 ${record.name || `录像段 ${index + 1}`} 到服务器`"
+                    :disabled="downloadPending || !canDownload"
+                    @click="queueDownload(record)"
+                  >
+                    <template #icon><Download :size="15" /></template>
+                  </a-button>
+                </div>
+              </div>
+              <div v-else class="segment-empty">
+                <LoaderCircle v-if="queryState === 'querying'" :size="26" class="spin" />
+                <Video v-else :size="28" />
+                <strong>{{ querySummary }}</strong>
+                <span v-if="['timeout', 'offline', 'error'].includes(queryState)">{{ queryMessage }}</span>
+              </div>
+              <div v-if="result" class="segment-footer">
+                <span>{{ result.receivedCount }} / {{ result.declaredTotal }} 段</span>
+                <span>耗时 {{ result.elapsedMs }} ms</span>
+              </div>
+            </aside>
+          </main>
+
+          <RecordTimeline
+            class="timeline-panel"
+            :range="queryRange"
+            :records="records"
+            :selected-record-key="playback.recordKey"
+            :current-time="playback.currentTime"
+            @locate="handleTimelineLocate"
+          />
+        </template>
+      </div>
     </div>
 
     <RecordCacheProgressDialog
@@ -933,11 +988,34 @@ onUnmounted(() => {
 }
 .playback-workspace {
   display: flex;
+  flex: 1;
   flex-direction: column;
+  min-width: 0;
   height: 100%;
   min-height: 0;
   padding: 0;
   overflow: hidden;
+}
+
+/* 左侧通道树 + 右侧原回放区。
+   ⛔ min-width:0 不能省：flex 项默认 min-width:auto，会被树里的内容（五个视图页签 + 搜索框）
+      顶宽，实测 240px 会被撑到 310px —— 这就是「树和播放区比例不对」的根因。 */
+.record-playback-layout {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.channel-panel {
+  display: flex;
+  flex: 0 0 240px;
+  flex-direction: column;
+  width: 240px;
+  min-width: 0;
+  max-width: 240px;
+  min-height: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--uvp-list-panel-border);
 }
 .record-playback-permission-state {
   padding: 18px;

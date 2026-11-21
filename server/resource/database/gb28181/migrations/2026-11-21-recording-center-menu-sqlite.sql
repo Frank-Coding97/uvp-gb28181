@@ -9,8 +9,9 @@
 --      的角色补这一行 —— 漏了就是客户现场升级后录像菜单整片不见，而管理员账号
 --      往往因为全选看不出来。
 --
--- 设备录像沿用旧的隐藏路由（/gb28181/device-record-playback/:channelId）的组件：
--- 设备列表点「录像」仍然按 name 跳转，落到同一个新页面，旧链接也不会 404。
+-- 设备录像与旧的隐藏路由（/gb28181/device-record-playback/:channelId）**共用同一份组件**：
+-- 设备列表点「录像」仍按 name 跳转到这里，老书签也不会 404；左侧通道树就是在这个页面上加的。
+-- ⛔ 所以这两条菜单的 component 必须一模一样，且指向 gb28181/device-record-playback/index。
 
 -- 1) 录像中心目录（顶层，占据原云端录像的位置）
 INSERT INTO sys_menu (parent_id,path,name,redirect,component,title,type,permission,hide,disable,icon,sort,created_at,updated_at,created_by)
@@ -23,7 +24,7 @@ WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE path='/recording-center' AND dele
 --       （menu-item.vue 的 key 就是 path），带参路径点下去会把 ':channelId' 当成真实
 --       通道号。通道改用 ?channel=id，带通道的深链交给旧隐藏路由承担。
 INSERT INTO sys_menu (parent_id,path,name,redirect,component,title,type,permission,hide,disable,icon,sort,created_at,updated_at,created_by)
-SELECT p.id,'/recording-center/device','recording-center-device','','recording-center/device/index','设备录像',2,'',0,0,'lucide:History',10,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
+SELECT p.id,'/recording-center/device','recording-center-device','','gb28181/device-record-playback/index','设备录像',2,'',0,0,'lucide:History',10,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
 FROM sys_menu p
 WHERE p.path='/recording-center' AND p.type=1 AND p.deleted_at IS NULL
 AND NOT EXISTS (SELECT 1 FROM sys_menu WHERE path='/recording-center/device' AND deleted_at IS NULL);
@@ -39,10 +40,6 @@ SET parent_id=(SELECT id FROM (SELECT MIN(id) AS id FROM sys_menu WHERE path='/r
 WHERE path IN ('/gb28181/cloud-recordings','/gb28181/record-cache','/gb28181/recording-schedules')
   AND deleted_at IS NULL
   AND (SELECT id FROM (SELECT MIN(id) AS id FROM sys_menu WHERE path='/recording-center' AND type=1 AND deleted_at IS NULL) recording_center) IS NOT NULL;
-
--- 4) 旧隐藏路由复用新页面：设备列表的「录像」入口与老书签都落到同一份实现
-UPDATE sys_menu SET component='recording-center/device/index'
-WHERE path='/gb28181/device-record-playback/:channelId' AND deleted_at IS NULL;
 
 -- 4b) 三个播放权限点挂到「设备录像」下（原本挂在设备列表与旧隐藏路由下，勾选时找不到）
 --     ⛔ sys_role_menu 记的是**菜单 id 的具体集合、父子不继承**，所以换父节点只改变

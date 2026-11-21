@@ -52,9 +52,9 @@ const channel = {
   audioEnabled: false
 };
 
-function mountTree() {
+function mountTree(extraProps: Record<string, unknown> = {}) {
   return mount(ChannelSourceTree, {
-    props: { usedChannelIds: [], view: "devices" },
+    props: { usedChannelIds: [], view: "devices", ...extraProps },
     global: {
       stubs: {
         "a-spin": { template: "<div><slot /></div>" },
@@ -174,6 +174,28 @@ describe("ChannelSourceTree", () => {
     expect(wrapper.get('[data-node-key="root:device:1:channel:11"] .tree-node svg').classes()).toContain("lucide-camera");
     await wrapper.get('[data-node-key="root:device:1:channel:11"] .tree-node').trigger("click");
     expect(wrapper.emitted("select")?.[0]?.[0]).toMatchObject({ id: 11, name: "东门" });
+  });
+
+  // 设备录像页要能点离线通道（设备断电重启后历史录像往往还查得到），
+  // 多屏播放不能（离线开不了实时流）。默认行为必须保持「点不动」。
+  it("keeps offline channels unselectable unless the host page opts in", async () => {
+    api.listChannels.mockResolvedValue({ code: 0, data: { list: [{ ...channel, status: 0 }] } });
+
+    const strict = mountTree();
+    await flushPromises();
+    await strict.get('[data-node-key="root:device:1"] .twist-button').trigger("click");
+    await flushPromises();
+    await strict.get('[data-node-key="root:device:1:channel:11"] .tree-node').trigger("click");
+    expect(strict.emitted("select")).toBeUndefined();
+    strict.unmount();
+
+    const lenient = mountTree({ allowOfflineSelect: true });
+    await flushPromises();
+    await lenient.get('[data-node-key="root:device:1"] .twist-button').trigger("click");
+    await flushPromises();
+    await lenient.get('[data-node-key="root:device:1:channel:11"] .tree-node').trigger("click");
+    expect(lenient.emitted("select")?.[0]?.[0]).toMatchObject({ id: 11, name: "东门" });
+    lenient.unmount();
   });
 
   it("does not load persistent favorites for a guest, only greys the entry", async () => {

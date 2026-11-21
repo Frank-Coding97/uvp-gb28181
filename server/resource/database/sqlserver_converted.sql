@@ -8039,7 +8039,7 @@ INSERT INTO [sys_menu] ([id], [parent_id], [path], [name], [redirect], [componen
 (140361, 140369, N'', N'', NULL, N'', N'修改 SIP 配置', 0, 0, 0, 0, 0, N'', 0, N'', N'', 0, 3, 0, N'gb28181:sip:config:update', N'2026-07-20 09:24:46.000000', N'2026-07-20 09:24:46.000000', NULL, 1),
 (140362, 140507, N'/gb28181/sip-traces', N'gb28181-sip-traces', N'', N'gb28181/sip-log-v2/index', N'SIP 日志', 0, 0, 0, 0, 0, N'', 0, N'', N'lucide:FileText', 10, 2, 0, N'', N'2026-07-20 13:46:36.000000', N'2026-09-17 14:40:02.000000', NULL, 0),
 (140364, 140358, N'', N'', NULL, NULL, N'管理自定义分组', 0, 0, 0, 0, 0, N'', 0, N'', N'', 0, 3, 0, N'gb28181:device-group:manage', N'2026-08-02 16:32:06.000000', N'2026-08-02 16:32:06.000000', NULL, 1),
-(140365, 0, N'/gb28181/device-record-playback/:channelId', N'gb28181-device-record-playback', N'', N'recording-center/device/index', N'设备录像回放', 0, 1, 0, 0, 0, N'', 0, N'', N'lucide:History', 210, 2, 0, N'', N'2026-08-04 15:41:09.000000', N'2026-09-15 18:59:24.000000', NULL, 1),
+(140365, 0, N'/gb28181/device-record-playback/:channelId', N'gb28181-device-record-playback', N'', N'gb28181/device-record-playback/index', N'设备录像回放', 0, 1, 0, 0, 0, N'', 0, N'', N'lucide:History', 210, 2, 0, N'', N'2026-08-04 15:41:09.000000', N'2026-09-15 18:59:24.000000', NULL, 1),
 (140366, 0, N'/gb28181/alarm-management', N'gb28181-alarm-management', N'', N'gb28181/alarm-management/index', N'告警管理', 0, 0, 0, 0, 0, N'', 0, N'', N'lucide:BellRing', 80, 2, 0, N'gb28181:alarm:view', N'2026-08-04 22:41:38.000000', N'2026-09-15 18:59:24.000000', NULL, 1),
 (140367, 140366, N'', N'', NULL, N'', N'物理删除告警', 0, 0, 0, 0, 0, N'', 0, N'', N'', 0, 3, 0, N'gb28181:alarm:delete', N'2026-08-04 22:41:38.000000', N'2026-08-04 22:41:38.000000', NULL, 1),
 (140368, 0, N'/gb28181/multi-screen-playback', N'gb28181-multi-screen-playback', NULL, N'gb28181/multi-screen-playback/index', N'多屏播放', 0, 0, 0, 0, 0, N'', 0, N'', N'lucide:MonitorPlay', 30, 2, 0, N'', N'2026-08-06 17:33:14.000000', N'2026-09-15 18:59:24.000000', NULL, 1),
@@ -8177,7 +8177,7 @@ INSERT INTO [sys_menu] ([id], [parent_id], [path], [name], [redirect], [componen
 (140620, 140509, N'', N'', NULL, N'', N'批量下载图像', 0, 0, 0, 1, 0, N'', 0, N'', N'', 1, 3, 0, N'gb28181:snapshot:download', N'2026-11-04 19:14:43.000000', N'2026-11-04 19:14:43.000000', NULL, 1),
 (140621, 140509, N'', N'', NULL, N'', N'删除图像', 0, 0, 0, 1, 0, N'', 0, N'', N'', 2, 3, 0, N'gb28181:snapshot:delete', N'2026-11-04 19:14:43.000000', N'2026-11-04 19:14:43.000000', NULL, 1),
 (140700, 0, N'/recording-center', N'RecordingCenter', N'/recording-center/device', N'', N'录像中心', 0, 0, 0, 1, 0, N'', 0, N'', N'lucide:Video', 40, 1, 0, N'', N'2026-11-21 12:00:00.000000', N'2026-11-21 12:00:00.000000', NULL, 1),
-(140701, 140700, N'/recording-center/device', N'recording-center-device', N'', N'recording-center/device/index', N'设备录像', 0, 0, 0, 0, 0, N'', 0, N'', N'lucide:History', 10, 2, 0, N'', N'2026-11-21 12:00:00.000000', N'2026-11-21 12:00:00.000000', NULL, 1);
+(140701, 140700, N'/recording-center/device', N'recording-center-device', N'', N'gb28181/device-record-playback/index', N'设备录像', 0, 0, 0, 0, 0, N'', 0, N'', N'lucide:History', 10, 2, 0, N'', N'2026-11-21 12:00:00.000000', N'2026-11-21 12:00:00.000000', NULL, 1);
 SET IDENTITY_INSERT [sys_menu] OFF;
 INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
 (1, 5),

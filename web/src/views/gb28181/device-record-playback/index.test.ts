@@ -86,10 +86,30 @@ vi.mock("../components/PlayWindow.vue", () => ({
   }
 }));
 
+// 路由对象按用例可改：默认是「设备列表点录像进来」带 channelId，另有用例模拟
+// 「从录像中心菜单点进来」这种不带通道号的入口。
+const routeState = vi.hoisted(() => ({
+  params: { channelId: "31" } as Record<string, string>,
+  query: { recordQueryMock: "complete", returnKey: "return-key" } as Record<string, string>
+}));
+
 vi.mock("vue-router", async importOriginal => ({
   ...(await importOriginal<typeof import("vue-router")>()),
-  useRoute: () => ({ params: { channelId: "31" }, query: { recordQueryMock: "complete", returnKey: "return-key" } }),
+  useRoute: () => routeState,
   useRouter: () => ({ push: api.routerPush, getRoutes: api.routerGetRoutes })
+}));
+
+// 通道树用桩件替掉：这一页只关心「树里点了某路通道之后发生了什么」，
+// 真树要拉设备/行政区域/收藏好几套接口，跟本页的逻辑无关。
+vi.mock("../components/channel-tree/ChannelSourceTree.vue", () => ({
+  default: {
+    name: "ChannelSourceTree",
+    props: { selectedChannelId: { type: Number, default: null } },
+    emits: ["select", "select-group", "favoriteSaved"],
+    template: `<div data-testid="channel-tree-stub" :data-selected="selectedChannelId">
+      <button data-testid="pick-channel-55" @click="$emit('select', { id: 55, name: '西门通道', code: '34020000001320000055' })">55</button>
+    </div>`
+  }
 }));
 
 // 这一页的错误文案并不来自模板渲染,而是 `utils/http` 对**每一个**失败请求自动弹的
@@ -166,6 +186,8 @@ enableAutoUnmount(afterEach);
 describe("device record playback workspace", () => {
   beforeEach(() => {
     vi.useRealTimers();
+    routeState.params = { channelId: "31" };
+    routeState.query = { recordQueryMock: "complete", returnKey: "return-key" };
     account.permissions = ["gb28181:device-record:query", "gb28181:device-record:play", "gb28181:device-record:download"];
     vi.stubGlobal(
       "fetch",
@@ -294,8 +316,11 @@ describe("device record playback workspace", () => {
   });
 
   it("fits the playback workspace into its layout host instead of the browser viewport", () => {
-    expect(playbackPageSource).toContain('class="snow-fill-inner uvp-page-shell-flat playback-workspace"');
+    expect(playbackPageSource).toContain('class="snow-fill-inner uvp-page-shell-flat record-playback-layout"');
     expect(hasRuleBlock(playbackPageSource, ".record-playback-page", "height: 100%", "min-height: 0")).toBe(true);
+    expect(hasRuleBlock(playbackPageSource, ".record-playback-layout", "display: flex", "height: 100%", "min-height: 0")).toBe(
+      true
+    );
     expect(
       hasRuleBlock(
         playbackPageSource,
@@ -306,6 +331,9 @@ describe("device record playback workspace", () => {
         "min-height: 0"
       )
     ).toBe(true);
+    // ⛔ 左侧通道树必须钉死宽度：flex 项默认 min-width:auto，会被树里的内容（五个视图页签 +
+    //    搜索框）顶宽 —— 实测写了 240px 却渲染成 310px，播放区被挤窄，看起来「比例不对」。
+    expect(hasRuleBlock(playbackPageSource, ".channel-panel", "flex: 0 0 240px", "min-width: 0", "max-width: 240px")).toBe(true);
     expect(hasRuleBlock(playbackPageSource, ".timeline-panel", "flex: none")).toBe(true);
     expect(playbackPageSource).not.toContain("min-height: 100vh");
   });
@@ -402,14 +430,23 @@ describe("device record playback workspace", () => {
     });
   });
 
-  it("cleans up with the channel id captured before leaving the route", () => {
-    expect(playbackPageSource).toContain("const playbackChannelId = channelId.value;");
+  it("cleans up the session with the channel it was created on", () => {
+    // 会话收尾必须用「这个会话属于哪一路通道」，不能拿当前选中的通道去删：
+    // 换通道时 currentChannelId 已经指向新通道了还去删旧会话 ⇒ 旧会话没人释放，
+    // 新通道点播立刻撞 429 playback_busy。原实现靠 setup 时快照 channelId 保证，
+    // 现在通道可被左侧树切换，改由「先拆会话、后改通道号」这个顺序保证。
+    expect(playbackPageSource).toContain("const playbackChannelId = channelId;");
     // ⛔ 别把整行钉进断言:prettier 会把带第三个参数的调用拆成多行,格式化一次红一次。
-    expect(hasMarkup(playbackPageSource, "getPlaybackSession(playbackChannelId, sessionId, { showErrorMessage: false })")).toBe(
-      true
-    );
-    expect(hasMarkup(playbackPageSource, "deletePlaybackSession(playbackChannelId, sessionId,")).toBe(true);
+    expect(
+      hasMarkup(playbackPageSource, "getPlaybackSession(playbackChannelId.value, sessionId, { showErrorMessage: false })")
+    ).toBe(true);
+    expect(hasMarkup(playbackPageSource, "deletePlaybackSession(playbackChannelId.value, sessionId,")).toBe(true);
     expect(playbackPageSource).not.toContain("deletePlaybackSession(channelId.value, sessionId).catch");
+    const switchBody = playbackPageSource.slice(playbackPageSource.indexOf("async function switchChannel"));
+    expect(switchBody).toContain("async function switchChannel");
+    expect(switchBody.indexOf("await stopPlayback(false, false)")).toBeLessThan(
+      switchBody.indexOf("currentChannelId.value = next")
+    );
   });
 
   it("queries recordings automatically after loading the channel options", async () => {
@@ -426,6 +463,70 @@ describe("device record playback workspace", () => {
       expect.any(AbortSignal),
       20000
     );
+  });
+
+  // ── 从「录像中心 → 设备录像」菜单进来：URL 不带通道号，通道由左侧树给 ──────────
+  it("不带通道号进来时不发查询，提示从左侧通道树选通道", async () => {
+    routeState.params = {};
+    routeState.query = { returnKey: "return-key" };
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+
+    expect(api.getRecordQueryOptions).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain("未选择通道");
+    expect(wrapper.text()).toContain("从左侧通道树选择一路通道");
+    // 没有通道就没有查询条件，查询按钮不该出现
+    expect(wrapper.find('[data-testid="record-query-submit"]').exists()).toBe(false);
+  });
+
+  it("支持用 ?channel= 指定通道（菜单点击时走这条）", async () => {
+    routeState.params = {};
+    routeState.query = { channel: "31" };
+    mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+
+    expect(api.getRecordQueryOptions).toHaveBeenCalledWith(31);
+    expect(api.queryDeviceRecords).toHaveBeenCalledTimes(1);
+  });
+
+  it("在左侧树里换通道：按新通道重新查询，并同步高亮", async () => {
+    api.getRecordQueryOptions.mockImplementation((id: number) =>
+      Promise.resolve({
+        code: 0,
+        data: {
+          device: { id: 7, code: "34020000002000000001", name: "园区 NVR-A", online: true },
+          channel: {
+            id,
+            code: `3402000000132000${String(id).padStart(4, "0")}`,
+            name: id === 55 ? "西门通道" : "东门出入口"
+          },
+          timezone: "Asia/Shanghai",
+          serverNow: "2026-08-02T19:40:20+08:00",
+          maxRangeHours: 24,
+          timeoutSeconds: 15,
+          supportedTypes: ["all", "manual", "alarm"]
+        }
+      })
+    );
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+    expect(api.getRecordQueryOptions).toHaveBeenCalledWith(31);
+    expect(wrapper.get('[data-testid="channel-tree-stub"]').attributes("data-selected")).toBe("31");
+
+    await wrapper.get('[data-testid="pick-channel-55"]').trigger("click");
+    await flushPromises();
+
+    expect(api.getRecordQueryOptions).toHaveBeenLastCalledWith(55);
+    expect(api.queryDeviceRecords).toHaveBeenLastCalledWith(
+      55,
+      expect.objectContaining({ type: "all" }),
+      expect.any(AbortSignal),
+      20000
+    );
+    expect(wrapper.text()).toContain("西门通道");
+    expect(wrapper.get('[data-testid="channel-tree-stub"]').attributes("data-selected")).toBe("55");
+    // 换通道不该跳路由（跳了整棵树的状态就重置了）
+    expect(api.routerPush).not.toHaveBeenCalled();
   });
 
   it("writes a range picked on the Arco range picker back into the query payload", async () => {
