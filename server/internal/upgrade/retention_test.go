@@ -98,6 +98,105 @@ func TestRetentionPreservesCurrentRollbackAndRecoveryArtifacts(t *testing.T) {
 	}
 }
 
+func TestRetentionDoesNotCascadeThroughPreviousTargetChain(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout := RegisteredLayout{Root: root}
+	if err := layout.validate(); err != nil {
+		t.Fatal(err)
+	}
+	store, err := OpenTaskStore(layout.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Real installations carry a predecessor for every completed upgrade. The
+	// chain must not make each retained release protect the one before it.
+	var records []TaskRecord
+	for i := 0; i < 6; i++ {
+		record, err := store.Submit(TaskRequest{IdempotencyKey: "chain-" + string(rune('a'+i)), Actor: "admin", TargetDigest: strings.Repeat("a", 64)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		record.Phase = PhaseSucceeded
+		record.UpdatedAt = time.Date(2026, 11, 10, i, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)
+		if i > 0 {
+			record.PreviousTarget = filepath.Join(layout.Releases, records[i-1].TaskID)
+			record.PreviousTargetCaptured = true
+		}
+		record.StagingPath = filepath.Join(layout.State, "verified", record.TaskID+".tar")
+		for _, dir := range []string{
+			filepath.Join(layout.Releases, record.TaskID),
+			filepath.Join(layout.State, "backups", record.TaskID),
+			filepath.Join(layout.State, "prepared-backups", record.TaskID),
+		} {
+			if err := os.MkdirAll(dir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "proof"), []byte("keep"), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.MkdirAll(filepath.Dir(record.StagingPath), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(record.StagingPath, []byte("artifact"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.UpdateMetadata(record.TaskID, func(r *TaskRecord) error { *r = record; return nil }); err != nil {
+			t.Fatal(err)
+		}
+		records = append(records, record)
+	}
+	// A failed attempt sits on top with its rollback source outside the window.
+	failed, err := store.Submit(TaskRequest{IdempotencyKey: "chain-failed", Actor: "admin", TargetDigest: strings.Repeat("b", 64)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed.Phase = PhaseFailed
+	failed.UpdatedAt = time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)
+	failed.PreviousTarget = filepath.Join(layout.Releases, records[3].TaskID)
+	failed.PreviousTargetCaptured = true
+	if err := store.UpdateMetadata(failed.TaskID, func(r *TaskRecord) error { *r = failed; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(layout.Releases, records[5].TaskID), layout.Current); err != nil {
+		t.Fatal(err)
+	}
+	if err := PruneCompletedArtifacts(context.Background(), store, layout, 2); err != nil {
+		t.Fatal(err)
+	}
+	// Retained window, the active release and the failed task's rollback source.
+	kept := []TaskRecord{failed, records[5], records[4], records[3]}
+	for _, record := range kept {
+		if _, err := os.Stat(filepath.Join(layout.State, "backups", record.TaskID)); record.TaskID != failed.TaskID && err != nil {
+			t.Fatalf("removed rollback backup %s: %v", record.TaskID, err)
+		}
+		if record.TaskID == failed.TaskID {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(layout.Releases, record.TaskID)); err != nil {
+			t.Fatalf("removed retained release %s: %v", record.TaskID, err)
+		}
+	}
+	// records[3] survives as a rollback source only; its own predecessor must go.
+	for _, record := range []TaskRecord{records[0], records[1], records[2]} {
+		for _, dir := range []string{
+			filepath.Join(layout.Releases, record.TaskID),
+			filepath.Join(layout.State, "backups", record.TaskID),
+			filepath.Join(layout.State, "prepared-backups", record.TaskID),
+		} {
+			if _, err := os.Stat(dir); !os.IsNotExist(err) {
+				t.Fatalf("retained expired artifact %s: %v", dir, err)
+			}
+		}
+		if _, err := os.Stat(record.StagingPath); !os.IsNotExist(err) {
+			t.Fatalf("retained expired staging %s: %v", record.StagingPath, err)
+		}
+	}
+}
+
 func TestCleanupFailureCannotRollbackCommittedUpgrade(t *testing.T) {
 	store, record := prepareWorkflowTask(t)
 	adapter := &fakeWorkflowAdapter{}

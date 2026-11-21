@@ -54,21 +54,33 @@ func PruneCompletedArtifacts(ctx context.Context, store *TaskStore, layout Regis
 		return fmt.Errorf("inspect retained current release: %w", err)
 	}
 	keep := map[string]bool{}
+	rollbackSources := map[string]bool{}
 	completed := 0
 	for _, r := range records {
 		safeTerminal := r.Phase == PhaseSucceeded || r.Phase == PhaseRolledBack
-		if !safeTerminal || completed < retain || protected[filepath.Join(layout.Releases, r.TaskID)] {
+		release := filepath.Join(layout.Releases, r.TaskID)
+		if !safeTerminal || completed < retain || protected[release] {
 			keep[r.TaskID] = true
-			if r.PreviousTarget != "" {
-				protected[protectedReleaseRoot(layout.Releases, r.PreviousTarget)] = true
+			// Only a rollback-eligible record needs its predecessor: one that is
+			// still in flight, or the release that is currently active. When this
+			// set was extended for every retained record while walking newest
+			// first, each record protected its own predecessor, which in turn was
+			// kept and protected the one before it. Real installations always
+			// carry a full predecessor chain, so the retention never freed
+			// anything: every upgrade kept another full copy of config/data and
+			// installs eventually failed their own disk-space preflight.
+			if r.PreviousTarget != "" && (!safeTerminal || protected[release]) {
+				rollbackSources[protectedReleaseRoot(layout.Releases, r.PreviousTarget)] = true
 			}
 		}
 		if safeTerminal {
 			completed++
 		}
 	}
+	// Rollback sources are kept one level deep only; keeping one must not
+	// protect a predecessor of its own.
 	for _, r := range records {
-		if protected[filepath.Join(layout.Releases, r.TaskID)] {
+		if rollbackSources[filepath.Join(layout.Releases, r.TaskID)] {
 			keep[r.TaskID] = true
 		}
 	}
