@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="统一视频接入平台" data-uvp-logo="unified-video-gateway">
+  <rect width="32" height="32" rx="7" fill="#10233F"/>
+  <g transform="translate(2 2) scale(.21875)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M16 32H43M10 64H43M16 96H43" stroke="#60A5FA" stroke-width="8"/>
+    <circle cx="16" cy="32" r="5" fill="#60A5FA" stroke="none"/>
+    <circle cx="10" cy="64" r="5" fill="#60A5FA" stroke="none"/>
+    <circle cx="16" cy="96" r="5" fill="#60A5FA" stroke="none"/>
+    <rect x="43" y="31" width="42" height="66" rx="13" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="3"/>
+    <rect x="52" y="45" width="24" height="38" rx="5" fill="#10233F" stroke="none"/>
+    <path d="M58 53H70V59H58ZM58 65H70V75H58Z" fill="#0FAAA6" stroke="none"/>
+    <path d="M85 64H111M103 56L111 64L103 72" stroke="#39D1C7" stroke-width="8"/>
+  </g>
+</svg>

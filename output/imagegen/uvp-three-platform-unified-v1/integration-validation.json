@@ -1,0 +1,19 @@
+{
+  "status": "replaced-in-local-source",
+  "server": {
+    "unit_tests": "9/9 PASS",
+    "production_build": "PASS",
+    "browser": "Login brand and favicon decoded, both #1687F8"
+  },
+  "desktop": {
+    "frontend_build": "PASS",
+    "bundle_icons": "Tauri CLI generated PNG/ICO/ICNS"
+  },
+  "mobile": {
+    "android_resources": "Gradle resource processing PASS, Java 17",
+    "ios_assets": "actool PASS, opaque square AppIcon",
+    "application_icon": "Approved master match PASS"
+  },
+  "deployed": false,
+  "pushed": false
+}

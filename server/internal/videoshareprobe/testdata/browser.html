@@ -1,0 +1,15 @@
+<!doctype html><meta charset="utf-8"><title>Video share transport probe</title>
+<div id="player" style="width:640px;height:360px"></div>
+<pre id="status"></pre>
+<script src="/easyplayer/EasyPlayer-pro.js"></script>
+<script>
+window.probeEvents=[];window.onerror=(message)=>{document.getElementById('status').textContent=String(message)};
+const protocol=new URLSearchParams(location.search).get('protocol')||'flv';
+window.probePlayer=new EasyPlayerPro(document.getElementById('player'),{
+isLive:true,hasAudio:true,isMute:false,stretch:false,MSE:true,WCS:true,WASM:true,WASMSIMD:true,
+decoderPath:'/easyplayer/',debug:false,bufferTime:0.2,
+btns:{fullscreen:true,play:true,audio:true,record:false,screenshot:false}
+});
+['error','timeout','timeUpdate','loading','play','videoInfo'].forEach(event=>probePlayer.on(event,data=>(probeEvents.push({event,data,time:performance.now()}),document.getElementById('status').textContent=JSON.stringify(probeEvents.slice(-5)))));
+probePlayer.play(new URL(protocol==='flv'?'/live.flv':'/hls/index.m3u8',location.href).href).catch(error=>probeEvents.push({event:'rejection',data:String(error)}));
+</script>

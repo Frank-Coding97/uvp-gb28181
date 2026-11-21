@@ -30,18 +30,10 @@ S-Logo 是一个灵活的系统logo图标组件，支持传入图片URL、宽度
 ```vue
 <template>
   <!-- 自定义宽度和高度 -->
-  <s-logo 
-    :image-url="logoUrl" 
-    :width="64" 
-    :height="64" 
-  />
-  
+  <s-logo :image-url="logoUrl" :width="64" :height="64" />
+
   <!-- 使用字符串尺寸 -->
-  <s-logo 
-    :image-url="logoUrl" 
-    width="120px" 
-    height="80px" 
-  />
+  <s-logo :image-url="logoUrl" width="120px" height="80px" />
 </template>
 ```
 
@@ -49,25 +41,19 @@ S-Logo 是一个灵活的系统logo图标组件，支持传入图片URL、宽度
 
 ```vue
 <template>
-  <s-logo 
-    :image-url="customLogoUrl"
-    :width="48"
-    :height="48"
-    alt="自定义Logo"
-    :default-image-url="customDefaultUrl"
-  />
+  <s-logo :image-url="customLogoUrl" :width="48" :height="48" alt="自定义Logo" :default-image-url="customDefaultUrl" />
 </template>
 ```
 
 ## Props 参数
 
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `imageUrl` | string | `''` | 主图片URL地址 |
-| `width` | number \| string | `32` | 图片宽度（像素值或CSS字符串） |
-| `height` | number \| string | `32` | 图片高度（像素值或CSS字符串） |
-| `alt` | string | `'系统logo'` | 图片替代文本 |
-| `defaultImageUrl` | string | `'/src/assets/sys/default.svg'` | 默认图片URL |
+| 参数              | 类型             | 默认值                          | 说明                          |
+| ----------------- | ---------------- | ------------------------------- | ----------------------------- |
+| `imageUrl`        | string           | `''`                            | 主图片URL地址                 |
+| `width`           | number \| string | `32`                            | 图片宽度（像素值或CSS字符串） |
+| `height`          | number \| string | `32`                            | 图片高度（像素值或CSS字符串） |
+| `alt`             | string           | `'系统logo'`                    | 图片替代文本                  |
+| `defaultImageUrl` | string           | `'/src/assets/sys/default.svg'` | 默认图片URL                   |
 
 ## Fallback 机制
 
@@ -85,21 +71,17 @@ S-Logo 是一个灵活的系统logo图标组件，支持传入图片URL、宽度
 <template>
   <div class="demo-container">
     <h3>S-Logo 组件示例</h3>
-    
+
     <div class="logo-row">
       <h4>基础用法 (32x32)</h4>
       <s-logo :image-url="validLogoUrl" />
     </div>
-    
+
     <div class="logo-row">
       <h4>自定义尺寸 (64x64)</h4>
-      <s-logo 
-        :image-url="largeLogoUrl" 
-        :width="64" 
-        :height="64" 
-      />
+      <s-logo :image-url="largeLogoUrl" :width="64" :height="64" />
     </div>
-    
+
     <div class="logo-row">
       <h4>无效URL测试（会使用默认图片）</h4>
       <s-logo :image-url="invalidLogoUrl" />
@@ -108,16 +90,16 @@ S-Logo 是一个灵活的系统logo图标组件，支持传入图片URL、宽度
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref } from "vue";
 
 // 有效的logo URL
-const validLogoUrl = ref('/src/assets/logo/snow.svg')
+const validLogoUrl = ref("/src/assets/logo/snow.svg");
 
 // 大尺寸logo URL
-const largeLogoUrl = ref('/src/assets/img/logo.jpg')
+const largeLogoUrl = ref("/src/assets/img/logo.jpg");
 
 // 无效的logo URL（会触发fallback）
-const invalidLogoUrl = ref('/invalid/path/logo.png')
+const invalidLogoUrl = ref("/invalid/path/logo.png");
 </script>
 
 <style scoped>
@@ -143,9 +125,9 @@ const invalidLogoUrl = ref('/invalid/path/logo.png')
 
 ```typescript
 // main.ts 或相关组件中
-import SLogo from '@/components/s-logo/index.vue'
+import SLogo from "@/components/s-logo/index.vue";
 
-app.component('SLogo', SLogo)
+app.component("SLogo", SLogo);
 ```
 
 ## 注意事项
@@ -158,6 +140,7 @@ app.component('SLogo', SLogo)
 ## 错误处理
 
 组件会在浏览器控制台输出警告信息：
+
 - 主图片加载失败时：`主Logo图片加载失败: [URL]`
 - 默认图片加载失败时：`默认Logo图片也加载失败`
 
@@ -177,3 +160,4 @@ app.component('SLogo', SLogo)
   background: linear-gradient(45deg, #f0f0f0, #e0e0e0);
   border: 2px solid #ccc;
 }
+```

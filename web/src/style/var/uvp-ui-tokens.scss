@@ -1,0 +1,447 @@
+:root {
+  --uvp-navigation-bg: #f3f7fb;
+  --uvp-shell-bg: var(--uvp-navigation-bg);
+  --uvp-shell-muted: #eef4f8;
+  --uvp-sidebar-bg: var(--uvp-navigation-bg);
+  --uvp-sidebar-panel-bg: transparent;
+  --uvp-sidebar-panel-border: transparent;
+  --uvp-sidebar-panel-shadow: none;
+  --uvp-sidebar-width: 256px;
+  --uvp-sidebar-collapsed-width: 48px;
+  --uvp-workspace-gap: 8px;
+  --uvp-workspace-radius: 14px;
+  --uvp-workspace-bg: #ffffff;
+  --uvp-workspace-border: #e5eaf3;
+  --uvp-workspace-shadow: 12px 12px 30px -24px rgb(15 23 42 / 16%);
+  --uvp-header-height: 56px;
+  --uvp-header-padding-x: 24px;
+  --uvp-main-padding: 24px;
+  --uvp-panel-bg: #ffffff;
+  --uvp-panel-border: #e8edf5;
+  --uvp-scrollbar-thumb: #c3cfdd;
+  --uvp-scrollbar-thumb-hover: #94a3b8;
+
+  /* 仪表类「底轨」色（进度条里代表"剩余/未占用"的那一段）。
+     ⛔ 必须两套主题都定义：底轨是**大面积**色块，亮色下 #e8edf5 够用，
+        暗色下同样的 token 会弱到看不见（实测 Δ亮度只有 2%），所以要单独给一个偏亮的灰蓝。 */
+  --uvp-meter-track: #e2e8f0;
+  --uvp-panel-radius: 14px;
+  --uvp-panel-shadow: 0 6px 18px rgb(15 23 42 / 4%);
+  --uvp-list-panel-bg: #fbfdff;
+  --uvp-list-panel-border: #e6edf7;
+  --uvp-list-toolbar-bg: #f8fbff;
+  --uvp-search-panel-bg: linear-gradient(180deg, #fcfeff 0%, #f7fbff 100%);
+  --uvp-search-panel-shadow: inset 0 1px 0 rgb(255 255 255 / 88%);
+  --uvp-search-control-bg: #ffffff;
+  --uvp-search-control-shadow: inset 0 0 0 1px rgb(148 163 184 / 16%);
+  --uvp-search-control-focus-shadow: inset 0 0 0 1px rgb(37 99 235 / 28%);
+  --uvp-search-secondary-btn-bg: #ffffff;
+  --uvp-search-secondary-btn-hover-bg: #f8fbff;
+  --uvp-search-secondary-btn-border: #dce6f2;
+  --uvp-search-secondary-btn-shadow: inset 0 1px 0 rgb(255 255 255 / 88%);
+  --uvp-secondary-action-bg: #f1f5f9;
+  --uvp-secondary-action-hover-bg: #e8eef5;
+  --uvp-secondary-action-border: #cbd5e1;
+  --uvp-secondary-action-text: #334155;
+
+  /* 刷新：青绿底青绿字。同样在 2026-11-04 加深一档，
+     原来 #e8f7f5 在白底上等于没上色。 */
+  --uvp-refresh-btn-bg: #cfeee7;
+  --uvp-refresh-btn-hover-bg: #b9e6dc;
+  --uvp-refresh-btn-active-bg: #a4dcd0;
+  --uvp-refresh-btn-border: #96d5c7;
+  --uvp-refresh-btn-text: #0f766e;
+
+  /* ═══════════════════ 实心面（白字压在上面）专用 token ═══════════════════
+   * ⛔⛔ 为什么不能直接用 --uvp-brand 当底色：
+   *   --uvp-brand 是**文字/图标色**，暗色下被调成浅蓝 #60a5fa（否则文字在深底上看不见）。
+   *   一旦拿它当 `background` 再配 `color: #fff`，白字压浅蓝 = 对比度约 2:1，
+   *   实心块整体"发白、发糊"，深色下最显眼的问题。
+   *   正确口径：实心面单独一套 token，暗色下用**深蓝 #2563eb**（与主按钮一致），
+   *   白字对比度约 5:1，才是图2 那种沉稳的实心蓝。
+   * 本组**必须两套主题都定义**，且不要写成 var() 别名（别名在计算值阶段会被替换、钉死在亮色）。 */
+  --uvp-solid-bg: #2563eb;
+  --uvp-solid-hover-bg: #1d4ed8;
+  --uvp-solid-active-bg: #1e40af;
+  --uvp-solid-border: #2563eb;
+  --uvp-solid-text: #ffffff;
+  --uvp-table-header-bg: #f5f9fd;
+  --uvp-table-row-bg: #ffffff;
+  --uvp-table-row-hover-bg: #f8fbff;
+  --uvp-table-row-checked-bg: #eef5ff;
+  --uvp-table-row-checked-hover-bg: #e7f1ff;
+  --uvp-dialog-bg: #ffffff;
+  --uvp-dialog-header-bg: linear-gradient(180deg, #fbfdff 0%, #ffffff 100%);
+  --uvp-dialog-footer-bg: #fbfdff;
+  --uvp-dialog-control-bg: #f8fbff;
+  --uvp-dialog-border: #e6edf7;
+  --uvp-dialog-shadow: 0 24px 72px -32px rgb(15 23 42 / 34%);
+  --uvp-popconfirm-bg: #ffffff;
+  --uvp-popconfirm-border: #e3ebf5;
+  --uvp-popconfirm-shadow: 0 18px 48px -28px rgb(15 23 42 / 30%);
+  --uvp-text-primary: #1f2937;
+  --uvp-text-secondary: #4b5563;
+  --uvp-text-tertiary: #6b7280;
+  --uvp-sidebar-title: #111827;
+  --uvp-sidebar-section: #6b7280;
+  --uvp-brand: #2563eb;
+  --uvp-chart-area-start: rgb(37 99 235 / 24%);
+  --uvp-chart-area-middle: rgb(37 99 235 / 7%);
+  --uvp-brand-strong: #1d4ed8;
+  --uvp-brand-cyan: #0faaa6;
+  --uvp-brand-soft: #e8f2ff;
+  --uvp-danger: #d14343;
+  --uvp-danger-soft: #fff2f2;
+  --uvp-danger-border: #f5cece;
+  --uvp-success-border: #b7e4d0;
+  --uvp-warning: #b66b12;
+  --uvp-warning-soft: #fff7ed;
+  --uvp-warning-border: #fed7aa;
+  --uvp-sidebar-brand-mark-bg: linear-gradient(145deg, #ffffff 0%, #eef7ff 100%);
+  --uvp-sidebar-hover-bg: rgb(255 255 255 / 42%);
+  --uvp-sidebar-active-bg: linear-gradient(90deg, rgb(37 99 235 / 10%) 0%, rgb(14 165 233 / 6%) 100%);
+  --uvp-sidebar-active-shadow: inset 0 0 0 1px rgb(37 99 235 / 10%);
+  --uvp-sidebar-active-line: #2563eb;
+  --uvp-sidebar-module-bg: transparent;
+  --uvp-sidebar-module-open-bg: rgb(255 255 255 / 32%);
+  --uvp-sidebar-module-border: transparent;
+  --uvp-sidebar-tree-line: rgb(148 163 184 / 36%);
+  --uvp-sidebar-tree-dot: #7aa7e8;
+
+  /* ═══════════════════ 基础层（通用语义 token） ═══════════════════
+   * 上面是「具体层」（按组件/场景命名：--uvp-dialog-control-bg、--uvp-table-row-checked-bg…），
+   * 这里是「基础层」：不分场景的通用名字（默认边框、默认底色、主色、成功色…）。
+   * 组件里大量写成 var(--uvp-border) / var(--uvp-bg) / var(--uvp-primary) 这种通用名，
+   * 但真源里一个都没定义 —— 于是 12 个 token、77 处引用在计算值阶段失效：
+   *   · background 失效 ⇒ 回退 transparent ⇒ **整块背景隐形**（最坑，肉眼极难归因）
+   *   · border 失效     ⇒ 回退 currentColor ⇒ 线还在但跟文字同色，看起来「差不多」，没人报
+   *   · font-family 失效 ⇒ 该属性被丢弃 ⇒ 等宽字体不生效，退化成继承字体
+   * 基础层就是把这些名字补成**真值**：能对上具体层的用 var() 别名（单一真源、跟随主题），
+   * 具体层没有对应物的（success 家族 / 等宽字体 / subtle 边框 / 禁用文字）直接给字面值。
+   *
+   * ⛔⛔ 铁律：凡是**值里含 var() 的别名**，必须在下面 body[arco-theme="dark"] 里**再写一遍**。
+   *   :root 上的 var() 在**计算值阶段**就被替换成亮色字面量并往下继承；暗色只覆盖被引用的
+   *   那个 token，**不会**回头改别名 ⇒ 不重复声明的别名在暗色下会被钉死在亮色值（实测确认）。
+   *   --uvp-shell-bg / --uvp-sidebar-bg 之所以在暗色块里又出现一次，就是这个原因。
+   *   门禁：src/style/model/uvp-tokens.test.ts。
+   * ═══════════════════════════════════════════════════════════════ */
+  --uvp-primary: var(--uvp-brand);
+  --uvp-success: #059669;
+  --uvp-success-soft: #ecfdf5;
+  --uvp-border: var(--uvp-panel-border);
+  --uvp-border-subtle: #eef3f9;
+  --uvp-bg: var(--uvp-panel-bg);
+  --uvp-bg-secondary: var(--uvp-table-header-bg);
+  --uvp-bg-tertiary: var(--uvp-secondary-action-bg);
+  --uvp-page-bg: var(--uvp-shell-bg);
+  --uvp-surface-muted: var(--uvp-shell-muted);
+  --uvp-text-disabled: #a8b4c4;
+
+  /* 等宽字体栈：不出现在暗色块（字面量，无 var() 依赖，继承即可）。 */
+  --uvp-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* ═══════════════════ 按钮体系 ═══════════════════
+   * 唯一真源：src/styles/uvp-buttons.scss。规则与禁用写法见
+   * docs/frontend-button-system.md，门禁 src/styles/uvp-buttons.test.ts。
+   *
+   * ⛔ 尺寸只有三档：lg(40 页头主 CTA) / md(34 默认) / sm(28 紧凑)。
+   *   Arco 原生的 32(default) 与 24(mini) 一律归并，避免同排按钮高低不齐。
+   * ⛔ 这里**全字面量、两套主题都写全**：不写 var() 别名，
+   *   避免 :root 上的别名在计算值阶段被钉死在亮色（见上方基础层铁律）。 */
+  --uvp-btn-h-lg: 40px;
+  --uvp-btn-h-md: 34px;
+  --uvp-btn-h-sm: 28px;
+  --uvp-btn-pad-lg: 20px;
+  --uvp-btn-pad-md: 14px;
+  --uvp-btn-pad-sm: 10px;
+  --uvp-btn-radius: 8px;
+  --uvp-btn-radius-sm: 6px;
+  --uvp-btn-fs-md: 13px;
+  --uvp-btn-fs-sm: 12px;
+  --uvp-btn-weight: 600;
+  --uvp-btn-min-w-lg: 104px;
+  --uvp-btn-min-w-md: 72px;
+  --uvp-btn-min-w-sm: 64px;
+  --uvp-btn-gap: 8px;
+
+  /* 主操作：全屏/全弹窗最多一个 */
+  --uvp-btn-primary-bg: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  --uvp-btn-primary-bg-hover: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+  --uvp-btn-primary-bg-active: linear-gradient(135deg, #1e40af 0%, #1d4ed8 100%);
+  --uvp-btn-primary-text: #ffffff;
+  --uvp-btn-primary-border: transparent;
+  --uvp-btn-primary-shadow: 0 10px 20px -16px rgb(37 99 235 / 70%);
+  --uvp-btn-primary-shadow-hover: 0 14px 24px -18px rgb(29 78 216 / 72%);
+
+  /* 次级操作：蓝底蓝字。
+     ⛔ 2026-11-04 二次加深：原来 #f2f7ff 与页面白底几乎同色，肉眼看仍是「白按钮」，
+        老板的原话是「我想所有按钮都上色」。现取 #e3eefe（与白底 ΔE 足够区分），
+        文字与边框同色系，#1d4ed8 压在上面对比度 5.6:1 仍达标。 */
+  --uvp-btn-secondary-bg: #e3eefe;
+  --uvp-btn-secondary-bg-hover: #d4e5fc;
+  --uvp-btn-secondary-bg-active: #c5dbfa;
+  --uvp-btn-secondary-border: #b9d3f3;
+  --uvp-btn-secondary-border-hover: #93bced;
+  --uvp-btn-secondary-text: #1d4ed8;
+  --uvp-btn-secondary-shadow: 0 1px 2px rgb(37 99 235 / 10%);
+
+  /* 中性操作：取消 / 关闭 / 重置 */
+  --uvp-btn-neutral-bg: #f1f5f9;
+  --uvp-btn-neutral-bg-hover: #e8eef5;
+  --uvp-btn-neutral-bg-active: #dee6ef;
+  --uvp-btn-neutral-border: #cbd5e1;
+  --uvp-btn-neutral-text: #334155;
+
+  /* 危险：实心（确认删除）/ 软底（工具栏删除） */
+  --uvp-btn-danger-solid-bg: #d14343;
+  --uvp-btn-danger-solid-bg-hover: #b93a3a;
+  --uvp-btn-danger-solid-text: #ffffff;
+  --uvp-btn-danger-soft-bg: #fff2f2;
+  --uvp-btn-danger-soft-bg-hover: #ffe3e3;
+  --uvp-btn-danger-soft-border: #f5cece;
+  --uvp-btn-danger-soft-text: #c53030;
+
+  /* 停止 / 中断：琥珀 */
+  --uvp-btn-stop-bg: #fff7ed;
+  --uvp-btn-stop-bg-hover: #ffedd5;
+  --uvp-btn-stop-border: #fed7aa;
+  --uvp-btn-stop-text: #b45309;
+
+  /* 选择类操作（批量选择 / 全选本页 / 加入选择）：紫。
+     ⛔ 2026-11-04 新增：老板要求「每个按钮颜色都不一样」，而原体系里
+        「选择」这种**开关型**动作只能借次级浅蓝或中性灰，一屏上会跟「重置」撞色。
+     色相选紫的理由：它既不表示"取数"（青绿）也不表示"破坏"（红），
+     在一屏蓝/青绿/红/灰之间正好补上唯一缺的冷色位。 */
+  --uvp-btn-select-bg: #ede9fe;
+  --uvp-btn-select-bg-hover: #e4dffa;
+  --uvp-btn-select-bg-active: #dad3f6;
+  --uvp-btn-select-border: #ddd6fe;
+  --uvp-btn-select-text: #6d28d9;
+
+  /* 清空已选（uvp-clear-btn）：琥珀。
+     ⛔ 与 `--uvp-btn-stop-*` **刻意不同值**：stop 是"中断进行中的任务"，
+        clear 是"把已勾的放掉"，两者语义不同、将来深浅可能各自调整，不能共用 token。
+     比 stop 更黄一档（#fef3c7 vs #fff7ed），是为了让同一工具条上的
+     琥珀（清空）与软红（删除）之间还隔着一层暖色，不至于看成同一色系。 */
+  --uvp-btn-clear-bg: #fef3c7;
+  --uvp-btn-clear-bg-hover: #fde9a8;
+  --uvp-btn-clear-bg-active: #fbe08a;
+  --uvp-btn-clear-border: #fcd34d;
+  --uvp-btn-clear-text: #92400e;
+
+  /* 天蓝（uvp-sky-btn）：全选本页这类"扩大范围"的辅助动作。
+     ⛔ 与青绿（取数）必须能一眼分开：青绿偏绿、天蓝偏蓝，且底比青绿更浅一档。 */
+  --uvp-btn-sky-bg: #e0f2fe;
+  --uvp-btn-sky-bg-hover: #cfebfd;
+  --uvp-btn-sky-bg-active: #bfe3fc;
+  --uvp-btn-sky-border: #7dd3fc;
+  --uvp-btn-sky-text: #0369a1;
+
+  /* 新增：绿实心（uvp-create-btn） */
+  --uvp-btn-success-bg: #16845f;
+  --uvp-btn-success-bg-hover: #0f6f4f;
+  --uvp-btn-success-text: #ffffff;
+
+  /* 新增·描边（控制台卡片里的「添加」这类小号新增键）。
+     ⛔ 深色主题下不能拿上面的 #16845f 当文字色：那是给实心底配白字的，
+        直接放在深底上当字色只有 2 点几的对比度，10.5px 的小字根本看不清。
+     文字色取 #047857，在 --uvp-btn-success-soft 上实测 5.21:1。 */
+  --uvp-btn-success-soft: #ecfdf5;
+  --uvp-btn-success-soft-hover: #d1fae5;
+  --uvp-btn-success-line: #a7f3d0;
+  --uvp-btn-success-ink: #047857;
+  --uvp-btn-focus-ring: 0 0 0 3px rgb(37 99 235 / 24%);
+  --uvp-btn-disabled-opacity: 0.55;
+}
+
+body[arco-theme="dark"] {
+  --uvp-navigation-bg: #0b1118;
+  --uvp-shell-bg: var(--uvp-navigation-bg);
+  --uvp-shell-muted: #101923;
+  --uvp-sidebar-bg: var(--uvp-navigation-bg);
+  --uvp-sidebar-panel-bg: transparent;
+  --uvp-sidebar-panel-border: transparent;
+  --uvp-sidebar-panel-shadow: none;
+  --uvp-workspace-bg: #101923;
+  --uvp-workspace-border: #233244;
+  --uvp-workspace-shadow: 16px 16px 38px -24px rgb(0 0 0 / 62%);
+  --uvp-panel-bg: #162231;
+  --uvp-panel-border: #263648;
+  --uvp-scrollbar-thumb: #3b5068;
+  --uvp-scrollbar-thumb-hover: #5b7490;
+  --uvp-meter-track: #33475c;
+  --uvp-panel-shadow: 0 10px 24px rgb(0 0 0 / 18%);
+  --uvp-list-panel-bg: #121d2a;
+  --uvp-list-panel-border: #25364a;
+  --uvp-list-toolbar-bg: #142130;
+  --uvp-search-panel-bg: linear-gradient(180deg, #162536 0%, #121d2a 100%);
+  --uvp-search-panel-shadow: inset 0 1px 0 rgb(255 255 255 / 5%), 0 10px 24px rgb(0 0 0 / 14%);
+  --uvp-search-control-bg: #101923;
+  --uvp-search-control-shadow: inset 0 0 0 1px rgb(116 133 154 / 18%);
+  --uvp-search-control-focus-shadow: inset 0 0 0 1px rgb(96 165 250 / 34%), 0 0 0 3px rgb(96 165 250 / 8%);
+  --uvp-search-secondary-btn-bg: #101923;
+  --uvp-search-secondary-btn-hover-bg: #1a2a3b;
+  --uvp-search-secondary-btn-border: #27384b;
+  --uvp-search-secondary-btn-shadow: inset 0 0 0 1px rgb(116 133 154 / 18%);
+  --uvp-secondary-action-bg: #1b2a3a;
+  --uvp-secondary-action-hover-bg: #24384c;
+  --uvp-secondary-action-border: #3b4d61;
+  --uvp-secondary-action-text: #dbe7f3;
+  --uvp-refresh-btn-bg: #123a3a;
+  --uvp-refresh-btn-hover-bg: #174b4a;
+  --uvp-refresh-btn-active-bg: #1d5b58;
+  --uvp-refresh-btn-border: #2f7773;
+  --uvp-refresh-btn-text: #5eead4;
+
+  /* 实心面 · 暗色：用**深蓝**而不是 --uvp-brand 的浅蓝，白字才有对比度。
+     值与亮色段同为 #2563eb，是刻意对齐 —— 实心主按钮在两套主题下观感一致。 */
+  --uvp-solid-bg: #2563eb;
+  --uvp-solid-hover-bg: #1d4ed8;
+  --uvp-solid-active-bg: #1e40af;
+  --uvp-solid-border: #2563eb;
+  --uvp-solid-text: #ffffff;
+  --uvp-table-header-bg: #1a2a3b;
+  --uvp-table-row-bg: #142130;
+  --uvp-table-row-hover-bg: #1d3146;
+  --uvp-table-row-checked-bg: #183252;
+  --uvp-table-row-checked-hover-bg: #21456b;
+  --uvp-dialog-bg: #162231;
+  --uvp-dialog-header-bg: linear-gradient(180deg, #1a2a3b 0%, #162231 100%);
+  --uvp-dialog-footer-bg: #142130;
+  --uvp-dialog-control-bg: #101923;
+  --uvp-dialog-border: #27384b;
+  --uvp-dialog-shadow: 0 28px 76px -28px rgb(0 0 0 / 72%);
+  --uvp-popconfirm-bg: #182536;
+  --uvp-popconfirm-border: #2a3b50;
+  --uvp-popconfirm-shadow: 0 24px 56px -28px rgb(0 0 0 / 72%);
+  --uvp-text-primary: #dbe7f3;
+  --uvp-text-secondary: #a8b6c7;
+  --uvp-text-tertiary: #74859a;
+  --uvp-sidebar-title: #dbe7f3;
+  --uvp-sidebar-section: #7f90a4;
+  --uvp-brand: #60a5fa;
+  --uvp-chart-area-start: rgb(96 165 250 / 24%);
+  --uvp-chart-area-middle: rgb(96 165 250 / 7%);
+  --uvp-brand-strong: #93c5fd;
+  --uvp-brand-cyan: #2dd4bf;
+  --uvp-brand-soft: rgb(96 165 250 / 14%);
+  --uvp-danger: #f87171;
+  --uvp-danger-soft: rgb(248 113 113 / 12%);
+  --uvp-danger-border: rgb(248 113 113 / 28%);
+  --uvp-warning: #fbbf24;
+  --uvp-warning-soft: rgb(251 191 36 / 12%);
+  --uvp-warning-border: rgb(251 191 36 / 28%);
+  --uvp-sidebar-brand-mark-bg: linear-gradient(145deg, #182536 0%, #0f1f32 100%);
+  --uvp-sidebar-hover-bg: rgb(148 163 184 / 10%);
+  --uvp-sidebar-active-bg: linear-gradient(90deg, rgb(96 165 250 / 18%) 0%, rgb(45 212 191 / 8%) 100%);
+  --uvp-sidebar-active-shadow: inset 0 0 0 1px rgb(96 165 250 / 18%);
+  --uvp-sidebar-active-line: #60a5fa;
+  --uvp-sidebar-module-bg: transparent;
+  --uvp-sidebar-module-open-bg: rgb(148 163 184 / 8%);
+  --uvp-sidebar-module-border: transparent;
+  --uvp-sidebar-tree-line: rgb(116 133 154 / 34%);
+  --uvp-sidebar-tree-dot: #60a5fa;
+
+  /* 基础层 · 暗色。⛔ 含 var() 的别名必须在这里重复声明（原因见 :root 处的注释）。
+   * 纯字面量且两主题同值的（--uvp-font-mono）不必重复。 */
+  --uvp-primary: var(--uvp-brand);
+  --uvp-success: #34d399;
+  --uvp-success-soft: rgb(52 211 153 / 12%);
+  --uvp-success-border: rgb(52 211 153 / 28%);
+  --uvp-border: var(--uvp-panel-border);
+  --uvp-border-subtle: #1e2b3b;
+  --uvp-bg: var(--uvp-panel-bg);
+  --uvp-bg-secondary: var(--uvp-table-header-bg);
+  --uvp-bg-tertiary: var(--uvp-secondary-action-bg);
+  --uvp-page-bg: var(--uvp-shell-bg);
+  --uvp-surface-muted: var(--uvp-shell-muted);
+  --uvp-text-disabled: #4f6274;
+
+  /* 按钮体系 · 暗色（全字面量，与亮色段一一对应；缺一个就会回退成亮色值）。 */
+  --uvp-btn-h-lg: 40px;
+  --uvp-btn-h-md: 34px;
+  --uvp-btn-h-sm: 28px;
+  --uvp-btn-pad-lg: 20px;
+  --uvp-btn-pad-md: 14px;
+  --uvp-btn-pad-sm: 10px;
+  --uvp-btn-radius: 8px;
+  --uvp-btn-radius-sm: 6px;
+  --uvp-btn-fs-md: 13px;
+  --uvp-btn-fs-sm: 12px;
+  --uvp-btn-weight: 600;
+  --uvp-btn-min-w-lg: 104px;
+  --uvp-btn-min-w-md: 72px;
+  --uvp-btn-min-w-sm: 64px;
+  --uvp-btn-gap: 8px;
+  --uvp-btn-primary-bg: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  --uvp-btn-primary-bg-hover: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+  --uvp-btn-primary-bg-active: linear-gradient(135deg, #1e40af 0%, #1d4ed8 100%);
+  --uvp-btn-primary-text: #ffffff;
+  --uvp-btn-primary-border: transparent;
+  --uvp-btn-primary-shadow: none;
+  --uvp-btn-primary-shadow-hover: none;
+  --uvp-btn-secondary-bg: rgb(96 165 250 / 18%);
+  --uvp-btn-secondary-bg-hover: rgb(96 165 250 / 28%);
+  --uvp-btn-secondary-bg-active: rgb(96 165 250 / 36%);
+  --uvp-btn-secondary-border: rgb(96 165 250 / 44%);
+  --uvp-btn-secondary-border-hover: rgb(96 165 250 / 64%);
+  --uvp-btn-secondary-text: #93c5fd;
+  --uvp-btn-secondary-shadow: none;
+  --uvp-btn-neutral-bg: #1b2a3a;
+  --uvp-btn-neutral-bg-hover: #24384c;
+  --uvp-btn-neutral-bg-active: #2c4359;
+  --uvp-btn-neutral-border: #3b4d61;
+  --uvp-btn-neutral-text: #dbe7f3;
+  --uvp-btn-danger-solid-bg: #dc2626;
+  --uvp-btn-danger-solid-bg-hover: #b91c1c;
+  --uvp-btn-danger-solid-text: #ffffff;
+  --uvp-btn-danger-soft-bg: rgb(248 113 113 / 14%);
+  --uvp-btn-danger-soft-bg-hover: rgb(248 113 113 / 22%);
+  --uvp-btn-danger-soft-border: rgb(248 113 113 / 34%);
+  --uvp-btn-danger-soft-text: #fca5a5;
+  --uvp-btn-stop-bg: rgb(251 191 36 / 14%);
+  --uvp-btn-stop-bg-hover: rgb(251 191 36 / 22%);
+  --uvp-btn-stop-border: rgb(251 191 36 / 34%);
+  --uvp-btn-stop-text: #fcd34d;
+
+  /* 暗色：容器底是深色，软底一律走 `rgb(x / α)` 叠加而不是实色 ——
+     实色浅底在暗色下会变成一块发光的白斑（见 uvp-buttons.scss 第 7 节注释）。 */
+  --uvp-btn-select-bg: rgb(167 139 250 / 16%);
+  --uvp-btn-select-bg-hover: rgb(167 139 250 / 24%);
+  --uvp-btn-select-bg-active: rgb(167 139 250 / 32%);
+  --uvp-btn-select-border: rgb(167 139 250 / 38%);
+  --uvp-btn-select-text: #c4b5fd;
+  --uvp-btn-clear-bg: rgb(251 191 36 / 16%);
+  --uvp-btn-clear-bg-hover: rgb(251 191 36 / 24%);
+  --uvp-btn-clear-bg-active: rgb(251 191 36 / 32%);
+  --uvp-btn-clear-border: rgb(251 191 36 / 40%);
+  --uvp-btn-clear-text: #fcd34d;
+  --uvp-btn-sky-bg: rgb(56 189 248 / 14%);
+  --uvp-btn-sky-bg-hover: rgb(56 189 248 / 22%);
+  --uvp-btn-sky-bg-active: rgb(56 189 248 / 30%);
+  --uvp-btn-sky-border: rgb(56 189 248 / 38%);
+  --uvp-btn-sky-text: #7dd3fc;
+  --uvp-btn-success-bg: #16845f;
+  --uvp-btn-success-bg-hover: #0f6f4f;
+  --uvp-btn-success-text: #ffffff;
+  --uvp-btn-success-soft: rgb(52 211 153 / 12%);
+  --uvp-btn-success-soft-hover: rgb(52 211 153 / 20%);
+  --uvp-btn-success-line: rgb(52 211 153 / 38%);
+  --uvp-btn-success-ink: #6ee7b7;
+  --uvp-btn-focus-ring: 0 0 0 3px rgb(96 165 250 / 28%);
+  --uvp-btn-disabled-opacity: 0.5;
+}
+
+@media (width <= 1280px) {
+  :root {
+    --uvp-main-padding: 20px;
+    --uvp-header-padding-x: 20px;
+  }
+}
+
+@media (width <= 768px) {
+  :root {
+    --uvp-main-padding: 16px;
+    --uvp-header-padding-x: 16px;
+  }
+}

@@ -1,0 +1,9 @@
+Use case: logo-brand
+Asset type: primary square app icon and source artwork for a coordinated UVP video platform logo kit.
+Primary request: Design a refreshed UVP logo closely related to the supplied existing phone-app and desktop-simulator icons. Reference image 1 is the existing phone-app icon; reference image 2 is the existing desktop icon. These images are style and brand references, not edit targets.
+Subject: the exact uppercase letters "UVP" in a clean bold geometric sans-serif, with a simple camera shutter aperture integrated into the bowl/counter of P. Preserve the familiar highly legible UVP silhouette. Keep the V clean and strong. Make the aperture simple with only 5 or 6 broad blades, with enough negative space to survive small-size reduction.
+Color palette: solid vivid professional azure blue #1687F8 background, pure white letterforms. The aperture is blue negative space within the white P.
+Composition: one centered horizontal UVP monogram on a full-bleed flat square blue canvas. The monogram spans approximately 76 percent of canvas width and 34 percent of canvas height, optically centered. Deliberate balanced spacing. No rounded outer corners, because corner masks will be applied during export.
+Style: polished flat identity artwork for a real enterprise video software brand, crisp vector-like edges, confidently minimal, compatible with the existing reference icons.
+Text (verbatim): "UVP"
+Constraints: ONLY one logo, no presentation board, no explanatory labels, no extra lettering, no GB28181 text, no watermark, no phone or desktop mockup, no perspective, no 3D, no gradients, no glows, no shadows, no decorative surrounding objects. Fill the entire square background with solid blue. Do not reproduce the small desktop camera/header line; retain only the UVP family resemblance and camera aperture concept.

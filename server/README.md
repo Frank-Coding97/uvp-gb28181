@@ -1,29 +1,13 @@
-# GinFast 多租户版
+# UVP GB28181 后端
 
-开源、免费、轻量级 Gin 前后分离快速开发基础框架，基于主流技术，集成了 JWT 认证、权限控制、数据库操作等功能，帮助开发者快速搭建一个支持多租户的后台管理系统。
+UVP 国标视频接入管理平台的后端服务，提供 GB/T 28181 设备接入、SIP 信令处理、媒体调度、录像与回放、语音对讲、级联和运维可观测性等能力，同时承载平台自身的用户、角色、菜单、部门、字典与 API 权限管理。权限按部门（`owner_dept_id`）做数据隔离，非多租户模型。
 
-本项目由[Gfast](https://github.com/tiger1103/gfast)团队（[奇讯科技](https://www.qjit.cn)）开发，如果您愿意为GinFast贡献代码或提供建议以及商业合作，请加微信：qixun007(备注：ginfast)
-
-项目为前后端分离，前端地址：
-
-github地址：[https://github.com/qxkjsoft/ginfast-ui](https://github.com/qxkjsoft/ginfast-ui)
+前端工程见同级目录 `web/`，完整项目说明见[仓库根 README](../README.md)。
 
 ## 使用文档
 
-[文档](docs/README.md)
-
-[安装使用视频](https://www.bilibili.com/video/BV14gsgzXEGM/)
-
-[多租户版的使用视频](https://www.bilibili.com/video/BV1Kk1wBaELb/)
-
-[多租户版的使用及开发视频](https://www.bilibili.com/video/BV199kaB9EdZ/)
-
-[ginfast宝塔部署教程](https://www.bilibili.com/video/BV1Wi6MBwEYL/)
-## 演示地址
-
-[http://gin.g-fast.cn/system](http://gin.g-fast.cn/system)
-
-账号：demo  密码：123456
+- 用户操作手册：[`docs/manual/`](../docs/manual/)
+- 接口文档：服务启动后访问 `/swagger/index.html`
 
 ## 功能特性
 
@@ -40,9 +24,7 @@ github地址：[https://github.com/qxkjsoft/ginfast-ui](https://github.com/qxkjs
 - 🔗 **菜单与API权限关联**：支持菜单与API权限的动态关联管理
 - 🏗️ **分层架构**：采用Controller-Service-Model分层架构，代码结构清晰
 - 📚 **API文档**：集成 Swagger API 文档，自动生成接口文档
-- 🏢 **多租户架构**：支持完整的租户管理、用户租户关联、数据隔离等功能
-- 🔒 **数据隔离**：基于GORM钩子函数实现自动租户数据隔离，确保各租户数据安全
-- 👥 **租户用户管理**：支持用户与租户的灵活关联，一个用户可关联多个租户
+- 🏢 **部门数据隔离**：GB28181 资产通过 `owner_dept_id` 归属到部门，按部门维度做数据隔离
 - 🤖 **代码生成**：强大的代码生成器，支持根据数据库表一键生成完整的后端和前端代码，包括模型、控制器、服务和视图层
 - 🔌 **插件管理**：完整的插件管理系统，支持插件打包、导入、导出、卸载等功能，支持版本管理和依赖检查
 - ⏰ **任务调度**：基于Cron表达式的任务调度系统，支持多种执行策略、阻塞策略、超时控制和自动重试机制
@@ -68,7 +50,7 @@ github地址：[https://github.com/qxkjsoft/ginfast-ui](https://github.com/qxkjs
 ## 项目结构
 
 ```
-ginfast-tenant/
+uvp-gb28181/
 ├── app/                    # 应用核心代码
 │   ├── controllers/        # 控制器层
 │   │   ├── auth.go         # 认证控制器
@@ -82,8 +64,6 @@ ginfast-tenant/
 │   │   ├── sysgen.go       # 代码生成配置控制器
 │   │   ├── sysmenu.go      # 菜单管理控制器
 │   │   ├── sysrole.go      # 角色管理控制器
-│   │   ├── systenant.go    # 租户管理控制器
-│   │   ├── sysusertenant.go # 用户租户关联控制器
 │   │   ├── sysjobs.go      # 任务调度管理控制器
 │   │   ├── sysjobresults.go # 任务执行结果控制器
 │   │   └── pluginsmanager.go # 插件管理控制器
@@ -111,8 +91,6 @@ ginfast-tenant/
 │   │   ├── sysmenu.go      # 菜单模型
 │   │   ├── sysmenuapi.go   # 菜单API关联模型
 │   │   ├── sysrole.go      # 角色模型
-│   │   ├── systenants.go   # 租户模型
-│   │   ├── sysusertenant.go # 用户租户关联模型
 │   │   ├── pluginexport.go # 插件导出配置模型
 │   │   └── *param.go       # 各种参数模型
 │   ├── routes/             # 路由配置
@@ -137,7 +115,6 @@ ginfast-tenant/
 │       ├── gormhelper/     # GORM助手
 │       ├── passwordhelper/ # 密码助手
 │       ├── response/       # 响应助手
-│       ├── tenanthelper/   # 租户助手
 │       ├── tokenhelper/    # Token助手
 │       └── ymlconfig/      # 配置助手
 ├── bootstrap/              # 应用初始化
@@ -154,7 +131,8 @@ ginfast-tenant/
 │   └── exampleinit.go      # 插件初始化文件
 ├── resource/               # 资源文件
 │   ├── database/           # 数据库脚本
-│   │   └── gin-fast-tenant.sql # 数据库初始化脚本
+│   │   ├── uvp-gb28181.sql # MySQL 全量初始化脚本
+│   │   └── gb28181/migrations/ # GB28181 增量迁移(含部门归属重构)
 │   ├── logs/               # 日志文件目录
 │   └── public/             # 静态资源
 ├── scripts/                # 脚本文件
@@ -176,8 +154,8 @@ ginfast-tenant/
 
 1. 克隆项目
 ```bash
-git clone https://github.com/qxkjsoft/ginfast.git
-cd ginfast
+git clone git@github.com:Frank-Coding97/uvp-gb28181.git
+cd uvp-gb28181/server
 ```
 
 2. 安装依赖
@@ -187,7 +165,8 @@ go mod tidy
 
 3. 配置数据库
    - 修改 `config/config.yml` 中的数据库配置
-   - 导入数据库脚本 `resource/database/gin-fast.sql`
+   - 导入数据库脚本 `resource/database/uvp-gb28181.sql`
+   - 按顺序执行 `resource/database/gb28181/migrations/` 下的增量迁移
 
 4. 启动应用
 ```bash
@@ -195,6 +174,14 @@ go run main.go
 ```
 
 应用将在 `http://localhost:8080` 启动。
+
+### SIP 首次安装配置
+
+- 新建数据库应直接导入对应全量脚本：MySQL 使用 `resource/database/uvp-gb28181.sql`，PostgreSQL 使用 `resource/database/postgresql_converted.sql`，SQL Server 使用 `resource/database/sqlserver_converted.sql`。全量脚本把 SIP 引导状态初始化为 `pending`。
+- 已有数据库升级时，执行对应的 `resource/database/gb28181/migrations/2026-07-19-sip-first-install-setup*.sql` 和 `2026-07-19-sip-setup-permissions*.sql`。增量脚本把既有安装标记为 `legacy`，不会强制弹出首次引导。
+- `gb28181.sip` 可以不配置；缺失或非法 SIP 配置不会阻止 HTTP 后台启动。具有 `gb28181:sip:config:update` 权限的管理员可在登录后的引导或 SIP 平台信息页完成配置。
+- 数据库表 `gb_sip_config` 是运行时配置真身。YAML 只在该表无记录且字段完整时 seed 一次，之后修改 YAML 不会覆盖数据库配置。
+- V1 保存配置后运行状态为 `restart_required`，需重启服务才会重新绑定 SIP 监听端口。
 
 ## API文档
 
@@ -210,8 +197,8 @@ go run main.go
 
 #### Linux/Mac 系统:
 ```bash
-# 进入项目根目录
-cd gin-fast
+# 进入后端目录
+cd server
 
 # 运行脚本生成文档
 ./scripts/swagger.sh
@@ -219,8 +206,8 @@ cd gin-fast
 
 #### Windows 系统:
 ```cmd
-# 进入项目根目录
-cd gin-fast
+# 进入后端目录
+cd server
 
 # 运行脚本生成文档
 scripts\swagger.bat
@@ -240,6 +227,8 @@ swag init -g main.go -o docs/swagger
 ## 配置说明
 
 主要配置项位于 `config/config.yml` 文件中：
+
+SIP 可选 seed 的完整写法见 `config/config.example.yml`。公网部署应把 `ip` 设为本机监听地址，把 `advertiseip` 设为设备可访问的公网 IPv4；`0.0.0.0` 只能用于监听，不能用于设备注册地址。
 
 ### 服务器配置
 ```yaml
@@ -267,58 +256,26 @@ Database:
   Loc: "Local"           # 时区
 ```
 
-## 多租户架构说明
+## 部门数据隔离说明
 
-本项目基于标准的多租户架构设计，支持数据隔离和租户管理功能：
-
-### 核心组件
-
-1. **租户管理 (Tenant Management)**
-   - 租户创建、更新、删除和查询
-   - 租户状态管理（启用/停用）
-   - 租户域名绑定
-
-2. **用户租户关联 (User-Tenant Association)**
-   - 用户与租户的多对多关系管理
-   - 支持用户关联多个租户
-   - 默认租户设置
-   - 批量关联和取消关联操作
-
-3. **数据隔离 (Data Isolation)**
-   - 基于GORM钩子函数自动实现数据隔离
-   - 通过TenantID字段实现行级数据隔离
-   - JWT中间件自动注入租户信息
+GB28181 资产(设备、通道、目录节点、挂载关系、异常记录)通过 `owner_dept_id` 归属到部门,按部门维度做数据隔离。历史多租户 schema 已通过迁移物理移除。
 
 ### 数据模型
 
-- `Tenant` - 租户模型，包含租户基本信息
-- `SysUserTenant` - 用户租户关联模型，管理用户与租户的关系
+- `gb_device / gb_channel / gb_catalog_node / gb_channel_mount / gb_anomaly_record` 均含 `owner_dept_id` 列并建有索引
+- 用户通过 `sys_user.dept_id` 关联部门,登录后 JWT claim 只携带用户信息,不再携带租户信息
 
-### 控制器
+### 数据访问约束
 
-- `TenantController` - 租户管理控制器
-- `SysUserTenantController` - 用户租户关联控制器
+- 查询/写入 GB28181 资产时以 `owner_dept_id` 作为数据作用域,由业务代码在 service 层显式携带
+- JWT 中不包含租户 claim(见 `tokenhelper` 相关回归测试),权限判定完全基于用户 + Casbin
 
-### 中间件和工具
+### 迁移链条
 
-- `tenanthelper` - 租户助手函数，提供租户数据隔离作用域
-- `gormhelper/hook.go` - GORM钩子函数，自动设置TenantID字段
-- `jwt.go` - JWT认证中间件，提取并验证租户信息
+- `2026-07-11-owner-dept-phase1.sql` — 补 `owner_dept_id` 字段/索引并从历史 `tenant_id` 回填
+- `2026-07-11-remove-tenant-phase2.sql` — 物理删除 `tenant_id` 列、相关索引与 `sys_user_tenant / sys_tenant` 等表
 
-### 多租户开发注意事项
-
-1. **数据隔离**
-   - 所有需要进行租户隔离的模型都必须包含 `TenantID uint` 字段
-   - GORM钩子函数会自动为创建和更新操作设置TenantID
-   - 查询时会自动应用租户数据隔离作用域
-
-2. **JWT认证与租户信息**
-   - JWT Token中包含租户信息
-   - 通过 `tenanthelper.TenantScope(c)` 可以获取当前用户的租户数据作用域
-
-3. **跨租户操作**
-   - 特殊管理接口可以绕过租户隔离，但需要谨慎使用
-   - 用户租户关联控制器提供了不进行租户过滤的用户和角色查询接口
+新环境执行完 Phase 2 后即已完全脱离多租户 schema。
 
 ## 代码生成功能说明
 
@@ -411,7 +368,7 @@ GET /api/codegen/preview?genId=<gen_id>
 ### 代码生成最佳实践
 
 1. **字段设计规范**
-   - 为所有需要隔离的字段添加 `TenantID` 字段
+   - 需要按部门隔离的表统一使用 `owner_dept_id` 字段
    - 为表和字段添加有意义的注释，便于代码文档生成
    - 使用标准的数据类型（VARCHAR、INT、DATETIME等）
 
@@ -433,7 +390,7 @@ GET /api/codegen/preview?genId=<gen_id>
 | 字段 | 说明 | 示例 |
 |------|------|------|
 | dbType | 数据库类型 | mysql、postgresql、sqlserver |
-| database | 数据库名 | gin-fast |
+| database | 数据库名 | uvp-gb28181 |
 | name | 表名 | sys_user |
 | moduleName | 模块名 | user |
 | fileName | 文件名 | user |
@@ -550,8 +507,8 @@ GET /api/pluginsmanager/exports
 POST /api/pluginsmanager/export
 ```
 将指定插件打包成压缩包进行下载。压缩包包含：
-- 后端代码文件（ginfastback目录）
-- 前端代码文件（ginfastfront目录）
+- 后端代码文件（uvpback目录）
+- 前端代码文件（uvpfront目录）
 - plugin.json 插件配置文件
 - menus.json 菜单数据（如果有）
 - database.sql 数据库脚本（如果有）
@@ -629,7 +586,7 @@ DELETE /api/pluginsmanager/uninstall?folderName=example
   "email": "author@example.com",
   "url": "https://github.com/example",
   "dependencies": {
-    "ginfast": ">=1.0.0"
+    "uvp-gb28181": ">=1.0.0"
   },
   "exportDirs": [
     "plugins/example/controllers",
@@ -702,7 +659,7 @@ DELETE /api/pluginsmanager/uninstall?folderName=example
 在config.yml中配置前端项目路径：
 ```yaml
 gen:
-  dir: "../ginfast-ui"  # 前端项目根目录相对路径
+  dir: "../web"  # 前端项目根目录相对路径
 ```
 
 ## 插件开发规范
@@ -732,14 +689,14 @@ plugins/
    - 继承 `models.BaseModel` 基础模型
    - 实现标准的 CRUD 方法（Create, Update, Delete, GetByID等）
    - 创建对应的参数验证模型（如 CreateRequest, UpdateRequest等）
-   - 注意添加TenantID字段以支持多租户数据隔离
+   - 需要按部门做数据隔离时,加 `OwnerDeptID` 字段并在 service 层显式过滤
 
    示例：
    ```go
    // plugins/example/models/example.go
    type Example struct {
        models.BaseModel
-       TenantID    uint   `gorm:"column:tenant_id;default:0;comment:租户ID" json:"tenantID"` // 添加租户ID字段
+       OwnerDeptID uint   `gorm:"column:owner_dept_id;default:0;comment:所属部门ID" json:"ownerDeptID"`
        Name        string `gorm:"type:varchar(255);comment:名称" json:"name"`
        Description string `gorm:"type:varchar(255);comment:描述" json:"description"`
        CreatedBy   uint   `gorm:"type:int(11);comment:创建者ID" json:"createdBy"`
@@ -881,7 +838,7 @@ plugins/
    - 使用 `app.DB()` 获取数据库连接
    - 遵循 GORM 的操作规范
    - 注意处理数据库错误
-   - 添加TenantID字段以支持多租户数据隔离
+   - 需要按部门做数据隔离时,加 `OwnerDeptID` 字段并在 service 层显式过滤
 
 6. **导出配置**
    - 在插件根目录创建plugin_export.json文件
@@ -1022,7 +979,7 @@ package executors
 import (
     "context"
     "log"
-    "gin-fast/app/utils/schedulerhelper"
+    "uvplatform.com/uvp-gb28181/app/utils/schedulerhelper"
 )
 
 // MyExecutor 自定义执行器
@@ -1129,8 +1086,8 @@ func (e *ExampleExecutor) Name() string {
 package scheduler
 
 import (
-    "gin-fast/app/global/app"
-    "gin-fast/plugins/example/scheduler/executors"
+    "uvplatform.com/uvp-gb28181/app/global/app"
+    "uvplatform.com/uvp-gb28181/plugins/example/scheduler/executors"
 )
 
 func init() {
@@ -1139,45 +1096,129 @@ func init() {
 }
 ```
 
+## ZLM 流媒体集群管理
+
+把 ZLMediaKit 接入 GB28181 平台并沉淀为可视化、多节点、可调度的流媒体集群。
+
+### 设计文档
+
+- spec:`~/Documents/Atlas/wiki/projects/uvp/specs/zlmediakit-module.md`
+- plan:`~/Documents/Atlas/wiki/projects/uvp/plans/zlmediakit-module.md`
+- tasks:`~/Documents/Atlas/wiki/projects/uvp/tasks/zlmediakit-module.md`
+
+### 节点接入
+
+打开"国标平台 → 流媒体节点 → 节点列表",点击"添加":
+
+| 字段 | 说明 |
+|---|---|
+| name | 显示名 |
+| host / api_port / api_secret | ZLM HTTP API 三件套(对应 `[api] secret` + `[http] port`) |
+| weight | 加权轮询权重 0-100,默认 50 |
+| rtp_port_start / rtp_port_end | RTP 收流端口范围;多 ZLM 同机部署时需错开避冲突 |
+| tags | JSON,业务侧自定义标签 |
+
+保存前先调 `/test-connection` 探测 ZLM 可达性,然后 `setServerConfig` 把业务侧生成的 UUID 写入 ZLM `[general] mediaServerId`,后续 Hook 回调凭此反查节点。
+
+> yaml `gb28181.zlm` 块只在 `meta_node` 表为空时作 seed 兜底,运行时由 UI 管理。
+
+### Hook 自动下发
+
+后端启动取 Registry 首节点构造 Client,通过 `setServerConfig` 一次性下发完整 Hook URL(`/index/hook/on_*` 七项)+ `hook.alive_interval=30`,不需要手工改 ZLM `config.ini`。
+
+Hook 列表:
+
+- `on_server_started` — ZLM 启动
+- `on_server_keepalive` — 心跳(节点 stats 来源)
+- `on_stream_changed` — 流注册/注销(LocationMap 维护)
+- `on_stream_none_reader` — 无人观看
+- `on_rtp_server_timeout` — RTP 超时
+- `on_publish` / `on_play` — 推/拉鉴权
+
+### 配置页(8 组 55 项)
+
+节点详情 → 配置 tab,按产品化分组展示:
+
+| 组 | 典型项 |
+|---|---|
+| 网络端口 | http.port / rtmp.port / rtsp.port(需重启) |
+| Hook | hook.enable / 各 on_* URL / alive_interval(运行时可改) |
+| 国标 | general.mediaServerId / rtp_proxy.port_range |
+| 协议 | rtmp.* / rtsp.* / hls.* |
+| 集群 | cluster.* |
+| 性能 | general.maxStreamWaitMS / threads |
+| 安全 | api.secret / hls.fileBufSize |
+| 录像 | record.* |
+
+保存时后端按"hot_reloadable / requires_restart"自动分流:可热改的调 `setServerConfig`;必重启的标红 + 弹窗提示。
+
+### 调度策略
+
+"流媒体节点 → 调度策略":
+
+| 算法 | 行为 | 文件 |
+|---|---|---|
+| roundrobin | 轮询 | `app/gb28181/zlm/scheduler/roundrobin.go` |
+| weighted | GCD 平滑加权(参考 nginx upstream) | `app/gb28181/zlm/scheduler/weighted.go` |
+| leastload | `NetThreadLoadAvg * 0.6 + WorkThreadLoadAvg * 0.4` 取最小 | `app/gb28181/zlm/scheduler/leastload.go` |
+
+UI 切换算法**热生效**,通过 `scheduler.Manager.Switch`,无需重启服务。当前算法存 `scheduler_setting` 表,启动从 DB 加载。
+
+### 调度日志
+
+每次 invite Pick 节点都异步落 `scheduler_log` 表(带缓冲 channel 1000,失败丢弃记 warn,不阻塞 Pick)。
+
+- "调度策略"页底部展示最近 200 条
+- bootstrap 每天 0:00 自动 prune 7 天前
+
+### 容量预警
+
+`scheduler.Manager.Pick` 之前调 `node/capacity.go IsCapacityAvailable` 自动过滤:
+
+- `port_usage >= 0.8`(rtp_port_range 用量,基于 keepalive 上报)
+- `cpu >= 0.8`(NetThreadLoadAvg 综合)
+
+被过滤节点在节点列表行黄色背景 + tooltip "接近容量,已暂时摘除调度池"。
+
+### 驱逐 / 重启
+
+节点操作列(需先隔离 / 维护态):
+
+- **驱逐**:批量 `kick_sessions`,断开该节点所有连接
+- **重启**:调 ZLM `restartServer`,所有流中断,UI 二次确认 + graceMS 默认 5000
+- **隔离 / 激活**:state=active ↔ maintenance,scheduler 自动跳过 maintenance / offline 节点
+
+### 离线检测
+
+`zlm/heartbeat/watcher.go` 每 60s 扫一次 Registry,LastHeartbeat > 90s 标 offline,scheduler 自动跳过。
+
+节点详情有"重新探测"按钮:手工调 `/test-connection`,若恢复则 state=active。
+
 ## 部署说明
 
 ### 编译项目
 ```bash
-go build -o gin-fast .
+go build -o uvp-gb28181 .
 ```
 
 ### 运行项目
 ```bash
-./gin-fast
+./uvp-gb28181
 ```
 
 ### Docker 部署
 
 1. 构建 Docker 镜像
 ```bash
-docker build -t gin-fast .
+docker build -t uvp-gb28181 .
 ```
 
 2. 运行容器
 ```bash
-docker run -p 8080:8080 gin-fast
+docker run -p 8080:8080 uvp-gb28181
 ```
 
-## 免责声明：
-> 1、GIN-FAST仅限自己学习使用，一切商业行为与GIN-FAST无关。
+## 许可证
 
-> 2、用户不得利用GIN-FAST从事非法行为，用户应当合法合规的使用，发现用户在使用产品时有任何的非法行为，GIN-FAST有权配合有关机关进行调查或向政府部门举报，GIN-FAST不承担用户因非法行为造成的任何法律责任，一切法律责任由用户自行承担，如因用户使用造成第三方损害的，用户应当依法予以赔偿。
-
-> 3、所有与使用GIN-FAST相关的资源直接风险均由用户承担。
-
-## 交流群
-
-### 微信群
-```
-如果二维码过期，请添加微信 qixun007 邀请您进群(备注：ginfast)
-```
-![微信群](docs/mdFile/wx3.png)
-
-### QQ群
-
-QQ群：967593545
+本项目基于 [MIT License](LICENSE) 开源。第三方组件的版权与许可声明见
+[THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md)。

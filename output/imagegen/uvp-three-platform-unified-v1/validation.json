@@ -1,0 +1,10 @@
+{
+  "shared_UVP_and_aperture_pixels": "PASS",
+  "simulators_GB28181_Sim_header": "PASS",
+  "same_header_font_size_vertical_alignment": "PASS",
+  "same_blue_background": "PASS",
+  "server_assets_byte_identical": "PASS",
+  "png_decode_and_transparency": "PASS",
+  "ico_16_to_256": "PASS",
+  "project_files_replaced": false
+}

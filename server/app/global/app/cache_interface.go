@@ -30,6 +30,11 @@ type CacheInterf interface {
 	// Del 删除键
 	Del(ctx context.Context, keys ...string) error
 
+	// GetDel 原子地取出并删除键
+	// 键不存在时返回 ("", ErrKeyNotFound)
+	// 并发调用时保证只有一个调用方能拿到值，用于一次性凭据（如扫码接入 token）
+	GetDel(ctx context.Context, key string) (string, error)
+
 	// Exists 检查键是否存在
 	Exists(ctx context.Context, keys ...string) (int64, error)
 

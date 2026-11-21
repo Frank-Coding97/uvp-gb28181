@@ -1,0 +1,32 @@
+# UVP privileged updater helper. Keep this unit independent from the backend
+# so it survives backend stop/restart during an upgrade.
+[Unit]
+Description=UVP service upgrade helper
+After=local-fs.target
+Before=uvp-backend.service
+
+[Service]
+Type=simple
+# The registration is administrator-owned and binds this helper to one
+# deployment/project. Without it the socket remains status-only and cannot
+# apply or roll back an upgrade.
+# The helper is deliberately outside current/: an application release must not
+# replace the process that owns its recovery record halfway through a switch.
+# Updating this binary is a separate administrator action after compatibility
+# review; the normal release deployer only bootstraps it when it is absent.
+ExecStart=/opt/uvp-gb28181/updater/uvp-updater serve --socket /run/uvp/updater.sock --state /opt/uvp-gb28181/updater-state --registration /opt/uvp-gb28181/config/updater-registration.json
+Restart=on-failure
+RestartSec=3s
+RuntimeDirectory=uvp
+RuntimeDirectoryMode=0750
+NoNewPrivileges=false
+PrivateTmp=true
+ProtectSystem=strict
+# Activation atomically switches current and writes releases/, backups, state,
+# and gate files under the registered installation root. ProtectSystem=strict
+# otherwise makes /opt read-only and the helper fails after it has stopped the
+# backend. Keep the exception scoped to this one registered root.
+ReadWritePaths=/opt/uvp-gb28181 /run/uvp
+
+[Install]
+WantedBy=multi-user.target

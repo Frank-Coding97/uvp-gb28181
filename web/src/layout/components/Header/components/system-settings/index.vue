@@ -1,5 +1,13 @@
 <template>
-  <a-drawer :width="340" :visible="props.systemOpen" @ok="handleCancel" @cancel="handleCancel" unmount-on-close>
+  <a-drawer
+    body-class="uvp-system-dialog__body"
+    class="uvp-system-drawer"
+    :width="340"
+    :visible="props.systemOpen"
+    @ok="handleCancel"
+    @cancel="handleCancel"
+    unmount-on-close
+  >
     <template #title> {{ $t(`system.system settings`) }} </template>
     <div>
       <div>
@@ -11,10 +19,6 @@
         <div class="flex-row">
           <div>{{ $t(`system.menu accordion`) }}</div>
           <a-switch v-model="isAccordion" />
-        </div>
-        <div class="flex-row">
-          <div>{{ $t(`system.breadcrumb`) }}</div>
-          <a-switch v-model="isBreadcrumb" />
         </div>
         <div class="flex-row">
           <div>{{ $t(`system.tab bar`) }}</div>
@@ -40,8 +44,12 @@
         </div>
         <div class="flex-row">
           <div>{{ $t(`system.watermark text`) }}</div>
-          <a-input :style="{ width: '100px' }" v-model="watermark" 
-          :placeholder="$t(`system.please-enter-something`)" allow-clear />
+          <a-input
+            :style="{ width: '100px' }"
+            v-model="watermark"
+            :placeholder="$t(`system.please-enter-something`)"
+            allow-clear
+          />
         </div>
         <div class="flex-row">
           <div>{{ $t(`system.watermark size`) }}</div>
@@ -79,7 +87,6 @@ const routerStore = useRouteConfigStore();
 const {
   collapsed,
   isAccordion,
-  isBreadcrumb,
   isTabs,
   isFooter,
   watermark,

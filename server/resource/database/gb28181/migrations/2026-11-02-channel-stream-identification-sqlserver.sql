@@ -1,0 +1,1 @@
+IF COL_LENGTH(N'dbo.gb_channel', N'stream_identification') IS NULL ALTER TABLE [dbo].[gb_channel] ADD [stream_identification] NVARCHAR(32) NOT NULL CONSTRAINT [df_gb_channel_stream_identification] DEFAULT N'';

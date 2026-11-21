@@ -1,0 +1,2 @@
+{"id": 1, "name": "系统管理员", "sort": 0, "status": 1, "description": "最高权限管理员角色", "parent_id": 0, "created_at": {"$ts": "2025-09-01 17:32:12.000000"}, "updated_at": {"$ts": "2025-09-30 15:53:24.000000"}, "deleted_at": null, "created_by": 1, "data_scope": 1, "checked_depts": ""}
+{"id": 3, "name": "游客", "sort": 0, "status": 1, "description": "只读游客：允许业务查看、实时观看和录像回放；禁止下载、控制与修改", "parent_id": 0, "created_at": {"$ts": "2026-08-24 20:29:31.000000"}, "updated_at": {"$ts": "2026-09-05 18:46:37.000000"}, "deleted_at": null, "created_by": 1, "data_scope": 4, "checked_depts": ""}
