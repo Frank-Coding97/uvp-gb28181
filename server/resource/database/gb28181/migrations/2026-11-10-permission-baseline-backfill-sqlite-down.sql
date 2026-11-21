@@ -1,5 +1,16 @@
--- 回滚：仅删除本迁移补齐的精确 (path,method) / (v0,v1,v2) 组合。
--- ⚠️ 与 2026-10-29-map-view-permissions 有重叠路径，两个迁移一起回滚才回到原状。
-DELETE FROM sys_menu_api WHERE api_id IN (SELECT id FROM sys_api WHERE (path='/api/gb28181/device-mgmt/map/center' AND method='GET') OR (path='/api/gb28181/device-mgmt/map/center' AND method='PUT') OR (path='/api/gb28181/device-mgmt/map/channel-tree' AND method='GET') OR (path='/api/gb28181/device-mgmt/map/trajectory' AND method='GET') OR (path='/api/sysJobResults/clear' AND method='POST'));
-DELETE FROM sys_casbin_rule WHERE ptype='p' AND ((v0='role_1' AND v1='/api/config/viewCache' AND v2='GET') OR (v0='role_1' AND v1='/api/gb28181/cascade/platforms/:id/disable' AND v2='POST') OR (v0='role_1' AND v1='/api/gb28181/device-mgmt/device/:id/catalog/refresh/:operationId' AND v2='GET') OR (v0='role_1' AND v1='/api/gb28181/device-mgmt/firmware-repository' AND v2='GET') OR (v0='role_1' AND v1='/api/gb28181/device-mgmt/firmware-repository' AND v2='POST') OR (v0='role_1' AND v1='/api/gb28181/device-mgmt/firmware-repository/:id' AND v2='DELETE') OR (v0='role_1' AND v1='/api/gb28181/device-mgmt/firmware-repository/:id' AND v2='GET') OR (v0='role_1' AND v1='/api/gb28181/device-mgmt/firmware-repository/:id/download-link' AND v2='POST') OR (v0='role_1' AND v1='/api/gb28181/device-mgmt/firmware-repository/:id/status' AND v2='PATCH') OR (v0='role_1' AND v1='/api/gb28181/device-mgmt/map/center' AND v2='GET') OR (v0='role_1' AND v1='/api/gb28181/device-mgmt/map/center' AND v2='PUT') OR (v0='role_1' AND v1='/api/gb28181/device-mgmt/map/channel-tree' AND v2='GET') OR (v0='role_1' AND v1='/api/gb28181/device-mgmt/map/trajectory' AND v2='GET') OR (v0='role_1' AND v1='/api/gb28181/play/:deviceId/:channelId/authorization' AND v2='POST') OR (v0='role_1' AND v1='/api/gb28181/sip/service-config' AND v2='GET') OR (v0='role_1' AND v1='/api/gb28181/sip/service-config' AND v2='PUT') OR (v0='role_1' AND v1='/api/gb28181/zlm/sessions/network' AND v2='GET') OR (v0='role_1' AND v1='/api/gb28181/zlm/sessions/viewers' AND v2='GET') OR (v0='role_1' AND v1='/api/sysJobResults/clear' AND v2='POST') OR (v0='role_1' AND v1='/api/sysMenu/:id' AND v2='GET') OR (v0='role_1' AND v1='/api/sysParam/:id' AND v2='GET') OR (v0='role_1' AND v1='/api/sysParam/add' AND v2='POST') OR (v0='role_1' AND v1='/api/sysParam/delete' AND v2='DELETE') OR (v0='role_1' AND v1='/api/sysParam/edit' AND v2='PUT') OR (v0='role_1' AND v1='/api/sysParam/getByCode/:code' AND v2='GET') OR (v0='role_1' AND v1='/api/sysParam/list' AND v2='GET') OR (v0='role_1' AND v1='/api/sysRole/:id' AND v2='GET') OR (v0='role_1' AND v1='/api/sysRole/list' AND v2='GET') OR (v0='role_1' AND v1='/api/users/switchTenant/:tenantld' AND v2='GET') OR (v0='role_3' AND v1='/api/gb28181/device-mgmt/map/center' AND v2='GET') OR (v0='role_3' AND v1='/api/gb28181/device-mgmt/map/channel-tree' AND v2='GET') OR (v0='role_3' AND v1='/api/gb28181/device-mgmt/map/trajectory' AND v2='GET'));
-DELETE FROM sys_api WHERE (path='/api/gb28181/device-mgmt/map/center' AND method='GET') OR (path='/api/gb28181/device-mgmt/map/center' AND method='PUT') OR (path='/api/gb28181/device-mgmt/map/channel-tree' AND method='GET') OR (path='/api/gb28181/device-mgmt/map/trajectory' AND method='GET') OR (path='/api/sysJobResults/clear' AND method='POST');
+-- 回滚：本迁移**故意不做删除**（no-op）。
+--
+-- 为什么不删：up 是 NOT EXISTS 型的「补齐基线」迁移 —— 那 5 个接口
+-- （map/center GET+PUT、map/channel-tree、map/trajectory、sysJobResults/clear）
+-- 与 32 条 casbin 策略本来就是 baseline/seeds 里的内容，全新安装库全都自带，
+-- 只有 2026-11-10 之前升级上来的老库缺。up 只补「恰好缺的那几条」，
+-- 但 down 无法知道当时补了哪几条：sys_api / sys_casbin_rule 都没有能区分
+-- 「基线导入」与「本次插入」的标记列，created_at 一律是执行时的 CURRENT_TIMESTAMP。
+--
+-- 强行按书面清单删会伤到不属于本迁移的行。实测（全新基线库上误跑本文件）：
+--   sys_api −5、sys_menu_api −5、sys_casbin_rule −32
+-- 老库 up→down 的净差是 sys_casbin_rule −24 —— 把与本次无关的既有授权一起删了，
+-- 结果是库比升级前**更缺权限**（正是这些路径当初导致前端 403）。
+--
+-- 要真正回到迁移前状态，只能用全量脚本重建库；-migrate-down 降级不需要撤销本迁移。
+SELECT 1;

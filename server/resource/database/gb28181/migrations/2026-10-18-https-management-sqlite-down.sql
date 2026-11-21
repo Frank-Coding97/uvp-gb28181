@@ -1,3 +1,12 @@
-DELETE FROM sys_menu_api WHERE api_id IN (SELECT id FROM sys_api WHERE path IN ('/api/system/https/status','/api/system/https/check-port','/api/system/https/certificate','/api/system/https/apply'));
-DELETE FROM sys_casbin_rule WHERE v1 IN ('/api/system/https/status','/api/system/https/check-port','/api/system/https/certificate','/api/system/https/apply');
-DELETE FROM sys_api WHERE path IN ('/api/system/https/status','/api/system/https/check-port','/api/system/https/certificate','/api/system/https/apply');
+-- 回滚：本迁移**故意不做删除**（no-op）。
+--
+-- 为什么不删：up 是 NOT EXISTS 型的「补齐基线」迁移 —— 它补的 5 条 HTTPS 管理接口里，有 1 条在迁移引入前的基线里**本来就有**。
+--   
+-- 这批接口/授权本来就写在 baseline/seeds 里（全新安装自带，只有升级上来的老库缺），
+-- up 只补「恰好缺的那几条」。down 无法判定哪几行是本次插入的
+-- （sys_api / sys_casbin_rule 都没有能区分「基线导入」与「本次插入」的标记列），
+-- 按清单删必然连老库里本来就有、与本次无关的行一起删掉 —— 降级后反而继续 403。
+-- 实测：5 条路径中 1 条迁移前已存在于基线 ⇒ down 会删掉这条与本次无关的既有登记。
+
+-- 要真正回到迁移前状态只能用全量脚本重建库；-migrate-down 降级不需要撤销本迁移。
+SELECT 1;

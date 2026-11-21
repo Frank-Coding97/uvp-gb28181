@@ -119,13 +119,49 @@ func TestPermissionBackfillAppliesAndIsIdempotent(t *testing.T) {
 		"SELECT COUNT(*) FROM sys_casbin_rule WHERE v0='role_2' AND v1='/api/unrelated'").Scan(&untouched).Error)
 	require.EqualValues(t, 1, untouched)
 
-	// 回滚只清掉本迁移补的行。
+	// 回滚：本迁移是「补齐基线」型，down 故意 no-op（详见 -sqlite-down.sql 顶部注释）。
+	// 补的那 5 条登记 / 32 条授权本来就在 baseline/seeds 里，up 只补「恰好缺的」，
+	// down 无从区分「本次插入」与「库里原本就有」（两表都没有能标记来源的列）。
+	// 实测：老库上按清单删会连带删掉 24 条与本迁移无关的既有授权，降级后照样 403。
+	// 所以这里断言的是「一行都不能少」，不是「回到 1 行」。
 	down := readWorkRecordingPermissionMigration(t, permissionBackfillMigration+"-sqlite-down.sql")
 	for _, stmt := range splitStatements(down) {
 		require.NoError(t, db.Exec(stmt).Error, stmt)
 	}
 	require.NoError(t, db.Raw("SELECT COUNT(*) FROM sys_api").Scan(&apiCount).Error)
 	require.NoError(t, db.Raw("SELECT COUNT(*) FROM sys_casbin_rule").Scan(&ruleCount).Error)
-	require.EqualValues(t, 1, apiCount)
-	require.EqualValues(t, 1, ruleCount)
+	require.EqualValues(t, 6, apiCount)
+	require.EqualValues(t, 33, ruleCount)
+}
+
+// 旧 down 的真实事故场景：这些行**本来就全在**时，按书面清单删会误伤。
+//
+// 构造：先跑 up（此刻 5 条登记 + 32 条授权齐全，等价于新装基线库、或老库里本来就配过）
+// → 再跑 down → 一条都不许少。旧实现会删到只剩 1 条 api / 1 条授权，本用例立刻红。
+//
+// 为什么值得单独一个用例：它锁的不是"up 幂等"，而是"down 不许误删预存行"这个方向 ——
+// 将来若有人想给 down 恢复删除语义，先看到这个名字。
+func TestPermissionBackfillDownLeavesPreexistingRows(t *testing.T) {
+	db := openWorkRecordingPermissionSQLite(t)
+	seedWorkRecordingPermissionSchema(t, db)
+
+	up := readWorkRecordingPermissionMigration(t, permissionBackfillMigration+"-sqlite.sql")
+	for _, stmt := range splitStatements(up) {
+		require.NoError(t, db.Exec(stmt).Error, stmt)
+	}
+
+	down := readWorkRecordingPermissionMigration(t, permissionBackfillMigration+"-sqlite-down.sql")
+	for _, stmt := range splitStatements(down) {
+		require.NoError(t, db.Exec(stmt).Error, stmt)
+	}
+
+	var apiCount, ruleCount, untouched int64
+	require.NoError(t, db.Raw("SELECT COUNT(*) FROM sys_api").Scan(&apiCount).Error)
+	require.NoError(t, db.Raw("SELECT COUNT(*) FROM sys_casbin_rule").Scan(&ruleCount).Error)
+	require.NoError(t, db.Raw(
+		"SELECT COUNT(*) FROM sys_casbin_rule WHERE v0='role_2' AND v1='/api/unrelated'").Scan(&untouched).Error)
+
+	require.EqualValues(t, 6, apiCount, "down 删掉了不属于本迁移的接口登记")
+	require.EqualValues(t, 33, ruleCount, "down 删掉了不属于本迁移的授权")
+	require.EqualValues(t, 1, untouched)
 }

@@ -1,3 +1,14 @@
-DELETE FROM sys_menu_api WHERE api_id IN (SELECT id FROM sys_api WHERE path IN ('/api/gb28181/device-mgmt/map/markers','/api/gb28181/device-mgmt/map/clusters','/api/gb28181/device-mgmt/map/no-coord-count','/api/gb28181/device-mgmt/map/channel-tree','/api/gb28181/device-mgmt/map/trajectory','/api/gb28181/device-mgmt/map/center'));
-DELETE FROM sys_casbin_rule WHERE v1 IN ('/api/gb28181/device-mgmt/map/markers','/api/gb28181/device-mgmt/map/clusters','/api/gb28181/device-mgmt/map/no-coord-count','/api/gb28181/device-mgmt/map/channel-tree','/api/gb28181/device-mgmt/map/trajectory','/api/gb28181/device-mgmt/map/center');
-DELETE FROM sys_api WHERE path IN ('/api/gb28181/device-mgmt/map/markers','/api/gb28181/device-mgmt/map/clusters','/api/gb28181/device-mgmt/map/no-coord-count','/api/gb28181/device-mgmt/map/channel-tree','/api/gb28181/device-mgmt/map/trajectory','/api/gb28181/device-mgmt/map/center');
+-- 回滚：本迁移**故意不做删除**（no-op）。
+--
+-- 为什么不删：up 是 NOT EXISTS 型的「补齐基线」迁移 —— up 自己的注释就写着「本迁移只做"补齐缺失行"」——
+--   7 个地图接口早在 2026-09-05 / 10-21 就被随手加进 baseline/seeds 了。
+-- 这批接口/授权本来就写在 baseline/seeds 里（全新安装自带，只有升级上来的老库缺），
+-- up 只补「恰好缺的那几条」。down 无法判定哪几行是本次插入的
+-- （sys_api / sys_casbin_rule 都没有能区分「基线导入」与「本次插入」的标记列），
+-- 按清单删必然连老库里本来就有、与本次无关的行一起删掉 —— 降级后反而继续 403。
+-- 实测：6 个路径全部在迁移引入前的基线里 ⇒ up 在老库上补、在新库上一条不插，
+-- down 按路径全删，在已升级到新基线的库上会把地图接口登记与授权一起清空。
+-- ⚠️ 与 2026-11-10-permission-baseline-backfill 的 down 有重叠路径 —— 两个都是 no-op 才自洽。
+
+-- 要真正回到迁移前状态只能用全量脚本重建库；-migrate-down 降级不需要撤销本迁移。
+SELECT 1;

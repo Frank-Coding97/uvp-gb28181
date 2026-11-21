@@ -7,6 +7,8 @@
 -- 「您没有权限访问此资源」，前端弹错，页面功能残缺。
 -- 本迁移按 2026-11-10 线上库与 seeds 的逐行对账结果补齐；每条都带 NOT EXISTS，
 -- 重复执行不会覆盖任何既有自定义授权。
+-- ⚠️ 正因如此，配套的 -down.sql 是 **no-op**（不删任何行）：被补的条目本来就在
+--    seeds 基线里，按清单硬删等于删掉基线自带的接口登记与授权，详见该文件注释。
 INSERT INTO sys_api (title,path,method,api_group,created_at,updated_at,created_by)
 SELECT v.title,v.path,v.method,v.api_group,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
 FROM (

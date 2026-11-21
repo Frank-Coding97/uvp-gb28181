@@ -128,6 +128,139 @@ func TestStreamProbeAsyncPermissionMigrations(t *testing.T) {
 	require.Contains(t, normalized, "/api/gb28181/stream-probes/operations/:operationid")
 }
 
+// sqlWithoutComments 去掉整行/行尾 "--" 注释后压成单行小写。
+// 仅用于断言语句体里有没有 DELETE/INSERT —— 这些迁移文件不含带 "--" 的字符串字面量。
+func sqlWithoutComments(body string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(body, "\n") {
+		if i := strings.Index(line, "--"); i >= 0 {
+			line = line[:i]
+		}
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+	return strings.ToLower(strings.Join(strings.Fields(b.String()), " "))
+}
+
+// 2026-11-10 的权限基线补齐是 NOT EXISTS 型「只补不改」迁移，配套 down 必须保持 no-op。
+//
+// 为什么：被补的 5 个接口与 32 条 casbin 策略**本来就在 baseline/seeds 里**，新装库自带，
+// 只有更早升级上来的老库缺。up 只补恰好缺的那几条，事后无法判定补了哪些
+// （两表都没有能区分"基线导入"与"本次插入"的标记列）⇒ 按书面清单删必然误删。
+// 实测：全新基线库上误跑旧 down，sys_api −5、sys_menu_api −5、sys_casbin_rule −32；
+// 老库 up→down 后 sys_casbin_rule 比升级前**净少 24 条**（把无关的既有授权删了，
+// 反而让前端继续 403）。
+//
+// 2026-11-21 的种子补齐同理（灌的按钮/权限码/接口映射/openapi 锁行在 r9 基线里全部自带），
+// 而且它的旧 down 更危险：删掉 sys_openapi_security_state 那行会让下一次
+// -migrate-down 的前置校验 fail-closed，降级链路自己卡死自己。
+//
+// 这是一道反向护栏：谁把 down 改回 DELETE/UPDATE，这里立刻红，逼他重读上面这段。
+func TestBaselineBackfillDownStaysNoop(t *testing.T) {
+	cases := []struct {
+		name    string // 迁移前缀
+		downs   []string
+		applies []string // 需要断言是 NOT EXISTS 型幂等补齐的 up 文件
+	}{
+		{
+			name: "2026-11-10 权限基线补齐",
+			downs: []string{
+				"2026-11-10-permission-baseline-backfill-down.sql",
+				"2026-11-10-permission-baseline-backfill-postgresql-down.sql",
+				"2026-11-10-permission-baseline-backfill-sqlserver-down.sql",
+				"2026-11-10-permission-baseline-backfill-sqlite-down.sql",
+			},
+			applies: []string{
+				"2026-11-10-permission-baseline-backfill.sql",
+				"2026-11-10-permission-baseline-backfill-postgresql.sql",
+				"2026-11-10-permission-baseline-backfill-sqlserver.sql",
+				"2026-11-10-permission-baseline-backfill-sqlite.sql",
+			},
+		},
+		{
+			name: "2026-11-21 SQLite 种子补齐",
+			downs: []string{
+				"2026-11-21-sqlite-seed-catchup-down.sql",
+				"2026-11-21-sqlite-seed-catchup-sqlite-down.sql",
+			},
+			applies: []string{
+				"2026-11-21-sqlite-seed-catchup.sql",
+				"2026-11-21-sqlite-seed-catchup-postgresql.sql",
+				"2026-11-21-sqlite-seed-catchup-sqlserver.sql",
+				"2026-11-21-sqlite-seed-catchup-sqlite.sql",
+			},
+		},
+		{
+			// 与 2026-11-10 的 down 有重叠路径，两个都 no-op 才自洽。
+			name: "2026-10-29 地图视图权限补齐",
+			downs: []string{
+				"2026-10-29-map-view-permissions-down.sql",
+				"2026-10-29-map-view-permissions-postgresql-down.sql",
+				"2026-10-29-map-view-permissions-sqlserver-down.sql",
+				"2026-10-29-map-view-permissions-sqlite-down.sql",
+			},
+			applies: []string{
+				"2026-10-29-map-view-permissions.sql",
+				"2026-10-29-map-view-permissions-postgresql.sql",
+				"2026-10-29-map-view-permissions-sqlserver.sql",
+				"2026-10-29-map-view-permissions-sqlite.sql",
+			},
+		},
+		{
+			name: "2026-10-13 级联发布组权限补齐",
+			downs: []string{
+				"2026-10-13-cascade-publish-group-permission-down.sql",
+				"2026-10-13-cascade-publish-group-permission-postgresql-down.sql",
+				"2026-10-13-cascade-publish-group-permission-sqlserver-down.sql",
+				"2026-10-13-cascade-publish-group-permission-sqlite-down.sql",
+			},
+			applies: []string{
+				"2026-10-13-cascade-publish-group-permission.sql",
+				"2026-10-13-cascade-publish-group-permission-postgresql.sql",
+				"2026-10-13-cascade-publish-group-permission-sqlserver.sql",
+				"2026-10-13-cascade-publish-group-permission-sqlite.sql",
+			},
+		},
+		{
+			name: "2026-10-18 HTTPS 管理权限补齐",
+			downs: []string{
+				"2026-10-18-https-management-down.sql",
+				"2026-10-18-https-management-postgresql-down.sql",
+				"2026-10-18-https-management-sqlserver-down.sql",
+				"2026-10-18-https-management-sqlite-down.sql",
+			},
+			applies: []string{
+				"2026-10-18-https-management.sql",
+				"2026-10-18-https-management-postgresql.sql",
+				"2026-10-18-https-management-sqlserver.sql",
+				"2026-10-18-https-management-sqlite.sql",
+			},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			for _, upName := range c.applies {
+				up, err := migrationsfs.FS.ReadFile("migrations/" + upName)
+				require.NoError(t, err, "缺少 %s", upName)
+				require.Contains(t, sqlWithoutComments(string(up)), "not exists",
+					"%s 已不再是 NOT EXISTS 型幂等补齐 —— down 为 no-op 的前提变了，请重新评估", upName)
+			}
+			for _, downName := range c.downs {
+				down, err := migrationsfs.FS.ReadFile("migrations/" + downName)
+				require.NoError(t, err, "缺少 %s", downName)
+				body := sqlWithoutComments(string(down))
+				require.Contains(t, body, "select 1", "%s 应保持 no-op（SELECT 1）", downName)
+				for _, forbidden := range []string{"delete", "insert", "update"} {
+					require.NotContains(t, body, forbidden,
+						"%s 不许含 %s：按清单硬删会连基线自带的接口登记/授权一起删掉，详见文件内注释",
+						downName, strings.ToUpper(forbidden))
+				}
+			}
+		})
+	}
+}
+
 func TestStreamProbeAsyncFreshBaselinesContainQueryAPI(t *testing.T) {
 	for _, name := range []string{"uvp-gb28181.sql", "postgresql_converted.sql", "sqlserver_converted.sql"} {
 		body, err := os.ReadFile(filepath.Join("..", "..", "..", "resource", "database", name))
