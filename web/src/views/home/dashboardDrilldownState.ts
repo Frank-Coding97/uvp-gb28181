@@ -1,4 +1,4 @@
-import type { ZLMMediaIdentity, ZLMOverview } from "@/api/gb28181-zlm-runtime";
+import type { ZLMAudienceViewer, ZLMMediaIdentity, ZLMOverview } from "@/api/gb28181-zlm-runtime";
 import type { HomeRuntimeBinding } from "@/api/home-dashboard";
 
 export type DashboardHistoryRange = "1h" | "24h" | "7d";
@@ -45,7 +45,21 @@ export interface MediaRuntimeLedger {
   viewers: MediaBusinessStream[];
   sessions: MediaRuntimeSessionRow[];
   recordings: MediaBusinessStream[];
-  totals: { streams: number; viewers: number; sessions: number; recordings: number };
+  /**
+   * 按远端 IP 聚合的观众口径。
+   *
+   * ⛔ totals.viewers 优先取这里的 uniqueIps（一人多路算 1）；available=false
+   * 时（后端未装配播放器读取能力）必须回退到 Σ readerCount，不能显示 0。
+   */
+  audience: {
+    available: boolean;
+    uniqueIps: number;
+    connections: number;
+    viewers: ZLMAudienceViewer[];
+    partial: boolean;
+    truncated: boolean;
+  };
+  totals: { streams: number; viewers: number; connections: number; sessions: number; recordings: number };
   partial: boolean;
   warnings: string[];
   asOf: string;
@@ -104,20 +118,32 @@ export function buildMediaRuntimeLedger(
     sessions: Math.max(0, node.metrics.networkSessionCount),
     sampled: sampledNodeIds.has(node.nodeId)
   }));
+  const audience = {
+    available: !!overview?.audience?.available,
+    uniqueIps: Math.max(0, overview?.audience?.uniqueIps ?? 0),
+    connections: Math.max(0, overview?.audience?.connections ?? 0),
+    viewers: overview?.audience?.viewers ?? [],
+    partial: !!overview?.audience?.partial,
+    truncated: !!overview?.audience?.truncated
+  };
   const totals = {
     streams: streams.length,
-    viewers: streams.reduce((sum, item) => sum + item.viewers, 0),
+    viewers: audience.available ? audience.uniqueIps : streams.reduce((sum, item) => sum + item.viewers, 0),
+    connections: audience.available ? audience.connections : streams.reduce((sum, item) => sum + item.viewers, 0),
     sessions: sessions.filter(item => item.sampled).reduce((sum, item) => sum + item.sessions, 0),
     recordings: recordings.length
   };
   const warnings: string[] = [];
   if (overview && overview.metrics.streamCount !== rawStreams.length) warnings.push("在线流汇总与协议明细数量不一致");
   if (overview && overview.metrics.networkSessionCount !== totals.sessions) warnings.push("网络会话汇总与节点明细不一致");
+  if (audience.truncated) warnings.push("观众明细已截断，仅统计前 128 路有人的流");
+  if (audience.partial) warnings.push("部分节点观众明细读取失败，人数可能偏少");
   return {
     streams,
     viewers,
     sessions,
     recordings,
+    audience,
     totals,
     partial: !!overview?.partial || warnings.length > 0 || sessions.some(item => !item.sampled),
     warnings,

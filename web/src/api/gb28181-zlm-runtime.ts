@@ -202,10 +202,55 @@ export interface ZLMMediaRateSample {
   downstream: number;
 }
 
+export interface ZLMAudienceConnection {
+  nodeId: number;
+  media: ZLMMediaIdentity;
+  identifier: string;
+  peerIp: string;
+  typeId?: string;
+  peerPort: number;
+  localIp?: string;
+  localPort: number;
+}
+
+export interface ZLMAudienceStreamRef {
+  nodeId: number;
+  media: ZLMMediaIdentity;
+}
+
+/**
+ * 按远端 IP 聚合后的一位观众。
+ * ⛔ 不是「账号数」：ZLM 侧看不到账号，同一出口 NAT 后多人会合并成 1，
+ * 同一人换网络会算成 2。connections 可能大于 streams.length（同一路开多窗、
+ * 或同一路走了 FLV + HLS 两个入口）。
+ */
+export interface ZLMAudienceViewer {
+  peerIp: string;
+  connections: number;
+  streams: ZLMAudienceStreamRef[];
+  details: ZLMAudienceConnection[];
+}
+
+export interface ZLMAudienceSummary {
+  /**
+   * false = 后端未装配播放器读取能力，前端必须回退旧口径（Σ readerCount），
+   * 不能把 uniqueIps=0 当成「没人在看」。
+   */
+  available: boolean;
+  uniqueIps: number;
+  connections: number;
+  viewers: ZLMAudienceViewer[];
+  partial: boolean;
+  truncated: boolean;
+  errors?: Array<{ nodeId: number; error: ZLMRuntimeError }>;
+  asOf: string;
+}
+
 export interface ZLMOverview {
   nodes: ZLMNodeRuntime[];
   streams: ZLMRuntimeMedia[];
   metrics: ZLMOverviewMetrics;
+  audience?: ZLMAudienceSummary;
   mediaRateSamples?: ZLMMediaRateSample[];
   partial: boolean;
   asOf: string;

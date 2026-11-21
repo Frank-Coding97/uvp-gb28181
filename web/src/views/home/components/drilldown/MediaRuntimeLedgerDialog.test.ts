@@ -5,12 +5,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import MediaRuntimeLedgerDialog from "./MediaRuntimeLedgerDialog.vue";
 
 const listNetworkSessionsMock = vi.hoisted(() => vi.fn());
-const listStreamViewersMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/api/gb28181-zlm-runtime", async importOriginal => ({
   ...(await importOriginal<typeof import("@/api/gb28181-zlm-runtime")>()),
-  listZLMNetworkSessions: listNetworkSessionsMock,
-  listZLMStreamViewers: listStreamViewersMock
+  listZLMNetworkSessions: listNetworkSessionsMock
 }));
 
 vi.mock("@/store/modules/user", () => ({
@@ -47,12 +45,36 @@ const stream = {
     { schema: "rtsp", vhost: "v", app: "rtp", stream: "stream-1" }
   ]
 };
+// 后端已按远端 IP 聚合：同一地址的三条播放连接只占一位观众。
+const audienceViewer = {
+  peerIp: "10.0.0.8",
+  connections: 3,
+  streams: [{ nodeId: 1, media: { schema: "", vhost: "v", app: "rtp", stream: "stream-1" } }],
+  details: ["hls", "rtmp", "rtsp"].map(schema => ({
+    nodeId: 1,
+    media: { schema, vhost: "v", app: "rtp", stream: "stream-1" },
+    identifier: `${schema}-viewer`,
+    peerIp: "10.0.0.8",
+    typeId: "RtspSession",
+    peerPort: 52000,
+    localIp: "10.0.0.2",
+    localPort: 554
+  }))
+};
 const ledger = {
   streams: [stream],
   viewers: [stream],
   recordings: [stream],
   sessions: [{ nodeId: 1, nodeName: "node-a", sessions: 3, sampled: true }],
-  totals: { streams: 1, viewers: 2, sessions: 3, recordings: 1 },
+  audience: {
+    available: true,
+    uniqueIps: 1,
+    connections: 3,
+    viewers: [audienceViewer],
+    partial: false,
+    truncated: false
+  },
+  totals: { streams: 1, viewers: 1, connections: 3, sessions: 3, recordings: 1 },
   partial: false,
   warnings: [],
   asOf: "now"
@@ -60,35 +82,6 @@ const ledger = {
 
 describe("MediaRuntimeLedgerDialog", () => {
   beforeEach(() => {
-    listStreamViewersMock.mockReset().mockImplementation((nodeId, media) =>
-      Promise.resolve({
-        code: 0,
-        data: {
-          nodeId,
-          nodeUuid: "node-uuid",
-          target: media,
-          asOf: "now",
-          list: [
-            {
-              nodeId,
-              nodeUuid: "node-uuid",
-              media,
-              identifier: `${media.schema}-viewer`,
-              peerIp: "10.0.0.8",
-              peerPort: 52000,
-              localIp: "10.0.0.2",
-              localPort: 554,
-              typeId: "RtspSession",
-              kickable: true
-            }
-          ],
-          total: 1,
-          page: 1,
-          pageSize: 100,
-          truncated: false
-        }
-      })
-    );
     listNetworkSessionsMock.mockReset().mockResolvedValue({
       code: 0,
       data: {
@@ -158,7 +151,7 @@ describe("MediaRuntimeLedgerDialog", () => {
     expect(source).toContain("stopPlay");
     expect(source).toContain("preflightCloseZLMRTPServer");
     expect(source).toContain("forceCloseZLMRTPServer");
-    expect(source).toContain("listZLMStreamViewers");
+    expect(source).not.toContain("listZLMStreamViewers");
     expect(source).toContain("ZLMSessionKickDialog");
     expect(source).not.toContain("media-ledger-list");
   });
@@ -184,36 +177,46 @@ describe("MediaRuntimeLedgerDialog", () => {
     expect(source).toContain("y: 480");
     expect(source).not.toContain(".media-ledger-table{overflow:hidden;border:");
     expect(source).toContain('title="操作" :width="220" align="center" fixed="right"');
-    expect(source).toContain('title="操作" :width="100" align="center" fixed="right"');
+    // 观众表的强退只保留在展开行（按连接定位），主行不再放操作按钮。
+    expect(source).not.toContain('title="操作" :width="100" align="center" fixed="right"');
     expect(source).not.toContain('<a-button size="small" :disabled="record.viewers <= 0"');
     expect(source).not.toContain("快照时间");
     expect(source).not.toContain("ledger.asOf");
   });
 
-  it("loads viewer sessions directly into the viewers ledger", async () => {
-    mount(MediaRuntimeLedgerDialog, {
+  it("renders one row per remote address instead of one row per connection", async () => {
+    const wrapper = mount(MediaRuntimeLedgerDialog, {
       props: { visible: true, kind: "viewers", ledger },
       global: {
         stubs: {
           "a-modal": AModal,
           "s-layout-search": { template: "<div><slot name='fields' /></div>" },
-          "a-table": { template: "<div class='table-stub'><slot name='columns' /></div>" },
+          "a-table": {
+            props: ["data"],
+            template:
+              "<div class='table-stub'><div v-for='row in data' :key='row.key' class='viewer-row-stub'>{{ row.peerIp }}</div><slot name='columns' /></div>"
+          },
           "a-table-column": true
         }
       }
     });
     await flushPromises();
-    expect(listStreamViewersMock).toHaveBeenCalledTimes(3);
-    expect(listStreamViewersMock).toHaveBeenCalledWith(1, stream.mediaTargets[0], { page: 1, pageSize: 100 });
+    expect(listNetworkSessionsMock).not.toHaveBeenCalled();
+    const rows = wrapper.findAll(".viewer-row-stub");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].text()).toBe("10.0.0.8");
+    expect(wrapper.text()).toContain("10.0.0.8");
 
     const source = readFileSync(
       resolve(process.cwd(), "src/views/home/components/drilldown/MediaRuntimeLedgerDialog.vue"),
       "utf8"
     );
     expect(source).toContain("v-else-if=\"kind === 'viewers'\"");
-    expect(source).toContain(':scroll="{ x: 1080, y: 480 }"');
-    for (const label of ["设备 / 通道", "流 / 协议", "远端地址", "本地地址", "会话类型", "会话标识"])
-      expect(source).toContain(label);
+    expect(source).toContain(':scroll="{ x: 960, y: 480 }"');
+    for (const label of ["远端地址", "观看路数", "连接数", "设备 / 通道", "强退"]) expect(source).toContain(label);
+    // 展开行才是逐连接明细；主表不能再出现"每人一行连接"的旧列。
+    expect(source).toContain("#expand-row");
+    expect(source).toContain("expandedViewerKeys");
     expect(source).not.toContain("viewerVisible");
     expect(source).not.toContain("openViewers");
     expect(source).not.toContain(">观看会话</span>");

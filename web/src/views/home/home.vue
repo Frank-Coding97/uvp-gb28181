@@ -125,7 +125,7 @@
             <div class="runtime">
               <button type="button" @click.stop="openMediaRuntimeLedger('streams')">
                 <small>在线流</small><strong>{{ number(runtimeMetric(mediaRuntimeLedger.totals.streams)) }}</strong></button
-              ><button type="button" @click.stop="openMediaRuntimeLedger('viewers')">
+              ><button type="button" :title="viewerHint" @click.stop="openMediaRuntimeLedger('viewers')">
                 <small>观看者</small><strong>{{ number(runtimeMetric(mediaRuntimeLedger.totals.viewers)) }}</strong></button
               ><button type="button" @click.stop="openMediaRuntimeLedger('sessions')">
                 <small>网络会话</small><strong>{{ number(runtimeMetric(mediaRuntimeLedger.totals.sessions)) }}</strong></button
@@ -422,6 +422,12 @@ const trafficDescription = computed(() => (trafficDirection.value === "upstream"
 const trafficTrendColor = computed(() => (trafficDirection.value === "upstream" ? "var(--uvp-brand)" : "var(--uvp-brand-cyan)"));
 const trafficCoveragePartial = computed(() => dashboardSummary.value?.traffic?.status === "partial");
 const mediaRuntimeLedger = computed(() => buildMediaRuntimeLedger(mediaOverview.value, dashboardSummary.value?.bindings?.data));
+/** 观看者按远端 IP 去重：一人多路只算一位，鼠标悬停给出背后真实连接数。 */
+const viewerHint = computed(() => {
+  const ledger = mediaRuntimeLedger.value;
+  if (!ledger.audience.available) return "后端未提供按地址聚合口径，当前显示观看连接数";
+  return `按远端地址去重；共 ${ledger.totals.connections} 条播放连接`;
+});
 const mediaRuntimeCoverageText = computed(() =>
   mediaRuntimeStatus.value === "unavailable"
     ? "数据不可用"

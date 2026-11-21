@@ -9,6 +9,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"golang.org/x/sync/singleflight"
+
 	"uvplatform.com/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.com/uvp-gb28181/app/gb28181/zlm/node"
 )
@@ -80,6 +82,9 @@ type OverviewDependencies struct {
 	Registry OverviewNodeRegistry
 	Runtime  OverviewRuntimeReader
 	Media    OverviewMediaListReader
+	// Players 可选：装配后 overview 才产出「按远端 IP 去重」的观众口径。
+	// 未装配时 Audience.Available=false，前端必须回退到旧口径。
+	Players OverviewMediaPlayerReader
 }
 
 type OverviewOption func(*OverviewService)
@@ -126,14 +131,39 @@ func WithOverviewHeartbeatStaleAfter(after time.Duration) OverviewOption {
 	}
 }
 
+// WithOverviewAudienceTimeout 只约束观众聚合这一段的预算，不影响节点采集的
+// 三秒上限；测试里可以压到很小来验证降级行为。
+func WithOverviewAudienceTimeout(timeout time.Duration) OverviewOption {
+	return func(service *OverviewService) {
+		if timeout > 0 {
+			service.audienceTimeout = timeout
+		}
+	}
+}
+
+func WithOverviewAudienceWorkerLimit(limit int) OverviewOption {
+	return func(service *OverviewService) {
+		if limit > 0 {
+			service.audienceWorkers = limit
+		}
+	}
+}
+
 type OverviewService struct {
 	registry            OverviewNodeRegistry
 	runtime             OverviewRuntimeReader
 	media               OverviewMediaListReader
+	players             OverviewMediaPlayerReader
 	now                 func() time.Time
 	nodeTimeout         time.Duration
 	heartbeatStaleAfter time.Duration
 	workers             int
+	audienceTimeout     time.Duration
+	audienceWorkers     int
+
+	audienceMu    sync.Mutex
+	audienceCache *audienceCacheEntry
+	audienceGroup singleflight.Group
 }
 
 func NewOverviewService(dependencies OverviewDependencies, options ...OverviewOption) *OverviewService {
@@ -141,10 +171,13 @@ func NewOverviewService(dependencies OverviewDependencies, options ...OverviewOp
 		registry:            dependencies.Registry,
 		runtime:             dependencies.Runtime,
 		media:               dependencies.Media,
+		players:             dependencies.Players,
 		now:                 time.Now,
 		nodeTimeout:         DefaultOverviewNodeTimeout,
 		heartbeatStaleAfter: DefaultHeartbeatStaleAfter,
 		workers:             DefaultOverviewWorkers,
+		audienceTimeout:     DefaultAudienceCollectTimeout,
+		audienceWorkers:     DefaultAudienceWorkers,
 	}
 	for _, option := range options {
 		if option != nil {
@@ -277,6 +310,8 @@ type OverviewResult struct {
 	Nodes   []NodeRuntimeView `json:"nodes"`
 	Streams []RuntimeMedia    `json:"streams"`
 	Metrics OverviewMetrics   `json:"metrics"`
+	// Audience 是按远端 IP 去重的观众口径；Available=false 时前端回退旧口径。
+	Audience AudienceSummary `json:"audience"`
 	// MediaRateSamples is the shared backend-owned five-minute history. It is
 	// intentionally absent from raw OverviewService results and attached by
 	// OverviewSampler at the HTTP boundary.
@@ -387,6 +422,7 @@ func (s *OverviewService) GetOverview(ctx context.Context) (OverviewResult, erro
 	sort.Slice(result.Errors, func(i, j int) bool { return result.Errors[i].NodeID < result.Errors[j].NodeID })
 	sortRuntimeMedia(result.Streams)
 	result.Metrics.StreamCount = logicalStreamCount(result.Streams)
+	result.Audience = s.collectAudience(ctx, result.Streams)
 	return result, nil
 }
 

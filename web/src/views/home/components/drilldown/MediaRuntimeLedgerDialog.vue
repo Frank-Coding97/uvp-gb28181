@@ -6,7 +6,7 @@ import { stopPlay } from "@/api/gb28181";
 import { forceCloseZLMRTPServer, preflightCloseZLMRTPServer, type ZLMRTPServerCloseRequest } from "@/api/gb28181-zlm-ingress";
 import {
   listZLMNetworkSessions,
-  listZLMStreamViewers,
+  type ZLMMediaIdentity,
   type ZLMNetworkSession,
   type ZLMNetworkSessionQuery,
   type ZLMOwnershipPreflight,
@@ -20,9 +20,32 @@ import ZLMSessionKickDialog from "@/views/gb28181/zlm/ZLMSessionKickDialog.vue";
 import type { MediaBusinessStream, MediaRuntimeLedger, MediaRuntimeLedgerKind } from "../../dashboardDrilldownState";
 import { useZLMSessionTypeLabel } from "./useZLMSessionTypeDict";
 
-interface ViewerLedgerRow extends ZLMStreamViewer {
+/**
+ * 观众明细行：一条播放器连接。
+ * ⛔ 这张表不再是主表，主表按远端 IP 聚合（一人一行），连接只出现在展开行里。
+ */
+interface AudienceConnectionRow {
   key: string;
-  businessStream: MediaBusinessStream;
+  nodeId: number;
+  nodeName: string;
+  media: ZLMMediaIdentity;
+  identifier: string;
+  typeId: string;
+  peerIp: string;
+  peerPort: number;
+  localIp: string;
+  localPort: number;
+  businessStream: MediaBusinessStream | null;
+  kickable: boolean;
+}
+
+/** 主表行：同一个远端 IP 算一位观众，看几路由 streams 决定。 */
+interface AudienceViewerRow {
+  key: string;
+  peerIp: string;
+  connections: number;
+  streams: MediaBusinessStream[];
+  details: AudienceConnectionRow[];
 }
 
 const props = defineProps<{ visible: boolean; kind: MediaRuntimeLedgerKind; ledger: MediaRuntimeLedger }>();
@@ -35,13 +58,9 @@ const forcePreview = ref<ZLMOwnershipPreflight | null>(null);
 const forceLoading = ref(false);
 const forceError = ref("");
 const forceBusy = ref(false);
-const viewerRows = ref<ViewerLedgerRow[]>([]);
-const viewerLoading = ref(false);
-const viewerError = ref("");
-const viewerTruncated = ref(false);
-let viewerGeneration = 0;
+const expandedViewerKeys = ref<string[]>([]);
 const kickVisible = ref(false);
-const kickTarget = ref<ViewerLedgerRow | null>(null);
+const kickTarget = ref<ZLMStreamViewer | null>(null);
 const pageSize = 10;
 const networkRows = ref<ZLMNetworkSession[]>([]);
 const networkLoading = ref(false);
@@ -72,29 +91,64 @@ const streamRows = computed(() => {
       .includes(keyword)
   );
 });
+const viewerRows = computed<AudienceViewerRow[]>(() =>
+  props.ledger.audience.viewers.map(viewer => {
+    const details: AudienceConnectionRow[] = viewer.details.map(detail => {
+      const media = { ...detail.media };
+      const matched = streamIndex.value.get(businessStreamKey(detail.nodeId, media));
+      return {
+        key: `${detail.nodeId}\u001f${detail.media.schema}\u001f${detail.identifier}`,
+        nodeId: detail.nodeId,
+        nodeName: matched?.nodeName ?? `节点 #${detail.nodeId}`,
+        media,
+        identifier: detail.identifier,
+        typeId: detail.typeId ?? "",
+        peerIp: detail.peerIp,
+        peerPort: detail.peerPort,
+        localIp: detail.localIp ?? "",
+        localPort: detail.localPort,
+        businessStream: matched ?? null,
+        // 与后端 viewerKickable 同判据：无会话标识或 udp 类型不可踢
+        kickable:
+          !!detail.identifier &&
+          !String(detail.typeId ?? "")
+            .toLowerCase()
+            .includes("udp")
+      };
+    });
+    const streams: MediaBusinessStream[] = [];
+    for (const ref of viewer.streams) {
+      const matched = streamIndex.value.get(businessStreamKey(ref.nodeId, ref.media));
+      if (matched && !streams.includes(matched)) streams.push(matched);
+    }
+    return {
+      key: viewer.peerIp || `unknown:${details[0]?.identifier ?? viewer.connections}`,
+      peerIp: viewer.peerIp,
+      connections: viewer.connections,
+      streams,
+      details
+    };
+  })
+);
 const filteredViewerRows = computed(() => {
   const keyword = query.value.trim().toLowerCase();
   if (!keyword) return viewerRows.value;
-  return viewerRows.value.filter(item => {
-    const stream = item.businessStream;
-    return [
-      stream.deviceName,
-      stream.deviceId,
-      stream.channelName,
-      stream.channelId,
-      stream.streamId,
-      stream.app,
-      stream.nodeName,
-      item.media.schema,
+  return viewerRows.value.filter(item =>
+    [
       item.peerIp,
-      item.localIp,
-      item.identifier,
-      item.typeId
+      ...item.streams.flatMap(stream => [
+        stream.deviceName,
+        stream.deviceId,
+        stream.channelName,
+        stream.channelId,
+        stream.streamId
+      ]),
+      ...item.details.flatMap(detail => [detail.identifier, detail.typeId, detail.media.schema, String(detail.peerPort)])
     ]
       .join(" ")
       .toLowerCase()
-      .includes(keyword);
-  });
+      .includes(keyword)
+  );
 });
 const filteredCount = computed(() => streamRows.value.length);
 const pagination = computed(() => ({
@@ -134,15 +188,11 @@ watch(
   () => {
     query.value = "";
     closeSecondaryDialogs();
-    viewerGeneration += 1;
+    expandedViewerKeys.value = [];
     networkGeneration += 1;
-    viewerLoading.value = false;
     networkLoading.value = false;
     if (!props.visible) return;
-    if (props.kind === "viewers") {
-      void loadViewerSessions();
-      return;
-    }
+    // 观众表直接读 ledger.audience（后端已按远端 IP 聚合），不再逐流拉会话。
     if (props.kind !== "sessions") return;
     const preferredNode = props.ledger.sessions.find(item => item.sampled) ?? props.ledger.sessions[0];
     networkNodeId.value = preferredNode?.nodeId;
@@ -166,6 +216,18 @@ function closeSecondaryDialogs() {
 function displayName(value: string, fallback: string) {
   return value.trim() || fallback;
 }
+
+/** 业务流索引：观众明细只有 media 身份，设备/通道名要从 ledger.streams 里反查。 */
+function businessStreamKey(nodeId: number, media: { vhost: string; app: string; stream: string }) {
+  return `${nodeId}\u001f${media.vhost}\u001f${media.app}\u001f${media.stream}`;
+}
+const streamIndex = computed(() => {
+  const index = new Map<string, MediaBusinessStream>();
+  for (const item of props.ledger.streams) {
+    index.set(businessStreamKey(item.nodeId, { vhost: item.vhost, app: item.app, stream: item.streamId }), item);
+  }
+  return index;
+});
 function recordingText(row: MediaBusinessStream) {
   return row.recordingMp4 ? "MP4" : "未录制";
 }
@@ -248,52 +310,27 @@ async function confirmForce(payload: { nodeId: number; targetKey: string; finger
   }
 }
 
-async function loadViewerSessions() {
-  const requests = props.ledger.viewers.flatMap(businessStream =>
-    businessStream.mediaTargets.map(media => ({ businessStream, media }))
-  );
-  const generation = ++viewerGeneration;
-  viewerRows.value = [];
-  viewerError.value = "";
-  viewerTruncated.value = false;
-  if (!requests.length) return;
-  viewerLoading.value = true;
-  try {
-    const results = await Promise.allSettled(
-      requests.map(({ businessStream, media }) => listZLMStreamViewers(businessStream.nodeId, media, { page: 1, pageSize: 100 }))
-    );
-    if (generation !== viewerGeneration) return;
-    const unique = new Map<string, ViewerLedgerRow>();
-    let failed = 0;
-    results.forEach((result, index) => {
-      const request = requests[index];
-      if (result.status !== "fulfilled" || result.value.code !== 0 || !result.value.data) {
-        failed += 1;
-        return;
-      }
-      const page = result.value.data;
-      viewerTruncated.value ||= page.truncated || page.total > page.list.length;
-      for (const viewer of page.list) {
-        const key = `${viewer.nodeId}\u001f${viewer.media.schema}\u001f${viewer.identifier}`;
-        unique.set(key, { ...viewer, key, businessStream: request.businessStream });
-      }
-    });
-    viewerRows.value = [...unique.values()];
-    if (failed) viewerError.value = `${failed} 个协议的观看会话读取失败`;
-  } finally {
-    if (generation === viewerGeneration) viewerLoading.value = false;
-  }
-}
-
-function openKick(viewer: ViewerLedgerRow) {
-  if (!canKick.value || !viewer.kickable) return;
-  kickTarget.value = viewer;
+function openKick(detail: AudienceConnectionRow) {
+  if (!canKick.value || !detail.kickable) return;
+  // ⛔ 强退接口按「一条会话」定位，聚合成一行后必须传具体连接，不能传整位观众。
+  kickTarget.value = {
+    nodeId: detail.nodeId,
+    nodeName: detail.nodeName,
+    nodeUuid: "",
+    media: detail.media,
+    identifier: detail.identifier,
+    peerIp: detail.peerIp,
+    peerPort: detail.peerPort,
+    localIp: detail.localIp,
+    localPort: detail.localPort,
+    typeId: detail.typeId,
+    kickable: detail.kickable
+  };
   kickVisible.value = true;
 }
 
 function kickDone() {
   kickVisible.value = false;
-  if (props.visible && props.kind === "viewers") void loadViewerSessions();
   emit("refresh");
 }
 
@@ -439,9 +476,11 @@ function changeNetworkPageSize(value: number) {
       <div v-if="ledger.partial" class="media-ledger-warning" role="status">
         当前快照覆盖不完整<span v-if="ledger.warnings.length">：{{ ledger.warnings.join("；") }}</span>
       </div>
-      <div v-if="kind === 'viewers' && viewerError" class="media-ledger-warning" role="alert">{{ viewerError }}</div>
-      <div v-if="kind === 'viewers' && viewerTruncated" class="media-ledger-warning" role="status">
-        部分协议的观看会话超过单次采集上限，当前台账仅展示已采集数据。
+      <div v-if="kind === 'viewers' && !ledger.audience.available" class="media-ledger-warning" role="alert">
+        当前后端未提供按地址聚合的观众口径，已回退为「观看连接数」。
+      </div>
+      <div v-if="kind === 'viewers' && ledger.audience.truncated" class="media-ledger-warning" role="status">
+        有人的流超过单轮采集上限，当前只统计已采集部分。
       </div>
       <div v-if="kind === 'sessions' && networkError" class="media-ledger-warning" role="alert">{{ networkError }}</div>
       <div v-if="kind === 'sessions' && networkTruncated" class="media-ledger-warning" role="status">
@@ -521,68 +560,71 @@ function changeNetworkPageSize(value: number) {
 
       <a-table
         v-else-if="kind === 'viewers'"
+        v-model:expanded-keys="expandedViewerKeys"
         :data="filteredViewerRows"
-        :loading="viewerLoading"
         :pagination="viewerPagination"
         row-key="key"
+        :expandable="{ width: 36 }"
         class="uvp-data-table media-ledger-table"
-        :scroll="{ x: 1080, y: 480 }"
+        :scroll="{ x: 960, y: 480 }"
       >
         <template #columns>
-          <a-table-column title="设备 / 通道" :width="180"
+          <a-table-column title="远端地址" :width="200"
             ><template #cell="{ record }"
-              ><strong>{{ displayName(record.businessStream.deviceName, "未绑定设备") }}</strong
-              ><small>{{ displayName(record.businessStream.channelName, "未绑定通道") }}</small
-              ><small class="mono"
-                >{{ record.businessStream.deviceId || "—" }} / {{ record.businessStream.channelId || "—" }}</small
-              ></template
+              ><span class="mono">{{ record.peerIp || "来源未知" }}</span
+              ><small v-if="!record.peerIp">上游未返回对端地址</small></template
             ></a-table-column
           >
-          <a-table-column title="流 / 协议" :width="150"
+          <a-table-column title="观看路数" :width="100" align="center"
             ><template #cell="{ record }"
-              ><strong class="mono">{{ record.businessStream.streamId }}</strong
-              ><small>{{ record.businessStream.app }} · {{ record.businessStream.nodeName }}</small
-              ><a-tag size="small">{{ record.media.schema.toUpperCase() }}</a-tag></template
+              ><span class="numeric">{{ record.streams.length }}</span></template
             ></a-table-column
           >
-          <a-table-column title="远端地址" :width="195" :ellipsis="true" :tooltip="true"
+          <a-table-column title="连接数" :width="90" align="center"
             ><template #cell="{ record }"
-              ><span class="mono">{{ record.peerIp || "—" }}:{{ record.peerPort || "—" }}</span></template
+              ><span class="numeric">{{ record.connections }}</span></template
             ></a-table-column
           >
-          <a-table-column title="本地地址" :width="195" :ellipsis="true" :tooltip="true"
+          <a-table-column title="设备 / 通道" :width="380"
             ><template #cell="{ record }"
-              ><span class="mono">{{ record.localIp || "—" }}:{{ record.localPort || "—" }}</span></template
-            ></a-table-column
-          >
-          <a-table-column title="会话类型" :width="120"
-            ><template #cell="{ record }"
-              ><a-tag size="small" class="media-ledger-session-type" :title="record.typeId || undefined">{{
-                networkSessionTypeLabel(record.typeId)
-              }}</a-tag></template
-            ></a-table-column
-          >
-          <a-table-column title="会话标识" :width="140" :ellipsis="true" :tooltip="true"
-            ><template #cell="{ record }"
-              ><span class="mono">{{ record.identifier || "—" }}</span></template
-            ></a-table-column
-          >
-          <a-table-column title="操作" :width="100" align="center" fixed="right"
-            ><template #cell="{ record }"
-              ><div v-if="canKick" class="uvp-table-actions media-ledger-actions">
-                <a-link
-                  class="uvp-table-action uvp-table-action--delete"
-                  status="danger"
-                  :disabled="!record.kickable"
-                  @click="openKick(record)"
-                  ><template #icon><LogOut :size="13" /></template><span>强退</span></a-link
-                >
+              ><div v-if="record.streams.length" class="audience-streams">
+                <div v-for="stream in record.streams.slice(0, 2)" :key="stream.key" class="audience-stream">
+                  <strong>{{ displayName(stream.deviceName, "未绑定设备") }}</strong
+                  ><small>{{ displayName(stream.channelName, "未绑定通道") }} · {{ stream.streamId }}</small>
+                </div>
+                <small v-if="record.streams.length > 2">另有 {{ record.streams.length - 2 }} 路</small>
               </div>
-              <span v-else>—</span></template
+              <small v-else class="mono">未匹配到业务流</small></template
+            ></a-table-column
+          >
+          <a-table-column title="展开" :width="120" align="center"
+            ><template #cell="{ record }"
+              ><span class="audience-hint">查看 {{ record.connections }} 条连接</span></template
             ></a-table-column
           >
         </template>
-        <template #empty><div class="media-ledger-empty">当前没有可识别的观看会话</div></template>
+        <template #expand-row="{ record }">
+          <div class="audience-connections">
+            <div v-for="detail in record.details" :key="detail.key" class="audience-connection">
+              <span class="mono audience-schema">{{ detail.media.schema.toUpperCase() }}</span>
+              <span class="mono audience-stream-id">{{ detail.businessStream?.streamId || detail.media.stream }}</span>
+              <span class="mono">端口 {{ detail.peerPort || "—" }}</span>
+              <a-tag size="small" class="media-ledger-session-type" :title="detail.typeId || undefined">{{
+                networkSessionTypeLabel(detail.typeId)
+              }}</a-tag>
+              <span class="mono audience-identifier">{{ detail.identifier }}</span>
+              <a-link
+                v-if="canKick"
+                class="uvp-table-action uvp-table-action--delete"
+                status="danger"
+                :disabled="!detail.kickable"
+                @click="openKick(detail)"
+                ><template #icon><LogOut :size="13" /></template><span>强退</span></a-link
+              >
+            </div>
+          </div>
+        </template>
+        <template #empty><div class="media-ledger-empty">当前没有正在观看的客户端</div></template>
       </a-table>
 
       <a-table
@@ -703,7 +745,7 @@ function changeNetworkPageSize(value: number) {
 
   <ZLMSessionKickDialog
     v-model:visible="kickVisible"
-    :node-name="kickTarget?.businessStream.nodeName || ''"
+    :node-name="kickTarget?.nodeName || ''"
     :viewer="kickTarget"
     @done="kickDone"
   />
@@ -821,6 +863,48 @@ function changeNetworkPageSize(value: number) {
   white-space: nowrap;
 }
 .media-ledger-actions {
+  white-space: nowrap;
+}
+
+/* 观众表：主行是「一个人」，展开行才是逐条播放连接 */
+.audience-streams {
+  display: grid;
+  gap: 2px;
+}
+.audience-stream {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.35;
+}
+.audience-stream small,
+.audience-hint {
+  color: var(--uvp-text-tertiary);
+}
+.audience-connections {
+  display: grid;
+  gap: 6px;
+  padding: 4px 12px 4px 44px;
+}
+.audience-connection {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 10px;
+  background: var(--uvp-bg-subtle);
+  border-radius: 6px;
+}
+.audience-schema {
+  min-width: 46px;
+  color: var(--uvp-text-secondary);
+}
+.audience-stream-id {
+  min-width: 120px;
+}
+.audience-identifier {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--uvp-text-secondary);
   white-space: nowrap;
 }
 .protocols {

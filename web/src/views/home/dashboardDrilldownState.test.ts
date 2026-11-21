@@ -88,11 +88,34 @@ describe("dashboard drilldown state", () => {
 
   it("builds all media ledgers and totals from one overview snapshot", () => {
     const result = buildMediaRuntimeLedger(overview());
-    expect(result.totals).toEqual({ streams: 2, viewers: 2, sessions: 3, recordings: 1 });
+    expect(result.totals).toEqual({ streams: 2, viewers: 2, connections: 2, sessions: 3, recordings: 1 });
     expect(result.viewers).toHaveLength(1);
     expect(result.recordings).toHaveLength(1);
     expect(result.recordings[0]).toMatchObject({ recordingMp4: true, recordingHls: true });
     expect(result.partial).toBe(false);
+  });
+
+  it("prefers the backend audience count so one person watching several streams counts once", () => {
+    const value = overview();
+    value.audience = {
+      available: true,
+      uniqueIps: 1,
+      connections: 2,
+      viewers: [],
+      partial: false,
+      truncated: false,
+      asOf: "2026-09-04T10:00:00+08:00"
+    };
+    const result = buildMediaRuntimeLedger(value);
+    expect(result.audience.available).toBe(true);
+    expect(result.totals.viewers).toBe(1);
+    expect(result.totals.connections).toBe(2);
+  });
+
+  it("falls back to summed readerCount when the backend has no audience snapshot", () => {
+    const result = buildMediaRuntimeLedger(overview());
+    expect(result.audience.available).toBe(false);
+    expect(result.totals.viewers).toBe(2);
   });
 
   it("groups protocol variants into one business stream and attaches its device channel", () => {

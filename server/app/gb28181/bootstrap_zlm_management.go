@@ -64,6 +64,7 @@ func setupZLMManagementCore(nodeService *gbzlmsvc.NodeService, restart *gbzlmsvc
 			Registry: zlmRegistry,
 			Runtime:  runtime,
 			Media:    runtime,
+			Players:  runtime,
 		}),
 		app.Cache,
 	)
