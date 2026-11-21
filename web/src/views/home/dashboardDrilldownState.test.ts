@@ -141,7 +141,8 @@ describe("dashboard drilldown state", () => {
         recordingHls: true
       })
     ];
-    value.metrics.streamCount = 3;
+    // 后端 streamCount 按逻辑流（节点+vhost+app+stream）去重：三条协议输出仍是 1 条流。
+    value.metrics.streamCount = 1;
     const result = buildMediaRuntimeLedger(value, [
       {
         streamId: "0200000000",
@@ -152,6 +153,9 @@ describe("dashboard drilldown state", () => {
       }
     ]);
     expect(result.totals).toMatchObject({ streams: 1, viewers: 1, recordings: 0 });
+    // 多协议同源只是同一条流的多个输出，不能当成「明细比汇总多」而报警。
+    expect(result.warnings).toEqual([]);
+    expect(result.partial).toBe(false);
     expect(result.streams[0]).toMatchObject({
       streamId: "0200000000",
       protocols: ["hls", "rtmp", "rtsp"],

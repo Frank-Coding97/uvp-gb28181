@@ -134,7 +134,10 @@ export function buildMediaRuntimeLedger(
     recordings: recordings.length
   };
   const warnings: string[] = [];
-  if (overview && overview.metrics.streamCount !== rawStreams.length) warnings.push("在线流汇总与协议明细数量不一致");
+  // 后端 streamCount 是「逻辑流数」（同一条流只算一次，不分协议），
+  // 所以必须跟分组后的 streams 比。拿它比 rawStreams.length 会把
+  // 一条流的多协议输出误报成「数量不一致」。
+  if (overview && overview.metrics.streamCount !== streams.length) warnings.push("在线流汇总与协议明细数量不一致");
   if (overview && overview.metrics.networkSessionCount !== totals.sessions) warnings.push("网络会话汇总与节点明细不一致");
   if (audience.truncated) warnings.push("观众明细已截断，仅统计前 128 路有人的流");
   if (audience.partial) warnings.push("部分节点观众明细读取失败，人数可能偏少");
