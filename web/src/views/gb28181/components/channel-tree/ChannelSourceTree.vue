@@ -22,7 +22,7 @@ import {
   type ChannelVO,
   type DeviceVO,
   type DirectoryNode
-} from "../device-mgmt/api";
+} from "../../device-mgmt/api";
 import {
   appendChannelFavoriteGroup,
   createChannelFavoriteGroup,
@@ -33,7 +33,7 @@ import {
   type ChannelFavoriteInput
 } from "@/api/gb28181";
 import { hasPermission } from "@/hooks/usePermission";
-import { useDeviceStatusLabel } from "../useDeviceStatusDict";
+import { useDeviceStatusLabel } from "../../useDeviceStatusDict";
 
 /** 在线状态文案（`device_status` 字典）。 */
 const deviceStatusLabel = useDeviceStatusLabel();
@@ -81,6 +81,13 @@ interface SourceTreeNode {
 const props = defineProps<{
   usedChannelIds?: number[];
   view?: SourceView;
+  /**
+   * 当前正在查看/播放的通道（主键 id）。
+   *
+   * 多屏播放不传（视频墙没有"单选中"的概念）；设备录像页要把正在看的通道高亮出来。
+   * 只负责视觉，不参与"能不能点"的判断 —— 那是 `usedChannelIds` 的事。
+   */
+  selectedChannelId?: number | null;
 }>();
 
 const emit = defineEmits<{
@@ -864,6 +871,8 @@ defineExpose({ openFavoriteDialogForChannels });
           class="tree-row"
           :class="{
             used: node.kind === 'channel' && node.channel && isUsed(node.channel),
+            selected:
+              node.kind === 'channel' && node.channel && selectedChannelId != null && node.channel.id === selectedChannelId,
             offline: (node.kind === 'device' || node.kind === 'channel') && node.status !== 1
           }"
           :style="{ paddingLeft: `${8 + level * 14}px` }"
@@ -1361,6 +1370,14 @@ defineExpose({ openFavoriteDialogForChannels });
 }
 .tree-row.used {
   background: color-mix(in srgb, var(--uvp-brand) 8%, transparent);
+}
+.tree-row.selected {
+  background: var(--uvp-sidebar-active-bg);
+  box-shadow: inset 2px 0 0 var(--uvp-brand);
+}
+.tree-row.selected .node-name {
+  font-weight: 500;
+  color: var(--uvp-text-primary);
 }
 .twist-button {
   display: inline-grid;

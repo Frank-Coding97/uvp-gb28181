@@ -28,9 +28,9 @@ vi.mock("../device-mgmt/api", () => api);
 vi.mock("@/api/gb28181", () => playback);
 vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => ({ account }) }));
 vi.mock("@arco-design/web-vue", () => ({ Message: message }));
-vi.mock("./PlaybackSourceTree.vue", () => ({
+vi.mock("../components/channel-tree/ChannelSourceTree.vue", () => ({
   default: {
-    name: "PlaybackSourceTree",
+    name: "ChannelSourceTree",
     props: ["usedChannelIds", "view"],
     emits: ["select", "selectGroup", "favoriteSaved"],
     setup(_props: unknown, { expose }: { expose: (value: unknown) => void }) {

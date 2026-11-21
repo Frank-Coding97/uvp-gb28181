@@ -19,7 +19,7 @@ import { usePlaybackConsoleStore } from "@/store/modules/playback-console";
 import { hasPermission } from "@/hooks/usePermission";
 import PlayWindow from "../components/PlayWindow.vue";
 import BasicPtzPanel from "./BasicPtzPanel.vue";
-import PlaybackSourceTree from "./PlaybackSourceTree.vue";
+import ChannelSourceTree from "../components/channel-tree/ChannelSourceTree.vue";
 import UnplayedCover from "./UnplayedCover.vue";
 import { listChannels, type ChannelVO } from "../device-mgmt/api";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
@@ -535,7 +535,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="snow-fill gb28181-page multi-screen-page">
     <section class="source-panel" aria-label="设备树和云台控制">
-      <PlaybackSourceTree
+      <ChannelSourceTree
         ref="sourceTreeRef"
         v-model:view="sourceView"
         :used-channel-ids="usedChannelIds"

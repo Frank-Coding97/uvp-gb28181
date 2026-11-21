@@ -2,7 +2,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import PlaybackSourceTree from "./PlaybackSourceTree.vue";
+import ChannelSourceTree from "./ChannelSourceTree.vue";
 
 const api = vi.hoisted(() => ({
   listDevices: vi.fn(),
@@ -18,7 +18,7 @@ const favoritesApi = vi.hoisted(() => ({
 }));
 const account = vi.hoisted(() => ({ permissions: ["*:*:*"] as string[] }));
 
-vi.mock("../device-mgmt/api", () => api);
+vi.mock("../../device-mgmt/api", () => api);
 vi.mock("@/api/gb28181", () => favoritesApi);
 vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => ({ account }) }));
 
@@ -53,7 +53,7 @@ const channel = {
 };
 
 function mountTree() {
-  return mount(PlaybackSourceTree, {
+  return mount(ChannelSourceTree, {
     props: { usedChannelIds: [], view: "devices" },
     global: {
       stubs: {
@@ -81,7 +81,7 @@ function mountTree() {
   });
 }
 
-describe("PlaybackSourceTree", () => {
+describe("ChannelSourceTree", () => {
   beforeEach(() => {
     account.permissions = ["*:*:*"];
     const storage = new Map<string, string>();
@@ -122,13 +122,13 @@ describe("PlaybackSourceTree", () => {
 
   it("defaults to administrative and restores the department preference", async () => {
     const options = { global: { stubs: { "a-spin": { template: "<div><slot /></div>" } } } };
-    const wrapper = mount(PlaybackSourceTree, options);
+    const wrapper = mount(ChannelSourceTree, options);
     await flushPromises();
     expect(wrapper.get("[data-test=source-view-administrative]").attributes("aria-selected")).toBe("true");
     await wrapper.get("[data-test=source-view-department]").trigger("click");
     await flushPromises();
     wrapper.unmount();
-    const restored = mount(PlaybackSourceTree, options);
+    const restored = mount(ChannelSourceTree, options);
     await flushPromises();
     expect(restored.get("[data-test=source-view-department]").attributes("aria-selected")).toBe("true");
     restored.unmount();
@@ -185,7 +185,10 @@ describe("PlaybackSourceTree", () => {
     expect(favoritesApi.listChannelFavoriteGroups).not.toHaveBeenCalled();
     // ⭐ 权限改造（2026-10-11）：收藏入口不再从模板里消失，改为 `:disabled="!canManageFavorites"`
     //    （访客默认不展开设备，DOM 里不一定有行，所以这里钉模板契约而不是 DOM）。
-    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/multi-screen-playback/PlaybackSourceTree.vue"), "utf8");
+    const source = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/components/channel-tree/ChannelSourceTree.vue"),
+      "utf8"
+    );
     expect(source).toContain(':disabled="!canManageFavorites"');
     expect(wrapper.find(".favorite-dialog-backdrop").exists()).toBe(false);
     wrapper.unmount();
@@ -362,13 +365,19 @@ describe("PlaybackSourceTree", () => {
   });
 
   it("centers the favorite dialog over the whole page", () => {
-    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/multi-screen-playback/PlaybackSourceTree.vue"), "utf8");
+    const source = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/components/channel-tree/ChannelSourceTree.vue"),
+      "utf8"
+    );
 
     expect(source).toMatch(/\.favorite-dialog-backdrop\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*0;/s);
   });
 
   it("keeps indented tree rows inside the scroll container", () => {
-    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/multi-screen-playback/PlaybackSourceTree.vue"), "utf8");
+    const source = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/components/channel-tree/ChannelSourceTree.vue"),
+      "utf8"
+    );
 
     expect(source).toMatch(/\.tree-row\s*\{[^}]*box-sizing:\s*border-box;/s);
   });
@@ -427,7 +436,10 @@ describe("PlaybackSourceTree", () => {
     const channelRow = wrapper.get('[data-node-key="favorites:0:group:1:channel:11"]');
     expect(channelRow.find(".favorite-remove .lucide-trash-2").exists()).toBe(true);
 
-    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/multi-screen-playback/PlaybackSourceTree.vue"), "utf8");
+    const source = readFileSync(
+      resolve(process.cwd(), "src/views/gb28181/components/channel-tree/ChannelSourceTree.vue"),
+      "utf8"
+    );
     expect(source).toMatch(/\.favorite-remove\s*\{[^}]*color:\s*var\(--uvp-danger\);/s);
     expect(source).toMatch(/\.favorite-play\s*\{[^}]*width:\s*22px;[^}]*margin-right:\s*0;/s);
     expect(source).toMatch(/\.favorite-remove\s*\{[^}]*width:\s*20px;[^}]*margin-right:\s*0;/s);
