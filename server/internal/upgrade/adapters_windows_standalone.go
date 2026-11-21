@@ -180,10 +180,14 @@ func (a *WindowsStandaloneAdapter) Backup(ctx context.Context, record TaskRecord
 			return fmt.Errorf("backup %s: %w", name, err)
 		}
 	}
+	integrity := ""
 	if sqliteDatabase != "" {
-		if err := SQLiteBackup(ctx, sqliteDatabase, filepath.Join(backupRoot, "database.sqlite")); err != nil {
+		if err := SQLiteSnapshot(ctx, sqliteDatabase, filepath.Join(backupRoot, "database.sqlite")); err != nil {
 			return fmt.Errorf("backup sqlite database: %w", err)
 		}
+		// See StandaloneAdapter.Backup: the read-back scan is deferred so the
+		// stop window stays short, and restore verifies before it swaps bytes.
+		integrity = backupIntegrityPending
 	}
 	// Snapshot the program entries too: Rollback has no release directory to
 	// switch back to, so these bytes are the only way to restore the previous
@@ -203,7 +207,7 @@ func (a *WindowsStandaloneAdapter) Backup(ctx context.Context, record TaskRecord
 			return fmt.Errorf("snapshot %s: %w", name, err)
 		}
 	}
-	return writeBackupComplete(backupRoot)
+	return writeBackupCompleteState(backupRoot, integrity)
 }
 
 // snapshotEntries is every top-level entry that Activate may replace.

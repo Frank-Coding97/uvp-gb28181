@@ -205,12 +205,17 @@ func (a *StandaloneAdapter) Backup(ctx context.Context, record TaskRecord) error
 			return fmt.Errorf("backup %s: %w", name, err)
 		}
 	}
+	integrity := ""
 	if sqliteDatabase != "" {
-		if err := SQLiteBackup(ctx, sqliteDatabase, filepath.Join(backupRoot, "database.sqlite")); err != nil {
+		if err := SQLiteSnapshot(ctx, sqliteDatabase, filepath.Join(backupRoot, "database.sqlite")); err != nil {
 			return fmt.Errorf("backup sqlite database: %w", err)
 		}
+		// The scan reads the whole snapshot back. It is deferred to
+		// VerifyPendingBackupSnapshots so the upgrade stop window does not wait
+		// for it; a restore verifies the file before it replaces anything.
+		integrity = backupIntegrityPending
 	}
-	return writeBackupComplete(backupRoot)
+	return writeBackupCompleteState(backupRoot, integrity)
 }
 
 func validateSQLiteBackupSource(layout RegisteredLayout, record TaskRecord) error {
@@ -1165,12 +1170,17 @@ func (a *ComposeAdapter) Backup(ctx context.Context, record TaskRecord) error {
 	if err := copyFile(a.File, backupCompose, 0600); err != nil {
 		return err
 	}
+	integrity := ""
 	if sqliteDatabase != "" {
-		if err := SQLiteBackup(ctx, sqliteDatabase, filepath.Join(backupRoot, "database.sqlite")); err != nil {
+		if err := SQLiteSnapshot(ctx, sqliteDatabase, filepath.Join(backupRoot, "database.sqlite")); err != nil {
 			return fmt.Errorf("backup sqlite database: %w", err)
 		}
+		// The scan reads the whole snapshot back. It is deferred to
+		// VerifyPendingBackupSnapshots so the upgrade stop window does not wait
+		// for it; a restore verifies the file before it replaces anything.
+		integrity = backupIntegrityPending
 	}
-	return writeBackupComplete(backupRoot)
+	return writeBackupCompleteState(backupRoot, integrity)
 }
 
 // validateBackupComplete confirms that a durable Compose backup includes the
@@ -1366,8 +1376,19 @@ func (a *ComposeAdapter) candidateService() (string, error) {
 
 const backupCompleteMarker = ".complete.json"
 
+// Snapshot integrity states carried by the completion marker. An adapter that
+// defers the read-back scan records pending; VerifyPendingBackupSnapshots then
+// rewrites the marker to ok or failed. A legacy marker has no state because it
+// was only ever written after a successful synchronous scan.
+const (
+	backupIntegrityPending = "pending"
+	backupIntegrityOK      = "ok"
+	backupIntegrityFailed  = "failed"
+)
+
 type completedBackup struct {
-	Version int `json:"version"`
+	Version   int    `json:"version"`
+	Integrity string `json:"integrity,omitempty"`
 }
 
 func prepareBackupRoot(root string, record TaskRecord) error {
@@ -1397,49 +1418,74 @@ func prepareBackupRoot(root string, record TaskRecord) error {
 }
 
 func writeBackupComplete(root string) error {
-	data, err := json.Marshal(completedBackup{Version: 1})
+	return writeBackupCompleteState(root, "")
+}
+
+func writeBackupCompleteState(root, integrity string) error {
+	data, err := json.Marshal(completedBackup{Version: 1, Integrity: integrity})
 	if err != nil {
 		return err
 	}
 	return writeFileAtomically(filepath.Join(root, backupCompleteMarker), data, 0600)
 }
 
-func validateBackupComplete(root, sqliteDatabase string) (bool, error) {
+func readCompletedBackup(root string) (completedBackup, bool, error) {
 	marker := filepath.Join(root, backupCompleteMarker)
 	info, err := os.Lstat(marker)
 	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
+		return completedBackup{}, false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("stat backup completion marker: %w", err)
+		return completedBackup{}, false, fmt.Errorf("stat backup completion marker: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return false, errors.New("backup completion marker is not a regular file")
+		return completedBackup{}, false, errors.New("backup completion marker is not a regular file")
 	}
 	data, err := os.ReadFile(marker)
 	if err != nil {
-		return false, fmt.Errorf("read backup completion marker: %w", err)
+		return completedBackup{}, false, fmt.Errorf("read backup completion marker: %w", err)
 	}
 	var completed completedBackup
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&completed); err != nil {
-		return false, fmt.Errorf("decode backup completion marker: %w", err)
+		return completedBackup{}, false, fmt.Errorf("decode backup completion marker: %w", err)
 	}
 	if completed.Version != 1 {
-		return false, errors.New("backup completion marker version is unsupported")
+		return completedBackup{}, false, errors.New("backup completion marker version is unsupported")
 	}
+	switch completed.Integrity {
+	case "", backupIntegrityPending, backupIntegrityOK, backupIntegrityFailed:
+	default:
+		return completedBackup{}, false, errors.New("backup completion marker integrity state is unsupported")
+	}
+	return completed, true, nil
+}
+
+func validateBackupComplete(root, sqliteDatabase string) (bool, error) {
+	completed, present, err := readCompletedBackup(root)
+	if err != nil {
+		return false, err
+	}
+	if !present {
+		return false, nil
+	}
+	if completed.Integrity == backupIntegrityFailed {
+		return false, errors.New("complete backup sqlite snapshot failed integrity verification")
+	}
+	// The snapshot is no longer scanned here. A pending snapshot is scanned by
+	// VerifyPendingBackupSnapshots once the upgraded service is already serving,
+	// and a restore scans it again before it replaces anything; scanning on
+	// this path would put the same minutes back into the stop window on resume.
+	// Only the cheap presence check stays, because a marker without its
+	// snapshot cannot support a rollback at all.
 	if sqliteDatabase != "" {
-		snapshot := filepath.Join(root, "database.sqlite")
-		info, err := os.Lstat(snapshot)
+		info, err := os.Lstat(filepath.Join(root, "database.sqlite"))
 		if err != nil {
 			return false, fmt.Errorf("complete backup sqlite snapshot is missing: %w", err)
 		}
 		if !info.Mode().IsRegular() {
 			return false, errors.New("complete backup sqlite snapshot is not a regular file")
-		}
-		if err := checkSQLiteIntegrity(context.Background(), snapshot); err != nil {
-			return false, fmt.Errorf("complete backup sqlite snapshot is corrupt: %w", err)
 		}
 	}
 	return true, nil

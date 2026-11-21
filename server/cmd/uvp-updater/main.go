@@ -51,6 +51,22 @@ type serveRuntime struct {
 	// watcher performs the periodic release check. It only reads the release
 	// source: it never downloads, stages, or applies anything.
 	watcher backgroundRunner
+	// verifier finishes the rollback-snapshot integrity scan that the upgrade
+	// stop window skips. It runs after recovery so it cannot race a resumed
+	// backup.
+	verifier backgroundRunner
+}
+
+// snapshotVerifier scans rollback snapshots that were written while the service
+// was stopped and have not been verified yet.
+type snapshotVerifier struct {
+	store  *upgrade.TaskStore
+	layout upgrade.RegisteredLayout
+	events upgrade.UpgradeEventSink
+}
+
+func (v snapshotVerifier) Run(ctx context.Context) error {
+	return upgrade.VerifyPendingBackupSnapshots(ctx, v.store, v.layout, v.events)
 }
 
 func main() {
@@ -85,6 +101,15 @@ func runServe(ctx context.Context, args []string, getenv func(string) string) er
 		if err := assembly.workflow.Recover(ctx); err != nil {
 			fmt.Fprintln(os.Stderr, "upgrade recovery:", err)
 		}
+	}
+	// Snapshot verification is deliberately off the upgrade stop window, so it
+	// starts here: after recovery, while the service is already serving.
+	if assembly.verifier != nil {
+		go func() {
+			if err := assembly.verifier.Run(ctx); err != nil && ctx.Err() == nil {
+				fmt.Fprintln(os.Stderr, "backup verification:", err)
+			}
+		}()
 	}
 	if assembly.control != nil {
 		if err := assembly.control.Start(ctx); err != nil {
@@ -244,6 +269,7 @@ func buildServeRuntime(options serveOptions) (*serveRuntime, error) {
 		}
 		executor = workflow
 		assembly.workflow = workflow
+		assembly.verifier = snapshotVerifier{store: store, layout: layout, events: events}
 	}
 	server := &upgrade.UnixServer{SocketPath: filepath.Clean(socketPath), Store: store, Executor: executor, Control: assembly.control, SocketGroupID: socketGroupID, SocketGroupSet: socketGroupID >= 0}
 	if registration != nil {

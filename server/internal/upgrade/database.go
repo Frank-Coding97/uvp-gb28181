@@ -89,11 +89,14 @@ func BuildMigrationPlan(dialect string, applied, available, destructive []string
 	return plan
 }
 
-// SQLiteBackup creates a consistent snapshot while all writers are stopped.
-// It deliberately uses SQLite's backup operation instead of copying the main
-// file, which would omit committed WAL pages. Both paths are administrator
-// controlled and must be absolute; the destination must not already exist.
-func SQLiteBackup(ctx context.Context, source, destination string) error {
+// SQLiteSnapshot writes a consistent copy of a stopped database without
+// reading it back for verification. On a multi-gigabyte database the
+// verification scan costs about as much again as producing the snapshot, and
+// it only protects a file that the restore path verifies before it swaps any
+// bytes in. Callers that must keep a service stop window short use this and
+// let VerifyPendingBackupSnapshots finish the scan once the new release is
+// already serving.
+func SQLiteSnapshot(ctx context.Context, source, destination string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -127,6 +130,16 @@ func SQLiteBackup(ctx context.Context, source, destination string) error {
 	// VACUUM INTO accepts a bound string in SQLite and safely copies WAL data.
 	if _, err := db.ExecContext(ctx, "VACUUM INTO ?", destination); err != nil {
 		return fmt.Errorf("create sqlite consistent backup: %w", err)
+	}
+	return nil
+}
+
+// SQLiteBackup creates a consistent snapshot and verifies it before returning.
+// It is the entry point for paths that cannot defer the scan, such as a
+// rollback restore.
+func SQLiteBackup(ctx context.Context, source, destination string) error {
+	if err := SQLiteSnapshot(ctx, source, destination); err != nil {
+		return err
 	}
 	if err := checkSQLiteIntegrity(ctx, destination); err != nil {
 		_ = os.Remove(destination)
