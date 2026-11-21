@@ -102,6 +102,15 @@ describe("设备录像页", () => {
     expect(wrapper.get("[data-testid=device-record-date]").text()).toBe("2026-11-20");
   });
 
+  it("刷新页面时从 ?channel= 恢复选中的通道（菜单入口不带路径参数）", async () => {
+    state.route.query = { channel: "11", date: "2026-11-20" };
+    api.getRecordQueryOptions.mockResolvedValue({ code: 0, data: queryOptions() });
+    mountPage();
+    await flushPromises();
+
+    expect(api.getRecordQueryOptions).toHaveBeenCalledWith(11);
+  });
+
   it("设备离线时给出「去云端录像看看」的出口", async () => {
     state.route.params = { channelId: "11" };
     api.getRecordQueryOptions.mockResolvedValue({

@@ -52,8 +52,21 @@ const dayRecords = useDayRecords({ channelId, canQuery });
 const records = dayRecords.records;
 const playback = usePlaybackSession({ channelId, records, canPlay });
 
-/** 深链：路径里带了通道号（从设备列表点「录像」进来）。 */
-const deepLinked = computed(() => Boolean(String(route.params.channelId || "").trim()));
+/**
+ * 通道号的三种来源，优先级从高到低：
+ * 1. 路径参数 —— 旧隐藏路由 /gb28181/device-record-playback/:channelId，设备列表点「录像」走的它；
+ * 2. query.channel —— 侧边栏点「设备录像」后再选通道时写进去的，刷新页面靠它恢复；
+ * 3. 都没有 —— 空态，让用户从左侧树里挑。
+ *
+ * ⛔ 菜单本身的 path 不能带 :channelId：侧边栏是拿菜单 path 原样 router.push 的，
+ *    带参路径点下去会把 ":channelId" 当成真实通道号。
+ */
+const paramChannelId = computed(() => Number(String(route.params.channelId || "").trim()) || 0);
+const queryChannelId = computed(() => Number(String(route.query.channel || "").trim()) || 0);
+const initialChannelId = computed(() => paramChannelId.value || queryChannelId.value);
+
+/** 深链：URL 里已经指定了通道（从设备列表点「录像」进来）。 */
+const deepLinked = computed(() => initialChannelId.value > 0);
 
 const deviceOnline = computed(() => options.value?.device.online !== false);
 const queryLoading = computed(() => dayRecords.state.value === "querying");
@@ -161,9 +174,19 @@ function goToday() {
   void changeDate(today);
 }
 
+/**
+ * 回写地址栏：日期 + 通道号。
+ *
+ * 走的若是带参路由（旧隐藏路由），通道号同时替换进路径，否则路径和 query 会互相打脸；
+ * 不带参的路由只维护 ?channel=，这样同一条路由记录不换、组件不会被重建。
+ */
 function syncUrl() {
   const query = { ...route.query, date: date.value } as Record<string, string>;
   if (channelId.value) query.channel = String(channelId.value);
+  if (paramChannelId.value && channelId.value) {
+    void router.replace({ name: route.name as string, params: { channelId: String(channelId.value) }, query });
+    return;
+  }
   void router.replace({ path: route.path, query });
 }
 
@@ -219,8 +242,8 @@ async function toggleFullscreen() {
 
 onMounted(async () => {
   if (!canQuery.value) return;
-  const initial = Number(String(route.params.channelId || "").trim());
-  if (Number.isFinite(initial) && initial > 0) {
+  const initial = initialChannelId.value;
+  if (initial > 0) {
     channelId.value = initial;
     await loadOptions(initial);
   }

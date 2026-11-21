@@ -8029,7 +8029,7 @@ INSERT INTO "sys_menu" ("id", "parent_id", "path", "name", "redirect", "componen
 (140620, 140509, '', '', NULL, '', '批量下载图像', 0, 0, 0, 1, 0, '', 0, '', '', 1, 3, 0, 'gb28181:snapshot:download', '2026-11-04 19:14:43.000000', '2026-11-04 19:14:43.000000', NULL, 1),
 (140621, 140509, '', '', NULL, '', '删除图像', 0, 0, 0, 1, 0, '', 0, '', '', 2, 3, 0, 'gb28181:snapshot:delete', '2026-11-04 19:14:43.000000', '2026-11-04 19:14:43.000000', NULL, 1),
 (140700, 0, '/recording-center', 'RecordingCenter', '/recording-center/device', '', '录像中心', 0, 0, 0, 1, 0, '', 0, '', 'lucide:Video', 40, 1, 0, '', '2026-11-21 12:00:00.000000', '2026-11-21 12:00:00.000000', NULL, 1),
-(140701, 140700, '/recording-center/device/:channelId?', 'recording-center-device', '', 'recording-center/device/index', '设备录像', 0, 0, 0, 0, 0, '', 0, '', 'lucide:History', 10, 2, 0, '', '2026-11-21 12:00:00.000000', '2026-11-21 12:00:00.000000', NULL, 1);
+(140701, 140700, '/recording-center/device', 'recording-center-device', '', 'recording-center/device/index', '设备录像', 0, 0, 0, 0, 0, '', 0, '', 'lucide:History', 10, 2, 0, '', '2026-11-21 12:00:00.000000', '2026-11-21 12:00:00.000000', NULL, 1);
 SET IDENTITY_INSERT "sys_menu" OFF;
 INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (1, 5),

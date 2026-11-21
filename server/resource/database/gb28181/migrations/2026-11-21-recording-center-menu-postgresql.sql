@@ -18,12 +18,15 @@ SELECT 0,'/recording-center','RecordingCenter','/recording-center/device','','�
 FROM (SELECT 1 AS seed) v
 WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE path='/recording-center' AND deleted_at IS NULL);
 
--- 2) 设备录像菜单（挂在目录下；路径带可选通道号，深链和独立入口共用同一个页面）
+-- 2) 设备录像菜单（挂在目录下）
+--    ⛔ 路径里不能带 :channelId 这类参数：侧边栏是拿菜单 path 原样 router.push 的
+--       （menu-item.vue 的 key 就是 path），带参路径点下去会把 ':channelId' 当成真实
+--       通道号。通道改用 ?channel=id，带通道的深链交给旧隐藏路由承担。
 INSERT INTO sys_menu (parent_id,path,name,redirect,component,title,type,permission,hide,disable,icon,sort,created_at,updated_at,created_by)
-SELECT p.id,'/recording-center/device/:channelId?','recording-center-device','','recording-center/device/index','设备录像',2,'',0,0,'lucide:History',10,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
+SELECT p.id,'/recording-center/device','recording-center-device','','recording-center/device/index','设备录像',2,'',0,0,'lucide:History',10,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
 FROM sys_menu p
 WHERE p.path='/recording-center' AND p.type=1 AND p.deleted_at IS NULL
-AND NOT EXISTS (SELECT 1 FROM sys_menu WHERE path='/recording-center/device/:channelId?' AND deleted_at IS NULL);
+AND NOT EXISTS (SELECT 1 FROM sys_menu WHERE path='/recording-center/device' AND deleted_at IS NULL);
 
 -- 3) 既有三个页面挂到目录下，并按「看录像 → 归档 → 配置」重排
 UPDATE sys_menu
@@ -54,5 +57,5 @@ AND NOT EXISTS (SELECT 1 FROM sys_role_menu x WHERE x.role_id=rm.role_id AND x.m
 INSERT INTO sys_role_menu (role_id,menu_id)
 SELECT r.id,m.id FROM sys_role r CROSS JOIN sys_menu m
 WHERE r.id=1 AND r.status=1 AND r.deleted_at IS NULL AND m.deleted_at IS NULL
-AND m.path IN ('/recording-center','/recording-center/device/:channelId?')
+AND m.path IN ('/recording-center','/recording-center/device')
 AND NOT EXISTS (SELECT 1 FROM sys_role_menu rm WHERE rm.role_id=r.id AND rm.menu_id=m.id);

@@ -8177,7 +8177,7 @@ INSERT INTO [sys_menu] ([id], [parent_id], [path], [name], [redirect], [componen
 (140620, 140509, N'', N'', NULL, N'', N'批量下载图像', 0, 0, 0, 1, 0, N'', 0, N'', N'', 1, 3, 0, N'gb28181:snapshot:download', N'2026-11-04 19:14:43.000000', N'2026-11-04 19:14:43.000000', NULL, 1),
 (140621, 140509, N'', N'', NULL, N'', N'删除图像', 0, 0, 0, 1, 0, N'', 0, N'', N'', 2, 3, 0, N'gb28181:snapshot:delete', N'2026-11-04 19:14:43.000000', N'2026-11-04 19:14:43.000000', NULL, 1),
 (140700, 0, N'/recording-center', N'RecordingCenter', N'/recording-center/device', N'', N'录像中心', 0, 0, 0, 1, 0, N'', 0, N'', N'lucide:Video', 40, 1, 0, N'', N'2026-11-21 12:00:00.000000', N'2026-11-21 12:00:00.000000', NULL, 1),
-(140701, 140700, N'/recording-center/device/:channelId?', N'recording-center-device', N'', N'recording-center/device/index', N'设备录像', 0, 0, 0, 0, 0, N'', 0, N'', N'lucide:History', 10, 2, 0, N'', N'2026-11-21 12:00:00.000000', N'2026-11-21 12:00:00.000000', NULL, 1);
+(140701, 140700, N'/recording-center/device', N'recording-center-device', N'', N'recording-center/device/index', N'设备录像', 0, 0, 0, 0, 0, N'', 0, N'', N'lucide:History', 10, 2, 0, N'', N'2026-11-21 12:00:00.000000', N'2026-11-21 12:00:00.000000', NULL, 1);
 SET IDENTITY_INSERT [sys_menu] OFF;
 INSERT INTO [sys_menu_api] ([menu_id], [api_id]) VALUES
 (1, 5),
