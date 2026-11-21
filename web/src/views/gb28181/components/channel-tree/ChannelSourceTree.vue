@@ -1171,10 +1171,11 @@ defineExpose({ openFavoriteDialogForChannels });
 }
 
 /* 页签不再横向滚动：窄栏里滚成两个 + 箭头的观感最差（见 2026-11-21 老板截图）。
-   改成自适应等分网格，240px 下排 3 列两行，宽栏（多屏播放）自动排成一行。 */
+   固定 3 列（与设备列表页的 .directory-switch 同列数）：五个视图排成 3 + 2，
+   240px（设备录像）和 280px（多屏播放）下都是同一副摆法，不会再被箭头藏起来。 */
 .tree-views {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(54px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 2px;
   padding: 2px;
   margin: 10px 12px 8px;
