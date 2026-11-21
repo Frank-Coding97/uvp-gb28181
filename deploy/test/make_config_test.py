@@ -110,6 +110,26 @@ class MakeConfigTests(unittest.TestCase):
         self.assertRegex(rendered, r"(?m)^\s*appdebug:\s*false\b")
         self.assertNotRegex(rendered, r"(?m)^\s*appdebug:\s*true\b")
 
+    def test_build_keeps_log_cleanup_enabled_flag_from_template(self) -> None:
+        """包内 config.yml 必须保留 log_cleanup.configured: true。
+
+        ⛔⛔ 只写天数、不带开关时，新装实例页面上看着是 7 天，实际操作日志与
+        定时任务日志一条都不删（2026-11-21 线上机留了 151 万行，升级预检
+        因磁盘不足直接失败）。天数一样、开关缺席最难发现，所以在出包这一环
+        也要有一道契约。
+        """
+        source = Path(__file__).parents[2] / "server" / "config" / "config.example.yml"
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "config.yml"
+            make_config.build(source, target, "51010", "51011")
+            rendered = target.read_text(encoding="utf-8")
+
+        # 取 log_cleanup 段（到下一个顶级键为止）再断言，避免命中别处的同名键。
+        section = re.search(r"(?ms)^log_cleanup:\s*\n(.*?)(?=^\S)", rendered)
+        self.assertIsNotNone(section, "生成的 config.yml 里没有 log_cleanup 段")
+        assert section is not None
+        self.assertRegex(section.group(1), r"(?m)^\s+configured:\s*true\b")
+
     def test_build_replaces_placeholder_jwt_sign_key(self) -> None:
         """模板里的 CHANGE_ME 占位符绝不能随包发出去。"""
         source = Path(__file__).parents[2] / "server" / "config" / "config.example.yml"

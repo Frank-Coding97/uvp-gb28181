@@ -40,7 +40,11 @@ func (e *LogCleanupExecutor) Execute(ctx context.Context, job *schedulerhelper.J
 		return err
 	}
 	if !config.Configured && (kind == logcleanup.Operation || kind == logcleanup.Job) {
-		schedulerhelper.ReportSummary(ctx, fmt.Sprintf("日志类型=%s；跳过=等待首次保存日志清理配置", kind))
+		// 这两类要靠「页面保存过一次清理策略」才放行（其它四类一直有清理）。
+		// 跳过的原因必须能照做：任务状态仍是 SUCCESS，若摘要只写"跳过"，
+		// 没人会发现日志其实一条没删 —— 线上机因此把 151 万行操作日志
+		// 从装机留到磁盘告急，升级直接因容量不足失败。
+		schedulerhelper.ReportSummary(ctx, fmt.Sprintf("日志类型=%s；未启用=清理策略从未保存过，本次跳过（系统设置→日志清理保存一次即启用）", kind))
 		return nil
 	}
 

@@ -3,6 +3,7 @@ import {
   buildConfigUpdatePayload,
   defaultLogCleanupConfig,
   isLogCleanupConfigValid,
+  isLogCleanupEnabled,
   logCleanupPageRoute
 } from "./sysconfigState";
 
@@ -16,13 +17,22 @@ describe("日志清理配置状态", () => {
   it("提供确认过的默认保留期和服务端托管标记", () => {
     expect(defaultLogCleanupConfig).toEqual({
       sipRetentionDays: 7,
-      operationRetentionDays: 180,
-      loginRetentionDays: 180,
+      // 2026-10-19 老板定：登录/操作日志出厂默认 7 天（上一版 180）。
+      operationRetentionDays: 7,
+      loginRetentionDays: 7,
       jobRetentionDays: 30,
       playbackRetentionDays: 7,
       schedulerRetentionDays: 7,
       configured: false
     });
+  });
+
+  it("只有服务端确认过策略才算启用", () => {
+    expect(isLogCleanupEnabled({ configured: true })).toBe(true);
+    expect(isLogCleanupEnabled({ configured: false })).toBe(false);
+    // 从旧版本升上来的实例没有该键，取默认 false：页面必须提示未启用。
+    expect(isLogCleanupEnabled(defaultLogCleanupConfig)).toBe(false);
+    expect(isLogCleanupEnabled(undefined)).toBe(false);
   });
 
   it("使用已存在的系统配置路径并通过 tab 查询参数打开日志清理页签", () => {
@@ -45,8 +55,8 @@ describe("日志清理配置状态", () => {
     expect(payload).toEqual({
       logCleanup: {
         sipRetentionDays: 7,
-        operationRetentionDays: 180,
-        loginRetentionDays: 180,
+        operationRetentionDays: 7,
+        loginRetentionDays: 7,
         jobRetentionDays: 30,
         playbackRetentionDays: 7,
         schedulerRetentionDays: 7

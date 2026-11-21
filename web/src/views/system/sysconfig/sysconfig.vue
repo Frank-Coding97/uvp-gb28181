@@ -225,8 +225,12 @@
         </a-tab-pane>
         <a-tab-pane key="logCleanup" title="日志清理">
           <a-card :bordered="false" class="uvp-system-panel uvp-system-panel--dense mb-4">
-            <a-alert class="mb-4" type="warning">
-              保留天数按 1–365 天配置。保存只更新策略，不会立即删除数据；清理任务按计划执行。
+            <a-alert v-if="logCleanupEnabled" class="mb-4" type="info" show-icon>
+              清理策略已启用：保留天数按 1–365 天配置。保存只更新策略，不会立即删除数据，清理任务按计划执行。
+            </a-alert>
+            <a-alert v-else class="mb-4" type="warning" show-icon>
+              清理策略未启用：操作日志与定时任务日志<strong>不会被自动清理</strong>（SIP、登录、播放、调度四类仍按下面天数执行）。
+              保存本页即启用，此后按计划清理。
             </a-alert>
             <a-form class="uvp-system-form" :layout="layoutMode.layout" :model="logCleanupDraft" auto-label-width>
               <a-row :gutter="24">
@@ -266,7 +270,7 @@ import type { LogCleanupDraft, LogCleanupUpdateConfig, RegularConfigRequestData 
 import ImageUpload from "@/components/upload/image-upload.vue";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import SNumberField from "@/components/s-number-field/index.vue";
-import { buildConfigUpdatePayload, isLogCleanupConfigValid, logCleanupPageRoute } from "./sysconfigState";
+import { buildConfigUpdatePayload, isLogCleanupConfigValid, isLogCleanupEnabled, logCleanupPageRoute } from "./sysconfigState";
 const { isMobile } = useDevicesSize();
 const route = useRoute();
 const layoutMode = computed(() => {
@@ -301,6 +305,9 @@ const configData = ref({
   safe: sysConfigStore.safeConfig
 });
 const logCleanupDraft = reactive<LogCleanupDraft>({ ...defaultLogCleanupConfig });
+// 服务端 log_cleanup.configured：决定操作日志/定时任务日志到底清不清。
+// 保存成功会刷新整份配置，这里随之从「未启用」翻到「已启用」。
+const logCleanupEnabled = computed(() => isLogCleanupEnabled(sysConfigStore.logCleanupConfig));
 const logCleanupFields: Array<{ key: keyof LogCleanupUpdateConfig; label: string; hint: string }> = [
   { key: "sipRetentionDays", label: "SIP 日志保留天数", hint: "SIP 信令和已结束诊断数据的保留期。" },
   { key: "operationRetentionDays", label: "操作日志保留天数", hint: "包含已软删除的过期操作日志。" },
