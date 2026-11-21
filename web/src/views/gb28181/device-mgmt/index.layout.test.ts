@@ -391,3 +391,18 @@ describe("offline status pill", () => {
     expect(hasRuleBlock(source, ".status-pill .status-dot", "currentColor 14%")).toBe(true);
   });
 });
+
+describe("collapsed catalog rail", () => {
+  // 老板 2026-11-21：收起目录栏后 12px 里露出一根灰白竖杠（目录树的滚动条被挤进来）。
+  // 树不卸载（要保展开/选中/滚动位置），但收起时必须整块藏掉。
+  it("hides the whole directory panel while collapsed", () => {
+    expect(hasRuleBlock(source, ".workspace.catalog-collapsed .catalog-pane :deep(.directory-panel)", "visibility: hidden")).toBe(
+      true
+    );
+  });
+
+  it("keeps the rail narrow enough for just the divider and the toggle button", () => {
+    expect(hasRuleBlock(source, ".workspace.catalog-collapsed", "grid-template-columns: 12px")).toBe(true);
+    expect(hasRuleBlock(source, ".workspace.catalog-collapsed .catalog-collapse-btn", "left: 12px")).toBe(true);
+  });
+});

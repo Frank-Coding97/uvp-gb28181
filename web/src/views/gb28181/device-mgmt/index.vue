@@ -6428,6 +6428,15 @@ onUnmounted(() => {
   background: transparent;
   border-right: 0;
 }
+
+/* 收起后这 12px 只该留「分界线 + 收起按钮」。
+   ⛔ 树不能卸载（要保留展开/选中/滚动位置），但必须整块藏起来：`.directory-tree` 带
+   `scrollbar-gutter: stable`，压到 12px 后那条滚动条会被硬塞进来，渲染成一根灰白竖杠
+   贴着分界线一路到底（连同滚动条底角的白色小方块），看着像没收干净。
+   ⛔ 用 visibility 而不是 display:none —— 后者会丢 scrollTop。 */
+.workspace.catalog-collapsed .catalog-pane :deep(.directory-panel) {
+  visibility: hidden;
+}
 .content-pane {
   display: flex;
   flex-direction: column;
