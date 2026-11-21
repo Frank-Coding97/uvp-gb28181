@@ -227,10 +227,14 @@ function choose(node: DirectoryNode) {
 }
 
 function nodeTitle(node: DirectoryNode) {
-  // 悬浮提示只给「名称 (编码)」。⛔ 不要再按 depth 追加「目录层级较深」之类的建议：
+  // 悬浮提示只给「名称 (编码)」，设备节点再补上「在线状态 + 通道在线数/总数」——
+  // 行内已经把「在线/离线」字样让位给通道计数，这里必须能查到设备自身状态。
+  // ⛔ 不要再按 depth 追加「目录层级较深」之类的建议：
   // 设备叶子挂在行政区划叶子下，depth = 区域层级 + 1，20 位国标编码天然四五层，
   // 每台设备都会命中，提示既不指向问题也不告诉用户做什么，纯噪音。
-  return node.code ? `${node.name} (${node.code})` : node.name;
+  const title = node.code ? `${node.name} (${node.code})` : node.name;
+  if (!node.device) return title;
+  return `${title} · 设备${node.device.online ? "在线" : "离线"} · 通道在线 ${node.onlineCount}/${node.count}`;
 }
 
 async function refresh(view: DirectoryView = props.modelValue.view) {
@@ -341,9 +345,16 @@ onMounted(() => load(props.modelValue.view));
                   <span class="node-name">{{ node.name }}</span>
                   <span class="device-node-code">{{ node.device.deviceId }}</span>
                 </span>
-                <span class="device-node-status" :class="{ online: node.device.online }">{{
-                  node.device.online ? "在线" : "离线"
-                }}</span>
+                <!-- 右侧不再重复「在线/离线」字样：行首圆点已经用它自己的颜色表达这件事，
+                     腾出来的位置显示「通道在线数/通道总数」（后端 fillDirectoryDeviceChannelCounts 回填）。
+                     设备是否在线仍留在悬浮提示与 aria-label 里，别把这个语义弄丢。 -->
+                <span
+                  class="node-count device-node-count"
+                  :aria-label="`设备${node.device.online ? '在线' : '离线'}，在线通道 ${node.onlineCount} 个，共 ${node.count} 个`"
+                >
+                  <span class="node-online-count">{{ node.onlineCount }}</span
+                  ><span aria-hidden="true">/</span><span>{{ node.count }}</span>
+                </span>
               </template>
               <template v-else>
                 <MapPin v-if="node.type === 'area' || node.type === 'unknown'" :size="13" />
@@ -612,17 +623,6 @@ onMounted(() => load(props.modelValue.view));
   color: var(--uvp-text-tertiary);
   white-space: nowrap;
 }
-.device-node-status {
-  flex: 0 0 auto;
-  font-size: 10px;
-  color: var(--uvp-text-tertiary);
-}
-.device-node-status.online {
-  color: #158052;
-}
-:global(body[arco-theme="dark"] .directory-panel .device-node-status.online) {
-  color: #86efac;
-}
 .node-name {
   flex: 1;
   min-width: 0;
@@ -645,6 +645,14 @@ onMounted(() => load(props.modelValue.view));
 }
 :global(body[arco-theme="dark"] .directory-panel .node-online-count) {
   color: #86efac;
+}
+
+/* 设备行比目录行矮一档（10px 字号），必须写在 .node-count 之后才能覆盖它的
+   min-width / font-size —— 单类名同权重时后者胜出，写前面等于没写。 */
+.device-node-count {
+  flex: 0 0 auto;
+  min-width: 26px;
+  font-size: 10px;
 }
 .directory-empty {
   display: grid;

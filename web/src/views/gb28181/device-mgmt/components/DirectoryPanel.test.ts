@@ -44,8 +44,8 @@ const administrativeTree = [
             type: "device",
             code: "34020000002000000031",
             readOnly: true,
-            count: 0,
-            onlineCount: 0,
+            count: 2,
+            onlineCount: 1,
             depth: 2,
             device: { id: 31, deviceId: "34020000002000000031", alias: "", name: "门岗 NVR", online: true }
           }
@@ -202,6 +202,10 @@ describe("DirectoryPanel", () => {
     const device = wrapper.get('[data-node-key="device:31"]');
     expect(device.attributes("aria-selected")).toBe("true");
     expect(device.text()).toContain("门岗 NVR");
+    // 右侧显示「通道在线数/总数」，设备是否在线在悬浮提示里（行内不再重复「在线」字样）。
+    expect(device.get(".device-node-count").text()).toBe("1/2");
+    expect(device.element.parentElement?.getAttribute("data-tooltip")).toContain("设备在线");
+    expect(device.element.parentElement?.getAttribute("data-tooltip")).toContain("通道在线 1/2");
     await device.get(".directory-node").trigger("click");
     expect(wrapper.emitted("deviceSelect")?.[0]?.[0]).toMatchObject({ id: 31, deviceId: "34020000002000000031" });
     expect(wrapper.emitted("select")).toBeUndefined();
@@ -247,8 +251,12 @@ describe("DirectoryPanel", () => {
     await flushPromises();
 
     expect(listDirectoryTree).toHaveBeenLastCalledWith("administrative", expect.objectContaining({ since: "v1", sync: 1 }));
-    expect(wrapper.get('[data-node-key="device:31"] .device-node-status').text()).toBe("离线");
-    expect(wrapper.get('[data-node-key="device:31"]').attributes("aria-selected")).toBe("true");
+    const deviceRow = wrapper.get('[data-node-key="device:31"]');
+    // 设备行的右侧是「通道在线数/通道总数」，设备自身的在线/离线只由行首圆点 + aria-label 表达。
+    expect(deviceRow.get(".device-node-count").text()).toBe("1/2");
+    expect(deviceRow.get(".device-node-count").attributes("aria-label")).toContain("设备离线");
+    expect(deviceRow.get(".device-node-icon").classes()).not.toContain("online");
+    expect(deviceRow.attributes("aria-selected")).toBe("true");
     expect(wrapper.emitted("update:modelValue")?.length || 0).toBe(updatesBefore);
     wrapper.unmount();
   });
