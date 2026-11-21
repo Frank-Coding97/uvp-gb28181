@@ -58,6 +58,14 @@ func loadStatements(t *testing.T) []string {
 // ⚠️ 2026-11-03 再次对齐：基线追平活库 —— gb_cascade_alarm_delivery 入基线
 //	（117 表），gb_device 补上报字符集三列（reported_charset / wire_charset /
 //	reported_charset_at）。索引 327 → 331。
+// ⚠️ 2026-11-21 索引重名消解：重名索引在生成阶段加 `<表名>__` 前缀（见
+//	generate.py 的 dedupe_index_names），原先被 SQLite 静默跳过的 9 条全部
+//	真正建出；同时删掉 sys_job_results 的死索引 idx_created_at（IR 已移除）。
+//	331 → 339，`dupes` 由 9 变 0。
+// ⚠️ 2026-11-21 同批还做了基线追平：sqlite 基线落后 MySQL 一个月，重生成后
+//	补上 gb_device.device_type 列、图像库两个按钮权限（140620/140621）、
+//	「一键清理」(140619)、批量下载接口(686)与 sys_openapi_security_state 初始行。
+//	种子语句 38 → 39（多出来的是 sys_openapi_security_state 的初始行）。
 func TestBaselineGoldenCounts(t *testing.T) {
 	stmts := loadStatements(t)
 	phases, counted, dupes, total := planStatements(stmts)
@@ -71,11 +79,11 @@ func TestBaselineGoldenCounts(t *testing.T) {
 	if got := counts[phaseTable]; got != 117 {
 		t.Errorf("建表语句数 = %d，期望 117", got)
 	}
-	if got := counts[phaseIndex]; got != 331 {
-		t.Errorf("能真正建出的索引数 = %d，期望 331", got)
+	if got := counts[phaseIndex]; got != 339 {
+		t.Errorf("能真正建出的索引数 = %d，期望 339", got)
 	}
-	if got := counts[phaseSeed]; got != 38 {
-		t.Errorf("种子数据语句数 = %d，期望 38", got)
+	if got := counts[phaseSeed]; got != 39 {
+		t.Errorf("种子数据语句数 = %d，期望 39", got)
 	}
 	if got := counts[phasePragma]; got != 2 {
 		t.Errorf("PRAGMA 语句数 = %d，期望 2（必须能在事务外执行）", got)
@@ -83,11 +91,13 @@ func TestBaselineGoldenCounts(t *testing.T) {
 	if total != len(stmts)-len(dupes) {
 		t.Errorf("分母 %d 与「语句数-重复数」%d 不一致", total, len(stmts)-len(dupes))
 	}
-	// 已知基线缺陷（详见 topics/migrations-and-db.md）：MySQL 迁移过来的索引名
-	// 只在表内唯一、SQLite 是库级唯一 ⇒ 同名索引被静默跳过，实测 9 条。
-	// ⛔ 这里刻意断言「确实存在被跳过的」，好在未来修复后立刻发现并更新结论。
-	if len(dupes) == 0 {
-		t.Error("预期存在被 SQLite 静默跳过的重复索引名，实际为 0 —— 基线或算法变了？")
+	// ⛔⛔ SQLite 的索引名是库级唯一的，而基线从 MySQL 转来（MySQL 只要求表内唯一）⇒
+	// 同名索引会在第二张表上被 `CREATE INDEX IF NOT EXISTS` **静默跳过**：
+	// 不报错，索引只是建在了组内第一张表上，后面的表一张都没有（线上实测
+	// sys_jobs 连 created_at 索引都不存在）。生成阶段已统一加 `<表名>__` 前缀消解，
+	// 这里反过来断言「一条都不能剩」—— 只要谁再引入重名，立刻红。
+	if len(dupes) != 0 {
+		t.Errorf("索引名仍有 %d 条重名（会被 SQLite 静默跳过）: %v", len(dupes), dupes)
 	}
 }
 

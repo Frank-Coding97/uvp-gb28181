@@ -16,8 +16,8 @@ from pathlib import Path
 
 BASELINE = Path(__file__).resolve().parent / "baseline.sql"
 
-EXPECT_TABLES = 116
-EXPECT_INDEX = None      # 由 manifest 给出，不硬编码
+EXPECT_TABLES = 117      # 与 manifest.tables / baseline_test.go 的黄金数字一致
+EXPECT_INDEXES = 339     # 同理；少于这个数 = 有索引因重名被静默跳过
 EXPECT_SEED_ROWS = None
 
 
@@ -59,6 +59,15 @@ def main() -> int:
 
         if tables != EXPECT_TABLES:
             print(f"❌ 表数应为 {EXPECT_TABLES}，实际 {tables}")
+            return 1
+
+        # ⛔⛔ 索引数必须断言，不能只打印：SQLite 的索引名库级唯一，同名索引会被
+        #    `CREATE INDEX IF NOT EXISTS` **静默跳过**（不报错）⇒ 少了几个索引
+        #    在日志里看不出来，只有「声明数 vs 建出数」对账才暴露
+        #    （2026-11-21 之前实测被跳过 9 条，gb_device 的 deleted_at 索引就没建上）。
+        if indexes != EXPECT_INDEXES:
+            print(f"❌ 索引数应为 {EXPECT_INDEXES}，实际 {indexes}"
+                  "（少了多半是索引重名被静默跳过，见 generate.py 的 dedupe_index_names）")
             return 1
 
         # 自增必须真的自增：插一条再插一条，id 应递增

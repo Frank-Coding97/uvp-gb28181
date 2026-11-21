@@ -33,7 +33,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 SOURCE = ROOT.parent / "uvp-gb28181.sql"
 POLICY = ROOT.parent / "baseline" / "policy.json"
-VERSION = "sqlite-baseline-20261023-r7"
+VERSION = "sqlite-baseline-20261121-r9"
 
 
 # --------------------------------------------------------------------------
@@ -262,6 +262,71 @@ COMMENT_RE = re.compile(r"\bCOMMENT\s+'(?P<text>(?:[^']|'')*)'", re.I)
 
 def column_list(raw: str) -> str:
     return ", ".join(q(c.strip().strip("`")) for c in raw.split(","))
+
+
+# 表外索引语句（本脚本自己生成的形态，也是 baseline.sql 里实际的行）
+INDEX_STMT_RE = re.compile(
+    r'^(?P<head>CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+)'
+    r'(?P<name>"[^"]+")\s+ON\s+(?P<table>"[^"]+")',
+    re.I,
+)
+
+
+def conflicting_index_names(pairs: list[tuple[str, str]]) -> dict[str, set[str]]:
+    """找出**索引名重复**的那些名字，返回 {索引名: 涉及的表名集合}。
+
+    ⛔⛔ 为什么必须处理：SQLite 的索引名是**库级唯一**（``sqlite_master.name``
+    UNIQUE），而 MySQL 只要求表内唯一。基线是从 MySQL 脚本转来的，同一个索引名
+    会在多张表上各出现一次 —— 实测 5 组 13 条（``idx_deleted_at`` 在 5 张表上都有），
+    再加上 IR 里已移除的 ``sys_job_results.idx_created_at`` 一共 6 组。
+    SQLite 执行 ``CREATE INDEX IF NOT EXISTS`` 时，只要**库里有同名索引**就静默跳过，
+    **不报错**、也不管它建在哪张表上 ⇒ 后出现的那几条永远不会被建出来。
+
+    线上实测的后果：``sys_jobs.idx_created_at`` / ``idx_status``、
+    ``gb_device.idx_deleted_at`` / ``idx_owner_dept_deleted``、
+    ``sys_user_sessions.idx_user_id`` 全部**不存在**（索引其实建在了同名的
+    前一张表上），会话鉴权、设备列表等查询在 SQLite 版上全表扫。
+    """
+    tables_by_name: dict[str, set[str]] = {}
+    for name, table in pairs:
+        # 入参可能带标识符引号（正则匹配出来的原样），统一去掉再比
+        tables_by_name.setdefault(name.strip('"'), set()).add(table.strip('"'))
+    return {name: tables for name, tables in tables_by_name.items() if len(tables) > 1}
+
+
+def dedupe_index_names(statements: list[str]) -> list[str]:
+    """给重名索引加 ``<表名>__`` 前缀，让每个索引在 SQLite 里真正建得出来。
+
+    ⛔ 冲突组内**全部**改名，不能只改被跳过的那些：「谁被跳过」取决于语句顺序，
+    只补后面的会让索引名随基线重生成顺序漂移。统一规则 = 重名即全组加前缀，
+    PostgreSQL 的转换器本来就这么做（``sys_jobs__idx_status``），这里对齐。
+
+    ⛔ 改名后仍撞名直接抛错：那说明同一张表声明了同名索引，是源脚本的问题，
+    不能靠加前缀掩盖。
+    """
+    pairs: list[tuple[str, str]] = []
+    for stmt in statements:
+        m = INDEX_STMT_RE.match(stmt)
+        if m:
+            pairs.append((m.group("name"), m.group("table")))
+    clash = conflicting_index_names(pairs)
+    seen: set[str] = set()
+    out: list[str] = []
+    for stmt in statements:
+        m = INDEX_STMT_RE.match(stmt)
+        if not m:
+            out.append(stmt)
+            continue
+        name, table = m.group("name"), m.group("table")
+        if name.strip('"') in clash:
+            # 前缀本身不带引号：q() 已经保证整串是合法标识符
+            prefixed = table.strip('"') + "__" + name.strip('"')
+            name = q(prefixed)
+        if name in seen:
+            raise ValueError(f"索引重名无法消解: {name}（同一张表声明了两次同名索引）")
+        seen.add(name)
+        out.append(m.group("head") + name + stmt[m.end("name"):])
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -547,6 +612,16 @@ def main() -> None:
         else:
             skipped[head] = skipped.get(head, 0) + 1
 
+    # ⛔ 索引名必须在这一步消解重名：SQLite 的索引名库级唯一，同名索引会让
+    #    后出现的那条被 `IF NOT EXISTS` 静默跳过（详见 dedupe_index_names）。
+    #    ⚠️ 必须放在解析完所有表**之后**：冲突与否要看全库，单张表看不出来。
+    duplicated = conflicting_index_names([
+        (m.group("name"), m.group("table"))
+        for stmt in table_statements
+        if (m := INDEX_STMT_RE.match(stmt))
+    ])
+    table_statements = dedupe_index_names(table_statements)
+
     output: list[str] = [
         "-- SQLite baseline for the UVP standalone green package.",
         f"-- Generated from {SOURCE.name}; DO NOT EDIT (run generate.py instead).",
@@ -595,6 +670,8 @@ def main() -> None:
         "notes": [
             "sys_civil_code 不在本文件：3348 行区划数据由应用侧 civilcode.SeedIfEmpty 在同一事务内灌。",
             "复合主键表保留主键约束、放弃 AUTOINCREMENT（SQLite 只允许单列 INTEGER 主键自增）。",
+            "重名索引一律加 <表名>__ 前缀（见 dedupe_index_names）：SQLite 的索引名库级唯一，"
+            "同名的 CREATE INDEX IF NOT EXISTS 会被静默跳过，索引实际只建在组内第一张表上。",
         ],
     }
     (ROOT / "manifest.json").write_text(
@@ -606,6 +683,10 @@ def main() -> None:
         print(f"   ⚠️ 跳过的语句头: {skipped}")
     if stats["tables_without_autoincrement"]:
         print(f"   无自增的表 {len(stats['tables_without_autoincrement'])} 张（复合主键等）")
+    if duplicated:
+        print(f"   索引重名已加表名前缀（{len(duplicated)} 组）:")
+        for name, tables in sorted(duplicated.items()):
+            print(f"     {name} → {'/'.join(sorted(tables))}")
 
 
 if __name__ == "__main__":

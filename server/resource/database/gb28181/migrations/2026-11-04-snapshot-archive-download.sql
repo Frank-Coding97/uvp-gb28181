@@ -13,6 +13,10 @@
 -- 权限面与读图/列表接口一致（都是 `gb28181:device:snapshot` 那个抓拍按钮 140450）：
 -- 能看这批图的人才能把这批图下载走，否则等于绕过"只读账号不许下载"的口径。
 --
+-- ⚠️ 2026-11-21 补记：本文件**只覆盖 MySQL**。SQLite 单机版当时还没纳入交付面，
+--    所以按钮菜单（140620/140621）/ 页面菜单权限码 / 接口重挂一直没进 SQLite 存量库；
+--    现在统一由 2026-11-21-sqlite-seed-catchup-sqlite.sql 补齐（按 path+method 定位，
+--    不写死自增 id —— 存量 SQLite 库的 id 与 MySQL 活库对不上）。
 -- ⚠️ 与 2026-10-05-record-cache-ticket-apis.sql 同形态：仅 MySQL 方言、可重复执行，
 --    用于把新物件补进**已有开发库**；全新环境由三方言全量脚本建库
 --    （uvp-gb28181.sql / postgresql_converted.sql / sqlserver_converted.sql 已包含同样内容）。

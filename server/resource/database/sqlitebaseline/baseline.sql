@@ -478,6 +478,7 @@ CREATE TABLE IF NOT EXISTS "gb_device" (
   "device_id" TEXT NOT NULL CHECK ("device_id" IS NULL OR length("device_id") <= 20) DEFAULT '',
   "name" TEXT NOT NULL CHECK ("name" IS NULL OR length("name") <= 255) DEFAULT '',
   "alias" TEXT NOT NULL CHECK ("alias" IS NULL OR length("alias") <= 255) DEFAULT '',
+  "device_type" TEXT NOT NULL CHECK ("device_type" IS NULL OR length("device_type") <= 16) DEFAULT 'ipc',
   "password" TEXT NOT NULL CHECK ("password" IS NULL OR length("password") <= 255) DEFAULT '',
   "transport" TEXT NOT NULL CHECK ("transport" IS NULL OR length("transport") <= 8) DEFAULT '',
   "manufacturer" TEXT NOT NULL CHECK ("manufacturer" IS NULL OR length("manufacturer") <= 255) DEFAULT '',
@@ -517,6 +518,7 @@ CREATE TABLE IF NOT EXISTS "gb_device" (
   -- "device_id": 20位国标编码
   -- "name": 设备名称
   -- "alias": 用户自定义别名(用户可编辑,不被设备上报覆盖)
+  -- "device_type": 设备类型 ipc/nvr/platform(用户维护)
   -- "password": 按设备独立密码(本期用统一密码,留空)
   -- "transport": 传输模式 UDP/TCP
   -- "manufacturer": 厂商
@@ -2391,7 +2393,7 @@ CREATE INDEX IF NOT EXISTS "idx_alarm_binding_resource" ON "gb_alarm_binding" ("
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_dedupe_key" ON "gb_alarm_event" ("dedupe_key");
 CREATE INDEX IF NOT EXISTS "idx_alarm_device_time" ON "gb_alarm_event" ("device_id", "alarm_time");
 CREATE INDEX IF NOT EXISTS "idx_alarm_time" ON "gb_alarm_event" ("alarm_time");
-CREATE INDEX IF NOT EXISTS "idx_channel_id" ON "gb_alarm_event" ("channel_id");
+CREATE INDEX IF NOT EXISTS "gb_alarm_event__idx_channel_id" ON "gb_alarm_event" ("channel_id");
 CREATE INDEX IF NOT EXISTS "idx_received_at" ON "gb_alarm_event" ("received_at");
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_alarm_resource_code" ON "gb_alarm_resource" ("owner_dept_id", "device_code", "alarm_code");
 CREATE INDEX IF NOT EXISTS "idx_alarm_resource_alarm_code" ON "gb_alarm_resource" ("alarm_code");
@@ -2433,16 +2435,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uk_cascade_snapshot_upload" ON "gb_cascade_sn
 CREATE INDEX IF NOT EXISTS "idx_cascade_snapshot_expiry" ON "gb_cascade_snapshot_session" ("platform_id", "expires_at");
 CREATE INDEX IF NOT EXISTS "idx_catalog_alarm_resource" ON "gb_catalog_node" ("alarm_resource_id");
 CREATE INDEX IF NOT EXISTS "idx_code" ON "gb_catalog_node" ("code");
-CREATE INDEX IF NOT EXISTS "idx_deleted_at" ON "gb_catalog_node" ("deleted_at");
+CREATE INDEX IF NOT EXISTS "gb_catalog_node__idx_deleted_at" ON "gb_catalog_node" ("deleted_at");
 CREATE INDEX IF NOT EXISTS "idx_owner_dept_anomaly" ON "gb_catalog_node" ("owner_dept_id", "anomaly");
 CREATE INDEX IF NOT EXISTS "idx_owner_dept_civil_code" ON "gb_catalog_node" ("owner_dept_id", "civil_code");
 CREATE INDEX IF NOT EXISTS "idx_owner_dept_parent" ON "gb_catalog_node" ("owner_dept_id", "parent_id");
 CREATE INDEX IF NOT EXISTS "idx_owner_dept_type" ON "gb_catalog_node" ("owner_dept_id", "node_type");
 CREATE INDEX IF NOT EXISTS "idx_owner_source_type_code" ON "gb_catalog_node" ("owner_dept_id", "source_device_id", "node_type", "code");
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_device_channel" ON "gb_channel" ("device_id", "channel_id");
-CREATE INDEX IF NOT EXISTS "idx_deleted_at" ON "gb_channel" ("deleted_at");
+CREATE INDEX IF NOT EXISTS "gb_channel__idx_deleted_at" ON "gb_channel" ("deleted_at");
 CREATE INDEX IF NOT EXISTS "idx_device_id" ON "gb_channel" ("device_id");
-CREATE INDEX IF NOT EXISTS "idx_owner_dept_deleted" ON "gb_channel" ("owner_dept_id", "deleted_at");
+CREATE INDEX IF NOT EXISTS "gb_channel__idx_owner_dept_deleted" ON "gb_channel" ("owner_dept_id", "deleted_at");
 CREATE INDEX IF NOT EXISTS "idx_stream_id" ON "gb_channel" ("stream_id");
 CREATE INDEX IF NOT EXISTS "idx_stream_transport" ON "gb_channel" ("stream_transport");
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_gb_channel_favorite_group_owner_name" ON "gb_channel_favorite_group" ("owner_user_id", "name");
@@ -2464,9 +2466,9 @@ CREATE INDEX IF NOT EXISTS "idx_custom_group_device_group" ON "gb_custom_group_d
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_dashboard_layout_user_key" ON "gb_dashboard_layout" ("user_id", "dashboard_key");
 CREATE INDEX IF NOT EXISTS "idx_dashboard_layout_updated" ON "gb_dashboard_layout" ("updated_at");
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_device_id" ON "gb_device" ("device_id");
-CREATE INDEX IF NOT EXISTS "idx_deleted_at" ON "gb_device" ("deleted_at");
+CREATE INDEX IF NOT EXISTS "gb_device__idx_deleted_at" ON "gb_device" ("deleted_at");
 CREATE INDEX IF NOT EXISTS "idx_gb_device_zlm_node" ON "gb_device" ("zlm_node_id");
-CREATE INDEX IF NOT EXISTS "idx_owner_dept_deleted" ON "gb_device" ("owner_dept_id", "deleted_at");
+CREATE INDEX IF NOT EXISTS "gb_device__idx_owner_dept_deleted" ON "gb_device" ("owner_dept_id", "deleted_at");
 CREATE INDEX IF NOT EXISTS "idx_status_keepalive" ON "gb_device" ("status", "keepalive_time");
 CREATE INDEX IF NOT EXISTS "idx_subscribe_capability" ON "gb_device" ("subscribe_capability", "subscribe_last_test");
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_device_config_target" ON "gb_device_config" ("device_id", "target_code", "config_type");
@@ -2486,11 +2488,11 @@ CREATE INDEX IF NOT EXISTS "idx_firmware_upgrade_device_sn" ON "gb_device_firmwa
 CREATE INDEX IF NOT EXISTS "idx_firmware_upgrade_device_status" ON "gb_device_firmware_upgrade" ("device_id", "status");
 CREATE INDEX IF NOT EXISTS "idx_firmware_upgrade_device_time" ON "gb_device_firmware_upgrade" ("device_id", "created_at");
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_device_target" ON "gb_device_grant" ("device_id", "target_type", "target_id");
-CREATE INDEX IF NOT EXISTS "idx_deleted_at" ON "gb_device_grant" ("deleted_at");
+CREATE INDEX IF NOT EXISTS "gb_device_grant__idx_deleted_at" ON "gb_device_grant" ("deleted_at");
 CREATE INDEX IF NOT EXISTS "idx_device" ON "gb_device_grant" ("device_id");
 CREATE INDEX IF NOT EXISTS "idx_target" ON "gb_device_grant" ("target_type", "target_id");
 CREATE INDEX IF NOT EXISTS "ix_device_intent_recovery" ON "gb_device_operation_intent" ("device_pk", "device_epoch", "state", "operation_id");
-CREATE INDEX IF NOT EXISTS "idx_deleted_at" ON "gb_device_status_event" ("deleted_at");
+CREATE INDEX IF NOT EXISTS "gb_device_status_event__idx_deleted_at" ON "gb_device_status_event" ("deleted_at");
 CREATE INDEX IF NOT EXISTS "idx_device_code" ON "gb_device_status_event" ("device_code");
 CREATE INDEX IF NOT EXISTS "idx_device_occurred" ON "gb_device_status_event" ("device_id", "occurred_at", "id");
 CREATE INDEX IF NOT EXISTS "idx_event_type_occurred" ON "gb_device_status_event" ("event_type", "occurred_at");
@@ -2527,7 +2529,7 @@ CREATE INDEX IF NOT EXISTS "idx_position_history_channel_time" ON "gb_mobile_pos
 CREATE INDEX IF NOT EXISTS "idx_position_history_device_source_time" ON "gb_mobile_position_history" ("device_id", "source_code", "event_time");
 CREATE INDEX IF NOT EXISTS "idx_position_history_received_at" ON "gb_mobile_position_history" ("received_at");
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_position_device_source" ON "gb_mobile_position_latest" ("device_id", "source_code");
-CREATE INDEX IF NOT EXISTS "idx_channel_id" ON "gb_mobile_position_latest" ("channel_id");
+CREATE INDEX IF NOT EXISTS "gb_mobile_position_latest__idx_channel_id" ON "gb_mobile_position_latest" ("channel_id");
 CREATE INDEX IF NOT EXISTS "idx_event_time" ON "gb_mobile_position_latest" ("event_time");
 CREATE INDEX IF NOT EXISTS "idx_openapi_grant_client_state" ON "gb_openapi_play_grant" ("client_id", "state");
 CREATE INDEX IF NOT EXISTS "idx_openapi_grant_expires" ON "gb_openapi_play_grant" ("expires_at");
@@ -2661,14 +2663,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS "idx_casbin_rule" ON "sys_casbin_rule" ("ptype
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_sys_casbin_rule" ON "sys_casbin_rule" ("ptype", "v0", "v1", "v2", "v3", "v4", "v5");
 CREATE INDEX IF NOT EXISTS "idx_parent_code" ON "sys_civil_code" ("parent_code", "level");
 CREATE INDEX IF NOT EXISTS "idx_pinyin" ON "sys_civil_code" ("pinyin");
-CREATE INDEX IF NOT EXISTS "idx_created_at" ON "sys_job_results" ("created_at");
 CREATE INDEX IF NOT EXISTS "idx_job_id" ON "sys_job_results" ("job_id");
 CREATE INDEX IF NOT EXISTS "idx_start_time" ON "sys_job_results" ("start_time");
-CREATE INDEX IF NOT EXISTS "idx_status" ON "sys_job_results" ("status");
+CREATE INDEX IF NOT EXISTS "sys_job_results__idx_status" ON "sys_job_results" ("status");
 CREATE INDEX IF NOT EXISTS "idx_created_at" ON "sys_jobs" ("created_at");
 CREATE INDEX IF NOT EXISTS "idx_executor_name" ON "sys_jobs" ("executor_name");
 CREATE INDEX IF NOT EXISTS "idx_group" ON "sys_jobs" ("group");
-CREATE INDEX IF NOT EXISTS "idx_status" ON "sys_jobs" ("status");
+CREATE INDEX IF NOT EXISTS "sys_jobs__idx_status" ON "sys_jobs" ("status");
 CREATE INDEX IF NOT EXISTS "idx_login_logs_created_at" ON "sys_login_logs" ("created_at");
 CREATE INDEX IF NOT EXISTS "idx_login_logs_failure_reason" ON "sys_login_logs" ("failure_reason");
 CREATE INDEX IF NOT EXISTS "idx_login_logs_ip" ON "sys_login_logs" ("ip");
@@ -2697,12 +2698,12 @@ CREATE INDEX IF NOT EXISTS "fk_openapi_authority_generation" ON "sys_openapi_pro
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_openapi_generation_domain" ON "sys_openapi_process_generation" ("domain_id", "generation_id");
 CREATE INDEX IF NOT EXISTS "idx_sys_operation_logs_created_at" ON "sys_operation_logs" ("created_at");
 CREATE INDEX IF NOT EXISTS "idx_sys_operation_logs_deleted_at" ON "sys_operation_logs" ("deleted_at");
-CREATE INDEX IF NOT EXISTS "idx_user_id" ON "sys_operation_logs" ("user_id");
+CREATE INDEX IF NOT EXISTS "sys_operation_logs__idx_user_id" ON "sys_operation_logs" ("user_id");
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_sys_param_code" ON "sys_param" ("code");
 CREATE INDEX IF NOT EXISTS "idx_sys_param_deleted_at" ON "sys_param" ("deleted_at");
 CREATE INDEX IF NOT EXISTS "idx_client_ip" ON "sys_user_sessions" ("client_ip");
 CREATE INDEX IF NOT EXISTS "idx_session_valid" ON "sys_user_sessions" ("revoked_at", "session_expires_at", "login_at");
-CREATE INDEX IF NOT EXISTS "idx_user_id" ON "sys_user_sessions" ("user_id");
+CREATE INDEX IF NOT EXISTS "sys_user_sessions__idx_user_id" ON "sys_user_sessions" ("user_id");
 CREATE UNIQUE INDEX IF NOT EXISTS "username" ON "sys_users" ("username");
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_openapi_capability_group_capability_code" ON "sys_openapi_capability" ("group_id", "code");
 CREATE UNIQUE INDEX IF NOT EXISTS "uk_openapi_capability_scope" ON "sys_openapi_capability" ("scope");
@@ -3203,7 +3204,9 @@ INSERT INTO "sys_api" ("id", "title", "path", "method", "api_group", "created_at
 (682, '查看更新提示', '/api/system/upgrade/notice', 'GET', '服务升级', '2026-10-29 11:26:25.000000', '2026-10-29 11:26:25.000000', NULL, 1),
 (683, '忽略更新版本', '/api/system/upgrade/notice/ignore', 'POST', '服务升级', '2026-10-29 11:26:25.000000', '2026-10-29 11:26:25.000000', NULL, 1),
 (684, '取消忽略更新版本', '/api/system/upgrade/notice/ignore', 'DELETE', '服务升级', '2026-10-29 11:26:25.000000', '2026-10-29 11:26:25.000000', NULL, 1),
-(685, '设置定时检查更新', '/api/system/upgrade/notice/auto-check', 'POST', '服务升级', '2026-10-29 12:18:23.000000', '2026-10-29 12:18:23.000000', NULL, 1);
+(685, '设置定时检查更新', '/api/system/upgrade/notice/auto-check', 'POST', '服务升级', '2026-10-29 12:18:23.000000', '2026-10-29 12:18:23.000000', NULL, 1),
+(686, '批量下载抓拍图像', '/api/gb28181/device-mgmt/snapshots/archive', 'GET', '图像库', '2026-11-04 16:41:24.000000', '2026-11-04 16:41:24.000000', NULL, 1),
+(687, '清空定时任务日志', '/api/sysJobResults/clear', 'POST', '日志中心', '2026-11-04 18:55:00.000000', '2026-11-04 18:55:00.000000', NULL, 1);
 INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5") VALUES
 (6266, 'g', 'user_1', 'role_1', '*', '', '', ''),
 (8166, 'p', 'role_3', '/api/users/logout', 'POST', '*', '', ''),
@@ -3737,7 +3740,9 @@ INSERT INTO "sys_casbin_rule" ("id", "ptype", "v0", "v1", "v2", "v3", "v4", "v5"
 (10354, 'p', 'role_1', '/api/system/upgrade/notice', 'GET', '*', '', ''),
 (10355, 'p', 'role_1', '/api/system/upgrade/notice/ignore', 'POST', '*', '', ''),
 (10356, 'p', 'role_1', '/api/system/upgrade/notice/ignore', 'DELETE', '*', '', ''),
-(10357, 'p', 'role_1', '/api/system/upgrade/notice/auto-check', 'POST', '*', '', '');
+(10357, 'p', 'role_1', '/api/system/upgrade/notice/auto-check', 'POST', '*', '', ''),
+(10358, 'p', 'role_1', '/api/gb28181/device-mgmt/snapshots/archive', 'GET', '*', '', ''),
+(10359, 'p', 'role_1', '/api/sysJobResults/clear', 'POST', '*', '', '');
 INSERT INTO "sys_civil_code" ("code", "name", "short_name", "parent_code", "level", "pinyin", "created_at", "updated_at") VALUES
 ('110000', '北京市', '北京市', '', 1, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),
 ('110100', '北京市市辖区', '市辖区', '110000', 2, '', '2026-07-18 17:27:38.000000', '2026-07-18 17:27:38.000000'),
@@ -7545,7 +7550,7 @@ INSERT INTO "sys_menu" ("id", "parent_id", "path", "name", "redirect", "componen
 (140498, 0, '/gb28181/openapi-client', 'gb28181-openapi-client', '', 'gb28181/openapi-client/index', 'OpenAPI 客户端', 0, 0, 0, 0, 0, '', 0, '', 'lucide:Plug', 140, 2, 0, '', '2026-09-10 10:13:12.000000', '2026-09-15 18:59:24.000000', NULL, 1),
 (140507, 0, '/log-center', 'LogCenter', NULL, NULL, '日志中心', 0, 0, 0, 1, 0, '', 0, '', 'lucide:FileClock', 170, 1, 0, '', '2026-09-17 14:40:02.000000', '2026-09-17 14:40:02.000000', NULL, NULL),
 (140508, 140358, '', 'GbDeviceStorageCardFormat', NULL, '', '格式化存储卡', 0, 1, 0, 0, 0, '', 0, '', '', 1, 3, 0, 'gb28181:device:format_sd', '2026-09-20 17:12:58.000000', '2026-09-20 17:12:58.000000', NULL, 1),
-(140509, 0, '/gb28181/snapshot-library', 'snapshot-library', NULL, 'gb28181/snapshot-library/index', '图像库', 0, 0, 0, 0, 0, '', 0, '', 'lucide:Images', 90, 2, 0, '', '2026-09-20 17:19:27.000000', '2026-09-20 17:23:13.000000', NULL, 1),
+(140509, 0, '/gb28181/snapshot-library', 'snapshot-library', NULL, 'gb28181/snapshot-library/index', '图像库', 0, 0, 0, 0, 0, '', 0, '', 'lucide:Images', 90, 2, 0, 'gb28181:snapshot:view', '2026-09-20 17:19:27.000000', '2026-11-04 19:14:43.000000', NULL, 1),
 (140510, 140507, '/gb28181/playback-log', 'gb28181-playback-log', NULL, 'gb28181/playback-log/index', '播放日志', 0, 0, 0, 0, 0, '', 0, '', 'lucide:FileClock', 60, 2, 0, 'gb28181:play-log:view', '2026-09-21 20:34:45.000000', '2026-10-06 15:09:52.000000', NULL, 1);
 INSERT INTO "sys_menu" ("id", "parent_id", "path", "name", "redirect", "component", "title", "is_full", "hide", "disable", "keep_alive", "affix", "link", "iframe", "svg_icon", "icon", "sort", "type", "is_link", "permission", "created_at", "updated_at", "deleted_at", "created_by") VALUES
 (140511, 140358, '', 'GbFirmwareRepositoryManage', NULL, '', '管理固件仓库', 0, 0, 0, 0, 0, '', 0, '', '', 2, 3, 0, 'gb28181:firmware-repository:manage', '2026-10-02 15:44:25.000000', '2026-10-02 15:44:25.000000', NULL, 1),
@@ -7561,7 +7566,10 @@ INSERT INTO "sys_menu" ("id", "parent_id", "path", "name", "redirect", "componen
 (140615, 140610, '', '', NULL, '', '收藏缓存', 0, 0, 0, 1, 0, '', 0, '', '', 5, 3, 0, 'gb28181:record-cache:favorite', '2026-10-05 11:52:03.000000', '2026-10-05 11:52:03.000000', NULL, 1),
 (140616, 10, '/system/service-upgrade/index', 'service-upgrade', NULL, 'system/service-upgrade/index', '服务升级', 0, 0, 0, 0, 0, '', 0, '', 'lucide:CloudDownload', 100, 2, 0, '', '2026-10-16 14:52:29.000000', '2026-10-16 14:52:29.000000', NULL, 1),
 (140617, 140616, '', 'ServiceUpgradeRead', NULL, '', '查看服务升级', 0, 0, 0, 0, 0, '', 0, '', '', 0, 3, 0, 'system:upgrade:read', '2026-10-16 14:52:29.000000', '2026-10-16 14:52:29.000000', NULL, 1),
-(140618, 140616, '', 'ServiceUpgradeManage', NULL, '', '管理服务升级', 0, 0, 0, 0, 0, '', 0, '', '', 0, 3, 0, 'system:upgrade:manage', '2026-10-16 14:52:29.000000', '2026-10-16 14:52:29.000000', NULL, 1);
+(140618, 140616, '', 'ServiceUpgradeManage', NULL, '', '管理服务升级', 0, 0, 0, 0, 0, '', 0, '', '', 0, 3, 0, 'system:upgrade:manage', '2026-10-16 14:52:29.000000', '2026-10-16 14:52:29.000000', NULL, 1),
+(140619, 140347, '', 'SysJobResultsClear', NULL, '', '一键清理', 0, 0, 0, 0, 0, '', 0, '', '', 1, 3, 0, 'system:sysjobresults:clear', '2026-11-04 18:55:00.000000', '2026-11-04 18:55:00.000000', NULL, 1),
+(140620, 140509, '', '', NULL, '', '批量下载图像', 0, 0, 0, 1, 0, '', 0, '', '', 1, 3, 0, 'gb28181:snapshot:download', '2026-11-04 19:14:43.000000', '2026-11-04 19:14:43.000000', NULL, 1),
+(140621, 140509, '', '', NULL, '', '删除图像', 0, 0, 0, 1, 0, '', 0, '', '', 2, 3, 0, 'gb28181:snapshot:delete', '2026-11-04 19:14:43.000000', '2026-11-04 19:14:43.000000', NULL, 1);
 INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (1, 5),
 (1, 6),
@@ -7928,8 +7936,6 @@ INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (140449, 505),
 (140450, 483),
 (140450, 519),
-(140450, 587),
-(140450, 589),
 (140451, 489),
 (140451, 504),
 (140451, 524),
@@ -7963,10 +7969,10 @@ INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (140455, 495),
 (140455, 496),
 (140455, 497),
-(140455, 498);
-INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
+(140455, 498),
 (140455, 535),
-(140456, 534),
+(140456, 534);
+INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (140456, 579),
 (140457, 499),
 (140458, 466),
@@ -8036,6 +8042,8 @@ INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (140496, 558),
 (140497, 557),
 (140508, 588),
+(140509, 587),
+(140509, 589),
 (140510, 593),
 (140510, 594),
 (140610, 629),
@@ -8061,7 +8069,12 @@ INSERT INTO "sys_menu_api" ("menu_id", "api_id") VALUES
 (140618, 664),
 (140618, 683),
 (140618, 684),
-(140618, 685);
+(140618, 685),
+(140619, 687),
+(140620, 686),
+(140621, 639);
+INSERT INTO "sys_openapi_security_state" ("id", "must_auth_locked", "locked_at", "lock_version") VALUES
+(1, 0, NULL, 0);
 INSERT INTO "sys_role" ("id", "name", "sort", "status", "description", "parent_id", "created_at", "updated_at", "deleted_at", "created_by", "data_scope", "checked_depts") VALUES
 (1, '系统管理员', 0, 1, '最高权限管理员角色', 0, '2025-09-01 17:32:12.000000', '2025-09-30 15:53:24.000000', NULL, 1, 1, ''),
 (3, '游客', 0, 1, '只读游客：允许业务查看、实时观看和录像回放；禁止下载、控制与修改', 0, '2026-08-24 20:29:31.000000', '2026-09-05 18:46:37.000000', NULL, 1, 4, '');
@@ -8278,6 +8291,9 @@ INSERT INTO "sys_role_menu" ("role_id", "menu_id") VALUES
 (1, 140616),
 (1, 140617),
 (1, 140618),
+(1, 140619),
+(1, 140620),
+(1, 140621),
 (3, 1),
 (3, 140358),
 (3, 140365),

@@ -1,10 +1,10 @@
 {
-  "version": "sqlite-baseline-20261023-r7",
+  "version": "sqlite-baseline-20261121-r9",
   "source": "uvp-gb28181.sql",
-  "source_sha256": "1747dde9c6d9b8cd6b93e46409b763e51008c6a910682c0d2fcf07759e78733b",
-  "sha256": "bcb67b93140b47c8c79827b96b7a7856ac74b9f34ea9870ea07ebaa6214f2c67",
+  "source_sha256": "fbe3f98bb36b47a4de3bddf860612134c74bdfb3c7bfafdf06b02fdbb1c2d5f1",
+  "sha256": "17c91da890c01610ac002d73bc5e3a4e72f12ab582bdd28aa91327bebc8ff55c",
   "tables": 117,
-  "seed_statements": 38,
+  "seed_statements": 39,
   "foreign_keys_kept": 3,
   "autoincrement_tables": 97,
   "tables_without_autoincrement": [
@@ -32,6 +32,7 @@
   "skipped_statement_heads": {},
   "notes": [
     "sys_civil_code 不在本文件：3348 行区划数据由应用侧 civilcode.SeedIfEmpty 在同一事务内灌。",
-    "复合主键表保留主键约束、放弃 AUTOINCREMENT（SQLite 只允许单列 INTEGER 主键自增）。"
+    "复合主键表保留主键约束、放弃 AUTOINCREMENT（SQLite 只允许单列 INTEGER 主键自增）。",
+    "重名索引一律加 <表名>__ 前缀（见 dedupe_index_names）：SQLite 的索引名库级唯一，同名的 CREATE INDEX IF NOT EXISTS 会被静默跳过，索引实际只建在组内第一张表上。"
   ]
 }

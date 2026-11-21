@@ -153,6 +153,11 @@ var createObjectRe = regexp.MustCompile(`(?is)^CREATE\s+(?:UNIQUE\s+)?(TABLE|IND
 //	若按条数计进度，进度条跑到 316/316 而结尾对账只有 307 个索引 ——
 //	读者的第一反应是「对账写错了」，而不是「有 9 条压根没生效」。
 //	⇒ 分母用「去重后真正会建出来的对象数」，并把被跳过的**显式报出来**。
+//
+// ⭐ 2026-11-21 起重名索引已在生成阶段消解（generate.py 的 dedupe_index_names
+// 统一加 `<表名>__` 前缀），所以本函数在当前基线上实测 0 条重复；保留这套
+// 判重逻辑是因为**分母算法本身**必须对「有人手改基线」也有防御，
+// baseline_test.go 会反过来断言重复数必须是 0。
 func planStatements(stmts []string) (phases []string, counted []bool, dupes []string, total int) {
 	phases = make([]string, len(stmts))
 	counted = make([]bool, len(stmts))
