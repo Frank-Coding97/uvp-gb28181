@@ -205,6 +205,19 @@ describe("ChannelSourceTree", () => {
     lenient.unmount();
   });
 
+  // 从通道列表带着通道进来：树得自己展开到那一路，否则「选中」的是一个看不见的行。
+  it("reveals the channel handed in by the host page", async () => {
+    const wrapper = mountTree({ revealChannel: { channelId: 11, deviceCode: "device-1" }, selectedChannelId: 11 });
+    await flushPromises();
+
+    // 设备没展开过 ⇒ 通道行还不存在，必须先按国标编码找到设备、再把它的通道拉回来
+    expect(api.listChannels).toHaveBeenCalledWith(expect.objectContaining({ deviceId: "device-1" }));
+    expect(wrapper.get('[data-node-key="root:device:1"]').attributes("aria-expanded")).toBe("true");
+    expect(wrapper.get('[data-node-key="root:device:1:channel:11"]').classes()).toContain("selected");
+    // 只展开 + 高亮，不能再 emit 一次 select：宿主页面已经选中它了，重复触发会重查录像
+    expect(wrapper.emitted("select")).toBeUndefined();
+  });
+
   it("does not load persistent favorites for a guest, only greys the entry", async () => {
     account.permissions = ["gb28181:device:view", "gb28181:play:start"];
     const wrapper = mountTree();

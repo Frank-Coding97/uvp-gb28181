@@ -1,4 +1,5 @@
 import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
+import { reactive } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DeviceRecordPlayback from "./index.vue";
 import playbackPageSource from "./index.vue?raw";
@@ -88,25 +89,36 @@ vi.mock("../components/PlayWindow.vue", () => ({
 
 // 路由对象按用例可改：默认是「设备列表点录像进来」带 channelId，另有用例模拟
 // 「从录像中心菜单点进来」这种不带通道号的入口。
+// `route` 是交给 `useRoute()` 的**响应式**代理（真路由本身就是响应式的）：
+// 「同一路由上换成另一路通道」那条用例要在挂载后改 params，必须能触发 watch。
 const routeState = vi.hoisted(() => ({
   params: { channelId: "31" } as Record<string, string>,
-  query: { recordQueryMock: "complete", returnKey: "return-key" } as Record<string, string>
+  query: { recordQueryMock: "complete", returnKey: "return-key" } as Record<string, string>,
+  route: null as any
 }));
 
 vi.mock("vue-router", async importOriginal => ({
   ...(await importOriginal<typeof import("vue-router")>()),
-  useRoute: () => routeState,
+  useRoute: () => routeState.route,
   useRouter: () => ({ push: api.routerPush, getRoutes: api.routerGetRoutes })
 }));
+
+// 交给 useRoute() 的必须是**响应式**的（真路由本身就这样），否则「同一路由上换成另一路
+// 通道」这条监听永远不触发。⛔ 不能写在 mock 工厂里 import("vue")：那时 vue 还没初始化完，
+// 拿到的是半成品模块，整页会渲染成 `Invalid vnode type: undefined`。
+routeState.route = reactive(routeState);
 
 // 通道树用桩件替掉：这一页只关心「树里点了某路通道之后发生了什么」，
 // 真树要拉设备/行政区域/收藏好几套接口，跟本页的逻辑无关。
 vi.mock("../components/channel-tree/ChannelSourceTree.vue", () => ({
   default: {
     name: "ChannelSourceTree",
-    props: { selectedChannelId: { type: Number, default: null } },
+    props: {
+      selectedChannelId: { type: Number, default: null },
+      revealChannel: { type: Object, default: null }
+    },
     emits: ["select", "select-group", "favoriteSaved"],
-    template: `<div data-testid="channel-tree-stub" :data-selected="selectedChannelId">
+    template: `<div data-testid="channel-tree-stub" :data-selected="selectedChannelId" :data-reveal="JSON.stringify(revealChannel)">
       <button data-testid="pick-channel-55" @click="$emit('select', { id: 55, name: '西门通道', code: '34020000001320000055' })">55</button>
     </div>`
   }
@@ -535,6 +547,34 @@ describe("device record playback workspace", () => {
     expect(wrapper.get('[data-testid="channel-tree-stub"]').attributes("data-selected")).toBe("55");
     // 换通道不该跳路由（跳了整棵树的状态就重置了）
     expect(api.routerPush).not.toHaveBeenCalled();
+  });
+
+  // 从通道列表点「录像」进来时，树停在省市级、目标通道根本不在 DOM 里 ——
+  // 只传 selectedChannelId 等于「高亮一个看不见的行」。所以还要把通道本身交给树去展开。
+  it("把当前通道交给左侧树，让它默认展开到这一路", async () => {
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+
+    // 通道主键先到，设备国标编码要等查询条件回来才补上；树认最后一次。
+    expect(JSON.parse(wrapper.get('[data-testid="channel-tree-stub"]').attributes("data-reveal") || "null")).toEqual({
+      channelId: 31,
+      deviceCode: "34020000002000000001"
+    });
+  });
+
+  // 通道列表现在直接把「录像」落到 /recording-center/device?channel=id（跟菜单同一个页签）。
+  // 用户在这一页上再点另一路通道时路由不变、组件被复用 —— 不监听路由就永远停在第一路。
+  it("同一路由上换成另一路通道也要跟着换", async () => {
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+    expect(api.getRecordQueryOptions).toHaveBeenCalledWith(31);
+    expect(wrapper.get('[data-testid="channel-tree-stub"]').attributes("data-selected")).toBe("31");
+
+    routeState.route.params = { channelId: "55" };
+    await flushPromises();
+
+    expect(api.getRecordQueryOptions).toHaveBeenLastCalledWith(55);
+    expect(wrapper.get('[data-testid="channel-tree-stub"]').attributes("data-selected")).toBe("55");
   });
 
   it("writes a range picked on the Arco range picker back into the query payload", async () => {

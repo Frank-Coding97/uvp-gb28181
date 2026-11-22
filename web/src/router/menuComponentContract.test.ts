@@ -54,7 +54,8 @@ describe("menu component contract", () => {
     const legacy = menus.find(item => item.path === "/gb28181/device-record-playback/:channelId");
 
     expect(menu?.component).toBe("gb28181/device-record-playback/index");
-    // 设备列表点「录像」走的是这条隐藏路由的 name，两条必须指向同一份实现
+    // 两条都指向同一份实现：设备列表点「录像」优先落到上面那条菜单路由（?channel=id），
+    // 只有菜单没授权时才回落到隐藏的旧路由（老书签、只授权了旧菜单的角色）。
     expect(legacy?.component).toBe(menu?.component);
   });
 });

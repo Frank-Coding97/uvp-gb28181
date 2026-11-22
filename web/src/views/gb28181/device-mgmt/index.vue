@@ -3127,6 +3127,13 @@ function openRecordQuery(record: ChannelVO) {
     listPageSize: listPageSize.value,
     cardPageSize: cardPageSize.value
   });
+  // 直接进「设备录像」这个菜单路由（`?channel=id`），跟侧边栏点进来的页签是同一个；
+  // 只有这个菜单没授权时才回落到隐藏的旧路由（老库里只授权了旧菜单的角色）。
+  const menuRoute = router.getRoutes().find((item: { path?: string }) => item.path === "/recording-center/device");
+  if (menuRoute) {
+    router.push({ path: "/recording-center/device", query: { channel: String(record.id), returnKey } });
+    return;
+  }
   router.push({ name: "gb28181-device-record-playback", params: { channelId: record.id }, query: { returnKey } });
 }
 function isInteractiveDblclick(event: MouseEvent) {

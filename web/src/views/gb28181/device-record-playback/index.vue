@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   CircleAlert,
@@ -69,6 +69,11 @@ const currentChannelId = ref(parsePlaybackChannelId(route.params.channelId) || p
 const channelId = computed(() => currentChannelId.value);
 const playbackChannelId = channelId;
 const recordTreeSelectedId = computed(() => (currentChannelId.value > 0 ? currentChannelId.value : null));
+// 树默认展开到当前通道：主键先到，设备国标编码要等查询条件回来，所以这里会从
+// `{channelId}` 变成 `{channelId, deviceCode}` 一次，树那边认最后一次。
+const recordTreeReveal = computed<{ channelId: number; deviceCode?: string } | null>(() =>
+  currentChannelId.value > 0 ? { channelId: currentChannelId.value, deviceCode: options.value?.device?.code || undefined } : null
+);
 const options = ref<RecordQueryOptions | null>(null);
 const form = ref<RecordQueryForm | null>(null);
 const queryState = ref<RecordQueryUiState>("idle");
@@ -680,6 +685,23 @@ async function switchChannel(channel: { id?: number } | null) {
   await loadOptions();
 }
 
+/**
+ * 同一路由上换一路通道也要跟着换。
+ *
+ * 从通道列表点「录像」现在落在「设备录像」这个菜单路由上（`?channel=id`），
+ * 用户在这一页里再去点另一路通道时路由不变、组件被复用 —— 只读一次路由参数的话
+ * 页面会一直停在最先那一路，看起来就是「点了没反应」。
+ * 树里点通道不走路由（会重置树状态），所以这里不会被自己触发。
+ */
+watch(
+  () => [route.params.channelId, route.query.channel] as const,
+  () => {
+    const next = parsePlaybackChannelId(route.params.channelId) || parsePlaybackChannelId(route.query.channel);
+    if (!next || next === currentChannelId.value) return;
+    void switchChannel({ id: next });
+  }
+);
+
 onMounted(() => {
   loadOptions();
 });
@@ -702,6 +724,7 @@ onUnmounted(() => {
       <aside v-if="canQuery" class="channel-panel" aria-label="通道选择">
         <ChannelSourceTree
           :selected-channel-id="recordTreeSelectedId"
+          :reveal-channel="recordTreeReveal"
           allow-offline-select
           @select="switchChannel"
           @select-group="() => undefined"

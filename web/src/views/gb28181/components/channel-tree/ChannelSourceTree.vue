@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch, type Component } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Component } from "vue";
 import {
   Camera,
   Cctv,
@@ -96,6 +96,15 @@ const props = defineProps<{
    * 目录还在），而且「点了没反应」比「提示设备离线」糟糕得多。
    */
   allowOfflineSelect?: boolean;
+  /**
+   * 进页面时要把哪一路通道「展开到眼前」。
+   *
+   * 从通道列表/设备列表带着通道进来时，树还停在省市级、目标行根本不在 DOM 里，
+   * 只传 `selectedChannelId` 等于「高亮一个看不见的行」。这里按通道主键定位：
+   * 先在当前视图已加载的节点里找，找不到再按设备国标编码找到设备、把它的通道拉一次。
+   * 只负责展开 + 滚动，**不 emit select**（通道已经由宿主页面选中了）。
+   */
+  revealChannel?: { channelId: number; deviceCode?: string } | null;
 }>();
 
 const emit = defineEmits<{
@@ -711,15 +720,86 @@ function nodeStatus(node: SourceTreeNode) {
   return node.count ? `${node.onlineCount}/${node.count}` : "空";
 }
 
+/* ------------------------------------------------------------------ *
+ * 「展开到目标通道」：从通道列表/设备列表带着通道进来时定位并高亮
+ * ------------------------------------------------------------------ */
+const treeContent = ref<HTMLElement | null>(null);
+let revealToken = 0;
+
+function findNodePath(
+  nodes: SourceTreeNode[],
+  match: (node: SourceTreeNode) => boolean,
+  ancestors: SourceTreeNode[] = []
+): SourceTreeNode[] | null {
+  for (const node of nodes) {
+    if (match(node)) return [...ancestors, node];
+    if (!node.children.length) continue;
+    const found = findNodePath(node.children, match, [...ancestors, node]);
+    if (found) return found;
+  }
+  return null;
+}
+
+/** 自上而下把路径展开：目录的静态子节点是现成的，只有设备需要真去拉一次通道。 */
+async function expandTreePath(path: SourceTreeNode[]) {
+  for (const node of path) {
+    if (!node.hasChildren) continue;
+    if (!node.loaded) await loadNodeChildren(node);
+    node.expanded = true;
+  }
+}
+
+function scrollTreeRowIntoView(key: string) {
+  const row = treeContent.value?.querySelector<HTMLElement>(`[data-node-key="${key}"]`);
+  // jsdom 没有 scrollIntoView，测试环境跳过滚动即可。
+  row?.scrollIntoView?.({ block: "center" });
+}
+
+async function revealChannelInTree(request: { channelId: number; deviceCode?: string } | null | undefined) {
+  if (!request || request.channelId <= 0 || !canViewDevices.value) return;
+  // 连续两次进入（点了另一路通道）时只认最后一次，避免旧的那次把树滚回去。
+  const token = ++revealToken;
+  if (!loaded.value[view.value]) await loadRoot(view.value);
+  if (token !== revealToken) return;
+  const isTargetChannel = (node: SourceTreeNode) => node.kind === "channel" && node.channel?.id === request.channelId;
+  let path = findNodePath(currentTree.value, isTargetChannel);
+  // 通道行还没加载出来（设备没展开过）⇒ 用国标编码找到设备，再把它的通道拉回来。
+  if (!path && request.deviceCode) {
+    const devicePath = findNodePath(currentTree.value, node => node.kind === "device" && node.deviceId === request.deviceCode);
+    if (devicePath) {
+      await expandTreePath(devicePath);
+      if (token !== revealToken) return;
+      path = findNodePath(currentTree.value, isTargetChannel);
+    }
+  }
+  if (!path) return;
+  await expandTreePath(path);
+  if (token !== revealToken) return;
+  await nextTick();
+  scrollTreeRowIntoView(path[path.length - 1].key);
+}
+
 onMounted(async () => {
   if (canManageFavorites.value) await loadFavorites();
   await loadRoot();
   if (unmounted) return;
+  // 带着通道进来（通道列表 / 设备列表点「录像」）时，把目标行展开到眼前。
+  // 放在 loadRoot 之后：树还没数据时找不到设备节点。
+  if (props.revealChannel) void revealChannelInTree(props.revealChannel);
   refreshTimer = window.setInterval(() => {
     if (loading.value || visibleRows.value.some(({ node }) => node.loading)) return;
     void refresh(true);
   }, 10_000);
 });
+
+// 通道晚到也算：设备录像页是先拿通道主键、再异步查到设备国标编码的，
+// `options` 回来后 `revealChannel` 的身份会变一次，这里接着补上定位。
+watch(
+  () => props.revealChannel,
+  request => {
+    if (request) void revealChannelInTree(request);
+  }
+);
 
 watch(
   () => props.view,
@@ -849,7 +929,7 @@ defineExpose({ openFavoriteDialogForChannels });
       {{ error }}<button type="button" @click="refresh()" class="uvp-refresh-text">重试</button>
     </div>
     <a-spin :loading="loading" class="tree-loading">
-      <div class="tree-content" role="tree">
+      <div ref="treeContent" class="tree-content" role="tree">
         <div
           v-for="{ node, level } in visibleRows"
           :key="node.key"
