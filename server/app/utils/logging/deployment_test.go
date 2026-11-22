@@ -34,12 +34,22 @@ func TestLoggingDeploymentTemplate(t *testing.T) {
 		if !reflect.DeepEqual(c.Outputs, []string{"file", "stdout"}) || c.FileFormat != "console" || c.StdoutFormat != "console" {
 			t.Fatalf("development outputs changed with appdebug=%v: %+v", debug, c)
 		}
-		if c.Modules["access"] != zapcore.InfoLevel || c.Modules["scheduler"] != zapcore.InfoLevel || c.Routes || c.MaxSizeMB != 5 || c.MaxBackups != 7 || c.MaxAgeDays != 15 {
+		if c.Modules["access"] != zapcore.WarnLevel || c.Modules["scheduler"] != zapcore.InfoLevel || c.Routes || c.MaxSizeMB != 5 || c.MaxBackups != 7 || c.MaxAgeDays != 15 {
 			t.Fatalf("invalid deployment defaults: %+v", c)
 		}
 		if v.GetInt("scheduler.job_results_buffer_size") != 1000 {
 			t.Fatal("logging migration changed the result queue capacity")
 		}
+	}
+}
+
+func TestLoggingAccessModuleDefaultIsWarn(t *testing.T) {
+	c, err := ParseConfig(values{}, "/app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Modules["access"] != zapcore.WarnLevel {
+		t.Fatalf("missing access module defaulted to %s, want warn", c.Modules["access"])
 	}
 }
 

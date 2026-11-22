@@ -52,7 +52,7 @@ func TestLoggingHookResult(t *testing.T) {
 		require.Equal(t, false, entry.ContextMap()["business_success"])
 	})
 
-	t.Run("success records result and hook scope", func(t *testing.T) {
+	t.Run("success does not emit access log", func(t *testing.T) {
 		root, observed := observer.New(zap.DebugLevel)
 		previous := app.ZapLog
 		app.ZapLog = zap.New(root)
@@ -71,10 +71,10 @@ func TestLoggingHookResult(t *testing.T) {
 		}
 		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 		require.Equal(t, 0, body.Code)
-		entry := findHookAccessLog(t, observed)
-		require.Equal(t, int64(0), entry.ContextMap()["business_code"])
-		require.Equal(t, true, entry.ContextMap()["business_success"])
-		require.NotEmpty(t, entry.ContextMap()["request_id"])
+		require.NotEmpty(t, response.Header().Get("X-Request-ID"))
+		for _, entry := range observed.All() {
+			require.NotEqual(t, "http.access", entry.ContextMap()["event"])
+		}
 	})
 }
 

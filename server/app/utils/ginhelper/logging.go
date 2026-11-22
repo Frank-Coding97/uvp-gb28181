@@ -15,6 +15,8 @@ import (
 	"uvplatform.com/uvp-gb28181/app/utils/response"
 )
 
+const slowRequestThreshold = time.Second
+
 func validClientID(s string) bool {
 	if len(s) == 0 || len(s) > 64 {
 		return false
@@ -55,7 +57,8 @@ func RequestLogging(root *zap.Logger) gin.HandlerFunc {
 			size = 0
 		}
 		status := c.Writer.Status()
-		fields = []zap.Field{zap.String("event", "http.access"), zap.String("method", method), zap.String("route", route), zap.Int("http_status", status), zap.Float64("duration_ms", float64(time.Since(started))/float64(time.Millisecond)), zap.Int("response_bytes", size)}
+		duration := time.Since(started)
+		fields = []zap.Field{zap.String("event", "http.access"), zap.String("method", method), zap.String("route", route), zap.Int("http_status", status), zap.Float64("duration_ms", float64(duration)/float64(time.Millisecond)), zap.Int("response_bytes", size)}
 		businessFailed := false
 		if result, ok := response.BusinessResult(c); ok {
 			code := zap.Int("business_code", result.Code)
@@ -71,8 +74,11 @@ func RequestLogging(root *zap.Logger) gin.HandlerFunc {
 			access.Error("HTTP request completed", fields...)
 		case status >= http.StatusBadRequest || businessFailed:
 			access.Warn("HTTP request completed", fields...)
+		case duration >= slowRequestThreshold:
+			fields = append(fields, zap.String("reason_code", "slow_request"))
+			access.Warn("HTTP request completed", fields...)
 		default:
-			access.Info("HTTP request completed", fields...)
+			return
 		}
 	}
 }

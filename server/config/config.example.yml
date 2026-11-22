@@ -116,7 +116,7 @@ logs:
   stdoutformat: "console"    # stdout：console/json；容器建议 json
   level: "info"              # debug/info/warn/error；变更日志配置需重启
   modules:                    # 按子系统单独设置级别，未列出的子系统跟随 level
-    access: "info"           # 独立于根 level，保留访问摘要
+    access: "warn"           # 仅记录 HTTP 错误、业务失败和慢请求
     scheduler: "info"        # 调度与定时任务日志
   routes: false               # 是否输出路由登记日志，不控制调试接口
   maxsize: 5                  # 单文件 MiB

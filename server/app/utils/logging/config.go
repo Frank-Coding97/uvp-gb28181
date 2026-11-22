@@ -25,7 +25,7 @@ type Config struct {
 }
 
 func ParseConfig(src Source, basePath string) (Config, error) {
-	c := Config{Level: zapcore.InfoLevel, Modules: map[string]zapcore.Level{"access": zapcore.InfoLevel}, FileFormat: "console", StdoutFormat: "console", MaxSizeMB: 5, MaxBackups: 7, MaxAgeDays: 15}
+	c := Config{Level: zapcore.InfoLevel, Modules: map[string]zapcore.Level{"access": zapcore.WarnLevel}, FileFormat: "console", StdoutFormat: "console", MaxSizeMB: 5, MaxBackups: 7, MaxAgeDays: 15}
 	get := func(k string) interface{} {
 		if src == nil {
 			return nil

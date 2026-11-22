@@ -42,7 +42,7 @@ func NewRuntime(opts Options) (*Runtime, error) {
 		return nil, err
 	}
 	if _, ok := cfg.Modules["access"]; !ok {
-		cfg.Modules["access"] = zapcore.InfoLevel
+		cfg.Modules["access"] = zapcore.WarnLevel
 	}
 	minLevel := cfg.Level
 	uniformLevel := true

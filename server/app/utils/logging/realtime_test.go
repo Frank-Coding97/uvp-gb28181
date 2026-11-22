@@ -97,7 +97,7 @@ func TestRuntimeConsoleMirrorKeepsAccessInStdoutOnlyMode(t *testing.T) {
 	sub, _, _ := hub.Subscribe(context.Background(), RealtimeFilter{}, 0)
 	t.Cleanup(func() { hub.Unsubscribe(sub.ID) })
 
-	runtime.Root.Named("access").Info("request completed", zap.String("event", "http.access"))
+	runtime.Root.Named("access").Warn("request failed", zap.String("event", "http.access"), zap.Int("http_status", 500))
 	select {
 	case event := <-sub.Events:
 		require.Equal(t, "http.access", event.Event)

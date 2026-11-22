@@ -158,15 +158,15 @@ func TestLoggingRuntimeModuleLevels(t *testing.T) {
 	r.Root.Named("db").Named("query").Debug("query")
 	r.Root.Named("other").Warn("warn")
 	rows := records(t, b)
-	if len(rows) != 3 {
-		t.Fatalf("got %d records want 3: %s", len(rows), b.String())
+	if len(rows) != 2 {
+		t.Fatalf("got %d records want 2: %s", len(rows), b.String())
 	}
-	if rows[0]["component"] != "access" || rows[1]["component"] != "db.query" {
+	if rows[0]["component"] != "db.query" || rows[1]["component"] != "other" {
 		t.Fatalf("module fields %v", rows)
 	}
 }
 
-func TestLoggingRuntimeKeepsRoutineAccessInFileWithoutFloodingStdout(t *testing.T) {
+func TestLoggingRuntimeKeepsFailedAccessInFileAndStdout(t *testing.T) {
 	c := configForTest(t, values{
 		"logs.outputs":      []string{"file", "stdout"},
 		"logs.textformat":   "json",
@@ -186,8 +186,9 @@ func TestLoggingRuntimeKeepsRoutineAccessInFileWithoutFloodingStdout(t *testing.
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if got := len(records(t, fileSink)); got != 2 {
-		t.Fatalf("file access records = %d, want 2", got)
+	fileRows := records(t, fileSink)
+	if len(fileRows) != 1 || fileRows[0]["http_status"] != float64(400) {
+		t.Fatalf("file access records = %v, want only the failed request", fileRows)
 	}
 	stdoutRows := records(t, stdoutSink)
 	if len(stdoutRows) != 1 || stdoutRows[0]["level"] != "warn" {
@@ -195,11 +196,11 @@ func TestLoggingRuntimeKeepsRoutineAccessInFileWithoutFloodingStdout(t *testing.
 	}
 }
 
-func TestLoggingRuntimeStdoutOnlyKeepsRoutineAccess(t *testing.T) {
+func TestLoggingRuntimeStdoutOnlyKeepsFailedAccess(t *testing.T) {
 	r, sink := runtimeForTest(t, values{"logs.level": "warn"})
-	r.Root.Named("access").Info("HTTP request completed", zap.String("event", "http.access"), zap.Int("http_status", 200))
+	r.Root.Named("access").Warn("HTTP request completed", zap.String("event", "http.access"), zap.Int("http_status", 400))
 	if got := len(records(t, sink)); got != 1 {
-		t.Fatalf("stdout-only access records = %d, want 1", got)
+		t.Fatalf("stdout-only failed access records = %d, want 1", got)
 	}
 }
 func TestLoggingRuntimeIdentityAndSnapshot(t *testing.T) {

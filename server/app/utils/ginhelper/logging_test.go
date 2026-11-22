@@ -17,6 +17,7 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"time"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 	"uvplatform.com/uvp-gb28181/app/global/consts"
 	"uvplatform.com/uvp-gb28181/app/utils/logging"
@@ -84,7 +85,11 @@ func TestLoggingHTTPResults(t *testing.T) {
 	g.GET("/bad", func(c *gin.Context) { c.Status(400) })
 	g.GET("/content", func(c *gin.Context) { c.String(200, "hello") })
 	g.GET("/error", func(c *gin.Context) { c.Status(500) })
-	for _, path := range []string{"/ok", "/failure", "/bad", "/content", "/error", "/missing-secret?token=fixture-secret"} {
+	g.GET("/slow", func(c *gin.Context) {
+		time.Sleep(slowRequestThreshold + 10*time.Millisecond)
+		c.Status(200)
+	})
+	for _, path := range []string{"/ok", "/failure", "/bad", "/content", "/error", "/missing-secret?token=fixture-secret", "/slow"} {
 		w := httptest.NewRecorder()
 		g.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
 		if w.Header().Get("X-Request-ID") == "" {
@@ -92,9 +97,10 @@ func TestLoggingHTTPResults(t *testing.T) {
 		}
 	}
 	rows := b.rows(t)
-	if len(rows) != 6 {
+	if len(rows) != 5 {
 		t.Fatalf("access count %d", len(rows))
 	}
+	byRoute := make(map[string]map[string]interface{}, len(rows))
 	for _, r := range rows {
 		if r["event"] != "http.access" || r["duration_ms"] == nil || r["response_bytes"] == nil {
 			t.Errorf("invalid summary %v", r)
@@ -102,20 +108,26 @@ func TestLoggingHTTPResults(t *testing.T) {
 		if strings.Contains(r["route"].(string), "secret") {
 			t.Fatal("raw unmatched route leaked")
 		}
+		byRoute[r["route"].(string)] = r
 	}
-	if rows[1]["business_code"] != float64(42) || rows[1]["business_success"] != false || rows[1]["http_status"] != float64(200) {
-		t.Errorf("business result %v", rows[1])
+	if _, ok := byRoute["/ok"]; ok {
+		t.Fatal("successful request emitted access log")
 	}
-	if _, ok := rows[3]["business_code"]; ok {
+	if _, ok := byRoute["/content"]; ok {
+		t.Fatal("successful content request emitted access log")
+	}
+	if byRoute["/failure"]["business_code"] != float64(42) || byRoute["/failure"]["business_success"] != false || byRoute["/failure"]["http_status"] != float64(200) {
+		t.Errorf("business result %v", byRoute["/failure"])
+	}
+	if byRoute["/failure"]["response_bytes"] == float64(0) {
+		t.Error("business failure response size missing")
+	}
+	if _, ok := byRoute["/bad"]["business_code"]; ok {
 		t.Fatal("invented business code")
 	}
-	if rows[3]["response_bytes"] != float64(5) {
-		t.Error("wrong bytes")
-	}
-	wantLevels := []string{"info", "warn", "warn", "info", "error", "warn"}
-	for i, want := range wantLevels {
-		if rows[i]["level"] != want {
-			t.Errorf("row %d level = %v, want %s", i, rows[i]["level"], want)
+	for route, want := range map[string]string{"/failure": "warn", "/bad": "warn", "/error": "error", "<unmatched>": "warn", "/slow": "warn"} {
+		if byRoute[route] == nil || byRoute[route]["level"] != want {
+			t.Errorf("route %s level = %v, want %s", route, byRoute[route], want)
 		}
 	}
 }
@@ -151,7 +163,7 @@ func TestLoggingHTTPConcurrentIdentity(t *testing.T) {
 	}
 	wg.Wait()
 	rows := b.rows(t)
-	if len(rows) != 128 {
+	if len(rows) != 64 {
 		t.Fatalf("records %d", len(rows))
 	}
 	counts := map[string]int{}
@@ -167,7 +179,7 @@ func TestLoggingHTTPConcurrentIdentity(t *testing.T) {
 		}
 	}
 	for id, count := range counts {
-		if id == "" || count != 2 {
+		if id == "" || count != 1 {
 			t.Errorf("crossed request %q: %d", id, count)
 		}
 	}
@@ -175,13 +187,13 @@ func TestLoggingHTTPConcurrentIdentity(t *testing.T) {
 func TestLoggingHTTPInvalidIdentity(t *testing.T) {
 	for _, id := range []string{"", strings.Repeat("x", 65), "bad\nvalue", "坏id"} {
 		g, b := loggingRouter(t)
-		g.GET("/", func(c *gin.Context) { c.Status(204) })
+		g.GET("/", func(c *gin.Context) { c.Status(500) })
 		r := httptest.NewRequest("GET", "/", nil)
 		r.Header.Set("X-Request-ID", id)
 		g.ServeHTTP(httptest.NewRecorder(), r)
 		rows := b.rows(t)
 		if len(rows) != 1 {
-			t.Fatal("missing access")
+			t.Fatal("missing failure access log")
 		}
 		if _, ok := rows[0]["client_request_id"]; ok {
 			t.Error("invalid identity retained")
@@ -213,7 +225,7 @@ func TestLoggingRecovery(t *testing.T) {
 			g.ServeHTTP(w, httptest.NewRequest("GET", "/panic", nil))
 			rows := b.rows(t)
 			want := 2
-			if kind == "abort" {
+			if kind == "abort" || kind == "written" || kind == "broken_pipe" {
 				want = 1
 			}
 			if len(rows) != want {
@@ -291,8 +303,8 @@ func TestLoggingHTTPStreaming(t *testing.T) {
 		}
 	})
 	g.ServeHTTP(&streamWriter{header: http.Header{}, conn: left, reader: rw}, httptest.NewRequest("GET", "/hijack", nil))
-	if len(b.rows(t)) != 2 {
-		t.Error("stream access count")
+	if len(b.rows(t)) != 0 {
+		t.Error("successful streaming request emitted access log")
 	}
 }
 func TestLoggingHTTPDebugRoutes(t *testing.T) {
@@ -359,8 +371,8 @@ func TestLoggingHTTPDebugRoutes(t *testing.T) {
 						routeCount++
 					}
 				}
-				if accessCount != 1 {
-					t.Error("warn root suppressed access")
+				if accessCount != 0 {
+					t.Error("successful request emitted access log")
 				}
 				if routes && routeCount == 0 {
 					t.Error("requested route listing missing")

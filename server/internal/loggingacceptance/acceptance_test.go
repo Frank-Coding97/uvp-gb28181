@@ -195,7 +195,6 @@ func runAcceptance(t *testing.T, root, binary, mode string) {
 		event  string
 		fields map[string]any
 	}{
-		{"http.access", map[string]any{"request_id": normal.ID, "http_status": float64(200)}},
 		{"http.access", map[string]any{"request_id": blocked.ID, "http_status": float64(200)}},
 		{"acceptance.http.completed", map[string]any{"request_id": blocked.ID}},
 		{"casbin.permission.denied", map[string]any{"request_id": forbidden.ID, "level": "warn"}},
@@ -238,7 +237,7 @@ func runAcceptance(t *testing.T, root, binary, mode string) {
 	if !hasAcceptanceEvent(rows, "scheduler.acceptance.canceled", map[string]any{"job_id": jobID}) && !hasAcceptanceEvent(rows, "scheduler.acceptance.completed", map[string]any{"job_id": jobID}) {
 		t.Error("actual executor terminal event missing")
 	}
-	for _, id := range []string{normal.ID, business.ID, slow.ID, panicked.ID, blocked.ID} {
+	for _, id := range []string{business.ID, slow.ID, panicked.ID, blocked.ID} {
 		count := 0
 		for _, row := range rows {
 			if row["event"] == "http.access" && row["request_id"] == id {
@@ -249,8 +248,11 @@ func runAcceptance(t *testing.T, root, binary, mode string) {
 			}
 		}
 		if count != 1 {
-			t.Errorf("access records for %s=%d, want one", id, count)
+			t.Errorf("diagnostic access records for %s=%d, want one", id, count)
 		}
+	}
+	if hasAcceptanceEvent(rows, "http.access", map[string]any{"request_id": normal.ID}) {
+		t.Error("ordinary successful request emitted an access record")
 	}
 	raw, err := os.ReadFile(logPath)
 	if err != nil {
@@ -341,7 +343,7 @@ func writeAcceptanceConfig(t *testing.T, root, dir, address, logPath, mode strin
 		"safe.loginlockthreshold": 0, "captcha.open": false, "httpserver.port": address,
 		"token.jwttokensignkey": "isolated-logging-acceptance-signing-key-832562", "token.isCache": false,
 		"logs.filepath": logPath, "logs.textformat": "json", "logs.stdoutformat": "json", "logs.level": "warn",
-		"logs.modules": map[string]any{"access": "info", "http": "info", "scheduler": "info", "lifecycle": "info", "acceptance": "info"},
+		"logs.modules": map[string]any{"access": "warn", "http": "info", "scheduler": "info", "lifecycle": "info", "acceptance": "info"},
 		"logs.routes":  false, "logs.console": false, "logs.outputs": []any{"file", "stdout"},
 		"gormv2.mysql.slowthreshold": 1, "gormv2.mysql.isopenreaddb": 0,
 		"gb28181.zlm.host": "", "gb28181.zlm.secret": "", "gb28181.trace.enabled": false,

@@ -80,9 +80,26 @@ http {
     uwsgi_temp_path       "@ROOT@/run/nginx-uwsgi";
     scgi_temp_path        "@ROOT@/run/nginx-scgi";
 
-    log_format uvp '$remote_addr - [$time_local] "$request" $status $body_bytes_sent '
-                   '"$http_referer" "$http_user_agent" rt=$request_time';
-    access_log "@ROOT@/logs/nginx-access.log" uvp;
+    map $status $uvp_access_status_failed {
+        ~^[23] 0;
+        default 1;
+    }
+    map $request_time $uvp_access_slow {
+        ~^[1-9] 1;
+        default 0;
+    }
+    map "$uvp_access_status_failed:$uvp_access_slow" $uvp_access_loggable {
+        default 1;
+        "0:0" 0;
+    }
+    map $upstream_http_x_request_id $uvp_log_request_id {
+        ""      $request_id;
+        default $upstream_http_x_request_id;
+    }
+    log_format uvp '$remote_addr - [$time_local] "$request_method $uri $server_protocol" '
+                   '$status $body_bytes_sent rt=$request_time upstream=$upstream_response_time '
+                   'rid=$uvp_log_request_id';
+    access_log "@ROOT@/logs/nginx-access.log" uvp if=$uvp_access_loggable;
 
     keepalive_timeout  65;
     server_tokens off;

@@ -77,6 +77,35 @@ func TestRenderBothTemplates(t *testing.T) {
 		})
 	}
 }
+
+func TestAccessLogTemplatesFilterNormalRequestsAndQueries(t *testing.T) {
+	for _, platform := range []string{"standalone", "standalone-windows", "compose/nginx"} {
+		t.Run(platform, func(t *testing.T) {
+			raw, err := os.ReadFile(filepath.Join("../../../deploy", platform, "nginx.conf.template"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			template := string(raw)
+			for _, required := range []string{
+				"map $status $uvp_access_status_failed",
+				"map $request_time $uvp_access_slow",
+				`map "$uvp_access_status_failed:$uvp_access_slow" $uvp_access_loggable`,
+				`"$request_method $uri $server_protocol"`,
+				"if=$uvp_access_loggable",
+			} {
+				if !strings.Contains(template, required) {
+					t.Errorf("access log template missing %q", required)
+				}
+			}
+			for _, unsafe := range []string{`"$request"`, `"$http_referer"`} {
+				if strings.Contains(template, unsafe) {
+					t.Errorf("access log template includes unsafe value %q", unsafe)
+				}
+			}
+		})
+	}
+}
+
 func fixture(t *testing.T) *Manager {
 	t.Helper()
 	root := t.TempDir()
