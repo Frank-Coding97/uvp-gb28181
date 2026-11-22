@@ -147,7 +147,7 @@
             >发布于 {{ formatTime(update.manifest.published_at) }}</span
           >
         </div>
-        <div class="release-notes-inline">{{ update.manifest.release_notes || "该版本未提供更新说明" }}</div>
+        <ReleaseNotes class="release-notes-inline" :text="update.manifest.release_notes" />
         <a-space wrap
           ><a-button
             v-if="canManage"
@@ -299,7 +299,7 @@
           }}</a-descriptions-item></a-descriptions
         >
         <h3 class="drawer-section-title">版本更新说明</h3>
-        <p class="release-notes-text">{{ selectedTask.release_notes || "该版本未提供更新说明" }}</p>
+        <ReleaseNotes class="release-notes-text" :text="selectedTask.release_notes" />
         <template v-if="selectedTask.error"
           ><h3 class="drawer-section-title">诊断日志</h3>
           <pre class="diagnostic-log">{{ selectedTask.error }}</pre>
@@ -315,8 +315,8 @@
       ><template #title>版本更新说明</template>
       <h2 class="release-version">v{{ releaseNotesDetail.version }}</h2>
       <p v-if="releaseNotesDetail.publishedAt" class="upgrade-caption">发布于 {{ formatTime(releaseNotesDetail.publishedAt) }}</p>
-      <p class="release-notes-text">{{ releaseNotesDetail.notes || "该版本未提供更新说明" }}</p></a-drawer
-    >
+      <ReleaseNotes class="release-notes-text" :text="releaseNotesDetail.notes"
+    /></a-drawer>
     <a-drawer
       class="uvp-system-drawer"
       :visible="migrationDetailsVisible"
@@ -359,6 +359,7 @@ import {
 import { hasPermission } from "@/hooks/usePermission";
 import { useUpgradeNotice, invalidateUpgradeNotice } from "@/hooks/useUpgradeNotice";
 import { APP_BUILD_ID, APP_VERSION, checkRuntimeBuildIdentity } from "@/config/version";
+import ReleaseNotes from "./ReleaseNotes.vue";
 import UpgradeProgress, { type ProgressDisplay, type UploadTransfer } from "./UpgradeProgress.vue";
 
 const canManage = computed(() => hasPermission("system:upgrade:manage"));
@@ -1546,10 +1547,6 @@ onUnmounted(() => {
   max-height: 180px;
   margin: 18px 0;
   overflow-y: auto;
-  line-height: 1.8;
-  color: var(--color-text-2);
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
 }
 .package-details {
   margin-top: 20px;
@@ -1570,15 +1567,17 @@ onUnmounted(() => {
   font-size: 12px;
   color: var(--color-text-4);
 }
-.task-hint,
 .release-notes-text {
   line-height: 1.8;
   color: var(--color-text-2);
   overflow-wrap: anywhere;
-  white-space: pre-wrap;
 }
 .task-hint {
   margin: 16px 0;
+  line-height: 1.8;
+  color: var(--color-text-2);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 .task-descriptions :deep(.arco-descriptions-table) {
   width: 100%;

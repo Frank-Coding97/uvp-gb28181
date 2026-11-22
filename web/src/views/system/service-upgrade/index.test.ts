@@ -802,6 +802,30 @@ describe("service upgrade page", () => {
     wrapper.unmount();
   });
 
+  // 回归：发布清单里的说明是 Markdown 列表，此前整段当纯文本渲染，
+  // 界面上直接露出「- **录像中心**：…」的原始标记。
+  it("待升级版本的说明按列表渲染，不再露出 Markdown 标记", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    const vm = wrapper.vm as any;
+    vm.update = {
+      manifest: {
+        version: "1.1.26",
+        release_notes: "- **录像中心**：左侧菜单新增「录像中心」。\n- 对讲支持 G.711U。"
+      },
+      artifact: { filename: "uvp-gb28181-linux-amd64-1.1.26.tar.gz", sha256: "a".repeat(64) },
+      hasUpdate: true
+    };
+    await flushPromises();
+
+    const items = wrapper.findAll(".release-notes-inline .release-notes-list li");
+    expect(items).toHaveLength(2);
+    expect(items[0].find("strong").text()).toBe("录像中心");
+    expect(items[0].text()).toBe("录像中心：左侧菜单新增「录像中心」。");
+    expect(wrapper.get(".release-notes-inline").text()).not.toContain("**");
+    wrapper.unmount();
+  });
+
   it("任务详情沿用系统抽屉和详情表格样式", async () => {
     const task = { task_id: "detail-style", version: "1.1.6", phase: "backing_up", committed: false };
     api.getStatus.mockResolvedValue({ data: { ...status(), tasks: [task] } });
