@@ -50,6 +50,9 @@ type RefreshBatch = {
   statsQuery: TraceSessionQuery;
 };
 
+// ⛔「传输保活」默认不出现在列表/统计里（后端查询层统一排除，老板 2026-11-22 要求）：
+// 它是 TCP 长连接的空包，没有 SIP 报文内容，却每条都自成一条会话，会把真实信令挤掉。
+// 这个选项必须留着 —— 选它就是「我就是要看空包」，后端见到该业务码才不排除。
 const businessCodeOptions: Array<{ value: TraceBusinessCode; label: string }> = [
   { value: "register", label: "注册" },
   { value: "keepalive", label: "心跳保持" },

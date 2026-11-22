@@ -63,6 +63,21 @@ func legacyMethodFallbacks(code BusinessCode) []string {
 	}
 }
 
+// excludeTransportKeepalive 默认把「传输保活」空包挡在查询外。
+//
+// 传输保活是 TCP 长连接上的纯空白载荷（正文只有 CRLF，没有起始行/头域），
+// 它没有 Call-ID ⇒ 每条都自成一条会话，数量随保活周期线性增长，
+// 真实信令会被整屏挤掉（老板 2026-11-22 要求默认不展示）。
+// ⛔ 只在读取侧过滤，采集侧照旧落库：显式按业务类型筛「传输保活」时仍要查得到，
+// 否则排查长连接保活（设备掉线、中间 NAT 超时）就没了原始证据。
+// ⛔ 不要改成「入库就丢」——历史数据还在，且丢了对排障不可逆。
+func excludeTransportKeepalive(query *gorm.DB, code BusinessCode, table string) *gorm.DB {
+	if code == BusinessTransportKeepalive {
+		return query
+	}
+	return query.Where(table+".business_code <> ?", string(BusinessTransportKeepalive))
+}
+
 func applyBusinessCodeFilter(query *gorm.DB, code BusinessCode, table string) *gorm.DB {
 	if code == "" {
 		return query
@@ -113,6 +128,7 @@ func applyMessageFilter(db *gorm.DB, filter MessageFilter) (*gorm.DB, error) {
 		db = db.Where("status_code >= ? AND status_code <= ?", min, max)
 	}
 	db = applyBusinessCodeFilter(db, filter.BusinessCode, "gb_sip_trace_message")
+	db = excludeTransportKeepalive(db, filter.BusinessCode, "gb_sip_trace_message")
 	db = applyTraceKeywordFilter(db, filter.Keyword, "gb_sip_trace_message")
 	return db, nil
 }
@@ -299,6 +315,7 @@ func applySessionFilter(query *gorm.DB, filter SessionFilter, from, to time.Time
 	if filter.CallID != "" {
 		query = query.Where("call_id = ?", filter.CallID)
 	}
+	query = excludeTransportKeepalive(query, filter.BusinessCode, "gb_sip_trace_message")
 	query = applyTraceKeywordFilter(query, filter.Keyword, "gb_sip_trace_message")
 	return query
 }

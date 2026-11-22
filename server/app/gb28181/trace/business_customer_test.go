@@ -367,13 +367,27 @@ func TestTransportEventsWithoutCallIDRemainSeparateAndFilterable(t *testing.T) {
 	store, err := NewRelationalStore(db)
 	require.NoError(t, err)
 	at := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)
-	events := []StoredEvent{testRelationalEvent("transport-event-a", at, "device-a", "", "", 0), testRelationalEvent("transport-event-b", at.Add(time.Second), "device-a", "", "", 0)}
+	events := []StoredEvent{
+		testRelationalEvent("transport-event-a", at, "device-a", "", "", 0),
+		testRelationalEvent("transport-event-b", at.Add(time.Second), "device-a", "", "", 0),
+		testRelationalEvent("transport-event-c", at.Add(2*time.Second), "device-a", "", "", 0),
+	}
 	events[0].BusinessCode, events[0].BusinessType = BusinessTransportKeepalive, "传输保活"
 	events[1].BusinessCode, events[1].BusinessType = BusinessSTUNBinding, "STUN探测"
+	events[2].BusinessCode, events[2].BusinessType = BusinessUnknown, "未知业务"
 	require.NoError(t, store.InsertBatch(t.Context(), events))
+
+	// 契约一：没有 Call-ID 的报文各自独立成会话，不会被并成一条。
+	// 契约二：传输保活默认不出现在列表里（老板 2026-11-22 要求），
+	//        剩下两条仍然是两条独立会话。
 	sessions, err := store.ListSessions(t.Context(), SessionFilter{From: at.Add(-time.Minute), To: at.Add(time.Minute), Limit: 10})
 	require.NoError(t, err)
 	require.Len(t, sessions, 2)
+	for _, item := range sessions {
+		require.NotEqual(t, BusinessTransportKeepalive, item.BusinessCode)
+	}
+
+	// 契约三：显式按业务类型筛「传输保活」时仍查得到（采集侧没有丢数据）。
 	filtered, err := store.ListSessions(t.Context(), SessionFilter{From: at.Add(-time.Minute), To: at.Add(time.Minute), BusinessCode: BusinessTransportKeepalive, Limit: 1})
 	require.NoError(t, err)
 	require.Len(t, filtered, 1)
