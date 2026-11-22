@@ -70,8 +70,9 @@ onBeforeUnmount(() => {
 
 const columns = [
   { title: "#", slotName: "idx", width: 52, align: "center" as const },
-  { title: "业务类型", slotName: "business", width: 118 },
-  { title: "起始方法", slotName: "method", width: 92 },
+  { title: "业务类型", slotName: "business", width: 128 },
+  // 92 太少：单元格左右各 16px 内边距，剩下的宽度放不下 REGISTER（8 个等宽字符会折成两行）
+  { title: "起始方法", slotName: "method", width: 112 },
   { title: "From 国标 ID", slotName: "from", width: 164 },
   { title: "To 国标 ID", slotName: "to", width: 164 },
   { title: "Source", slotName: "source", ellipsis: true, tooltip: true, width: 174 },
@@ -79,7 +80,7 @@ const columns = [
   { title: "报文数", slotName: "msgs", width: 76, align: "center" as const },
   { title: "起止时间", slotName: "time", width: 176 },
   { title: "时长", slotName: "duration", width: 84 },
-  { title: "状态", slotName: "state", width: 100, align: "center" as const }
+  { title: "状态", slotName: "state", width: 108, align: "center" as const }
 ];
 
 function firstMethod(session: TraceSession): string {
@@ -283,6 +284,7 @@ function methodTone(method: string): string {
 
 .method-chip {
   display: inline-flex;
+  flex: none;
   align-items: center;
   justify-content: center;
   height: 22px;
@@ -290,6 +292,7 @@ function methodTone(method: string): string {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
   font-weight: 600;
+  white-space: nowrap;
   border-radius: 4px;
 }
 .chip-success {
@@ -324,6 +327,7 @@ function methodTone(method: string): string {
   padding: 0 10px;
   font-size: 11px;
   font-weight: 500;
+  white-space: nowrap;
   border-radius: 11px;
 }
 .state-success {
