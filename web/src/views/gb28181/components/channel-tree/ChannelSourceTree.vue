@@ -135,9 +135,6 @@ const loaded = ref<Record<SourceView, boolean>>({
 });
 const loading = ref(false);
 const error = ref("");
-const onlineDeviceTotal = ref(0);
-const offlineDeviceTotal = ref(0);
-const deviceStatsLoaded = ref(false);
 const devicePage = ref(1);
 const devicePageSize = 50;
 const deviceListTotal = ref(0);
@@ -442,28 +439,6 @@ function deviceListParams(page = devicePage.value) {
   return { ...(q ? { q } : {}), ...(status ? { status } : {}), page, pageSize: devicePageSize };
 }
 
-async function updateDeviceTotals(response: any) {
-  if (typeof response.data?.onlineTotal === "number" && typeof response.data?.offlineTotal === "number") {
-    onlineDeviceTotal.value = response.data.onlineTotal;
-    offlineDeviceTotal.value = response.data.offlineTotal;
-    deviceStatsLoaded.value = true;
-    return;
-  }
-  try {
-    const q = appliedDeviceKeyword.value || undefined;
-    const [onlineResponse, offlineResponse] = await Promise.all([
-      listDevices({ ...(q ? { q } : {}), status: "online", page: 1, pageSize: 1 }),
-      listDevices({ ...(q ? { q } : {}), status: "offline", page: 1, pageSize: 1 })
-    ]);
-    if (onlineResponse.code !== 0 || offlineResponse.code !== 0) return;
-    onlineDeviceTotal.value = onlineResponse.data?.total || 0;
-    offlineDeviceTotal.value = offlineResponse.data?.total || 0;
-    deviceStatsLoaded.value = true;
-  } catch {
-    return;
-  }
-}
-
 function preserveNodeState(nextNodes: SourceTreeNode[], previousNodes: SourceTreeNode[], keepChildren = false) {
   const previousByKey = new Map(previousNodes.map(node => [node.key, node]));
   return nextNodes.map(node => {
@@ -506,7 +481,6 @@ async function loadRoot(nextView: SourceView = view.value, force = false, silent
       const response = await listDevices(deviceListParams());
       const devices = responseList<DeviceVO>(response);
       deviceListTotal.value = response.data?.total || 0;
-      await updateDeviceTotals(response);
       const maxPage = Math.max(1, Math.ceil(deviceListTotal.value / devicePageSize));
       if (devicePage.value > maxPage) {
         devicePage.value = maxPage;
@@ -1079,19 +1053,11 @@ defineExpose({ openFavoriteDialogForChannels });
       </div>
     </a-spin>
     <div
-      v-if="view === 'devices' && deviceStatsLoaded"
+      v-if="view === 'devices' && deviceListTotal > 0"
       class="tree-pagination uvp-pagination-bar"
       :aria-label="`共 ${deviceListTotal} 台设备`"
     >
       <span class="device-total">共 {{ deviceListTotal }} 台</span>
-      <span
-        v-if="deviceStatsLoaded"
-        class="tree-summary"
-        :aria-label="`设备状态：在线 ${onlineDeviceTotal} 台，离线 ${offlineDeviceTotal} 台`"
-      >
-        <span><i class="summary-dot online" aria-hidden="true" />在线 {{ onlineDeviceTotal }}</span>
-        <span><i class="summary-dot offline" aria-hidden="true" />离线 {{ offlineDeviceTotal }}</span>
-      </span>
       <a-pagination
         v-if="deviceListTotal > devicePageSize"
         simple
@@ -1200,9 +1166,7 @@ defineExpose({ openFavoriteDialogForChannels });
   color: var(--uvp-text-secondary);
 }
 .tree-head,
-.tree-head-actions,
-.tree-summary,
-.tree-summary span {
+.tree-head-actions {
   display: flex;
   align-items: center;
 }
@@ -1228,30 +1192,6 @@ defineExpose({ openFavoriteDialogForChannels });
   font-size: 10px;
   font-weight: 500;
   color: var(--uvp-text-tertiary);
-}
-.tree-summary {
-  gap: 10px;
-  font-size: 11px;
-  color: var(--uvp-text-tertiary);
-  white-space: nowrap;
-}
-.tree-summary span {
-  gap: 5px;
-}
-.summary-dot {
-  display: inline-block;
-  flex: 0 0 8px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-.summary-dot.online {
-  background: #10b981;
-  box-shadow: 0 0 0 2px rgb(16 185 129 / 12%);
-}
-.summary-dot.offline {
-  background: #ef4444;
-  box-shadow: 0 0 0 2px rgb(239 68 68 / 10%);
 }
 .tree-head-actions {
   gap: 2px;
@@ -1815,7 +1755,7 @@ defineExpose({ openFavoriteDialogForChannels });
 .tree-pagination {
   display: flex;
 
-  /* 不能写死 flex-basis：窄栏里「共 N 台 + 在线/离线 + 分页器」会换行，
+  /* 不能写死 flex-basis：窄栏里「共 N 台 + 分页器」会换行，
      锁死 38px 会把第二行裁掉 */
   flex: 0 0 auto;
   flex-wrap: wrap;

@@ -153,14 +153,15 @@ describe("ChannelSourceTree", () => {
     expect(wrapper.find("[data-test=source-view-administrative] .lucide-map-pin").exists()).toBe(true);
     expect(wrapper.find("[data-test=source-view-department] .lucide-folder").exists()).toBe(true);
     expect(wrapper.find("[data-test=source-view-favorites] .lucide-star").exists()).toBe(true);
-    // 头部与「设备列表」页的 .directory-head 同构：有标题；设备总数仍只出现在分页器，
-    // 头部不许重复（下面两条 device-total 的断言就是守这个）。
+    // 头部与「设备列表」页的 .directory-head 同构：有标题；设备总数只出现在底部条，
+    // 头部不许重复（下面 device-total 的断言就是守这个）。
     expect(wrapper.get(".tree-title").text()).toBe("设备目录");
     expect(wrapper.find(".tree-head .lucide-router").exists()).toBe(false);
     expect(wrapper.find(".tree-head .device-total").exists()).toBe(false);
     expect(wrapper.get(".tree-pagination .device-total").text()).toBe("共 120 台");
-    expect(wrapper.get(".tree-summary").text()).toContain("在线 1");
-    expect(wrapper.get(".tree-summary").text()).toContain("离线 119");
+    // 在线/离线数量已从底部撤掉（老板 2026-11-22：底部放它不合适，顶部又太挤）：
+    // 树里每行右侧本来就有状态点，筛选面板也能按在线/离线过滤，这排数字只占高度。
+    expect(wrapper.find(".tree-summary").exists()).toBe(false);
     expect(wrapper.get("[data-test=device-filter-toggle]").attributes("aria-expanded")).toBe("false");
     // 搜索框常显（与设备列表页的「搜索目录」同构），筛选面板只负责设备状态
     expect(wrapper.find("[data-test=device-search]").exists()).toBe(true);
