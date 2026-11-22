@@ -578,8 +578,14 @@ async function loadNodeChildren(node: SourceTreeNode) {
 
 async function toggle(node: SourceTreeNode) {
   if (!node.hasChildren) return;
+  const key = node.key;
   if (!node.expanded) await loadNodeChildren(node);
-  node.expanded = !node.expanded;
+  // 拉子节点期间树可能被静默刷新重建过 ⇒ 按 key 取回当前对象再翻状态，
+  // 否则这次点击会落在一个已经不在渲染树里的旧对象上，看起来就是「点了没反应」。
+  const fresh = findNodeByKey(currentTree.value, key);
+  if (!fresh || !fresh.hasChildren) return;
+  if (!fresh.loaded) await loadNodeChildren(fresh);
+  fresh.expanded = !fresh.expanded;
 }
 
 /**
@@ -740,12 +746,37 @@ function findNodePath(
   return null;
 }
 
-/** 自上而下把路径展开：目录的静态子节点是现成的，只有设备需要真去拉一次通道。 */
+function findNodeByKey(nodes: SourceTreeNode[], key: string): SourceTreeNode | null {
+  for (const node of nodes) {
+    if (node.key === key) return node;
+    const found = findNodeByKey(node.children, key);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * 自上而下把路径展开：目录的静态子节点是现成的，只有设备需要真去拉一次通道。
+ *
+ * ⛔ 全程按 **key** 重新取节点，不要图省事直接改传进来的那个对象。
+ *    每次拉子节点都要等一次网络，而 10 秒一次的静默刷新（`refresh`）会在等待期间
+ *    把整棵树重建一遍（所有节点对象换成新的）。这时拿着旧对象写 `expanded`，
+ *    等于写在一份已经不在渲染树里的副本上 —— 现象就是「带着通道进来，只展开到省/市，
+ *    设备节点仍然是折叠的」。等待期间被重建过（`loaded` 又变回 false）就再拉一次。
+ */
 async function expandTreePath(path: SourceTreeNode[]) {
-  for (const node of path) {
-    if (!node.hasChildren) continue;
-    if (!node.loaded) await loadNodeChildren(node);
-    node.expanded = true;
+  for (const target of path) {
+    const key = target.key;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const node = findNodeByKey(currentTree.value, key);
+      if (!node || !node.hasChildren) break;
+      if (!node.loaded) await loadNodeChildren(node);
+      const fresh = findNodeByKey(currentTree.value, key);
+      if (!fresh) break;
+      if (!fresh.loaded && attempt < 2) continue;
+      fresh.expanded = true;
+      break;
+    }
   }
 }
 
@@ -770,6 +801,12 @@ async function revealChannelInTree(request: { channelId: number; deviceCode?: st
       await expandTreePath(devicePath);
       if (token !== revealToken) return;
       path = findNodePath(currentTree.value, isTargetChannel);
+      // 设备刚拉回来就撞上静默刷新时，子节点可能又被换掉了，等一拍再补找一次。
+      if (!path) {
+        await nextTick();
+        if (token !== revealToken) return;
+        path = findNodePath(currentTree.value, isTargetChannel);
+      }
     }
   }
   if (!path) return;

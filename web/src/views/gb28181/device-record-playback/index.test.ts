@@ -29,6 +29,7 @@ function hasRuleBlock(source: string, selector: string, ...declarations: string[
 }
 
 const api = vi.hoisted(() => ({
+  getChannel: vi.fn(),
   getRecordQueryOptions: vi.fn(),
   queryDeviceRecords: vi.fn(),
   createPlaybackSession: vi.fn(),
@@ -214,6 +215,10 @@ describe("device record playback workspace", () => {
     sessionStorage.clear();
     api.routerPush.mockReset();
     messageError.mockReset();
+    api.getChannel.mockResolvedValue({
+      code: 0,
+      data: { id: 31, deviceId: "34020000002000000001", channelId: "34020000001320000001", name: "东门出入口", status: 1 }
+    });
     api.getRecordQueryOptions.mockResolvedValue({
       code: 0,
       data: {
@@ -551,11 +556,14 @@ describe("device record playback workspace", () => {
 
   // 从通道列表点「录像」进来时，树停在省市级、目标通道根本不在 DOM 里 ——
   // 只传 selectedChannelId 等于「高亮一个看不见的行」。所以还要把通道本身交给树去展开。
+  // ⛔ 设备编码不能等「录像查询配置」：那个接口慢的现场要好几秒才回，等它等于
+  //    让用户在折叠的设备节点前面干等。这里把它钉成永不返回，编码照样必须到位。
   it("把当前通道交给左侧树，让它默认展开到这一路", async () => {
+    api.getRecordQueryOptions.mockImplementation(() => new Promise(() => undefined));
     const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
     await flushPromises();
 
-    // 通道主键先到，设备国标编码要等查询条件回来才补上；树认最后一次。
+    expect(api.getChannel).toHaveBeenCalledWith(31);
     expect(JSON.parse(wrapper.get('[data-testid="channel-tree-stub"]').attributes("data-reveal") || "null")).toEqual({
       channelId: 31,
       deviceCode: "34020000002000000001"

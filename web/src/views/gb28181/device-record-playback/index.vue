@@ -15,6 +15,7 @@ import {
   Videotape
 } from "@lucide/vue";
 import {
+  getChannel,
   getRecordQueryOptions,
   queryDeviceRecords,
   type RecordQueryItem,
@@ -69,10 +70,18 @@ const currentChannelId = ref(parsePlaybackChannelId(route.params.channelId) || p
 const channelId = computed(() => currentChannelId.value);
 const playbackChannelId = channelId;
 const recordTreeSelectedId = computed(() => (currentChannelId.value > 0 ? currentChannelId.value : null));
+// 当前通道所属设备的国标编码，专供左侧树「展开到这一路」用（见 loadRevealDeviceCode）。
+const revealDeviceCode = ref("");
 // 树默认展开到当前通道：主键先到，设备国标编码要等查询条件回来，所以这里会从
 // `{channelId}` 变成 `{channelId, deviceCode}` 一次，树那边认最后一次。
+// 编码优先用「单独取的」（见 loadRevealDeviceCode），查询配置里的作兜底。
 const recordTreeReveal = computed<{ channelId: number; deviceCode?: string } | null>(() =>
-  currentChannelId.value > 0 ? { channelId: currentChannelId.value, deviceCode: options.value?.device?.code || undefined } : null
+  currentChannelId.value > 0
+    ? {
+        channelId: currentChannelId.value,
+        deviceCode: revealDeviceCode.value || options.value?.device?.code || undefined
+      }
+    : null
 );
 const options = ref<RecordQueryOptions | null>(null);
 const form = ref<RecordQueryForm | null>(null);
@@ -221,6 +230,30 @@ function readLastRecordIdentity() {
 function saveLastRecordIdentity(record: RecordQueryItem) {
   if (typeof window === "undefined") return;
   window.sessionStorage.setItem(`uvp:gb28181:playback:${playbackChannelId.value}`, recordIdentity(record));
+}
+
+/**
+ * 单独取一次「当前通道属于哪个设备」。
+ *
+ * 左侧树要展开到当前通道，只缺这一个国标编码；它本来藏在「录像查询配置」的返回里，
+ * 但那个接口要连设备/通道做一串校验，慢的时候好几秒才回 —— 这段时间树不知道展开谁，
+ * 用户看到的就是「进了页面设备节点还折叠着」。这里用通道主键轻量取一次，
+ * 让树不必等查询配置；失败就退回查询配置里的编码（`recordTreeReveal` 里的 `||`）。
+ */
+async function loadRevealDeviceCode() {
+  const id = currentChannelId.value;
+  if (id <= 0) {
+    revealDeviceCode.value = "";
+    return;
+  }
+  try {
+    const response = await getChannel(id);
+    // 期间又切了通道 ⇒ 丢掉这次结果，别把上一路的编码喂给树。
+    if (id !== currentChannelId.value) return;
+    revealDeviceCode.value = response.data?.deviceId || "";
+  } catch {
+    // 取不到不影响页面功能，交给查询配置兜底。
+  }
 }
 
 async function loadOptions() {
@@ -673,6 +706,9 @@ async function switchChannel(channel: { id?: number } | null) {
   channelReleasePending.value = false;
   await stopPlayback(false, false);
   currentChannelId.value = next;
+  // 先清掉上一路的编码：否则树会拿旧设备编码去找新通道，白跑一趟。
+  revealDeviceCode.value = "";
+  void loadRevealDeviceCode();
   playback.value = createPlaybackState();
   playbackMediaUrl.value = "";
   playbackSource.value = null;
@@ -704,6 +740,7 @@ watch(
 
 onMounted(() => {
   loadOptions();
+  void loadRevealDeviceCode();
 });
 onUnmounted(() => {
   queryAbort?.abort();

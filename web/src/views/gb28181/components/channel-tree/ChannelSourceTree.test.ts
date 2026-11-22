@@ -218,6 +218,35 @@ describe("ChannelSourceTree", () => {
     expect(wrapper.emitted("select")).toBeUndefined();
   });
 
+  // ⛔ 设备通道要等一次网络请求，而 10 秒一次的静默刷新会在这期间把整棵树重建
+  //    （所有节点对象换成新的）。旧实现把 `expanded` 写在被换掉的旧对象上，
+  //    现象就是「带着通道进来，只展开到省/市，设备节点仍然是折叠的」。
+  it("keeps the reveal when the tree is rebuilt while the device channels are loading", async () => {
+    let finishFirstLoad: (value: unknown) => void = () => undefined;
+    let firstLoad = true;
+    const payload = { code: 0, data: { list: [channel] } };
+    api.listChannels.mockImplementation(() => {
+      if (!firstLoad) return Promise.resolve(payload);
+      firstLoad = false;
+      return new Promise(resolve => {
+        finishFirstLoad = resolve;
+      });
+    });
+
+    const wrapper = mountTree({ revealChannel: { channelId: 11, deviceCode: "device-1" }, selectedChannelId: 11 });
+    await flushPromises();
+
+    // 通道还在路上时用户（或定时器）触发一次整树刷新
+    await wrapper.get("button.tree-refresh").trigger("click");
+    await flushPromises();
+    finishFirstLoad(payload);
+    await flushPromises();
+
+    expect(wrapper.get('[data-node-key="root:device:1"]').attributes("aria-expanded")).toBe("true");
+    expect(wrapper.get('[data-node-key="root:device:1:channel:11"]').classes()).toContain("selected");
+    wrapper.unmount();
+  });
+
   it("does not load persistent favorites for a guest, only greys the entry", async () => {
     account.permissions = ["gb28181:device:view", "gb28181:play:start"];
     const wrapper = mountTree();
