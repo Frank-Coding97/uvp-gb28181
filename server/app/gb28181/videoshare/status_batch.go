@@ -3,7 +3,6 @@ package videoshare
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"time"
 
 	"gorm.io/gorm"
@@ -34,29 +33,20 @@ func (s *Service) BatchStatus(ctx context.Context, channelIDs []uint, actorID ui
 		if err != nil {
 			return err
 		}
-		authorize := NewDatabaseAuthorizer(permission)
-		snapshots := make(map[uint]AuthorizationSnapshot, len(channelIDs))
-		seen := make(map[uint]bool, len(channelIDs))
-		allowedIDs := make([]uint, 0, len(channelIDs))
+		// ⛔ 必须用整页版授权器：逐通道版每通道都要重查 sys_users + datascope，
+		//    200 条通道在慢链路上必然撞穿上面那 2s 预算，整页列表连带 503。
+		snapshots, err := NewDatabaseBatchAuthorizer(permission)(ctx, tx, actorID, channelIDs)
+		if err != nil {
+			return err
+		}
+		if len(snapshots) == 0 {
+			return nil
+		}
+		allowedIDs := make([]uint, 0, len(snapshots))
 		now := s.now().UTC()
-		for _, id := range channelIDs {
-			if id == 0 || seen[id] {
-				continue
-			}
-			seen[id] = true
-			snapshot, err := authorize(ctx, tx, actorID, id)
-			if errors.Is(err, ErrExpired) || errors.Is(err, ErrNotFound) {
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			snapshots[id] = snapshot
+		for id := range snapshots {
 			allowedIDs = append(allowedIDs, id)
 			result[id] = StatusSummary{ServerTime: now}
-		}
-		if len(allowedIDs) == 0 {
-			return nil
 		}
 		var shares []gbmodels.GbChannelVideoShare
 		if err := tx.Select("channel_pk, enabled, activated_at, expires_at, revision, revoked_at, revoke_reason, device_pk, device_id, device_epoch").Where("channel_pk IN ?", allowedIDs).Find(&shares).Error; err != nil {

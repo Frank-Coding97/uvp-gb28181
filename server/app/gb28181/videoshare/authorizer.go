@@ -83,6 +83,106 @@ func NewDatabaseAuthorizer(check PermissionChecker) Authorizer {
 	}
 }
 
+// BatchAuthorizer is the whole-page form of Authorizer: same per-channel
+// fail-closed verdict, but the caller's identity and visibility scope are
+// resolved once instead of once per channel.
+type BatchAuthorizer func(context.Context, *gorm.DB, uint, []uint) (map[uint]AuthorizationSnapshot, error)
+
+// NewDatabaseBatchAuthorizer mirrors NewDatabaseAuthorizer for a page of
+// channels.
+//
+// ⛔ Why this exists: the single-channel authorizer re-reads sys_users and the
+// datascope for *every* channel. One page of 200 channels therefore costs
+// 400+ round trips, and on a slow link (dev machine → 220 over OpenVPN, ~90ms
+// RTT per leg) that blows straight through BatchStatus' 2s budget — the whole
+// channel list answers 503 because a decorative share badge could not be read.
+// The verdict for each channel is unchanged: same visibility scope, same
+// device-epoch / owner-department checks, same two Casbin probes.
+func NewDatabaseBatchAuthorizer(check PermissionChecker) BatchAuthorizer {
+	return func(ctx context.Context, tx *gorm.DB, actorID uint, channelPKs []uint) (map[uint]AuthorizationSnapshot, error) {
+		result := make(map[uint]AuthorizationSnapshot, len(channelPKs))
+		if actorID == 0 || tx == nil || check == nil || len(channelPKs) == 0 {
+			return result, nil
+		}
+		var user basemodels.User
+		if err := tx.WithContext(ctx).Where("id = ? AND status = ?", actorID, 1).Take(&user).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return result, nil
+			}
+			return nil, err
+		}
+		if user.ID == 0 {
+			return result, nil
+		}
+		visibility, err := videoShareVisibilityScope(ctx, user, tx)
+		if err != nil {
+			return nil, err
+		}
+		ids := make([]uint, 0, len(channelPKs))
+		seen := make(map[uint]bool, len(channelPKs))
+		for _, id := range channelPKs {
+			if id == 0 || seen[id] {
+				continue
+			}
+			seen[id] = true
+			ids = append(ids, id)
+		}
+		if len(ids) == 0 {
+			return result, nil
+		}
+		var rows []batchAuthorizedChannel
+		if err := tx.WithContext(ctx).Table("gb_channel").
+			Select("gb_channel.id AS id, gb_channel.device_id AS device_id, gb_channel.channel_id AS channel_id, "+
+				"gb_channel.owner_dept_id AS owner_dept_id, gb_device.id AS device_pk, "+
+				"gb_device.access_epoch AS device_epoch, gb_device.owner_dept_id AS device_owner_dept_id").
+			Joins("JOIN gb_device ON gb_device.device_id = gb_channel.device_id AND gb_device.deleted_at IS NULL").
+			Scopes(visibility).
+			Where("gb_channel.id IN ? AND gb_channel.deleted_at IS NULL", ids).
+			Find(&rows).Error; err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			if _, done := result[row.ID]; done {
+				continue
+			}
+			// 与单通道版逐条对齐：设备归属部门必须与通道一致，设备轮次不能为 0。
+			if row.DevicePK == 0 || row.DeviceEpoch == 0 || row.DeviceOwnerDeptID != row.OwnerDeptID {
+				continue
+			}
+			sharePath := "/api/gb28181/channel-shares/" + strconv.FormatUint(uint64(row.ID), 10)
+			playPath := "/api/gb28181/play/" + row.DeviceID + "/" + row.ChannelID
+			allowed := true
+			for _, permission := range []struct{ path, method string }{{sharePath, http.MethodPut}, {playPath, http.MethodPost}} {
+				ok, err := check(ctx, actorID, permission.path, permission.method)
+				if err != nil {
+					return nil, err
+				}
+				if !ok {
+					allowed = false
+					break
+				}
+			}
+			if !allowed {
+				continue
+			}
+			result[row.ID] = AuthorizationSnapshot{DevicePK: row.DevicePK, DeviceID: row.DeviceID, DeviceEpoch: row.DeviceEpoch}
+		}
+		return result, nil
+	}
+}
+
+// batchAuthorizedChannel 是批量授权一次性取回的通道 + 设备快照。
+// 单独定义而不是复用 GbChannel：需要把 gb_device 的列以别名映射进来。
+type batchAuthorizedChannel struct {
+	ID                uint
+	DeviceID          string
+	ChannelID         string
+	OwnerDeptID       uint
+	DevicePK          uint   `gorm:"column:device_pk"`
+	DeviceEpoch       uint64 `gorm:"column:device_epoch"`
+	DeviceOwnerDeptID uint   `gorm:"column:device_owner_dept_id"`
+}
+
 func videoShareVisibilityScope(ctx context.Context, user basemodels.User, tx *gorm.DB) (func(*gorm.DB) *gorm.DB, error) {
 	all := func(query *gorm.DB) *gorm.DB { return query }
 	if app.ConfigYml != nil {

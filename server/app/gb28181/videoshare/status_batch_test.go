@@ -175,6 +175,24 @@ func TestBatchStatusPropagatesDatabaseFailureAndCancellation(t *testing.T) {
 	require.Nil(t, states)
 }
 
+// ⛔ 一页通道必须只解析一次当前用户、只扫一次 gb_channel。
+// 逐通道版授权器每通道都要重查 sys_users + datascope：200 条通道 ≈ 400+ 次往返，
+// 在慢链路上必然撞穿 BatchStatus 的 2s 预算 ⇒ 整页通道列表连带 503（2026-11-22 现场复现）。
+func TestBatchStatusResolvesActorAndChannelsOncePerPage(t *testing.T) {
+	service, ids, _ := batchStatusFixture(t)
+	reads := map[string]int{}
+	require.NoError(t, service.db.Callback().Query().Before("gorm:query").Register("batch_count_identity", func(query *gorm.DB) {
+		reads[query.Statement.Table]++
+	}))
+	_, err := service.BatchStatus(context.Background(), ids, 7)
+	require.NoError(t, err)
+	require.NoError(t, service.db.Callback().Query().Remove("batch_count_identity"))
+	require.Equal(t, 1, reads["gb_channel"], "通道与设备必须一次批量取回，不能按通道逐条查")
+	// 2 次 = authorizer 自己查一次 + datascope.ResolveOwnerDeptAccessByUserID 内部查一次，
+	// 都与通道数无关。逐通道版在这里是 2×通道数。
+	require.LessOrEqual(t, reads["sys_users"], 2, "当前用户只解析一次，不能按通道重复查")
+}
+
 func TestStatusDistinguishesNaturalExpiryFromOtherRevocations(t *testing.T) {
 	for _, reason := range []string{"", "expired", "manual", "permission_revoked"} {
 		t.Run(reason, func(t *testing.T) {
