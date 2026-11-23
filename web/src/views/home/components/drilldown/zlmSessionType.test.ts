@@ -11,6 +11,9 @@ describe("zlmSessionTypeLabel", () => {
   it("带命名空间的类型直接查表", () => {
     expect(zlmSessionTypeLabel("mediakit::HttpSession")).toBe("HTTP 会话");
     expect(zlmSessionTypeLabel("mediakit::RtpSession")).toBe("RTP 会话");
+    // STUN/TURN 通道（二开 ZLM 的 webrtc/IceSession.hpp）曾经未收录 ⇒ 表格里露原始 C++ 类型名
+    expect(zlmSessionTypeLabel("mediakit::IceSession")).toBe("WebRTC ICE 会话");
+    expect(zlmSessionTypeLabel("IceSession")).toBe("WebRTC ICE 会话");
   });
 
   it("只给短名时补 mediakit:: 前缀（接口两种形态都要认）", () => {
@@ -51,9 +54,10 @@ describe("zlmSessionTypeLabel", () => {
     expect(zlmSessionTypeLabel("toolkit::SessionWithSSL<mediakit::HttpSession>", labels)).toBe("HTTP 专线 · TLS");
   });
 
-  it("值域锁定：兜底表恰好这 9 档 ZLM 会话类型", () => {
+  it("值域锁定：兜底表恰好这 10 档 ZLM 会话类型", () => {
     expect(Object.keys(ZLM_SESSION_TYPE_LABEL_FALLBACK).sort()).toEqual([
       "mediakit::HttpSession",
+      "mediakit::IceSession",
       "mediakit::RtmpSession",
       "mediakit::RtpSession",
       "mediakit::RtspSession",

@@ -29,6 +29,8 @@ export const ZLM_SESSION_TYPE_LABEL_FALLBACK: Readonly<Record<string, string>> =
   "mediakit::SrtSession": "SRT 会话",
   "mediakit::WebSocketSession": "WebSocket 会话",
   "mediakit::WebRtcSession": "WebRTC 会话",
+  // STUN/TURN 通道（`webrtc/IceSession.hpp`，二开 ZLM 在 icePort/iceTcpPort 上 start 的会话）
+  "mediakit::IceSession": "WebRTC ICE 会话",
   "mediakit::TcpSession": "TCP 会话",
   "mediakit::UdpSession": "UDP 会话"
 };
