@@ -198,7 +198,7 @@
                 @page-size-change="handlePageSizeChange"
               >
                 <template #columns>
-                  <a-table-column title="录像时间" :width="210">
+                  <a-table-column title="录像时间" :width="FILE_TABLE_COLUMN_WIDTHS.time">
                     <template #cell="{ record }">
                       <div :data-testid="`recording-time-${record.id}`" class="recording-time-cell mono">
                         <span><small>开始</small>{{ formatDateTime(record.startTime) }}</span>
@@ -206,10 +206,10 @@
                       </div>
                     </template>
                   </a-table-column>
-                  <a-table-column title="时长" :width="110">
+                  <a-table-column title="时长" :width="FILE_TABLE_COLUMN_WIDTHS.duration">
                     <template #cell="{ record }">{{ formatDuration(record.timeLen) }}</template>
                   </a-table-column>
-                  <a-table-column title="设备" :width="190">
+                  <a-table-column title="设备" :width="FILE_TABLE_COLUMN_WIDTHS.device">
                     <template #cell="{ record }">
                       <div class="recording-entity-cell">
                         <span>{{ record.deviceName || record.deviceId || "--" }}</span
@@ -217,7 +217,7 @@
                       </div>
                     </template>
                   </a-table-column>
-                  <a-table-column title="通道" :width="200">
+                  <a-table-column title="通道" :width="FILE_TABLE_COLUMN_WIDTHS.channel">
                     <template #cell="{ record }">
                       <div class="recording-entity-cell">
                         <span>{{ record.channelName || record.channelCode || "--" }}</span
@@ -225,30 +225,36 @@
                       </div>
                     </template>
                   </a-table-column>
-                  <a-table-column title="文件" :width="220" :ellipsis="true" :tooltip="true">
+                  <a-table-column title="文件" :width="FILE_TABLE_COLUMN_WIDTHS.file" :ellipsis="true" :tooltip="true">
                     <template #cell="{ record }">{{ record.fileName || "--" }}</template>
                   </a-table-column>
-                  <a-table-column title="大小" :width="110">
+                  <a-table-column title="大小" :width="FILE_TABLE_COLUMN_WIDTHS.size">
                     <template #cell="{ record }">{{ formatFileSize(record.fileSize) }}</template>
                   </a-table-column>
-                  <a-table-column title="节点" :width="150">
+                  <a-table-column title="节点" :width="FILE_TABLE_COLUMN_WIDTHS.node">
                     <template #cell="{ record }">{{ record.node.name || `节点 ${record.node.id}` }}</template>
                   </a-table-column>
-                  <a-table-column title="信息" :width="106">
+                  <a-table-column title="信息" :width="FILE_TABLE_COLUMN_WIDTHS.metadata">
                     <template #cell="{ record }">
                       <a-tag :color="record.metadataState === 'complete' ? 'blue' : 'orange'">
                         {{ record.metadataState === "complete" ? "完整" : "待完善" }}
                       </a-tag>
                     </template>
                   </a-table-column>
-                  <a-table-column title="状态" :width="118">
+                  <a-table-column title="状态" :width="FILE_TABLE_COLUMN_WIDTHS.availability">
                     <template #cell="{ record }">
                       <a-tag :color="availabilityPresentation(record.availability).color">
                         {{ availabilityPresentation(record.availability).label }}
                       </a-tag>
                     </template>
                   </a-table-column>
-                  <a-table-column title="操作" data-testid="recording-actions-column" :width="160" align="center" fixed="right">
+                  <a-table-column
+                    title="操作"
+                    data-testid="recording-actions-column"
+                    :width="FILE_TABLE_COLUMN_WIDTHS.actions"
+                    align="center"
+                    fixed="right"
+                  >
                     <template #cell="{ record }">
                       <div class="uvp-table-actions cloud-recording-actions">
                         <a-link
@@ -491,7 +497,33 @@ const selectedRowKeys = ref<string[]>([]);
 const deletingIds = ref(new Set<string>());
 const batchDeleting = ref(false);
 const stoppingIds = ref(new Set<string>());
-const rowSelection = computed(() => (canDelete.value ? { type: "checkbox" as const, showCheckedAll: true } : undefined));
+/*
+ * 文件表列宽真源（px）—— ⛔ 改列宽只改这里，`scroll.x` 由它求和得出。
+ *
+ * 历史坑（表现为「表头压着内容错位」）：操作列从 280 收到 160 时漏改写死的 `scroll.x`
+ * （仍是按旧列宽算的 1694），而 Arco 表头表格宽吃 `scroll.x`、表体表格宽吃实际内容宽，
+ * 两者不等 ⇒ 横向滚到右侧时表头比表体少滚（实测 72px）⇒ 表头整体压在内容右边。
+ */
+const FILE_TABLE_COLUMN_WIDTHS = {
+  time: 210,
+  duration: 110,
+  device: 190,
+  channel: 200,
+  file: 220,
+  size: 110,
+  node: 150,
+  metadata: 106,
+  availability: 118,
+  // ⛔ 不能收到 240 以下：详情/播放/下载/删除 四个 l-link（各 53px + 4px 间距）实测占 224px，
+  // 列宽不够会让行内容溢出（`white-space: nowrap`），把表体滚动宽度撑大到超过 scroll.x ⇒ 表头错位。
+  actions: 240
+} as const;
+/** 选择列宽：⛔ 必须写死，否则表头（全选框）与表体（行选框）各自按内容撑开成不同宽度。 */
+const FILE_TABLE_SELECTION_WIDTH = 48;
+const FILE_TABLE_COLUMNS_WIDTH = Object.values(FILE_TABLE_COLUMN_WIDTHS).reduce((sum, w) => sum + w, 0);
+const rowSelection = computed(() =>
+  canDelete.value ? { type: "checkbox" as const, showCheckedAll: true, width: FILE_TABLE_SELECTION_WIDTH } : undefined
+);
 const contextualNodeId = computed(() => {
   const scalar = Array.isArray(props.nodeId) ? props.nodeId[0] : props.nodeId;
   const value = typeof scalar === "number" || typeof scalar === "string" ? String(scalar).trim() : "";
@@ -517,7 +549,10 @@ const pagination = reactive({
   showPageSize: true,
   pageSizeOptions: [10, 20, 50, 100]
 });
-const fileTableScroll = computed(() => ({ x: 1694, ...(files.value.length ? { y: "100%" } : {}) }));
+const fileTableScroll = computed(() => ({
+  x: canDelete.value ? FILE_TABLE_COLUMNS_WIDTH + FILE_TABLE_SELECTION_WIDTH : FILE_TABLE_COLUMNS_WIDTH,
+  ...(files.value.length ? { y: "100%" } : {})
+}));
 const activeTableScroll = computed(() => ({
   x: "100%",
   minWidth: canStop.value ? 1222 : 1082,

@@ -141,8 +141,33 @@ describe("cloud recording layout", () => {
     expect(source).toMatch(
       /\.cloud-recordings-table-wrap\s*\{(?=[^}]*flex:\s*1;)(?=[^}]*min-height:\s*0;)(?=[^}]*overflow:\s*hidden;)[^}]*\}/s
     );
-    expect(source).toContain("x: 1694");
+    expect(source).toContain("FILE_TABLE_COLUMN_WIDTHS");
+    expect(source).toMatch(
+      /x: canDelete\.value \? FILE_TABLE_COLUMNS_WIDTH \+ FILE_TABLE_SELECTION_WIDTH : FILE_TABLE_COLUMNS_WIDTH/
+    );
     expect(source).toContain('...(files.value.length ? { y: "100%" } : {})');
+  });
+
+  it("横向滚动宽度必须与列宽同源（写死数字曾导致表头压着内容错位）", () => {
+    // 表头吃 scroll.x、表体吃实际内容宽：两者不等 ⇒ 滚到右侧时表头少滚、整体错位。
+    // 因此 scroll.x 只能由列宽真源求和得出，禁止再出现写死的 px 数字。
+    expect(source).toMatch(/const FILE_TABLE_COLUMNS_WIDTH = Object\.values\(FILE_TABLE_COLUMN_WIDTHS\)/);
+    expect(source).not.toMatch(/\bx:\s*\d{3,}/);
+    // 模板里文件表的每一列都必须引用真源，不能一处写死
+    const fileColumns = source.slice(
+      source.indexOf('title="录像时间"'),
+      source.indexOf('data-testid="recording-actions-column"')
+    );
+    const widths = [...fileColumns.matchAll(/:width="([^"]+)"/g)].map(m => m[1]);
+    expect(widths.length).toBeGreaterThanOrEqual(9);
+    expect(widths.every(w => w.startsWith("FILE_TABLE_COLUMN_WIDTHS."))).toBe(true);
+  });
+
+  it("操作列宽必须容得下四个行内按钮（列宽不足会溢出并撑大表体滚动宽度）", () => {
+    // 详情/播放/下载/删除 四个 a-link 实测 53px×4 + 4px×3 = 224px，列宽小于它就会出现
+    // 「行内容溢出 → 表体 scrollWidth 超出 scroll.x → 表头错位」。
+    const actionsWidth = Number(/actions:\s*(\d+)/.exec(source)?.[1]);
+    expect(actionsWidth).toBeGreaterThanOrEqual(224);
   });
 });
 
@@ -371,7 +396,7 @@ describe("CloudRecordings", () => {
     const wrapper = mount(CloudRecordings, { global: { stubs } });
     await flushPromises();
 
-    expect(wrapper.get("[data-testid='recording-actions-column']").attributes("width")).toBe("280");
+    expect(wrapper.get("[data-testid='recording-actions-column']").attributes("width")).toBe("240");
     expect(source).toContain('data-testid="recording-actions-column"');
     expect(source).toMatch(/data-testid="recording-actions-column"[^>]*fixed="right"/);
     expect(source).not.toMatch(/data-testid="recording-actions-column"[^>]*:fixed="isMobile \? '' : 'right'"/);
