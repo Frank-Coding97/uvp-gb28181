@@ -864,4 +864,25 @@ describe("录像缓存页骨架：必须与同仓其它分页列表页一致", (
     //    「a-link 没有 loading 所以只能用 a-button」是**错的** —— Link 有 loading/disabled。
     expect(source).not.toMatch(/<a-button[^>]*uvp-table-action/);
   });
+
+  it("横向滚动宽度必须与列宽同源（写死的 px 曾比列宽和多 50，表头压着内容错位）", () => {
+    // 表头表格宽吃 `scroll.x`、表体表格宽吃真实列宽 —— 两者不等，横向滚到右端就会逐列
+    // 错开（`fixed="right"` 的操作列贴边定位反而永远对齐，于是看起来像"只有中间列错"）。
+    // 这里曾写死 `x: 1890`，而 11 列加起来只有 1840 ⇒ 表头比表体多滚 50px。
+    expect(source).toMatch(/const RECORD_CACHE_COLUMNS_WIDTH = Object\.values\(RECORD_CACHE_COLUMN_WIDTHS\)/);
+    expect(source).not.toMatch(/\bx:\s*\d{3,}/);
+    // 每一列都必须引用真源，只要有一列写死数字，这条真源就形同虚设。
+    const columns = source.slice(source.indexOf('title="设备"'), source.indexOf('title="操作"'));
+    const widths = [...columns.matchAll(/:width="([^"]+)"/g)].map(m => m[1]);
+    expect(widths).toHaveLength(10);
+    expect(widths.every(w => w.startsWith("RECORD_CACHE_COLUMN_WIDTHS."))).toBe(true);
+    expect(hasMarkup(source, ':width="RECORD_CACHE_COLUMN_WIDTHS.actions"')).toBe(true);
+  });
+
+  it("操作列宽要容得下最挤那一行的五颗按钮（列宽不够会撑宽表体，反过来让表头错位）", () => {
+    // 详情 53 + 取消收藏 79 + 下载 53 + 分段 53 + 删除 53 = 291，加 4px×4 间隙 ≈ 307。
+    // 这是真机量 `getBoundingClientRect` 得出的，不是估的，别凭感觉往回缩。
+    const actions = Number(/actions:\s*(\d+)/.exec(source)?.[1]);
+    expect(actions).toBeGreaterThanOrEqual(307);
+  });
 });

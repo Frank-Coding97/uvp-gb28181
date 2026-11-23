@@ -21,6 +21,30 @@ import {
   type RecordCacheTask
 } from "@/api/recordCache";
 
+/*
+ * 任务表列宽真源（px）—— ⛔ 改列宽只改这里，`scroll.x` 由它求和得出。
+ *
+ * 历史坑（2026-11-23 修，与云端录像同源）：`scroll.x` 曾写死 1890，而 11 列
+ * 加起来只有 1840。Arco 的表头表格宽吃 `scroll.x`、表体表格宽吃真实列宽，
+ * 两者不等 ⇒ 横向滚到右端时表头比表体多滚 50px，中间几列逐列错位
+ * （`fixed="right"` 的操作列贴边定位，反而永远对齐，容易让人以为只有中间列错）。
+ */
+const RECORD_CACHE_COLUMN_WIDTHS = {
+  device: 180,
+  channel: 180,
+  progress: 220,
+  status: 100,
+  range: 180,
+  duration: 110,
+  size: 110,
+  speed: 80,
+  createdAt: 180,
+  expiresAt: 180,
+  actions: 320
+} as const;
+
+const RECORD_CACHE_COLUMNS_WIDTH = Object.values(RECORD_CACHE_COLUMN_WIDTHS).reduce((sum, w) => sum + w, 0);
+
 const canCancel = computed(() => hasPermission("gb28181:record-cache:cancel"));
 const canDownload = computed(() => hasPermission("gb28181:record-cache:download"));
 const canDelete = computed(() => hasPermission("gb28181:record-cache:delete"));
@@ -528,7 +552,7 @@ onMounted(() => {
         :loading="loading"
         :pagination="false"
         :bordered="false"
-        :scroll="{ x: 1890, y: '100%' }"
+        :scroll="{ x: RECORD_CACHE_COLUMNS_WIDTH, y: '100%' }"
         row-key="taskId"
       >
         <template #columns>
@@ -538,12 +562,13 @@ onMounted(() => {
                想加回来之前先想清楚：那一列会占掉 300px，等于牺牲设备/通道的可读性。 -->
 
           <!-- 「设备」和「通道」各自把**名称 + 国标编码**合成一格（上行名称、下行编码）。
-               ⛔ 编码一行都不折：20 位国标编码按 mono 字体量下来 ~168px，加内边距要 180 起步，
-                  所以这两列各留 220。名字再长就在上面那行 `ellipsis` 省略、hover 出title。
+                ⛔ 编码一行都不折：20 位国标编码按 12px mono 量下来 ~144px，加左右各 16px
+                   内边距要 176，所以这两列给 180（再窄编码就会把列撑开，进而撑宽整个表体）。
+                   名字再长就在上面那行 `ellipsis` 省略、hover 出title。
                ⛔ 通道那一格取的是 `channelCode`，**不是** `channelId` ——
                   `channelId` 是库里的自增主键（31 这种），在设备侧根本不存在这个号，
                   设备面板上的通道编码是 `channelCode`。同理设备那一格是 `deviceId`。 -->
-          <a-table-column title="设备" :width="180">
+          <a-table-column title="设备" :width="RECORD_CACHE_COLUMN_WIDTHS.device">
             <template #cell="{ record }">
               <div class="record-cache-cell record-cache-cell--stack">
                 <span class="record-cache-cell__title" :title="record.deviceName || record.deviceId">
@@ -554,7 +579,7 @@ onMounted(() => {
             </template>
           </a-table-column>
 
-          <a-table-column title="通道" :width="180">
+          <a-table-column title="通道" :width="RECORD_CACHE_COLUMN_WIDTHS.channel">
             <template #cell="{ record }">
               <div class="record-cache-cell record-cache-cell--stack">
                 <span class="record-cache-cell__title" :title="record.channelName || record.channelCode">
@@ -565,7 +590,7 @@ onMounted(() => {
             </template>
           </a-table-column>
 
-          <a-table-column title="进度" :width="220">
+          <a-table-column title="进度" :width="RECORD_CACHE_COLUMN_WIDTHS.progress">
             <template #cell="{ record }">
               <div class="record-cache-cell record-cache-cell--stack">
                 <div class="record-cache-progress" :data-state="record.state">
@@ -598,7 +623,7 @@ onMounted(() => {
             </template>
           </a-table-column>
 
-          <a-table-column title="状态" :width="100">
+          <a-table-column title="状态" :width="RECORD_CACHE_COLUMN_WIDTHS.status">
             <template #cell="{ record }">
               <a-tag :color="stateColor(record.state)" size="small">{{ stateText(record.state) }}</a-tag>
             </template>
@@ -606,7 +631,7 @@ onMounted(() => {
 
           <!-- 录像区间只有"起 / 至"两行时间戳，内容宽度是固定的（`2026-10-06 12:53:49`），
                290 是当初随手给的富余值，实际只需 ~230 就不会折行。 -->
-          <a-table-column title="录像区间" :width="180">
+          <a-table-column title="录像区间" :width="RECORD_CACHE_COLUMN_WIDTHS.range">
             <template #cell="{ record }">
               <div class="record-cache-cell record-cache-cell--stack">
                 <span>{{ formatTime(record.startTime) }}</span>
@@ -619,14 +644,14 @@ onMounted(() => {
                跟「进度」列里那个"已缓存 / 总时长"是两回事：那一行比的是进度，
                这里要能一眼读出"这段有多长"（挑缓存哪段、估算占多大空间都靠它）。
                ⛔ 别改成 `endTime - startTime` 现算：跨天的段会算错，且后端已有权威值。 -->
-          <a-table-column title="时长" :width="110">
+          <a-table-column title="时长" :width="RECORD_CACHE_COLUMN_WIDTHS.duration">
             <template #cell="{ record }">{{ formatDuration(record.totalSeconds) }}</template>
           </a-table-column>
-          <a-table-column title="大小" :width="110">
+          <a-table-column title="大小" :width="RECORD_CACHE_COLUMN_WIDTHS.size">
             <template #cell="{ record }">{{ formatByteSize(record.cachedBytes) }}</template>
           </a-table-column>
 
-          <a-table-column title="倍速" :width="80">
+          <a-table-column title="倍速" :width="RECORD_CACHE_COLUMN_WIDTHS.speed">
             <template #cell="{ record }">{{ record.downloadSpeed }}×</template>
           </a-table-column>
 
@@ -634,11 +659,11 @@ onMounted(() => {
                判断依据，却要占 110px。人挪进「详情」弹窗（那里有完整时间线）。
                ⛔ 别只注释掉留一坨死模板 —— 想加回来按 need 重新写。 -->
 
-          <a-table-column title="创建时间" :width="180">
+          <a-table-column title="创建时间" :width="RECORD_CACHE_COLUMN_WIDTHS.createdAt">
             <template #cell="{ record }">{{ formatTime(record.createdAt) }}</template>
           </a-table-column>
 
-          <a-table-column title="过期时间" :width="180">
+          <a-table-column title="过期时间" :width="RECORD_CACHE_COLUMN_WIDTHS.expiresAt">
             <template #cell="{ record }">{{ formatTime(record.expiresAt) }}</template>
           </a-table-column>
 
@@ -652,7 +677,7 @@ onMounted(() => {
                   真机实测单颗宽度就是这么来的（`getBoundingClientRect`，13px 字号带 13px 图标）。
                   ⇒ 320 起步；⛔ 别再退回 200/260，那两档都会把「删除」裁掉半颗
                   （同一天 WeeklyScheduleGrid 的「清空」就是这么被 `overflow: hidden` 吃掉的）。 -->
-          <a-table-column title="操作" :width="320" align="center" fixed="right">
+          <a-table-column title="操作" :width="RECORD_CACHE_COLUMN_WIDTHS.actions" align="center" fixed="right">
             <template #cell="{ record }">
               <div class="uvp-table-actions">
                 <!-- ⛔ 详情排最前：它是只读入口，其余都是会改状态的动作，
