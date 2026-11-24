@@ -1371,6 +1371,51 @@ function Start-Backend {
     Write-UvpOk "后端已启动（http://127.0.0.1:$($Ports.HTTP)）"
 }
 
+# Resolve-ZlmIniArg 算出「从 ZLM 的工作目录到持久副本」的**相对**路径。
+#
+# ⛔⛔ 必须相对，不能绝对：MediaServer.exe 用窄字符（ANSI）打路径，安装目录一旦带
+#   中文或空格（客户的 `D:\接活\…` 就是），绝对路径会静默开错文件甚至起不来
+#   （UVP-REN/deploy/windows/zlm-probe 专门在「含中文和空格的路径」下验收过）。
+# ⛔⛔ 层级**必须按实际目录深度算，不许手写常量** —— 2026-11-24 现场事故（1.1.26，
+#   `D:\uvp28181`）：这里手写成 `..\config\zlm.ini`，而工作目录是 `<根>\vendor\zlm`，
+#   一个 `..` 只上到 `<根>\vendor` ⇒ 实际去开 `<根>\vendor\config\zlm.ini`（不存在）
+#   ⇒ ZLM 的 `parseFile` 打开失败 → 走 catch：日志打 `dump ini file to:`，然后**静默
+#   退回出厂默认端口**（80/443/554/10000…）⇒ 平台在 15504 上等 20 秒，报「流媒体服务
+#   （ZLM）启动失败」。更阴的是紧随其后的 dumpFile 也写不进那个不存在的目录（ofstream
+#   静默失败）⇒ 磁盘上那份 `config\zlm.ini` 毫发无损 ⇒ 现场现象是「文件明明在、就是
+#   读不到」，排查很容易被引到杀软抢锁 / 文件内容写坏上去。
+# ⭐ 所以算完必须**用 Test-Path 反查一次**：拼回去若不是那份真实存在的文件，就当失败
+#   处理（退回包内模板 + 告警），绝不把一个自己都没验证过的路径交给 ZLM。
+function Resolve-ZlmIniArg {
+    if (-not (Test-Path -LiteralPath $ZlmIni)) { return $null }
+    $rel = $ZlmIni.Substring($Root.Length).TrimStart('\')       # config\zlm.ini
+    $sub = $ZlmDir.Substring($Root.Length).Trim('\')            # vendor\zlm
+    $depth = @($sub -split '\\' | Where-Object { $_ -ne '' }).Count
+    $arg = ('..\' * $depth) + $rel
+    $probe = Join-Path $ZlmDir $arg
+    if (-not (Test-Path -LiteralPath $probe)) {
+        Write-UvpWarn "ZLM 配置相对路径算错：$arg → $probe 不存在（应为 $ZlmIni），本次改读包内模板"
+        return $null
+    }
+    return $arg
+}
+
+# Test-ZlmIniReadFailure 判断 ZLM 是不是**打不开**配置文件（而不是起不来）。
+# 判据只有一条字符串：`dump ini file to:` —— 它是 ZLM `loadIniConfig()` catch 分支的
+# 唯一输出（src/Common/config.cpp:52），而那条 catch 里唯一会抛的是 mini.h:68 的
+# `ifstream` 打开失败；配置内容再离谱（缺段、缺键、乱码、BOM、CRLF）它的解析器都能
+# 读过去，**不会**报错。所以命中这行 = 路径/权限问题，不是配置内容问题。
+function Test-ZlmIniReadFailure {
+    param([string]$LogPath)
+    if ([string]::IsNullOrWhiteSpace($LogPath)) { return $false }
+    if (-not (Test-Path -LiteralPath $LogPath)) { return $false }
+    try {
+        return [bool](Select-String -LiteralPath $LogPath -Pattern 'dump ini file to' -SimpleMatch -Quiet -ErrorAction Stop)
+    } catch {
+        return $false
+    }
+}
+
 function Start-Zlm {
     param([hashtable]$Ports)
     $log = Join-Path $LogsDir 'zlm.log'
@@ -1382,15 +1427,30 @@ function Start-Zlm {
     # ⛔ 配置读**持久副本** config\zlm.ini（见 $ZlmIni 定义处）；没有副本时才退回包内那份。
     #   仍然只传**相对路径**（工作目录是 vendor\zlm）：MediaServer.exe 用窄字符开文件，
     #   绝对路径一旦含中文/空格就出事。
-    $iniArg = 'config.ini'
-    if (Test-Path -LiteralPath $ZlmIni) { $iniArg = '..\config\zlm.ini' }
+    # ⛔ 路径由 Resolve-ZlmIniArg 按目录深度算 + Test-Path 反查（见函数注释：1.1.26
+    #   现场就是手写成 '..\config\zlm.ini'，少上一层，ZLM 读不到、静默跑在 80 端口）。
+    $iniArg = Resolve-ZlmIniArg
+    if (-not $iniArg) { $iniArg = 'config.ini' }
     $args = @('-c', $iniArg)
     # ZLM 的 SSL 只从 `-s` 指定的**单个** PEM 读（私钥+证书合一，由 certgen 合成）。
     # 同样只给裸文件名 —— 它就在 vendor\zlm\ 下。
     if (Test-Path -LiteralPath $ZlmSslPem) { $args += @('-s', [System.IO.Path]::GetFileName($ZlmSslPem)) }
     Start-Child -Name 'zlm' -Exe $ZlmExe -WorkDir $ZlmDir -LogPath $log -PidPath $ZlmPidFile -Arguments $args | Out-Null
     if (-not (Wait-Port -Port $Ports.ZLM_HTTP -Tries 100 -SleepMs 200 -LogPath $log)) {
-        Fail "流媒体服务（ZLM）启动失败，详见 $log"
+        # ⛔ 「打不开配置文件」和「端口绑不上」在屏幕上长得一模一样（都是等不到端口），
+        #   但处置完全相反：前者要改路径/清锁，后者才去挪端口段。这里必须把线索点破，
+        #   否则现场只会照着我们下一句提示去查 UDP 保留段，越查越远（2026-11-24 实况）。
+        $hint = ''
+        if (Test-ZlmIniReadFailure -LogPath $log) {
+            $hint = "`n" +
+                "              判据：日志里有 `"dump ini file to:`" —— MediaServer **打不开**配置文件" +
+                "（不是内容写错：ZLM 的解析器不会因格式报错）。`n" +
+                "              它已静默退回出厂默认端口（80/443/554），所以 $($Ports.ZLM_HTTP) 永远等不到。`n" +
+                "              本次传给 ZLM 的是：-c $iniArg（工作目录 $ZlmDir）；磁盘上本应是 $ZlmIni`n" +
+                "              处置：先确认该路径真实存在；若那份文件已被写成出厂默认（无注释、port=80），`n" +
+                "                    再执行一次 start.cmd —— 端口与 secret 会被自动同步回去。"
+        }
+        Fail ("流媒体服务（ZLM）启动失败，详见 $log" + $hint)
     }
     # ⛔⛔ 「TCP 端口通了」**不等于启动成功** —— 必须再等一拍，看它有没有立刻自杀。
     #   ZLM 的启动顺序是「先绑 TCP（HTTP/RTSP/RTMP 都绑得上）→ 再绑 RTP/SRT/ICE 的 UDP」，

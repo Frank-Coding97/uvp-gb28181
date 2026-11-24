@@ -189,6 +189,13 @@ run_check "增量升级包生成器" "$ROOT" 'node --test scripts/build-update-p
 run_check "Windows 升级助手路径与授权锁" "$ROOT" \
   'node --test scripts/standalone-windows-updater-path-and-lock.test.mjs'
 
+# ---------- Windows 单机版：ZLM 配置路径 ----------
+# 手写 `..\config\zlm.ini` 少一层 ⇒ ZLM 打不开配置、静默跑在出厂 80/443，
+# 平台等 15504 二十秒后只报「流媒体服务启动失败」，与「端口被系统保留」长得一样。
+# 只在 Windows 真机上才炸，静态守。
+run_check "Windows ZLM 配置路径" "$ROOT" \
+  'node --test scripts/standalone-windows-zlm-ini-path.test.mjs'
+
 # ---------- 完整档额外检查 ----------
 if [ "$MODE" = "full" ]; then
   if [ -x "$WEB_BIN/vue-tsc" ]; then
