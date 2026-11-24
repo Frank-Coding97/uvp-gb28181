@@ -10,6 +10,7 @@
 </p>
 
 <p align="center">
+  <a href="https://gitee.com/Frank-Coding/uvp-gb28181"><img src="https://img.shields.io/badge/Gitee-uvp--gb28181-C71D23?logo=gitee&logoColor=white" alt="Gitee"></a>
   <a href="https://github.com/Frank-Coding97/uvp-gb28181/releases"><img src="https://img.shields.io/github/v/release/Frank-Coding97/uvp-gb28181?label=release&color=2563EB" alt="release"></a>
   <img src="https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white" alt="Go">
   <img src="https://img.shields.io/badge/Vue-3.5-42B883?logo=vuedotjs&logoColor=white" alt="Vue">
@@ -28,7 +29,9 @@ UVP 是 **Unified Video Platform** 的缩写，中文全称为 **统一视频接
 - 官网：<https://uvplatform.com/>
 - 当前版本：以根目录 [`VERSION`](VERSION) 为唯一来源（上方 Release 徽章自动同步最新版本）
 - 许可证：MIT
-- 代码托管：[GitHub](https://github.com/Frank-Coding97/uvp-gb28181) · [Gitee](https://gitee.com/Frank-Coding/uvp-gb28181)
+- 代码托管：[Gitee](https://gitee.com/Frank-Coding/uvp-gb28181)（国内访问更快） · [GitHub](https://github.com/Frank-Coding97/uvp-gb28181)
+- 安装包下载：[Gitee Releases](https://gitee.com/Frank-Coding/uvp-gb28181/releases) · [GitHub Releases](https://github.com/Frank-Coding97/uvp-gb28181/releases)
+- 问题反馈：[Gitee Issues](https://gitee.com/Frank-Coding/uvp-gb28181/issues) · [GitHub Issues](https://github.com/Frank-Coding97/uvp-gb28181/issues)
 
 <p align="center">
   <img src="docs/screenshots/dashboard-dark.jpg" alt="UVP-GB28181 管理端仪表盘：实时 SIP 事务量、点播成功率、设备与通道在线率、协议事务分布" width="100%">
@@ -54,9 +57,9 @@ UVP 是 **Unified Video Platform** 的缩写，中文全称为 **统一视频接
 
 **UVP GB28181 Sim** 把 Android / iOS 手机变成一台 GB/T 28181 国标摄像机（GB/T 28181-2016 / 2022 双版本），注册、实时点播、历史回放、云台控制、语音广播都走真实协议栈，可以直接注册到本平台或任意上级平台联调。项目前期还没有真机、或者出差在外手边只有手机时，用它就能把接入流程先跑通。
 
+- 仓库（Gitee）：<https://gitee.com/Frank-Coding/uvp-gb28181-sim>（国内访问更快）
 - 仓库（GitHub）：<https://github.com/Frank-Coding97/uvp-gb28181-sim>
-- 仓库（Gitee）：<https://gitee.com/Frank-Coding/uvp-gb28181-sim>
-- 安装包：在 Releases 页下载 APK
+- 安装包：在 Gitee / GitHub 的 Releases 页下载 APK
 - 快速对接：本平台的「SIP 接入信息」页支持扫码录入，把平台参数直接写进模拟器，不用手抄 SIP 域、ID 和端口
 
 ## 对外开放接口
@@ -65,8 +68,8 @@ UVP 是 **Unified Video Platform** 的缩写，中文全称为 **统一视频接
 **独立仓库**，不在本仓：Java / Python / Go 客户端、Postman 与 Apifox 集合、签名规范、契约副本都在那边，
 客户对接时只需要那一个仓库。
 
-- GitHub：<https://github.com/Frank-Coding97/uvp-gb28181-openapi>
-- Gitee：<https://gitee.com/Frank-Coding/uvp-gb28181-openapi>（国内访问更快，内容与 GitHub 一致）
+- Gitee：<https://gitee.com/Frank-Coding/uvp-gb28181-openapi>（国内访问更快）
+- GitHub：<https://github.com/Frank-Coding97/uvp-gb28181-openapi>（内容与 Gitee 一致）
 
 ## 目录
 
@@ -369,9 +372,9 @@ scripts/quality-gate.sh --full   # 完整档：追加 vue-tsc 类型检查与全
 ## 版本与发布
 
 - 版本号唯一来源为根目录 `VERSION`，前后端版本需与其一致
-- 每个版本的升版说明写在 `docs/releases/v<版本号>.md`，发布脚本会原样写入 GitHub / Gitee Release 与官网升级日志
+- 每个版本的升版说明写在 `docs/releases/v<版本号>.md`，发布脚本会原样写入 Gitee / GitHub Release 与官网升级日志
 - 发布流程由 `scripts/publish-release.mjs` 与 `scripts/publish-upgrade-release.mjs` 驱动，产物与校验信息输出到 `release-output/`
-- 仓库同时维护 GitHub 与 Gitee 两个远程，发版需两边同步
+- 仓库同时维护 Gitee 与 GitHub 两个远程，发版需两边同步
 
 ## 项目背景
 
@@ -421,7 +424,7 @@ UVP-GB28181 采用宽松的 MIT License。无论个人还是企业，都可以�
 
 开源这个项目，也是希望借此认识更多从事视频监控、国标接入、流媒体和相关业务的同行。我愿意把这些年在设备接入、复杂网络、协议兼容和平台运维中积累的经验，逐步整理成可以复用的行业解决方案，与大家共同交流和完善。一个人的经历终究有限，只有让更多真实设备、真实场景和不同观点参与进来，平台才能持续解决更有价值的问题。
 
-坦率地说，做这个项目也有一点自己的“私心”：我希望通过 UVP-GB28181，让更多人看到我在视频接入领域的专业能力和长期积累。项目相关的技术讨论、方案探讨和问题反馈，都欢迎在 [Issue](https://github.com/Frank-Coding97/uvp-gb28181/issues) 区一起交流，这样讨论的过程也能被后来的人检索到。
+坦率地说，做这个项目也有一点自己的“私心”：我希望通过 UVP-GB28181，让更多人看到我在视频接入领域的专业能力和长期积累。项目相关的技术讨论、方案探讨和问题反馈，都欢迎在 [Issue](https://gitee.com/Frank-Coding/uvp-gb28181/issues) 区一起交流（[GitHub Issues](https://github.com/Frank-Coding97/uvp-gb28181/issues) 同样有效），这样讨论的过程也能被后来的人检索到。
 
 当然，合作并不是交流的前提。即使彼此之间没有任何商业关系，我也很愿意结识来自五湖四海的行业朋友，交流业务场景、技术方案、踩坑经历和新的想法。开源带来的价值不应只有代码，也应该包括人与人之间真实、长期的连接。
 
@@ -471,13 +474,13 @@ UVP-GB28181 基于 [MIT License](LICENSE) 开源。个人和企业均可在遵�
 
 **5. 第三方组件遵循各自条款。** 本项目集成的 ZLMediaKit、EasyPlayer.js、GinFast 等组件，其许可证与使用限制以各自项目为准，使用前请自行确认。
 
-**6. 发现问题请联系。** 若你认为本项目存在侵犯权益的内容或能力，或发现本项目被用于不当用途，欢迎通过 [Issue](https://github.com/Frank-Coding97/uvp-gb28181/issues) 或下方联系方式告知，作者会及时评估并处理。
+**6. 发现问题请联系。** 若你认为本项目存在侵犯权益的内容或能力，或发现本项目被用于不当用途，欢迎通过 [Issue](https://gitee.com/Frank-Coding/uvp-gb28181/issues) 或下方联系方式告知，作者会及时评估并处理。
 
 继续使用本项目，即表示你已阅读并同意上述声明。
 
 ## 联系我
 
-遇到 Bug、想要新功能、做平台兼容性反馈，欢迎提 [Issue](https://github.com/Frank-Coding97/uvp-gb28181/issues)（Gitee 侧也有 [Issues](https://gitee.com/Frank-Coding/uvp-gb28181/issues)）。项目相关的技术问题会在 Issue 区一起讨论，也方便后来的人检索到同类问题的处理过程。
+遇到 Bug、想要新功能、做平台兼容性反馈，欢迎提 [Issue](https://gitee.com/Frank-Coding/uvp-gb28181/issues)（GitHub 侧也有 [Issues](https://github.com/Frank-Coding97/uvp-gb28181/issues)）。项目相关的技术问题会在 Issue 区一起讨论，也方便后来的人检索到同类问题的处理过程。
 
 如果你的团队有国标平台二次开发、设备与协议适配、私有化部署或疑难问题排查方面的需求，也欢迎通过 Issue 或 [SUPPORT.md](SUPPORT.md) 里的方式联系我，我会按实际场景给出可落地的方案。
 
