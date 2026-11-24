@@ -10,9 +10,9 @@
 </p>
 
 <p align="center">
-  <a href="https://gb28181.uvplatform.com"><img src="https://img.shields.io/badge/%E5%9C%A8%E7%BA%BF%E4%BD%93%E9%AA%8C-%E7%AB%8B%E5%8D%B3%E6%89%93%E5%BC%80-2563EB?style=for-the-badge" alt="在线体验"></a>
-  <a href="https://gitee.com/Frank-Coding/uvp-gb28181/releases"><img src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD%E5%AE%89%E8%A3%85%E5%8C%85-Gitee%20Releases-0FAAA6?style=for-the-badge" alt="下载安装包"></a>
-  <a href="https://gitee.com/Frank-Coding/uvp-gb28181-sim/releases"><img src="https://img.shields.io/badge/%E6%89%8B%E6%9C%BA%E5%8F%98%E6%91%84%E5%83%8F%E6%9C%BA-%E4%B8%8B%E8%BD%BD%E6%A8%A1%E6%8B%9F%E5%99%A8-374151?style=for-the-badge" alt="手机变摄像机"></a>
+  <a href="https://gb28181.uvplatform.com"><img src="https://img.shields.io/badge/%E5%9C%A8%E7%BA%BF%E4%BD%93%E9%AA%8C-%E7%AB%8B%E5%8D%B3%E6%89%93%E5%BC%80-2563EB?style=for-the-badge" alt="在线体验"></a>&nbsp;
+  <a href="https://gitee.com/Frank-Coding/uvp-gb28181/releases"><img src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD%E5%AE%89%E8%A3%85%E5%8C%85-Gitee%20Releases-0FAAA6?style=for-the-badge" alt="下载安装包"></a>&nbsp;
+  <a href="https://gitee.com/Frank-Coding/uvp-gb28181-sim/releases"><img src="https://img.shields.io/badge/%E6%89%8B%E6%9C%BA%E5%8F%98%E6%91%84%E5%83%8F%E6%9C%BA-%E4%B8%8B%E8%BD%BD%E6%A8%A1%E6%8B%9F%E5%99%A8-10233F?style=for-the-badge" alt="手机变摄像机"></a>
 </p>
 
 <p align="center">
