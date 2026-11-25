@@ -247,12 +247,16 @@ print_start_summary() {
   fi
   local demo_pw=""
   demo_pw="$(read_conf_scalar demoaccount defaultpassword 2>/dev/null || true)"
+  # ⛔⛔ 这是 config.yml 里的**出厂值**，不是数据库里的当前口令：首次登录改密只写
+  #   sys_user.password / must_change_password，**不回写 config.yml**。措辞必须说成
+  #   「出厂初始口令」，否则改过密码的现场每次重启都看到旧口令，会以为口令被重置了。
   if [ -n "$demo_pw" ]; then
-    printf '%s登录账号  admin / %s（登录后请立即修改）\n' "$IND" "$demo_pw"
+    printf '%s登录账号  admin / %s（出厂初始口令，首次登录会强制改密）\n' "$IND" "$demo_pw"
   else
     # ⛔ 读不到就**不编**一个口令出来：只说"见交付说明"（包的 README 里写着）。
-    printf '%s登录账号  admin（密码见 README/交付说明，登录后请立即修改）\n' "$IND"
+    printf '%s登录账号  admin（出厂初始口令见 config/config.yml 的 server.demoaccount.defaultpassword）\n' "$IND"
   fi
+  printf '%s已改过口令的请用你自己的；忘记口令可运行 ./uvp-gb28181-ctl.sh reset-password 重置\n' "$IND"
 
   printf '%s%s%s\n' "$C_TAG" "$rule" "$C_RST"
   return 0

@@ -766,7 +766,17 @@ function Get-PidByExe {
 }
 
 function Stop-Component {
-    param([string]$Label, [string]$PidPath, [string]$ExePath)
+    param(
+        [string]$Label,
+        [string]$PidPath,
+        [string]$ExePath,
+        # 调用方已经先做过优雅关闭（目前只有 Redis：redis-cli shutdown，会刷 AOF）。
+        # ⛔⛔ 这种情况下进程会**先于本函数**退出，本函数只能看到「已经不在了」，
+        #   打出来就是「Redis 未在运行」—— 而客户上一秒才看到它启动、端口也在听，
+        #   会以为 stop 没生效或状态错乱。所以要把「优雅关闭前是否活着」传进来：
+        #   真活着且现在没了 ⇒ 就是「已停止」，不是「未在运行」。
+        [bool]$WasRunning = $false
+    )
     $pidValue = Get-PidFromFile -Path $PidPath
     $killed = $false
     if ($pidValue -gt 0) {
@@ -782,7 +792,7 @@ function Stop-Component {
             $killed = $true
         }
     }
-    if ($killed) { Write-UvpDet "$Label 已停止" } else { Write-UvpDet "$Label 未在运行" }
+    if ($killed -or $WasRunning) { Write-UvpDet "$Label 已停止" } else { Write-UvpDet "$Label 未在运行" }
 }
 
 # ---------------------------------------------------------------- 横幅/汇总 ----
@@ -873,12 +883,18 @@ function Write-StartSummary {
     } else {
         Write-UvpDet '提示      未识别到对外网卡，其它电脑请改用本机 IP 访问'
     }
+    # ⛔⛔ 这里读的是 config.yml 里的**出厂值**，不是数据库里的当前口令：
+    #   首次登录改密只会写 sys_user.password / must_change_password，**不会回写 config.yml**。
+    #   所以措辞必须说成「出厂初始口令」+ 生效条件，否则改过密码的现场每次重启都看到
+    #   “admin / 123456（登录后请立即修改）”，会以为口令被重置回去了、或者以为平台没记住新口令。
     $demo = Get-DemoCredential
+    $loginUser = if ($demo.User) { $demo.User } else { 'admin' }
     if ($demo.Password) {
-        Write-UvpDet ("登录账号  {0} / {1}（登录后请立即修改）" -f $demo.User, $demo.Password)
+        Write-UvpDet ("登录账号  {0} / {1}（出厂初始口令，首次登录会强制改密）" -f $loginUser, $demo.Password)
     } else {
-        Write-UvpDet '登录账号  admin（口令见 config\config.yml 的 server.demoaccount.defaultpassword，登录后请立即修改）'
+        Write-UvpDet ("登录账号  {0}（出厂初始口令见 config\config.yml 的 server.demoaccount.defaultpassword）" -f $loginUser)
     }
+    Write-UvpDet '            已改过口令的请用你自己的；忘记口令可运行 reset-password.cmd 重置'
     Write-Host ("{0}{1}{2}" -f $C.tag, $rule, $C.rst)
 }
 
@@ -1722,11 +1738,21 @@ function Invoke-Stop {
     # ⛔ PowerShell 不支持 `$函数名(参数)` 这种调用形式（那是 C 系语言的写法），
     #   必须写成 `(函数名 -参数 值)`；写成前者是**解析期语法错误**，不是运行期报错。
     $redisPort = [int](PortEnvDefaultSafe -EnvMap $envMap)
+    # ⛔ 优雅关闭前先记状态：`redis-cli shutdown` 成功时进程会当场退出，
+    #   等到下面 Stop-Component 时它已经「不在了」，那时再判就只会得到「未在运行」。
+    #   判据取「pid 文件里的进程活着」或「按 exe 路径能扫到」二者之一。
+    $redisWasRunning = $false
+    $redisPidValue = Get-PidFromFile -Path $RedisPidFile
+    if ($redisPidValue -gt 0 -and (Test-PidAlive -ProcessId $redisPidValue)) {
+        $redisWasRunning = $true
+    } elseif (@(Get-PidByExe -ExePath $RedisExe).Count -gt 0) {
+        $redisWasRunning = $true
+    }
     if ((Test-Path -LiteralPath $RedisCli) -and (Test-TcpPort -Port $redisPort)) {
         Invoke-NativeQuiet -Exe $RedisCli -Arguments @('-p', "$redisPort", 'shutdown')
         Start-Sleep -Milliseconds 400
     }
-    Stop-Component -Label 'Redis' -PidPath $RedisPidFile -ExePath $RedisExe
+    Stop-Component -Label 'Redis' -PidPath $RedisPidFile -ExePath $RedisExe -WasRunning $redisWasRunning
 
     # 助手最后停：升级任务的状态归它管，业务先走完再收它。
     Stop-Updater
