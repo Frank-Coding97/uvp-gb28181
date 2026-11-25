@@ -267,6 +267,7 @@ foreach ($item in @(
         @{ P = (Join-Path $WinDir 'start.cmd');   N = "deploy\standalone-windows\start.cmd" },
         @{ P = (Join-Path $WinDir 'stop.cmd');    N = "deploy\standalone-windows\stop.cmd" },
         @{ P = (Join-Path $WinDir 'status.cmd');  N = "deploy\standalone-windows\status.cmd" },
+        @{ P = (Join-Path $ServerDir 'cmd\uvp-tray\rsrc_windows_amd64.syso'); N = "server\cmd\uvp-tray\rsrc_windows_amd64.syso（UVP-GB28181.exe 的图标资源：缺了打出来的 exe 就是白纸图标；重生成用 scripts\gen-win-icon.sh）" },
         @{ P = (Join-Path $VendorRedis 'redis-server.exe'); N = "-VendorDir\redis\redis-server.exe" },
         @{ P = (Join-Path $VendorRedis 'redis-cli.exe');    N = "-VendorDir\redis\redis-cli.exe" },
         @{ P = (Join-Path $VendorZlm 'MediaServer.exe');    N = "-VendorDir\zlm\MediaServer.exe" },
@@ -360,6 +361,30 @@ if ($SkipBuild) {
     Ok "前端产物已生成"
     }
 }
+
+# ---- UVP-GB28181.exe 的图标资源：无条件读回校验 ----
+#
+# ⛔ 放在 -SkipBuild 分支**之外**：跳编时复用的旧 exe 也要带货。
+# ⛔ 图标是 **PE 资源**，跟 main.go 里 `//go:embed app.ico`（托盘菜单里画的那个）是两套东西：
+#    syso 没被链接时 `go build` 会**一声不响地成功**，只有客户在资源管理器 / 桌面快捷方式上
+#    看到一张白纸图标 —— 出包当场不查，现场没人会把它当 bug 报。
+#    判据取「资源数据目录的 RVA 是否为 0」：这个 exe 除图标没有别的资源，非 0 就等于进去了。
+if (-not (Test-Path -LiteralPath $TrayExeOut)) {
+    Fail "找不到 $TrayExeOut（-SkipBuild 时请先备好带图标的产物）"
+}
+$exeBytes  = [System.IO.File]::ReadAllBytes($TrayExeOut)
+$peOffset  = [BitConverter]::ToInt32($exeBytes, 0x3C)
+$optOffset = $peOffset + 24
+# PE32+ 的数据目录从 optional header +112 开始，PE32 是 +96；两种都认，别假定只有 64 位。
+$ddOffset  = $optOffset + 112
+if ([BitConverter]::ToUInt16($exeBytes, $optOffset) -ne 0x20B) { $ddOffset = $optOffset + 96 }
+$resRva    = [BitConverter]::ToUInt32($exeBytes, $ddOffset + 16)
+if ($resRva -eq 0) {
+    Fail ("uvp-tray.exe 里没有资源节 —— 图标没嵌进去。检查 " +
+          "server\cmd\uvp-tray\rsrc_windows_amd64.syso 是否还在、是否匹配 windows/amd64" +
+          "（重生成：scripts\gen-win-icon.sh）")
+}
+Ok "uvp-tray.exe 图标资源已嵌入（.rsrc RVA 0x$('{0:x}' -f $resRva)）"
 
 # ---- 前端产物里的 SIP 默认端口：无条件读回校验 ----
 #
