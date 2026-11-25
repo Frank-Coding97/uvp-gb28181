@@ -79,6 +79,7 @@ import { useThemeConfig } from "@/store/modules/theme-config";
 const themeStore = useThemeConfig();
 const { collapsed, asideDark, layoutType } = storeToRefs(themeStore);
 import { handleUrl } from "@/utils/app";
+import { DEFAULT_PRODUCT_TITLE } from "@/utils/product-brand";
 import { useSysConfigStore } from "@/store/modules/sys-config";
 import LogoSvg from "@/components/s-logo/index.vue";
 import { useUpgradeNotice } from "@/hooks/useUpgradeNotice";
@@ -110,8 +111,8 @@ const goUpgrade = () => {
 const sysConfigStore = useSysConfigStore();
 const { systemConfig } = storeToRefs(sysConfigStore);
 
-// 全局title
-const title = import.meta.env.VITE_GLOB_APP_TITLE;
+// 全局title（后端配置没拿到时的兜底，见 product-brand.ts）
+const title = import.meta.env.VITE_GLOB_APP_TITLE || DEFAULT_PRODUCT_TITLE;
 
 // 从系统配置中获取标题
 const bannerTitle = computed(() => {

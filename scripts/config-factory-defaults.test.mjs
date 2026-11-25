@@ -131,16 +131,27 @@ test('登录/操作日志默认保留 7 天，且 yml 与 Go 兜底值一致', (
 });
 
 test('首屏标题与系统名称一致（不留下旧产品名）', () => {
+  const EXPECTED = 'UVP-GB28181统一视频接入平台';
   const title = read(INDEX_HTML).match(/<title>([^<]*)<\/title>/)?.[1]?.trim();
-  assert.equal(title, 'UVP-GB28181统一视频接入平台');
-  // 页面加载前靠 index.html 兜底，配置接口失败时靠 .env 的 VITE_GLOB_APP_TITLE 兜底。
-  // ⛔ web/.env 被 .gitignore 忽略（CI 上没有），所以这里只在本地存在时才校验，
-  //   否则测试在干净检出上会 ENOENT 直接炸。
+  assert.equal(title, EXPECTED);
+
+  // 前端兜底常量（Logo / 登录页在配置接口失败时用）。⛔ 它和 index.html 一旦分家，
+  // 表现就是「首屏新名、后端一挂又跳回旧名」，而且只在故障时才看得见。
+  const brand = read('web/src/utils/product-brand.ts').match(
+    /DEFAULT_PRODUCT_TITLE\s*=\s*"([^"]*)"/
+  )?.[1];
+  assert.equal(brand, EXPECTED, 'web/src/utils/product-brand.ts 的 DEFAULT_PRODUCT_TITLE 与首屏标题不一致');
+
+  // 出包时真正的取值走 config.yml ⇒ 必须与 config.example.yml 同源（新装包才带新名字）。
+  assert.equal(scalarIn(sectionBody(yml, 'system'), 'system', 'systemname'), EXPECTED);
+
+  // web/.env 被 .gitignore 忽略（CI 上没有），所以这里只在本地存在时才校验，
+  // 否则测试在干净检出上会 ENOENT 直接炸。
   const envPath = join(ROOT, 'web/.env');
   if (existsSync(envPath)) {
     assert.match(
       readFileSync(envPath, 'utf8'),
-      /^VITE_GLOB_APP_TITLE\s*=\s*UVP-GB28181统一视频接入平台\s*$/m,
+      new RegExp(`^VITE_GLOB_APP_TITLE\\s*=\\s*${EXPECTED}\\s*$`, 'm'),
       'web/.env 的 VITE_GLOB_APP_TITLE 还是旧产品名'
     );
   }

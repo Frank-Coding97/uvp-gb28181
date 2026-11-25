@@ -6,6 +6,7 @@
 </template>
 <script setup lang="ts">
 import { handleUrl } from "@/utils/app";
+import { DEFAULT_PRODUCT_TITLE } from "@/utils/product-brand";
 import { useSysConfigStore } from "@/store/modules/sys-config";
 import { storeToRefs } from "pinia";
 import LogoSvg from "@/components/s-logo/index.vue";
@@ -14,8 +15,8 @@ import LogoSvg from "@/components/s-logo/index.vue";
 const sysConfigStore = useSysConfigStore();
 const { systemConfig } = storeToRefs(sysConfigStore);
 
-// 全局title
-const title = import.meta.env.VITE_GLOB_APP_TITLE;
+// 全局title（后端配置没拿到时的兜底，见 product-brand.ts）
+const title = import.meta.env.VITE_GLOB_APP_TITLE || DEFAULT_PRODUCT_TITLE;
 // 从系统配置中获取logo
 const sysLogo = computed(() => {
   return handleUrl(systemConfig.value?.systemLogo);
