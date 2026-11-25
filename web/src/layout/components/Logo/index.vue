@@ -119,7 +119,10 @@ const bannerTitle = computed(() => {
 });
 
 const subtitle = computed(() => {
-  return bannerTitle.value.replace(/^UVP\s*/, "") || "统一视频接入平台";
+  // ⛔ 侧边栏已经硬编码渲染「UVP」+ 「GB28181」两个标；这里必须把**整段品牌前缀**剥掉，
+  //   否则系统名称改成「UVP-GB28181统一视频接入平台」后会显示成
+  //   「UVP GB28181 -GB28181统一视频接入平台」（重复一遍）。
+  return bannerTitle.value.replace(/^UVP[- ]*(?:GB28181)?\s*/, "") || "统一视频接入平台";
 });
 
 // 从系统配置中获取logo

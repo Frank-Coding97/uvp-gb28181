@@ -14,7 +14,7 @@
 //   目的是让它在任何环境下都能跑（不需要装依赖），且失败信息直指"改哪个文件"。
 
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -77,9 +77,9 @@ function scalarIn(body, section, key) {
 
 const yml = read(EXAMPLE);
 
-test('系统名称默认是「UVP统一视频接入平台」', () => {
+test('系统名称默认是「UVP-GB28181统一视频接入平台」', () => {
   const got = scalarIn(sectionBody(yml, 'system'), 'system', 'systemname');
-  assert.equal(got, 'UVP统一视频接入平台');
+  assert.equal(got, 'UVP-GB28181统一视频接入平台');
 });
 
 test('版权信息 / 备案号的出厂占位与页脚识别常量逐字一致', () => {
@@ -132,7 +132,18 @@ test('登录/操作日志默认保留 7 天，且 yml 与 Go 兜底值一致', (
 
 test('首屏标题与系统名称一致（不留下旧产品名）', () => {
   const title = read(INDEX_HTML).match(/<title>([^<]*)<\/title>/)?.[1]?.trim();
-  assert.equal(title, 'UVP统一视频接入平台');
+  assert.equal(title, 'UVP-GB28181统一视频接入平台');
+  // 页面加载前靠 index.html 兜底，配置接口失败时靠 .env 的 VITE_GLOB_APP_TITLE 兜底。
+  // ⛔ web/.env 被 .gitignore 忽略（CI 上没有），所以这里只在本地存在时才校验，
+  //   否则测试在干净检出上会 ENOENT 直接炸。
+  const envPath = join(ROOT, 'web/.env');
+  if (existsSync(envPath)) {
+    assert.match(
+      readFileSync(envPath, 'utf8'),
+      /^VITE_GLOB_APP_TITLE\s*=\s*UVP-GB28181统一视频接入平台\s*$/m,
+      'web/.env 的 VITE_GLOB_APP_TITLE 还是旧产品名'
+    );
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
