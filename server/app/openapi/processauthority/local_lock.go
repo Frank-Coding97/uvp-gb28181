@@ -90,6 +90,11 @@ func AcquireLocalLock(path string) (lock *LocalLock, acquireErr error) {
 		}
 		s.file, err = s.root.OpenFile(lockName, os.O_RDWR, 0)
 	}
+	// 新建后立刻把 DACL 固定成「当前用户 + 管理员 + 系统」：默认 DACL 会跟着
+	// 创建令牌走，提权创建的文件普通权限读不了（详见 local_lock_windows.go）。
+	if err == nil && created && hardenCreatedLocalFile(filepath.Join(path, lockName)) != nil {
+		return nil, ErrLocalAuthorityUnavailable
+	}
 	if err != nil || !secureLocalFile(s.file, false) {
 		return nil, ErrLocalAuthorityUnavailable
 	}

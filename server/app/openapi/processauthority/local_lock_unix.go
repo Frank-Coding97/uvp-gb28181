@@ -39,6 +39,10 @@ func secureLocalFile(file *os.File, directory bool) bool {
 
 func syncLocalDirectory(file *os.File) error { return file.Sync() }
 
+// hardenCreatedLocalFile 只在 Windows 上有意义（默认 DACL 取决于创建令牌是否提权）。
+// Unix 已经用 0600 + 同 uid 校验锁定了归属，这里不需要额外动作。
+func hardenCreatedLocalFile(string) error { return nil }
+
 // localFileIdentity names the held file by inode only, on purpose: Darwin
 // assigns volume device numbers dynamically, so the very same lock file
 // reports a different st_dev after every reboot while its inode is stable.

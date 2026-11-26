@@ -20,6 +20,44 @@ func lockLocalFile(file *os.File) error {
 	return nil
 }
 
+// hardenCreatedLocalFile 把新建锁文件的 DACL 固定成「当前用户 + 本机管理员 + 系统」。
+//
+// 为什么必须显式设置：Windows 新建文件的默认 DACL 来自**创建进程的令牌**。用管理员
+// 令牌（提权）创建时只会落下 Administrators / SYSTEM 两个条目 —— 之后用户用普通
+// 权限双击托盘（UAC 过滤令牌），后端连打开这个锁都没权限，启动直接失败为
+// phase=process_authority reason=state_unavailable（222 现场实测：锁属主
+// BUILTIN\Administrators，普通用户 icacls / Get-Content 全部 Access denied）。
+//
+// 提权与不提权是**同一个用户 SID**，所以把当前用户 SID 写进 DACL 后两种令牌都能读；
+// 同时仍只放本机三个可信主体，Everyone 之类一律不出现 —— 与 secureLocalFile 的
+// trusted 判据、local_acl_windows_test 的标准形态（P + SY + BA + 当前用户）保持一致。
+//
+// 只对**新建**文件调用：已存在的锁禁止改写（AcquireLocalLock 的契约是绝不修复既有
+// 状态，能走到打开它说明当前令牌本来就有权限）。
+func hardenCreatedLocalFile(path string) error {
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		return err
+	}
+	sd, err := windows.SecurityDescriptorFromString(fmt.Sprintf(
+		"D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;%s)", user.User.Sid.String()))
+	if err != nil {
+		return err
+	}
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		return err
+	}
+	// ⛔⛔ 必须用**按路径**的 SetNamedSecurityInfo，不能用句柄版 SetSecurityInfo：
+	//   os.OpenFile 拿到的句柄只有 GENERIC_READ|GENERIC_WRITE，没有 WRITE_DAC，
+	//   句柄版会直接 ERROR_ACCESS_DENIED（Windows 单测实测），而创建者对自有文件
+	//   通过路径改 DACL 有隐式权限。目标路径由已校验的私有目录 + 固定文件名拼出，
+	//   紧接着 secureLocalFile 还会按句柄复核身份与 DACL。
+	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		nil, nil, dacl, nil)
+}
+
 func secureLocalFile(file *os.File, directory bool) bool {
 	handle := windows.Handle(file.Fd())
 	var info windows.ByHandleFileInformation

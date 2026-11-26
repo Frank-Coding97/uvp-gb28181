@@ -122,14 +122,35 @@ test('安装说明要提醒路径长度，别只写「不含中文和空格」',
 
 // ------------------------------------------------- ② icacls /T 破坏锁文件 ----
 
-test('收紧目录权限后必须恢复 api-authority.lock 的授权，且顺序在 /T 之后', () => {
-  const tighten = authority.indexOf("'/T'");
-  const reset = authority.indexOf("'/reset'");
-  assert.ok(tighten > 0, '找不到 icacls /T 收紧动作');
-  assert.ok(reset > tighten, '/reset 必须排在 /T 之后，否则会被 /T 再次剥光');
+test('已存在的 api-authority.lock 必须显式授权：不许 /reset（父目录没 ACE 时会留空 DACL）', () => {
+  // /reset 会沿用父目录当时可继承的 ACE；父目录一旦没给出 ACE（收紧命令因
+  // 「一次 icacls 多个 /grant:r ⇒ 退出码 87，整条不生效」而失败时就是这样），
+  // 结果就是「受保护 + 零条 ACE」的死锁文件 —— 2026-11-26 在 222 上实测复现。
+  // 注释里写着「别用 /reset」是正常的，只检查真正执行的行。
+  const authCode = authority.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n');
+  assert.doesNotMatch(authCode, /\/reset/, '不许再用 /reset 恢复锁文件授权');
   assert.match(authority, /Join-Path \$Path 'api-authority\.lock'/);
   assert.match(authority, /Test-Path -LiteralPath \$lockFile/,
-    '首次启动锁文件还不存在，不能无条件 reset');
+    '首次启动锁文件还不存在，不能无条件动它的 ACL');
+
+  // 三条受信身份（当前用户 / SYSTEM / Administrators）都要显式落到文件上。
+  const grants = authority.match(/Set-ProcessAuthorityAce -Path \$lockFile[^\n]*/g) || [];
+  assert.equal(grants.length, 3, '锁文件必须逐条授权三项受信身份');
+  assert.ok(grants.some((g) => /\$sid/.test(g)), '必须含当前用户 SID（提权创建后普通令牌才读得动）');
+  assert.ok(grants.some((g) => g.includes('S-1-5-18')), '必须含 SYSTEM');
+  assert.ok(grants.some((g) => g.includes('S-1-5-32-544')), '必须含 Administrators');
+});
+
+test('一次 icacls 只能带一个 /grant:r（多个即退出码 87，一个 ACL 都不改）', () => {
+  // ⛔ 2026-11-26 踩过：把三条 /grant:r 塞进一次调用，icacls 直接「无效参数」
+  //   返回 87，而 stdout 是本地化文本，`Failed processing` 那种英文正则匹配不到，
+  //   于是脚本安静地以为权限已收紧。⇒ 现在只允许 Set-ProcessAuthorityAce 里出现
+  //   唯一一处 '/grant:r'（每条 ACE 一次调用），且必须看 $LASTEXITCODE。
+  const occurrences = (ctl.match(/'\/grant:r'/g) || []).length;
+  assert.equal(occurrences, 1, `ctl.ps1 里 '/grant:r' 应只在 Set-ProcessAuthorityAce 出现一次，实际 ${occurrences} 次`);
+  const helper = psFunction('Set-ProcessAuthorityAce');
+  assert.match(helper, /\/grant:r/, '辅助函数负责授权');
+  assert.match(helper, /\$LASTEXITCODE/, '必须用退出码判断成败，别只看输出文本');
 });
 
 test('锁文件名必须与 Go 侧 lockName 常量一致（跨语言，别一处改一处不改）', () => {
@@ -141,6 +162,63 @@ test('锁文件名必须与 Go 侧 lockName 常量一致（跨语言，别一处
 test('反向契约：不许删锁文件救急（会换新 domainID ⇒ database_domain_mismatch）', () => {
   const code = authority.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n');
   assert.doesNotMatch(code, /Remove-Item[^\n]*api-authority\.lock/i);
+});
+
+// ------------------------------------------- ③ 停止/退出要看得见反馈 ----
+// 老板 2026-11-26：「停止退出的时候能不能也弹出 cmd 弹窗，最起码用户能看到反馈，
+// 托盘上是有悬浮提示但是用户不一定悬浮去看」。
+// 于是停止和启动一样走可见控制台窗口，托盘靠一个回报文件判断窗口里那一轮停完没有。
+// ⛔ 别退回「托盘静默跑 ctl.ps1 stop + 消息框」：那十几秒里用户什么也看不到，
+//    222 现场就是把它反馈成「点退出没反应 / 退不掉」。
+
+const trayGo = readFileSync(url('../server/cmd/uvp-tray/main.go'), 'utf8');
+const startCmd = readFileSync(url('../deploy/standalone-windows/start.cmd'), 'utf8');
+const stopCmd = readFileSync(url('../deploy/standalone-windows/stop.cmd'), 'utf8');
+
+test('托盘窗口标题必须与脚本里的 title 一致（改名会让托盘找不到窗口、只能空等超时）', () => {
+  for (const [goConst, cmdText, cmdName] of [
+    ['startWindowTitle', startCmd, 'start.cmd'],
+    ['stopWindowTitle', stopCmd, 'stop.cmd'],
+  ]) {
+    const want = trayGo.match(new RegExp(`const ${goConst} = "([^"]+)"`))?.[1];
+    assert.ok(want, `main.go 里找不到常量 ${goConst}`);
+    const escaped = want.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    assert.match(cmdText, new RegExp(`^title ${escaped}[ \\t]*$`, 'm'),
+      `${cmdName} 的 title 必须与 ${goConst}（${want}）逐字一致`);
+  }
+});
+
+test('stop.cmd 必须在 pause 之前回报退出码（窗口会停在 pause 上，之后才写就永远等不到）', () => {
+  const envName = trayGo.match(/const stopMarkerEnv = "([^"]+)"/)?.[1];
+  assert.ok(envName, 'main.go 里找不到 stopMarkerEnv');
+  assert.ok(stopCmd.includes(`%${envName}%`), `stop.cmd 没有用 %${envName}% 回报退出码`);
+
+  const markerIdx = stopCmd.indexOf(`%${envName}%`);
+  const pauseIdx = stopCmd.search(/^pause[ \t]*$/m);
+  assert.ok(pauseIdx > 0, 'stop.cmd 里找不到 pause');
+  assert.ok(markerIdx < pauseIdx, '回报退出码必须写在 pause 之前');
+});
+
+test('停止必须走可见窗口，托盘不许再静默跑 stop', () => {
+  assert.doesNotMatch(trayGo, /runAction\("stop"/,
+    'stop 一律走 handleStop（可见窗口）；静默调用就是「点了没反应」的老问题');
+  assert.match(trayGo, /go handleStop\(false\)/, '菜单「停止服务」要开窗口');
+  assert.match(trayGo, /handleStop\(true\)/, '「退出」要先在窗口里停完再退托盘');
+
+  const spawn = trayGo.match(/func spawnStopWindow\(marker string\) error \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(spawn, 'main.go 里找不到 spawnStopWindow');
+  // ⛔ 不能自己 exec cmd /c stop.cmd：os/exec 在 Stdout/Stderr 为 nil 时把子进程
+  //    输出接到 NUL，窗口会是一片空白（启动窗口同样踩过这个坑）。
+  assert.match(spawn, /"\/c", "start", ""/, '必须让 cmd 的 start 去建控制台');
+});
+
+test('服务就绪后要自动打开管理页面（别让人再去托盘菜单里翻）', () => {
+  // 老板 2026-11-26：「启动的时候能自动打开浏览器自动打开管理页面吗」
+  const watch = trayGo.match(/func watchStartup\(rawURL string\) \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(watch, 'main.go 里找不到 watchStartup');
+  const ready = watch.match(/if portOpen\(addr\) \{[\s\S]*?\n\t\t\}/)?.[0];
+  assert.ok(ready, 'watchStartup 里找不到就绪分支');
+  assert.match(ready, /openURL\(rawURL\)/, '探到就绪必须自动开一次管理页面');
 });
 
 // ---------------------------------------------------------------- 门禁接线 ----

@@ -8,5 +8,6 @@ func lockLocalFile(*os.File) error               { return ErrLocalAuthorityUnava
 func secureLocalFile(*os.File, bool) bool        { return false }
 func syncLocalDirectory(*os.File) error          { return ErrLocalAuthorityUnavailable }
 func localFileIdentity(*os.File) (string, error) { return "", ErrLocalAuthorityUnavailable }
+func hardenCreatedLocalFile(string) error        { return ErrLocalAuthorityUnavailable }
 
 func localIdentityMatch(recorded, live string) bool { return recorded == live }
