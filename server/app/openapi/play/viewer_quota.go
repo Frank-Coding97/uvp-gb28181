@@ -53,6 +53,9 @@ type ViewerRuntimeSnapshot struct {
 	// tuple when the node cannot supply a boot-bound snapshot.
 	TargetAuthoritative bool
 	Identifiers         map[string]struct{}
+	// HLS cookies outlive HTTP sockets; RTC lists expose ICE socket IDs rather
+	// than signaling IDs. Their absence is not proof that a viewer closed.
+	IdentifiersIncomplete bool
 }
 
 type ViewerRuntimeSnapshotter interface {
@@ -320,6 +323,9 @@ func (q *ViewerQuota) ReconcileViewers(ctx context.Context, runtime ViewerRuntim
 			continue
 		}
 		_, present := snapshot.Identifiers[viewer.Identifier]
+		if !present && snapshot.IdentifiersIncomplete {
+			continue
+		}
 		updates := map[string]any{"last_seen_at": now, "updated_at": now}
 		if !present {
 			updates["state"] = models.ViewerStateClosed

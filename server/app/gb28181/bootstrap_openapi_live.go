@@ -81,11 +81,18 @@ func (r *openAPIViewerRuntimeSnapshotter) SnapshotViewerRuntime(ctx context.Cont
 	if client == nil {
 		return openapiplay.ViewerRuntimeSnapshot{}, gbzlm.ErrRuntimeControlUnavailable
 	}
+	// HLS cookie IDs and RTC signaling IDs are not a complete socket-player
+	// list. Only a missing source (or authenticated final flow) proves closure.
+	schema := target.Schema
+	incomplete := schema == "hls" || schema == "rtc"
+	if schema == "rtc" {
+		schema = "rtsp"
+	}
 	players, err := client.GetRuntimeMediaPlayers(ctx, gbzlm.StreamTarget{
-		Schema: target.Schema, VHost: target.VHost, App: target.App, Stream: target.Stream,
+		Schema: schema, VHost: target.VHost, App: target.App, Stream: target.Stream,
 	})
 	if err != nil {
-		standard, standardErr := client.GetMediaPlayerList(ctx, target.Schema, target.VHost, target.App, target.Stream)
+		standard, standardErr := client.GetMediaPlayerList(ctx, schema, target.VHost, target.App, target.Stream)
 		if standardErr != nil && !errors.Is(standardErr, gbzlm.ErrMediaNotFound) {
 			return openapiplay.ViewerRuntimeSnapshot{}, gbzlm.ErrRuntimeControlUnavailable
 		}
@@ -93,13 +100,13 @@ func (r *openAPIViewerRuntimeSnapshotter) SnapshotViewerRuntime(ctx context.Cont
 		for _, player := range standard {
 			identifiers[player.Identifier] = struct{}{}
 		}
-		return openapiplay.ViewerRuntimeSnapshot{TargetAuthoritative: true, Identifiers: identifiers}, nil
+		return openapiplay.ViewerRuntimeSnapshot{TargetAuthoritative: true, Identifiers: identifiers, IdentifiersIncomplete: incomplete && standardErr == nil}, nil
 	}
 	identifiers := make(map[string]struct{}, len(players.Players))
 	for _, player := range players.Players {
 		identifiers[player.Identifier] = struct{}{}
 	}
-	return openapiplay.ViewerRuntimeSnapshot{BootNonce: players.BootNonce, Identifiers: identifiers}, nil
+	return openapiplay.ViewerRuntimeSnapshot{BootNonce: players.BootNonce, Identifiers: identifiers, IdentifiersIncomplete: incomplete}, nil
 }
 
 func (r *openAPIHookRuntimeIdentityResolver) ResolveOpenAPIRuntimeIdentity(ctx context.Context, mediaServerID string) (string, error) {

@@ -57,38 +57,49 @@ func TestViewerQuotaReservesCompensatesAndExpiresPending(t *testing.T) {
 }
 
 func TestViewerQuotaBindsIdempotentlyAndFlowReportReleasesSlot(t *testing.T) {
-	db := quotaDB(t, 1)
-	quota := NewViewerQuota(db, func() time.Time { return quotaNow })
-	reservation, err := quota.Reserve(context.Background(), ReservationRequest{
-		ClientID: 1, DeviceID: "37010301021320000018", ChannelID: "37010301021320000006",
-	})
-	require.NoError(t, err)
+	for _, protocol := range []string{"http-flv", "https-flv", "ws-flv", "wss-flv", "http-fmp4", "https-fmp4", "ws-fmp4", "wss-fmp4", "http-ts", "https-ts", "ws-ts", "wss-ts", "hls", "https-hls", "webrtc", "rtmp", "rtmps", "rtsp", "rtsps"} {
+		t.Run(protocol, func(t *testing.T) {
+			db := quotaDB(t, 1)
+			quota := NewViewerQuota(db, func() time.Time { return quotaNow })
+			reservation, err := quota.Reserve(context.Background(), ReservationRequest{
+				ClientID: 1, DeviceID: "37010301021320000018", ChannelID: "37010301021320000006",
+			})
+			require.NoError(t, err)
 
-	claims := playauth.Claims{
-		Version: 4, DeviceID: "37010301021320000018", ChannelID: "37010301021320000006",
-		DeviceEpoch: 3, App: "rtp", Stream: "stream-a", MediaServerID: "node-a", MediaGeneration: 9,
-		OpenAPIClientID: 1, OpenAPIGrantID: reservation.GrantID,
+			claims := playauth.Claims{
+				Version: 4, DeviceID: "37010301021320000018", ChannelID: "37010301021320000006",
+				DeviceEpoch: 3, App: "rtp", Stream: "stream-a", MediaServerID: "node-a", MediaGeneration: 9,
+				OpenAPIClientID: 1, OpenAPIGrantID: reservation.GrantID,
+			}
+			binding := playauth.OpenAPIViewerBinding{
+				NodeUUID: "node-a", BootNonce: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Identifier: "session-a",
+				Protocol: protocol, Schema: "http", VHost: "__defaultVhost__", App: "rtp", Stream: "stream-a", MediaGeneration: 9,
+			}
+			require.NoError(t, quota.BindViewer(context.Background(), claims, binding))
+			require.NoError(t, quota.BindViewer(context.Background(), claims, binding), "same ZLM connection must be idempotent")
+
+			_, err = quota.Reserve(context.Background(), ReservationRequest{
+				ClientID: 1, DeviceID: claims.DeviceID, ChannelID: claims.ChannelID,
+			})
+			require.ErrorIs(t, err, ErrQuotaExceeded)
+
+			if protocol == "hls" || protocol == "https-hls" || protocol == "webrtc" {
+				closed, err := quota.ReconcileViewers(context.Background(), quotaSnapshotter{snapshot: ViewerRuntimeSnapshot{BootNonce: binding.BootNonce, IdentifiersIncomplete: true}}, 100)
+				require.NoError(t, err)
+				require.Zero(t, closed)
+				_, err = quota.Reserve(context.Background(), ReservationRequest{ClientID: 1, DeviceID: claims.DeviceID, ChannelID: claims.ChannelID})
+				require.ErrorIs(t, err, ErrQuotaExceeded, "incomplete socket list must not free an active viewer")
+			}
+			require.NoError(t, quota.CloseViewer(context.Background(), playauth.OpenAPIFlowReport{
+				NodeUUID: binding.NodeUUID, BootNonce: binding.BootNonce, Identifier: binding.Identifier,
+				Protocol: binding.Protocol, Schema: binding.Schema, VHost: binding.VHost, App: binding.App, Stream: binding.Stream, Player: true,
+			}))
+			_, err = quota.Reserve(context.Background(), ReservationRequest{
+				ClientID: 1, DeviceID: claims.DeviceID, ChannelID: claims.ChannelID,
+			})
+			require.NoError(t, err)
+		})
 	}
-	binding := playauth.OpenAPIViewerBinding{
-		NodeUUID: "node-a", BootNonce: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Identifier: "session-a",
-		Protocol: "http-flv", Schema: "http", VHost: "__defaultVhost__", App: "rtp", Stream: "stream-a", MediaGeneration: 9,
-	}
-	require.NoError(t, quota.BindViewer(context.Background(), claims, binding))
-	require.NoError(t, quota.BindViewer(context.Background(), claims, binding), "same ZLM connection must be idempotent")
-
-	_, err = quota.Reserve(context.Background(), ReservationRequest{
-		ClientID: 1, DeviceID: claims.DeviceID, ChannelID: claims.ChannelID,
-	})
-	require.ErrorIs(t, err, ErrQuotaExceeded)
-
-	require.NoError(t, quota.CloseViewer(context.Background(), playauth.OpenAPIFlowReport{
-		NodeUUID: binding.NodeUUID, BootNonce: binding.BootNonce, Identifier: binding.Identifier,
-		Protocol: binding.Protocol, Schema: binding.Schema, VHost: binding.VHost, App: binding.App, Stream: binding.Stream, Player: true,
-	}))
-	_, err = quota.Reserve(context.Background(), ReservationRequest{
-		ClientID: 1, DeviceID: claims.DeviceID, ChannelID: claims.ChannelID,
-	})
-	require.NoError(t, err)
 }
 
 type quotaSnapshotter struct {

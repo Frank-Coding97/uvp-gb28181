@@ -3,6 +3,7 @@ package gb28181
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -112,5 +113,30 @@ func TestOpenAPIViewerRuntimeSnapshotterFallsBackToExactStandardTarget(t *testin
 				require.Empty(t, snapshot.Identifiers)
 			}
 		})
+	}
+}
+
+func TestOpenAPIViewerRuntimeSnapshotterDoesNotInferSegmentedOrRTCViewerAbsence(t *testing.T) {
+	for _, schema := range []string{"hls", "rtc"} {
+		for _, missing := range []bool{false, true} {
+			t.Run(schema+fmt.Sprint(missing), func(t *testing.T) {
+				client := &openAPIViewerRuntimeClientStub{err: gbzlm.ErrRuntimeControlUnavailable}
+				if missing {
+					client.standardErr = gbzlm.ErrMediaNotFound
+				}
+				snapshotter := &openAPIViewerRuntimeSnapshotter{
+					registry:  openAPIViewerNodeResolverStub{node: &node.Node{ID: 1, MediaServerUUID: "node-a"}},
+					newClient: func(*node.Node) openAPIViewerRuntimeClient { return client },
+				}
+				snapshot, err := snapshotter.SnapshotViewerRuntime(context.Background(), openapiplay.ViewerRuntimeTarget{NodeUUID: "node-a", Schema: schema, VHost: "__defaultVhost__", App: "rtp", Stream: "stream-a"})
+				require.NoError(t, err)
+				require.Equal(t, !missing, snapshot.IdentifiersIncomplete)
+				want := schema
+				if schema == "rtc" {
+					want = "rtsp"
+				}
+				require.Equal(t, want, client.target.Schema)
+			})
+		}
 	}
 }

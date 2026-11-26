@@ -838,6 +838,7 @@ type onPlayBody struct {
 }
 
 type onFlowReportBody struct {
+	Params        string `json:"params"`
 	ID            string `json:"id"`
 	MediaServerID string `json:"mediaServerId"`
 	BootNonce     string `json:"bootNonce"`
@@ -1143,6 +1144,13 @@ func (h *HookController) OnPlay(c *gin.Context) {
 		identityResolver := h.openAPIRuntimeIdentityResolver
 		h.playAuthMu.RUnlock()
 		protocol, ok := openAPIHookProtocol(body.Protocol, body.Schema)
+		// ZLM appends the signaling session to WebRTC params before on_play.
+		// Require a single matching value so a caller-supplied session cannot
+		// redirect the final ICE flow report to another viewer.
+		if protocol == "webrtc" {
+			session, single := singleValue(params, "session")
+			ok = ok && single && session == body.ID
+		}
 		if !ok || binder == nil || body.ID == "" || claims.MediaServerID != body.MediaServerID || claims.MediaGeneration == 0 {
 			h.denyPlayback(c, body.Stream, "openapi_binding_invalid", "playback authorization denied")
 			return
@@ -1173,19 +1181,51 @@ func (h *HookController) OnPlay(c *gin.Context) {
 	hookOK(c)
 }
 
+// openAPIHookProtocol combines the socket transport with the media schema.
+// ZLM reports rtmp for FLV media carried over HTTP/WS, and hls/rtc for
+// protocols whose transport is not exposed by older nodes.
 func openAPIHookProtocol(protocol, schema string) (string, bool) {
 	if protocol == "" {
 		protocol = schema
 	}
 	switch protocol {
-	case "http":
-		return "http-flv", true
-	case "https":
-		return "https-flv", true
-	case "ws":
-		return "ws-flv", true
-	case "wss":
-		return "wss-flv", true
+	case "http", "https", "ws", "wss":
+		var family string
+		switch schema {
+		case "http", "https", "ws", "wss":
+			if schema != protocol {
+				return "", false
+			}
+			family = "flv"
+		case "rtmp":
+			family = "flv"
+		case "fmp4", "ts":
+			family = schema
+		case "hls":
+			if protocol != "http" && protocol != "https" {
+				return "", false
+			}
+			if protocol == "http" {
+				return "hls", true
+			}
+			return "https-hls", true
+		case "rtc":
+			if protocol == "http" || protocol == "https" {
+				return "webrtc", true
+			}
+			return "", false
+		default:
+			return "", false
+		}
+		return protocol + "-" + family, true
+	case "hls":
+		return "hls", schema == "hls"
+	case "rtc", "webrtc":
+		return "webrtc", schema == "rtc"
+	case "rtmp", "rtmps":
+		return protocol, schema == "rtmp"
+	case "rtsp", "rtsps":
+		return protocol, schema == "rtsp"
 	default:
 		return "", false
 	}
@@ -1211,9 +1251,23 @@ func (h *HookController) observeOpenAPIFlow(c *gin.Context, body onFlowReportBod
 	if !ok {
 		return
 	}
+	identifier := body.ID
+	if protocol == "webrtc" {
+		// The final report's socket ID belongs to ICE, not the HTTP signaling
+		// session admitted by on_play. Use ZLM's original admission identity.
+		params, err := url.ParseQuery(strings.TrimPrefix(body.Params, "?"))
+		if err != nil {
+			return
+		}
+		session, ok := singleValue(params, "session")
+		if !ok || session == "" {
+			return
+		}
+		identifier = session
+	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), time.Second)
 	err := observer.CloseViewer(ctx, playauth.OpenAPIFlowReport{
-		NodeUUID: body.MediaServerID, BootNonce: bootNonce, Identifier: body.ID,
+		NodeUUID: body.MediaServerID, BootNonce: bootNonce, Identifier: identifier,
 		Protocol: protocol, Schema: body.Schema, VHost: body.VHost, App: body.App, Stream: body.Stream, Player: true,
 	})
 	cancel()
