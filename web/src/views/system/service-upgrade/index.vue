@@ -62,7 +62,15 @@
             </div>
           </div>
           <a-space wrap
-            ><a-link @click="showReleaseNotes(currentVersionText, currentRelease?.release_notes, currentRelease?.published_at)"
+            ><a-link
+              @click="
+                showReleaseNotes(
+                  currentVersionText,
+                  currentRelease?.release_notes,
+                  currentRelease?.published_at,
+                  currentRelease?.task_id
+                )
+              "
               >本版本更新说明</a-link
             ><a-link :aria-expanded="environmentExpanded" @click="environmentExpanded = !environmentExpanded">{{
               environmentExpanded ? "收起环境详情" : "版本与环境详情"
@@ -181,16 +189,19 @@
               <p class="section-subtitle">查看每次升级的结果，诊断日志可在详情中查看</p>
             </div></template
           ><template #extra
-            ><span class="upgrade-caption">共 {{ sortedTasks.length }} 条记录</span></template
+            ><span class="upgrade-caption">共 {{ historyTotal }} 条记录</span></template
           >
           <div class="upgrade-tasks">
             <a-table
               class="uvp-data-table"
-              :data="sortedTasks"
-              :pagination="{ pageSize: 10, hideOnSinglePage: true }"
+              :data="historyTasks"
+              :pagination="historyTablePagination"
+              :loading="historyLoading"
               :bordered="false"
               row-key="task_id"
               :scroll="{ x: 860 }"
+              @page-change="onHistoryPageChange"
+              @page-size-change="onHistoryPageSizeChange"
             >
               <template #columns>
                 <a-table-column title="目标版本" :width="130"
@@ -217,7 +228,9 @@
                     ><div class="uvp-table-actions">
                       <a-link
                         class="uvp-table-action uvp-table-action--logs"
-                        @click="showReleaseNotes(record.version || '待校验', record.release_notes, record.published_at)"
+                        @click="
+                          showReleaseNotes(record.version || '待校验', record.release_notes, record.published_at, record.task_id)
+                        "
                         ><template #icon><icon-file /></template>更新说明</a-link
                       ><a-link class="uvp-table-action uvp-table-action--detail" @click="showTaskDetails(record.task_id)"
                         ><template #icon><icon-eye /></template>任务详情</a-link
@@ -274,7 +287,7 @@
       :visible="Boolean(selectedTask)"
       width="min(560px, 100vw)"
       :footer="false"
-      @cancel="selectedTaskID = ''"
+      @cancel="closeTaskDetails"
     >
       <template #title>任务详情</template>
       <template v-if="selectedTask">
@@ -345,10 +358,12 @@ import {
   createServiceUpgradeTask,
   getServiceUpgradeImport,
   getServiceUpgradeStatus,
+  getServiceUpgradeTask,
   importServiceUpgrade,
   getServiceUpgradeMigrationPlan,
   rollbackServiceUpgradeTask,
   type UpgradeEvent,
+  type UpgradeHistoryPage,
   type UpgradeImportArtifact,
   type UpgradeMigrationPlan,
   type UpgradeImportJob,
@@ -400,6 +415,64 @@ const taskAction = ref("");
 const sortedTasks = computed(() =>
   [...(status.value?.tasks || [])].sort((a, b) => (b.updated_at || "").localeCompare(a.updated_at || ""))
 );
+/**
+ * 升级历史分页。
+ *
+ * 历史任务是唯一会随版本无限增长的数据，状态接口只回最近摘要（且不含更新说明），
+ * 所以「升级记录」表格必须按页向后端要。⛔ 别再改回 `status.tasks` 一次全取：
+ * 线上 13 条任务时状态响应已 72KB，超过助手 64KB 读取上限后整页 503，表现出来
+ * 就像「在线升级失败」。
+ */
+const HISTORY_PAGE_SIZE = 10;
+const historyState = ref<UpgradeHistoryPage | undefined>(undefined);
+const historyLoading = ref(false);
+/** 后端有没有分页能力：老后端不返回 taskTotal，此时退回前端切片（兼容旧包）。 */
+const supportsHistoryPaging = computed(() => typeof status.value?.taskTotal === "number");
+const historyTasks = computed(() => historyState.value?.tasks ?? sortedTasks.value);
+const historyTotal = computed(() => historyState.value?.total ?? status.value?.taskTotal ?? sortedTasks.value.length);
+const historyTablePagination = computed(() =>
+  historyState.value
+    ? {
+        current: historyState.value.page,
+        pageSize: historyState.value.pageSize,
+        total: historyState.value.total,
+        showTotal: true,
+        showPageSize: true,
+        pageSizeOptions: [10, 20, 50]
+      }
+    : { pageSize: HISTORY_PAGE_SIZE, hideOnSinglePage: true }
+);
+const loadHistory = async (page = 1, pageSize = historyState.value?.pageSize ?? HISTORY_PAGE_SIZE) => {
+  if (!supportsHistoryPaging.value || historyLoading.value) return;
+  historyLoading.value = true;
+  try {
+    const result = await getServiceUpgradeStatus({ page, pageSize });
+    if (result.data?.history) historyState.value = result.data.history;
+  } catch {
+    // 历史读失败不该影响「当前状态」；保留上一次成功的结果，避免表格闪空。
+  } finally {
+    historyLoading.value = false;
+  }
+};
+const onHistoryPageChange = (page: number) => {
+  void loadHistory(page, historyState.value?.pageSize ?? HISTORY_PAGE_SIZE);
+};
+const onHistoryPageSizeChange = (pageSize: number) => {
+  void loadHistory(1, pageSize);
+};
+/**
+ * 状态每 5 秒轮询一次，历史只在「任务确实变了」时重取：
+ * 用 总数 + 最新任务的 (task_id, updated_at) 当签名，避免把轮询变成双倍请求。
+ */
+const historySignature = ref("");
+const syncHistory = () => {
+  if (!supportsHistoryPaging.value) return;
+  const newest = sortedTasks.value[0];
+  const signature = `${status.value?.taskTotal ?? 0}:${newest?.task_id ?? ""}:${newest?.updated_at ?? ""}`;
+  if (signature === historySignature.value) return;
+  historySignature.value = signature;
+  void loadHistory(historyState.value?.page ?? 1, historyState.value?.pageSize ?? HISTORY_PAGE_SIZE);
+};
 const lastActiveTaskID = ref("");
 const progressTask = computed(
   () =>
@@ -409,16 +482,66 @@ const progressTask = computed(
 const environmentExpanded = ref(false);
 const migrationDetailsVisible = ref(false);
 const selectedTaskID = ref("");
-const selectedTask = computed(() => status.value?.tasks.find(task => task.task_id === selectedTaskID.value));
+/** 抽屉里的任务详情：可能是列表摘要，也可能是按 ID 单独拉回来的完整记录。 */
+const taskDetail = ref<UpgradeTask | undefined>(undefined);
+const selectedTask = computed(() => taskDetail.value);
+const findTaskRecord = (id: string) =>
+  status.value?.tasks.find(task => task.task_id === id) ?? historyState.value?.tasks.find(task => task.task_id === id);
+const hydrateTask = async (id: string) => {
+  try {
+    const result = await getServiceUpgradeTask(id);
+    if (selectedTaskID.value === id && result?.data)
+      taskDetail.value = { ...(taskDetail.value || {}), ...result.data } as UpgradeTask;
+  } catch {
+    // 详情接口失败就保留列表里的摘要，不能把已经打开的抽屉关掉。
+  }
+};
+const closeTaskDetails = () => {
+  selectedTaskID.value = "";
+  taskDetail.value = undefined;
+};
 const showTaskDetails = (id: string) => {
   selectedTaskID.value = id;
+  const local = findTaskRecord(id);
+  taskDetail.value = local;
+  // 摘要不带更新说明正文，缺正文时按 ID 补一次（详情里要显示「版本更新说明」）。
+  if (!local?.release_notes) void hydrateTask(id);
+};
+/**
+ * 抽屉开着时跟着轮询刷新进度，否则升级过程中的阶段会停在打开那一刻。
+ * 已经补回来的更新说明不能被摘要覆盖掉。
+ */
+const syncSelectedTask = () => {
+  if (!selectedTaskID.value) return;
+  const fresh = findTaskRecord(selectedTaskID.value);
+  if (!fresh) return;
+  taskDetail.value = { ...fresh, release_notes: taskDetail.value?.release_notes || fresh.release_notes };
 };
 const releaseNotesVisible = ref(false);
 const releaseNotesDetail = ref({ version: "", notes: "", publishedAt: "" });
-const showReleaseNotes = (version: string, notes = "", publishedAt = "") => {
+const showReleaseNotes = async (version: string, notes = "", publishedAt = "", taskID = "") => {
   selectedTaskID.value = "";
+  taskDetail.value = undefined;
   releaseNotesDetail.value = { version, notes, publishedAt };
   releaseNotesVisible.value = true;
+  if (notes || !taskID) return;
+  const local = findTaskRecord(taskID);
+  if (local?.release_notes) {
+    releaseNotesDetail.value = { version, notes: local.release_notes, publishedAt: publishedAt || local.published_at || "" };
+    return;
+  }
+  try {
+    const result = await getServiceUpgradeTask(taskID);
+    if (result?.data?.release_notes) {
+      releaseNotesDetail.value = {
+        version,
+        notes: result.data.release_notes,
+        publishedAt: publishedAt || result.data.published_at || ""
+      };
+    }
+  } catch {
+    // 拉不到正文时保留空说明，弹层照旧打开，不弹第二个错误。
+  }
 };
 const currentRelease = computed(() =>
   sortedTasks.value.find(
@@ -1044,6 +1167,8 @@ const loadStatus = async () => {
       if (status.value.activeTask) lastActiveTaskID.value = status.value.activeTask.task_id;
       statusError.value = "";
       reconcileUpdate();
+      syncHistory();
+      syncSelectedTask();
       if (!runtimeIdentityMismatch.value) clearClientRefreshTarget();
       else maybeRefreshClient();
       // 升级已经生效：顺手让侧边栏摘掉徽标，别等下一轮 2 分钟轮询。

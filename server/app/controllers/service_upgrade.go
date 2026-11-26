@@ -286,7 +286,84 @@ func (c *ServiceUpgradeController) migrationStateDigest(ctx context.Context) (st
 	return digest, err
 }
 
+// 升级历史分页：状态接口只返回最近摘要（见 upgrade.StatusTaskLimit），
+// 历史记录按页取，避免响应体随升级次数无限增长。
+const (
+	upgradeHistoryDefaultPageSize = 10
+	upgradeHistoryMaxPageSize     = upgrade.MaxTaskPageSize
+)
+
+type upgradeHistoryPage struct {
+	Page     int                        `json:"page"`
+	PageSize int                        `json:"pageSize"`
+	Total    int                        `json:"total"`
+	Tasks    []*publicUpgradeTaskRecord `json:"tasks"`
+}
+
+// upgradeHistoryRequest 解析 ?page=&pageSize=（也接受 page_size）。
+// 不带 page 表示「首屏轮询」，不返回历史块 —— 轮询每 5 秒一次，不该拖着一页说明走。
+func upgradeHistoryRequest(ctx *gin.Context) (int, int, bool) {
+	raw := strings.TrimSpace(ctx.Query("page"))
+	if raw == "" {
+		return 0, 0, false
+	}
+	page, err := strconv.Atoi(raw)
+	if err != nil || page <= 0 {
+		page = 1
+	}
+	size := upgradeHistoryDefaultPageSize
+	for _, key := range []string{"pageSize", "page_size"} {
+		value := strings.TrimSpace(ctx.Query(key))
+		if value == "" {
+			continue
+		}
+		if parsed, convErr := strconv.Atoi(value); convErr == nil && parsed > 0 {
+			size = parsed
+		}
+		break
+	}
+	if size > upgradeHistoryMaxPageSize {
+		size = upgradeHistoryMaxPageSize
+	}
+	return page, size, true
+}
+
+func newUpgradeHistoryPage(page, size, total int, records []upgrade.TaskRecord) upgradeHistoryPage {
+	if total < len(records) {
+		total = len(records)
+	}
+	return upgradeHistoryPage{Page: page, PageSize: size, Total: total, Tasks: publicUpgradeTasks(records)}
+}
+
+// upgradeHistoryPage 通过助手取一页历史任务。
+func (c *ServiceUpgradeController) upgradeHistoryPage(ctx context.Context, page, size int) (upgradeHistoryPage, error) {
+	response, err := c.callUpgradeRPC(ctx, upgrade.ProtocolRequest{
+		Protocol: upgrade.UpdaterProtocolVersion, Action: upgrade.ActionTaskList, Page: page, PageSize: size,
+	})
+	if err == nil && response.OK {
+		return newUpgradeHistoryPage(page, size, response.TaskTotal, response.Tasks), nil
+	}
+	// ⛔ 老助手用 DisallowUnknownFields 解码请求，收到 page/page_size 会直接报
+	//    "unknown field"，不是空列表。升级窗口内业务进程可能比助手新，这条回退
+	//    不是可有可无：没有它，历史面板在助手替换前会整块报错。
+	fallback, fallbackErr := c.callUpgradeRPC(ctx, upgrade.ProtocolRequest{
+		Protocol: upgrade.UpdaterProtocolVersion, Action: upgrade.ActionTaskList,
+	})
+	if fallbackErr != nil {
+		if err != nil {
+			return upgradeHistoryPage{}, err
+		}
+		return upgradeHistoryPage{}, fallbackErr
+	}
+	if !fallback.OK {
+		return upgradeHistoryPage{}, upgradeRPCResponseError(fallback)
+	}
+	records, total := upgrade.PageTasks(fallback.Tasks, page, size)
+	return newUpgradeHistoryPage(page, size, total, records), nil
+}
+
 func (c *ServiceUpgradeController) Status(ctx *gin.Context) {
+	historyPage, historySize, withHistory := upgradeHistoryRequest(ctx)
 	if !c.local {
 		response, err := c.callUpgradeRPC(ctx.Request.Context(), upgrade.ProtocolRequest{Protocol: upgrade.UpdaterProtocolVersion, Action: upgrade.ActionStatus})
 		if err != nil {
@@ -310,19 +387,34 @@ func (c *ServiceUpgradeController) Status(ctx *gin.Context) {
 			version["build_id"] = status.CurrentBuildID
 		}
 		_, updaterErr := os.Stat(c.updaterSocket())
+		// 老助手会回传全部历史任务；这里再收一次窗口，保证状态体积与历史条数无关。
+		tasks := upgrade.RecentTaskSummaries(status.Tasks, upgrade.StatusTaskLimit)
+		taskTotal := status.TaskTotal
+		if taskTotal < len(tasks) {
+			taskTotal = len(tasks)
+		}
 		payload := gin.H{
 			"current":                 version,
 			"deployment":              status.Deployment,
 			"releaseSourceConfigured": status.ReleaseSourceConfigured,
 			"capabilities":            gin.H{"onlineCheck": status.OnlineCheck, "offlineImport": status.OfflineImport, "apply": updaterErr == nil, "rollback": updaterErr == nil, "updaterProtocol": upgrade.UpdaterProtocolVersion},
 			"activeTask":              publicUpgradeTask(status.ActiveTask),
-			"tasks":                   publicUpgradeTasks(status.Tasks),
+			"tasks":                   publicUpgradeTasks(tasks),
+			"taskTotal":               taskTotal,
 			"events":                  status.Events,
 		}
 		// 下载字节数只做展示。老助手不报这块时**整个键都不下发**，
 		// 页面据此退回「不确定进度」的流动条，而不是显示 0%。
 		if status.Transfer != nil {
 			payload["transfer"] = status.Transfer
+		}
+		if withHistory {
+			history, historyErr := c.upgradeHistoryPage(ctx.Request.Context(), historyPage, historySize)
+			if historyErr != nil {
+				c.FailAndAbort(ctx, "读取升级历史失败", historyErr, http.StatusServiceUnavailable)
+				return
+			}
+			payload["history"] = history
 		}
 		c.Success(ctx, payload)
 		return
@@ -343,15 +435,21 @@ func (c *ServiceUpgradeController) Status(ctx *gin.Context) {
 	if eventLog, eventErr := upgrade.OpenFileEventLog(filepath.Join(upgradeStateRoot(c.versionPath), "events.jsonl")); eventErr == nil {
 		events, _ = eventLog.Recent(50)
 	}
-	c.Success(ctx, gin.H{
+	payload := gin.H{
 		"current":                 version,
 		"deployment":              c.deployment(),
 		"releaseSourceConfigured": strings.HasPrefix(c.releaseSourceValue(), "https://"),
 		"capabilities":            gin.H{"onlineCheck": c.check != nil || c.configuredCheck() != nil, "offlineImport": len(c.trustedKeys()) > 0, "apply": updaterErr == nil, "rollback": updaterErr == nil, "updaterProtocol": 1},
 		"activeTask":              publicUpgradeTask(activeTask(records)),
-		"tasks":                   publicUpgradeTasks(records),
+		"tasks":                   publicUpgradeTasks(upgrade.RecentTaskSummaries(records, upgrade.StatusTaskLimit)),
+		"taskTotal":               len(records),
 		"events":                  events,
-	})
+	}
+	if withHistory {
+		paged, total := upgrade.PageTasks(records, historyPage, historySize)
+		payload["history"] = newUpgradeHistoryPage(historyPage, historySize, total, paged)
+	}
+	c.Success(ctx, payload)
 }
 
 func (c *ServiceUpgradeController) currentVersionPayload() map[string]any {

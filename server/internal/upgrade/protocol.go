@@ -31,6 +31,11 @@ const (
 
 const maxProtocolEventLimit = 100
 
+// MaxTaskPageSize 是历史任务分页的每页上限。页面只需要十来条，
+// 上限存在的意义是让**单次响应体有界**：一条任务带完整中文更新说明约 3KB，
+// 50 条约 150KB，配合 8MB 的响应上限仍有百倍余量。
+const MaxTaskPageSize = 50
+
 // PrepareTaskRequest is retained for internal compatibility. Its path fields
 // are deliberately excluded from the wire protocol: a socket client may only
 // name an opaque inbox token, never a helper filesystem path.
@@ -67,19 +72,24 @@ type ProtocolRequest struct {
 	Actor        string              `json:"actor,omitempty"`
 	EventLimit   int                 `json:"event_limit,omitempty"`
 	InboxToken   string              `json:"inbox_token,omitempty"`
+	// Page/PageSize 只对 task_list 生效。历史任务是唯一会随版本无限增长的数据，
+	// 一次性回传会让响应体越滚越大（线上 13 条任务已 72KB），必须按页取。
+	Page     int `json:"page,omitempty"`
+	PageSize int `json:"page_size,omitempty"`
 }
 
 type ProtocolResponse struct {
-	Protocol int                 `json:"protocol"`
-	OK       bool                `json:"ok"`
-	Error    string              `json:"error,omitempty"`
-	Task     *TaskRecord         `json:"task,omitempty"`
-	Tasks    []TaskRecord        `json:"tasks,omitempty"`
-	Events   []UpgradeEvent      `json:"events,omitempty"`
-	Status   *ControlStatus      `json:"status,omitempty"`
-	Check    *ControlCheckResult `json:"check,omitempty"`
-	Staged   *StagedArtifact     `json:"staged,omitempty"`
-	Import   *ImportRecord       `json:"import,omitempty"`
+	Protocol  int                 `json:"protocol"`
+	OK        bool                `json:"ok"`
+	Error     string              `json:"error,omitempty"`
+	Task      *TaskRecord         `json:"task,omitempty"`
+	Tasks     []TaskRecord        `json:"tasks,omitempty"`
+	TaskTotal int                 `json:"task_total,omitempty"`
+	Events    []UpgradeEvent      `json:"events,omitempty"`
+	Status    *ControlStatus      `json:"status,omitempty"`
+	Check     *ControlCheckResult `json:"check,omitempty"`
+	Staged    *StagedArtifact     `json:"staged,omitempty"`
+	Import    *ImportRecord       `json:"import,omitempty"`
 }
 
 func (r ProtocolRequest) Validate() error {
@@ -87,9 +97,15 @@ func (r ProtocolRequest) Validate() error {
 		return fmt.Errorf("unsupported updater protocol %d", r.Protocol)
 	}
 	switch r.Action {
-	case ActionStatus, ActionCheck, ActionTaskList:
-		if !r.hasOnlyZeroOptionalFields() {
+	// 分页只对历史任务列表有意义；其它动作带分页字段一律拒收，
+	// 让「协议没写清楚」在入口就暴露，而不是被静默忽略。
+	case ActionStatus, ActionCheck:
+		if !r.hasOnlyZeroOptionalFields() || r.Page != 0 || r.PageSize != 0 {
 			return errors.New("read request contains unexpected fields")
+		}
+	case ActionTaskList:
+		if !r.hasOnlyZeroOptionalFields() || r.Page < 0 || r.PageSize < 0 || r.PageSize > MaxTaskPageSize {
+			return errors.New("task_list request contains invalid paging")
 		}
 	case ActionPrepare:
 		if !validTaskID(r.TaskID) || r.ImportID != "" || !validDigest(r.TargetDigest) || r.Confirmation || r.Prepare != nil || r.Create != nil || r.Actor != "" || r.EventLimit != 0 || r.InboxToken != "" {

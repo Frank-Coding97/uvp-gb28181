@@ -12,6 +12,7 @@ const api = vi.hoisted(() => ({
   applyTask: vi.fn(),
   cancelTask: vi.fn(),
   rollbackTask: vi.fn(),
+  getTask: vi.fn(),
   getNotice: vi.fn(),
   setAutoCheck: vi.fn(),
   clearIgnore: vi.fn()
@@ -38,6 +39,7 @@ vi.mock("@/api/service-upgrade", () => ({
   applyServiceUpgradeTask: api.applyTask,
   cancelServiceUpgradeTask: api.cancelTask,
   rollbackServiceUpgradeTask: api.rollbackTask,
+  getServiceUpgradeTask: api.getTask,
   getServiceUpgradeNotice: api.getNotice,
   ignoreServiceUpgradeNotice: vi.fn(),
   clearIgnoredServiceUpgradeNotice: api.clearIgnore,
@@ -1550,6 +1552,70 @@ describe("service upgrade page", () => {
     await flushPromises();
 
     expect(wrapper.find('[data-testid="ignored-update-entry"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  // ⛔ 状态接口只回最近摘要（且不带更新说明），历史必须按页向后端要：
+  //    一次性全取会让状态响应随升级次数增长，线上 13 条就到 72KB，超过助手
+  //    64KB 读取上限后整页 503（表现为「在线升级失败」）。
+  it("升级记录按后端分页取，状态只带摘要也能拿到总条数", async () => {
+    const summary = {
+      task_id: "summary-1",
+      version: "1.1.28",
+      phase: "succeeded",
+      committed: true,
+      updated_at: "2026-11-26T00:00:00Z"
+    };
+    const history = { page: 1, pageSize: 10, total: 12, tasks: [{ ...summary, release_notes: "第一页说明" }] };
+    api.getStatus
+      .mockResolvedValueOnce({ code: 0, data: { ...status(), tasks: [summary], taskTotal: 12 } })
+      .mockResolvedValueOnce({ code: 0, data: { ...status(), tasks: [summary], taskTotal: 12, history } });
+
+    const wrapper = mountPage();
+    await flushPromises();
+    const vm = wrapper.vm as any;
+
+    expect(vm.historyTotal).toBe(12);
+    expect(vm.historyTasks).toHaveLength(1);
+    expect(vm.historyTasks[0].release_notes).toBe("第一页说明");
+    expect(api.getStatus).toHaveBeenLastCalledWith({ page: 1, pageSize: 10 });
+    wrapper.unmount();
+  });
+
+  it("历史翻页时按新页码向后端请求", async () => {
+    const summary = {
+      task_id: "summary-1",
+      version: "1.1.28",
+      phase: "succeeded",
+      committed: true,
+      updated_at: "2026-11-26T00:00:00Z"
+    };
+    api.getStatus.mockResolvedValue({
+      code: 0,
+      data: { ...status(), tasks: [summary], taskTotal: 30, history: { page: 1, pageSize: 10, total: 30, tasks: [summary] } }
+    });
+
+    const wrapper = mountPage();
+    await flushPromises();
+    (wrapper.vm as any).onHistoryPageChange(3);
+    await flushPromises();
+
+    expect(api.getStatus).toHaveBeenLastCalledWith({ page: 3, pageSize: 10 });
+    wrapper.unmount();
+  });
+
+  it("摘要缺更新说明时按任务 ID 补拉详情", async () => {
+    const summary = { task_id: "notes-missing", version: "1.1.28", phase: "succeeded", committed: true };
+    api.getStatus.mockResolvedValue({ code: 0, data: { ...status(), tasks: [summary], taskTotal: 1 } });
+    api.getTask.mockResolvedValue({ code: 0, data: { ...summary, release_notes: "补回来的更新说明" } });
+
+    const wrapper = mountPage();
+    await flushPromises();
+    (wrapper.vm as any).showTaskDetails(summary.task_id);
+    await flushPromises();
+
+    expect(api.getTask).toHaveBeenCalledWith(summary.task_id);
+    expect(wrapper.text()).toContain("补回来的更新说明");
     wrapper.unmount();
   });
 });

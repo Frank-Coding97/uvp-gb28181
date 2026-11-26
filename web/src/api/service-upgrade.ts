@@ -61,9 +61,25 @@ export interface UpgradeStatus {
   releaseSourceConfigured: boolean;
   capabilities: { onlineCheck: boolean; offlineImport: boolean; apply: boolean; rollback: boolean; updaterProtocol: number };
   activeTask?: UpgradeTask;
+  /** 最近的任务摘要（不含更新说明正文），条数由后端固定，与历史总量无关 */
   tasks: UpgradeTask[];
+  /** 全部历史任务条数；老后端不返回，此时按 tasks.length 处理 */
+  taskTotal?: number;
+  /** 带 page 参数请求时才返回的一页历史（含更新说明） */
+  history?: UpgradeHistoryPage;
   events?: UpgradeEvent[];
   transfer?: UpgradeTransfer;
+}
+
+/**
+ * 升级历史分页。历史任务是唯一会随版本无限增长的数据：
+ * 一次性回传会让状态响应越滚越大（线上 13 条已 72KB，超过 64KB 读取上限后整页 503）。
+ */
+export interface UpgradeHistoryPage {
+  page: number;
+  pageSize: number;
+  total: number;
+  tasks: UpgradeTask[];
 }
 
 /**
@@ -164,8 +180,11 @@ export interface UpgradeImportArtifact {
 
 // 这两个 GET 是页面首屏的「状态探针」：失败时页面已经有常驻横幅说明原因，
 // 再走一次全局红 toast 就是同一次故障弹两条。调用方自己决定怎么提示。
-export const getServiceUpgradeStatus = () =>
-  http.request<BaseResult<UpgradeStatus>>("get", baseUrlApi("system/upgrade/status"), undefined, { showErrorMessage: false });
+// ⛔ 不传 page 时只回最近摘要；传 page 才额外带上那一页历史（含更新说明）。
+export const getServiceUpgradeStatus = (paging?: { page: number; pageSize: number }) =>
+  http.request<BaseResult<UpgradeStatus>>("get", baseUrlApi("system/upgrade/status"), paging ? { params: paging } : undefined, {
+    showErrorMessage: false
+  });
 export const getServiceUpgradeMigrationPlan = () =>
   http.request<BaseResult<UpgradeMigrationPlan>>("get", baseUrlApi("system/upgrade/migration-plan"), undefined, {
     showErrorMessage: false

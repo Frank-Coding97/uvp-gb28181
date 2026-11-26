@@ -84,15 +84,18 @@ type ControlCheckResult struct {
 }
 
 type ControlStatus struct {
-	CurrentVersion          string         `json:"current_version,omitempty"`
-	CurrentBuildID          string         `json:"current_build_id,omitempty"`
-	Deployment              string         `json:"deployment"`
-	ReleaseSourceConfigured bool           `json:"release_source_configured"`
-	OnlineCheck             bool           `json:"online_check"`
-	OfflineImport           bool           `json:"offline_import"`
-	ActiveTask              *TaskRecord    `json:"active_task,omitempty"`
-	Tasks                   []TaskRecord   `json:"tasks"`
-	Events                  []UpgradeEvent `json:"events"`
+	CurrentVersion          string       `json:"current_version,omitempty"`
+	CurrentBuildID          string       `json:"current_build_id,omitempty"`
+	Deployment              string       `json:"deployment"`
+	ReleaseSourceConfigured bool         `json:"release_source_configured"`
+	OnlineCheck             bool         `json:"online_check"`
+	OfflineImport           bool         `json:"offline_import"`
+	ActiveTask              *TaskRecord  `json:"active_task,omitempty"`
+	Tasks                   []TaskRecord `json:"tasks"`
+	// TaskTotal 是全部历史任务的条数。Tasks 只装最近 StatusTaskLimit 条摘要，
+	// 分页浏览历史时以 TaskTotal 算页数。
+	TaskTotal int            `json:"task_total"`
+	Events    []UpgradeEvent `json:"events"`
 	// Transfer carries byte-level download progress for ActiveTask. It is
 	// optional and cosmetic: older helpers simply omit it, and older business
 	// processes ignore it because the response decoder is tolerant.
@@ -174,6 +177,17 @@ func (s *ControlService) ListTasks(ctx context.Context) ([]TaskRecord, error) {
 	return s.Store.List()
 }
 
+// ListTasksPage 返回历史任务的一页（按更新时间倒序）与总数。
+// 这是唯一会带完整更新说明的读取接口，所以必须分页。
+func (s *ControlService) ListTasksPage(ctx context.Context, page, pageSize int) ([]TaskRecord, int, error) {
+	records, err := s.ListTasks(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	paged, total := PageTasks(records, page, pageSize)
+	return paged, total, nil
+}
+
 func (s *ControlService) RecentEvents(ctx context.Context, limit int) ([]UpgradeEvent, error) {
 	if err := controlContext(ctx); err != nil {
 		return nil, err
@@ -207,7 +221,8 @@ func (s *ControlService) Status(ctx context.Context) (ControlStatus, error) {
 		ReleaseSourceConfigured: s != nil && strings.HasPrefix(strings.TrimSpace(s.ReleaseSource), "https://"),
 		OnlineCheck:             s.OnlineCheckEnabled(),
 		OfflineImport:           s != nil && len(s.TrustedKeys) > 0,
-		Tasks:                   records,
+		Tasks:                   RecentTaskSummaries(records, StatusTaskLimit),
+		TaskTotal:               len(records),
 		Events:                  events,
 		ActiveTask:              activeTaskRecord(records),
 	}

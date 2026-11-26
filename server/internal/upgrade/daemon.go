@@ -51,6 +51,12 @@ type UpdaterControl interface {
 	GetTask(context.Context, string) (TaskRecord, error)
 }
 
+// pagedTaskLister 是 UpdaterControl 的可选增强：历史任务必须分页读取。
+// 做成可选接口而不是加进 UpdaterControl，是为了不让旧实现/测试替身被迫同步实现。
+type pagedTaskLister interface {
+	ListTasksPage(ctx context.Context, page, pageSize int) ([]TaskRecord, int, error)
+}
+
 // PeerAuthorizer derives the Unix peer identity from the accepted socket. A
 // socket mode is only a coarse admission control; privileged helpers must
 // validate the kernel-reported peer before decoding a request.
@@ -358,12 +364,24 @@ func (s *UnixServer) dispatch(ctx context.Context, request ProtocolRequest) Prot
 			response.Error = err.Error()
 			return response
 		}
+		// 首选助手侧分页：响应体只装这一页，与历史条数无关。
+		if lister, ok := control.(pagedTaskLister); ok {
+			records, total, listErr := lister.ListTasksPage(ctx, request.Page, request.PageSize)
+			if listErr != nil {
+				response.Error = listErr.Error()
+				return response
+			}
+			response.OK, response.Tasks, response.TaskTotal = true, records, total
+			return response
+		}
+		// 兼容只实现 ListTasks 的旧控制层：本地切片，仍只回一页。
 		records, err := control.ListTasks(ctx)
 		if err != nil {
 			response.Error = err.Error()
 			return response
 		}
-		response.OK, response.Tasks = true, records
+		paged, total := PageTasks(records, request.Page, request.PageSize)
+		response.OK, response.Tasks, response.TaskTotal = true, paged, total
 		return response
 	case ActionEvents:
 		control, err := s.control()
