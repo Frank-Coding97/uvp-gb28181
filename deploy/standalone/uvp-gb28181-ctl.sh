@@ -2495,7 +2495,13 @@ sync_zlm_ports_ini() {
   # [ffmpeg] bin 属于"包内自管"，每次跟模板对齐（理由见上面那个函数）。
   local ffmpeg_bin ffmpeg_args=()
   ffmpeg_bin="$(zlm_template_ffmpeg_bin)"
-  if [ -n "$ffmpeg_bin" ]; then ffmpeg_args=(--ffmpeg-bin "$ffmpeg_bin"); fi
+  # ⛔ flag 名必须是 --zlm-ffmpeg：uvp-setup 的 ports-sync 只认这个名字
+  #   （server/cmd/uvp-setup/portsync.go 的 fs.String("zlm-ffmpeg", ...)）。
+  #   2026-11-26 出 1.1.28 时实测：写成 --ffmpeg-bin 会让 Go flag 直接
+  #   "flag provided but not defined" ⇒ 退出码 1 ⇒ 整个启动链失败，
+  #   而包内 config.ini 的 [ffmpeg] bin 一直有值（./bin/ffmpeg），
+  #   所以这条路径是**每次启动都走**，不是边缘分支。
+  if [ -n "$ffmpeg_bin" ]; then ffmpeg_args=(--zlm-ffmpeg "$ffmpeg_bin"); fi
 
   local rc=0
   "$SETUP_BIN" ports-sync --ini "$ZLM_INI" \

@@ -74,8 +74,14 @@ function shellCalls(text) {
   //     sync_zlm_ports_ini 那串带反斜杠的参数把 zlm-* 补齐了，看起来像是都收到了）。
   //   ⇒ 必须先按括号取出整个数组体，再在体内收 flag。
   //   ⛔ 用 `[^()]*` 而不是贪婪：这些数组值里没有嵌套括号，遇到嵌套宁可跳过也不错杀。
-  for (const m of body.matchAll(/\bargs=\(([^()]*)\)/g)) {
-    const inner = m[1];
+  // ⛔⛔ 必须收**所有** `*args=` 数组，不能只收名字正好叫 `args` 的：
+  //   2026-11-26 出 1.1.28 时踩到，`ffmpeg_args=(--ffmpeg-bin "$ffmpeg_bin")`
+  //   这个数组名带前缀，`\bargs=\(` 里 `\b` 在 `_` 后面不成立 ⇒ 整条漏掉；
+  //   而它展开进的是同一个 `"$SETUP_BIN" ports-sync …` 调用，
+  //   于是写成 `--ffmpeg-bin`（Go 侧只注册了 `zlm-ffmpeg`）测试照样全绿，
+  //   现场表现是 Linux 每次启动都 `flag provided but not defined` ⇒ 起不来。
+  for (const m of body.matchAll(/\b(\w*args)=\(([^()]*)\)/g)) {
+    const inner = m[2];
     const first = inner.match(/^\s*([a-z][a-z0-9-]*)/);
     if (first) subs.add(first[1]);
     collectFlags(inner, flags);
@@ -122,7 +128,10 @@ function psCalls(text) {
   //      并把它那几个 flag 算进 uvp-setup 的白名单校验
   //      ⇒ 两条**假红**（2026-11-09 跑出来的，跟端口改动无关）。
   //    ⛔ 匹配 `[^()]*`：这些数组里没有嵌套括号，遇到嵌套就跳过，宁漏不误报。
-  for (const m of joined.matchAll(/\$(\w*[Aa]rgs)\s*=\s*@\(([^()]*)\)/g)) {
+  //    ⛔⛔ 必须支持 `+=`：`$syncArgs += @('--zlm-ffmpeg', …)` 是追加写法，
+  //      只认 `= @(` 会漏掉它 —— 2026-11-26 修 `--ffmpeg-bin` 时才暴露：
+  //      Windows 侧那个键从来没进过比对集合（它本身是对的，但门禁看不见它）。
+  for (const m of joined.matchAll(/\$(\w*[Aa]rgs)\s*\+?=\s*@\(([^()]*)\)/g)) {
     const inner = m[2];
     const first = inner.match(/'([a-z][a-z0-9-]*)'/);
     if (first) subs.add(first[1]);
