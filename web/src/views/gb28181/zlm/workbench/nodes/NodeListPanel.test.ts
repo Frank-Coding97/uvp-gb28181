@@ -99,7 +99,7 @@ describe("NodeListPanel", () => {
     expect(source).toContain('v-if="record.mediaServerUUID"');
   });
 
-  it("asks for confirmation before disabling a node, and keeps enable a single click", () => {
+  it("confirms disable and single-port enable while keeping multi-port enable a single click", () => {
     // 停用会把节点从调度池摘掉 —— 误点一次现象很隐晦（后续点播悄悄换节点），必须二次确认。
     expect(source).toContain("Modal.confirm({");
     expect(source).toContain('title: "停用媒体节点"');
@@ -107,8 +107,9 @@ describe("NodeListPanel", () => {
     // 危险确认键要走 status=danger（样式见 uvp-modal-simple.scss），别退回品牌蓝。
     expect(source).toContain('okButtonProps: { status: "danger" }');
     expect(source).toContain("onOk: () => toggleNodeEnabled(node, false)");
-    // 启用的分支在弹确认之前就 return 掉了，保持一键可用。
+    expect(source).toContain('title: "启用单端口媒体节点"');
+    expect(source).toContain("关闭全局固定播放地址及自动点播");
+    expect(source).toContain('if (node.rtpReceiveMode === "single")');
     expect(source).toContain("void toggleNodeEnabled(node, true);");
-    expect(source).toMatch(/if \(nextEnabled\) \{\s*void toggleNodeEnabled\(node, true\);\s*return;\s*\}/);
   });
 });

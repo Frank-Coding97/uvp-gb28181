@@ -210,6 +210,10 @@ func (s *ServiceConfig) UnmarshalJSON(data []byte) error {
 }
 
 func (sc *ServiceConfigController) GetServiceConfig(c *gin.Context) {
+	if sc.playbackCompatibility != nil {
+		unlock := sc.playbackCompatibility.Lock()
+		defer unlock()
+	}
 	sc.Success(c, sc.currentServiceConfig())
 }
 
@@ -239,7 +243,7 @@ func (sc *ServiceConfigController) currentServiceConfig() ServiceConfig {
 		PreallocationMode: PreallocationModeConfig{Enabled: gbconfig.PreallocationMode()}, IgnoreChannelOfflineStatusNotify: IgnoreChannelOfflineStatusNotifyConfig{Enabled: gbconfig.IgnoreChannelOfflineStatusNotify()},
 		PTZDefaultSpeed: PTZDefaultSpeedConfig{Level: currentPTZDefaultSpeedLevel()}, DefaultChannelStreamTransport: DefaultChannelStreamTransportConfig{Transport: gbconfig.CurrentDefaultChannelStreamTransport()},
 		DefaultPlaybackProtocol: DefaultPlaybackProtocolConfig{Protocol: gbconfig.CurrentDefaultPlaybackProtocol()}, GlobalSubscriptions: GlobalSubscriptionConfig{Items: gbconfig.GlobalSubscriptionItems()},
-		DefaultChannelAudio: DefaultChannelAudioConfig{Enabled: gbconfig.DefaultChannelAudioEnabled()}, PlaybackSettings: gbconfig.CurrentPlaybackSettings(), FixedAddressPlayback: gbconfig.CurrentFixedAddressPlaybackSettings(),
+		DefaultChannelAudio: DefaultChannelAudioConfig{Enabled: gbconfig.DefaultChannelAudioEnabled()}, PlaybackSettings: gbconfig.CurrentPlaybackSettings(), FixedAddressPlayback: sc.fixedPlaybackSettings(),
 		PlayAuth: gbconfig.CurrentPlayAuthSettings(), VideoShare: currentVideoShareConfig(), RecordCacheTailToleranceSec: gbconfig.CurrentRecordCacheTailToleranceSec(), SIPLog: SIPLogUpdateResult{Enabled: gbconfig.SIPTraceEnabled(), Applied: sc.sipTraceApplied(gbconfig.SIPTraceEnabled())},
 		Cascade: &cascade,
 	}
@@ -254,6 +258,14 @@ func (sc *ServiceConfigController) UpdateServiceConfig(c *gin.Context) {
 	if app.ConfigYml == nil {
 		sc.Fail(c, "配置服务尚未初始化", nil, http.StatusServiceUnavailable)
 		return
+	}
+	if sc.playbackCompatibility != nil {
+		unlock := sc.playbackCompatibility.Lock()
+		defer unlock()
+		if err := sc.playbackCompatibility.Validate(request.FixedAddressPlayback); err != nil {
+			sc.Fail(c, err.Error(), err, http.StatusConflict)
+			return
+		}
 	}
 	current := sc.currentServiceConfig()
 	if !request.recordCacheTailTolerancePresent {
@@ -305,6 +317,7 @@ func (sc *ServiceConfigController) UpdateServiceConfig(c *gin.Context) {
 			}
 		}
 	}
+	request.FixedAddressPlayback = sc.fixedPlaybackSettings()
 	sc.SuccessWithMessage(c, "国标服务配置已更新", request)
 }
 
@@ -405,10 +418,22 @@ func SetPlayAuthRuntimeReady(ready bool) {
 // 这里不复用 /api/config/update，避免页面提交时覆盖系统和安全配置。
 type ServiceConfigController struct {
 	controllers.Common
-	reload             SIPTraceReloader
-	runtimeEnabled     SIPTraceRuntimeProvider
-	playAuthTTLUpdater PlayAuthTTLUpdater
-	playbackSettingsMu sync.Mutex
+	reload                SIPTraceReloader
+	runtimeEnabled        SIPTraceRuntimeProvider
+	playAuthTTLUpdater    PlayAuthTTLUpdater
+	playbackSettingsMu    sync.Mutex
+	playbackCompatibility *PlaybackCompatibility
+}
+
+func (sc *ServiceConfigController) SetPlaybackCompatibility(policy *PlaybackCompatibility) {
+	sc.playbackCompatibility = policy
+}
+
+func (sc *ServiceConfigController) fixedPlaybackSettings() gbconfig.FixedAddressPlaybackSettings {
+	if sc.playbackCompatibility != nil {
+		return sc.playbackCompatibility.Settings()
+	}
+	return gbconfig.CurrentFixedAddressPlaybackSettings()
 }
 
 func NewServiceConfigController() *ServiceConfigController {

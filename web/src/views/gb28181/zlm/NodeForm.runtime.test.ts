@@ -3,11 +3,13 @@ import { defineComponent, h } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import NodeForm from "./NodeForm.vue";
 
-const api = vi.hoisted(() => ({ getConfig: vi.fn(), probe: vi.fn() }));
+const api = vi.hoisted(() => ({ getConfig: vi.fn(), probe: vi.fn(), update: vi.fn() }));
+const messages = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }));
+vi.mock("@arco-design/web-vue", () => ({ Message: messages }));
 vi.mock("@/api/gb28181-zlm", () => ({
   getZLMNodeConfig: api.getConfig,
   createZLMNode: vi.fn(),
-  updateZLMNode: vi.fn(),
+  updateZLMNode: api.update,
   probeZLMNode: api.probe
 }));
 
@@ -111,6 +113,60 @@ describe("receive port mode is edit-only", () => {
     await flushPromises();
 
     expect(wrapper.html()).toContain('aria-label="收流端口模式"');
+  });
+});
+
+describe("single-port playback configuration warning", () => {
+  const config = { code: 0, data: { groups: [{ items: [{ key: "rtp_proxy.port", value: "10000" }] }] } };
+  const stubs = {
+    ...createStubs,
+    "a-switch": {
+      props: ["modelValue", "checkedValue", "uncheckedValue"],
+      emits: ["update:modelValue"],
+      template: `<button @click="$emit('update:modelValue', modelValue === checkedValue ? uncheckedValue : checkedValue)">{{ modelValue }}</button>`
+    }
+  };
+
+  it("warns before saving single-port mode and does not persist when cancelled", async () => {
+    api.getConfig.mockResolvedValue(config);
+    api.update.mockClear();
+    const wrapper = track(
+      shallowMount(NodeForm, {
+        props: { visible: true, node: multiNode as any },
+        global: { renderStubDefaultSlot: true, stubs }
+      })
+    );
+    await flushPromises();
+    await wrapper.get('[aria-label="收流端口模式"]').trigger("click");
+    expect(wrapper.text()).toContain("保存后将关闭全局固定播放地址及自动点播");
+    expect(wrapper.text()).toContain("新发起的播放将使用动态地址");
+    expect(api.update).not.toHaveBeenCalled();
+    await wrapper
+      .findAll("button")
+      .find(button => button.text() === "取消")!
+      .trigger("click");
+    expect(api.update).not.toHaveBeenCalled();
+    expect(wrapper.emitted("update:visible")).toEqual([[false]]);
+  });
+
+  it("reports the linked configuration change only after a successful save", async () => {
+    api.getConfig.mockResolvedValue(config);
+    api.update.mockResolvedValue({ code: 0, data: { fixedAddressPlaybackDisabled: true } });
+    const wrapper = track(
+      shallowMount(NodeForm, {
+        props: { visible: true, node: multiNode as any },
+        global: { renderStubDefaultSlot: true, stubs }
+      })
+    );
+    await flushPromises();
+    await wrapper.get('[aria-label="收流端口模式"]').trigger("click");
+    await wrapper
+      .findAll("button")
+      .find(button => button.text().includes("保存"))!
+      .trigger("click");
+    await flushPromises();
+    expect(api.update).toHaveBeenCalledWith(7, expect.objectContaining({ rtpReceiveMode: "single" }));
+    expect(messages.success).toHaveBeenCalledWith(expect.stringContaining("已关闭固定播放地址及自动点播"));
   });
 });
 

@@ -1889,6 +1889,8 @@ export interface PlaybackSettingsConfig {
 export interface FixedAddressPlaybackConfig {
   fixedAddressEnabled: boolean;
   autoOnDemandEnabled: boolean;
+  /** 已启用的单端口节点；非空时固定地址及自动点播不可用。 */
+  singlePortNodes?: Array<{ id: number; name: string }>;
 }
 
 export interface PlayAuthConfig {

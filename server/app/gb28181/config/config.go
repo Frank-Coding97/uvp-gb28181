@@ -236,9 +236,15 @@ func ValidatePlaybackSettings(settings PlaybackSettings) error {
 	return nil
 }
 
+type SinglePortNode struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
 type FixedAddressPlaybackSettings struct {
-	FixedAddressEnabled bool `json:"fixedAddressEnabled"`
-	AutoOnDemandEnabled bool `json:"autoOnDemandEnabled"`
+	SinglePortNodes     []SinglePortNode `json:"singlePortNodes,omitempty"`
+	FixedAddressEnabled bool             `json:"fixedAddressEnabled"`
+	AutoOnDemandEnabled bool             `json:"autoOnDemandEnabled"`
 }
 
 // PlayAuthSettings is the public playback authorization policy. Key material
@@ -377,6 +383,18 @@ func CurrentFixedAddressPlaybackSettings() FixedAddressPlaybackSettings {
 	fixedAddressPlaybackMu.RLock()
 	defer fixedAddressPlaybackMu.RUnlock()
 	return FixedAddressPlaybackSettingsFrom(app.ConfigYml)
+}
+
+// UseDynamicPlaybackUntilConfigRepair keeps existing single-port installations
+// playable when startup reconciliation cannot persist the corrected flags.
+// The caller must report the persistence failure; this does not claim a disk save.
+func UseDynamicPlaybackUntilConfigRepair() {
+	fixedAddressPlaybackMu.Lock()
+	defer fixedAddressPlaybackMu.Unlock()
+	if app.ConfigYml != nil {
+		app.ConfigYml.Set(FixedAddressEnabledConfigKey, false)
+		app.ConfigYml.Set(AutoOnDemandEnabledConfigKey, false)
+	}
 }
 
 type mutableValueSource interface {

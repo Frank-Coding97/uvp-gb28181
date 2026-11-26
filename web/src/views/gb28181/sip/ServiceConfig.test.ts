@@ -493,6 +493,70 @@ describe("ServiceConfig edit mode", () => {
     expect(api.updateFixedAddressPlaybackConfig).not.toHaveBeenCalled();
   });
 
+  it("有已启用单端口节点时关闭并禁用固定地址及自动点播，说明节点和处理入口", async () => {
+    api.fetchFixedAddressPlaybackConfig.mockResolvedValue({
+      code: 0,
+      data: {
+        fixedAddressEnabled: true,
+        autoOnDemandEnabled: true,
+        singlePortNodes: [
+          { id: 7, name: "北京单端口节点" },
+          { id: 8, name: "上海节点" }
+        ]
+      }
+    });
+    const wrapper = mountPage();
+    await flushPromises();
+
+    for (const field of ["fixedAddressEnabled", "autoOnDemandEnabled"]) {
+      const control = wrapper.get(`[data-field='${field}'] button`);
+      expect(control.element).toHaveProperty("disabled", true);
+      expect(control.text()).toBe("false");
+    }
+    expect(wrapper.text()).toContain("北京单端口节点、上海节点");
+    expect(wrapper.text()).toContain("存在已启用的单端口媒体节点");
+    expect(wrapper.get('a[href="/media/nodes"]').text()).toContain("节点管理");
+    expect(api.updateServiceConfig).not.toHaveBeenCalled();
+  });
+
+  it("无已启用单端口节点时保持关闭但允许手动开启固定地址", async () => {
+    api.fetchFixedAddressPlaybackConfig.mockResolvedValue({
+      code: 0,
+      data: { fixedAddressEnabled: false, autoOnDemandEnabled: false, singlePortNodes: [] }
+    });
+    const wrapper = mountPage();
+    await flushPromises();
+    const fixed = wrapper.get("[data-field='fixedAddressEnabled'] button");
+    expect(fixed.text()).toBe("false");
+    expect(fixed.element).toHaveProperty("disabled", false);
+    await fixed.trigger("click");
+    expect(fixed.text()).toBe("true");
+  });
+
+  it("旧页面保存遇到单端口冲突时刷新固定地址状态并保留其他草稿", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get("[data-field='fixedAddressEnabled'] button").trigger("click");
+    await wrapper.get("[data-field='cascade.platformName'] input").setValue("尚未保存的平台名称");
+    api.updateServiceConfig.mockResolvedValue({ code: 400, message: "存在已启用的单端口媒体节点，不能开启固定播放地址" });
+    api.fetchFixedAddressPlaybackConfig.mockResolvedValue({
+      code: 0,
+      data: { fixedAddressEnabled: false, autoOnDemandEnabled: false, singlePortNodes: [{ id: 7, name: "新单端口节点" }] }
+    });
+    await wrapper
+      .findAll("button")
+      .find(button => button.text().includes("保存配置"))!
+      .trigger("click");
+    await flushPromises();
+
+    expect(api.fetchServiceConfig).toHaveBeenCalledTimes(2);
+    expect(wrapper.get("[data-field='fixedAddressEnabled'] button").element).toHaveProperty("disabled", true);
+    expect(wrapper.text()).toContain("新单端口节点");
+    expect((wrapper.get("[data-field='cascade.platformName'] input").element as HTMLInputElement).value).toBe(
+      "尚未保存的平台名称"
+    );
+  });
+
   it("完整提交两个开关并按响应原子更新", async () => {
     api.fetchFixedAddressPlaybackConfig.mockResolvedValue({
       code: 0,

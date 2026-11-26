@@ -155,6 +155,10 @@ func SetServiceConfigSIPTraceRuntimeProvider(provider gbcontrollers.SIPTraceRunt
 	serviceConfigController.SetSIPTraceRuntimeProvider(provider)
 }
 
+func SetServiceConfigPlaybackCompatibility(policy *gbcontrollers.PlaybackCompatibility) {
+	serviceConfigController.SetPlaybackCompatibility(policy)
+}
+
 func SetServiceConfigPlayAuthTTLUpdater(updater gbcontrollers.PlayAuthTTLUpdater) {
 	serviceConfigController.SetPlayAuthTTLUpdater(updater)
 }

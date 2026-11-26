@@ -44,6 +44,7 @@ export interface ZLMNode {
   recoveryReason?: string;
   recoveryFingerprint?: string;
   rtpReceiveMode?: "single" | "multi";
+  fixedAddressPlaybackDisabled?: boolean;
   rtpProxyPort?: number;
   rtpPortStart: number;
   rtpPortEnd: number;
@@ -190,7 +191,10 @@ export const activateZLMNode = (id: number) =>
   http.request<BaseResult<{ ok: boolean }>>("post", baseUrlApi(`gb28181/zlm/nodes/${id}/activate`));
 
 export const enableZLMNode = (id: number) =>
-  http.request<BaseResult<{ ok: boolean; enabled: true }>>("post", baseUrlApi(`gb28181/zlm/nodes/${id}/enable`));
+  http.request<BaseResult<{ ok: boolean; enabled: true; fixedAddressPlaybackDisabled?: boolean }>>(
+    "post",
+    baseUrlApi(`gb28181/zlm/nodes/${id}/enable`)
+  );
 
 export const disableZLMNode = (id: number) =>
   http.request<BaseResult<{ ok: boolean; enabled: false }>>("post", baseUrlApi(`gb28181/zlm/nodes/${id}/disable`));

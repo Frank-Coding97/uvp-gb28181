@@ -161,7 +161,13 @@ async function handleSubmit() {
     if (response.code !== 0) throw new Error(response.message || "节点保存失败");
 
     saved = true;
-    Message.success(editing.value ? "节点配置已保存，收流模式仅影响新会话" : "节点已验证并创建");
+    Message.success(
+      response.data?.fixedAddressPlaybackDisabled
+        ? "节点配置已保存，已关闭固定播放地址及自动点播；收流模式仅影响新会话"
+        : editing.value
+          ? "节点配置已保存，收流模式仅影响新会话"
+          : "节点已验证并创建"
+    );
   } catch (error) {
     Message.error(zlmErrorPresentation(error).label);
   } finally {
@@ -302,6 +308,12 @@ async function handleSubmit() {
           <span :class="{ 'form-tip': form.rtpReceiveMode !== 'multi' }">多端口</span>
         </a-space>
         <div class="form-tip">保存后仅影响新会话，已有会话继续使用原模式。固定播放地址需使用多端口。</div>
+        <div v-if="form.rtpReceiveMode === 'single'" class="form-hint" role="alert">
+          <template v-if="props.node?.enabled !== false">
+            保存后将关闭全局固定播放地址及自动点播，新发起的播放将使用动态地址。
+          </template>
+          <template v-else> 当前节点已停用；后续启用单端口节点时将关闭全局固定播放地址及自动点播。 </template>
+        </div>
       </a-form-item>
       <a-form-item
         v-if="form.rtpReceiveMode === 'single'"

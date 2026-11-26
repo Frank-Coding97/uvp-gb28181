@@ -518,6 +518,13 @@ func startControlPlane(cfg gbconfig.Config, authority *processauthority.Authorit
 			app.ZapLog.Debug("读取平台媒体网络默认值失败,沿用 YAML 配置", zap.String("event", "zlm.platform_media_defaults_load_failed"), zap.Error(err))
 		}
 		nodeSvc := gbzlmsvc.NewNodeService(zlmRegistry, adapter, tuning)
+		playbackCompatibility := gbcontrollers.NewPlaybackCompatibility(zlmRegistry)
+		nodeSvc.SetPlaybackCompatibility(playbackCompatibility)
+		gbroutes.SetServiceConfigPlaybackCompatibility(playbackCompatibility)
+		if err := playbackCompatibility.Reconcile(); err != nil {
+			app.ZapLog.Error("单端口节点与固定播放地址配置冲突修复失败，请检查配置文件写入权限", zap.Error(err))
+		}
+
 		restartCoordinator := gbzlmsvc.NewRestartCoordinator(zlmRegistry)
 		zlmNodeService = nodeSvc
 		zlmRestartCoordinator = restartCoordinator

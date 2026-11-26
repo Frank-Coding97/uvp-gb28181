@@ -49,6 +49,8 @@ const playbackSettingsReady = ref(false);
 const fixedAddressPlaybackLoading = ref(true);
 const fixedAddressPlaybackSaving = ref(false);
 const fixedAddressPlaybackReady = ref(false);
+const singlePortNodes = ref<NonNullable<FixedAddressPlaybackConfig["singlePortNodes"]>>([]);
+const fixedAddressBlocked = computed(() => singlePortNodes.value.length > 0);
 const playAuthLoading = ref(true);
 const playAuthSaving = ref(false);
 const playAuthReady = ref(false);
@@ -286,9 +288,10 @@ function restorePlaybackSettingsDraft() {
 }
 
 function applyFixedAddressPlaybackConfig(config: FixedAddressPlaybackConfig) {
+  singlePortNodes.value = config.singlePortNodes ?? [];
   const normalized = {
-    fixedAddressEnabled: config.fixedAddressEnabled,
-    autoOnDemandEnabled: config.fixedAddressEnabled && config.autoOnDemandEnabled
+    fixedAddressEnabled: !fixedAddressBlocked.value && config.fixedAddressEnabled,
+    autoOnDemandEnabled: !fixedAddressBlocked.value && config.fixedAddressEnabled && config.autoOnDemandEnabled
   };
   draft.playback.fixedAddressEnabled = normalized.fixedAddressEnabled;
   draft.playback.autoOnDemandEnabled = normalized.autoOnDemandEnabled;
@@ -495,6 +498,16 @@ async function saveConfig() {
     restorePlayAuthDraft();
     restorePlaybackSettingsDraft();
     Message.error(error?.message || "保存国标服务配置失败");
+    // 节点模式可能已在其他页面修改，仅刷新这组配置，保留其他未保存草稿。
+    try {
+      const response = await fetchServiceConfig();
+      if (response.code !== 0) throw new Error(response.message || "加载配置失败");
+      applyFixedAddressPlaybackConfig(response.data.fixedAddressPlayback);
+      fixedAddressPlaybackReady.value = true;
+    } catch {
+      fixedAddressPlaybackReady.value = false;
+      Message.warning("无法刷新固定播放地址状态，请重新加载页面后再修改该配置");
+    }
   } finally {
     aggregateSaving.value = false;
     positionHistorySaving.value = false;
@@ -1086,8 +1099,22 @@ onMounted(async () => {
                   <a-switch
                     v-model="draft.playback.fixedAddressEnabled"
                     :loading="fixedAddressPlaybackLoading || fixedAddressPlaybackSaving"
-                    :disabled="fixedAddressPlaybackLoading || fixedAddressPlaybackSaving || !fixedAddressPlaybackReady"
+                    :disabled="
+                      fixedAddressBlocked ||
+                      fixedAddressPlaybackLoading ||
+                      fixedAddressPlaybackSaving ||
+                      !fixedAddressPlaybackReady
+                    "
                   />
+                  <template v-if="fixedAddressBlocked" #extra>
+                    <span
+                      >存在已启用的单端口媒体节点（{{
+                        singlePortNodes.map(node => node.name).join("、")
+                      }}），固定播放地址及自动点播不可用。</span
+                    >
+                    <router-link :to="{ path: '/media/nodes' }">前往节点管理</router-link>
+                    <span>，全部改为多端口或停用这些节点后可手动开启。</span>
+                  </template>
                 </a-form-item>
               </a-col>
               <a-col :span="isMobile ? 24 : 12">
@@ -1100,6 +1127,7 @@ onMounted(async () => {
                     v-model="draft.playback.autoOnDemandEnabled"
                     :loading="fixedAddressPlaybackLoading || fixedAddressPlaybackSaving"
                     :disabled="
+                      fixedAddressBlocked ||
                       !draft.playback.fixedAddressEnabled ||
                       fixedAddressPlaybackLoading ||
                       fixedAddressPlaybackSaving ||

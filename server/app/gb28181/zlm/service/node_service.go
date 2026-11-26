@@ -151,6 +151,8 @@ type NodeDTO struct {
 	AutoOnDemandReady     bool              `json:"autoOnDemandReady"`
 	CreatedAt             time.Time         `json:"createdAt"`
 	UpdatedAt             time.Time         `json:"updatedAt"`
+
+	FixedAddressPlaybackDisabled bool `json:"fixedAddressPlaybackDisabled,omitempty"`
 }
 
 // CreateNodeReq 新建节点入参
@@ -219,6 +221,11 @@ type UpdateNodeReq struct {
 }
 
 // NodeService 节点 CRUD + 状态切换
+type NodePlaybackCompatibility interface {
+	Lock() func()
+	WithNodeChange(*node.Node, func() error) (bool, error)
+}
+
 type NodeService struct {
 	registry        *node.Registry
 	probe           ZLMProbe
@@ -247,6 +254,26 @@ type NodeService struct {
 	retired   *RetiredNodeCoordinator
 	logger    *zap.Logger
 	restart   *RestartCoordinator
+
+	playbackCompatibility NodePlaybackCompatibility
+}
+
+func (s *NodeService) SetPlaybackCompatibility(policy NodePlaybackCompatibility) {
+	s.playbackCompatibility = policy
+}
+
+func (s *NodeService) lockPlaybackCompatibility() func() {
+	if s.playbackCompatibility != nil {
+		return s.playbackCompatibility.Lock()
+	}
+	return func() {}
+}
+
+func (s *NodeService) withNodeChange(candidate *node.Node, apply func() error) (bool, error) {
+	if s.playbackCompatibility != nil {
+		return s.playbackCompatibility.WithNodeChange(candidate, apply)
+	}
+	return false, apply()
 }
 
 // NewNodeService 构造
@@ -650,6 +677,9 @@ func (s *NodeService) ProbeCreate(ctx context.Context, req CreateNodeReq) (*Node
 }
 
 func (s *NodeService) Create(ctx context.Context, req CreateNodeReq) (*NodeDTO, error) {
+	unlockPlayback := s.lockPlaybackCompatibility()
+	defer unlockPlayback()
+
 	tmp, err := buildCreateCandidate(req)
 	if err != nil {
 		return nil, err
@@ -664,30 +694,43 @@ func (s *NodeService) Create(ctx context.Context, req CreateNodeReq) (*NodeDTO, 
 		return nil, err
 	}
 
-	// 2. 入库 + 加内存(Registry.Add 内部 Repo.Create)
-	added, err := s.registry.Add(ctx, *tmp)
-	if err != nil {
-		return nil, fmt.Errorf("入库失败: %w", err)
-	}
-
-	// 3. 把 mediaServerId + Hook 写到 ZLM(失败则回滚)
-	if err := s.ConvergeNodeConfig(ctx, added.ID); err != nil {
-		if rollbackErr := s.registry.Delete(ctx, added.ID); rollbackErr != nil {
-			return nil, fmt.Errorf("%w: 创建失败且本地回滚失败: %v", ErrRollbackUncertain, redactNodeError(rollbackErr, added))
+	var added *node.Node
+	disabled, err := s.withNodeChange(tmp, func() error {
+		// 2. 入库 + 加内存(Registry.Add 内部 Repo.Create)
+		var err error
+		added, err = s.registry.Add(ctx, *tmp)
+		if err != nil {
+			return fmt.Errorf("入库失败: %w", err)
 		}
-		// 回滚已经把行删掉了 —— 与"删节点"是同一类收尾，走同一条路：
-		// 收敛失败可能发生在回读那一步，也就是 hook **已经写进对端**了。不清掉的话，
-		// 对端会拿着一个平台已经不认识的 uuid 一直回调 —— 正是幽灵节点的缩影。
-		// （回滚失败时行还在，不能 Retire —— 节点仍然是注册表里的实体。）
-		s.retireDeletedNode(ctx, added, retireReasonFailedCreate)
-		return nil, fmt.Errorf("写 ZLM 配置失败,已回滚: %w", redactNodeError(err, added))
-	}
 
-	return s.toDTO(added), nil
+		// 3. 把 mediaServerId + Hook 写到 ZLM(失败则回滚)
+		if err := s.ConvergeNodeConfig(ctx, added.ID); err != nil {
+			if rollbackErr := s.registry.Delete(ctx, added.ID); rollbackErr != nil {
+				return fmt.Errorf("%w: 创建失败且本地回滚失败: %v", ErrRollbackUncertain, redactNodeError(rollbackErr, added))
+			}
+			// 回滚已经把行删掉了 —— 与"删节点"是同一类收尾，走同一条路：
+			// 收敛失败可能发生在回读那一步，也就是 hook **已经写进对端**了。不清掉的话，
+			// 对端会拿着一个平台已经不认识的 uuid 一直回调 —— 正是幽灵节点的缩影。
+			// （回滚失败时行还在，不能 Retire —— 节点仍然是注册表里的实体。）
+			s.retireDeletedNode(ctx, added, retireReasonFailedCreate)
+			return fmt.Errorf("写 ZLM 配置失败,已回滚: %w", redactNodeError(err, added))
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := s.toDTO(added)
+	result.FixedAddressPlaybackDisabled = disabled
+	return result, nil
 }
 
 // Update 更新可变字段
 func (s *NodeService) Update(ctx context.Context, id int64, req UpdateNodeReq) (*NodeDTO, error) {
+	unlockPlayback := s.lockPlaybackCompatibility()
+	defer unlockPlayback()
+
 	lock := s.nodeLock(id)
 	lock.Lock()
 	defer lock.Unlock()
@@ -774,34 +817,42 @@ func (s *NodeService) Update(ctx context.Context, id int64, req UpdateNodeReq) (
 		}
 	}
 
-	if err := s.registry.Update(ctx, *candidate); err != nil {
+	disabled, err := s.withNodeChange(candidate, func() error {
+		if err := s.registry.Update(ctx, *candidate); err != nil {
+			return err
+		}
+		if candidate.IsActive() {
+			if err := s.convergeNodeLocked(ctx, id); err != nil {
+				if connectionChanged {
+					// The candidate endpoint may have accepted SetConfig before a
+					// readback/convergence failure. Restore the old endpoint in local
+					// persistence, but retain a bounded recovery marker so a fresh
+					// process remains fail-closed until reconciliation succeeds.
+					recovery := failedEndpointRecovery(candidate, err)
+					localErr := s.restoreNodeSnapshot(ctx, old, recovery)
+					s.registry.SetAutoOnDemandReady(old.ID, false)
+					s.registry.SetAdmissionBlocked(old.ID, true)
+					if localErr != nil {
+						return fmt.Errorf("%w: local snapshot restore failed: %v", ErrRollbackUncertain, redactNodeError(localErr, old))
+					}
+					return fmt.Errorf("%w: candidate external state uncertain", ErrRollbackUncertain)
+				}
+				rollbackErr := s.rollbackNodeLocked(ctx, old)
+				if rollbackErr != nil {
+					return rollbackErr
+				}
+				return redactNodeError(err, candidate)
+			}
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
-	if candidate.IsActive() {
-		if err := s.convergeNodeLocked(ctx, id); err != nil {
-			if connectionChanged {
-				// The candidate endpoint may have accepted SetConfig before a
-				// readback/convergence failure. Restore the old endpoint in local
-				// persistence, but retain a bounded recovery marker so a fresh
-				// process remains fail-closed until reconciliation succeeds.
-				recovery := failedEndpointRecovery(candidate, err)
-				localErr := s.restoreNodeSnapshot(ctx, old, recovery)
-				s.registry.SetAutoOnDemandReady(old.ID, false)
-				s.registry.SetAdmissionBlocked(old.ID, true)
-				if localErr != nil {
-					return nil, fmt.Errorf("%w: local snapshot restore failed: %v", ErrRollbackUncertain, redactNodeError(localErr, old))
-				}
-				return nil, fmt.Errorf("%w: candidate external state uncertain", ErrRollbackUncertain)
-			}
-			rollbackErr := s.rollbackNodeLocked(ctx, old)
-			if rollbackErr != nil {
-				return nil, rollbackErr
-			}
-			return nil, redactNodeError(err, candidate)
-		}
-	}
 	got, _ := s.registry.Get(id)
-	return s.toDTO(got), nil
+	result := s.toDTO(got)
+	result.FixedAddressPlaybackDisabled = disabled
+	return result, nil
 }
 
 type ConfigApplyResult struct {
@@ -1225,18 +1276,26 @@ func (s *NodeService) Disable(ctx context.Context, id int64) error {
 // Enable restores the operator admission intent. Offline nodes remain offline
 // until a heartbeat arrives, at which point the normal scheduler gate opens.
 func (s *NodeService) Enable(ctx context.Context, id int64) error {
+	_, err := s.EnableWithPlaybackResult(ctx, id)
+	return err
+}
+
+func (s *NodeService) EnableWithPlaybackResult(ctx context.Context, id int64) (bool, error) {
+	unlockPlayback := s.lockPlaybackCompatibility()
+	defer unlockPlayback()
+
 	lock := s.nodeLock(id)
 	lock.Lock()
 	defer lock.Unlock()
 	cur, ok := s.registry.Get(id)
 	if !ok {
-		return ErrNodeNotFound
+		return false, ErrNodeNotFound
 	}
 	cur.AdminState = ""
 	if cur.State == node.StateMaintenance {
 		cur.State = node.StateOffline
 	}
-	return s.registry.Update(ctx, *cur)
+	return s.withNodeChange(cur, func() error { return s.registry.Update(ctx, *cur) })
 }
 
 // Activate is kept for old clients and now means Enable. It must not invent a

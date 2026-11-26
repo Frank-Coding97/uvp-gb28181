@@ -221,7 +221,15 @@ async function toggleNodeEnabled(node: ZLMNode, nextEnabled: boolean) {
       const response = nextEnabled ? await enableZLMNode(node.id) : await disableZLMNode(node.id);
       if (response.code !== 0) throw new Error(response.message || (nextEnabled ? "启用失败" : "停用失败"));
       if (nextEnabled) {
-        Message.success(nodeOnlineState(node) === "active" ? "节点已启用，可参与新任务调度" : "节点已启用，在线后将自动参与调度");
+        const playbackDisabled =
+          response.data && "fixedAddressPlaybackDisabled" in response.data && response.data.fixedAddressPlaybackDisabled;
+        Message.success(
+          playbackDisabled
+            ? "节点已启用，已关闭固定播放地址及自动点播；新发起的播放将使用动态地址"
+            : nodeOnlineState(node) === "active"
+              ? "节点已启用，可参与新任务调度"
+              : "节点已启用，在线后将自动参与调度"
+        );
       } else {
         Message.success("节点已停用，不再接收新任务；现有流不会中断");
       }
@@ -233,15 +241,24 @@ async function toggleNodeEnabled(node: ZLMNode, nextEnabled: boolean) {
 }
 
 /**
- * 启停同一个入口，但只有「停用」需要二次确认。
- *
- * 停用会把节点从调度池里摘掉 —— 误点一下就会让后续点播悄悄换到别的节点，
- * 现场很难第一时间反应过来是哪次点击造成的。启用是无害操作，不必多一次点击。
+ * 停用影响调度，启用单端口节点会关闭全局固定地址，两者都先说明影响。
+ * 多端口节点仍保持一键启用。
  */
 function handleEnabled(node: ZLMNode) {
   if (!canManage.value) return;
   const nextEnabled = node.enabled === false;
   if (nextEnabled) {
+    if (node.rtpReceiveMode === "single") {
+      Modal.confirm({
+        title: "启用单端口媒体节点",
+        content: `启用「${node.name}」后将关闭全局固定播放地址及自动点播，新发起的播放将使用动态地址；已有播放会话不受影响。确认启用？`,
+        okText: "启用并应用",
+        cancelText: "取消",
+        escToClose: true,
+        onOk: () => toggleNodeEnabled(node, true)
+      });
+      return;
+    }
     void toggleNodeEnabled(node, true);
     return;
   }

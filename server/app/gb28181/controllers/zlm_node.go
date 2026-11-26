@@ -194,8 +194,9 @@ func (zc *ZLMNodeController) setEnabled(c *gin.Context, enabled bool, auditActio
 		return
 	}
 	markManagementAudit(c, auditAction, id, nil, "", "", "requested")
+	playbackDisabled := false
 	if enabled {
-		err = zc.svc.Enable(c.Request.Context(), id)
+		playbackDisabled, err = zc.svc.EnableWithPlaybackResult(c.Request.Context(), id)
 	} else {
 		err = zc.svc.Disable(c.Request.Context(), id)
 	}
@@ -209,7 +210,7 @@ func (zc *ZLMNodeController) setEnabled(c *gin.Context, enabled bool, auditActio
 		return
 	}
 	markManagementAudit(c, auditAction, id, nil, "", "", "success")
-	zc.Success(c, gin.H{"ok": true, "enabled": enabled})
+	zc.Success(c, gin.H{"ok": true, "enabled": enabled, "fixedAddressPlaybackDisabled": playbackDisabled})
 }
 
 // purgeUnreachableRequested 读取强制移除标记(header 优先,兼容 query)。
