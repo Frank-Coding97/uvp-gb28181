@@ -16,8 +16,9 @@
       <OutDir>\uvp-gb28181-windows-amd64-<版本>.zip
       <OutDir>\uvp-gb28181-windows-amd64-<版本>.zip.sha256
 
-  客户双击包根的 UVP-GB28181.exe 即可启动：它拉起全部服务并常驻系统托盘，
-  右键托盘可打开管理页 / 查状态 / 重启 / 停止 / 退出（退出会先停服务）。
+  客户双击包根的 UVP-GB28181.exe 即可启动：它会开一个控制台窗口跑 start.cmd，
+  窗口里实时显示启动过程，起完后可手动关闭（关窗口不影响服务）；服务本身由常驻
+  的系统托盘管理，右键可打开管理页 / 查状态 / 重启 / 停止 / 退出（退出会先停服务）。
   老入口 start.cmd / stop.cmd / status.cmd 仍保留，行为不变。
 
   -VendorDir 里必须有四样（Linux 版对应 deploy/standalone/bin/{redis,nginx,zlm,ffmpeg}，
@@ -429,12 +430,19 @@ Assert-FrontendSipPort
 #   而后端二进制在前端构建**之前**编译 ⇒ 拿它当判据每次出包都误报）。
 # ⛔ 也必须排除 _test.go / *.test.ts / *.spec.ts：测试文件不编进二进制，
 #   但提交钩子会刷新它们的 mtime ⇒ 出包被永久卡死。
+# ⛔⛔ 两组产物必须**各看各的源码**：后端二进制只跟 server\ 比，前端 dist 只跟
+#   web\src 比。混在一起比会造出「改了 main.go 就要求重建 dist」的假警报 ——
+#   2026-11-26 出包时踩到，当时只能 touch dist\index.html 绕过去，而那是拿假动作
+#   骗自家门禁，真漏构建了也看不出来。
 function Assert-Fresh {
-    param([string]$Artifact, [string]$Label)
+    param([string]$Artifact, [string]$Label, [string[]]$SourceRoots)
     if (-not (Test-Path -LiteralPath $Artifact)) { Fail "$Label 不存在：$Artifact" }
+    if (-not $SourceRoots -or $SourceRoots.Count -eq 0) {
+        $SourceRoots = @($ServerDir, (Join-Path $WebDir 'src'))
+    }
     $cutoff = (Get-Item -LiteralPath $Artifact).LastWriteTimeUtc
     $newest = $null
-    foreach ($root in @($ServerDir, (Join-Path $WebDir 'src'))) {
+    foreach ($root in $SourceRoots) {
         if (-not (Test-Path -LiteralPath $root)) { continue }
         $cand = Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction SilentlyContinue |
             Where-Object {
@@ -456,10 +464,14 @@ function Assert-Fresh {
     Ok "$Label 新鲜度 OK"
 }
 Log '阶段 1/4 · 产物新鲜度断言'
-Assert-Fresh -Artifact $ServerExeOut -Label '后端二进制'
-Assert-Fresh -Artifact $SetupExeOut  -Label 'uvp-setup 二进制'
-Assert-Fresh -Artifact $TrayExeOut   -Label 'uvp-tray 二进制'
-Assert-Fresh -Artifact $DistIndex    -Label '前端产物'
+$goRoots  = @($ServerDir)
+$webRoots = @(Join-Path $WebDir 'src')
+Assert-Fresh -Artifact $ServerExeOut -Label '后端二进制'      -SourceRoots $goRoots
+Assert-Fresh -Artifact $SetupExeOut  -Label 'uvp-setup 二进制' -SourceRoots $goRoots
+Assert-Fresh -Artifact $TrayExeOut   -Label 'uvp-tray 二进制'  -SourceRoots $goRoots
+# ⚠️ uvp-updater.exe 不在这里比（-SkipBuild 时连 Go 工具链都可能没有）：
+#    它由升级通道单独签名发布，包内只做存在性校验（见下方「升级助手」段）。
+Assert-Fresh -Artifact $DistIndex    -Label '前端产物'        -SourceRoots $webRoots
 
 # ------------------------------------------------------------------ 装配 ----
 Log '阶段 2/4 · 装配包目录'

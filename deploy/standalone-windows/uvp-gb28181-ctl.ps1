@@ -735,9 +735,14 @@ function Start-Child {
 }
 
 function Stop-ProcessTree {
-    param([int]$ProcessId, [int]$GraceMs = 4000)
-    if ($ProcessId -le 0) { return }
-    if (-not (Test-PidAlive -ProcessId $ProcessId)) { return }
+    param([int]$ProcessId, [int]$GraceMs = 4000, [string]$ExePath)
+    # 返回 $true 表示「调用结束时这个进程确实不在了」。
+    # ⛔⛔ 以前这个函数没有返回值，Stop-Component 也无条件 `$killed = $true` ——
+    #   taskkill 因权限不足（服务是提权启动的，stop 是普通权限）写往 stderr 的
+    #   「拒绝访问」被 Invoke-NativeQuiet 吞掉，脚本仍然打「已停止」。客户看到的是
+    #   「exit 说停好了，可网页还能打开」。现在必须把「杀没杀掉」如实往上报。
+    if ($ProcessId -le 0) { return $true }
+    if (-not (Test-PidAlive -ProcessId $ProcessId)) { return $true }
     # ⛔ 先礼貌后强杀：Windows 没有 SIGTERM，Stop-Process 就是 TerminateProcess；
     #   用 taskkill /T 是为了把子进程（Cygwin 版 redis 的子 shell 等）一起带走。
     # ⛔⛔ 必须走 Invoke-NativeQuiet（它内部临时降 ErrorActionPreference）——
@@ -746,10 +751,22 @@ function Stop-ProcessTree {
     Invoke-NativeQuiet -Exe 'taskkill.exe' -Arguments @('/PID', "$ProcessId", '/T')
     $deadline = (Get-Date).AddMilliseconds($GraceMs)
     while ((Get-Date) -lt $deadline) {
-        if (-not (Test-PidAlive -ProcessId $ProcessId)) { return }
+        if (-not (Test-PidAlive -ProcessId $ProcessId)) { return $true }
         Start-Sleep -Milliseconds 200
     }
     Invoke-NativeQuiet -Exe 'taskkill.exe' -Arguments @('/PID', "$ProcessId", '/T', '/F')
+    # 强杀也要复核：没有权限时 taskkill /F 同样只写一行 stderr，退出码并不为 0，
+    # 但这里不解析退出码（中文/英文口令不同），直接看进程还在不在最可靠。
+    # ⛔ ZLM 这种大进程强杀后要几秒才真正从进程表消失，2 秒就判「没杀掉」会误报
+    #   （222 实测：报失败但几秒后进程已经没了）。给到 5 秒。
+    for ($i = 0; $i -lt 25; $i++) {
+        if (-not (Test-PidAlive -ProcessId $ProcessId)) { return $true }
+        Start-Sleep -Milliseconds 200
+    }
+    # pid 会被系统复用：Get-Process 只看 pid 号，可能把「别的进程」当成还没杀掉。
+    # 给了 exe 路径就以「这个 exe 的实例是否还在」为准，这才是调用方关心的判据。
+    if ($ExePath -and @(Get-PidByExe -ExePath $ExePath).Count -eq 0) { return $true }
+    return $false
 }
 
 # 按可执行文件路径兜底找进程（pid 文件丢了的时候用）
@@ -779,20 +796,30 @@ function Stop-Component {
     )
     $pidValue = Get-PidFromFile -Path $PidPath
     $killed = $false
+    $failed = @()
     if ($pidValue -gt 0) {
         if (Test-PidAlive -ProcessId $pidValue) {
-            Stop-ProcessTree -ProcessId $pidValue
-            $killed = $true
+            if (Stop-ProcessTree -ProcessId $pidValue -ExePath $ExePath) { $killed = $true } else { $failed += $pidValue }
         }
         Remove-Item -LiteralPath $PidPath -Force -ErrorAction SilentlyContinue
     }
-    if (-not $killed -and $ExePath) {
+    # pid 文件丢了、或者上面那次没杀掉（权限不足 / pid 已被复用），都按 exe 路径再扫一遍。
+    if ($ExePath -and ($failed.Count -gt 0 -or -not $killed)) {
         foreach ($extra in (Get-PidByExe -ExePath $ExePath)) {
-            Stop-ProcessTree -ProcessId $extra
-            $killed = $true
+            if (Stop-ProcessTree -ProcessId $extra -ExePath $ExePath) { $killed = $true } else { $failed += $extra }
         }
     }
-    if ($killed -or $WasRunning) { Write-UvpDet "$Label 已停止" } else { Write-UvpDet "$Label 未在运行" }
+    $failed = @($failed | Select-Object -Unique)
+    if ($failed.Count -gt 0) {
+        $script:StopFailures++
+        Write-UvpErr ("$Label 停止失败（PID " + ($failed -join ',') + "）—— 进程仍在运行。" +
+            "常见原因：服务由管理员或计划任务启动，当前会话权限不足；" +
+            "请右键「以管理员身份运行」本目录的 stop.cmd，或用任务管理器结束该进程。")
+    } elseif ($killed -or $WasRunning) {
+        Write-UvpDet "$Label 已停止"
+    } else {
+        Write-UvpDet "$Label 未在运行"
+    }
 }
 
 # ---------------------------------------------------------------- 横幅/汇总 ----
@@ -1301,6 +1328,22 @@ function Start-Redis {
 #   工作组机器上 `%USERDOMAIN%` 是 `WORKGROUP`，拼出来的账户名不存在，icacls 会报
 #   `No mapping between account names and security IDs was done`（错误 1332）—— 实测踩过。
 # ⚠️ `-S-1-5-18` = SYSTEM，`-S-1-5-32-544` = Administrators；用 SID 是为了不依赖系统语言。
+# 给一个路径追加/覆盖某条 ACE，返回 icacls 是否成功。
+#
+# ⛔⛔ 一次 icacls 调用里**只能出现一个 /grant:r**（或 /grant）。多写一个 =
+#   `无效参数 /grant:r`，退出码 87，**整条命令一个字节都不改** —— 而且 stdout 里那句
+#   是本地化文本，靠正则匹配 "Failed processing" 根本抓不到，于是脚本会安静地以为
+#   权限已经收紧好了。2026-11-26 在 222 上就是这么踩的：目录没动，紧随其后的
+#   `/reset` 却把锁文件剥成了**空 DACL**（受保护 + 零条 ACE = 谁都不许访问），
+#   普通权限双击托盘启动时后端直接 phase=process_authority state_unavailable。
+function Set-ProcessAuthorityAce {
+    param([string]$Path, [string]$Ace, [switch]$Recurse)
+    $argv = @($Path, '/grant:r', $Ace, '/C')
+    if ($Recurse) { $argv += '/T' }
+    $null = Invoke-NativeText -Exe 'icacls.exe' -Arguments $argv
+    return ($LASTEXITCODE -eq 0)
+}
+
 function Initialize-ProcessAuthorityDir {
     param([string]$Path)
     if (-not (Test-Path -LiteralPath $Path)) {
@@ -1312,27 +1355,41 @@ function Initialize-ProcessAuthorityDir {
         Write-UvpWarn "取不到当前用户 SID，跳过进程权威目录的权限收紧（后端可能拒绝启动）：$($_.Exception.Message)"
         return
     }
-    $ace = '*' + $sid + ':(OI)(CI)F'
-    # /T 是为了照顾"上一次启动已留下继承旧的 ACL 的文件"；/C 让个别失败不中断整体。
-    $out = Invoke-NativeText -Exe 'icacls.exe' -Arguments @(
-        $Path, '/inheritance:r',
-        '/grant:r', $ace,
-        '/grant:r', '*S-1-5-18:(OI)(CI)F',
-        '/grant:r', '*S-1-5-32-544:(OI)(CI)F',
-        '/T', '/C')
-    # ⛔⛔ 2026-11-10 在 222 上踩到：/inheritance:r + /grant:r '*SID:(OI)(CI)F'
-    #   递归（/T）到**普通文件**时，带 (OI)(CI) 的 ACE 对文件不生效 ⇒ 已存在的
-    #   api-authority.lock 被剥光 DACL（空 DACL = 拒绝所有人）。后端
-    #   AcquireLocalLock 打不开它，直接 phase=process_authority 拒绝启动。
-    #   ⚠️ 只在**第二次及以后启动**触发：首次启动时锁文件还不存在，后端随后创建
-    #      它并继承父目录（已收紧）的三项授权，一切正常 ⇒ 极易漏测、且全新安装验不出来。
-    #   ⇒ 收紧目录后，单独把锁文件的继承授权恢复回来（父目录此刻已是受信三项）。
-    #   ⛔ 别删锁文件"救急"：会生成新的 domainID，接着报 database_domain_mismatch。
+
+    # 目录：先断继承，再逐条授权（每条一次调用，见上面的 87 号坑）。
+    $null = Invoke-NativeText -Exe 'icacls.exe' -Arguments @($Path, '/inheritance:r', '/C')
+    $ok = $true
+    if (-not (Set-ProcessAuthorityAce -Path $Path -Ace ('*' + $sid + ':(OI)(CI)F'))) { $ok = $false }
+    if (-not (Set-ProcessAuthorityAce -Path $Path -Ace '*S-1-5-18:(OI)(CI)F')) { $ok = $false }
+    if (-not (Set-ProcessAuthorityAce -Path $Path -Ace '*S-1-5-32-544:(OI)(CI)F')) { $ok = $false }
+
+    # 已存在的锁文件：**显式**授权，绝不 /reset。
+    #
+    # ⛔⛔ 2026-11-10 在 222 上踩到：/inheritance:r + (OI)(CI) 递归（/T）到**普通文件**
+    #   时，带容器继承标志的 ACE 对文件不生效 ⇒ 已存在的 api-authority.lock 被剥光。
+    #   ⚠️ 只在**第二次及以后启动**触发：首次启动时锁文件还不存在，后端随后创建它并
+    #      继承父目录（已收紧）的三项授权，一切正常 ⇒ 极易漏测、全新安装也验不出来。
+    # ⛔ 也别用 `/reset` 恢复：它沿用父目录当时的可继承 ACE，父目录一旦没给出 ACE，
+    #   结果就是「受保护 + 零 ACE」的死锁文件（2026-11-26 实测）。直接 /grant:r 是
+    #   加法，既能修好空 DACL，也不会碰别人的 ACE。
+    # ⛔ 别删锁文件"救急"：会生成新的 domainID，接着报 database_domain_mismatch。
     $lockFile = Join-Path $Path 'api-authority.lock'
     if (Test-Path -LiteralPath $lockFile) {
-        $null = Invoke-NativeText -Exe 'icacls.exe' -Arguments @($lockFile, '/reset', '/C')
+        if (-not (Set-ProcessAuthorityAce -Path $lockFile -Ace ('*' + $sid + ':F'))) { $ok = $false }
+        if (-not (Set-ProcessAuthorityAce -Path $lockFile -Ace '*S-1-5-18:F')) { $ok = $false }
+        if (-not (Set-ProcessAuthorityAce -Path $lockFile -Ace '*S-1-5-32-544:F')) { $ok = $false }
+        # 兜底复核：真的能以当前身份打开吗？打不开就明说，别让后端只留一行
+        # `state_unavailable` 让人猜。
+        try {
+            $fs = [System.IO.File]::Open($lockFile, 'Open', 'ReadWrite', 'ReadWrite')
+            $fs.Close()
+        } catch {
+            Write-UvpWarn "进程权威锁文件当前身份打不开（$lockFile）：$($_.Exception.Message)"
+            Write-UvpWarn "  多数是它被更早的版本剥掉了权限。请**以管理员身份**运行一次 start.cmd 修复，之后即可正常启动。"
+            Write-UvpWarn "  ⛔ 不要删除这个文件：那会让平台换一个授权域，接着报 database_domain_mismatch。"
+        }
     }
-    if ($out -match 'Failed processing\s+[1-9]') {
+    if (-not $ok) {
         Write-UvpWarn "进程权威目录权限收紧部分失败，后端可能拒绝启动（$Path）"
     }
 }
@@ -1643,7 +1700,12 @@ function Stop-Updater {
     $raw = (Get-Content -LiteralPath $UpdaterPidFile -ErrorAction SilentlyContinue | Select-Object -First 1)
     $procId = 0
     if ([int]::TryParse("$raw".Trim(), [ref]$procId)) {
-        if (Test-PidAlive -ProcessId $procId) { Stop-ProcessTree -ProcessId $procId }
+        if (Test-PidAlive -ProcessId $procId) {
+            if (-not (Stop-ProcessTree -ProcessId $procId -ExePath $UpdaterExe)) {
+                $script:StopFailures++
+                Write-UvpErr ("升级助手 停止失败（PID $procId）—— 请右键「以管理员身份运行」本目录的 stop.cmd。")
+            }
+        }
     }
     Remove-Item -LiteralPath $UpdaterPidFile -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $UpdaterSocket -Force -ErrorAction SilentlyContinue
@@ -1710,6 +1772,7 @@ function Invoke-Start {
 }
 
 function Invoke-Stop {
+    $script:StopFailures = 0
     Write-Banner
     Write-UvpLog '正在停止服务（顺序：管理页面 → 后端 → 流媒体 → 缓存）'
     # nginx 走 -s quit：让 master 通知 worker 收尾，避免留下占端口的孤儿 worker。
@@ -1726,9 +1789,18 @@ function Invoke-Stop {
             '-p', (Quote-NativeArg $NginxDir), '-c', (Quote-NativeArg $NginxConf), '-s', 'quit')
     }
     Start-Sleep -Milliseconds 600
-    foreach ($pidValue in (Get-PidByExe -ExePath $NginxExe)) { Stop-ProcessTree -ProcessId $pidValue }
+    $nginxFailed = @()
+    foreach ($pidValue in (Get-PidByExe -ExePath $NginxExe)) {
+        if (-not (Stop-ProcessTree -ProcessId $pidValue -ExePath $NginxExe)) { $nginxFailed += $pidValue }
+    }
     Remove-Item -LiteralPath $NginxPidFile -Force -ErrorAction SilentlyContinue
-    Write-UvpDet '管理页面（nginx）已停止'
+    if ($nginxFailed.Count -gt 0) {
+        $script:StopFailures++
+        Write-UvpErr ("管理页面（nginx）停止失败（PID " + ($nginxFailed -join ',') + "）—— 进程仍在运行，" +
+            "请右键「以管理员身份运行」本目录的 stop.cmd。")
+    } else {
+        Write-UvpDet '管理页面（nginx）已停止'
+    }
 
     Stop-Component -Label '后端' -PidPath $BackendPidFile -ExePath $ServerExe
     Stop-Component -Label '流媒体服务（ZLM）' -PidPath $ZlmPidFile -ExePath $ZlmExe
@@ -1764,7 +1836,10 @@ function Invoke-Stop {
         if ($extra.Count -gt 0) { $leftover += "$($pair[1]) (PID $($extra -join ','))" }
     }
     if ($leftover.Count -gt 0) {
+        $script:StopFailures++
         Write-UvpWarn ("仍有残留进程：" + ($leftover -join ' / '))
+    } elseif ($script:StopFailures -gt 0) {
+        Write-UvpWarn '有组件未能停止，详见上方错误'
     } else {
         Write-UvpOk '已全部停止，无残留进程'
     }
@@ -1849,7 +1924,7 @@ function Show-Usage {
 
 switch ($Action.ToLower()) {
     'start'          { Invoke-Start }
-    'stop'           { Invoke-Stop }
+    'stop'           { Invoke-Stop; if ($script:StopFailures -gt 0) { exit 1 } }
     'restart'        { Invoke-Stop; Invoke-Start }
     'restart-zlm'    { $config = Get-Config; Stop-Component -Label 'ZLM' -PidPath $ZlmPidFile -ExePath $ZlmExe; Start-Zlm -Ports $config.Ports }
     'status'         { Invoke-Status; Invoke-UpdaterStatus }
