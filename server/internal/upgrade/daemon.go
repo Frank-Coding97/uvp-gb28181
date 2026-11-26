@@ -19,6 +19,14 @@ import (
 
 const maxProtocolRequestBytes = 64 << 10
 
+// ⛔ 响应体不能沿用请求上限。status 会把「全部历史任务 + 事件 + 更新检查结果」
+// 一次性回传，而每个任务都带完整的中文更新说明（1.5KB/条，中文 UTF-8 三字节/字）。
+// 2026-11-26 线上入库 1.1.28 后整体响应 72276 字节 > 64KB ⇒ 客户端按请求上限截断
+// ⇒ JSON 半截 ⇒ "read updater response: unexpected EOF" ⇒ 服务升级页恒 503，
+// 界面表现为「升级失败」，实际任务早已 staged 在 awaiting_confirmation。
+// 留足余量（每年一个版本也就 +2KB），仍是有界读取。
+const maxProtocolResponseBytes = 8 << 20
+
 // ApplyExecutor is implemented by a deployment adapter (standalone,
 // systemd, or compose). The updater daemon deliberately does not accept
 // commands or paths from the wire; adapters receive only a persisted task.
@@ -99,7 +107,7 @@ func CallUnix(ctx context.Context, socketPath string, request ProtocolRequest) (
 		return ProtocolResponse{}, fmt.Errorf("write updater request: %w", err)
 	}
 	var response ProtocolResponse
-	decoder := json.NewDecoder(io.LimitReader(conn, maxProtocolRequestBytes+1))
+	decoder := json.NewDecoder(io.LimitReader(conn, maxProtocolResponseBytes+1))
 	if err := decoder.Decode(&response); err != nil {
 		return ProtocolResponse{}, fmt.Errorf("read updater response: %w", err)
 	}
