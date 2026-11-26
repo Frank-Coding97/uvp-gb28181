@@ -338,7 +338,6 @@
 import { Message, Modal } from "@arco-design/web-vue";
 import type { FileItem } from "@arco-design/web-vue/es/upload/interfaces";
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { useRoute, useRouter } from "vue-router";
 import {
   applyServiceUpgradeTask,
   cancelServiceUpgradeTask,
@@ -357,7 +356,7 @@ import {
   type UpgradeTask
 } from "@/api/service-upgrade";
 import { hasPermission } from "@/hooks/usePermission";
-import { useUpgradeNotice, invalidateUpgradeNotice } from "@/hooks/useUpgradeNotice";
+import { consumeUpgradeAutoCheck, invalidateUpgradeNotice, onUpgradeAutoCheck, useUpgradeNotice } from "@/hooks/useUpgradeNotice";
 import { APP_BUILD_ID, APP_VERSION, checkRuntimeBuildIdentity } from "@/config/version";
 import ReleaseNotes from "./ReleaseNotes.vue";
 import UpgradeProgress, { type ProgressDisplay, type UploadTransfer } from "./UpgradeProgress.vue";
@@ -375,8 +374,6 @@ const {
   setAutoCheck,
   checkedAt: noticeCheckedAt
 } = useUpgradeNotice();
-const route = useRoute();
-const router = useRouter();
 
 const loading = ref(false);
 const statusError = ref("");
@@ -1082,6 +1079,18 @@ const check = async () => {
   }
 };
 
+/**
+ * 侧边栏「前往升级」带过来的一次性信号：进来就查，不用再手点一次。
+ * 放行条件与手点「检查在线更新」完全一致（管理权限、助手支持在线检查、状态没断线）。
+ * ⛔ 意图走内存信号，不走地址栏参数 —— 原因见 requestUpgradeAutoCheck 的注释。
+ */
+const runAutoCheck = async () => {
+  if (!consumeUpgradeAutoCheck()) return;
+  if (canManage.value && status.value?.capabilities.onlineCheck && !statusError.value) await check();
+};
+let stopAutoCheckWatch: (() => void) | undefined;
+let disposed = false;
+
 const importOffline = async (file: File) => {
   if (!canManage.value || importing.value || !status.value?.capabilities.offlineImport || statusError.value) return;
   errorMessage.value = "";
@@ -1345,16 +1354,17 @@ onMounted(async () => {
   importRefreshTimer = setInterval(() => {
     if (importJob.value && !importJobFinished.value) void refreshImportJob();
   }, 2500);
-  // 从侧边栏版本徽标点「前往升级」过来时自动查一次，省掉「再点一次检查」。
-  // 查完就把参数抹掉，刷新页面不会重复打官方源。
-  if (route.query.check === "1") {
-    void router.replace({ query: { ...route.query, check: undefined } });
-    if (canManage.value && status.value?.capabilities.onlineCheck && !statusError.value) {
-      void check();
-    }
-  }
+  // 状态还没读完就被切走：不再查、也不挂监听（信号过期后自己作废）。
+  if (disposed) return;
+  await runAutoCheck();
+  // 首屏状态齐了才开始监听：页面开着时再点「前往升级」是同页跳转、不会重建组件，
+  // 只能靠监听补上。太早监听会让首个信号在状态读完前被取走白白丢掉。
+  if (disposed) return;
+  stopAutoCheckWatch = onUpgradeAutoCheck(runAutoCheck);
 });
 onUnmounted(() => {
+  disposed = true;
+  stopAutoCheckWatch?.();
   importGeneration += 1;
   if (refreshTimer) clearInterval(refreshTimer);
   if (importRefreshTimer) clearInterval(importRefreshTimer);

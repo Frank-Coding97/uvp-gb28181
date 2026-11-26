@@ -59,7 +59,10 @@ const upgrade = vi.hoisted(() => ({
   }
 }));
 
+const requestAutoCheck = vi.hoisted(() => vi.fn());
+
 vi.mock("@/hooks/useUpgradeNotice", () => ({
+  requestUpgradeAutoCheck: requestAutoCheck,
   useUpgradeNotice: () => ({
     canIgnore: computed(() => upgrade.state.canIgnore),
     currentVersion: computed(() => upgrade.state.currentVersion),
@@ -93,6 +96,7 @@ const mountLogo = () =>
 describe("Logo", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
+    requestAutoCheck.mockReset();
     upgrade.state.pending = false;
     upgrade.state.canIgnore = true;
   });
@@ -139,8 +143,13 @@ describe("Logo", () => {
       .findAll("button")
       .find(node => node.text() === "前往升级")!
       .trigger("click");
-    // 带 check=1 让升级页落地即自动检查一次。
-    expect(routerPush).toHaveBeenCalledWith({ path: "/system/service-upgrade", query: { check: "1" } });
+    // ⛔ 意图不能走地址栏参数：布局层拿整条地址当页面 key，升级页查完抹掉参数会把自己重建，
+    //    查到的结果跟着旧实例被丢掉，用户还得再点一次「检查在线更新」。
+    //    所以地址保持干净，只登记一个一次性信号。
+    expect(routerPush).toHaveBeenCalledWith({ path: "/system/service-upgrade" });
+    expect(requestAutoCheck).toHaveBeenCalledTimes(1);
+    // 先登记再跳转：升级页挂载完状态后才取信号，顺序反了会取不到。
+    expect(requestAutoCheck.mock.invocationCallOrder[0]).toBeLessThan(routerPush.mock.invocationCallOrder[0]!);
     wrapper.unmount();
   });
 

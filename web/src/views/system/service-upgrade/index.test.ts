@@ -24,12 +24,9 @@ vi.mock("@arco-design/web-vue", () => ({ Message: { success: vi.fn(), error: vi.
 vi.mock("@/hooks/usePermission", () => ({
   hasPermission: (permission: string) => permissions.value.includes("*:*:*") || permissions.value.includes(permission)
 }));
-// 页面会读 `?check=1` 决定是否落地即自动检查；测试里给个空 query。
-const routeState = vi.hoisted(() => ({ query: {} as Record<string, string> }));
-vi.mock("vue-router", () => ({
-  useRoute: () => routeState,
-  useRouter: () => ({ replace: vi.fn(), push: vi.fn() })
-}));
+// ⛔ 这里不再把路由器换成桩：「落地自动检查」的意图走内存信号，不进地址栏。
+//    曾经的 ?check=1 方案在桩路由器下一直是绿的，真路由器下却因为页面重建把结果丢了
+//    （真路由器的端到端用例在 ./auto-check.test.ts）。
 
 vi.mock("@/api/service-upgrade", () => ({
   getServiceUpgradeStatus: api.getStatus,
@@ -48,6 +45,7 @@ vi.mock("@/api/service-upgrade", () => ({
 }));
 
 import { APP_VERSION } from "@/config/version";
+import { consumeUpgradeAutoCheck, requestUpgradeAutoCheck } from "@/hooks/useUpgradeNotice";
 import ServiceUpgradePage from "./index.vue";
 import Upload from "@arco-design/web-vue/es/upload/upload";
 
@@ -135,6 +133,8 @@ describe("service upgrade page", () => {
       }
     });
     permissions.value = ["system:upgrade:read", "system:upgrade:manage"];
+    // 上一个用例留下的「落地自动检查」信号不能漏到这个用例里。
+    consumeUpgradeAutoCheck();
     api.getStatus.mockReset().mockResolvedValue({ code: 0, data: status() });
     api.getMigrationPlan.mockReset().mockResolvedValue({
       code: 0,
@@ -685,10 +685,10 @@ describe("service upgrade page", () => {
     readonly.unmount();
   });
 
-  // 侧边栏版本徽标点「前往升级」会带 check=1：落地即自动查一次，
+  // 侧边栏版本徽标点「前往升级」会先登记一个一次性信号：落地即自动查一次，
   // 否则用户点完还得再点一次「检查在线更新」。
-  it("从版本徽标带 check=1 进入时自动检查一次", async () => {
-    routeState.query = { check: "1" };
+  it("从版本徽标进入时自动检查一次，查到的版本留在页面上", async () => {
+    requestUpgradeAutoCheck();
     api.check.mockResolvedValue({
       data: { manifest: { version: "1.2.0" }, artifact: { sha256: "a".repeat(64) }, hasUpdate: true }
     });
@@ -697,15 +697,66 @@ describe("service upgrade page", () => {
     expect(api.check).toHaveBeenCalledTimes(1);
     expect(wrapper.text()).toContain("1.2.0");
     wrapper.unmount();
-    routeState.query = {};
   });
 
-  it("没有 check=1 时进入页面不自动检查，避免每次开页都打官方源", async () => {
-    routeState.query = {};
+  it("没有信号时进入页面不自动检查，避免每次开页都打官方源", async () => {
+    api.check.mockResolvedValue({ data: { hasUpdate: false } });
     const wrapper = mountPage();
     await flushPromises();
     expect(api.check).not.toHaveBeenCalled();
     wrapper.unmount();
+  });
+
+  // 页面已经开着时点「前往升级」是同页跳转，组件不会重建：只能靠监听再查一次。
+  it("页面开着时再点「前往升级」会再查一次，且只查一次", async () => {
+    api.check.mockResolvedValue({
+      data: { manifest: { version: "1.2.0" }, artifact: { sha256: "a".repeat(64) }, hasUpdate: true }
+    });
+    const wrapper = mountPage();
+    await flushPromises();
+    expect(api.check).not.toHaveBeenCalled();
+
+    requestUpgradeAutoCheck();
+    await flushPromises();
+    expect(api.check).toHaveBeenCalledTimes(1);
+    expect(wrapper.text()).toContain("待升级版本 v1.2.0");
+    wrapper.unmount();
+  });
+
+  // 带着信号跳转失败（被拦去登录 / 没权限）时，不能等到下次从菜单正常进页面才突然查一次。
+  it("过期的信号不作数", async () => {
+    vi.useFakeTimers();
+    requestUpgradeAutoCheck();
+    vi.advanceTimersByTime(20 * 1000);
+    const wrapper = mountPage();
+    await flushPromises();
+    expect(api.check).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  // 只读账号没有管理权限时不自动查（与手点按钮的放行条件一致），信号照常取走。
+  it("没有管理权限时信号不触发检查", async () => {
+    permissions.value = ["system:upgrade:read"];
+    requestUpgradeAutoCheck();
+    const wrapper = mountPage();
+    await flushPromises();
+    expect(api.check).not.toHaveBeenCalled();
+    wrapper.unmount();
+    // 信号已被取走：换成有权限的账号再进页面也不会补查。
+    permissions.value = ["system:upgrade:read", "system:upgrade:manage"];
+    const again = mountPage();
+    await flushPromises();
+    expect(api.check).not.toHaveBeenCalled();
+    again.unmount();
+  });
+
+  it("卸载后不再响应迟到的信号", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    wrapper.unmount();
+    requestUpgradeAutoCheck();
+    await flushPromises();
+    expect(api.check).not.toHaveBeenCalled();
   });
 
   it("活动任务断线后保留进度，同任务恢复后显示终态，详情独立显示历史任务", async () => {

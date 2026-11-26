@@ -36,6 +36,43 @@ export function invalidateUpgradeNotice() {
   noticeEpoch.value += 1;
 }
 
+/**
+ * 「落地就自动查一次」的一次性信号（侧边栏「前往升级」→ 升级页）。
+ *
+ * ⛔ 这个意图**不能靠地址栏参数**传（曾经的 `?check=1`）：
+ *    布局层拿整条地址当页面组件的 key，查完把参数抹掉 = key 变了 =
+ *    整个升级页被重建，查到的结果跟着旧实例一起被丢弃 —— 用户看到的就是
+ *    「点『前往升级』进来，还得再手点一次检查」。单元测试里路由器是空桩，
+ *    所以那条用例当时一直是绿的。
+ *
+ * 信号只被取走一次；带着它跳转失败（被拦去登录、没有权限）时过了一会儿就作废，
+ * 免得下次从菜单正常进页面时莫名其妙查一次。
+ */
+const AUTO_CHECK_INTENT_TTL = 15 * 1000;
+const autoCheckRequestedAt = ref(0);
+
+export function requestUpgradeAutoCheck() {
+  autoCheckRequestedAt.value = Date.now();
+}
+
+/** 取走信号：有、且没过期才算数；取过即清。 */
+export function consumeUpgradeAutoCheck() {
+  const requestedAt = autoCheckRequestedAt.value;
+  if (!requestedAt) return false;
+  autoCheckRequestedAt.value = 0;
+  return Date.now() - requestedAt <= AUTO_CHECK_INTENT_TTL;
+}
+
+/**
+ * 页面已经开着时又点了「前往升级」（同页跳转不会重建组件）：靠这个监听补上。
+ * 返回的句柄由调用方在卸载时调用；清空信号那一次不算，所以只有「来信号」才触发。
+ */
+export function onUpgradeAutoCheck(handler: () => void) {
+  return watch(autoCheckRequestedAt, requestedAt => {
+    if (requestedAt) handler();
+  });
+}
+
 /** 能进服务升级页的人就看到提示；接口按这条权限放行，否则会 403。 */
 const NOTICE_PERMISSION = "system:upgrade:read";
 /** 「忽略此版本」是写操作，只有管理权限才能点。 */

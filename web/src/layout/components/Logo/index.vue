@@ -82,7 +82,7 @@ import { handleUrl } from "@/utils/app";
 import { DEFAULT_PRODUCT_TITLE } from "@/utils/product-brand";
 import { useSysConfigStore } from "@/store/modules/sys-config";
 import LogoSvg from "@/components/s-logo/index.vue";
-import { useUpgradeNotice } from "@/hooks/useUpgradeNotice";
+import { requestUpgradeAutoCheck, useUpgradeNotice } from "@/hooks/useUpgradeNotice";
 
 /**
  * 新版本徽标：后台每 15 分钟查一次官方源，这里只读缓存。
@@ -103,8 +103,10 @@ const checkedAtText = computed(() => {
 
 const goUpgrade = () => {
   noticeVisible.value = false;
-  // check=1 让升级页落地即自动查一次，省掉「再点一次检查在线更新」。
-  void router.push({ path: "/system/service-upgrade", query: { check: "1" } });
+  // 先登记「落地就查一次」再跳转：升级页读完状态后取走这个信号。
+  // ⛔ 别改回带 ?check=1：抹参数会让整个页面重建，查到的结果被丢掉（见 requestUpgradeAutoCheck）。
+  requestUpgradeAutoCheck();
+  void router.push({ path: "/system/service-upgrade" });
 };
 
 // 获取系统配置
