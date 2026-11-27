@@ -54,6 +54,13 @@ interface VideoSize {
 // EasyPlayerPro 由 index.html 静态引入(public/easyplayer/EasyPlayer-pro.js),挂在 window
 declare const EasyPlayerPro: any;
 
+// 这些 error 通知先于库内的 WASM 兜底，最终失败由 playFailedAndPaused 确认。
+const decoderFallbackErrors = new Set([
+  "mediaSourceH265NotSupport",
+  "webcodecsH265NotSupport",
+  "webcodecsUnsupportedConfigurationError"
+]);
+
 const containerRef = ref<HTMLDivElement | null>(null);
 const player = shallowRef<any>(null);
 const smoothness = shallowRef<PlayerSmoothness | null>(null);
@@ -260,7 +267,7 @@ async function play(u: string, token: number) {
 
     // 事件订阅
     //
-    // ⛔⛔ 出错/超时后**必须销毁实例**，不能留给下一次重试复用。
+    // ⛔⛔ 最终失败/超时后**必须销毁实例**，不能留给下一次重试复用。
     //    EasyPlayer 的失败是"实例级"的：内部 demux/解码器/定时器一旦坏掉就不会自愈，
     //    同族（flv↔flv）切换又按设计复用实例（见 switchTo），于是**第一次失败之后
     //    每次重试都复用那个坏实例** ⇒ 表现为"窗口怎么点都是拉流超时，只能刷新整页"。
@@ -272,13 +279,18 @@ async function play(u: string, token: number) {
       if (player.value !== p) return;
       void destroy();
     };
-    p.on("error", (err: any) => {
+    const failPlayback = (err: any) => {
       if (player.value !== p) return;
       errorMsg.value = `EasyPlayer 错误: ${typeof err === "string" ? err : JSON.stringify(err)}`;
       emit("error", errorMsg.value);
       reportPlayerError("player_error");
       discardBrokenInstance();
+    };
+    p.on("error", (err: any) => {
+      if (typeof err === "string" && decoderFallbackErrors.has(err)) return;
+      failPlayback(err);
     });
+    p.on("playFailedAndPaused", failPlayback);
     p.on("timeout", () => {
       if (player.value !== p) return;
       errorMsg.value = "拉流超时";

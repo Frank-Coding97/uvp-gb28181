@@ -515,7 +515,7 @@ describe("PlayWindow playback embedding", () => {
     await flushPromises();
   });
 
-  it.each(["error", "timeout"])("切回 FLV 后忽略旧实例迟到的 %s 事件", async event => {
+  it.each(["error", "timeout", "playFailedAndPaused"])("切回 FLV 后忽略旧实例迟到的 %s 事件", async event => {
     const listeners: Array<Record<string, (...args: any[]) => void>> = [];
     class FakeEasyPlayer {
       constructor() {
@@ -545,7 +545,7 @@ describe("PlayWindow playback embedding", () => {
     expect(wrapper.text()).not.toContain("decoderWorkerInitError");
     listeners[2][event]("decoderWorkerInitError");
     await flushPromises();
-    expect(wrapper.emitted("error")).toEqual([[event === "error" ? "EasyPlayer 错误: decoderWorkerInitError" : "拉流超时"]]);
+    expect(wrapper.emitted("error")).toEqual([[event === "timeout" ? "拉流超时" : "EasyPlayer 错误: decoderWorkerInitError"]]);
     expect(wrapper.emitted("playerError")).toHaveLength(1);
     wrapper.unmount();
   });
