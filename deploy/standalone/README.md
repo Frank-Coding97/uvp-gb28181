@@ -58,6 +58,7 @@ http://<本机IP>:51000
 ```bash
 ./uvp-gb28181-service-install.sh          # 注册 + 开机自启（不立即启动）
 ./uvp-gb28181-service-install.sh --now    # 注册并立即接管（会先停掉手工实例）
+sudo ./uvp-gb28181-service-install.sh --firewall-only  # 只注册并启动防火墙代理
 ./uvp-gb28181-service-uninstall.sh        # 卸载服务注册（不动数据）
 ```
 
@@ -68,13 +69,16 @@ http://<本机IP>:51000
 
 **国标接入安全**页面的「保护 / 严格」模式有两层防护：应用层准入（后端进程内直接丢弃报文）
 和**内核级封禁**（把攻击源 IP 写进 nftables，在 raw/prerouting 上丢包）。第二层由
-`bin/uvp-firewall-agent` 执行，它需要 **root 权限**：
+`bin/uvp-firewall-agent` 执行。通过 systemd 注册时需要管理员授权，运行时由 systemd 授予管理 nftables 所需的能力。
+
+从观察模式切换时，主机防火墙规则确认生效后才会保存保护模式。若页面提示代理未就绪，在绿色包目录运行
+`sudo ./uvp-gb28181-service-install.sh --firewall-only`，再回页面重试。普通账号也可以选择「仅应用层保护」。
 
 | 启动方式 | 内核级封禁 | 说明 |
 |---|---|---|
 | `sudo ./uvp-gb28181-ctl.sh start` | ✅ | 代理以 root 启动，socket 在 `run/firewall-agent.sock` |
 | `./uvp-gb28181-ctl.sh start`（普通用户） | ❌ 仅应用层 | 页面显示「主机防火墙 降级」 |
-| `sudo ./uvp-gb28181-service-install.sh` | ✅ | 代理由 systemd 以 root 单独托管（推荐） |
+| `sudo ./uvp-gb28181-service-install.sh --firewall-only` | ✅ | 只注册并启动由 systemd 托管的代理 |
 
 > 普通用户启动不是错误：平台功能不受影响，只是少一层内核封禁。
 > 内核封禁还需要目标机装了 **nftables**（`nft` 命令）；缺了代理会在 `logs/firewall-agent.log` 里报错，

@@ -203,6 +203,32 @@ func (b *NftBackend) List() ([]string, error) {
 	return values, nil
 }
 
+// CheckRules verifies the chain as well as its sets, including when no sources are blocked.
+func (b *NftBackend) CheckRules(ctx context.Context) error {
+	output, err := b.runner.Run(ctx, "nft", []string{"-n", "list", "chain", "inet", "uvp_sip_guard", "guard_prerouting"}, nil)
+	if err != nil {
+		return err
+	}
+	chain := string(output)
+	if !strings.Contains(chain, "type filter hook prerouting priority ") {
+		return errors.New("SIP firewall prerouting hook is missing")
+	}
+	for _, prefix := range b.rulePrefixes() {
+		found := false
+		for _, line := range strings.Split(chain, "\n") {
+			rule := strings.TrimSpace(line)
+			if strings.HasPrefix(rule, prefix+" counter ") && strings.HasSuffix(rule, " drop") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("SIP firewall rule missing for port %d", b.Port())
+		}
+	}
+	return nil
+}
+
 func (b *NftBackend) isAllowlisted(ip net.IP) bool {
 	for _, network := range b.cfg.Allowlist {
 		if network.Contains(ip) {
@@ -223,21 +249,29 @@ func (b *NftBackend) sourceSet(ip net.IP) (string, error) {
 }
 
 func (b *NftBackend) tableScript() string {
-	destination := b.cfg.Destination.String()
 	family := "ipv4_addr"
 	blocked := "blocked_v4"
-	protocol := "ip"
 	if b.cfg.Destination.To4() == nil {
 		family = "ipv6_addr"
 		blocked = "blocked_v6"
-		protocol = "ip6"
 	}
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "add table inet uvp_sip_guard\nadd set inet uvp_sip_guard %s { type %s; flags timeout; }\n", blocked, family)
 	fmt.Fprintf(&builder, "add chain inet uvp_sip_guard guard_prerouting { type filter hook prerouting priority raw; policy accept; }\n")
-	fmt.Fprintf(&builder, "add rule inet uvp_sip_guard guard_prerouting iifname %q %s daddr %s %s saddr @%s udp dport %d counter drop\n", b.cfg.Interface, protocol, destination, protocol, blocked, b.Port())
-	fmt.Fprintf(&builder, "add rule inet uvp_sip_guard guard_prerouting iifname %q %s daddr %s %s saddr @%s tcp dport %d counter drop\n", b.cfg.Interface, protocol, destination, protocol, blocked, b.Port())
+	for _, prefix := range b.rulePrefixes() {
+		fmt.Fprintf(&builder, "add rule inet uvp_sip_guard guard_prerouting %s counter drop\n", prefix)
+	}
 	return builder.String()
+}
+
+func (b *NftBackend) rulePrefixes() [2]string {
+	protocol, blocked := "ip", "blocked_v4"
+	if b.cfg.Destination.To4() == nil {
+		protocol, blocked = "ip6", "blocked_v6"
+	}
+	base := fmt.Sprintf("iifname %q %s daddr %s %s saddr @%s", b.cfg.Interface, protocol, b.cfg.Destination, protocol, blocked)
+	port := b.Port()
+	return [2]string{fmt.Sprintf("%s udp dport %d", base, port), fmt.Sprintf("%s tcp dport %d", base, port)}
 }
 
 func validateNftConfig(cfg NftConfig) error {

@@ -27,6 +27,27 @@ func TestAdmissionDropsBannedBeforeTrace(t *testing.T) {
 	require.Zero(t, traceCalls)
 }
 
+func TestAdmissionRejectsBannedSourceWithoutParsingSIP(t *testing.T) {
+	var events []Event
+	a := NewAdmission(DefaultPolicyWithMode(ModeApplication), nil, nil, func(e Event) {
+		events = append(events, e)
+	})
+	require.NoError(t, a.Ban("198.51.100.10", time.Time{}))
+	props := readProps()
+	out, err := a.Filter(props, []byte("REGISTER sip:x SIP/2.0\r\n\r\n"))
+	require.NoError(t, err)
+	require.Empty(t, out)
+	require.Len(t, events, 1)
+	require.Equal(t, ReasonActiveBan, events[0].Reason)
+	require.Equal(t, "UNKNOWN", events[0].Method)
+
+	props.Transport = "TCP"
+	require.True(t, a.RejectBannedSource(props))
+	require.Len(t, events, 2)
+	a.Unban("198.51.100.10")
+	require.False(t, a.RejectBannedSource(props))
+}
+
 func TestAdmissionBuffersPartialTCPAndDelegatesCompleteFrame(t *testing.T) {
 	clock := &fakeClock{now: time.Unix(100, 0)}
 	var got []byte

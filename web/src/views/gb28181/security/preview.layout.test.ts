@@ -7,6 +7,14 @@ import { hasMarkup } from "@/test/source-assert";
 const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/security/preview.vue"), "utf8");
 
 describe("security preview system integration", () => {
+  it("restores the saved mode and gives operators a firewall startup command", () => {
+    expect(source).toContain('failure?.errorCode === "firewall_activation_failed"');
+    expect(source).toContain("selectedMode.value = failure.data.mode");
+    expect(source).toContain("sudo ./uvp-gb28181-service-install.sh --firewall-only");
+    expect(source).toContain("复制命令");
+    expect(source).toContain("查看官网教程");
+  });
+
   it("uses the UVP workspace shell and theme tokens", () => {
     // ⛔ 别钉整行：prettier 会把超长的属性拆成多行。只钉 token 与顺序。
     expect(

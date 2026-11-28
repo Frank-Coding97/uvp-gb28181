@@ -21,6 +21,7 @@ type TransportTCP struct {
 	readFilter      TransportReadFilter
 	writeObserver   TransportWriteObserver
 	closeObserver   TransportConnectionCloseObserver
+	rejectAccepted  func(TransportReadProps) bool
 
 	pool *connectionPool
 
@@ -108,6 +109,12 @@ func (t *TransportTCP) Serve(l net.Listener, handler MessageHandler) error {
 		if err != nil {
 			t.log.Debug("Fail to accept conenction", "error", err)
 			return err
+		}
+		if t.rejectAccepted != nil && t.rejectAccepted(TransportReadProps{
+			Transport: t.Network(), RemoteAddr: conn.RemoteAddr(), LocalAddr: conn.LocalAddr(),
+		}) {
+			_ = conn.Close()
+			continue
 		}
 		if t.initConnection(conn, conn.RemoteAddr().String(), handler) == nil {
 			return errTransportClosed

@@ -2,7 +2,9 @@ package sip
 
 import (
 	"context"
+	"io"
 	"net"
+	"strconv"
 	"testing"
 	"time"
 
@@ -11,10 +13,46 @@ import (
 	"github.com/stretchr/testify/require"
 
 	gbconfig "uvplatform.com/uvp-gb28181/app/gb28181/config"
+	gbsecurity "uvplatform.com/uvp-gb28181/app/gb28181/security"
 	"uvplatform.com/uvp-gb28181/app/global/app"
 
 	"go.uber.org/zap"
 )
+
+func TestServerClosesBannedTCPConnectionBeforeReading(t *testing.T) {
+	reserved, err := net.Listen("tcp4", "127.0.0.1:0")
+	require.NoError(t, err)
+	cfg := testConfig()
+	cfg.SIP.Port = reserved.Addr().(*net.TCPAddr).Port
+	cfg.SIP.Transport = []string{"tcp"}
+	require.NoError(t, reserved.Close())
+
+	policy := gbsecurity.DefaultPolicy()
+	policy.Mode = gbsecurity.ModeApplication
+	policy.Allowlist = nil
+	admission := gbsecurity.NewAdmission(policy, nil, nil, nil)
+	require.NoError(t, admission.Ban("127.0.0.1", time.Time{}))
+	server, err := NewServer(cfg, WithSecurityAdmission(admission))
+	require.NoError(t, err)
+	require.NoError(t, server.Start())
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		require.NoError(t, server.Shutdown(ctx))
+	})
+
+	addr := net.JoinHostPort(cfg.SIP.ListenIP, strconv.Itoa(cfg.SIP.Port))
+	var client net.Conn
+	require.Eventually(t, func() bool {
+		client, err = net.DialTimeout("tcp4", addr, 100*time.Millisecond)
+		return err == nil
+	}, time.Second, 20*time.Millisecond)
+	defer client.Close()
+	require.NoError(t, client.SetReadDeadline(time.Now().Add(time.Second)))
+	_, err = client.Read(make([]byte, 1))
+	require.ErrorIs(t, err, io.EOF)
+	require.EqualValues(t, 1, admission.Dropped())
+}
 
 func init() {
 	// SIP server 用到 app.ZapLog,测试里给个 no-op logger

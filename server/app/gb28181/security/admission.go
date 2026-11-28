@@ -174,6 +174,26 @@ func (a *Admission) IsBanned(sourceIP string) bool {
 func (a *Admission) Dropped() int64 { return a.dropped.Load() }
 func (a *Admission) Sampled() int64 { return a.sampled.Load() }
 
+// RejectBannedSource checks IP-level decisions before any SIP framing or parsing.
+func (a *Admission) RejectBannedSource(info sip.TransportReadProps) bool {
+	source := sourceIP(info.RemoteAddr)
+	return a.rejectBannedSource(info, a.currentPolicy(), a.clock.Now(), source)
+}
+
+func (a *Admission) rejectBannedSource(info sip.TransportReadProps, policy Policy, now time.Time, source string) bool {
+	if policy.Mode == ModeObserve || !a.IsBanned(source) || policy.IsAllowlisted(source) {
+		return false
+	}
+	a.mu.Lock()
+	rules := a.rules
+	a.mu.Unlock()
+	if rules.IsTrustedSource(source, "", now) {
+		return false
+	}
+	_, _ = a.reject(info, ReasonActiveBan, source, messageIdentity{method: "UNKNOWN"}, "")
+	return true
+}
+
 // Filter is suitable for sip.TransportReadFilter. TCP/TLS reads are framed
 // first; an incomplete read returns nil and a sticky read is reduced to the
 // concatenation of complete frames that pass admission.
@@ -183,6 +203,9 @@ func (a *Admission) Filter(info sip.TransportReadProps, data []byte) ([]byte, er
 	now := a.clock.Now()
 	if source == "" {
 		return a.reject(info, ReasonUnknownMethod, "", messageIdentity{method: "UNKNOWN"}, "")
+	}
+	if a.rejectBannedSource(info, policy, now, source) {
+		return nil, nil
 	}
 	a.cleanupWindows(now, policy.Window)
 

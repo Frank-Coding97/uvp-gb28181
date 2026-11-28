@@ -10,9 +10,10 @@ import (
 type Mode string
 
 const (
-	ModeObserve Mode = "observe"
-	ModeProtect Mode = "protect"
-	ModeStrict  Mode = "strict"
+	ModeObserve     Mode = "observe"
+	ModeProtect     Mode = "protect"
+	ModeStrict      Mode = "strict"
+	ModeApplication Mode = "protect_app"
 )
 
 type Action string
@@ -58,6 +59,8 @@ var (
 	ErrInvalidAddress      = errors.New("invalid source address")
 	ErrInvalidPolicy       = errors.New("invalid security policy")
 	ErrFirewallUnsupported = errors.New("host firewall unsupported on this platform")
+	ErrFirewallActivation  = errors.New("host firewall activation failed")
+	ErrFirewallCleanup     = errors.New("host firewall cleanup pending")
 )
 
 type TTLStep struct {
@@ -112,7 +115,7 @@ func defaultAllowlist() []net.IPNet {
 }
 
 func (p Policy) Validate() error {
-	if p.Mode != ModeObserve && p.Mode != ModeProtect && p.Mode != ModeStrict {
+	if p.Mode != ModeObserve && p.Mode != ModeProtect && p.Mode != ModeStrict && p.Mode != ModeApplication {
 		return ErrInvalidPolicy
 	}
 	if p.Window <= 0 || p.BanScore <= 0 || p.MaxPacketBytes <= 0 || p.MaxEventKeys <= 0 || p.NonceTTL <= 0 {

@@ -44,6 +44,7 @@ type TransportLayer struct {
 	readFilter      TransportReadFilter
 	writeObserver   TransportWriteObserver
 	closeObserver   TransportConnectionCloseObserver
+	rejectTCP       func(TransportReadProps) bool
 
 	// dnsPreferSRV does always SRV lookup first
 	dnsPreferSRV bool
@@ -75,6 +76,13 @@ func WithTransportLayerDNSLookupSRV(preferSRV bool) TransportLayerOption {
 func WithTransportLayerReadFilter(f TransportReadFilter) TransportLayerOption {
 	return func(l *TransportLayer) {
 		l.readFilter = f
+	}
+}
+
+// WithTransportLayerTCPAcceptFilter closes rejected incoming TCP connections before SIP reads any bytes.
+func WithTransportLayerTCPAcceptFilter(reject func(TransportReadProps) bool) TransportLayerOption {
+	return func(l *TransportLayer) {
+		l.rejectTCP = reject
 	}
 }
 
@@ -213,6 +221,7 @@ func (l *TransportLayer) withTransports(conf TransportsConfig) {
 		l.tcp.readFilter = l.readFilter
 		l.tcp.writeObserver = l.writeObserver
 		l.tcp.closeObserver = l.closeObserver
+		l.tcp.rejectAccepted = l.rejectTCP
 	}
 	if conf.TLS != nil && l.tls == nil {
 		l.tls = conf.TLS

@@ -2,7 +2,7 @@ import { http } from "@/utils/http";
 import { baseUrlApi } from "./utils";
 import type { BaseResult } from "./types";
 
-export type SecurityMode = "observe" | "protect" | "strict";
+export type SecurityMode = "observe" | "protect" | "strict" | "protect_app";
 export type SecurityRiskScope = "source" | "device";
 export type SecurityEventSeverity = "high" | "medium" | "low";
 export type SecurityFirewallState = "applied" | "pending" | "failed";
@@ -134,7 +134,12 @@ export const unbanSecurity = (id: string) =>
   );
 export const getSecurityPolicy = () => http.request<BaseResult<SecurityPolicy>>("get", baseUrlApi("gb28181/security/policy"));
 export const updateSecurityPolicy = (policy: SecurityPolicy) =>
-  http.request<BaseResult<SecurityPolicy>>("put", baseUrlApi("gb28181/security/policy"), { data: policy });
+  http.request<BaseResult<SecurityPolicy>>(
+    "put",
+    baseUrlApi("gb28181/security/policy"),
+    { data: policy },
+    { showErrorMessage: false }
+  );
 export const getSecurityAgentHealth = () =>
   http.request<BaseResult<AgentStatus>>("get", baseUrlApi("gb28181/security/agent/health"));
 export const buildSecurityStreamUrl = () => baseUrlApi("gb28181/security/stream");

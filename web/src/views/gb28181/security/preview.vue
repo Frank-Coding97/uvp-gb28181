@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Message } from "@arco-design/web-vue";
+import { isAxiosError } from "axios";
 import VChart from "@visactor/vchart";
 import {
   Activity,
@@ -43,10 +44,12 @@ import {
   type SecurityEventAggregate,
   type SecurityEventSeverity,
   type SecurityFirewallState,
+  type SecurityMode,
   type SecurityPolicy,
   type SecuritySnapshot
 } from "@/api/gb28181-security";
 import SNumberField from "@/components/s-number-field/index.vue";
+import { writeTextToClipboard } from "@/utils/app";
 import { buildSecurityTrend, type SecurityTrendPeriod } from "./securityTrend";
 import {
   formatAutomaticBanTTL,
@@ -71,7 +74,7 @@ import {
 
 type TabKey = "overview" | "events" | "bans" | "blacklist" | "allowlist" | "policy";
 type RuleKind = "blacklist" | "allowlist";
-type ProtectionMode = "observe" | "protect" | "strict";
+type ProtectionMode = SecurityMode;
 
 interface SecurityEvent {
   id: number;
@@ -188,12 +191,24 @@ const protectionModes: ProtectionModeOption[] = [
     key: "protect",
     title: "保护",
     badge: "推荐",
-    desc: "自动拦截明确攻击",
+    desc: "自动封禁并联动主机防火墙",
     headline: "陌生 INVITE 与异常入口先拦截，重复风险自动封禁",
     summary: "兼顾公网防护与设备兼容性，适合大多数国标平台。",
     entryResult: "陌生 INVITE、超大包和未知方法风险先丢弃，不进入业务处理",
     protocolResult: `${registerValidationNote}；MESSAGE 继续经过协议解析链路`,
     banResult: "风险达到阈值先拒绝；自动永久 IP 封禁还需来源验证并排除成功认证共享出口",
+    icon: ShieldCheck
+  },
+  {
+    key: "protect_app",
+    title: "仅应用层保护",
+    badge: "免提权",
+    desc: "在 SIP 入口拦截已封 IP",
+    headline: "在 UVP 的 SIP 入口拦截异常访问",
+    summary: "适合以普通用户启动的绿色包。",
+    entryResult: "拒绝已封 IP 与明确的入口风险",
+    protocolResult: registerValidationNote,
+    banResult: "达到阈值并通过来源验证后，在应用层封禁 IP",
     icon: ShieldCheck
   },
   {
@@ -211,6 +226,9 @@ const protectionModes: ProtectionModeOption[] = [
 ];
 
 const selectedMode = ref<ProtectionMode>("protect");
+const firewallActivationError = ref("");
+const firewallStartCommand = "sudo ./uvp-gb28181-service-install.sh --firewall-only";
+const firewallGuideUrl = "https://uvplatform.com/blog/tutorials/linux-green-package-sip-firewall";
 const ruleDrawerVisible = ref(false);
 const editingRuleKind = ref<RuleKind>("blacklist");
 const ruleType = ref<AccessRule["type"]>("IP");
@@ -781,16 +799,41 @@ async function savePolicyPreview() {
     Message.warning(numberFieldError);
     return;
   }
-  securityPolicy.value.mode = selectedMode.value;
-  securityPolicy.value.banScore = Math.max(1, banThreshold.value);
-  securityPolicy.value.maxUdpPerWindow = Math.max(1, maxUdpThreshold.value);
-  const result = await updateSecurityPolicy(securityPolicy.value);
-  if (result.code !== 0) {
-    Message.error(result.message || "防护策略保存失败");
-    return;
+  firewallActivationError.value = "";
+  try {
+    const result = await updateSecurityPolicy({
+      ...securityPolicy.value,
+      mode: selectedMode.value,
+      banScore: Math.max(1, banThreshold.value),
+      maxUdpPerWindow: Math.max(1, maxUdpThreshold.value)
+    });
+    if (result.code !== 0) {
+      Message.error(result.message || "防护策略保存失败");
+      return;
+    }
+    await refreshPreview(false, true);
+    Message.success("防护策略已保存");
+  } catch (error) {
+    const failure = isAxiosError<{ errorCode?: string; message?: string; data?: SecurityPolicy }>(error)
+      ? error.response?.data
+      : undefined;
+    if (failure?.errorCode === "firewall_activation_failed" && failure.data) {
+      securityPolicy.value = failure.data;
+      selectedMode.value = failure.data.mode;
+      maxUdpThreshold.value = failure.data.maxUdpPerWindow;
+      banThreshold.value = failure.data.banScore;
+      const currentMode = protectionModes.find(mode => mode.key === failure.data?.mode)?.title ?? failure.data.mode;
+      firewallActivationError.value = `${failure.message || "主机防火墙联动失败。"}当前仍为「${currentMode}」。`;
+      return;
+    }
+    Message.error(failure?.message || "防护策略保存失败");
   }
-  await refreshPreview(false, true);
-  Message.success("防护策略已保存");
+}
+
+async function copyFirewallStartCommand() {
+  const copied = await writeTextToClipboard(firewallStartCommand);
+  if (copied) Message.success("命令已复制");
+  else Message.warning("复制失败，请选中命令手动复制");
 }
 
 watch([activeTab, period, trendData], async () => {
@@ -1256,6 +1299,13 @@ onBeforeUnmount(() => {
       </section>
 
       <section v-else class="workspace-panel policy-workspace">
+        <a-alert v-if="firewallActivationError" type="warning" show-icon>
+          <template #title>{{ firewallActivationError }}</template>
+          <div>请在 Linux 服务器的绿色包目录运行下方命令，启动代理后再重试。</div>
+          <code>{{ firewallStartCommand }}</code>
+          <a-button type="text" size="small" @click="copyFirewallStartCommand">复制命令</a-button>
+          <a :href="firewallGuideUrl" target="_blank" rel="noopener noreferrer">查看官网教程</a>
+        </a-alert>
         <div class="mode-selector" role="radiogroup" aria-label="防护模式">
           <button
             v-for="mode in protectionModes"
@@ -2177,7 +2227,7 @@ onBeforeUnmount(() => {
 
 .mode-selector {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
   gap: 10px;
   margin-bottom: 14px;
 }

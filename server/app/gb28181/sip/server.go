@@ -423,6 +423,9 @@ func NewServer(cfg gbconfig.Config, options ...ServerOption) (*Server, error) {
 		if readFilter != nil {
 			transportOptions = append(transportOptions, siplib.WithTransportLayerReadFilter(readFilter))
 		}
+		if opts.securityAdmission != nil {
+			transportOptions = append(transportOptions, siplib.WithTransportLayerTCPAcceptFilter(opts.securityAdmission.RejectBannedSource))
+		}
 		if traceRuntime != nil {
 			transportOptions = append(transportOptions, siplib.WithTransportLayerWriteObserver(traceRuntime.WriteObserver))
 		}

@@ -3,6 +3,7 @@ package security
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -264,7 +265,9 @@ func (r *Runtime) applyBan(decision BanDecision) error {
 		}
 	}
 	var err error
-	if r.agent != nil {
+	if r.Policy().Mode == ModeApplication {
+		err = ErrFirewallUnsupported
+	} else if r.agent != nil {
 		err = r.agent.Ban(decision)
 	} else {
 		err = errors.New("agent unavailable")
@@ -368,22 +371,48 @@ func (r *Runtime) UpdatePolicy(policy Policy, actors ...string) error {
 		return err
 	}
 	policy = policy.WithPermanentAutoBan()
+	previous := r.Policy()
+	active := r.bans.List(r.clock.Now())
+	decisions := enforcementDecisions(policy, active, r.clock.Now())
+	reconciler, canReconcile := r.agent.(ReconcileCapable)
+	// The native Windows client has no host-firewall integration. A Linux
+	// socket client can be temporarily unavailable and must still pass activation.
+	_, platformUnsupported := r.agent.(*UnsupportedFirewallClient)
+	activating := !platformUnsupported && (previous.Mode == ModeObserve || previous.Mode == ModeApplication) &&
+		(policy.Mode == ModeProtect || policy.Mode == ModeStrict)
+	var verifiedStatus AgentStatus
+	if activating {
+		if !canReconcile || isFirewallUnsupported(r.agent) {
+			return fmt.Errorf("%w: %w", ErrFirewallActivation, ErrFirewallUnsupported)
+		}
+		if err := reconciler.Reconcile(decisions); err != nil {
+			return errors.Join(ErrFirewallActivation, err, clearFailedActivation(reconciler))
+		}
+		verifiedStatus = agentStatus(r.agent)
+		if !verifiedStatus.Connected {
+			return errors.Join(ErrFirewallActivation, errors.New(verifiedStatus.LastError), clearFailedActivation(reconciler))
+		}
+	}
 	actor := "system"
 	if len(actors) > 0 {
 		actor = actorOrSystem(actors[0])
 	}
 	if r.store != nil {
 		if err := r.store.SavePolicy(context.Background(), policy, actor); err != nil {
+			if activating {
+				return errors.Join(err, clearFailedActivation(reconciler))
+			}
 			return err
 		}
 	}
 	r.mu.Lock()
 	r.policy = policy
+	if activating {
+		r.agentHealth = verifiedStatus
+	}
 	r.mu.Unlock()
 	r.admit.SetPolicy(policy)
 	r.scorer.SetPolicy(policy)
-	active := r.bans.List(r.clock.Now())
-	decisions := enforcementDecisions(policy, active, r.clock.Now())
 	for _, item := range active {
 		if item.Status == BanActive || item.Status == BanAgentFailed {
 			r.admit.Unban(item.Decision.SourceIP)
@@ -392,14 +421,28 @@ func (r *Runtime) UpdatePolicy(policy Policy, actors ...string) error {
 	for _, item := range decisions {
 		_ = r.admit.Ban(item.SourceIP, item.ExpiresAt())
 	}
-	if reconciler, ok := r.agent.(interface{ Reconcile([]BanDecision) error }); ok && !isFirewallUnsupported(r.agent) {
-		if err := reconciler.Reconcile(decisions); err != nil {
+	if canReconcile && !activating && !isFirewallUnsupported(r.agent) {
+		if err := reconciler.Reconcile(firewallDecisions(policy, decisions)); err != nil {
 			if !errors.Is(err, ErrFirewallUnsupported) {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+func clearFailedActivation(agent ReconcileCapable) error {
+	if err := agent.Reconcile(nil); err != nil {
+		return fmt.Errorf("%w: %w", ErrFirewallCleanup, err)
+	}
+	return nil
+}
+
+func firewallDecisions(policy Policy, decisions []BanDecision) []BanDecision {
+	if policy.Mode == ModeApplication {
+		return nil
+	}
+	return decisions
 }
 
 func enforcementDecisions(policy Policy, bans []FirewallBan, now time.Time) []BanDecision {
@@ -424,7 +467,7 @@ func (r *Runtime) Unban(identifier, actor string) error {
 	if !ok {
 		return errors.New("ban not found")
 	}
-	if r.agent != nil {
+	if r.Policy().Mode != ModeApplication && r.agent != nil {
 		if err := r.agent.Unban(item.Decision.SourceIP); err != nil && !errors.Is(err, ErrFirewallUnsupported) {
 			return err
 		}
@@ -490,7 +533,8 @@ func (r *Runtime) reconcileAgent() error {
 		r.mu.Unlock()
 		return nil
 	}
-	decisions := enforcementDecisions(r.Policy(), r.bans.List(r.clock.Now()), r.clock.Now())
+	policy := r.Policy()
+	decisions := firewallDecisions(policy, enforcementDecisions(policy, r.bans.List(r.clock.Now()), r.clock.Now()))
 	var err error
 	for _, d := range decisions {
 		item, _ := r.bans.Get(d.SourceIP, r.clock.Now())

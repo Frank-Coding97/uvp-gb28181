@@ -1810,7 +1810,7 @@ start_firewall_agent() {
   #   而且交互式弹密码会把 `start | tail` 这类用法挂死。
   if [ "$(id -u)" -ne 0 ]; then
     det "主机防火墙代理未启动：需要 root（nftables）—— 保护模式仅在应用层生效"
-    det "  要内核级封禁：sudo ./uvp-gb28181-ctl.sh start，或 sudo ./uvp-gb28181-service-install.sh 注册服务"
+    det "  启用内核级封禁：sudo ./uvp-gb28181-service-install.sh --firewall-only"
     return 0
   fi
 

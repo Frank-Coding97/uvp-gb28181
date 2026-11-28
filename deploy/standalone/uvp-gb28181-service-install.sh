@@ -37,7 +37,7 @@ UNIT_NAME="uvp-gb28181.service"
 UNIT_PATH="/etc/systemd/system/${UNIT_NAME}"
 UPDATER_UNIT_NAME="uvp-gb28181-updater.service"
 UPDATER_UNIT_PATH="/etc/systemd/system/${UPDATER_UNIT_NAME}"
-# 主机防火墙代理：**必须 root**（nftables / CAP_NET_ADMIN），而业务服务按安装者身份跑
+# 主机防火墙代理通过 systemd 获得管理 nftables 所需的能力
 # ⇒ 单独一个 unit。名字必须与 uvp-gb28181-ctl.sh 里的 FIREWALL_AGENT_UNIT_NAME 逐字一致。
 FIREWALL_UNIT_NAME="uvp-gb28181-firewall-agent.service"
 FIREWALL_UNIT_PATH="/etc/systemd/system/${FIREWALL_UNIT_NAME}"
@@ -47,10 +47,11 @@ fail() { printf '[uvp-service][ERROR] %s\n' "$*" >&2; exit 1; }
 
 usage() {
   cat <<'USAGE'
-用法：./uvp-gb28181-service-install.sh [--now]
+用法：./uvp-gb28181-service-install.sh [--now | --firewall-only]
 
   （无参数）   注册为 systemd 服务并设为开机自启，不立即启动
   --now       注册后立即接管：先停掉手工跑着的实例，再 systemctl start
+  --firewall-only  只注册并启动主机防火墙代理
   -h, --help  显示本帮助
 
 卸载：./uvp-gb28181-service-uninstall.sh
@@ -58,14 +59,18 @@ USAGE
 }
 
 WANT_NOW=0
+FIREWALL_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --now)     WANT_NOW=1 ;;
     -h|--help) usage; exit 0 ;;
-    *)         fail "未知参数：$1（只支持 --now 与 -h）" ;;
+    *)         fail "未知参数：$1（只支持 --now、--firewall-only 与 -h）" ;;
   esac
   shift
 done
+if [ "$WANT_NOW" = 1 ] && [ "$FIREWALL_ONLY" = 1 ]; then
+  fail "--now 与 --firewall-only 不能同时使用"
+fi
 
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 ROOT="$(dirname "$SELF")"
@@ -90,6 +95,9 @@ command -v systemctl >/dev/null 2>&1 \
   || fail "systemd 未作为 init 运行（/run/systemd/system 不存在）—— 容器内通常如此，无法注册系统服务"
 
 RUN_USER="${SUDO_USER:-$(id -un)}"
+if [ "$FIREWALL_ONLY" = 1 ] && [ -d "$ROOT/run" ]; then
+  RUN_USER="$(stat -c %U "$ROOT/run")"
+fi
 [ -n "$RUN_USER" ] || RUN_USER="root"
 id "$RUN_USER" >/dev/null 2>&1 \
   || fail "解析出的运行用户「${RUN_USER}」在本机不存在 —— 请改用 sudo -u <用户名> 执行本脚本"
@@ -106,6 +114,74 @@ case "$ROOT" in
     log "   建议把包挪到无空格的路径下再注册服务。"
     ;;
 esac
+
+install_firewall_unit() {
+  local agent="$ROOT/bin/uvp-firewall-agent" tmp_unit
+  if [ -e "$ROOT/current/bin/uvp-firewall-agent" ]; then
+    agent="$ROOT/current/bin/uvp-firewall-agent"
+  fi
+  [ -x "$agent" ] || return 1
+
+  tmp_unit="$(mktemp)"
+  cat > "$tmp_unit" <<UNIT
+[Unit]
+Description=UVP GB28181 主机防火墙代理（nftables）
+After=local-fs.target
+Before=${UNIT_NAME}
+
+[Service]
+Type=simple
+User=${RUN_USER}
+Group=${RUN_GROUP}
+WorkingDirectory=${ROOT}
+ExecStart=/bin/bash "${CTL}" serve-firewall-agent
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=true
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  if ! install -m 0644 "$tmp_unit" "$FIREWALL_UNIT_PATH"; then
+    rm -f "$tmp_unit"
+    return 1
+  fi
+  rm -f "$tmp_unit"
+  log "已写入主机防火墙代理单元：${FIREWALL_UNIT_PATH}"
+}
+
+start_firewall_unit() {
+  local socket="$ROOT/run/firewall-agent.sock" attempt
+  systemctl enable --now "$FIREWALL_UNIT_NAME" || return 1
+  for attempt in {1..30}; do
+    if systemctl is-active --quiet "$FIREWALL_UNIT_NAME" && [ -S "$socket" ]; then
+      log "主机防火墙代理已启动（${FIREWALL_UNIT_NAME}）"
+      return 0
+    fi
+    sleep 0.2
+  done
+  systemctl --no-pager --full status "$FIREWALL_UNIT_NAME" >&2 || true
+  return 1
+}
+
+if [ "$FIREWALL_ONLY" = 1 ]; then
+  command -v nft >/dev/null 2>&1 || fail "找不到 nft，请先安装 nftables"
+  firewall_unit_root="$(systemctl show -p WorkingDirectory --value "$FIREWALL_UNIT_NAME" 2>/dev/null || true)"
+  if [ -n "$firewall_unit_root" ] && [ "$firewall_unit_root" != "$ROOT" ]; then
+    fail "防火墙代理已注册到另一个绿色包目录：$firewall_unit_root"
+  fi
+  if [ -S "$ROOT/run/firewall-agent.sock" ] && ! systemctl is-active --quiet "$FIREWALL_UNIT_NAME" &&
+    ss -xlH | grep -F -- "$ROOT/run/firewall-agent.sock" >/dev/null; then
+    fail "包内已有前台防火墙代理，请结束该进程后重试"
+  fi
+  install_firewall_unit || fail "找不到包内防火墙代理"
+  systemctl daemon-reload
+  start_firewall_unit || fail "主机防火墙代理未就绪"
+  exit 0
+fi
 
 # --------------------------------------------------- 生成 unit 并落盘 ----
 TMP_UNIT="$(mktemp)"
@@ -188,64 +264,12 @@ UNIT
 install -m 0644 "$TMP_UPDATER_UNIT" "$UPDATER_UNIT_PATH"
 log "已写入独立升级助手单元：${UPDATER_UNIT_PATH}"
 
-# --------------------------------------------- 主机防火墙代理（root 单元）----
-#
-# ⛔⛔ 为什么必须是独立单元、且必须是 root：
-#   「国标接入安全」的保护/严格模式有两层：① 应用层准入（Go 进程内直接丢报文）
-#   ② 内核级封禁（把攻击源 IP 写进 nft 集合，在 raw/prerouting 上丢包）。
-#   第 ② 层要 CAP_NET_ADMIN，而业务服务按安装者身份跑（见头部约束 1）——
-#   两者身份不同，只能拆成两个 unit。
-#   漏了这个单元的症状正是老板 2026-10-20 报的：页面切保护模式直接报
-#   `dial unix /run/uvp/firewall-agent.sock: connect: no such file or directory`。
-FIREWALL_AGENT_BIN="$ROOT/bin/uvp-firewall-agent"
-# 升级过（ROOT/current 指向 releases/<id>）时以 current 为准：ROOT/bin 是首发版本的副本。
-if [ -e "$ROOT/current/bin/uvp-firewall-agent" ]; then
-  FIREWALL_AGENT_BIN="$ROOT/current/bin/uvp-firewall-agent"
-fi
-
-# ⛔ run/ 与 logs/ 必须**先按业务用户建好**：代理单元在本单元之前启动（Before=），
-#   若让它以 root 先建目录，业务用户之后就写不进 pid/日志，症状是"服务起不来但不报权限"。
 install -d -m 0755 -o "$RUN_USER" -g "$RUN_GROUP" "$ROOT/run" "$ROOT/logs"
-
-if [ -x "$FIREWALL_AGENT_BIN" ]; then
-  TMP_FIREWALL_UNIT="$(mktemp)"
-  trap 'rm -f "$TMP_UNIT" "$TMP_UPDATER_UNIT" "$TMP_FIREWALL_UNIT"' EXIT
-  cat > "$TMP_FIREWALL_UNIT" <<UNIT
-[Unit]
-Description=UVP GB28181 主机防火墙代理（nftables · 内核级封禁）
-After=local-fs.target
-Before=${UNIT_NAME}
-
-[Service]
-Type=simple
-User=root
-# ⛔ Group 必须是业务用户的主组：代理把 socket chmod 0660，
-#   后端（普通用户）靠「同组 + 组可读写」才能连上；写 root:root 会让后端永远
-#   只能看到"降级"，而 systemctl status 显示代理明明是 active。
-Group=${RUN_GROUP}
-WorkingDirectory=${ROOT}
-# ⛔ 不直接写 <包>/bin/uvp-firewall-agent：升级后程序在 releases/<id>/bin，
-#   `current` 软链才是权威 ⇒ 让 ctl 每次启动时解析（与 serve-updater 同一套路）。
-ExecStart=/bin/bash "${CTL}" serve-firewall-agent
-Restart=on-failure
-RestartSec=2s
-# 只给 nft/netlink 必需的能力，不给完整 root 特权集
-NoNewPrivileges=true
-AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
-# ⛔ 不要加 ProtectSystem=strict / ProtectHome=true：socket 要写进安装目录，
-#   而安装目录可能在 /opt /home 下，被保护后就写不进去 ⇒ 代理起不来。
-PrivateTmp=true
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-  install -m 0644 "$TMP_FIREWALL_UNIT" "$FIREWALL_UNIT_PATH"
-  log "已写入主机防火墙代理单元：${FIREWALL_UNIT_PATH}"
+if install_firewall_unit; then
+  FIREWALL_UNIT_AVAILABLE=1
 else
   FIREWALL_UNIT_AVAILABLE=0
-  log "⚠️ 包内没有主机防火墙代理（${FIREWALL_AGENT_BIN}）—— 跳过该单元"
-  log "   影响：安全页的保护/严格模式只在应用层拦截，页面显示「主机防火墙 降级」"
+  log "包内没有主机防火墙代理，跳过该单元"
 fi
 
 # --------------------------------------------------- 生效 + 开机自启 ----
@@ -274,20 +298,7 @@ if [ "${FIREWALL_UNIT_AVAILABLE:-1}" != "0" ]; then
     rm -f "$_fw_pidfile"
   fi
 
-  systemctl enable "$FIREWALL_UNIT_NAME" 2>&1 | sed 's/^/    /' || fail "防火墙代理 enable 失败"
-  # ⛔ 这个单元**立即启动**（与业务 unit 不同）：它不占端口、不碰业务数据，
-  #   而且"注册完服务但内核封禁还得等重启"是最难解释给客户的状态。
-  if systemctl start "$FIREWALL_UNIT_NAME" 2>&1 | sed 's/^/    /'; then
-    if systemctl is-active --quiet "$FIREWALL_UNIT_NAME"; then
-      log "主机防火墙代理已由 systemd 托管（${FIREWALL_UNIT_NAME}）"
-    else
-      log "⚠️ 主机防火墙代理启动后未保持运行 —— 常见原因是目标机没装 nftables："
-      systemctl --no-pager --full status "$FIREWALL_UNIT_NAME" 2>&1 | sed 's/^/    /' | head -20 || true
-      log "   影响：保护/严格模式只在应用层拦截（页面显示「主机防火墙 降级」）"
-    fi
-  else
-    log "⚠️ 主机防火墙代理启动失败，安全模式将只在应用层生效"
-  fi
+  start_firewall_unit || log "主机防火墙代理启动失败，应用层防护可继续运行"
 fi
 
 if systemctl is-active --quiet "$UNIT_NAME" 2>/dev/null; then

@@ -94,13 +94,13 @@ func TestStandalonePackageShipsFirewallAgent(t *testing.T) {
 	require.Contains(t, install, "Group=${RUN_GROUP}")
 	// ⛔ 单元不能写死版本路径（升级后 releases/<id> 会变），必须走 ctl 的 serve 子命令。
 	require.Contains(t, install, `ExecStart=/bin/bash "${CTL}" serve-firewall-agent`)
-	require.Contains(t, install, "systemctl enable \"$FIREWALL_UNIT_NAME\"")
+	require.Contains(t, install, "systemctl enable --now \"$FIREWALL_UNIT_NAME\"")
 
 	uninstall := read("deploy/standalone/uvp-gb28181-service-uninstall.sh")
 	require.Contains(t, uninstall, `FIREWALL_UNIT_NAME="uvp-gb28181-firewall-agent.service"`)
 	require.Contains(t, uninstall, "nft delete table inet uvp_sip_guard")
 
-	// Go 侧：没有代理时**不许**把"切保护模式"变成错误（否则绿色包永远开不了）。
+	// 绿色包仍使用 socket 客户端探测防火墙代理，并同步当前 SIP 端口。
 	bootstrap := read("server/app/gb28181/bootstrap.go")
 	require.Contains(t, bootstrap, "NewSocketPresenceClient")
 	require.Contains(t, bootstrap, "SetSIPPort")

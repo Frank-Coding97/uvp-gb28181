@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"errors"
 	"net"
 	"net/http"
 	"sort"
@@ -268,6 +269,22 @@ func (c *SecurityController) UpdatePolicy(ctx *gin.Context) {
 		return
 	}
 	if err := c.provider.UpdatePolicy(policy, strconv.FormatUint(uint64(c.GetCurrentUserID(ctx)), 10)); err != nil {
+		if errors.Is(err, gbsecurity.ErrFirewallActivation) || errors.Is(err, gbsecurity.ErrFirewallCleanup) {
+			currentPolicy := c.provider.Policy()
+			reason := "主机防火墙代理无法连接，或未能应用 SIP 防火墙规则。"
+			if errors.Is(err, gbsecurity.ErrFirewallUnsupported) {
+				reason = "主机防火墙代理未启动或当前系统不支持。"
+			}
+			if errors.Is(err, gbsecurity.ErrFirewallCleanup) {
+				reason += "防火墙规则清理尚未确认，服务会继续重试。"
+			}
+			response.SetBusinessResult(ctx, http.StatusConflict, false)
+			ctx.JSON(http.StatusConflict, gin.H{
+				"code": http.StatusConflict, "errorCode": "firewall_activation_failed",
+				"message": reason, "data": securityPolicyView(currentPolicy),
+			})
+			return
+		}
 		response.SetBusinessResult(ctx, http.StatusBadRequest, false)
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": err.Error()})
 		return

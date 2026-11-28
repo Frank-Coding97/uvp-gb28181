@@ -316,6 +316,11 @@ func (a *Agent) handleConn(conn net.Conn) {
 		case "unban":
 			err = a.Unban(req.SourceIP)
 		case "status":
+			if checker, ok := a.backend.(interface{ CheckRules(context.Context) error }); ok {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				err = checker.CheckRules(ctx)
+				cancel()
+			}
 		case "reconcile":
 			err = a.Reconcile(req.Decisions)
 		default:

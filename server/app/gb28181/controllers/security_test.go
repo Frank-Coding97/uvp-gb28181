@@ -20,6 +20,7 @@ type securityControllerProvider struct {
 	rules         []gbsecurity.AccessRule
 	policy        gbsecurity.SecurityPolicy
 	updatedPolicy *gbsecurity.SecurityPolicy
+	updateError   error
 	actor         string
 }
 
@@ -35,7 +36,7 @@ func (p *securityControllerProvider) Policy() gbsecurity.SecurityPolicy {
 func (p *securityControllerProvider) UpdatePolicy(policy gbsecurity.SecurityPolicy, actor string) error {
 	p.updatedPolicy = &policy
 	p.actor = actor
-	return nil
+	return p.updateError
 }
 func (p *securityControllerProvider) Unban(_ string, actor string) error {
 	p.actor = actor
@@ -297,6 +298,27 @@ func TestSecurityControllerUpdatePolicyNormalizesLegacyFiniteAutomaticBan(t *tes
 	require.Equal(t, 200, recorder.Code)
 	require.NotNil(t, provider.updatedPolicy)
 	require.Equal(t, []gbsecurity.TTLStep{{Score: view.BanScore, TTL: 0}}, provider.updatedPolicy.BanTTLs)
+}
+
+func TestSecurityControllerUpdatePolicyReportsActiveModeOnFirewallFailure(t *testing.T) {
+	current := gbsecurity.DefaultPolicy()
+	current.Mode = gbsecurity.ModeObserve
+	provider := &securityControllerProvider{policy: current, updateError: gbsecurity.ErrFirewallActivation}
+	router := gin.New()
+	router.PUT("/policy", NewSecurityController(provider).UpdatePolicy)
+	payload, err := json.Marshal(securityPolicyView(gbsecurity.DefaultPolicy()))
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest("PUT", "/policy", bytes.NewReader(payload)))
+	require.Equal(t, 409, recorder.Code)
+	var result struct {
+		ErrorCode string             `json:"errorCode"`
+		Data      SecurityPolicyView `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &result))
+	require.Equal(t, "firewall_activation_failed", result.ErrorCode)
+	require.Equal(t, gbsecurity.ModeObserve, result.Data.Mode)
 }
 
 func serveSecurityList(t *testing.T, target string, handler gin.HandlerFunc) *httptest.ResponseRecorder {
