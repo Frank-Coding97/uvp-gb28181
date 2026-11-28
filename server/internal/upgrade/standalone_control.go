@@ -1,6 +1,7 @@
 package upgrade
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -26,6 +27,11 @@ func (a *StandaloneAdapter) installControl(release string, record TaskRecord) er
 	}
 	if !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 || info.Size() == 0 {
 		return errors.New("packaged standalone control is not a nonempty executable file")
+	}
+	if same, err := filesHaveSameContent(source, a.Layout.Control); err != nil {
+		return err
+	} else if same {
+		return nil
 	}
 	backup, err := a.controlBackupPath(record)
 	if err != nil {
@@ -85,6 +91,65 @@ func (a *StandaloneAdapter) restoreControl(record TaskRecord) error {
 	}
 	if err := copyFileAtomically(backup, a.Layout.Control, 0755); err != nil {
 		return fmt.Errorf("restore standalone control: %w", err)
+	}
+	return nil
+}
+
+// A legacy helper finishes the first upgrade before the new helper can run
+// installControl. Repair that handoff after recovery, only for a succeeded
+// active release with a normal gate. Never disturb an unfinished upgrade.
+func (w *WorkflowExecutor) refreshStandaloneControl(ctx context.Context) error {
+	a, ok := w.Adapter.(*StandaloneAdapter)
+	if !ok || w.Gate == nil || a.Layout.Control != filepath.Join(a.Layout.Root, standaloneControlName) {
+		return nil
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	lock, err := acquireUpgradeLock(filepath.Join(w.Store.root, "workflow.lock"))
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	gate, err := w.Gate.Load()
+	if err != nil || gate.Mode != GateNormal {
+		return err
+	}
+	target, err := a.CurrentTarget()
+	if err != nil || target == "" {
+		return err
+	}
+	records, err := w.Store.List()
+	if err != nil {
+		return err
+	}
+	for _, record := range records {
+		if isResumableApplyPhase(record.Phase) || record.Phase == PhaseRecoveryRequired {
+			return nil
+		}
+	}
+	for _, record := range records {
+		if record.Phase != PhaseSucceeded || target != filepath.Join(a.Layout.Releases, record.TaskID) {
+			continue
+		}
+		same, err := filesHaveSameContent(filepath.Join(target, standaloneControlName), a.Layout.Control)
+		if errors.Is(err, os.ErrNotExist) || same {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		previous := record.PreviousTarget
+		if previous == "" {
+			previous = a.Layout.Root
+		}
+		if err := preserveZLMConfig(a.Layout.Root, previous); err != nil {
+			return err
+		}
+		if err := a.installControl(target, record); err != nil {
+			return err
+		}
+		// The old entrypoint has already started ZLM with the new template.
+		// Reload the saved configuration immediately during this one-time handoff.
+		return a.runner().Run(ctx, a.Layout.Control, "restart-zlm")
 	}
 	return nil
 }

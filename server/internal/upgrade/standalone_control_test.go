@@ -184,3 +184,52 @@ func TestStandaloneUpgradeKeepsLegacyPackageAndCustomControl(t *testing.T) {
 		require.Equal(t, zlmControlScript(false), string(got))
 	})
 }
+
+// 模拟旧助手已把 current 切到新包，却未更新安装根的启动入口。
+func TestNewHelperRepairsControlAfterLegacyUpgrade(t *testing.T) {
+	for _, blocked := range []bool{false, true} {
+		t.Run(map[bool]string{false: "completed", true: "recovery gate"}[blocked], func(t *testing.T) {
+			a, _ := standaloneControlFixture(t, false)
+			require.NoError(t, a.Layout.validate())
+			store, err := OpenTaskStore(a.Layout.State)
+			require.NoError(t, err)
+			defer store.Close()
+			record, err := store.Submit(TaskRequest{IdempotencyKey: "legacy", Actor: "admin", TargetDigest: strings.Repeat("a", 64)})
+			require.NoError(t, err)
+			for _, phase := range []TaskPhase{PhaseVerifying, PhasePreparing, PhaseAwaitingConfirmation, PhaseStopping, PhaseBackingUp, PhaseMigrating, PhaseActivating, PhaseValidating, PhaseCommitting, PhaseSucceeded} {
+				require.NoError(t, store.MarkPhase(record.TaskID, phase))
+			}
+			old, err := a.CurrentTarget()
+			require.NoError(t, err)
+			require.NoError(t, store.UpdateMetadata(record.TaskID, func(r *TaskRecord) error { r.PreviousTarget = old; return nil }))
+			target := filepath.Join(a.Layout.Releases, record.TaskID)
+			require.NoError(t, os.MkdirAll(filepath.Join(target, "vendor", "zlm"), 0755))
+			require.NoError(t, os.WriteFile(filepath.Join(target, legacyZLMConfigPath), []byte(shippedINI), 0644))
+			script := strings.ReplaceAll(zlmControlScript(true), `[ "$1" = start ]`, `[ "$1" = start ] || [ "$1" = restart-zlm ]`)
+			require.NoError(t, os.WriteFile(filepath.Join(target, controlName), []byte(script), 0755))
+			require.NoError(t, os.Remove(a.Layout.Current))
+			require.NoError(t, os.Symlink(target, a.Layout.Current))
+			gate, err := OpenGateStore(filepath.Join(a.Layout.State, "gate.json"))
+			require.NoError(t, err)
+			if blocked {
+				require.NoError(t, gate.Save(GateState{Mode: GateRecovery, TaskID: record.TaskID, BuildID: "candidate", Reason: "operator recovery"}))
+			}
+			w := &WorkflowExecutor{Store: store, Adapter: a, Gate: gate}
+			require.NoError(t, w.Recover(context.Background()))
+			got, err := os.ReadFile(a.Layout.Control)
+			require.NoError(t, err)
+			if blocked {
+				require.Equal(t, zlmControlScript(false), string(got))
+				return
+			}
+			require.Equal(t, script, string(got), "新助手启动后仍未接管旧入口")
+			got, err = os.ReadFile(filepath.Join(a.Layout.Root, "observed.ini"))
+			require.NoError(t, err)
+			require.Equal(t, legacyINI, string(got), "首次过渡必须立即恢复实际配置")
+			// 后续助手重启不应重复重启 ZLM。
+			require.NoError(t, os.Remove(filepath.Join(a.Layout.Root, "observed.ini")))
+			require.NoError(t, w.Recover(context.Background()))
+			require.NoFileExists(t, filepath.Join(a.Layout.Root, "observed.ini"))
+		})
+	}
+}
