@@ -125,6 +125,23 @@ describe("system dialog skin coverage", () => {
     );
   });
 
+  it("函数式弹窗的头部跟面板同底色，不另起一块（Modal.confirm/warning）", () => {
+    // 2026-11-28 老板截图：「确认开始服务升级？」标题区浮出一块比面板略亮的矩形。
+    // 起因是 `.uvp-system-dialog .arco-modal-header` 的渐变底/描边/padding 也命中了
+    // `.arco-modal-simple`，而 simple 面板外侧自带 20px/24px padding ⇒ header 内缩成一整块色块。
+    // ⛔ 判据必须带 `.uvp-system-dialog`：写成 `.arco-modal-simple .arco-modal-header` 只能靠
+    //   源码顺序压过 uvp-ui-language，`@use` 顺序一调就静默回退（和本轮修的 bug 同款）。
+    const simpleStyles = readFileSync(resolve(root, "style/model/uvp-modal-simple.scss"), "utf8");
+    const header = ".arco-modal-simple.uvp-system-dialog .arco-modal-header";
+    expect(hasRuleBlock(simpleStyles, header, "background: transparent !important")).toBe(true);
+    expect(hasRuleBlock(simpleStyles, header, "border-bottom: 0 !important")).toBe(true);
+    expect(hasRuleBlock(simpleStyles, header, "padding: 0 !important")).toBe(true);
+    // 头/体之间现在只剩标题那条线 ⇒ 必须走 token，否则暗色下（黑 6% 压深底）等于没有分隔
+    expect(
+      hasRuleBlock(simpleStyles, ".arco-modal-simple .arco-modal-title", "border-bottom: 1px solid var(--uvp-dialog-border)")
+    ).toBe(true);
+  });
+
   it("finds the dialogs across the whole app (扫描本身不是空转)", () => {
     expect(modals.length).toBeGreaterThan(50);
     // 点名一颗已知成员：扫描器要是哪天切错段落（比如被注释/字符串带偏），这条立刻红

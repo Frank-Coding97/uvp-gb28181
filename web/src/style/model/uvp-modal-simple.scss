@@ -19,6 +19,31 @@
     inset 0 1px 2px rgb(15 23 42 / 4%) !important;
 }
 
+/*
+ * simple 头部：必须复位成「透明无框」
+ *
+ * ⛔⛔ 为什么需要这一条（2026-11-28 老板截图点名「确认开始服务升级？那个背景和其他弹窗不一样」）：
+ *   `Modal.confirm/warning` 生成的面板是 `.arco-modal.arco-modal-simple`，**同时也带**
+ *   房规类 `uvp-system-dialog`（函数式调用同样传了 `modalClass`）⇒
+ *   `uvp-ui-language.scss` 里 `.uvp-system-dialog .arco-modal-header` 的
+ *   「渐变底 + border-bottom + 18/24/14 padding + min-height 56」**照样命中**。
+ *   但 simple 面板外侧自带 `padding: 20px 24px`，header 被缩在里面，
+ *   于是变成一块**比面板略亮的内缩矩形**（暗色 `--uvp-dialog-header-bg` = #1a2a3b→#162231，
+ *   而面板是 #162231），跟旁边每一颗普通弹窗都不一样。
+ *   上一版已经把 body / footer 按同一套路压回去了，唯独 header 漏掉 —— 就是它。
+ *
+ * ⛔ 特异性要写到 0,3,0：`uvp-ui-language.scss` 那条是 0,2,0 且全带 !important，
+ *   只写 `.arco-modal-simple .arco-modal-header` 只能靠源码顺序取胜（目前 `@use` 在本文件
+ *   之前），顺序一调就回退。`margin-bottom` 归 0 是因为标题自带 12px/16px 间距。
+ */
+.arco-modal-simple.uvp-system-dialog .arco-modal-header {
+  min-height: 0;
+  padding: 0 !important;
+  margin-bottom: 0;
+  background: transparent !important;
+  border-bottom: 0 !important;
+}
+
 /* simple 内容区 */
 .arco-modal-simple .arco-modal-body {
   padding: 0 0 16px !important;
@@ -38,7 +63,10 @@
   line-height: 24px;
   color: var(--uvp-text-primary);
   letter-spacing: 0;
-  border-bottom: 1px solid rgb(15 23 42 / 6%);
+
+  /* ⛔ 分隔线必须走 token：原来硬编码 rgb(15 23 42 / 6%)，暗色下就是「黑 6% 压在 #162231 上」
+     ⇒ 等于没有线。header 复位成透明后，这条线是唯一的头/体分隔，必须两个主题都看得见。 */
+  border-bottom: 1px solid var(--uvp-dialog-border);
 }
 
 /* simple 图标 */
