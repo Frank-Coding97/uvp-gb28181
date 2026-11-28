@@ -197,11 +197,6 @@ func buildServeRuntime(options serveOptions) (*serveRuntime, error) {
 		if err != nil {
 			return nil, err
 		}
-		if registration.Deployment == "standalone" && runtime.GOOS != "windows" {
-			if _, err := upgrade.SyncStandaloneControl(layout); err != nil {
-				fmt.Fprintln(os.Stderr, "standalone control synchronization unavailable")
-			}
-		}
 		assembly.progress, err = store.EnableProgress(filepath.Join(layout.Root, "updater-progress"))
 		if err != nil {
 			// Observability must not disable the helper's recovery authority.

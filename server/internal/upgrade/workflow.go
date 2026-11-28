@@ -267,7 +267,7 @@ func (w *WorkflowExecutor) Recover(ctx context.Context) error {
 		// TaskStore enforces a single active task, so there can be no second
 		// resumable record. Continue defensively if a legacy store contains one.
 	}
-	return nil
+	return w.refreshStandaloneControl(ctx)
 }
 
 func (w *WorkflowExecutor) cleanupRecovered(ctx context.Context, record TaskRecord) error {
