@@ -459,6 +459,20 @@ func syncZLMIni(path string, z zlmPorts, secret, mediaServerID string) error {
 	}
 	eol := detectEOL(string(raw))
 	lines := splitLines(string(raw), eol)
+	// ffmpeg.snap 禁止通过 ZLM API 修改；在启动前迁移出厂模板。
+	// 本机 UDP 拉 GOP 缓存会溢出丢包，残缺视频帧仍会被编码成 JPEG。
+	section := ""
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			section = trimmed
+			continue
+		}
+		key, value, _ := strings.Cut(trimmed, "=")
+		if section == "[ffmpeg]" && strings.TrimSpace(key) == "snap" && strings.TrimSpace(value) == "%s -i %s -y -f mjpeg -frames:v 1 -an %s" {
+			lines[i] = line[:leadingSpace(line)] + "snap=%s -rtsp_transport tcp -i %s -y -f mjpeg -frames:v 1 -an %s"
+		}
+	}
 
 	edits := []zlmIniEdit{}
 	if secret != "" {

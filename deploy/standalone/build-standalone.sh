@@ -560,7 +560,7 @@ for i, line in enumerate(lines):
     if not m:
         continue
     indent, key, eq, old, cr = m.groups()
-    # 只认三处：[api] 的 secret、[general] 的 mediaServerId、[ffmpeg] 的 bin，
+    # 按段落改身份、FFmpeg 路径与默认抓拍命令，
     # 别处出现的同名键不能动（这份 ini 有 11 个段）。
     if section == "api" and key == "secret" and old.strip() != secret:
         changed.append("[api] secret: " + old.strip() + " -> (固定值)")
@@ -574,6 +574,9 @@ for i, line in enumerate(lines):
     elif section == "ffmpeg" and key == "bin" and old.strip() != "./bin/ffmpeg":
         changed.append("[ffmpeg] bin: " + old.strip() + " -> ./bin/ffmpeg（包内内置）")
         lines[i] = indent + key + eq + "./bin/ffmpeg" + cr
+    elif section == "ffmpeg" and key == "snap" and old.strip() == "%s -i %s -y -f mjpeg -frames:v 1 -an %s":
+        changed.append("[ffmpeg] snap: 使用 TCP，避免本机 UDP 抓帧丢包")
+        lines[i] = indent + key + eq + "%s -rtsp_transport tcp -i %s -y -f mjpeg -frames:v 1 -an %s" + cr
     # ⛔⛔ [http] dirMenu 必须出厂为 0：开着时 ZLM 的 HTTP 口把 www 目录整个列成
     #   网页，而 www 正是录像/截图/HLS 的落盘目录 ⇒ 同网段任何人不用登录平台
     #   就能把全部历史录像翻一遍（allow_ip_range 出厂就放行 10/172/192）。
