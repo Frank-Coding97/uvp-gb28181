@@ -208,6 +208,12 @@ func TestBuildServeRuntimeWiresRegisteredControl(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if assembly.progress == nil {
+		t.Fatal("registered helper did not initialize independent progress")
+	}
+	if info, err := os.Stat(filepath.Join(root, "updater-progress")); err != nil || !info.IsDir() {
+		t.Fatalf("progress directory unavailable: %v", err)
+	}
 	server, ok := assembly.server.(*upgrade.UnixServer)
 	if !ok || server.Control == nil {
 		t.Fatalf("server control = %#v", server)

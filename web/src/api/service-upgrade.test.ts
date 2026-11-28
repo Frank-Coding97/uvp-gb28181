@@ -10,6 +10,7 @@ import {
   clearIgnoredServiceUpgradeNotice,
   createServiceUpgradeTask,
   getServiceUpgradeMigrationPlan,
+  getServiceUpgradeProgress,
   getServiceUpgradeImport,
   getServiceUpgradeNotice,
   getSystemEnvironment,
@@ -22,6 +23,31 @@ describe("服务升级 API", () => {
   beforeEach(() => {
     request.mockReset();
     request.mockResolvedValue({ code: 0, data: {} });
+  });
+
+  it("独立进度使用同源无缓存读取，拒绝任意网址和错误任务", async () => {
+    const watch = { task_id: "task-1", url: `/api/system/upgrade/progress/${"a".repeat(64)}.json` };
+    const snapshot = {
+      task: { task_id: "task-1", phase: "backing_up", committed: false },
+      observed_at: new Date().toISOString()
+    };
+    const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => snapshot });
+    vi.stubGlobal("fetch", fetch);
+    try {
+      expect(await getServiceUpgradeProgress(watch)).toEqual(snapshot);
+      expect(fetch).toHaveBeenCalledWith(watch.url, expect.objectContaining({ cache: "no-store", credentials: "same-origin" }));
+      await expect(getServiceUpgradeProgress({ ...watch, url: "https://evil.example/progress.json" })).rejects.toThrow();
+      expect(fetch).toHaveBeenCalledTimes(1);
+      const serverNow = new Date(Date.now() + 300000).toUTCString();
+      fetch.mockResolvedValue({ ok: true, headers: new Headers({ Date: serverNow }), json: async () => snapshot });
+      expect(await getServiceUpgradeProgress(watch)).toEqual({ ...snapshot, server_now: serverNow });
+      fetch.mockResolvedValue({ ok: true, json: async () => ({ ...snapshot, task: { ...snapshot.task, task_id: "other" } }) });
+      await expect(getServiceUpgradeProgress(watch)).rejects.toThrow();
+      fetch.mockResolvedValue({ ok: true, json: async () => ({ ...snapshot, task: { ...snapshot.task, phase: "invented" } }) });
+      await expect(getServiceUpgradeProgress(watch)).rejects.toThrow();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("任务创建只发送幂等键和摘要，应用/回退使用固定任务路由", async () => {

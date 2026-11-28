@@ -276,6 +276,7 @@ services:
     volumes:
       # 上传目录：后端写、nginx 读（只读挂载，避免 nginx 侧能改业务数据）
       - ${UVP_ROOT:?UVP_ROOT 必填}/data/uploads:/opt/uvp/uploads:ro
+      - ${UVP_ROOT:?UVP_ROOT 必填}/updater-progress:/opt/uvp/updater-progress:ro
       # ⛔ 证书挂卷而不是随镜像：否则重建容器就换一张新证书，
       #    浏览器又要重新信任一次（表现为"升级完所有人都报证书告警"）。
       - ${UVP_ROOT:?UVP_ROOT 必填}/config/tls:/opt/uvp/tls:ro

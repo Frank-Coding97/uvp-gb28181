@@ -408,6 +408,9 @@ func (c *ServiceUpgradeController) Status(ctx *gin.Context) {
 		if status.Transfer != nil {
 			payload["transfer"] = status.Transfer
 		}
+		if response.Progress != nil {
+			payload["progress"] = response.Progress
+		}
 		if withHistory {
 			history, historyErr := c.upgradeHistoryPage(ctx.Request.Context(), historyPage, historySize)
 			if historyErr != nil {

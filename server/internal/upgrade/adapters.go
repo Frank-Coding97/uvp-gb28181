@@ -147,7 +147,7 @@ func (a *StandaloneAdapter) Stop(ctx context.Context, _ TaskRecord) error {
 	if a.Layout.Control == "" {
 		return errors.New("standalone control path is not registered")
 	}
-	return a.runner().Run(ctx, a.Layout.Control, "stop")
+	return a.runner().Run(ctx, a.Layout.Control, standaloneUpgradeStopAction(a.Layout))
 }
 
 // PreparePackage validates database backup prerequisites before the
@@ -763,7 +763,7 @@ func (a *StandaloneAdapter) Rollback(ctx context.Context, record TaskRecord) err
 	if a.Layout.Control == "" {
 		return errors.New("standalone control path is not registered")
 	}
-	if err := a.runner().Run(ctx, a.Layout.Control, "stop"); err != nil {
+	if err := a.runner().Run(ctx, a.Layout.Control, standaloneUpgradeStopAction(a.Layout)); err != nil {
 		return err
 	}
 	if err := restoreRollbackDatabase(ctx, a.Layout, record); err != nil {
@@ -2158,4 +2158,20 @@ func moveTreeContents(source, destination string) error {
 		}
 	}
 	return nil
+}
+
+// Inspect old installed scripts before invoking the upgrade-only action. Do
+// not retry a failed stop: it may already have partially disrupted services.
+func standaloneUpgradeStopAction(layout RegisteredLayout) string {
+	paths := []string{layout.Control}
+	if strings.EqualFold(filepath.Ext(layout.Control), ".cmd") {
+		paths = append(paths, filepath.Join(filepath.Dir(layout.Control), "uvp-gb28181-ctl.ps1"))
+	}
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err == nil && strings.Contains(string(data), "stop-for-upgrade") {
+			return "stop-for-upgrade"
+		}
+	}
+	return "stop"
 }

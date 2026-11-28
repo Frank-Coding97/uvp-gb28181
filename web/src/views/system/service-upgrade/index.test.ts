@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
   getStatus: vi.fn(),
+  getProgress: vi.fn(),
   getMigrationPlan: vi.fn(),
   check: vi.fn(),
   importPackage: vi.fn(),
@@ -31,6 +32,7 @@ vi.mock("@/hooks/usePermission", () => ({
 
 vi.mock("@/api/service-upgrade", () => ({
   getServiceUpgradeStatus: api.getStatus,
+  getServiceUpgradeProgress: api.getProgress,
   getServiceUpgradeMigrationPlan: api.getMigrationPlan,
   checkServiceUpgrade: api.check,
   importServiceUpgrade: api.importPackage,
@@ -138,6 +140,7 @@ describe("service upgrade page", () => {
     // 上一个用例留下的「落地自动检查」信号不能漏到这个用例里。
     consumeUpgradeAutoCheck();
     api.getStatus.mockReset().mockResolvedValue({ code: 0, data: status() });
+    api.getProgress.mockReset().mockRejectedValue(new Error("进度不可用"));
     api.getMigrationPlan.mockReset().mockResolvedValue({
       code: 0,
       data: { can_apply: true, pending: [], applied: [], unknown: [], destructive: [], dialect: "sqlite" }
@@ -160,6 +163,152 @@ describe("service upgrade page", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("后端停机时独立进度继续推进，抽屉同步且不会将助手结果当成运行版本", async () => {
+    const task = { task_id: "upgrade-1", phase: "stopping", version: "1.2.0", build_id: "new-build", committed: false };
+    const progress = { task_id: task.task_id, url: `/api/system/upgrade/progress/${"a".repeat(64)}.json` };
+    api.getStatus.mockResolvedValue({ data: { ...status(), activeTask: task, tasks: [task], progress } });
+    api.getProgress.mockResolvedValue({ task: { ...task, phase: "backing_up" }, observed_at: new Date().toISOString() });
+    const wrapper = mountPage();
+    await flushPromises();
+    const vm = wrapper.vm as any;
+    vm.showTaskDetails(task.task_id);
+    api.getStatus.mockRejectedValue({ response: { status: 502 } });
+    api.getMigrationPlan.mockRejectedValue({ response: { status: 502 } });
+    await vm.loadStatus();
+    api.getProgress.mockResolvedValue({
+      task: { ...task, phase: "migrating" },
+      observed_at: new Date(Date.now() + 1).toISOString()
+    });
+    await vm.refreshProgress();
+    await flushPromises();
+    expect(wrapper.get('[data-testid="task-progress"]').text()).toContain("执行迁移");
+    expect(wrapper.get('[data-testid="task-progress"]').text()).not.toContain("正在重连");
+    expect(wrapper.get('[data-testid="task-detail-progress"]').text()).toContain("执行迁移");
+    expect(wrapper.text()).toContain("升级进度正常更新");
+    expect(vm.statusError).toBeTruthy();
+    api.getProgress.mockResolvedValue({
+      task: { ...task, phase: "succeeded", committed: true },
+      observed_at: new Date(Date.now() + 2).toISOString()
+    });
+    await vm.refreshProgress();
+    await flushPromises();
+    expect(wrapper.get('[data-testid="task-progress"]').text()).toContain("升级成功");
+    expect(vm.status.current.build_id).toBe("old");
+    expect(vm.clientRefreshState).toBe("idle");
+    expect(api.applyTask).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("停服刷新从会话恢复进度，拒绝过期、倒序和其他任务的快照", async () => {
+    const progress = { task_id: "upgrade-1", url: `/api/system/upgrade/progress/${"a".repeat(64)}.json` };
+    window.sessionStorage.setItem("uvp.service-upgrade.progress", JSON.stringify(progress));
+    api.getStatus.mockRejectedValue({ response: { status: 502 } });
+    const task = { task_id: progress.task_id, phase: "migrating", committed: false };
+    const observed = Date.now();
+    api.getProgress.mockResolvedValue({ task, observed_at: new Date(observed).toISOString() });
+    const wrapper = mountPage();
+    await flushPromises();
+    const vm = wrapper.vm as any;
+    expect(wrapper.get('[data-testid="task-progress"]').text()).toContain("执行迁移");
+    for (const snapshot of [
+      { task: { ...task, phase: "backing_up" }, observed_at: new Date(observed - 1).toISOString() },
+      { task: { ...task, phase: "succeeded", task_id: "other" }, observed_at: new Date(observed + 1).toISOString() },
+      { task: { ...task, phase: "succeeded" }, observed_at: new Date(observed - 60000).toISOString() }
+    ]) {
+      api.getProgress.mockResolvedValue(snapshot);
+      await vm.refreshProgress();
+      await flushPromises();
+      expect(wrapper.get('[data-testid="task-progress"]').text()).toContain("执行迁移");
+      expect(wrapper.get('[data-testid="task-progress"]').text()).toContain("正在重连");
+    }
+    wrapper.unmount();
+  });
+
+  it("会话缓存中的任意地址不会用于独立进度查询", async () => {
+    window.sessionStorage.setItem(
+      "uvp.service-upgrade.progress",
+      JSON.stringify({ task_id: "task", url: "https://evil.example/progress" })
+    );
+    const wrapper = mountPage();
+    await flushPromises();
+    expect(api.getProgress).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it.each([
+    ["failed", "任务失败或已取消"],
+    ["rolled_back", "已恢复旧版本"],
+    ["recovery_required", "需要恢复处理"]
+  ])("停服期间独立进度如实展示 %s 终态", async (phase, label) => {
+    const progress = { task_id: "upgrade-1", url: `/api/system/upgrade/progress/${"a".repeat(64)}.json` };
+    window.sessionStorage.setItem("uvp.service-upgrade.progress", JSON.stringify(progress));
+    api.getStatus.mockRejectedValue({ response: { status: 502 } });
+    api.getProgress.mockResolvedValue({
+      task: { task_id: progress.task_id, phase, committed: false, failure_phase: "validating", error: "启动验证未通过" },
+      observed_at: new Date().toISOString()
+    });
+    const wrapper = mountPage();
+    await flushPromises();
+    const panel = wrapper.get('[data-testid="task-progress"]');
+    expect(panel.text()).toContain(label);
+    expect(panel.text()).not.toContain("正在重连");
+    expect(panel.text()).toContain("失败阶段：验证启动");
+    expect(api.applyTask).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("独立轮询每秒推进，并在页面卸载后停止", async () => {
+    vi.useFakeTimers();
+    const progress = { task_id: "upgrade-1", url: `/api/system/upgrade/progress/${"a".repeat(64)}.json` };
+    window.sessionStorage.setItem("uvp.service-upgrade.progress", JSON.stringify(progress));
+    api.getStatus.mockRejectedValue({ response: { status: 502 } });
+    api.getProgress.mockImplementation(async () => ({
+      task: {
+        task_id: progress.task_id,
+        phase: api.getProgress.mock.calls.length > 1 ? "migrating" : "backing_up",
+        committed: false
+      },
+      observed_at: new Date().toISOString()
+    }));
+    const wrapper = mountPage();
+    await flushPromises();
+    expect(wrapper.get('[data-testid="task-progress"]').text()).toContain("备份数据");
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushPromises();
+    expect(wrapper.get('[data-testid="task-progress"]').text()).toContain("执行迁移");
+    wrapper.unmount();
+    const calls = api.getProgress.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(api.getProgress).toHaveBeenCalledTimes(calls);
+  });
+
+  it.each([-300000, 300000])("服务器时钟偏差 %s 毫秒时按 HTTP Date 判断快照新鲜度", async offset => {
+    const progress = { task_id: "upgrade-1", url: `/api/system/upgrade/progress/${"a".repeat(64)}.json` };
+    window.sessionStorage.setItem("uvp.service-upgrade.progress", JSON.stringify(progress));
+    api.getStatus.mockRejectedValue({ response: { status: 502 } });
+    const serverNow = Date.now() + offset;
+    const task = { task_id: progress.task_id, phase: "migrating", committed: false };
+    api.getProgress.mockResolvedValue({
+      task,
+      observed_at: new Date(serverNow).toISOString(),
+      server_now: new Date(serverNow).toUTCString()
+    });
+    const wrapper = mountPage();
+    await flushPromises();
+    expect(wrapper.get('[data-testid="task-progress"]').text()).toContain("执行迁移");
+    expect(wrapper.get('[data-testid="task-progress"]').text()).not.toContain("正在重连");
+    api.getProgress.mockResolvedValue({
+      task: { ...task, phase: "succeeded" },
+      observed_at: new Date(serverNow).toISOString(),
+      server_now: new Date(serverNow + 60000).toUTCString()
+    });
+    await (wrapper.vm as any).refreshProgress();
+    await flushPromises();
+    expect(wrapper.get('[data-testid="task-progress"]').text()).toContain("执行迁移");
+    expect(wrapper.get('[data-testid="task-progress"]').text()).toContain("正在重连");
+    wrapper.unmount();
   });
 
   it("点击导入打开文件选择，上传后轮询异步任务并显示失败原因", async () => {

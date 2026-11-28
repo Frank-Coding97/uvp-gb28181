@@ -79,6 +79,7 @@ type ProtocolRequest struct {
 }
 
 type ProtocolResponse struct {
+	Progress  *ProgressWatch      `json:"progress,omitempty"`
 	Protocol  int                 `json:"protocol"`
 	OK        bool                `json:"ok"`
 	Error     string              `json:"error,omitempty"`

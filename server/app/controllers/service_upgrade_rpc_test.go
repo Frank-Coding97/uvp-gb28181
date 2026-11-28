@@ -37,6 +37,7 @@ type recordingUpgradeRPC struct {
 	statusErr   error
 	// transfer 是助手侧（内存里）的下载字节快照，用来验证它会被原样透出。
 	transfer *upgrade.TaskTransferProgress
+	progress *upgrade.ProgressWatch
 }
 
 func (f *recordingUpgradeRPC) Call(_ context.Context, _ string, request upgrade.ProtocolRequest) (upgrade.ProtocolResponse, error) {
@@ -44,6 +45,7 @@ func (f *recordingUpgradeRPC) Call(_ context.Context, _ string, request upgrade.
 	response := upgrade.ProtocolResponse{Protocol: upgrade.UpdaterProtocolVersion, OK: true}
 	switch request.Action {
 	case upgrade.ActionStatus:
+		response.Progress = f.progress
 		if f.statusErr != nil {
 			return upgrade.ProtocolResponse{}, f.statusErr
 		}
@@ -434,4 +436,31 @@ func TestProductionUpgradeStatusOmitsTransferWhenHelperHasNone(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.NotContains(t, recorder.Body.String(), `"transfer"`)
+}
+
+func TestProductionUpgradeStatusForwardsIndependentProgressCapability(t *testing.T) {
+	root := t.TempDir()
+	taskID := strings.Repeat("c", 32)
+	for _, watch := range []*upgrade.ProgressWatch{nil, {TaskID: taskID, URL: upgrade.ProgressURLPrefix + strings.Repeat("a", 64) + ".json"}} {
+		fixture := &recordingUpgradeRPC{task: upgrade.TaskRecord{TaskID: taskID, Phase: upgrade.PhaseStopping}, progress: watch}
+		controller := newServiceUpgradeController(serviceUpgradeOptions{VersionPath: filepath.Join(root, "version.json"), RPC: fixture})
+		oldResponse, oldLog := app.Response, app.ZapLog
+		app.Response, app.ZapLog = response.NewResponseHandler(), zap.NewNop()
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodGet, "/api/system/upgrade/status", nil)
+		controller.Status(ctx)
+		app.Response, app.ZapLog = oldResponse, oldLog
+		require.Equal(t, http.StatusOK, recorder.Code)
+		var payload struct {
+			Data struct {
+				Progress *upgrade.ProgressWatch `json:"progress"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
+		require.Equal(t, watch, payload.Data.Progress)
+		if watch == nil {
+			require.NotContains(t, recorder.Body.String(), `"progress"`)
+		}
+	}
 }

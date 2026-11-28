@@ -1771,10 +1771,7 @@ function Invoke-Start {
     Write-Host ''
 }
 
-function Invoke-Stop {
-    $script:StopFailures = 0
-    Write-Banner
-    Write-UvpLog '正在停止服务（顺序：管理页面 → 后端 → 流媒体 → 缓存）'
+function Invoke-StopFrontend {
     # nginx 走 -s quit：让 master 通知 worker 收尾，避免留下占端口的孤儿 worker。
     # ⛔ 必须带 -p（否则 nginx 找不到 pid 文件，报 OpenEvent("Global\ngx_quit_…") failed (2)），
     #   且 -p 的值要去掉结尾反斜杠再加引号（见 Quote-NativeArg）。
@@ -1801,6 +1798,18 @@ function Invoke-Stop {
     } else {
         Write-UvpDet '管理页面（nginx）已停止'
     }
+}
+
+function Invoke-Stop {
+    param([switch]$ForUpgrade)
+    $script:StopFailures = 0
+    Write-Banner
+    if ($ForUpgrade) {
+        Write-UvpLog '正在停止业务服务，管理页面与升级助手继续提供升级进度'
+    } else {
+        Write-UvpLog '正在停止服务（顺序：管理页面 → 后端 → 流媒体 → 缓存）'
+    }
+    if (-not $ForUpgrade) { Invoke-StopFrontend }
 
     Stop-Component -Label '后端' -PidPath $BackendPidFile -ExePath $ServerExe
     Stop-Component -Label '流媒体服务（ZLM）' -PidPath $ZlmPidFile -ExePath $ZlmExe
@@ -1827,11 +1836,13 @@ function Invoke-Stop {
     Stop-Component -Label 'Redis' -PidPath $RedisPidFile -ExePath $RedisExe -WasRunning $redisWasRunning
 
     # 助手最后停：升级任务的状态归它管，业务先走完再收它。
-    Stop-Updater
+    if (-not $ForUpgrade) { Stop-Updater }
 
     # 兜底：把本包目录下的残留进程再扫一遍（pid 文件丢失场景）
     $leftover = @()
-    foreach ($pair in @(@($ServerExe, 'uvp-server'), @($ZlmExe, 'MediaServer'), @($RedisExe, 'redis-server'), @($NginxExe, 'nginx'))) {
+    $components = @(@($ServerExe, 'uvp-server'), @($ZlmExe, 'MediaServer'), @($RedisExe, 'redis-server'))
+    if (-not $ForUpgrade) { $components += ,@($NginxExe, 'nginx') }
+    foreach ($pair in $components) {
         $extra = Get-PidByExe -ExePath $pair[0]
         if ($extra.Count -gt 0) { $leftover += "$($pair[1]) (PID $($extra -join ','))" }
     }
@@ -1841,7 +1852,8 @@ function Invoke-Stop {
     } elseif ($script:StopFailures -gt 0) {
         Write-UvpWarn '有组件未能停止，详见上方错误'
     } else {
-        Write-UvpOk '已全部停止，无残留进程'
+        if ($ForUpgrade) { Write-UvpOk '业务服务已停止，升级进度入口保留' }
+        else { Write-UvpOk '已全部停止，无残留进程' }
     }
     Write-Host ''
 }
@@ -1925,6 +1937,8 @@ function Show-Usage {
 switch ($Action.ToLower()) {
     'start'          { Invoke-Start }
     'stop'           { Invoke-Stop; if ($script:StopFailures -gt 0) { exit 1 } }
+    'stop-for-upgrade' { Invoke-Stop -ForUpgrade; if ($script:StopFailures -gt 0) { exit 1 } }
+    'stop-frontend'  { $script:StopFailures = 0; Invoke-StopFrontend; if ($script:StopFailures -gt 0) { exit 1 } }
     'restart'        { Invoke-Stop; Invoke-Start }
     'restart-zlm'    { $config = Get-Config; Stop-Component -Label 'ZLM' -PidPath $ZlmPidFile -ExePath $ZlmExe; Start-Zlm -Ports $config.Ports }
     'status'         { Invoke-Status; Invoke-UpdaterStatus }

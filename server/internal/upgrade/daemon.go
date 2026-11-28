@@ -267,6 +267,7 @@ func (s *UnixServer) dispatch(ctx context.Context, request ProtocolRequest) Prot
 				return response
 			}
 			response.OK, response.Status, response.Task = true, &status, status.ActiveTask
+			s.attachProgress(&response)
 			return response
 		}
 		records, err := s.Store.List()
@@ -276,6 +277,7 @@ func (s *UnixServer) dispatch(ctx context.Context, request ProtocolRequest) Prot
 		}
 		response.OK = true
 		response.Task = activeTaskRecord(records)
+		s.attachProgress(&response)
 		return response
 	case ActionCheck:
 		control, err := s.control()
@@ -774,4 +776,15 @@ func activeTaskRecord(records []TaskRecord) *TaskRecord {
 
 func bytesTrimSpace(data []byte) []byte {
 	return []byte(strings.TrimSpace(string(data)))
+}
+
+// Only authenticated local peers receive the task-scoped static read capability.
+func (s *UnixServer) attachProgress(response *ProtocolResponse) {
+	if s.Store.progress == nil || response.Task == nil {
+		return
+	}
+	watch, err := s.Store.progress.Watch(response.Task.TaskID)
+	if err == nil {
+		response.Progress = &watch
+	}
 }

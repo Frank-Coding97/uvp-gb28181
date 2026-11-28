@@ -88,7 +88,7 @@
         </a-descriptions>
       </a-card>
       <UpgradeProgress
-        v-if="showImportProgress || (progressTask && progressTask.phase !== 'succeeded')"
+        v-if="showImportProgress || (progressTask && (progressTask.phase !== 'succeeded' || showLiveCompletion))"
         :data-testid="showImportProgress ? 'import-progress' : 'task-progress'"
         class="upgrade-progress-panel"
         v-bind="showImportProgress ? { ...importProgress, title: '服务升级' } : taskProgress(progressTask!)"
@@ -97,7 +97,7 @@
         :transfer="showImportProgress ? undefined : transferFor(progressTask)"
         :indeterminate="showImportProgress ? false : indeterminateFor(progressTask)"
         :elapsed="showImportProgress ? undefined : elapsedFor(progressTask)"
-        :reconnecting="showImportProgress ? Boolean(importJobError && !importJobFinished) : Boolean(statusError)"
+        :reconnecting="showImportProgress ? Boolean(importJobError && !importJobFinished) : progressReconnecting(progressTask)"
       >
         <template v-if="(showImportProgress && importFailed) || (!showImportProgress && progressTask)" #action
           ><a-link v-if="showImportProgress && importFailed" data-testid="dismiss-import" @click="dismissImport">关闭</a-link
@@ -126,7 +126,10 @@
         {{ migrationBlockLabel }}<template #action><a-link @click="migrationDetailsVisible = true">查看原因</a-link></template>
       </a-alert>
       <a-alert v-if="statusError" class="upgrade-alert" type="warning"
-        >服务状态暂不可用，正在重连。保留的任务信息为上次结果，不代表升级成功；{{ statusError }}</a-alert
+        ><template v-if="liveProgressAvailable">业务服务正在恢复，升级进度正常更新；{{ statusError }}</template
+        ><template v-else
+          >服务状态暂不可用，正在重连。保留的任务信息为上次结果，不代表升级成功；{{ statusError }}</template
+        ></a-alert
       >
       <a-alert v-if="migrationError" class="upgrade-alert" type="warning"
         >迁移信息暂不可用，应用升级前需重新检查：{{ migrationError }}</a-alert
@@ -297,7 +300,7 @@
           :transfer="transferFor(selectedTask)"
           :indeterminate="indeterminateFor(selectedTask)"
           :elapsed="elapsedFor(selectedTask)"
-          :reconnecting="Boolean(statusError)"
+          :reconnecting="progressReconnecting(selectedTask)"
         />
         <p class="task-hint">{{ taskHint(selectedTask) }}</p>
         <a-descriptions :column="1" bordered class="uvp-system-description uvp-system-description--compact task-descriptions"
@@ -358,6 +361,7 @@ import {
   createServiceUpgradeTask,
   getServiceUpgradeImport,
   getServiceUpgradeStatus,
+  getServiceUpgradeProgress,
   getServiceUpgradeTask,
   importServiceUpgrade,
   getServiceUpgradeMigrationPlan,
@@ -368,6 +372,8 @@ import {
   type UpgradeMigrationPlan,
   type UpgradeImportJob,
   type UpgradeStatus,
+  type UpgradeProgressWatch,
+  type UpgradeProgressSnapshot,
   type UpgradeTask
 } from "@/api/service-upgrade";
 import { hasPermission } from "@/hooks/usePermission";
@@ -474,17 +480,43 @@ const syncHistory = () => {
   void loadHistory(historyState.value?.page ?? 1, historyState.value?.pageSize ?? HISTORY_PAGE_SIZE);
 };
 const lastActiveTaskID = ref("");
-const progressTask = computed(
-  () =>
-    status.value?.activeTask ||
-    (lastActiveTaskID.value ? status.value?.tasks.find(task => task.task_id === lastActiveTaskID.value) : sortedTasks.value[0])
+const liveProgressTask = ref<UpgradeProgressSnapshot["task"]>();
+const progressWatch = ref<UpgradeProgressWatch>();
+const progressObservedAt = ref(0);
+const progressReceivedAt = ref(0);
+const progressClock = ref(Date.now());
+const progressReadFailed = ref(false);
+const liveProgressAvailable = computed(() =>
+  Boolean(liveProgressTask.value && !progressReadFailed.value && progressClock.value - progressReceivedAt.value <= 15000)
 );
+const showLiveCompletion = computed(() =>
+  Boolean(
+    liveProgressTask.value?.phase === "succeeded" &&
+      (statusError.value ||
+        !liveProgressTask.value.build_id ||
+        status.value?.current?.build_id !== liveProgressTask.value.build_id)
+  )
+);
+const withLiveProgress = (task?: UpgradeTask) => {
+  const live = liveProgressTask.value;
+  if (!live || (task && task.task_id !== live.task_id)) return task;
+  if (task?.updated_at && live.updated_at && Date.parse(task.updated_at) > Date.parse(live.updated_at)) return task;
+  return { idempotency_key: "", actor: "", target_digest: "", ...task, ...live };
+};
+const progressTask = computed(() =>
+  withLiveProgress(
+    status.value?.activeTask ||
+      (lastActiveTaskID.value ? status.value?.tasks.find(task => task.task_id === lastActiveTaskID.value) : sortedTasks.value[0])
+  )
+);
+const progressReconnecting = (task?: UpgradeTask) =>
+  Boolean(statusError.value && !(liveProgressAvailable.value && task?.task_id === liveProgressTask.value?.task_id));
 const environmentExpanded = ref(false);
 const migrationDetailsVisible = ref(false);
 const selectedTaskID = ref("");
 /** 抽屉里的任务详情：可能是列表摘要，也可能是按 ID 单独拉回来的完整记录。 */
 const taskDetail = ref<UpgradeTask | undefined>(undefined);
-const selectedTask = computed(() => taskDetail.value);
+const selectedTask = computed(() => (taskDetail.value ? withLiveProgress(taskDetail.value) : undefined));
 const findTaskRecord = (id: string) =>
   status.value?.tasks.find(task => task.task_id === id) ?? historyState.value?.tasks.find(task => task.task_id === id);
 const hydrateTask = async (id: string) => {
@@ -502,7 +534,7 @@ const closeTaskDetails = () => {
 };
 const showTaskDetails = (id: string) => {
   selectedTaskID.value = id;
-  const local = findTaskRecord(id);
+  const local = findTaskRecord(id) || (liveProgressTask.value?.task_id === id ? withLiveProgress() : undefined);
   taskDetail.value = local;
   // 摘要不带更新说明正文，缺正文时按 ID 补一次（详情里要显示「版本更新说明」）。
   if (!local?.release_notes) void hydrateTask(id);
@@ -928,6 +960,69 @@ const writeSessionValue = (key: string, value: string) => {
   }
 };
 
+const progressStorageKey = "uvp.service-upgrade.progress";
+const validProgressWatch = (value: unknown): value is UpgradeProgressWatch => {
+  const watch = value as UpgradeProgressWatch | undefined;
+  return Boolean(
+    typeof watch?.task_id === "string" &&
+      watch.task_id &&
+      typeof watch.url === "string" &&
+      /^\/api\/system\/upgrade\/progress\/[a-f0-9]{64}\.json$/.test(watch.url)
+  );
+};
+const setProgressWatch = (watch?: UpgradeProgressWatch) => {
+  const next = validProgressWatch(watch) ? watch : undefined;
+  if (next?.task_id !== progressWatch.value?.task_id || next?.url !== progressWatch.value?.url) {
+    liveProgressTask.value = undefined;
+    progressObservedAt.value = 0;
+    progressReceivedAt.value = 0;
+    progressReadFailed.value = false;
+  }
+  progressWatch.value = next;
+  writeSessionValue(progressStorageKey, next ? JSON.stringify(next) : "");
+};
+const restoreProgressWatch = () => {
+  try {
+    setProgressWatch(JSON.parse(readSessionValue(progressStorageKey)));
+  } catch {
+    setProgressWatch();
+  }
+};
+let pollingProgress = false;
+const refreshProgress = async () => {
+  progressClock.value = Date.now();
+  const watch = progressWatch.value;
+  if (!watch || pollingProgress || disposed) return;
+  pollingProgress = true;
+  try {
+    const snapshot = await getServiceUpgradeProgress(watch);
+    if (disposed || watch !== progressWatch.value) return;
+    const observedAt = Date.parse(snapshot.observed_at);
+    const now = Date.now();
+    const serverNow = Date.parse(snapshot.server_now || "");
+    const referenceTime = Number.isFinite(serverNow) ? serverNow : now;
+    if (
+      snapshot.task.task_id !== watch.task_id ||
+      !Object.hasOwn(phaseLabels, snapshot.task.phase) ||
+      typeof snapshot.task.committed !== "boolean" ||
+      !Number.isFinite(observedAt) ||
+      referenceTime - observedAt > 15000 ||
+      observedAt - referenceTime > 5000 ||
+      observedAt < progressObservedAt.value
+    )
+      throw new Error("升级进度已过期或与任务不符");
+    liveProgressTask.value = snapshot.task;
+    progressObservedAt.value = observedAt;
+    progressReceivedAt.value = now;
+    progressClock.value = now;
+    progressReadFailed.value = false;
+  } catch {
+    if (!disposed && watch === progressWatch.value) progressReadFailed.value = true;
+  } finally {
+    pollingProgress = false;
+  }
+};
+
 type PendingUpgrade = { taskID: string; digest: string; buildID: string };
 const pendingUpgradeKey = "uvp.service-upgrade.auto-apply";
 const readPendingUpgrade = (): PendingUpgrade | undefined => {
@@ -1151,6 +1246,7 @@ const maybeRefreshClient = () => {
   reloadClient();
 };
 let refreshTimer: ReturnType<typeof setInterval> | undefined;
+let progressRefreshTimer: ReturnType<typeof setInterval> | undefined;
 let importRefreshTimer: ReturnType<typeof setInterval> | undefined;
 let pollingImport = false;
 
@@ -1164,6 +1260,11 @@ const loadStatus = async () => {
     ]);
     if (statusResult.status === "fulfilled") {
       status.value = statusResult.value.data;
+      const watch = status.value.progress;
+      setProgressWatch(
+        watch && (!status.value.activeTask || status.value.activeTask.task_id === watch.task_id) ? watch : undefined
+      );
+      void refreshProgress();
       if (status.value.activeTask) lastActiveTaskID.value = status.value.activeTask.task_id;
       statusError.value = "";
       reconcileUpdate();
@@ -1473,7 +1574,11 @@ const confirmRollback = (id: string) => {
 };
 
 onMounted(async () => {
+  restoreProgressWatch();
+  void refreshProgress();
+  progressRefreshTimer = setInterval(refreshProgress, 1000);
   await loadStatus();
+  if (disposed) return;
   refreshTimer = setInterval(loadStatus, 5000);
   await restoreImportJob();
   importRefreshTimer = setInterval(() => {
@@ -1492,6 +1597,7 @@ onUnmounted(() => {
   stopAutoCheckWatch?.();
   importGeneration += 1;
   if (refreshTimer) clearInterval(refreshTimer);
+  if (progressRefreshTimer) clearInterval(progressRefreshTimer);
   if (importRefreshTimer) clearInterval(importRefreshTimer);
 });
 </script>

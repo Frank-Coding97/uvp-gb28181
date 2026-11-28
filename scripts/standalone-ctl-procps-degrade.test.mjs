@@ -42,6 +42,7 @@ const HELPERS = [
   fn('has_pgrep'),
   fn('proc_pids_by_exe'),
   fn('proc_alive_by_exe'),
+  fn('nginx_running_exe'),
   '_no_pgrep_noted=""',
   fn('note_no_pgrep_once'),
 ].join('\n');
@@ -107,6 +108,7 @@ NGINX_HTTPS_PORT=${nginxPort}
 NGINX_HTTPS_ENABLED=1
 NGINX_HTTP_PORT=${nginxPort}
 NGINX_BIN="$UVP_T_NGINX_BIN"
+NGINX_PID_FILE=/nonexistent-pkg/run/nginx.pid
 ${HELPERS}
 ${ZLM}
 ${NGINX}

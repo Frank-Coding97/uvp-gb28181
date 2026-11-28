@@ -99,6 +99,8 @@ services:
     image: "uvp-gb28181-frontend:${IMAGE_TAG:-test}"
     container_name: uvp-frontend
     restart: unless-stopped
+    volumes:
+      - ${UVP_ROOT:-/opt/uvp-gb28181}/updater-progress:/opt/uvp/updater-progress:ro
     ports:
       - "56000:80"
     depends_on:

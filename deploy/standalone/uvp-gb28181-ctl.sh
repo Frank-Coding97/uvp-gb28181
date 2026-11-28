@@ -1226,13 +1226,19 @@ check_ports_free() {
     fi
   }
 
+  # 升级时页面入口保持运行；只豁免经 pid + 可执行路径验证属于本安装的 nginx。
+  local keep_frontend=0
+  if nginx_healthy; then keep_frontend=1; fi
+
   # 顺序与 PORTS.md 的规划段一致（51000-51064 连续无空洞；51064 SIP 由引导页自检）
   #
   # ⛔⛔ 2026-10-19 端口互换：**51000 是明文入口、51001 才是 HTTPS**（上一版相反）。
   #   这里的端口字面量只是「变量为空时的兜底」，但仍必须与真实默认值一致：
   #   否则哪天变量没取到，预检就去查一个根本没人监听的端口 ⇒ 报"通过"，
   #   而真正的监听端口可能正被别的程序占着（正是这套预检要防的事）。
-  if [ "$NGINX_HTTPS_ENABLED" = "1" ]; then
+  if [ "$keep_frontend" = "1" ]; then
+    :
+  elif [ "$NGINX_HTTPS_ENABLED" = "1" ]; then
     _check_one 51000 tcp "HTTP（默认入口 + 明文 API）" NGINX_HTTP_PORT
     _check_one 51001 tcp "HTTPS（浏览器访问管理页面）" NGINX_HTTPS_PORT
   else
@@ -2311,6 +2317,29 @@ ensure_tls_material() {
 #   最坏情况：浏览器打开 30000，看到的是**别的系统**的页面，
 #   而包这边所有自检都显示正常 —— 全程零报错，最难查的一类问题。
 #   ⭐ 与 ZLM 同一个道理：端口可连≠ 服务是我们的。判据必须是**进程**。
+# current 切换后，旧 master 的可执行文件仍在上一版 release；pid 文件固定在 run/。
+nginx_running_exe() {
+  local pid="" exe=""
+  if [ -f "$NGINX_PID_FILE" ]; then
+    pid="$(cat "$NGINX_PID_FILE" 2>/dev/null || true)"
+    case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+    kill -0 "$pid" 2>/dev/null || return 1
+    exe="$(readlink "/proc/$pid/exe" 2>/dev/null || true)"
+    exe="${exe% (deleted)}"
+    case "$exe" in
+      "$ROOT"/vendor/nginx/sbin/nginx|"$ROOT"/releases/*/vendor/nginx/sbin/nginx)
+        printf '%s\n' "$exe"
+        return 0
+        ;;
+    esac
+  fi
+  if proc_alive_by_exe "$NGINX_BIN"; then
+    printf '%s\n' "$NGINX_BIN"
+    return 0
+  fi
+  return 1
+}
+
 nginx_healthy() {
   # ⛔⛔ 关闭 fd 必须写进**子 shell**。
   #   实测踩过：写成裸的 `exec 3<&- 3>&- 2>/dev/null || true` 时，
@@ -2331,7 +2360,7 @@ nginx_healthy() {
   # 按可执行文件**绝对路径**匹配：按名字会命中同机其它 nginx
   # （这台机器上就Docker 里跑了 27 天的 nginx）。缺 pgrep 时自动走 /proc。
   note_no_pgrep_once
-  proc_alive_by_exe "$NGINX_BIN"
+  proc_alive_by_exe "$NGINX_BIN" || nginx_running_exe >/dev/null
 }
 
 start_nginx() {
@@ -2345,11 +2374,6 @@ start_nginx() {
   # absolute paths for the next restart.
   render_nginx_conf || return 0
 
-  if nginx_healthy; then
-    log "nginx 已在运行（端口 ${NGINX_HTTPS_PORT}）"
-    return 0
-  fi
-
   ensure_self_signed_cert || return 0
 
   # ⛔ 先 -t 校验再起：nginx 配置写错时的表现是「反复重启、端口时有时无」，
@@ -2358,6 +2382,13 @@ start_nginx() {
     log "nginx 配置校验失败，最后 10 行："
     tail -10 "$NGINX_LOG" >&2 || true
     fail "nginx 配置有误（详见 ${NGINX_LOG}）"
+  fi
+
+  if nginx_healthy; then
+    # 旧 master 继续提供升级进度，新配置把静态页面切到新版本；二进制留待正常重启更新。
+    "$NGINX_BIN" -p "$ROOT" -c "$NGINX_CONF" -s reload >>"$NGINX_LOG" 2>&1 || fail "nginx 配置重载失败"
+    log "nginx 已重载（端口 ${NGINX_HTTPS_PORT}）"
+    return 0
   fi
 
   "$NGINX_BIN" -p "$ROOT" -c "$NGINX_CONF" >>"$NGINX_LOG" 2>&1
@@ -2385,8 +2416,15 @@ stop_nginx() {
       sleep 0.25
     done
   fi
-  # 兜底：端口还没放掉就按可执行路径清（pid 文件可能不可靠）
-  nginx_healthy && stop_by_pidfile "" "$NGINX_BIN" "nginx"
+  # current 可能已经切换；用稳定 pid 复核本安装的实际旧路径，不能拿新版路径清旧 master。
+  # 不把 pid 文件直接交给停止函数，避免过期/被复用的 pid 杀到别人的进程。
+  local running_exe=""
+  if nginx_healthy; then
+    running_exe="$(nginx_running_exe)" || running_exe=""
+    if [ -n "$running_exe" ]; then
+      stop_by_pidfile "" "$running_exe" "nginx"
+    fi
+  fi
   rm -f "$NGINX_PID_FILE"
 }
 
@@ -3037,6 +3075,16 @@ case "${1:-start}" in
   # 以前台方式跑主机防火墙代理，路径/端口由本脚本按当前版本解析。
   serve-firewall-agent)
     serve_firewall_agent
+    ;;
+  stop-for-upgrade)
+    stop_backend
+    stop_zlm
+    stop_redis
+    stop_firewall_agent
+    if redis_healthy || zlm_healthy || backend_healthy; then
+      fail "升级停服不完整，拒绝继续备份和迁移"
+    fi
+    log "业务服务已停止，管理页面与升级助手继续提供升级进度"
     ;;
   stop)
     stop_nginx

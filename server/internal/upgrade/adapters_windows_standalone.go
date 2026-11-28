@@ -16,14 +16,15 @@ import (
 // replace. They hold the customer's configuration, data, logs and the helper's
 // own task state; every other top-level entry belongs to the release payload.
 var persistentEntries = map[string]struct{}{
-	"config":        {},
-	"data":          {},
-	"logs":          {},
-	"run":           {},
-	"resource":      {},
-	"updater":       {},
-	"updater-gate":  {},
-	"updater-state": {},
+	"config":           {},
+	"data":             {},
+	"logs":             {},
+	"run":              {},
+	"resource":         {},
+	"updater":          {},
+	"updater-gate":     {},
+	"updater-state":    {},
+	"updater-progress": {},
 }
 
 // helperEntry is the one persistent directory that still has to move forward:
@@ -84,7 +85,7 @@ func (a *WindowsStandaloneAdapter) runControl(ctx context.Context, args ...strin
 }
 
 func (a *WindowsStandaloneAdapter) Stop(ctx context.Context, _ TaskRecord) error {
-	return a.runControl(ctx, "stop")
+	return a.runControl(ctx, standaloneUpgradeStopAction(a.Layout))
 }
 
 func (a *WindowsStandaloneAdapter) PreparePackage(ctx context.Context, record TaskRecord) error {
@@ -284,9 +285,15 @@ func (a *WindowsStandaloneAdapter) stageCandidate(record TaskRecord) (string, er
 	return packageRoot, nil
 }
 
-func (a *WindowsStandaloneAdapter) Activate(_ context.Context, record TaskRecord) error {
+func (a *WindowsStandaloneAdapter) Activate(ctx context.Context, record TaskRecord) error {
 	if err := a.Layout.validate(); err != nil {
 		return err
+	}
+	// Windows locks the running nginx image: stop it only at replacement.
+	if standaloneUpgradeStopAction(a.Layout) == "stop-for-upgrade" {
+		if err := a.runControl(ctx, "stop-frontend"); err != nil {
+			return err
+		}
 	}
 	// 绿色包是原地覆盖，vendor\zlm\config.ini 就躺在安装根里 ⇒ 旧位置 =
 	// 安装根自身。必须在 replacePath 之前搬走，否则新包那份会把现场设置盖掉。
@@ -375,11 +382,16 @@ func (a *WindowsStandaloneAdapter) CurrentTarget() (string, error) {
 }
 
 func (a *WindowsStandaloneAdapter) Rollback(ctx context.Context, record TaskRecord) error {
-	if err := a.runControl(ctx, "stop"); err != nil {
+	if err := a.runControl(ctx, standaloneUpgradeStopAction(a.Layout)); err != nil {
 		return err
 	}
 	if err := restoreRollbackDatabase(ctx, a.Layout, record); err != nil {
 		return err
+	}
+	if standaloneUpgradeStopAction(a.Layout) == "stop-for-upgrade" {
+		if err := a.runControl(ctx, "stop-frontend"); err != nil {
+			return err
+		}
 	}
 	if err := a.restoreProgramSnapshot(record); err != nil {
 		return err

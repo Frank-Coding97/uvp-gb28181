@@ -55,6 +55,7 @@ type serveRuntime struct {
 	// stop window skips. It runs after recovery so it cannot race a resumed
 	// backup.
 	verifier backgroundRunner
+	progress *upgrade.ProgressPublisher
 }
 
 // snapshotVerifier scans rollback snapshots that were written while the service
@@ -94,6 +95,12 @@ func runServe(ctx context.Context, args []string, getenv func(string) string) er
 	assembly, err := buildServeRuntime(options)
 	if err != nil {
 		return err
+	}
+	if assembly.progress != nil {
+		progressCtx, stopProgress := context.WithCancel(ctx)
+		progressDone := make(chan struct{})
+		go func() { defer close(progressDone); _ = assembly.progress.Run(progressCtx) }()
+		defer func() { stopProgress(); <-progressDone }()
 	}
 	// Recover a task that had already crossed the durable stop boundary before
 	// before the local control socket starts accepting requests.
@@ -189,6 +196,16 @@ func buildServeRuntime(options serveOptions) (*serveRuntime, error) {
 		layout, err := registration.Layout()
 		if err != nil {
 			return nil, err
+		}
+		if registration.Deployment == "standalone" && runtime.GOOS != "windows" {
+			if _, err := upgrade.SyncStandaloneControl(layout); err != nil {
+				fmt.Fprintln(os.Stderr, "standalone control synchronization unavailable")
+			}
+		}
+		assembly.progress, err = store.EnableProgress(filepath.Join(layout.Root, "updater-progress"))
+		if err != nil {
+			// Observability must not disable the helper's recovery authority.
+			fmt.Fprintln(os.Stderr, "upgrade progress publication unavailable")
 		}
 		imports, err := upgrade.OpenImportStore(state)
 		if err != nil {

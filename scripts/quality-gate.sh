@@ -183,6 +183,10 @@ run_check "在线升级发布脚本" "$ROOT" 'node --test scripts/publish-upgrad
 # 助手镜像若就地覆盖正在运行的进程，看着"换了却没生效"。这两条都靠这个测试守住。
 run_check "增量升级包生成器" "$ROOT" 'node --test scripts/build-update-package.test.mjs'
 
+# ---------- 停服期间的独立升级进度入口 ----------
+run_check "升级进度部署契约" "$ROOT" \
+  'node --test scripts/upgrade-live-progress-deployment.test.mjs'
+
 # ---------- Windows 单机版：升级助手通信路径 / 进程授权锁 ----------
 # 两个都只在特殊现场条件下才炸（解压目录过深 / 第二次启动），常规验收发现不了：
 # socket 超 107 字节 → 服务升级页一直 503；icacls /T 剥光锁文件授权 → 后端拒绝启动。

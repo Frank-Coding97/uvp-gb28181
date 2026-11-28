@@ -237,6 +237,19 @@ http {
             error_log /dev/null crit;
         }
 
+        # Read-only upgrade progress remains available while the backend is stopped.
+        location ~ "^/api/system/upgrade/progress/(?<uvp_upgrade_progress_token>[0-9a-f]{64})\.json$" {
+            alias "/opt/uvp/updater-progress/$uvp_upgrade_progress_token.json";
+            limit_except GET HEAD { deny all; }
+            default_type application/json;
+            add_header Cache-Control "no-store" always;
+            access_log off;
+            error_log /dev/null crit;
+            autoindex off;
+        }
+        location = /api/system/upgrade/progress { return 404; }
+        location /api/system/upgrade/progress/ { return 404; }
+
         location /api/ {
             proxy_pass http://uvp_backend;
             proxy_http_version 1.1;
@@ -332,6 +345,19 @@ http {
             # Error logs also include the capability URL on upstream disconnects.
             error_log /dev/null crit;
         }
+
+        # Read-only upgrade progress remains available while the backend is stopped.
+        location ~ "^/api/system/upgrade/progress/(?<uvp_upgrade_progress_token>[0-9a-f]{64})\.json$" {
+            alias "/opt/uvp/updater-progress/$uvp_upgrade_progress_token.json";
+            limit_except GET HEAD { deny all; }
+            default_type application/json;
+            add_header Cache-Control "no-store" always;
+            access_log off;
+            error_log /dev/null crit;
+            autoindex off;
+        }
+        location = /api/system/upgrade/progress { return 404; }
+        location /api/system/upgrade/progress/ { return 404; }
 
         location /api/ {
             proxy_pass http://uvp_backend;

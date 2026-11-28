@@ -1422,3 +1422,16 @@ func TestLoadRegistrationRejectsUnknownFieldsAndBuildsFixedAdapter(t *testing.T)
 		t.Fatal("unknown registration field accepted")
 	}
 }
+
+func TestStandaloneUpgradeStopKeepsFrontendWithCompatibleControl(t *testing.T) {
+	root := t.TempDir()
+	control := filepath.Join(root, "uvp-gb28181-ctl.sh")
+	require.NoError(t, os.WriteFile(control, []byte("case stop-for-upgrade) ;; esac"), 0755))
+	runner := &fakeCommandRunner{}
+	adapter := &StandaloneAdapter{Layout: RegisteredLayout{Root: root, Control: control}, Runner: runner}
+	require.NoError(t, adapter.Stop(context.Background(), TaskRecord{}))
+	require.Equal(t, []string{control, "stop-for-upgrade"}, runner.calls[0])
+	require.NoError(t, os.WriteFile(control, []byte("legacy control"), 0755))
+	require.NoError(t, adapter.Stop(context.Background(), TaskRecord{}))
+	require.Equal(t, []string{control, "stop"}, runner.calls[1])
+}

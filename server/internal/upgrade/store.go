@@ -59,7 +59,10 @@ type TaskRecord struct {
 	UpdatedAt              string                    `json:"updated_at,omitempty"`
 }
 
-type TaskStore struct{ root string }
+type TaskStore struct {
+	root     string
+	progress *ProgressPublisher
+}
 
 func OpenTaskStore(root string) (*TaskStore, error) {
 	if root == "" {
@@ -287,6 +290,10 @@ func (s *TaskStore) save(records []TaskRecord) error {
 	}
 	if err := syncDirectory(s.root); err != nil {
 		return fmt.Errorf("sync task store directory: %w", err)
+	}
+	if s.progress != nil {
+		// Display failure must never invalidate an already persisted phase.
+		_ = s.progress.publish(persisted)
 	}
 	return nil
 }

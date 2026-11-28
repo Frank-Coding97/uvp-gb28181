@@ -69,7 +69,56 @@ export interface UpgradeStatus {
   history?: UpgradeHistoryPage;
   events?: UpgradeEvent[];
   transfer?: UpgradeTransfer;
+  /** 由助手发布、Nginx 直接提供的当前任务只读进度。 */
+  progress?: UpgradeProgressWatch;
 }
+
+export interface UpgradeProgressWatch {
+  task_id: string;
+  url: string;
+}
+
+export interface UpgradeProgressSnapshot {
+  task: Pick<UpgradeTask, "task_id" | "phase" | "committed"> & Partial<UpgradeTask>;
+  observed_at: string;
+  /** HTTP Date 与助手使用服务器时钟，避免浏览器时钟偏差影响判活。 */
+  server_now?: string;
+}
+
+const progressPhases = new Set([
+  "fetching",
+  "verifying",
+  "preparing",
+  "awaiting_confirmation",
+  "stopping",
+  "backing_up",
+  "migrating",
+  "activating",
+  "validating",
+  "committing",
+  "succeeded",
+  "failed",
+  "rolled_back",
+  "recovery_required"
+]);
+
+/** 固定同源路径不经过业务 API，也不携带登录凭据到外部地址。 */
+export const getServiceUpgradeProgress = async (watch: UpgradeProgressWatch): Promise<UpgradeProgressSnapshot> => {
+  if (!watch.task_id || !/^\/api\/system\/upgrade\/progress\/[a-f0-9]{64}\.json$/.test(watch.url))
+    throw new Error("升级进度地址无效");
+  const response = await fetch(watch.url, { cache: "no-store", credentials: "same-origin", signal: AbortSignal.timeout(5000) });
+  if (!response.ok) throw new Error("升级进度暂不可用");
+  const snapshot = await response.json();
+  if (
+    snapshot?.task?.task_id !== watch.task_id ||
+    !progressPhases.has(snapshot.task.phase) ||
+    typeof snapshot.task.committed !== "boolean" ||
+    !Number.isFinite(Date.parse(snapshot.observed_at))
+  )
+    throw new Error("升级进度内容无效");
+  const serverNow = response.headers?.get("Date");
+  return serverNow && Number.isFinite(Date.parse(serverNow)) ? { ...snapshot, server_now: serverNow } : snapshot;
+};
 
 /**
  * 升级历史分页。历史任务是唯一会随版本无限增长的数据：
