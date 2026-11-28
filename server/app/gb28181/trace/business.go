@@ -154,6 +154,9 @@ func classifySIPBusiness(raw []byte) businessClassification {
 			return businessClassification{BusinessDownload, "下载", "high"}
 		case strings.Contains(session, "playback") || strings.Contains(session, "record"):
 			return businessClassification{BusinessPlayback, "回放", "high"}
+		case method == "INVITE" && session == "play" && isReceiveOnlyAudioSDP(body):
+			// Broadcast receivers can use the same session name as live video.
+			return businessClassification{BusinessBroadcast, "语音广播", "medium"}
 		case strings.Contains(session, "play") || strings.Contains(session, "live"):
 			return businessClassification{BusinessRealtimePlay, "实时点播", "high"}
 		case method == "INVITE" && subjectSuggestsRealtime(subject):
@@ -167,6 +170,26 @@ func classifySIPBusiness(raw []byte) businessClassification {
 		}
 	}
 	return unknown
+}
+
+func isReceiveOnlyAudioSDP(body []byte) bool {
+	hasAudio := false
+	direction := ""
+	for line := range strings.SplitSeq(string(body), "\n") {
+		line = strings.ToLower(strings.TrimSpace(line))
+		if media, ok := strings.CutPrefix(line, "m="); ok {
+			fields := strings.Fields(media)
+			if hasAudio || len(fields) < 4 || fields[0] != "audio" {
+				return false
+			}
+			hasAudio = true
+		}
+		switch line {
+		case "a=recvonly", "a=sendonly", "a=sendrecv", "a=inactive":
+			direction = line[2:]
+		}
+	}
+	return hasAudio && direction == "recvonly"
 }
 
 func classifyMANSCDP(cmdType string, body []byte) businessClassification {

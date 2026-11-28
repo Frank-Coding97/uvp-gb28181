@@ -1,6 +1,7 @@
 package trace
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -8,6 +9,35 @@ import (
 
 	gbmodels "uvplatform.com/uvp-gb28181/app/gb28181/models"
 )
+
+func TestClassifyBroadcastPlayInvite(t *testing.T) {
+	dahuaOffer, err := os.ReadFile("../sdp/testdata/dahua-broadcast-offer.sdp")
+	require.NoError(t, err)
+
+	tests := []struct {
+		name string
+		sdp  string
+		want BusinessCode
+	}{
+		{"Dahua broadcast capture", string(dahuaOffer), BusinessBroadcast},
+		{"broadcast without vendor description", "s=Play\r\nm=audio 30000 RTP/AVP 8\r\na=recvonly\r\n", BusinessBroadcast},
+		{"broadcast with session direction", "s=Play\r\na=recvonly\r\nm=audio 30000 RTP/AVP 8\r\n", BusinessBroadcast},
+		{"audio talk", "s=Talk\r\nm=audio 30000 RTP/AVP 8\r\na=sendrecv\r\n", BusinessTalk},
+		{"media direction overrides session direction", "s=Play\r\na=recvonly\r\nm=audio 30000 RTP/AVP 8\r\na=sendrecv\r\n", BusinessRealtimePlay},
+		{"video with audio", "s=Play\r\nm=video 30000 RTP/AVP 96\r\nm=audio 30002 RTP/AVP 8\r\na=recvonly\r\n", BusinessRealtimePlay},
+		{"audio playback", "s=Playback\r\nm=audio 30000 RTP/AVP 8\r\na=recvonly\r\n", BusinessPlayback},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := []byte("INVITE sip:x SIP/2.0\r\nContent-Type: application/sdp\r\n\r\n" + tt.sdp)
+			metadata := extractSIPMetadata(raw, DirectionInbound)
+			require.Equal(t, tt.want, metadata.BusinessCode)
+			if tt.want == BusinessBroadcast {
+				require.Equal(t, "语音广播", metadata.BusinessType)
+			}
+		})
+	}
+}
 
 func TestClassifySIPBusinessUsesProtocolEvidence(t *testing.T) {
 	tests := []struct {
