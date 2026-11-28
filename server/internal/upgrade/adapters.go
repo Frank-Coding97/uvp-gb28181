@@ -533,7 +533,13 @@ func (a *StandaloneAdapter) activate(record TaskRecord, prepare func(string) err
 	// 翻转 current 之前先把现场调过的 ZLM 配置搬进持久目录：新发布目录里的
 	// vendor/zlm/config.ini 是出厂模板，直接换上就会把 [rtc] externIP 等
 	// 现场设置重置掉（见 operator_config.go 的长注释）。
-	if err := preserveZLMConfig(a.Layout.Root, a.Layout.Current); err != nil {
+	legacyRoot := a.Layout.Current
+	if _, err := os.Lstat(legacyRoot); errors.Is(err, os.ErrNotExist) {
+		legacyRoot = a.Layout.Root // First upgrade of a flat installation.
+	} else if err != nil {
+		return fmt.Errorf("stat current release before preserving zlm config: %w", err)
+	}
+	if err := preserveZLMConfig(a.Layout.Root, legacyRoot); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(a.Layout.Releases, 0755); err != nil {
@@ -598,6 +604,11 @@ func (a *StandaloneAdapter) activate(record TaskRecord, prepare func(string) err
 	// 放在翻转 current 之前：落盘失败时还没动线上指向，失败路径更干净。
 	if _, err := stageHelperImage(release, a.Layout.Root, HelperUnixImage); err != nil {
 		return err
+	}
+	if prepare == nil {
+		if err := a.installControl(release, record); err != nil {
+			return err
+		}
 	}
 	next := a.Layout.Current + ".next"
 	_ = os.Remove(next)
@@ -770,6 +781,9 @@ func (a *StandaloneAdapter) Rollback(ctx context.Context, record TaskRecord) err
 		return err
 	}
 	if err := a.switchCurrent(record); err != nil {
+		return err
+	}
+	if err := a.restoreControl(record); err != nil {
 		return err
 	}
 	if err := a.runner().Run(ctx, a.Layout.Control, "start"); err != nil {
