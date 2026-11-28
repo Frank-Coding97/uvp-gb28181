@@ -16,7 +16,7 @@ type SysGenListRequest struct {
 
 // Validate 验证请求参数
 func (r *SysGenListRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }
 
 // Handle 获取查询条件
@@ -44,7 +44,7 @@ type SysGenBatchInsertRequest struct {
 
 // Validate 验证批量插入请求参数
 func (r *SysGenBatchInsertRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }
 
 // SysGenUpdateRequest 代码生成配置更新请求参数
@@ -65,7 +65,7 @@ type SysGenUpdateRequest struct {
 
 // Validate 验证更新请求参数
 func (r *SysGenUpdateRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }
 
 // SysGenFieldUpdateRequest 代码生成字段配置更新请求参数
@@ -90,5 +90,5 @@ type SysGenRefreshFieldsRequest struct {
 
 // Validate 验证刷新字段请求参数
 func (r *SysGenRefreshFieldsRequest) Validate(c *gin.Context) error {
-	return r.Validator.Check(c, r)
+	return r.Check(c, r)
 }

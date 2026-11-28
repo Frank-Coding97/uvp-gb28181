@@ -35,13 +35,13 @@ func TestLogLevelValues(t *testing.T) {
 // TestNewFileJobLogger 测试创建日志记录器
 func TestNewFileJobLogger(t *testing.T) {
 	logDir := filepath.Join(os.TempDir(), "test-logs")
-	defer os.RemoveAll(logDir)
+	defer func() { _ = os.RemoveAll(logDir) }()
 
 	logger, err := NewFileJobLogger(logDir, LevelInfo)
 	if err != nil {
 		t.Fatalf("NewFileJobLogger failed: %v", err)
 	}
-	defer logger.Close()
+	defer func() { _ = logger.Close() }()
 
 	if logger == nil {
 		t.Fatal("logger is nil")
@@ -69,13 +69,13 @@ func TestNewFileJobLoggerWithInvalidPath(t *testing.T) {
 // TestLoggerDebug 测试调试日志
 func TestLoggerDebug(t *testing.T) {
 	logDir := filepath.Join(os.TempDir(), "test-logs-debug")
-	defer os.RemoveAll(logDir)
+	defer func() { _ = os.RemoveAll(logDir) }()
 
 	logger, err := NewFileJobLogger(logDir, LevelDebug)
 	if err != nil {
 		t.Fatalf("NewFileJobLogger failed: %v", err)
 	}
-	defer logger.Close()
+	defer func() { _ = logger.Close() }()
 
 	logger.Debug("test-job", "debug message: %s", "test")
 
@@ -86,13 +86,13 @@ func TestLoggerDebug(t *testing.T) {
 // TestLoggerInfo 测试信息日志
 func TestLoggerInfo(t *testing.T) {
 	logDir := filepath.Join(os.TempDir(), "test-logs-info")
-	defer os.RemoveAll(logDir)
+	defer func() { _ = os.RemoveAll(logDir) }()
 
 	logger, err := NewFileJobLogger(logDir, LevelInfo)
 	if err != nil {
 		t.Fatalf("NewFileJobLogger failed: %v", err)
 	}
-	defer logger.Close()
+	defer func() { _ = logger.Close() }()
 
 	logger.Info("test-job", "info message: %s", "test")
 
@@ -103,13 +103,13 @@ func TestLoggerInfo(t *testing.T) {
 // TestLoggerWarn 测试警告日志
 func TestLoggerWarn(t *testing.T) {
 	logDir := filepath.Join(os.TempDir(), "test-logs-warn")
-	defer os.RemoveAll(logDir)
+	defer func() { _ = os.RemoveAll(logDir) }()
 
 	logger, err := NewFileJobLogger(logDir, LevelInfo)
 	if err != nil {
 		t.Fatalf("NewFileJobLogger failed: %v", err)
 	}
-	defer logger.Close()
+	defer func() { _ = logger.Close() }()
 
 	logger.Warn("test-job", "warn message: %s", "test")
 
@@ -120,13 +120,13 @@ func TestLoggerWarn(t *testing.T) {
 // TestLoggerError 测试错误日志
 func TestLoggerError(t *testing.T) {
 	logDir := filepath.Join(os.TempDir(), "test-logs-error")
-	defer os.RemoveAll(logDir)
+	defer func() { _ = os.RemoveAll(logDir) }()
 
 	logger, err := NewFileJobLogger(logDir, LevelInfo)
 	if err != nil {
 		t.Fatalf("NewFileJobLogger failed: %v", err)
 	}
-	defer logger.Close()
+	defer func() { _ = logger.Close() }()
 
 	logger.Error("test-job", "error message: %s", "test")
 
@@ -137,13 +137,13 @@ func TestLoggerError(t *testing.T) {
 // TestLoggerLevelFiltering 测试日志级别过滤
 func TestLoggerLevelFiltering(t *testing.T) {
 	logDir := filepath.Join(os.TempDir(), "test-logs-level")
-	defer os.RemoveAll(logDir)
+	defer func() { _ = os.RemoveAll(logDir) }()
 
 	logger, err := NewFileJobLogger(logDir, LevelWarn)
 	if err != nil {
 		t.Fatalf("NewFileJobLogger failed: %v", err)
 	}
-	defer logger.Close()
+	defer func() { _ = logger.Close() }()
 
 	// Debug 和 Info 日志应该被过滤
 	logger.Debug("test-job", "debug message")
@@ -160,13 +160,13 @@ func TestLoggerLevelFiltering(t *testing.T) {
 // TestLogJobExecution 测试记录任务执行结果
 func TestLogJobExecution(t *testing.T) {
 	logDir := filepath.Join(os.TempDir(), "test-logs-execution")
-	defer os.RemoveAll(logDir)
+	defer func() { _ = os.RemoveAll(logDir) }()
 
 	logger, err := NewFileJobLogger(logDir, LevelInfo)
 	if err != nil {
 		t.Fatalf("NewFileJobLogger failed: %v", err)
 	}
-	defer logger.Close()
+	defer func() { _ = logger.Close() }()
 
 	tests := []struct {
 		name   string
@@ -229,13 +229,13 @@ func (e *testError) Error() string {
 // TestLogJobLifecycle 测试记录任务生命周期事件
 func TestLogJobLifecycle(t *testing.T) {
 	logDir := filepath.Join(os.TempDir(), "test-logs-lifecycle")
-	defer os.RemoveAll(logDir)
+	defer func() { _ = os.RemoveAll(logDir) }()
 
 	logger, err := NewFileJobLogger(logDir, LevelInfo)
 	if err != nil {
 		t.Fatalf("NewFileJobLogger failed: %v", err)
 	}
-	defer logger.Close()
+	defer func() { _ = logger.Close() }()
 
 	job := &Job{
 		ID:             "test-job-1",
@@ -259,7 +259,7 @@ func TestLogJobLifecycle(t *testing.T) {
 // TestLogFileRotation 测试日志文件轮转
 func TestLogFileRotation(t *testing.T) {
 	logDir := filepath.Join(os.TempDir(), "test-logs-rotation")
-	defer os.RemoveAll(logDir)
+	defer func() { _ = os.RemoveAll(logDir) }()
 
 	logger, err := NewFileJobLogger(logDir, LevelInfo)
 	if err != nil {
@@ -280,13 +280,15 @@ func TestLogFileRotation(t *testing.T) {
 		t.Logf("dailyFile changed from %s to %s", initialFile, logger.dailyFile)
 	}
 
-	logger.Close()
+	if err := logger.Close(); err != nil {
+		t.Errorf("Close failed: %v", err)
+	}
 }
 
 // TestLoggerClose 测试关闭日志记录器
 func TestLoggerClose(t *testing.T) {
 	logDir := filepath.Join(os.TempDir(), "test-logs-close")
-	defer os.RemoveAll(logDir)
+	defer func() { _ = os.RemoveAll(logDir) }()
 
 	logger, err := NewFileJobLogger(logDir, LevelInfo)
 	if err != nil {
@@ -309,13 +311,13 @@ func TestLoggerClose(t *testing.T) {
 // TestLoggerConcurrentWrites 测试并发写入
 func TestLoggerConcurrentWrites(t *testing.T) {
 	logDir := filepath.Join(os.TempDir(), "test-logs-concurrent")
-	defer os.RemoveAll(logDir)
+	defer func() { _ = os.RemoveAll(logDir) }()
 
 	logger, err := NewFileJobLogger(logDir, LevelInfo)
 	if err != nil {
 		t.Fatalf("NewFileJobLogger failed: %v", err)
 	}
-	defer logger.Close()
+	defer func() { _ = logger.Close() }()
 
 	// 并发写入日志
 	done := make(chan bool)
@@ -339,7 +341,7 @@ func TestLoggerConcurrentWrites(t *testing.T) {
 // TestReadLogFile 测试读取日志文件内容
 func TestReadLogFile(t *testing.T) {
 	logDir := filepath.Join(os.TempDir(), "test-logs-read")
-	defer os.RemoveAll(logDir)
+	defer func() { _ = os.RemoveAll(logDir) }()
 
 	logger, err := NewFileJobLogger(logDir, LevelInfo)
 	if err != nil {
@@ -354,7 +356,9 @@ func TestReadLogFile(t *testing.T) {
 	// 等待日志写入
 	time.Sleep(200 * time.Millisecond)
 
-	logger.Close()
+	if err := logger.Close(); err != nil {
+		t.Errorf("Close failed: %v", err)
+	}
 
 	// 读取日志文件
 	today := time.Now().Format("2006-01-02")
@@ -364,7 +368,7 @@ func TestReadLogFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open log file: %v", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	scanner := bufio.NewScanner(file)
 	found := false
@@ -384,7 +388,7 @@ func TestReadLogFile(t *testing.T) {
 // TestLoggerWithDifferentLevels 测试不同日志级别
 func TestLoggerWithDifferentLevels(t *testing.T) {
 	logDir := filepath.Join(os.TempDir(), "test-logs-different-levels")
-	defer os.RemoveAll(logDir)
+	defer func() { _ = os.RemoveAll(logDir) }()
 
 	levels := []LogLevel{LevelDebug, LevelInfo, LevelWarn, LevelError, LevelFatal}
 
@@ -394,7 +398,7 @@ func TestLoggerWithDifferentLevels(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewFileJobLogger failed: %v", err)
 			}
-			defer logger.Close()
+			defer func() { _ = logger.Close() }()
 
 			logger.Debug("test-job", "debug message")
 			logger.Info("test-job", "info message")
@@ -409,13 +413,13 @@ func TestLoggerWithDifferentLevels(t *testing.T) {
 // TestLoggerEmptyJobID 测试空任务ID
 func TestLoggerEmptyJobID(t *testing.T) {
 	logDir := filepath.Join(os.TempDir(), "test-logs-empty-jobid")
-	defer os.RemoveAll(logDir)
+	defer func() { _ = os.RemoveAll(logDir) }()
 
 	logger, err := NewFileJobLogger(logDir, LevelInfo)
 	if err != nil {
 		t.Fatalf("NewFileJobLogger failed: %v", err)
 	}
-	defer logger.Close()
+	defer func() { _ = logger.Close() }()
 
 	// 空任务ID应该也能正常工作
 	logger.Info("", "message with empty job ID")
@@ -427,13 +431,13 @@ func TestLoggerEmptyJobID(t *testing.T) {
 // TestLoggerLongMessage 测试长消息
 func TestLoggerLongMessage(t *testing.T) {
 	logDir := filepath.Join(os.TempDir(), "test-logs-long-message")
-	defer os.RemoveAll(logDir)
+	defer func() { _ = os.RemoveAll(logDir) }()
 
 	logger, err := NewFileJobLogger(logDir, LevelInfo)
 	if err != nil {
 		t.Fatalf("NewFileJobLogger failed: %v", err)
 	}
-	defer logger.Close()
+	defer func() { _ = logger.Close() }()
 
 	// 创建一个长消息
 	longMessage := strings.Repeat("This is a long message. ", 100)
@@ -446,13 +450,13 @@ func TestLoggerLongMessage(t *testing.T) {
 // TestLoggerSpecialCharacters 测试特殊字符
 func TestLoggerSpecialCharacters(t *testing.T) {
 	logDir := filepath.Join(os.TempDir(), "test-logs-special-chars")
-	defer os.RemoveAll(logDir)
+	defer func() { _ = os.RemoveAll(logDir) }()
 
 	logger, err := NewFileJobLogger(logDir, LevelInfo)
 	if err != nil {
 		t.Fatalf("NewFileJobLogger failed: %v", err)
 	}
-	defer logger.Close()
+	defer func() { _ = logger.Close() }()
 
 	specialMessages := []string{
 		"Message with 中文",
@@ -473,13 +477,13 @@ func TestLoggerSpecialCharacters(t *testing.T) {
 // TestJobLoggerInterface 测试JobLogger接口实现
 func TestJobLoggerInterface(t *testing.T) {
 	logDir := filepath.Join(os.TempDir(), "test-logs-interface")
-	defer os.RemoveAll(logDir)
+	defer func() { _ = os.RemoveAll(logDir) }()
 
 	logger, err := NewFileJobLogger(logDir, LevelInfo)
 	if err != nil {
 		t.Fatalf("NewFileJobLogger failed: %v", err)
 	}
-	defer logger.Close()
+	defer func() { _ = logger.Close() }()
 
 	// 验证接口实现
 	var _ JobLogger = logger
@@ -516,13 +520,13 @@ func TestJobLoggerInterface(t *testing.T) {
 // TestLoggerNilResult 测试空结果处理
 func TestLoggerNilResult(t *testing.T) {
 	logDir := filepath.Join(os.TempDir(), "test-logs-nil-result")
-	defer os.RemoveAll(logDir)
+	defer func() { _ = os.RemoveAll(logDir) }()
 
 	logger, err := NewFileJobLogger(logDir, LevelInfo)
 	if err != nil {
 		t.Fatalf("NewFileJobLogger failed: %v", err)
 	}
-	defer logger.Close()
+	defer func() { _ = logger.Close() }()
 
 	// 这个测试主要是确保不会panic
 	// 实际使用中不应该传入nil结果

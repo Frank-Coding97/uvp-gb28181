@@ -1,0 +1,1 @@
+ALTER TABLE "gb_device" ADD COLUMN IF NOT EXISTS "talk_audio_codec" VARCHAR(16) NOT NULL DEFAULT 'pcma';

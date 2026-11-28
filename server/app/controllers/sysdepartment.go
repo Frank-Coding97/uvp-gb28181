@@ -1,10 +1,10 @@
 package controllers
 
 import (
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/service"
-	"uvplatform.cn/uvp-gb28181/app/utils/tenanthelper"
+	"fmt"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/service"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -42,14 +42,14 @@ func NewSysDepartmentController() *SysDepartmentController {
 // @Security ApiKeyAuth
 func (sc *SysDepartmentController) GetDivision(c *gin.Context) {
 	sysDepartmentList := models.NewSysDepartmentList()
-	err := sysDepartmentList.Find(c, func(db *gorm.DB) *gorm.DB {
+	err := sysDepartmentList.Find(c.Request.Context(), func(db *gorm.DB) *gorm.DB {
 		return db.Where("status = ?", 1)
-	}, tenanthelper.TenantScope(c))
+	})
 	if err != nil {
 		sc.FailAndAbort(c, "获取部门列表失败", err)
 	}
 	if !sysDepartmentList.IsEmpty() {
-		sysDepartmentList = sysDepartmentList.BuildTree().TreeSort()
+		sysDepartmentList = sysDepartmentList.BuildTree(c.Request.Context()).TreeSort()
 	}
 	sc.Success(c, gin.H{
 		"list": sysDepartmentList,
@@ -76,7 +76,7 @@ func (sc *SysDepartmentController) Add(c *gin.Context) {
 
 	// 检查部门名称是否已存在
 	existDept := models.NewSysDepartment()
-	err := existDept.Find(c, func(d *gorm.DB) *gorm.DB {
+	err := existDept.Find(c.Request.Context(), func(d *gorm.DB) *gorm.DB {
 		return d.Where("name = ?", req.Name)
 	})
 	if err != nil {
@@ -89,7 +89,7 @@ func (sc *SysDepartmentController) Add(c *gin.Context) {
 	// 如果指定了父级ID，检查父级部门是否存在
 	if req.ParentID != nil && *req.ParentID > 0 {
 		parentDept := models.NewSysDepartment()
-		err := parentDept.Find(c, func(d *gorm.DB) *gorm.DB {
+		err := parentDept.Find(c.Request.Context(), func(d *gorm.DB) *gorm.DB {
 			return d.Where("id = ?", *req.ParentID)
 		})
 		if err != nil {
@@ -111,7 +111,7 @@ func (sc *SysDepartmentController) Add(c *gin.Context) {
 	dept.Sort = req.Sort
 	dept.Describe = req.Describe
 
-	err = dept.Create(c)
+	err = dept.Create(c.Request.Context())
 	if err != nil {
 		sc.FailAndAbort(c, "新增部门失败", err)
 	}
@@ -136,7 +136,7 @@ func (sc *SysDepartmentController) Update(c *gin.Context) {
 	if err := req.Validate(c); err != nil {
 		sc.FailAndAbort(c, err.Error(), err)
 	}
-	dept, err := sc.SysDepartmentService.Update(c, &req)
+	dept, err := sc.SysDepartmentService.Update(c.Request.Context(), &req)
 	if err != nil {
 		sc.FailAndAbort(c, err.Error(), err)
 	}
@@ -163,7 +163,7 @@ func (sc *SysDepartmentController) Delete(c *gin.Context) {
 
 	// 检查部门是否存在
 	dept := models.NewSysDepartment()
-	err := dept.Find(c, func(d *gorm.DB) *gorm.DB {
+	err := dept.Find(c.Request.Context(), func(d *gorm.DB) *gorm.DB {
 		return d.Where("id = ?", req.ID)
 	})
 	if err != nil {
@@ -175,7 +175,7 @@ func (sc *SysDepartmentController) Delete(c *gin.Context) {
 
 	// 检查是否有子部门
 	childDepts := models.NewSysDepartmentList()
-	err = childDepts.Find(c, func(d *gorm.DB) *gorm.DB {
+	err = childDepts.Find(c.Request.Context(), func(d *gorm.DB) *gorm.DB {
 		return d.Where("parent_id = ?", req.ID)
 	})
 	if err != nil {
@@ -187,7 +187,7 @@ func (sc *SysDepartmentController) Delete(c *gin.Context) {
 
 	// 检查是否有用户关联此部门
 	var userCount int64
-	err = app.DB().Model(&models.User{}).Where("dept_id = ?", req.ID).Count(&userCount).Error
+	err = app.DBContext(c.Request.Context()).Model(&models.User{}).Where("dept_id = ?", req.ID).Count(&userCount).Error
 	if err != nil {
 		sc.FailAndAbort(c, "检查用户部门关联失败", err)
 	}
@@ -196,7 +196,22 @@ func (sc *SysDepartmentController) Delete(c *gin.Context) {
 	}
 
 	// 软删除部门
-	err = dept.Delete(c)
+	err = service.NewPermissionService().Transaction(c.Request.Context(), func(tx *gorm.DB, _ *service.PermissionService) error {
+		var count int64
+		if err := tx.Model(&models.User{}).Where("dept_id = ?", req.ID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != 0 {
+			return fmt.Errorf("存在用户关联此部门，无法删除")
+		}
+		if err := tx.Model(&models.SysDepartment{}).Where("parent_id = ?", req.ID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != 0 {
+			return fmt.Errorf("存在子部门，无法删除")
+		}
+		return tx.Where("id = ?", req.ID).Delete(&models.SysDepartment{}).Error
+	})
 	if err != nil {
 		sc.FailAndAbort(c, "删除部门失败", err)
 	}
@@ -223,7 +238,7 @@ func (sc *SysDepartmentController) GetByID(c *gin.Context) {
 	}
 
 	dept := models.NewSysDepartment()
-	err := dept.GetDepartmentByID(c, req.ID)
+	err := dept.GetDepartmentByID(c.Request.Context(), req.ID)
 	if err != nil {
 		sc.FailAndAbort(c, "获取部门信息失败", err)
 	}

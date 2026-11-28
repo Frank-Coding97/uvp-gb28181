@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>UVP · 登录 · 双栏门面版</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --primary: #1890ff;
+  --primary-hover: #40a9ff;
+  --primary-active: #096dd9;
+  --primary-soft: #e6f7ff;
+  --success: #52c41a;
+  --warning: #fa8c16;
+  --danger: #ff4d4f;
+  --text: #333;
+  --text-secondary: #666;
+  --text-hint: #999;
+  --border: #e8e8e8;
+  --bg: #f0f2f5;
+  --white: #fff;
+  --hero-from: #0a4d99;
+  --hero-to: #1890ff;
+}
+html, body { height: 100%; }
+body {
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  min-height: 100vh;
+}
+
+/* === LEFT — hero === */
+.hero {
+  position: relative;
+  background:
+    radial-gradient(ellipse at 80% 10%, rgba(255,255,255,.08), transparent 50%),
+    radial-gradient(ellipse at 10% 90%, rgba(82,196,26,.10), transparent 50%),
+    linear-gradient(135deg, var(--hero-from) 0%, var(--hero-to) 100%);
+  color: #fff;
+  padding: 48px 56px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-position: -1px -1px;
+  pointer-events: none;
+}
+
+.hero-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  position: relative;
+}
+.hero-logo {
+  background: rgba(255,255,255,.16);
+  border: 1px solid rgba(255,255,255,.28);
+  color: #fff;
+  font-weight: 700;
+  font-size: 16px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  letter-spacing: 1px;
+  backdrop-filter: blur(4px);
+}
+.hero-head .title { font-size: 16px; font-weight: 600; letter-spacing: .5px; }
+
+.hero-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  position: relative;
+  max-width: 540px;
+}
+.hero-eyebrow {
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  color: rgba(255,255,255,.7);
+  text-transform: uppercase;
+  margin-bottom: 16px;
+}
+.hero-title {
+  font-size: 42px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.5px;
+  margin-bottom: 16px;
+}
+.hero-title em {
+  font-style: normal;
+  color: #b7ff8a;
+}
+.hero-lede {
+  font-size: 15px;
+  line-height: 1.7;
+  color: rgba(255,255,255,.82);
+  max-width: 480px;
+  margin-bottom: 36px;
+}
+
+/* === KPI strip === */
+.kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 36px;
+}
+.kpi {
+  background: rgba(255,255,255,.07);
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 8px;
+  padding: 16px 18px;
+  backdrop-filter: blur(6px);
+}
+.kpi-label {
+  font-size: 12px;
+  color: rgba(255,255,255,.7);
+  margin-bottom: 6px;
+  letter-spacing: .5px;
+}
+.kpi-value {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.1;
+  font-feature-settings: "tnum" 1;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.kpi-value .unit { font-size: 12px; font-weight: 400; color: rgba(255,255,255,.6); }
+.kpi-foot {
+  margin-top: 8px;
+  font-size: 11px;
+  color: rgba(255,255,255,.6);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.kpi-foot .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.kpi-foot .dot.green { background: #b7ff8a; box-shadow: 0 0 6px #b7ff8a; }
+.kpi-foot .dot.amber { background: #ffd666; box-shadow: 0 0 6px #ffd666; }
+
+/* === capability chips === */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.chip {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 99px;
+  background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.18);
+  color: rgba(255,255,255,.88);
+  letter-spacing: .3px;
+}
+
+.hero-foot {
+  font-size: 12px;
+  color: rgba(255,255,255,.55);
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
+  letter-spacing: .08em;
+  position: relative;
+}
+
+/* === RIGHT — form === */
+.form-side {
+  background: var(--white);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 56px;
+}
+.form-card {
+  width: 100%;
+  max-width: 360px;
+}
+.form-head {
+  margin-bottom: 28px;
+}
+.form-head h1 {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+.form-head p {
+  font-size: 13px;
+  color: var(--text-hint);
+}
+
+.field { margin-bottom: 16px; }
+.field-label {
+  display: block;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.input-wrap {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 12px;
+  gap: 8px;
+  background: var(--white);
+  transition: border-color .15s;
+}
+.input-wrap:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(24,144,255,.1);
+}
+.input-wrap svg { color: var(--text-hint); flex-shrink: 0; }
+.input-wrap input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 14px;
+  color: var(--text);
+  font-family: inherit;
+}
+.input-wrap input::placeholder { color: var(--text-hint); }
+
+.captcha-row { display: flex; gap: 10px; }
+.captcha-row .input-wrap { flex: 1; }
+.captcha-img {
+  width: 110px;
+  height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background-image:
+    linear-gradient(135deg, #fafafa 0%, #f0f0f0 100%),
+    repeating-linear-gradient(45deg, transparent 0, transparent 6px, rgba(24,144,255,.08) 6px, rgba(24,144,255,.08) 7px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "Courier New", monospace;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.options-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 4px 0 20px;
+}
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.checkbox input { accent-color: var(--primary); }
+.link {
+  font-size: 13px;
+  color: var(--primary);
+  cursor: pointer;
+}
+.link:hover { color: var(--primary-hover); }
+
+.submit-btn {
+  width: 100%;
+  height: 40px;
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background .15s;
+  font-family: inherit;
+}
+.submit-btn:hover { background: var(--primary-hover); }
+.submit-btn:active { background: var(--primary-active); }
+
+.form-foot {
+  margin-top: 32px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-hint);
+  line-height: 1.7;
+}
+
+@media (max-width: 960px) {
+  .layout { grid-template-columns: 1fr; }
+  .hero { padding: 32px 24px 40px; min-height: 0; }
+  .hero-title { font-size: 28px; }
+  .form-side { padding: 32px 24px; }
+}
+</style>
+</head>
+<body>
+
+<div class="layout">
+
+  <!-- LEFT: hero -->
+  <div class="hero">
+    <div class="hero-head">
+      <span class="hero-logo">UVP</span>
+      <span class="title">UVP 统一视频接入平台</span>
+    </div>
+
+    <div class="hero-body">
+      <div class="hero-eyebrow">Unified Video Platform · GB/T 28181-2022</div>
+      <div class="hero-title">把所有视频源<br/>接进<em> 同一张控制台</em></div>
+      <p class="hero-lede">
+        国标 SIP 接入 · 视频转发 · 设备管理 · 录像点播 · 级联调度 ——
+        一套平台覆盖从前端到上联的全链路。
+      </p>
+
+      <div class="kpi-strip">
+        <div class="kpi">
+          <div class="kpi-label">接入设备</div>
+          <div class="kpi-value">1,248</div>
+          <div class="kpi-foot"><span class="dot green"></span>在线 1,032</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">视频通道</div>
+          <div class="kpi-value">6,732</div>
+          <div class="kpi-foot"><span class="dot green"></span>正在播放 465</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">流媒体节点</div>
+          <div class="kpi-value">6 <span class="unit">/ 全部正常</span></div>
+          <div class="kpi-foot"><span class="dot green"></span>p99 时延 &lt; 200ms</div>
+        </div>
+      </div>
+
+      <div class="chips">
+        <span class="chip">GB/T 28181-2022</span>
+        <span class="chip">SIP / RTP</span>
+        <span class="chip">ZLMediaKit</span>
+        <span class="chip">级联</span>
+        <span class="chip">回放点播</span>
+        <span class="chip">多租户</span>
+      </div>
+    </div>
+
+    <div class="hero-foot">
+      v2.3.0 · 2025-05-06 · build #20260506
+    </div>
+  </div>
+
+  <!-- RIGHT: form -->
+  <div class="form-side">
+    <div class="form-card">
+      <div class="form-head">
+        <h1>账号登录</h1>
+        <p>欢迎回来,请输入您的账号信息</p>
+      </div>
+
+      <div class="field">
+        <label class="field-label">租户编码</label>
+        <div class="input-wrap">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+            <polyline points="9 22 9 12 15 12 15 22"/>
+          </svg>
+          <input type="text" placeholder="不填则使用账号默认租户" />
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="field-label">账号</label>
+        <div class="input-wrap">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+          </svg>
+          <input type="text" placeholder="请输入账号" value="admin" />
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="field-label">密码</label>
+        <div class="input-wrap">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="11" width="18" height="11" rx="2"/>
+            <path d="M7 11V7a5 5 0 0110 0v4"/>
+          </svg>
+          <input type="password" placeholder="请输入密码" value="password" />
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="field-label">图形验证码</label>
+        <div class="captcha-row">
+          <div class="input-wrap">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 11l3 3L22 4"/>
+              <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+            </svg>
+            <input type="text" placeholder="请输入验证码" />
+          </div>
+          <div class="captcha-img" title="点击刷新">A4F9</div>
+        </div>
+      </div>
+
+      <div class="options-row">
+        <label class="checkbox">
+          <input type="checkbox" />
+          <span>记住账号</span>
+        </label>
+        <span class="link">忘记密码?</span>
+      </div>
+
+      <button class="submit-btn">登 录</button>
+
+      <div class="form-foot">
+        © 2026 UVP 统一视频接入平台<br/>
+        皖 ICP 备 XXXXXXXX 号 · Powered by GB/T 28181-2022
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

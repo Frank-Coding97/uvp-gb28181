@@ -1,0 +1,835 @@
+<script setup lang="ts">
+/**
+ * DeviceConfigWeekPlan - 录像计划的「周几 → 时段」编辑器（`VideoRecordPlan/Schedule`）
+ *
+ * 形态：7 行（周一 ~ 周日），每行一条 0~24 小时时间轴 + 该天的时段编辑条。
+ *
+ * ## 三条不能"顺手简化"的口径
+ *
+ * 1. ⛔ **关掉一天 = 该天整条不发**，不是发一条"0 秒时段"。标准原文
+ *    「如当天无录像计划可缺少」——两者的线格式与对端行为都不同。
+ *    所以这里的关 = 把该天的 `segments` 清空（构建侧见到空就跳过整天）。
+ * 2. ⛔ 时段保留到**秒**。协议里 `StartSec` / `StopSec` 都是必选整数；
+ *    界面只让填到分钟，就等于每次下发把设备上原有的秒清零 ——
+ *    静默改写，而且回读对账还会显示"一致"（因为比的是平台发出去的值）。
+ *    ⚠️ 唯一的例外是**用户亲手拖过的那一段**：拖拽吸附 15 分钟，秒会归零。
+ *    没被拖的段必须原样保留 —— 不许在任何批量路径里顺手 normalize 秒。
+ * 3. 新建时段给 `00:00:00 ~ 23:59:59`（全天）：这是安防场景最常见的计划，
+ *    而不是随手的 `00:00~00:00` 空区间 —— 那种默认值一发出去就是"零长时段"。
+ *
+ * ## 为什么从「纯输入框」改成「时间轴 + 输入条」
+ *
+ * ⛔ 原来 7 行 × 每段两个输入框，只能"读数字"：一眼看不出哪天没排、哪天压了两段、
+ *    现在这一刻在不在录。轴是**给人扫的**，输入框是**给人改的**，两者都要，不是二选一。
+ * ⛔ **时间轴是可拖的**（2026-11-05 老板要求）：拖色块中间 = 平移，拖左右两端 = 改起止，
+ *    吸附 15 分钟；点空白 = 新增一段全天；单击（没有位移）= 把焦点送到对应的起止输入框。
+ *    几何算法全部在 `deviceConfigWeekPlanDrag.ts`（纯函数、可单测），组件只负责把 clientX
+ *    换算成"位移了多少分钟"—— 拖拽里最容易错的吸附/边界/最短时长一律不写在组件里。
+ *
+ * ⛔⛔ 三件事必须同时成立，少一件就又变成"看起来能拖、拖了没反应"：
+ *    ① 点空白真的能新增（原来只有一行「点这里新增时段」的小字，**没绑 click**，纯说谎）；
+ *    ② 拖动真的改值（松手才 commit，拖动中只更新预览；`origin` 是按下那刻的快照，不许叠加）；
+ *    ③ 页脚把"吸附 15 分钟、秒级回输入框改"讲明白，别让人自己试出来。
+ */
+import { computed, onBeforeUnmount, ref } from "vue";
+import { CalendarPlus, Plus, Trash2 } from "@lucide/vue";
+import { WEEKDAY_LABELS, type ConfigScheduleDay } from "./deviceConfigGroups";
+import {
+  DAY_MINUTES,
+  applyDrag,
+  parseMinutes,
+  percentOfMinutes,
+  type DragMode,
+  type WeekPlanSegment
+} from "./deviceConfigWeekPlanDrag";
+
+const props = withDefaults(
+  defineProps<{
+    modelValue: ConfigScheduleDay[];
+    disabled?: boolean;
+  }>(),
+  { disabled: false }
+);
+
+const emit = defineEmits<{ "update:modelValue": [value: ConfigScheduleDay[]] }>();
+
+/** 全天的起止，作为新增时段的默认值。 */
+const FULL_DAY_START = "00:00:00";
+const FULL_DAY_STOP = "23:59:59";
+
+/**
+ * 把 props 折成"7 天都在"的完整视图。
+ *
+ * ⛔ 补齐缺的天而不是只渲染回读到的天：设备只回了周三时，界面上必须还能看到
+ *    周一/周二那两行（且是"未启用"），否则用户根本没法给那两天加计划 ——
+ *    缺行看起来像"这个界面不支持"。
+ */
+const viewDays = computed<ConfigScheduleDay[]>(() => {
+  const source = Array.isArray(props.modelValue) ? props.modelValue : [];
+  return WEEKDAY_LABELS.map((_, index) => {
+    const weekDayNum = index + 1;
+    const matched = source.find(day => Number(day?.weekDayNum) === weekDayNum);
+    return {
+      weekDayNum,
+      segments: (matched?.segments ?? []).map(segment => ({ ...segment }))
+    };
+  });
+});
+
+/**
+ * 今天是周几（1=周一 … 7=周日）。
+ *
+ * ⛔ `getDay()` 里周日是 0，协议里是 7，这个换算漏了就会把"今天"标到周一那一行，
+ *    而周计划恰恰是拿来判断"此刻在不在录"的，标错等于给错答案。
+ */
+const todayWeekDay = computed(() => {
+  const day = new Date().getDay();
+  return day === 0 ? 7 : day;
+});
+
+/** 当前时刻在一天里的百分比位置（画"现在"竖线用）。 */
+const nowPercent = computed(() => {
+  const now = new Date();
+  return ((now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds()) / 86400) * 100;
+});
+
+/** `HH:MM:SS` → 一天里的百分比。格式不认识时按 0 处理，让色块退化成一个点而不是崩掉。 */
+function percentOf(time: string | undefined): number {
+  const minutes = parseMinutes(time);
+  return minutes === null ? 0 : percentOfMinutes(minutes);
+}
+
+/**
+ * 一段的几何（left / width 百分比）。
+ *
+ * ⛔ 宽度给一个 0.4% 的下限：一整段被删到只剩几秒时，按比例算出来不足 1px，
+ *    看起来像"这段没了"，实际还在、还会下发。留一条头发丝，人才知道要回去改。
+ * ⛔ 结束早于开始（填反了）时不画成负宽：取 0 宽，靠下面的输入框红边提示，不在这里假装正常。
+ */
+function segmentStyle(segment: { start: string; stop: string }) {
+  const start = percentOf(segment.start);
+  const stop = percentOf(segment.stop);
+  const width = Math.max(stop > start ? stop - start : 0, 0.4);
+  return { left: `${start}%`, width: `${width}%` };
+}
+
+/** 段内标签只在色块够宽时才显示，窄段显示时间反而糊成一团。 */
+function segmentLabel(segment: { start: string; stop: string }) {
+  return `${(segment.start || "--").slice(0, 5)}-${(segment.stop || "--").slice(0, 5)}`;
+}
+
+function commit(next: ConfigScheduleDay[]) {
+  // 只发"有时段的天"：空天留在数组里会让脏值统计和下发报文都多出无意义条目。
+  emit(
+    "update:modelValue",
+    next.filter(day => day.segments.length > 0)
+  );
+}
+
+function toggleDay(weekDayNum: number, enabled: boolean) {
+  const next = viewDays.value.map(day => ({ ...day, segments: [...day.segments] }));
+  const target = next.find(day => day.weekDayNum === weekDayNum);
+  if (!target) return;
+  target.segments = enabled ? [{ start: FULL_DAY_START, stop: FULL_DAY_STOP }] : [];
+  commit(next);
+}
+
+/**
+ * 给这天加一段（全天）。轴上的空白点击与「+时段」按钮都走这里。
+ *
+ * ⛔ 空白区必须**真的能点**。上一版这块只有一行「点这里新增时段」的静态文字，
+ *    鼠标变手型、看着像按钮，点了什么都不会发生 —— 这比不写这行字更糟。
+ * ⛔ 点色块定位时要 `stop`，否则"定位 + 新加一段"会一起发生。
+ */
+function addSegment(weekDayNum: number) {
+  if (props.disabled) return;
+  const next = viewDays.value.map(day => ({ ...day, segments: [...day.segments] }));
+  const target = next.find(day => day.weekDayNum === weekDayNum);
+  if (!target) return;
+  target.segments = [...target.segments, { start: FULL_DAY_START, stop: FULL_DAY_STOP }];
+  commit(next);
+}
+
+function removeSegment(weekDayNum: number, index: number) {
+  const next = viewDays.value.map(day => ({ ...day, segments: [...day.segments] }));
+  const target = next.find(day => day.weekDayNum === weekDayNum);
+  if (!target) return;
+  target.segments = target.segments.filter((_, position) => position !== index);
+  commit(next);
+}
+
+function setSegment(weekDayNum: number, index: number, edge: "start" | "stop", raw: string) {
+  const next = viewDays.value.map(day => ({ ...day, segments: [...day.segments] }));
+  const target = next.find(day => day.weekDayNum === weekDayNum);
+  const segment = target?.segments[index];
+  if (!target || !segment) return;
+  segment[edge] = raw;
+  commit(next);
+}
+
+/* ─────────────────────── 拖拽（粗调）─────────────────────── */
+
+/**
+ * 拖拽进行中的状态。
+ *
+ * ⛔ `origin` 必须是**按下那一刻的整天快照**：位移始终相对它算。若每帧拿"当前值 + 本次位移"
+ *    叠加，吸附会把位移越抹越大，松手时能偏出好几个小时（典型"拖 10 分钟跳到 2 小时"）。
+ */
+type DragState = {
+  weekDayNum: number;
+  index: number;
+  mode: DragMode;
+  origin: WeekPlanSegment[];
+  startX: number;
+  trackWidth: number;
+  moved: boolean;
+};
+
+/** 起手到松手之间小于这个像素数，算"没拖"，仍是一次点击。 */
+const DRAG_THRESHOLD_PX = 3;
+
+const drag = ref<DragState | null>(null);
+/** 拖动中的预览，按周几存；松手才落成正式值。 */
+const preview = ref<Record<number, WeekPlanSegment[]>>({});
+/** 松手那一下浏览器还会补一个 click，要吞掉，否则焦点被抢进输入框。 */
+let suppressClickUntil = 0;
+
+/** 渲染用的段：拖动中的那一段走预览值，其余照旧。 */
+function segmentsFor(day: ConfigScheduleDay): WeekPlanSegment[] {
+  return preview.value[day.weekDayNum] ?? day.segments;
+}
+
+function startDrag(event: MouseEvent, weekDayNum: number, index: number, mode: DragMode) {
+  if (props.disabled) return;
+  const element = event.currentTarget as HTMLElement | null;
+  const track = element?.closest(".dcw-track") as HTMLElement | null;
+  const trackWidth = track?.getBoundingClientRect().width ?? 0;
+  // 拿不到宽度（元素还没布局 / 测试环境）就只能当点击处理，不能瞎算比例。
+  if (!trackWidth) return;
+  const day = viewDays.value.find(item => item.weekDayNum === weekDayNum);
+  if (!day) return;
+
+  drag.value = {
+    weekDayNum,
+    index,
+    mode,
+    origin: day.segments.map(segment => ({ ...segment })),
+    startX: event.clientX,
+    trackWidth,
+    moved: false
+  };
+  element?.setPointerCapture?.((event as PointerEvent).pointerId);
+  window.addEventListener("pointermove", onDragMove);
+  window.addEventListener("pointerup", endDrag);
+  window.addEventListener("pointercancel", endDrag);
+  event.preventDefault();
+}
+
+function onDragMove(event: PointerEvent) {
+  const state = drag.value;
+  if (!state) return;
+  const deltaX = event.clientX - state.startX;
+  if (!state.moved && Math.abs(deltaX) < DRAG_THRESHOLD_PX) return;
+  state.moved = true;
+  preview.value = {
+    ...preview.value,
+    [state.weekDayNum]: applyDrag(state.origin, state.index, state.mode, (deltaX / state.trackWidth) * DAY_MINUTES)
+  };
+}
+
+function endDrag() {
+  const state = drag.value;
+  drag.value = null;
+  window.removeEventListener("pointermove", onDragMove);
+  window.removeEventListener("pointerup", endDrag);
+  window.removeEventListener("pointercancel", endDrag);
+  if (!state) return;
+
+  const next = preview.value[state.weekDayNum];
+  const rest = { ...preview.value };
+  delete rest[state.weekDayNum];
+  preview.value = rest;
+
+  // 没动过（纯点击）不提交：否则"点色块定位"会被记成一次改动，平白点亮下发按钮。
+  if (!state.moved || !next) return;
+  suppressClickUntil = Date.now() + 250;
+  commitDay(state.weekDayNum, next);
+}
+
+/** 把某一天的段合并回整周并提交（其余 6 天原样带走）。 */
+function commitDay(weekDayNum: number, segments: WeekPlanSegment[]) {
+  commit(
+    viewDays.value.map(day => ({
+      weekDayNum: day.weekDayNum,
+      segments: (day.weekDayNum === weekDayNum ? segments : day.segments).map(segment => ({ ...segment }))
+    }))
+  );
+}
+
+/** 色块点击：拖动刚结束时忽略，平时把焦点送到起止输入框。 */
+function onBlockClick(weekDayNum: number, index: number) {
+  if (Date.now() < suppressClickUntil) return;
+  focusSegment(weekDayNum, index);
+}
+
+/** 空白点击：拖动刚结束时忽略，平时加一段全天。 */
+function onTrackClick(weekDayNum: number) {
+  if (Date.now() < suppressClickUntil) return;
+  addSegment(weekDayNum);
+}
+
+onBeforeUnmount(() => {
+  window.removeEventListener("pointermove", onDragMove);
+  window.removeEventListener("pointerup", endDrag);
+  window.removeEventListener("pointercancel", endDrag);
+});
+
+/**
+ * 单击色块（**没有位移**）→ 把焦点送到该段的"开始"输入框。
+ *
+ * ⛔ 同一个色块上现在并存两种手势：位移超过 3px 算拖动（见 `startDrag`），
+ *    没超过才算单击。所以这里必须先看 `suppressClickUntil` —— 拖完那一下浏览器还会补个
+ *    click，不吞掉就会"刚拖完，光标被抢进输入框"。
+ */
+function focusSegment(weekDayNum: number, index: number) {
+  const node = document.querySelector<HTMLInputElement>(`[data-testid="dcw-start-${weekDayNum}-${index}"] input`);
+  node?.focus();
+  node?.select?.();
+}
+
+/** 一天里有几段（行右侧的计数）。 */
+function daySummary(day: ConfigScheduleDay) {
+  return day.segments.length ? `${day.segments.length} 段` : "不录像";
+}
+
+/** 汇总：已配置几天、共几个时段（页脚用）。 */
+const summaryText = computed(() => {
+  const configured = viewDays.value.filter(day => day.segments.length > 0);
+  const segments = configured.reduce((total, day) => total + day.segments.length, 0);
+  return `${configured.length} 天 · ${segments} 个时段`;
+});
+
+/** 整套计划里最早的一段开始 / 最晚的一段结束，页脚拿去当"覆盖时段"的概括。 */
+const coverageText = computed(() => {
+  const all = viewDays.value.flatMap(day => day.segments);
+  if (!all.length) return "未排班";
+  const starts = all.map(segment => percentOf(segment.start));
+  const stops = all.map(segment => percentOf(segment.stop));
+  const fmt = (percent: number) => {
+    const total = Math.round((percent / 100) * 86400);
+    const pad = (value: number) => String(value).padStart(2, "0");
+    return `${pad(Math.floor(total / 3600) % 24)}:${pad(Math.floor((total % 3600) / 60))}`;
+  };
+  return `${fmt(Math.min(...starts))} – ${fmt(Math.max(...stops))}`;
+});
+</script>
+
+<template>
+  <div class="dcw" :class="{ 'is-disabled': disabled }">
+    <div class="dcw-scale" aria-hidden="true">
+      <span class="dcw-scale-gutter" />
+      <span class="dcw-scale-track">
+        <span>00</span>
+        <span>06</span>
+        <span>12</span>
+        <span>18</span>
+        <span>24</span>
+      </span>
+      <span class="dcw-scale-tail" />
+    </div>
+
+    <div
+      v-for="day in viewDays"
+      :key="day.weekDayNum"
+      class="dcw-day"
+      :class="{ 'is-today': day.weekDayNum === todayWeekDay, 'is-off': !day.segments.length }"
+      :data-testid="`dcw-day-${day.weekDayNum}`"
+    >
+      <div class="dcw-row">
+        <a-button
+          html-type="button"
+          type="text"
+          class="dcw-switch"
+          :class="{ 'is-on': day.segments.length > 0 }"
+          :disabled="disabled"
+          :aria-label="`周${WEEKDAY_LABELS[day.weekDayNum - 1]}录像计划`"
+          :data-testid="`dcw-toggle-${day.weekDayNum}`"
+          @click="toggleDay(day.weekDayNum, day.segments.length === 0)"
+        >
+          <i />
+        </a-button>
+        <span class="dcw-label">周{{ WEEKDAY_LABELS[day.weekDayNum - 1] }}</span>
+
+        <div
+          class="dcw-track"
+          :class="{ 'is-readonly': disabled }"
+          :title="disabled ? '' : '点空白处新增一段；拖动色块中间平移、拖两端改起止（吸附 15 分钟）'"
+          :data-testid="`dcw-track-${day.weekDayNum}`"
+          @click="onTrackClick(day.weekDayNum)"
+        >
+          <span
+            v-for="(segment, index) in segmentsFor(day)"
+            :key="index"
+            class="dcw-block"
+            :class="{ 'is-dragging': drag?.weekDayNum === day.weekDayNum && drag?.index === index }"
+            :style="segmentStyle(segment)"
+            :title="`${segmentLabel(segment)}：拖中间平移，拖两端改起止，单击定位到输入框`"
+            :data-testid="`dcw-block-${day.weekDayNum}-${index}`"
+            @pointerdown.stop="startDrag($event, day.weekDayNum, index, 'move')"
+            @click.stop="onBlockClick(day.weekDayNum, index)"
+          >
+            <span
+              class="dcw-handle is-start"
+              aria-hidden="true"
+              :data-testid="`dcw-handle-start-${day.weekDayNum}-${index}`"
+              @pointerdown.stop="startDrag($event, day.weekDayNum, index, 'start')"
+            />
+            <em>{{ segmentLabel(segment) }}</em>
+            <span
+              class="dcw-handle is-stop"
+              aria-hidden="true"
+              :data-testid="`dcw-handle-stop-${day.weekDayNum}-${index}`"
+              @pointerdown.stop="startDrag($event, day.weekDayNum, index, 'stop')"
+            />
+          </span>
+          <span v-if="!day.segments.length" class="dcw-track-empty">点这里新增时段</span>
+          <span v-if="day.weekDayNum === todayWeekDay" class="dcw-now" :style="{ left: `${nowPercent}%` }" title="当前时刻" />
+        </div>
+
+        <span class="dcw-count">{{ daySummary(day) }}</span>
+      </div>
+
+      <div class="dcw-segments" :class="{ 'is-empty': !day.segments.length }">
+        <div v-for="(segment, index) in day.segments" :key="index" class="dcw-segment">
+          <a-input
+            class="dcw-time"
+            :model-value="segment.start"
+            allow-clear
+            :disabled="disabled"
+            placeholder="HH:MM:SS"
+            :aria-label="`周${WEEKDAY_LABELS[day.weekDayNum - 1]}第 ${index + 1} 段开始`"
+            :data-testid="`dcw-start-${day.weekDayNum}-${index}`"
+            @update:model-value="setSegment(day.weekDayNum, index, 'start', $event)"
+          />
+          <span class="dcw-dash">→</span>
+          <a-input
+            class="dcw-time"
+            :model-value="segment.stop"
+            allow-clear
+            :disabled="disabled"
+            placeholder="HH:MM:SS"
+            :aria-label="`周${WEEKDAY_LABELS[day.weekDayNum - 1]}第 ${index + 1} 段结束`"
+            :data-testid="`dcw-stop-${day.weekDayNum}-${index}`"
+            @update:model-value="setSegment(day.weekDayNum, index, 'stop', $event)"
+          />
+          <a-button
+            html-type="button"
+            type="text"
+            class="dcw-icon"
+            :disabled="disabled"
+            :aria-label="`删除周${WEEKDAY_LABELS[day.weekDayNum - 1]}第 ${index + 1} 段`"
+            @click="removeSegment(day.weekDayNum, index)"
+          >
+            <Trash2 :size="11" />
+          </a-button>
+        </div>
+        <a-button
+          html-type="button"
+          type="outline"
+          class="dcw-add"
+          :disabled="disabled"
+          :aria-label="`为周${WEEKDAY_LABELS[day.weekDayNum - 1]}添加时段`"
+          :data-testid="`dcw-add-${day.weekDayNum}`"
+          @click="addSegment(day.weekDayNum)"
+        >
+          <Plus :size="10" />时段
+        </a-button>
+      </div>
+    </div>
+
+    <p class="dcw-foot">
+      <CalendarPlus :size="10" />
+      <span data-testid="dcw-summary">{{ summaryText }}</span>
+      <span class="dcw-foot-sep">·</span>
+      <span>{{ coverageText }}</span>
+      <span class="dcw-foot-sep">·</span>
+      <span>拖色块中间平移、拖两端改起止（吸附 15 分钟）</span>
+      <span class="dcw-foot-sep">·</span>
+      <span>秒级时间在下方起止框里按 HH:MM:SS 填写</span>
+      <span class="dcw-foot-sep">·</span>
+      <span>关掉某天表示该天没有录像计划（整条不下发）</span>
+    </p>
+  </div>
+</template>
+
+<style scoped lang="scss">
+.dcw {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+
+  &.is-disabled {
+    color: var(--uvp-text-disabled);
+
+    :deep(.dcw-time.arco-input-disabled) {
+      color: var(--uvp-text-disabled);
+      background: var(--uvp-shell-muted);
+      border-color: var(--uvp-panel-border, #dbe4f0);
+    }
+
+    .dcw-icon.arco-btn[type="button"],
+    .dcw-add.arco-btn[type="button"] {
+      color: var(--uvp-text-disabled);
+      background: var(--uvp-shell-muted);
+      border-color: var(--uvp-panel-border, #dbe4f0);
+    }
+  }
+}
+
+/* 顶部刻度：与下面的轨道共用同一套栅格（开关 26 + 标签 34 + 轨道 1fr + 计数 44），
+   否则刻度会和色块错位 —— 错位以后"这块是不是压到 12 点"就没法判断了。 */
+.dcw-scale {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr) 44px;
+  gap: 8px;
+  align-items: center;
+  padding-bottom: 2px;
+}
+.dcw-scale-track {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--uvp-text-tertiary);
+}
+
+.dcw-day {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 3px 0;
+  border-top: 1px solid var(--uvp-border-subtle);
+
+  &.is-off .dcw-label {
+    color: var(--uvp-text-tertiary);
+  }
+}
+
+.dcw-row {
+  display: grid;
+  grid-template-columns: 26px 34px minmax(0, 1fr) 44px;
+  gap: 8px;
+  align-items: center;
+}
+
+.dcw-switch.arco-btn[type="button"] {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  width: 26px;
+  height: 14px;
+  min-height: 0;
+  padding: 0 2px;
+  cursor: pointer;
+  background: var(--uvp-panel-border, #d5dfee);
+  border: none;
+  border-radius: 7px;
+  transition: background 0.15s;
+
+  i {
+    width: 10px;
+    height: 10px;
+    background: var(--uvp-solid-text, #ffffff);
+    border-radius: 50%;
+    transition: transform 0.15s;
+  }
+
+  &.is-on {
+    /* ⛔ 实心面用 --uvp-solid-bg：--uvp-brand 是文字色，暗色下是浅蓝，
+       白滑块压上去几乎看不见（对比度约 2:1）。 */
+    background: var(--uvp-solid-bg);
+
+    i {
+      transform: translateX(12px);
+    }
+  }
+
+  &:disabled {
+    color: var(--uvp-text-disabled);
+    cursor: not-allowed;
+    background: var(--uvp-dialog-control-bg);
+    opacity: 1;
+  }
+}
+
+.dcw-label {
+  font-size: 12px;
+  color: var(--uvp-text-secondary);
+
+  .is-today & {
+    font-weight: 600;
+    color: var(--uvp-text-primary);
+  }
+}
+
+.dcw-track {
+  position: relative;
+  height: 20px;
+  overflow: hidden;
+
+  /* ⛔ 两种光标是两件事：空白区的手型 =「点一下加一段」（见 addSegment），
+     色块自己的 grab / ew-resize =「能拖」。混着用就又回到"看着能拖其实不能"。
+     ⛔ 触摸拖动要自己吃掉手势，否则浏览器先滚页面，色块跟到一半就丢事件。 */
+  touch-action: none;
+  cursor: pointer;
+  user-select: none;
+  background: var(--uvp-shell-muted);
+  border-radius: 4px;
+  transition: background 0.12s;
+
+  &:hover {
+    background: var(--uvp-brand-soft, rgb(59 130 246 / 10%));
+  }
+
+  &.is-readonly {
+    cursor: not-allowed;
+
+    &:hover {
+      background: var(--uvp-shell-muted);
+    }
+  }
+}
+
+.dcw-block {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  touch-action: none;
+
+  /* 整块 = 平移（grab）。左右两端另有 ew-resize 手柄，见 `.dcw-handle`。 */
+  cursor: grab;
+
+  /* 实心块 + 白字：两套主题下都用 --uvp-solid-*，别拿 --uvp-brand 当底色。 */
+  background: var(--uvp-solid-bg);
+  transition: filter 0.12s;
+
+  em {
+    padding: 0 3px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 9px;
+    font-style: normal;
+    color: var(--uvp-solid-text);
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  &:hover {
+    filter: brightness(1.12);
+  }
+
+  &.is-dragging {
+    z-index: 2;
+    cursor: grabbing;
+
+    /* 拖动中要压在"现在"那条红线上，否则红线会从色块中间穿过去，看着像断成两段。 */
+    outline: 1px solid var(--uvp-solid-text);
+    outline-offset: -1px;
+  }
+}
+
+/**
+ * 左右调边手柄。
+ *
+ * ⛔ 手柄平时**不显形**（只占 6px 的热区 + 一个 ew-resize 光标）：段很窄时两条白杠会把
+ *    `08:00-18:00` 这类标签挤没。hover 时才亮出两条细杠，告诉人这里能拖。
+ */
+.dcw-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  touch-action: none;
+  cursor: ew-resize;
+
+  &.is-start {
+    left: 0;
+  }
+
+  &.is-stop {
+    right: 0;
+  }
+
+  &::after {
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    width: 2px;
+    content: "";
+    background: var(--uvp-solid-text);
+    border-radius: 1px;
+    opacity: 0;
+    transition: opacity 0.12s;
+  }
+
+  &.is-start::after {
+    left: 2px;
+  }
+
+  &.is-stop::after {
+    right: 2px;
+  }
+}
+
+.dcw-block:hover .dcw-handle::after,
+.dcw-block.is-dragging .dcw-handle::after {
+  opacity: 0.6;
+}
+
+.dcw-track-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--uvp-text-tertiary);
+}
+
+.dcw-now {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  pointer-events: none;
+  background: var(--uvp-danger);
+
+  &::before {
+    position: absolute;
+    top: -2px;
+    left: -2px;
+    width: 5px;
+    height: 5px;
+    content: "";
+    background: var(--uvp-danger);
+    border-radius: 50%;
+  }
+}
+
+.dcw-count {
+  font-size: 10px;
+  color: var(--uvp-text-tertiary);
+  text-align: right;
+}
+
+.dcw-segments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+
+  /* ⛔ 预留一个固定高度：没排班的天也要占位，否则开关一开一关整张表会上下跳一行。 */
+  min-height: 24px;
+  padding-left: 76px;
+
+  &.is-empty {
+    min-height: 6px;
+  }
+}
+
+.dcw-segment {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.dcw .dcw-time.arco-input-wrapper {
+  width: 110px;
+  height: 28px;
+  padding: 0 6px;
+  font-size: 11px;
+  color: var(--uvp-text-primary);
+  background: var(--uvp-dialog-control-bg, #ffffff);
+  border: 1px solid var(--uvp-panel-border, #dbe4f0);
+  border-radius: 4px;
+
+  &:focus-within {
+    border-color: var(--uvp-brand);
+  }
+
+  :deep(.arco-input.arco-input-size-medium) {
+    padding: 0;
+    font-size: 11px;
+    color: var(--uvp-text-primary);
+    text-align: center;
+  }
+}
+
+.dcw-dash {
+  font-size: 10px;
+  color: var(--uvp-text-tertiary);
+}
+
+.dcw-icon.arco-btn[type="button"],
+.dcw-add.arco-btn[type="button"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  color: var(--uvp-text-secondary);
+  cursor: pointer;
+  background: var(--uvp-dialog-control-bg, #f8fbff);
+  border: 1px solid var(--uvp-panel-border, #dbe4f0);
+  border-radius: 4px;
+
+  &:hover:not(:disabled) {
+    color: var(--uvp-brand);
+    border-color: var(--uvp-brand);
+  }
+
+  &:disabled {
+    color: var(--uvp-text-disabled);
+    cursor: not-allowed;
+    background: var(--uvp-shell-muted);
+    opacity: 1;
+  }
+}
+
+.dcw-icon.arco-btn[type="button"] {
+  width: 22px;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+}
+
+.dcw-add.arco-btn[type="button"] {
+  gap: 2px;
+  height: auto;
+  min-height: 0;
+  padding: 0 7px;
+  font-size: 10px;
+}
+
+.dcw-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+  margin: 4px 0 0;
+  font-size: 10px;
+  color: var(--uvp-text-tertiary);
+}
+
+.dcw-foot-sep {
+  opacity: 0.6;
+}
+
+.dcw-time :deep(.arco-input:disabled) {
+  color: var(--uvp-text-secondary);
+}
+</style>

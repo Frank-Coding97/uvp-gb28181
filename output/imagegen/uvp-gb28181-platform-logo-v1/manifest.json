@@ -1,0 +1,28 @@
+{
+  "product": "UVP-GB28181",
+  "product_title": "统一视频接入平台",
+  "target": "Server-side web platform: navigation, login branding, system logo and browser favicon",
+  "generation": "imagegen skill bundled CLI, gpt-image-2",
+  "prompt": "prompt-symbol.txt",
+  "references": "Existing phone and desktop simulator icons are style references only.",
+  "master": "uvp-gb28181-symbol-master.png",
+  "master_size": [
+    1254,
+    1254
+  ],
+  "master_mode": "RGBA",
+  "export_processing": "Preserved generated alpha, removed near-transparent speckles, normalized color, resized and composed exact text.",
+  "palette": {
+    "blue": "#1687F8",
+    "ink": "#10233F",
+    "white": "#FFFFFF"
+  },
+  "assets": {
+    "uvp-mark-blue.png": "独立标志 / 系统 Logo",
+    "uvp-full-light.png": "完整标识 / 浅色背景",
+    "uvp-full-dark.png": "完整标识 / 深色背景",
+    "uvp-nav-light.png": "横版导航标识 / 浅色背景",
+    "uvp-nav-dark.png": "横版导航标识 / 深色背景",
+    "favicon.ico": "浏览器标签"
+  }
+}

@@ -1,0 +1,1189 @@
+import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
+import { reactive } from "vue";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import DeviceRecordPlayback from "./index.vue";
+import playbackPageSource from "./index.vue?raw";
+import RecordTimeline from "./components/RecordTimeline.vue";
+import timelineSource from "./components/RecordTimeline.vue?raw";
+import { hasMarkup } from "@/test/source-assert";
+import { channelReleaseWatchBudget } from "./playbackTeardown";
+
+// ⛔ 别把 `{ prop: v; prop: v; }` 整串钉进断言：prettier 会把单行 CSS 拆成多行、
+// stylelint 会把同名规则合并成并列选择器（`.a .x,\n.b .x {`），格式化一次就红一次。
+// 这里按「某个选择器的**同一个规则块**里有没有这几条声明」来判。
+function ruleBlocks(source: string, selector: string): string[] {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(escaped + "[^{]*\\{([^}]*)\\}", "g");
+  const blocks: string[] = [];
+  let matched: RegExpExecArray | null;
+  while ((matched = pattern.exec(source)) !== null) {
+    blocks.push(matched[1].replace(/\s+/g, " ").trim());
+  }
+  return blocks;
+}
+
+// 媒体查询会让同一个选择器有多个规则块（例如 `.playback-main` 宽屏是 grid、
+// 窄屏是 flex 堆叠）。要求这几条声明**同处一块**，避免被另一个块的同名声明蒙混。
+function hasRuleBlock(source: string, selector: string, ...declarations: string[]): boolean {
+  return ruleBlocks(source, selector).some(block => declarations.every(item => block.includes(item)));
+}
+
+const api = vi.hoisted(() => ({
+  getChannel: vi.fn(),
+  getRecordQueryOptions: vi.fn(),
+  queryDeviceRecords: vi.fn(),
+  createPlaybackSession: vi.fn(),
+  // 回放页的「下载」已经改成提交**服务端缓存任务**（见 @/api/recordCache）：
+  // 受理成功后弹出的进度弹窗会轮询 getRecordCacheTask，两者都必须 mock，
+  // 否则点击下载会打真实 http。
+  createRecordCacheTask: vi.fn(),
+  getRecordCacheTask: vi.fn(),
+  cancelRecordCacheTask: vi.fn(),
+  getPlaybackSession: vi.fn(),
+  actionPlaybackSession: vi.fn(),
+  deletePlaybackSession: vi.fn(),
+  routerPush: vi.fn(),
+  routerGetRoutes: vi.fn(() => [{ name: "device-mgmt-list", path: "/gb28181/device-mgmt/index" }])
+}));
+
+const account = vi.hoisted(() => ({
+  permissions: ["gb28181:device-record:query", "gb28181:device-record:play", "gb28181:device-record:download"] as string[]
+}));
+
+const messageError = vi.hoisted(() => vi.fn());
+
+vi.mock("@arco-design/web-vue", async importOriginal => ({
+  ...(await importOriginal<typeof import("@arco-design/web-vue")>()),
+  Message: { error: messageError }
+}));
+
+vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => ({ account }) }));
+
+vi.mock("../device-mgmt/api", async importOriginal => ({
+  ...(await importOriginal<typeof import("../device-mgmt/api")>()),
+  ...api
+}));
+
+vi.mock("./api", async importOriginal => ({
+  ...(await importOriginal<typeof import("./api")>()),
+  createPlaybackSession: api.createPlaybackSession,
+  getPlaybackSession: api.getPlaybackSession,
+  actionPlaybackSession: api.actionPlaybackSession,
+  deletePlaybackSession: api.deletePlaybackSession
+}));
+
+vi.mock("@/api/recordCache", async importOriginal => ({
+  ...(await importOriginal<typeof import("@/api/recordCache")>()),
+  createRecordCacheTask: api.createRecordCacheTask,
+  getRecordCacheTask: api.getRecordCacheTask,
+  cancelRecordCacheTask: api.cancelRecordCacheTask
+}));
+
+vi.mock("../components/PlayWindow.vue", () => ({
+  default: {
+    name: "PlayWindow",
+    props: ["url", "playback", "hasAudio", "zlmWebrtc"],
+    emits: ["timeupdate", "loading"],
+    template: '<div data-testid="playback-player" :data-media-url="url" />'
+  }
+}));
+
+// 路由对象按用例可改：默认是「设备列表点录像进来」带 channelId，另有用例模拟
+// 「从录像中心菜单点进来」这种不带通道号的入口。
+// `route` 是交给 `useRoute()` 的**响应式**代理（真路由本身就是响应式的）：
+// 「同一路由上换成另一路通道」那条用例要在挂载后改 params，必须能触发 watch。
+const routeState = vi.hoisted(() => ({
+  params: { channelId: "31" } as Record<string, string>,
+  query: { recordQueryMock: "complete", returnKey: "return-key" } as Record<string, string>,
+  route: null as any
+}));
+
+vi.mock("vue-router", async importOriginal => ({
+  ...(await importOriginal<typeof import("vue-router")>()),
+  useRoute: () => routeState.route,
+  useRouter: () => ({ push: api.routerPush, getRoutes: api.routerGetRoutes })
+}));
+
+// 交给 useRoute() 的必须是**响应式**的（真路由本身就这样），否则「同一路由上换成另一路
+// 通道」这条监听永远不触发。⛔ 不能写在 mock 工厂里 import("vue")：那时 vue 还没初始化完，
+// 拿到的是半成品模块，整页会渲染成 `Invalid vnode type: undefined`。
+routeState.route = reactive(routeState);
+
+// 通道树用桩件替掉：这一页只关心「树里点了某路通道之后发生了什么」，
+// 真树要拉设备/行政区域/收藏好几套接口，跟本页的逻辑无关。
+vi.mock("../components/channel-tree/ChannelSourceTree.vue", () => ({
+  default: {
+    name: "ChannelSourceTree",
+    props: {
+      selectedChannelId: { type: Number, default: null },
+      revealChannel: { type: Object, default: null }
+    },
+    emits: ["select", "select-group", "favoriteSaved"],
+    template: `<div data-testid="channel-tree-stub" :data-selected="selectedChannelId" :data-reveal="JSON.stringify(revealChannel)">
+      <button data-testid="pick-channel-55" @click="$emit('select', { id: 55, name: '西门通道', code: '34020000001320000055' })">55</button>
+    </div>`
+  }
+}));
+
+// 这一页的错误文案并不来自模板渲染,而是 `utils/http` 对**每一个**失败请求自动弹的
+// 全局 `Message.error(响应体 message)`。重试循环里的中间失败必须被抑制,只在真正
+// 失败时弹一条 —— 所以下面的用例同时断言「弹了什么」和「没弹什么」。
+const suppressed = { showErrorMessage: false };
+
+// 后端 app.Response.Fail 的形状:业务错误码在 data.data 里,人话文案在 data.message。
+function backendFailure(status: number, errorCode: string, errorStage: string, message: string) {
+  return { message, response: { status, data: { message, data: { errorCode, errorStage } } } };
+}
+
+const teardownStall = () => backendFailure(504, "playback_unavailable", "teardown", "停止回放会话超时：设备未确认拆除");
+const channelBusy = () => backendFailure(429, "playback_busy", "busy", "当前通道已有回放会话");
+const sessionGone = () => backendFailure(404, "playback_not_found", "not_found", "回放会话不存在");
+
+// 通道被上一路的占位占着:会话还查得到,状态停在 stopping。
+function heldSession() {
+  return {
+    code: 0,
+    data: {
+      sessionId: "session-1",
+      state: "stopping",
+      channelId: "31",
+      recordKey: "opaque-record-key",
+      segmentStart: "2026-08-02T08:10:00+08:00",
+      segmentEnd: "2026-08-02T08:42:16+08:00",
+      positionSeconds: 0,
+      scale: 1,
+      hasAudio: false,
+      media: { urls: {} },
+      expiresAt: "2026-08-02T09:10:00+08:00",
+      errorStage: "",
+      errorCode: ""
+    }
+  };
+}
+
+function twoRecordings() {
+  return {
+    code: 0,
+    data: {
+      status: "complete",
+      declaredTotal: 2,
+      receivedCount: 2,
+      incomplete: false,
+      timezone: "Asia/Shanghai",
+      elapsedMs: 151,
+      list: [
+        {
+          recordKey: "recording-one",
+          name: "录像一",
+          startTime: "2026-08-02T08:00:00+08:00",
+          endTime: "2026-08-02T09:00:00+08:00"
+        },
+        {
+          recordKey: "recording-two",
+          name: "录像二",
+          startTime: "2026-08-02T09:00:00+08:00",
+          endTime: "2026-08-02T10:00:00+08:00"
+        }
+      ]
+    }
+  };
+}
+
+// ⛔⛔ 每个用例结束必须卸载组件。不卸载的话，组件内部的轮询定时器(800ms)与
+// 「等通道释放」的探测循环会留在**同一个 fake-timer 队列**里，被下一条用例的
+// `advanceTimersByTimeAsync` 一起推进 ⇒ `getPlaybackSession` 的调用次数随机膨胀
+// （实测 18 / 42 / 85 / 111，全量跑必红、单文件跑偶然全绿）。判据：只加卸载、
+// 不改任何断言，全量跑即转绿。
+enableAutoUnmount(afterEach);
+
+describe("device record playback workspace", () => {
+  beforeEach(() => {
+    vi.useRealTimers();
+    routeState.params = { channelId: "31" };
+    routeState.query = { recordQueryMock: "complete", returnKey: "return-key" };
+    account.permissions = ["gb28181:device-record:query", "gb28181:device-record:play", "gb28181:device-record:download"];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        blob: vi.fn().mockResolvedValue(new Blob(["recording"]))
+      })
+    );
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:download") });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    sessionStorage.clear();
+    api.routerPush.mockReset();
+    messageError.mockReset();
+    api.getChannel.mockResolvedValue({
+      code: 0,
+      data: { id: 31, deviceId: "34020000002000000001", channelId: "34020000001320000001", name: "东门出入口", status: 1 }
+    });
+    api.getRecordQueryOptions.mockResolvedValue({
+      code: 0,
+      data: {
+        device: { id: 7, code: "34020000002000000001", name: "园区 NVR-A", online: true },
+        channel: { id: 31, code: "34020000001320000001", name: "东门出入口" },
+        timezone: "Asia/Shanghai",
+        serverNow: "2026-08-02T19:40:20+08:00",
+        maxRangeHours: 24,
+        timeoutSeconds: 15,
+        supportedTypes: ["all", "manual", "alarm"]
+      }
+    });
+    api.queryDeviceRecords.mockResolvedValue({
+      code: 0,
+      data: {
+        status: "complete",
+        declaredTotal: 1,
+        receivedCount: 1,
+        incomplete: false,
+        timezone: "Asia/Shanghai",
+        elapsedMs: 842,
+        list: [
+          {
+            recordKey: "opaque-record-key",
+            deviceId: "34020000001320000001",
+            name: "上午巡检录像",
+            filePath: "/record/001.dav",
+            address: "园区东门",
+            startTime: "2026-08-02T08:10:00+08:00",
+            endTime: "2026-08-02T08:42:16+08:00",
+            secrecy: 0,
+            type: "time",
+            recorderId: "NVR-A",
+            fileSize: 248635904,
+            recordLocation: "34020000002000000001",
+            streamNumber: 0
+          }
+        ]
+      }
+    });
+    // 缓存任务的受理结果与后续轮询都返回"正在跑"的同一份快照：
+    // 这样进度弹窗能显示速率，且不会因为进入终态而提前停轮询（停轮询的路径
+    // 由 record-cache 页自己的用例覆盖）。
+    const cacheTask = {
+      taskId: "cache-1",
+      state: "running",
+      downloadSpeed: 4,
+      cachedBytes: 10485760,
+      cachedSeconds: 300,
+      totalSeconds: 1936,
+      progress: 0.15,
+      speedBytesPerSec: 2097152,
+      files: [],
+      lastError: ""
+    };
+    api.createRecordCacheTask.mockResolvedValue({ code: 0, data: cacheTask });
+    api.getRecordCacheTask.mockResolvedValue({ code: 0, data: cacheTask });
+    api.createPlaybackSession.mockResolvedValue({
+      code: 0,
+      data: {
+        sessionId: "session-1",
+        state: "playing",
+        channelId: "31",
+        recordKey: "opaque-record-key",
+        segmentStart: "2026-08-02T08:10:00+08:00",
+        segmentEnd: "2026-08-02T08:42:16+08:00",
+        positionSeconds: 0,
+        scale: 1,
+        hasAudio: false,
+        media: { urls: { wsFlv: "ws://zlm/playback/session-1.live.flv" } },
+        expiresAt: "2026-08-02T09:10:00+08:00",
+        errorStage: "",
+        errorCode: ""
+      }
+    });
+    api.getPlaybackSession.mockResolvedValue({
+      code: 0,
+      data: {
+        sessionId: "session-1",
+        state: "playing",
+        channelId: "31",
+        recordKey: "opaque-record-key",
+        segmentStart: "2026-08-02T08:10:00+08:00",
+        segmentEnd: "2026-08-02T08:42:16+08:00",
+        positionSeconds: 0,
+        scale: 1,
+        hasAudio: false,
+        media: { urls: { wsFlv: "ws://zlm/playback/session-1.live.flv" } },
+        expiresAt: "2026-08-02T09:10:00+08:00",
+        errorStage: "",
+        errorCode: ""
+      }
+    });
+    api.actionPlaybackSession.mockImplementation((_channelId, _sessionId, action) =>
+      Promise.resolve({
+        code: 0,
+        data: {
+          ...(api.createPlaybackSession.mock.results[0]?.value?.data || {}),
+          sessionId: "session-1",
+          state: action.action === "pause" ? "paused" : "playing",
+          recordKey: "opaque-record-key",
+          segmentStart: "2026-08-02T08:10:00+08:00",
+          segmentEnd: "2026-08-02T08:42:16+08:00",
+          positionSeconds: action.positionSeconds || 0,
+          scale: action.scale || 1,
+          hasAudio: false,
+          media: { urls: { wsFlv: "ws://zlm/playback/session-1.live.flv" } }
+        }
+      })
+    );
+    api.deletePlaybackSession.mockResolvedValue({ code: 0, data: { state: "stopped" } });
+  });
+
+  it("fits the playback workspace into its layout host instead of the browser viewport", () => {
+    expect(playbackPageSource).toContain('class="snow-fill-inner uvp-page-shell-flat record-playback-layout"');
+    expect(hasRuleBlock(playbackPageSource, ".record-playback-page", "height: 100%", "min-height: 0")).toBe(true);
+    expect(hasRuleBlock(playbackPageSource, ".record-playback-layout", "display: flex", "height: 100%", "min-height: 0")).toBe(
+      true
+    );
+    expect(
+      hasRuleBlock(
+        playbackPageSource,
+        ".playback-workspace",
+        "display: flex",
+        "flex-direction: column",
+        "height: 100%",
+        "min-height: 0"
+      )
+    ).toBe(true);
+    // ⛔ 左侧通道树必须钉死宽度：flex 项默认 min-width:auto，会被树里的内容（五个视图页签 +
+    //    搜索框）顶宽 —— 实测写了 240px 却渲染成 310px，播放区被挤窄，看起来「比例不对」。
+    //    280px 是老板要求的「放宽一档」（原 240 太窄，设备名/通道名常被截断）。
+    expect(hasRuleBlock(playbackPageSource, ".channel-panel", "flex: 0 0 280px", "min-width: 0", "max-width: 280px")).toBe(true);
+    expect(hasRuleBlock(playbackPageSource, ".timeline-panel", "flex: none")).toBe(true);
+    expect(playbackPageSource).not.toContain("min-height: 100vh");
+  });
+
+  it("keeps the query bar and transport controls on Arco components", () => {
+    // 这一页原先整套用原生 input[type=datetime-local] / select / button 手描外观。
+    // 换成 Arco 后要钉住,否则后续改动很容易静默退回原生控件。
+    expect(playbackPageSource).toContain("<a-range-picker");
+    expect(playbackPageSource).toContain('value-format="YYYY-MM-DDTHH:mm:ss"');
+    expect(playbackPageSource).toContain("<a-select");
+    expect(playbackPageSource).toContain("<a-button");
+    expect(playbackPageSource).not.toContain('type="datetime-local"');
+    expect(playbackPageSource).not.toContain("<select");
+    expect(playbackPageSource).not.toContain("<option");
+    expect(playbackPageSource).not.toContain("<input");
+    // ⛔ 查询栏不许用 <label> 包 Arco 控件：label 会把点击转发给它的关联控件（a-select 里那个
+    // 隐藏的 readonly input），一次点击变成两次开合 ⇒ 录像类型下拉弹出来立刻收回去。
+    expect(playbackPageSource).not.toMatch(/<label[^>]*class="query-field/);
+    // ⛔ 段卡片是刻意保留的原生 button:74px 高、内嵌三行内容的卡片式列表项,
+    // 不是按钮控件。换成 a-button 得把它整套外观再覆盖回去,收益为零。
+    expect(playbackPageSource).toContain("['segment-item'");
+  });
+
+  it("uses the device-list search panel language for the query area", () => {
+    // 查询条件已从顶部 query-bar 搬进「录像段」面板：控件皮肤仍与设备列表的搜索区同源。
+    expect(
+      hasRuleBlock(playbackPageSource, ".segment-query", "display: flex", "flex-direction: column", "padding: 8px 10px")
+    ).toBe(true);
+    expect(playbackPageSource).toContain("background: var(--uvp-search-control-bg) !important;");
+    expect(playbackPageSource).toContain("border: 1px solid var(--uvp-search-secondary-btn-border) !important;");
+    expect(playbackPageSource).toContain("box-shadow: var(--uvp-search-control-focus-shadow) !important;");
+    // 左栏无边界：不画自己的底色，直接透出页面背景（与设备列表的 .directory-panel 同构）
+    expect(
+      hasRuleBlock(
+        playbackPageSource,
+        ".channel-panel",
+        "background: transparent",
+        "border-right: 1px solid var(--uvp-panel-border)"
+      )
+    ).toBe(true);
+  });
+
+  it("lays the playback regions out edge-to-edge, separated by hairlines", () => {
+    // 无界布局：树 / 播放区 / 录像段 / 时间轴 全部铺到窗口边缘，块与块之间只留 1px 分隔线。
+    // 老板明确要求「上下左右的间距都不要」⇒ padding/margin 只能是 0，
+    // 分隔靠 .channel-panel 的 border-right、.segment-panel 的 border-left、
+    // 时间轴自己的 border-top（在 RecordTimeline.vue 里）。
+    expect(hasRuleBlock(playbackPageSource, ".record-playback-page", "height: 100%", "padding: 0")).toBe(true);
+    expect(hasRuleBlock(playbackPageSource, ".record-playback-layout", "display: flex", "height: 100%", "padding: 0")).toBe(true);
+    expect(hasRuleBlock(playbackPageSource, ".playback-workspace", "padding: 0")).toBe(true);
+    expect(playbackPageSource).not.toContain("min-height: 72px");
+    expect(
+      hasRuleBlock(
+        playbackPageSource,
+        ".playback-main",
+        "display: grid",
+        "grid-template-columns: minmax(0, 1fr) 312px",
+        "flex: 1",
+        "min-height: 0",
+        "padding: 0",
+        "margin: 0"
+      )
+    ).toBe(true);
+    // ⛔ 回归门禁：播放区不许再退化成卡片（底色 + 外框 + 圆角），那正是「有界感」的来源。
+    expect(hasRuleBlock(playbackPageSource, ".playback-main", "background: var(--uvp-shell-muted)")).toBe(false);
+    expect(hasRuleBlock(playbackPageSource, ".playback-main", "border: 1px solid var(--uvp-panel-border)")).toBe(false);
+    expect(hasRuleBlock(playbackPageSource, ".playback-main", "border-radius: var(--uvp-panel-radius)")).toBe(false);
+    // 录像段：只留左边一条线，不再自带整圈外框和 10px 间距
+    expect(hasRuleBlock(playbackPageSource, ".segment-panel", "border-left: 1px solid var(--uvp-list-panel-border)")).toBe(true);
+    expect(hasRuleBlock(playbackPageSource, ".segment-panel", "margin-left: 10px")).toBe(false);
+    expect(hasRuleBlock(playbackPageSource, ".timeline-panel", "flex: none", "margin: 0", "overflow: hidden")).toBe(true);
+    expect(hasRuleBlock(playbackPageSource, ".timeline-panel", "border-radius: var(--uvp-panel-radius)")).toBe(false);
+    // 窄屏改成纵向堆叠：同样要求这几条同处一块（宽屏那块是 grid，不会被误判）。
+    expect(hasRuleBlock(playbackPageSource, ".playback-main", "display: flex", "flex: none", "flex-direction: column")).toBe(
+      true
+    );
+  });
+
+  it("uses a card selection state and a compact recording type dot", () => {
+    expect(playbackPageSource).toContain(":aria-current=\"playback.recordKey === record.recordKey ? 'true' : undefined\"");
+    expect(
+      hasRuleBlock(
+        playbackPageSource,
+        ".segment-item.selected",
+        "z-index: 1",
+        "background: var(--uvp-table-row-checked-bg)",
+        "border-color: var(--uvp-brand)"
+      )
+    ).toBe(true);
+    expect(hasRuleBlock(playbackPageSource, ".segment-marker", "flex: none", "width: 7px", "height: 7px")).toBe(true);
+    expect(playbackPageSource).not.toContain("box-shadow: inset 3px 0 0 var(--uvp-brand)");
+  });
+
+  // 2026-11-21：顶部 query-bar 整体移除，其中的「返回设备管理」按钮一并删掉
+  // （页面是独立菜单页，回设备列表走顶部页签）。这里补一条反向断言，防止有人
+  // 又把一个孤零零的返回按钮塞回播放区顶上。
+  it("不再渲染顶部 query-bar 与返回按钮", () => {
+    expect(playbackPageSource).not.toContain("返回设备管理");
+    expect(playbackPageSource).not.toContain('class="query-bar"');
+  });
+
+  it("cleans up the session with the channel it was created on", () => {
+    // 会话收尾必须用「这个会话属于哪一路通道」，不能拿当前选中的通道去删：
+    // 换通道时 currentChannelId 已经指向新通道了还去删旧会话 ⇒ 旧会话没人释放，
+    // 新通道点播立刻撞 429 playback_busy。原实现靠 setup 时快照 channelId 保证，
+    // 现在通道可被左侧树切换，改由「先拆会话、后改通道号」这个顺序保证。
+    expect(playbackPageSource).toContain("const playbackChannelId = channelId;");
+    // ⛔ 别把整行钉进断言:prettier 会把带第三个参数的调用拆成多行,格式化一次红一次。
+    expect(
+      hasMarkup(playbackPageSource, "getPlaybackSession(playbackChannelId.value, sessionId, { showErrorMessage: false })")
+    ).toBe(true);
+    expect(hasMarkup(playbackPageSource, "deletePlaybackSession(playbackChannelId.value, sessionId,")).toBe(true);
+    expect(playbackPageSource).not.toContain("deletePlaybackSession(channelId.value, sessionId).catch");
+    const switchBody = playbackPageSource.slice(playbackPageSource.indexOf("async function switchChannel"));
+    expect(switchBody).toContain("async function switchChannel");
+    expect(switchBody.indexOf("await stopPlayback(false, false)")).toBeLessThan(
+      switchBody.indexOf("currentChannelId.value = next")
+    );
+  });
+
+  it("queries recordings automatically after loading the channel options", async () => {
+    mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+
+    expect(api.getRecordQueryOptions).toHaveBeenCalledTimes(1);
+    expect(api.queryDeviceRecords).toHaveBeenCalledTimes(1);
+    // 第 4 个参数是请求超时：后端 timeoutSeconds=15，前端必须多留 5 秒余量，
+    // 否则后端的「部分结果」写出来之前 axios 就先断了（见 recordQueryTimeoutMs）。
+    expect(api.queryDeviceRecords).toHaveBeenCalledWith(
+      31,
+      expect.objectContaining({ type: "all" }),
+      expect.any(AbortSignal),
+      20000
+    );
+  });
+
+  // ── 从「录像中心 → 设备录像」菜单进来：URL 不带通道号，通道由左侧树给 ──────────
+  it("不带通道号进来时不发查询，提示从左侧通道树选通道", async () => {
+    routeState.params = {};
+    routeState.query = { returnKey: "return-key" };
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+
+    expect(api.getRecordQueryOptions).not.toHaveBeenCalled();
+    // 顶部 query-bar 删掉后，"请先选通道"落在播放区空态与录像段面板里，
+    // 通道名/在线状态交给左侧设备树（那边本来就有）。
+    expect(wrapper.text()).toContain("从左侧设备树选择一路通道");
+    // 没有通道就没有查询条件：查询区整块不渲染
+    expect(wrapper.find('[data-testid="playback-query-bar"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="record-query-submit"]').exists()).toBe(false);
+  });
+
+  it("支持用 ?channel= 指定通道（菜单点击时走这条）", async () => {
+    routeState.params = {};
+    routeState.query = { channel: "31" };
+    mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+
+    expect(api.getRecordQueryOptions).toHaveBeenCalledWith(31);
+    expect(api.queryDeviceRecords).toHaveBeenCalledTimes(1);
+  });
+
+  it("在左侧树里换通道：按新通道重新查询，并同步高亮", async () => {
+    api.getRecordQueryOptions.mockImplementation((id: number) =>
+      Promise.resolve({
+        code: 0,
+        data: {
+          device: { id: 7, code: "34020000002000000001", name: "园区 NVR-A", online: true },
+          channel: {
+            id,
+            code: `3402000000132000${String(id).padStart(4, "0")}`,
+            name: id === 55 ? "西门通道" : "东门出入口"
+          },
+          timezone: "Asia/Shanghai",
+          serverNow: "2026-08-02T19:40:20+08:00",
+          maxRangeHours: 24,
+          timeoutSeconds: 15,
+          supportedTypes: ["all", "manual", "alarm"]
+        }
+      })
+    );
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+    expect(api.getRecordQueryOptions).toHaveBeenCalledWith(31);
+    expect(wrapper.get('[data-testid="channel-tree-stub"]').attributes("data-selected")).toBe("31");
+
+    await wrapper.get('[data-testid="pick-channel-55"]').trigger("click");
+    await flushPromises();
+
+    expect(api.getRecordQueryOptions).toHaveBeenLastCalledWith(55);
+    expect(api.queryDeviceRecords).toHaveBeenLastCalledWith(
+      55,
+      expect.objectContaining({ type: "all" }),
+      expect.any(AbortSignal),
+      20000
+    );
+    expect(wrapper.text()).toContain("西门通道");
+    expect(wrapper.get('[data-testid="channel-tree-stub"]').attributes("data-selected")).toBe("55");
+    // 换通道不该跳路由（跳了整棵树的状态就重置了）
+    expect(api.routerPush).not.toHaveBeenCalled();
+  });
+
+  // 从通道列表点「录像」进来时，树停在省市级、目标通道根本不在 DOM 里 ——
+  // 只传 selectedChannelId 等于「高亮一个看不见的行」。所以还要把通道本身交给树去展开。
+  // ⛔ 设备编码不能等「录像查询配置」：那个接口慢的现场要好几秒才回，等它等于
+  //    让用户在折叠的设备节点前面干等。这里把它钉成永不返回，编码照样必须到位。
+  it("把当前通道交给左侧树，让它默认展开到这一路", async () => {
+    api.getRecordQueryOptions.mockImplementation(() => new Promise(() => undefined));
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+
+    expect(api.getChannel).toHaveBeenCalledWith(31);
+    expect(JSON.parse(wrapper.get('[data-testid="channel-tree-stub"]').attributes("data-reveal") || "null")).toEqual({
+      channelId: 31,
+      deviceCode: "34020000002000000001"
+    });
+  });
+
+  // 通道列表现在直接把「录像」落到 /recording-center/device?channel=id（跟菜单同一个页签）。
+  // 用户在这一页上再点另一路通道时路由不变、组件被复用 —— 不监听路由就永远停在第一路。
+  it("同一路由上换成另一路通道也要跟着换", async () => {
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+    expect(api.getRecordQueryOptions).toHaveBeenCalledWith(31);
+    expect(wrapper.get('[data-testid="channel-tree-stub"]').attributes("data-selected")).toBe("31");
+
+    routeState.route.params = { channelId: "55" };
+    await flushPromises();
+
+    expect(api.getRecordQueryOptions).toHaveBeenLastCalledWith(55);
+    expect(wrapper.get('[data-testid="channel-tree-stub"]').attributes("data-selected")).toBe("55");
+  });
+
+  it("writes a range picked on the Arco range picker back into the query payload", async () => {
+    // 起止时间合成一个 a-range-picker 后，v-model 是二元组，而表单/序列化仍是 startTime、endTime
+    // 两个字段（靠 timeRange 这个 computed 桥接）。这条用例钉住桥接的两个方向。
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+    api.queryDeviceRecords.mockClear();
+
+    const inputs = wrapper.findAll(".time-picker input");
+    expect(inputs).toHaveLength(2);
+    // get 方向：默认表单值要回显到控件上。
+    expect((inputs[0].element as HTMLInputElement).value).toBe("2026-08-02T00:00:00");
+    expect((inputs[1].element as HTMLInputElement).value).toBe("2026-08-02T19:40:20");
+
+    // set 方向：改控件要写回表单，并原样进请求体（value-format 保证是裸字符串，不带时区后缀）。
+    await inputs[0].setValue("2026-08-02T07:00:00");
+    await inputs[1].setValue("2026-08-02T09:30:00");
+    await wrapper.get('[data-testid="record-query-submit"]').trigger("click");
+    await flushPromises();
+
+    expect(api.queryDeviceRecords).toHaveBeenCalledWith(
+      31,
+      expect.objectContaining({ startTime: "2026-08-02T07:00:00", endTime: "2026-08-02T09:30:00" }),
+      expect.any(AbortSignal),
+      20000
+    );
+  });
+
+  it("does not query or render the playback workspace without query permission", async () => {
+    account.permissions = ["gb28181:device-record:play"];
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+
+    expect(api.getRecordQueryOptions).not.toHaveBeenCalled();
+    expect(api.queryDeviceRecords).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain("无权查询设备录像");
+  });
+
+  it("allows query-only users to inspect results without opening a playback session", async () => {
+    account.permissions = ["gb28181:device-record:query"];
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+
+    expect(api.queryDeviceRecords).toHaveBeenCalledTimes(1);
+    expect(api.createPlaybackSession).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-testid="record-segment-0"]').attributes("aria-disabled")).toBe("true");
+  });
+
+  it("automatically plays the first playable recording instead of a one-second boundary fragment", async () => {
+    api.queryDeviceRecords.mockResolvedValueOnce({
+      code: 0,
+      data: {
+        status: "complete",
+        declaredTotal: 2,
+        receivedCount: 2,
+        incomplete: false,
+        timezone: "Asia/Shanghai",
+        elapsedMs: 151,
+        list: [
+          {
+            recordKey: "boundary-fragment",
+            name: "边界片段",
+            startTime: "2026-08-02T00:00:00+08:00",
+            endTime: "2026-08-02T00:00:01+08:00"
+          },
+          {
+            recordKey: "playable-recording",
+            name: "有效录像",
+            startTime: "2026-08-02T00:00:01+08:00",
+            endTime: "2026-08-02T00:32:37+08:00"
+          }
+        ]
+      }
+    });
+
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="record-segment-1"]').classes()).toContain("selected");
+    expect(wrapper.get('[data-testid="record-segment-0"]').classes()).not.toContain("selected");
+    expect(api.createPlaybackSession).toHaveBeenCalledWith(
+      31,
+      { recordKey: "playable-recording", playFrom: "2026-08-02T00:00:01+08:00" },
+      expect.any(String),
+      suppressed
+    );
+  });
+
+  it("keeps a stable idempotency key and restores the last recording after remount", async () => {
+    const firstWrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+    const firstRequest = api.createPlaybackSession.mock.calls[0];
+    firstWrapper.unmount();
+
+    api.createPlaybackSession.mockClear();
+    const secondWrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+
+    expect(api.createPlaybackSession).toHaveBeenCalledTimes(1);
+    expect(api.createPlaybackSession.mock.calls[0][2]).toBe(firstRequest[2]);
+    expect(secondWrapper.get('[data-testid="record-segment-0"]').classes()).toContain("selected");
+  });
+
+  it("stops the active session before automatically playing another recording", async () => {
+    api.queryDeviceRecords.mockResolvedValueOnce({
+      code: 0,
+      data: {
+        status: "complete",
+        declaredTotal: 2,
+        receivedCount: 2,
+        incomplete: false,
+        timezone: "Asia/Shanghai",
+        elapsedMs: 151,
+        list: [
+          {
+            recordKey: "recording-one",
+            name: "录像一",
+            startTime: "2026-08-02T00:00:01+08:00",
+            endTime: "2026-08-02T00:32:37+08:00"
+          },
+          {
+            recordKey: "recording-two",
+            name: "录像二",
+            startTime: "2026-08-02T00:32:37+08:00",
+            endTime: "2026-08-02T01:19:20+08:00"
+          }
+        ]
+      }
+    });
+    let finishStop!: () => void;
+    api.deletePlaybackSession.mockReturnValueOnce(
+      new Promise(resolve => {
+        finishStop = () => resolve({ code: 0, data: { state: "stopped" } });
+      })
+    );
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+
+    expect(api.createPlaybackSession).toHaveBeenCalledTimes(1);
+    await wrapper.get('[data-testid="record-segment-1"]').trigger("click");
+    await Promise.resolve();
+    expect(api.deletePlaybackSession).toHaveBeenCalledWith(31, "session-1", suppressed);
+    expect(api.createPlaybackSession).toHaveBeenCalledTimes(1);
+    expect(wrapper.get('[data-testid="playback-loading"]').text()).toContain("正在停止");
+
+    finishStop();
+    await flushPromises();
+    expect(api.createPlaybackSession).toHaveBeenCalledTimes(2);
+    expect(api.createPlaybackSession).toHaveBeenLastCalledWith(
+      31,
+      { recordKey: "recording-two", playFrom: "2026-08-02T00:32:37+08:00" },
+      expect.any(String),
+      suppressed
+    );
+    expect(wrapper.find('[data-testid="playback-loading"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="playback-player"]').exists()).toBe(true);
+  });
+
+  it("does not start another recording when stopping the active session fails", async () => {
+    api.queryDeviceRecords.mockResolvedValueOnce({
+      code: 0,
+      data: {
+        status: "complete",
+        declaredTotal: 2,
+        receivedCount: 2,
+        incomplete: false,
+        timezone: "Asia/Shanghai",
+        elapsedMs: 151,
+        list: [
+          {
+            recordKey: "recording-one",
+            name: "录像一",
+            startTime: "2026-08-02T00:00:01+08:00",
+            endTime: "2026-08-02T00:32:37+08:00"
+          },
+          {
+            recordKey: "recording-two",
+            name: "录像二",
+            startTime: "2026-08-02T00:32:37+08:00",
+            endTime: "2026-08-02T01:19:20+08:00"
+          }
+        ]
+      }
+    });
+    api.deletePlaybackSession.mockRejectedValueOnce(new Error("stop failed"));
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+
+    await wrapper.get('[data-testid="record-segment-1"]').trigger("click");
+    await flushPromises();
+
+    expect(api.createPlaybackSession).toHaveBeenCalledTimes(1);
+    expect(wrapper.get('[data-testid="record-segment-0"]').classes()).toContain("selected");
+    expect(wrapper.get('[data-testid="playback-status"]').text()).toContain("回放失败");
+    expect(messageError).toHaveBeenLastCalledWith("stop failed");
+  });
+
+  it("waits for the channel to be released after a teardown timeout instead of hanging", async () => {
+    vi.useFakeTimers();
+    api.deletePlaybackSession.mockRejectedValueOnce(teardownStall());
+    // 第一轮探测:占位仍在,通道没释放;第二轮:会话已从平台消失 = 释放了。
+    api.getPlaybackSession.mockResolvedValueOnce(heldSession()).mockRejectedValueOnce(sessionGone());
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+
+    await wrapper.get('[aria-label="停止"]').trigger("click");
+    await flushPromises();
+
+    // ⛔ 不轮询 DELETE:绑定保留时它推不动任何状态(那条 TEARDOWN 不会重发),
+    // 只会再白等一个 SIP 超时。观察释放只能靠「会话还在不在」。
+    expect(api.deletePlaybackSession).toHaveBeenCalledTimes(1);
+    expect(wrapper.get('[data-testid="playback-status"]').text()).toContain("正在等待通道释放");
+    expect(messageError).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(500);
+    await flushPromises();
+    expect(wrapper.get('[data-testid="playback-status"]').text()).toContain("正在等待通道释放");
+
+    await vi.advanceTimersByTimeAsync(800);
+    await flushPromises();
+    expect(wrapper.get('[data-testid="playback-status"]').text()).toContain("已停止");
+    expect(messageError).not.toHaveBeenCalled();
+  });
+
+  it("reports the teardown failure once when the channel never frees up", async () => {
+    vi.useFakeTimers();
+    api.deletePlaybackSession.mockRejectedValueOnce(teardownStall());
+    api.getPlaybackSession.mockResolvedValue(heldSession());
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+
+    await wrapper.get('[aria-label="停止"]').trigger("click");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(20_000);
+    await flushPromises();
+
+    expect(api.deletePlaybackSession).toHaveBeenCalledTimes(1);
+    expect(api.getPlaybackSession).toHaveBeenCalledTimes(channelReleaseWatchBudget);
+    expect(wrapper.get('[data-testid="playback-status"]').text()).toContain("回放失败");
+    // 中间失败全被抑制,只留一条如实文案。
+    expect(messageError).toHaveBeenCalledTimes(1);
+    expect(messageError).toHaveBeenLastCalledWith("设备未确认拆除，通道仍在后台释放中，请稍后重试");
+  });
+
+  it("waits out a busy channel and retries session creation with the same idempotency key", async () => {
+    vi.useFakeTimers();
+    // 上一路刚结束、后台清扫器还没释放:平台固定回 429。
+    api.createPlaybackSession.mockRejectedValueOnce(channelBusy());
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+
+    expect(api.createPlaybackSession).toHaveBeenCalledTimes(1);
+    expect(wrapper.get('[data-testid="playback-status"]').text()).toContain("正在等待通道释放");
+    expect(messageError).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(600);
+    await flushPromises();
+
+    expect(api.createPlaybackSession).toHaveBeenCalledTimes(2);
+    // 同一幂等键重试 ⇒ 平台去重,不会因为重试生成第二路会话。
+    expect(api.createPlaybackSession.mock.calls[0][2]).toBe(api.createPlaybackSession.mock.calls[1][2]);
+    expect(wrapper.get('[data-testid="playback-status"]').text()).toContain("正在回放");
+    // ⛔ wrapper.get(...).exists() 是 TS2339(返回类型被 Omit 掉 exists),只能用 find。
+    expect(wrapper.find('[data-testid="playback-player"]').exists()).toBe(true);
+    expect(messageError).not.toHaveBeenCalled();
+  });
+
+  it("retries the teardown before switching recordings after a failed stop", async () => {
+    vi.useFakeTimers();
+    api.queryDeviceRecords.mockResolvedValueOnce(twoRecordings());
+    // 第一次停止:设备没确认拆除,通道一直没释放 → 如实失败,但会话 id 保留。
+    api.deletePlaybackSession.mockRejectedValueOnce(teardownStall());
+    api.getPlaybackSession.mockResolvedValue(heldSession());
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+
+    await wrapper.get('[aria-label="停止"]').trigger("click");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(20_000);
+    await flushPromises();
+    expect(wrapper.get('[data-testid="playback-status"]').text()).toContain("回放失败");
+
+    // 再拖动到另一段:这次后台已经把通道释放了。⛔ 判据不能只看 status ——
+    // 停在 "failed" 但会话 id 还在,必须先重新拆干净,否则只会撞 429。
+    api.createPlaybackSession.mockClear();
+    wrapper.findComponent(RecordTimeline).vm.$emit("locate", {
+      recordKey: "recording-two",
+      time: "2026-08-02T09:12:34+08:00"
+    });
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(100);
+    await flushPromises();
+
+    expect(api.deletePlaybackSession).toHaveBeenCalledTimes(2);
+    expect(api.createPlaybackSession).toHaveBeenCalledTimes(1);
+    expect(api.createPlaybackSession).toHaveBeenLastCalledWith(
+      31,
+      { recordKey: "recording-two", playFrom: "2026-08-02T09:12:34+08:00" },
+      expect.any(String),
+      suppressed
+    );
+    expect(wrapper.get('[data-testid="playback-status"]').text()).toContain("正在回放");
+  });
+
+  it("replaces the idle cover with the player after automatic playback starts", async () => {
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+
+    const viewport = wrapper.get('[data-testid="playback-viewport"]');
+    expect(viewport.find('[data-testid="playback-idle-cover"]').exists()).toBe(false);
+    expect(viewport.find('[data-testid="playback-player"]').exists()).toBe(true);
+    expect(viewport.find(".camera-scene").exists()).toBe(false);
+    expect(viewport.text()).not.toContain("设备录像 MOCK");
+  });
+
+  it("keeps only the channel label over the video surface", () => {
+    expect(playbackPageSource).toContain('class="video-overlay top-overlay"');
+    expect(playbackPageSource).toContain("CH-01 {{ options?.channel.name");
+    expect(playbackPageSource).not.toContain('class="video-overlay bottom-overlay"');
+    expect(playbackPageSource).not.toContain('class="stream-badge"');
+    expect(playbackPageSource).not.toContain("localDateTime(playback.currentTime");
+  });
+
+  it("keeps the timeline as the only dynamic current-time display", () => {
+    expect(playbackPageSource).toContain('@timeupdate="handlePlayerTimeUpdate"');
+    expect(playbackPageSource).toContain('@loading="handlePlayerLoading"');
+    expect(playbackPageSource).not.toContain('data-testid="playback-time"');
+    expect(timelineSource).toContain('data-testid="timeline-range"');
+    expect(timelineSource).toContain("当前录像 · {{ selectedRecordRangeText }}");
+    expect(timelineSource).not.toContain("当前视窗 · {{ visibleRangeText }}");
+  });
+
+  it("renders the five-zone playback workspace and query result", async () => {
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+    await wrapper.get('[data-testid="record-query-submit"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[data-testid="playback-query-bar"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="playback-viewport"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="record-segment-list"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="playback-controls"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="record-timeline"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain("上午巡检录像");
+    expect(wrapper.get('[data-testid="record-segment-size-0"]').text()).toBe("237.1 MB");
+    expect(wrapper.find('[aria-label="静音"]').exists()).toBe(false);
+    expect(wrapper.find('[aria-label="取消静音"]').exists()).toBe(false);
+    expect(wrapper.find('[aria-label="音量"]').exists()).toBe(false);
+  });
+
+  it("does not render a file size placeholder when the device omits FileSize", async () => {
+    api.queryDeviceRecords.mockResolvedValueOnce({
+      code: 0,
+      data: {
+        status: "complete",
+        declaredTotal: 1,
+        receivedCount: 1,
+        incomplete: false,
+        timezone: "Asia/Shanghai",
+        elapsedMs: 120,
+        list: [
+          {
+            recordKey: "without-file-size",
+            name: "未返回大小的录像",
+            startTime: "2026-08-02T09:00:00+08:00",
+            endTime: "2026-08-02T09:30:00+08:00",
+            fileSize: null
+          }
+        ]
+      }
+    });
+
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="record-segment-size-0"]').exists()).toBe(false);
+  });
+
+  it("creates a real playback session and renders its media URL", async () => {
+    vi.useFakeTimers();
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+    expect(api.createPlaybackSession).toHaveBeenCalledWith(
+      31,
+      { recordKey: "opaque-record-key", playFrom: "2026-08-02T08:10:00+08:00" },
+      expect.any(String),
+      suppressed
+    );
+    expect(wrapper.get('[data-testid="playback-status"]').text()).toContain("正在回放");
+    expect(wrapper.get('[data-testid="playback-player"]').attributes("data-media-url")).toBe(
+      "ws://zlm/playback/session-1.live.flv"
+    );
+    const player = wrapper.findComponent({ name: "PlayWindow" });
+    player.vm.$emit("timeupdate", 10_000);
+    player.vm.$emit("timeupdate", 11_000);
+    await flushPromises();
+    expect(wrapper.get('[data-testid="timeline-playhead"]').text()).toContain("08:10:01");
+  });
+
+  it("uses the session protocol snapshot and does not reselect it during polling", async () => {
+    vi.useFakeTimers();
+    api.createPlaybackSession.mockResolvedValueOnce({
+      code: 0,
+      data: {
+        sessionId: "session-webrtc",
+        state: "playing",
+        channelId: "31",
+        recordKey: "opaque-record-key",
+        segmentStart: "2026-08-02T08:10:00+08:00",
+        segmentEnd: "2026-08-02T08:42:16+08:00",
+        positionSeconds: 0,
+        scale: 1,
+        hasAudio: false,
+        media: {
+          defaultProtocol: "webrtc",
+          protocol: "webrtc",
+          url: "https://zlm/index/api/webrtc?stream=one",
+          zlmWebrtc: true,
+          urls: { wsFlv: "ws://zlm/old.live.flv" }
+        },
+        expiresAt: "2026-08-02T09:10:00+08:00",
+        errorStage: "",
+        errorCode: ""
+      }
+    });
+    api.getPlaybackSession.mockResolvedValueOnce({
+      code: 0,
+      data: {
+        sessionId: "session-webrtc",
+        state: "playing",
+        channelId: "31",
+        recordKey: "opaque-record-key",
+        segmentStart: "2026-08-02T08:10:00+08:00",
+        segmentEnd: "2026-08-02T08:42:16+08:00",
+        positionSeconds: 1,
+        scale: 1,
+        hasAudio: false,
+        media: { urls: { wsFlv: "ws://zlm/changed.live.flv" } },
+        expiresAt: "2026-08-02T09:10:00+08:00",
+        errorStage: "",
+        errorCode: ""
+      }
+    });
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+    expect(wrapper.get('[data-testid="playback-player"]').attributes("data-media-url")).toBe(
+      "webrtc://zlm/index/api/webrtc?stream=one"
+    );
+    expect(wrapper.findComponent({ name: "PlayWindow" }).props("zlmWebrtc")).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(800);
+    await flushPromises();
+    expect(wrapper.get('[data-testid="playback-player"]').attributes("data-media-url")).toBe(
+      "webrtc://zlm/index/api/webrtc?stream=one"
+    );
+  });
+
+  it("freezes the timeline while the media is buffering", async () => {
+    vi.useFakeTimers();
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+    const player = wrapper.findComponent({ name: "PlayWindow" });
+
+    player.vm.$emit("timeupdate", 10_000);
+    player.vm.$emit("loading", true);
+    player.vm.$emit("timeupdate", 13_000);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(wrapper.get('[data-testid="timeline-playhead"]').text()).toContain("08:10:00");
+
+    player.vm.$emit("loading", false);
+    player.vm.$emit("timeupdate", 11_000);
+    await flushPromises();
+    expect(wrapper.get('[data-testid="timeline-playhead"]').text()).toContain("08:10:01");
+  });
+
+  it("sends playback controls and stops the active session", async () => {
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+    await wrapper.get('[data-testid="playback-primary-action"]').trigger("click");
+    await flushPromises();
+
+    await wrapper.get('[data-testid="playback-primary-action"]').trigger("click");
+    await flushPromises();
+    expect(api.actionPlaybackSession).toHaveBeenCalledWith(31, "session-1", { action: "pause" });
+
+    await wrapper.get('[data-testid="playback-primary-action"]').trigger("click");
+    await flushPromises();
+    expect(api.actionPlaybackSession).toHaveBeenCalledWith(31, "session-1", { action: "resume" });
+
+    await wrapper.get('[data-testid="playback-scale"]').setValue("2");
+    await flushPromises();
+    expect(api.actionPlaybackSession).toHaveBeenCalledWith(31, "session-1", { action: "scale", scale: 2 });
+
+    wrapper.findComponent(RecordTimeline).vm.$emit("locate", {
+      recordKey: "opaque-record-key",
+      time: "2026-08-02T08:10:42+08:00"
+    });
+    await flushPromises();
+    expect(api.actionPlaybackSession).toHaveBeenCalledWith(31, "session-1", { action: "seek", positionSeconds: 42 });
+
+    await wrapper.get('[aria-label="停止"]').trigger("click");
+    await flushPromises();
+    expect(api.deletePlaybackSession).toHaveBeenCalledWith(31, "session-1", suppressed);
+  });
+
+  it("switches recordings and starts playback from the time released on the timeline", async () => {
+    api.queryDeviceRecords.mockResolvedValueOnce({
+      code: 0,
+      data: {
+        status: "complete",
+        declaredTotal: 2,
+        receivedCount: 2,
+        incomplete: false,
+        timezone: "Asia/Shanghai",
+        elapsedMs: 151,
+        list: [
+          {
+            recordKey: "recording-one",
+            name: "录像一",
+            startTime: "2026-08-02T08:00:00+08:00",
+            endTime: "2026-08-02T09:00:00+08:00"
+          },
+          {
+            recordKey: "recording-two",
+            name: "录像二",
+            startTime: "2026-08-02T09:00:00+08:00",
+            endTime: "2026-08-02T10:00:00+08:00"
+          }
+        ]
+      }
+    });
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+
+    wrapper.findComponent(RecordTimeline).vm.$emit("locate", {
+      recordKey: "recording-two",
+      time: "2026-08-02T09:12:34+08:00"
+    });
+    await flushPromises();
+
+    expect(api.deletePlaybackSession).toHaveBeenCalledWith(31, "session-1", suppressed);
+    expect(api.createPlaybackSession).toHaveBeenCalledTimes(2);
+    expect(api.createPlaybackSession).toHaveBeenLastCalledWith(
+      31,
+      { recordKey: "recording-two", playFrom: "2026-08-02T09:12:34+08:00" },
+      expect.any(String),
+      suppressed
+    );
+    expect(wrapper.get('[data-testid="timeline-playhead"]').text()).toContain("09:12:34");
+  });
+
+  it("submits a server-side cache task for the selected recording", async () => {
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+    await wrapper.get('[data-testid="record-query-submit"]').trigger("click");
+    await flushPromises();
+    const download = wrapper.get('[data-testid="playback-download"]');
+    expect(download.attributes("disabled")).toBeUndefined();
+    await download.trigger("click");
+    await flushPromises();
+    // 提交的是**缓存任务**：拉流与落盘都在服务端，浏览器不再 fetch 直播流存 blob。
+    expect(api.createRecordCacheTask).toHaveBeenCalledWith({
+      channelId: 31,
+      recordKey: "opaque-record-key",
+      playFrom: "2026-08-02T08:10:00+08:00"
+    });
+    // 受理成功后弹出实时进度弹窗（看得见速率，也能随时转后台）。
+    await flushPromises();
+    expect(wrapper.find('[data-testid="record-cache-progress"]').exists()).toBe(true);
+  });
+
+  it("keeps playback controls for the visitor but greys out every device-record download entry", async () => {
+    account.permissions = ["gb28181:device-record:query", "gb28181:device-record:play"];
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+
+    expect(api.createPlaybackSession).toHaveBeenCalledTimes(1);
+    expect(wrapper.find('[data-testid="playback-primary-action"]').exists()).toBe(true);
+    expect(wrapper.find('[aria-label="停止"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="playback-scale"]').exists()).toBe(true);
+    // ⭐ 权限改造（2026-10-11）：下载入口**保留可见但置灰**，不再从页面消失，
+    //    这样访客知道平台有"缓存到服务器"能力，但点不动。
+    expect(wrapper.get('[data-testid="playback-download"]').attributes("disabled")).toBeDefined();
+    await wrapper.get('[data-testid="record-query-submit"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[data-testid="record-segment-download-0"]').attributes("disabled")).toBeDefined();
+  });
+
+  it("offers an independent download entry on every record segment", async () => {
+    const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+    await flushPromises();
+    await wrapper.get('[data-testid="record-query-submit"]').trigger("click");
+    await flushPromises();
+    const download = wrapper.get('[data-testid="record-segment-download-0"]');
+    expect(download.attributes("aria-label")).toBe("缓存 上午巡检录像 到服务器");
+    await download.trigger("click");
+    await flushPromises();
+    expect(api.createRecordCacheTask).toHaveBeenCalledWith({
+      channelId: 31,
+      recordKey: "opaque-record-key",
+      playFrom: "2026-08-02T08:10:00+08:00"
+    });
+  });
+});

@@ -1,0 +1,1 @@
+IF COL_LENGTH(N'dbo.gb_cascade_media_session', N'session_kind') IS NULL ALTER TABLE [dbo].[gb_cascade_media_session] ADD [session_kind] NVARCHAR(16) NOT NULL CONSTRAINT [df_gb_cascade_media_session_kind] DEFAULT (N'video');

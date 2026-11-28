@@ -12,6 +12,16 @@ body {
   justify-content: center;
   background: #fff;
 }
+
+/* 暗色启动占位：由 index.html 的内联脚本在 Vue 之前打上 html.uvp-boot-dark。
+   底色对齐 --uvp-shell-bg / body 暗色底（实测 rgb(11,17,24)），蓝条对齐 --uvp-brand。 */
+.uvp-boot-dark .init-page {
+  background: #0b1118;
+}
+.uvp-boot-dark .snow-loader {
+  --c: no-repeat linear-gradient(rgb(96 165 250) 0 0);
+}
+
 /* HTML: <div class="snow-loader"></div> */
 .snow-loader {
   width: 45px;

@@ -1,0 +1,232 @@
+package gormhelper
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/glebarez/sqlite"
+	"go.uber.org/zap"
+	"gorm.io/gorm"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/global/consts"
+)
+
+// sqlitePragmas 是拼进 DSN 的 PRAGMA。
+//
+// 每一项都有原因，不是默认值抄来的：
+//   - busy_timeout(5000)：并发写时默认**不等待**、直接 SQLITE_BUSY。
+//     录像索引、点播会话这些写入天然并发，必须给等待窗口。
+//   - journal_mode(WAL)：默认 rollback journal 在读写混合下写锁竞争严重，
+//     WAL 允许读写并行，是单机场景的正确选择。
+//     ⛔ WAL 会产生 -wal / -shm 两个副文件，停机前要正常关闭（由启停脚本负责），
+//     直接 kill -9 会留下需要下次启动回放的日志。
+//   - foreign_keys(1)：SQLite 默认**关外键**。开着才能让建表里的 REFERENCES 真正生效，
+//     否则跨表引用可以写成孤儿数据而没有任何报错。
+//   - _txlock=immediate：立刻拿写锁，而不是延迟到事务首次写入才拿 ——
+//     否则并发事务会在中途才失败，重试逻辑没法推理。
+//   - synchronous(NORMAL)：⛔⛔ 这一项是**吞吐的生死线**，不是可选项。
+//     SQLite 的默认 synchronous 是 FULL(2)，WAL 模式下它要求**每次提交都 fsync WAL**；
+//     本项目 SkipDefaultTransaction=true + 连接池 1 条，于是每个写语句都是一次
+//     「拿唯一连接 → 写 → fsync → 还连接」，实测被钉死在 **48 次/秒**（p50 14ms）。
+//     2026-11-09 千路压测实测：1000 台设备冷启动注册 ≈ 5000 次 DB 操作 ⇒ 要 100 秒，
+//     而 SIP 注册 32 秒就超时 ⇒ 全部重试 ⇒ 排队越积越长，日志里全是
+//     `db.slow_query duration_ms=50000~170000` 和 `context deadline exceeded`。
+//     改成 NORMAL 后同一负载 **2745 次/秒（57 倍）**，p50 降到亚毫秒。
+//     代价：操作系统掉电可能丢**最后若干个已提交事务**（数据库本身不会损坏）——
+//     与 MySQL 缺省语义一致，对监控平台完全可接受。
+//     ⛔ 不要"为了安全"改回 FULL / 或干脆不写（=默认 FULL）：那会直接把千路容量砍到几十路。
+//   - cache_size(-65536)：页缓存 64MB（负值单位是 KiB，-2000 才是默认的 2MB）。
+//     默认 2MB 对动辄上 GB 的库等于没有缓存：每次查询都要重新向操作系统要页、
+//     反序列化 B 树节点。64MB 能覆盖热点索引与近期日志页，扫描类查询受益最明显。
+//     ⛔ 不要设成 -1048576 这类"越大越好"的值：单连接吃 1GB 内存，
+//     现场机（4GB 内存的工控机）会被直接拖进 swap。
+//   - mmap_size(268435456)：把库的只读映射到进程地址空间，省掉 read() 的拷贝。
+//     256MB 覆盖不了整个 GB 级库，但足以覆盖最热的那部分页。
+//   - journal_size_limit(67108864)：WAL 在 checkpoint 之后截断到 64MB。
+//     ⛔ 默认值 -1 = 不截断：一次大批量删除会把 -wal 撑到与库同量级，
+//     之后即使 checkpoint 过也一直占着磁盘（现场排查磁盘占用时极易被忽略）。
+//   - auto_vacuum(2)：⛔⛔ 这一项**必须排在最前面**，且只对**新建的空库**生效。
+//     SQLite 把 auto-vacuum 模式记在文件头（第 1 页偏移 52），只有在建库那一刻
+//     设置才会写进去；库一旦有数据，再执行这个 PRAGMA 就是空操作（必须整库 VACUUM 才行）。
+//     所以它必须排在 journal_mode 之前 —— journal_mode 会先把文件头写出来，
+//     一旦文件非空，这条就白写了。
+//     值 2 = INCREMENTAL：删行只把页记进 freelist，由每日「数据库空间回收」
+//     任务分块调用 PRAGMA incremental_vacuum 逐步缩小文件。
+//     ⛔ 不开 FULL(1)：FULL 每次提交都搬页，写放大明显，本项目是持续高频写入。
+//     ⛔ 光开这个不会自动缩文件：不调 incremental_vacuum 文件永不缩小。
+var sqlitePragmas = []string{
+	"_pragma=auto_vacuum(2)",
+	"_pragma=busy_timeout(5000)",
+	"_pragma=journal_mode(WAL)",
+	"_pragma=cache_size(-65536)",
+	"_pragma=mmap_size(268435456)",
+	"_pragma=journal_size_limit(67108864)",
+	"_pragma=foreign_keys(1)",
+	"_pragma=synchronous(NORMAL)",
+}
+
+func sqliteDSN(dataSource string) string {
+	sep := "?"
+	if strings.Contains(dataSource, "?") {
+		sep = "&"
+	}
+	return dataSource + sep + strings.Join(sqlitePragmas, "&") + "&_txlock=immediate"
+}
+
+// resolveSQLitePath 把配置里的路径解析成绝对路径，并确保父目录存在。
+//
+// ⛔ 相对路径是这里最容易出事的地方：systemd / 双击启动时 cwd 未必是安装目录，
+// 一个相对的 "./data/uvp.db" 会静默落到别处，表现为「装完能跑、重启后数据没了」。
+// 所以统一按 app.BasePath 解析。
+func resolveSQLitePath(configured string) (string, error) {
+	path := strings.TrimSpace(configured)
+	if path == "" {
+		return "", errors.New("SQLite 数据库路径未配置（gormv2.sqlite.write.database）")
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(app.BasePath, path)
+	}
+	path = filepath.Clean(path)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", fmt.Errorf("创建 SQLite 数据目录失败: %w", err)
+	}
+	return path, nil
+}
+
+func resolveExistingSQLitePath(configured string) (string, error) {
+	path := strings.TrimSpace(configured)
+	if path == "" {
+		return "", errors.New("SQLite 数据库路径未配置（gormv2.sqlite.write.database）")
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(app.BasePath, path)
+	}
+	path = filepath.Clean(path)
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("SQLite 只读预检数据库不可用: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", errors.New("SQLite 只读预检数据库不是常规文件")
+	}
+	return path, nil
+}
+
+func sqliteReadOnlyDSN(path string) string {
+	uri := url.URL{Scheme: "file", Path: filepath.ToSlash(path)}
+	query := url.Values{}
+	query.Set("mode", "ro")
+	query.Add("_pragma", "busy_timeout(5000)")
+	query.Add("_pragma", "query_only(1)")
+	uri.RawQuery = query.Encode()
+	return uri.String()
+}
+
+// GetOneSqliteClient 返回 SQLite 连接。
+//
+// 与 GetSqlDriver 的差别全部由 SQLite 特性决定，不是风格选择：
+//  1. **PrepareStmt 关闭**：SQLite 不支持预编译语句复用。开着既慢，
+//     又会因语句缓存把写锁持有时间拉长，表现成随机的 "database is locked"。
+//  2. **不接读写分离**：dbresolver 的 Replica 需要第二个独立连接源，
+//     SQLite 是本地单文件、没有副本可言。
+//  3. **连接池上限 1**：SQLite 同一时刻只允许一个写者。给它开多连接池，
+//     表现是随机 SQLITE_BUSY，且极难定位。
+//  4. **不设 ConnMaxLifetime**：本地文件句柄应常驻，定期丢弃会让 WAL 反复 checkpoint。
+func GetOneSqliteClient() (*gorm.DB, error) {
+	const sqliteDialect = consts.DbTypeSqlite
+
+	configured := app.ConfigYml.GetString("gormv2." + sqliteDialect + ".write.database")
+	path, err := resolveSQLitePath(configured)
+	if err != nil {
+		app.Log(context.Background()).Named("db").Error("SQLite 路径解析失败",
+			zap.String("event", "db.dialector.init_failed"),
+			zap.String("dialect", sqliteDialect),
+			zap.String("configured", configured), zap.Error(err))
+		return nil, err
+	}
+
+	// 可写性必须在建连接**之前**验证：gorm.Open 只要驱动注册成功就不会报错，
+	// 「目录只读 / 磁盘满 / 路径不存在」会推迟到第一条业务查询才炸，
+	// 那时日志里只有 "no such table"，完全看不出根因是写不了文件。
+	if err := probeSQLiteWritable(path); err != nil {
+		app.Log(context.Background()).Named("db").Error("SQLite 路径不可写",
+			zap.String("event", "db.dialector.init_failed"),
+			zap.String("dialect", sqliteDialect),
+			zap.String("path", path), zap.Error(err))
+		return nil, err
+	}
+
+	gormDb, err := gorm.Open(sqlite.Open(sqliteDSN(path)), &gorm.Config{
+		PrepareStmt:            false,
+		SkipDefaultTransaction: true,
+		Logger:                 redefineLog(sqliteDialect),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	rawDb, err := gormDb.DB()
+	if err != nil {
+		return nil, err
+	}
+	rawDb.SetMaxOpenConns(1)
+	rawDb.SetMaxIdleConns(1)
+
+	if err := installLogContext(gormDb); err != nil {
+		return nil, err
+	}
+
+	// 与其它库保持一致的 GORM 回调。⛔ 不要因为"本地库简单"就跳过：
+	// 跳过会导致软删字段行为与其他库不一致，而这种不一致只在客户切库时才暴露。
+	_ = gormDb.Callback().Query().Before("gorm:query").Register("disable_raise_record_not_found", MaskNotDataError)
+	_ = gormDb.Callback().Create().Before("gorm:before_create").Register("CreateBeforeHook", CreateBeforeHook)
+	_ = gormDb.Callback().Update().Before("gorm:before_update").Register("UpdateBeforeHook", UpdateBeforeHook)
+	_ = gormDb.Callback().Delete().Before("gorm:before_delete").Register("DeleteBeforeHook", DeleteBeforeHook)
+
+	return gormDb, nil
+}
+
+// GetOneSqliteReadOnlyClient opens an existing SQLite database for an
+// upgrade preflight. It deliberately does not create parent directories,
+// probe writability, or apply journal_mode changes.
+func GetOneSqliteReadOnlyClient() (*gorm.DB, error) {
+	const sqliteDialect = consts.DbTypeSqlite
+
+	path, err := resolveExistingSQLitePath(app.ConfigYml.GetString("gormv2." + sqliteDialect + ".write.database"))
+	if err != nil {
+		return nil, err
+	}
+	gormDb, err := gorm.Open(sqlite.Open(sqliteReadOnlyDSN(path)), &gorm.Config{
+		PrepareStmt:            false,
+		SkipDefaultTransaction: true,
+		Logger:                 redefineLog(sqliteDialect),
+	})
+	if err != nil {
+		return nil, err
+	}
+	rawDb, err := gormDb.DB()
+	if err != nil {
+		return nil, err
+	}
+	rawDb.SetMaxOpenConns(1)
+	rawDb.SetMaxIdleConns(1)
+	return gormDb, nil
+}
+
+// probeSQLiteWritable 直接对目标文件做一次真实的追加写。
+//
+// 为什么不用 os.Stat / os.OpenFile 探针：那只能证明文件存在，不证明 SQLite 能写。
+// 真正会咬人的是「文件存在但所在目录只读」（数据文件改不了、WAL 建不了），
+// 只有对同一路径实际动一次手才测得出来。
+func probeSQLiteWritable(path string) error {
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
+	if err != nil {
+		return fmt.Errorf("SQLite 数据库文件不可写: %w", err)
+	}
+	return f.Close()
+}

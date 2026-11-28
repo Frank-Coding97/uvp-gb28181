@@ -1,4 +1,6 @@
-Copyright (c) 2025 云南奇讯科技
+MIT License
+
+Copyright (c) 2026 Frank
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -17,3 +19,9 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+本目录包含基于 ginfast-ui（MIT License）二次开发的代码。该部分代码的版权声明
+与许可声明按 MIT 条款保留在仓库根目录 THIRD-PARTY-NOTICES.md 中，随本软件
+一同分发。

@@ -1,13 +1,16 @@
 package casbinhelper
 
 import (
+	"context"
 	"fmt"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/utils/common"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/utils/common"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
 
 	"github.com/casbin/casbin/v2"
 	"github.com/casbin/casbin/v2/model"
@@ -28,8 +31,17 @@ const (
 // CasbinService Casbin服务
 // 实现 app.CasbinInterf 接口
 type CasbinHelper struct {
-	enforcer *casbin.Enforcer
-	stopChan chan struct{} // 用于停止定期重载goroutine
+	enforcer          *casbin.Enforcer
+	policyUnavailable error
+	policyMu          sync.RWMutex
+	reloadMu          sync.Mutex
+	reloadState       *policyReloadState
+}
+
+type policyReloadState struct {
+	stop     chan struct{}
+	done     chan struct{}
+	stopOnce sync.Once
 }
 
 // 编译时检查是否实现了接口
@@ -74,19 +86,28 @@ func (s *CasbinHelper) InitCasbin(db *gorm.DB, config string) error {
 	}
 
 	// 创建Casbin执行器，使用数据库适配器
-	s.enforcer, err = casbin.NewEnforcer(m, adapter)
+	enforcer, err := casbin.NewEnforcer(m, adapter)
 	if err != nil {
 		return fmt.Errorf("failed to create enforcer: %v", err)
 	}
 
 	// 为角色关系(g)启用域模式匹配
-	s.enforcer.AddNamedDomainMatchingFunc("g", "KeyMatch2", util.KeyMatch2)
+	enforcer.AddNamedDomainMatchingFunc("g", "KeyMatch2", util.KeyMatch2)
 
 	// 加载策略
-	err = s.enforcer.LoadPolicy()
+	err = enforcer.LoadPolicy()
 	if err != nil {
 		return fmt.Errorf("failed to load policy: %v", err)
 	}
+
+	// Re-initialization is supported: finish the previous reload goroutine
+	// before replacing the enforcer it captured. A failed new initialization
+	// therefore leaves the existing helper running unchanged.
+	s.StopAutoLoadPolicy()
+	s.policyMu.Lock()
+	s.enforcer = enforcer
+	s.policyUnavailable = nil
+	s.policyMu.Unlock()
 
 	// 启动定期重载策略的goroutine
 	s.startAutoLoadPolicy()
@@ -102,7 +123,7 @@ func (s *CasbinHelper) PrefixRole(roleID uint) string {
 	return fmt.Sprintf("%s%d", RolePrefix, roleID)
 }
 
-// PrefixDomain 为租户ID添加域前缀
+// PrefixDomain 为域ID添加域前缀
 func (s *CasbinHelper) PrefixDomain(domainID uint) string {
 	return fmt.Sprintf("%s%d", DomainPrefix, domainID)
 }
@@ -116,6 +137,11 @@ func (s *CasbinHelper) HandlerDomain(domain []string) []string {
 
 // Enforce 检查权限
 func (s *CasbinHelper) Enforce(sub, obj, act string, domain ...string) (bool, error) {
+	s.policyMu.RLock()
+	defer s.policyMu.RUnlock()
+	if s.policyUnavailable != nil {
+		return false, s.policyUnavailable
+	}
 	if s.enforcer == nil {
 		return false, fmt.Errorf("casbin enforcer not initialized")
 	}
@@ -124,14 +150,23 @@ func (s *CasbinHelper) Enforce(sub, obj, act string, domain ...string) (bool, er
 	return s.enforcer.Enforce(sub, obj, act, domains[0])
 }
 
-// GetEnforcer 获取Casbin执行器
+// GetEnforcer 获取Casbin执行器。返回值仅用于兼容；调用者不能绕过 helper
+// 并发读写执行器，应使用 helper 的权限、策略和重载方法。
 func (s *CasbinHelper) GetEnforcer() *casbin.Enforcer {
+	s.policyMu.RLock()
+	defer s.policyMu.RUnlock()
 	return s.enforcer
 }
 
 // CasbinMiddleware Casbin权限中间件
 func (s *CasbinHelper) CasbinMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		requestContext := context.Background()
+		if c.Request != nil {
+			requestContext = c.Request.Context()
+		}
+		logger := app.Log(requestContext).Named("casbin")
+
 		// 从上下文中获取用户ID
 		userID := common.GetCurrentUserID(c)
 		if userID == 0 {
@@ -152,40 +187,43 @@ func (s *CasbinHelper) CasbinMiddleware() gin.HandlerFunc {
 
 		// 获取请求路径和方法
 		path := c.Request.URL.Path
+		route := c.FullPath()
 		method := c.Request.Method
 
 		// 使用带前缀的用户ID进行权限检查
 		userSubject := s.PrefixUser(userID)
-		// 获取租户ID（如果存在）
-		var domain string
-		claims := common.GetClaims(c)
-		if claims != nil && claims.TenantID > 0 {
-			domain = s.PrefixDomain(claims.TenantID)
-		}
+		domain := ""
 		var ok bool
 		var err error
 
-		// 带租户的权限检查
-		app.ZapLog.Info("Permission check with tenant",
-			zap.String("uid", userSubject),
-			zap.String("domain", domain),
-			zap.String("path", path),
+		logger.Info("Permission check",
+			zap.String("event", "casbin.permission.check"),
+			zap.String("user_id", userSubject),
+			zap.String("route", route),
 			zap.String("method", method))
-		// domain为空时，代表全局权限
 		ok, err = s.Enforce(userSubject, path, method, domain)
 
 		if err != nil {
-			app.ZapLog.Error("Permission check error", zap.Error(err))
+			logger.Warn("Permission check error",
+				zap.String("event", "casbin.permission.check_failed"),
+				zap.String("user_id", userSubject), zap.String("route", route),
+				zap.String("method", method),
+				logging.Error(err))
 			// 500 服务器内部错误
 			c.JSON(http.StatusInternalServerError, gin.H{"message": "权限检查时出现错误"})
 			c.Abort()
 			return
 		}
 
+		// INFO 而非 WARN：授权拒绝是**系统按设计做对了**——用户没有这个权限，返回 403，
+		// 与"这个路由不存在"一样不需要运维动作。判据②问"看到它要做什么"，没有人会去
+		// "修"一个用户缺权限（那要走角色配置，走的是另一条日志）。
+		// 权限**检查本身出错**（上一支，casbin 返回 err）才是 WARN，两者别混。
 		if !ok {
-			app.ZapLog.Warn("Permission denied",
-				zap.String("uid", userSubject),
-				zap.String("path", path),
+			logger.Info("Permission denied",
+				zap.String("event", "casbin.permission.denied"),
+				zap.String("user_id", userSubject),
+				zap.String("route", route),
 				zap.String("method", method))
 			// 403 禁止访问
 			c.JSON(http.StatusForbidden, gin.H{"message": "您没有权限访问此资源"})
@@ -199,6 +237,8 @@ func (s *CasbinHelper) CasbinMiddleware() gin.HandlerFunc {
 
 // AddRolesForUserByID 为用户ID添加多个角色（带前缀）
 func (s *CasbinHelper) AddRolesForUserByID(userID uint, roleIDs []uint, domain ...string) error {
+	s.policyMu.Lock()
+	defer s.policyMu.Unlock()
 	if s.enforcer == nil {
 		return fmt.Errorf("casbin enforcer not initialized")
 	}
@@ -225,6 +265,8 @@ func (s *CasbinHelper) AddRolesForUserByID(userID uint, roleIDs []uint, domain .
 
 // DeleteRolesForUserByID 删除用户ID的多个角色（带前缀）
 func (s *CasbinHelper) DeleteRolesForUserByID(userID uint, roleIDs []uint, domain ...string) error {
+	s.policyMu.Lock()
+	defer s.policyMu.Unlock()
 	if s.enforcer == nil {
 		return fmt.Errorf("casbin enforcer not initialized")
 	}
@@ -255,6 +297,8 @@ func (s *CasbinHelper) DeleteRolesForUserByID(userID uint, roleIDs []uint, domai
 
 // AddRoleInheritance 添加角色继承关系（子角色继承父角色）
 func (s *CasbinHelper) AddRoleInheritance(childRoleID, parentRoleID uint, domain ...string) error {
+	s.policyMu.Lock()
+	defer s.policyMu.Unlock()
 	if s.enforcer == nil {
 		return fmt.Errorf("casbin enforcer not initialized")
 	}
@@ -271,6 +315,8 @@ func (s *CasbinHelper) AddRoleInheritance(childRoleID, parentRoleID uint, domain
 
 // DeleteRoleInheritance 删除角色继承关系
 func (s *CasbinHelper) DeleteRoleInheritance(childRoleID, parentRoleID uint, domain ...string) error {
+	s.policyMu.Lock()
+	defer s.policyMu.Unlock()
 	if s.enforcer == nil {
 		return fmt.Errorf("casbin enforcer not initialized")
 	}
@@ -295,6 +341,8 @@ func (s *CasbinHelper) DeleteRoleInheritance(childRoleID, parentRoleID uint, dom
 
 // AddPolicyForRole 为角色添加权限策略
 func (s *CasbinHelper) AddPolicyForRole(roleID uint, obj, act string, domain ...string) error {
+	s.policyMu.Lock()
+	defer s.policyMu.Unlock()
 	if s.enforcer == nil {
 		return fmt.Errorf("casbin enforcer not initialized")
 	}
@@ -307,6 +355,8 @@ func (s *CasbinHelper) AddPolicyForRole(roleID uint, obj, act string, domain ...
 
 // AddPoliciesForRole 为角色批量添加权限策略
 func (s *CasbinHelper) AddPoliciesForRole(roleID uint, policies [][]string, domain ...string) error {
+	s.policyMu.Lock()
+	defer s.policyMu.Unlock()
 	if s.enforcer == nil {
 		return fmt.Errorf("casbin enforcer not initialized")
 	}
@@ -361,6 +411,8 @@ func (s *CasbinHelper) AddPoliciesForRole(roleID uint, policies [][]string, doma
 
 // RemovePolicyForRole 删除角色的权限策略
 func (s *CasbinHelper) RemovePolicyForRole(roleID uint, obj, act string, domain ...string) error {
+	s.policyMu.Lock()
+	defer s.policyMu.Unlock()
 	if s.enforcer == nil {
 		return fmt.Errorf("casbin enforcer not initialized")
 	}
@@ -373,6 +425,8 @@ func (s *CasbinHelper) RemovePolicyForRole(roleID uint, obj, act string, domain 
 
 // RemoveAllPoliciesForRole 删除角色的所有权限策略
 func (s *CasbinHelper) RemoveAllPoliciesForRole(roleID uint, domain ...string) error {
+	s.policyMu.Lock()
+	defer s.policyMu.Unlock()
 	if s.enforcer == nil {
 		return fmt.Errorf("casbin enforcer not initialized")
 	}
@@ -395,6 +449,11 @@ func (s *CasbinHelper) RemoveAllPoliciesForRole(roleID uint, domain ...string) e
 
 // GetRolesForUserByID 获取用户ID的所有角色（去除前缀，返回角色ID）
 func (s *CasbinHelper) GetRolesForUserByID(userID uint, domain ...string) ([]uint, error) {
+	s.policyMu.RLock()
+	defer s.policyMu.RUnlock()
+	if s.policyUnavailable != nil {
+		return nil, s.policyUnavailable
+	}
 	if s.enforcer == nil {
 		return nil, fmt.Errorf("casbin enforcer not initialized")
 	}
@@ -419,6 +478,11 @@ func (s *CasbinHelper) GetRolesForUserByID(userID uint, domain ...string) ([]uin
 
 // GetUsersForRole 获取拥有指定角色的所有用户ID（去除前缀，返回用户ID）
 func (s *CasbinHelper) GetUsersForRole(roleID uint, domain ...string) ([]uint, error) {
+	s.policyMu.RLock()
+	defer s.policyMu.RUnlock()
+	if s.policyUnavailable != nil {
+		return nil, s.policyUnavailable
+	}
 	if s.enforcer == nil {
 		return nil, fmt.Errorf("casbin enforcer not initialized")
 	}
@@ -443,6 +507,11 @@ func (s *CasbinHelper) GetUsersForRole(roleID uint, domain ...string) ([]uint, e
 
 // HasRoleForUser 检查用户是否拥有指定角色
 func (s *CasbinHelper) HasRoleForUser(userID uint, roleID uint, domain ...string) (bool, error) {
+	s.policyMu.RLock()
+	defer s.policyMu.RUnlock()
+	if s.policyUnavailable != nil {
+		return false, s.policyUnavailable
+	}
 	if s.enforcer == nil {
 		return false, fmt.Errorf("casbin enforcer not initialized")
 	}
@@ -453,6 +522,12 @@ func (s *CasbinHelper) HasRoleForUser(userID uint, roleID uint, domain ...string
 
 // GetPermissionsForUser 获取用户的所有权限
 func (s *CasbinHelper) GetPermissionsForUser(userID uint, domain ...string) ([][]string, error) {
+	// Casbin lazily populates its field-index map in this query.
+	s.policyMu.Lock()
+	defer s.policyMu.Unlock()
+	if s.policyUnavailable != nil {
+		return nil, s.policyUnavailable
+	}
 	if s.enforcer == nil {
 		return nil, fmt.Errorf("casbin enforcer not initialized")
 	}
@@ -460,47 +535,155 @@ func (s *CasbinHelper) GetPermissionsForUser(userID uint, domain ...string) ([][
 	return s.enforcer.GetPermissionsForUser(userSubject, s.HandlerDomain(domain)...)
 }
 
-// startAutoLoadPolicy 启动定期重载策略的goroutine
+// ReloadPolicy replaces the local model from persisted policy without writing
+// any policy back to the adapter. It is safe alongside helper reads and writes.
+func (s *CasbinHelper) ReloadPolicy() error {
+	s.policyMu.Lock()
+	defer s.policyMu.Unlock()
+	if s.enforcer == nil {
+		return fmt.Errorf("casbin enforcer not initialized")
+	}
+	if err := s.enforcer.LoadPolicy(); err != nil {
+		// LoadPolicy retains the old model on failure. It can contain revoked
+		// authority, so readers must wait for a successful authoritative reload.
+		s.policyUnavailable = fmt.Errorf("casbin policy unavailable: %w", err)
+		return err
+	}
+	s.policyUnavailable = nil
+	return nil
+}
+
+// startAutoLoadPolicy 从配置读取间隔并启动定期重载策略的goroutine。
 func (s *CasbinHelper) startAutoLoadPolicy() {
-	// 从配置文件读取自动重载间隔
-	autoLoadSeconds := app.ConfigYml.GetInt("casbin.autoloadpolicyseconds")
-	if autoLoadSeconds <= 0 {
-		app.ZapLog.Info("AutoLoadPolicySeconds not configured or invalid, skip auto reload policy")
+	autoLoadSeconds := 0
+	if app.ConfigYml != nil {
+		autoLoadSeconds = app.ConfigYml.GetInt("casbin.autoloadpolicyseconds")
+	}
+	s.startAutoLoadPolicyWithInterval(time.Duration(autoLoadSeconds) * time.Second)
+}
+
+// startAutoLoadPolicyWithInterval is kept separate so lifecycle tests can use
+// a short interval without loading the application configuration or database.
+func (s *CasbinHelper) startAutoLoadPolicyWithInterval(interval time.Duration) {
+	logger := app.Log(context.Background()).Named("casbin")
+	if interval <= 0 {
+		_ = s.CloseContext(context.Background())
+		logger.Info("AutoLoadPolicySeconds not configured or invalid, skip auto reload policy",
+			zap.String("event", "casbin.policy_reload.disabled"))
 		return
 	}
 
-	// 初始化停止通道
-	s.stopChan = make(chan struct{})
+	state := &policyReloadState{
+		stop: make(chan struct{}),
+		done: make(chan struct{}),
+	}
+	s.reloadMu.Lock()
+	previous := s.reloadState
+	s.reloadState = state
+	s.reloadMu.Unlock()
 
-	go func() {
-		ticker := time.NewTicker(time.Duration(autoLoadSeconds) * time.Second)
+	if previous != nil {
+		previous.stopOnce.Do(func() { close(previous.stop) })
+		<-previous.done
+	}
+
+	go func(reload *policyReloadState) {
+		defer close(reload.done)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
-		app.ZapLog.Info("Started auto reload policy goroutine",
-			zap.Int("interval_seconds", autoLoadSeconds))
+		logger.Info("Started auto reload policy goroutine",
+			zap.String("event", "casbin.policy_reload.started"),
+			zap.Int("interval_seconds", int(interval/time.Second)))
 
 		for {
 			select {
 			case <-ticker.C:
-				if s.enforcer != nil {
-					if err := s.enforcer.LoadPolicy(); err != nil {
-						app.ZapLog.Error("Failed to auto reload policy", zap.Error(err))
-					} else {
-						app.ZapLog.Debug("Auto reload policy successfully")
-					}
+				select {
+				case <-reload.stop:
+					logger.Info("Auto reload policy goroutine stopped",
+						zap.String("event", "casbin.policy_reload.stopped"))
+					return
+				default:
 				}
-			case <-s.stopChan:
-				app.ZapLog.Info("Auto reload policy goroutine stopped")
+				if s.GetEnforcer() == nil {
+					continue
+				}
+				if err := s.ReloadPolicy(); err != nil {
+					logger.Warn("Failed to auto reload policy",
+						zap.String("event", "casbin.policy_reload.failed"),
+						logging.Error(err))
+				} else {
+					logger.Debug("Auto reload policy successfully",
+						zap.String("event", "casbin.policy_reload.succeeded"))
+				}
+			case <-reload.stop:
+				logger.Info("Auto reload policy goroutine stopped",
+					zap.String("event", "casbin.policy_reload.stopped"))
 				return
 			}
 		}
-	}()
+	}(state)
 }
 
-// StopAutoLoadPolicy 停止定期重载策略的goroutine
-func (s *CasbinHelper) StopAutoLoadPolicy() {
-	if s.stopChan != nil {
-		close(s.stopChan)
-		s.stopChan = nil
+// CloseContext stops future policy reloads and waits for the current reload and
+// its final lifecycle log. Every caller waits on the same state.done channel.
+func (s *CasbinHelper) CloseContext(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
 	}
+
+	s.reloadMu.Lock()
+	state := s.reloadState
+	if state != nil {
+		state.stopOnce.Do(func() { close(state.stop) })
+	}
+	s.reloadMu.Unlock()
+	if state == nil {
+		return nil
+	}
+
+	// Prefer an already completed stop when both channels are ready. A plain
+	// two-way select is deliberately random in that case and can report the
+	// caller's deadline after the reload has already finished.
+	select {
+	case <-state.done:
+		s.reloadMu.Lock()
+		if s.reloadState == state {
+			s.reloadState = nil
+		}
+		s.reloadMu.Unlock()
+		return nil
+	default:
+	}
+
+	select {
+	case <-state.done:
+		s.reloadMu.Lock()
+		if s.reloadState == state {
+			s.reloadState = nil
+		}
+		s.reloadMu.Unlock()
+		return nil
+	case <-ctx.Done():
+		// Completion may have raced with context cancellation between the
+		// first check and this select. Check once more before returning the
+		// timeout so a completed stop is never reported as incomplete.
+		select {
+		case <-state.done:
+			s.reloadMu.Lock()
+			if s.reloadState == state {
+				s.reloadState = nil
+			}
+			s.reloadMu.Unlock()
+			return nil
+		default:
+		}
+		return ctx.Err()
+	}
+}
+
+// StopAutoLoadPolicy 停止定期重载策略的goroutine并等待其完成。
+func (s *CasbinHelper) StopAutoLoadPolicy() {
+	_ = s.CloseContext(context.Background())
 }

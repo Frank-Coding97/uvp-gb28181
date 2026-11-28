@@ -60,6 +60,6 @@ type CasbinInterf interface {
 	// StopAutoLoadPolicy 停止定期重载策略
 	StopAutoLoadPolicy()
 
-	// PrefixDomain
-	PrefixDomain(tenantID uint) string
+	// PrefixDomain 为域ID添加统一前缀
+	PrefixDomain(domainID uint) string
 }

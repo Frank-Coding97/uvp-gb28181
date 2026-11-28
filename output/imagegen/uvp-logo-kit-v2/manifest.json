@@ -1,0 +1,20 @@
+{
+  "generator": "imagegen skill bundled CLI / gpt-image-2",
+  "reference_images": [
+    "uvp-gb28181-sim/androidApp/src/main/res/mipmap-xxxhdpi/ic_launcher.png",
+    "uvp-gb28181-sim-desktop/apps/desktop/src-tauri/icons/icon.png"
+  ],
+  "prompt_file": "prompt-master.txt",
+  "source_file": "uvp-master-blue.png",
+  "palette": {
+    "blue": "#1687F8",
+    "ink": "#10233F",
+    "white": "#FFFFFF"
+  },
+  "exports": "Derived from one generated master; flat color normalization, alpha extraction, resizing and text composition.",
+  "source_size": [
+    1254,
+    1254
+  ],
+  "transparency": "Locally extracted from blue background; not native model transparency."
+}

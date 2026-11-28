@@ -1,0 +1,28 @@
+[Unit]
+Description=UVP GB28181 SIP firewall agent
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+RuntimeDirectory=uvp
+RuntimeDirectoryMode=0750
+UMask=0007
+Environment=UVP_SIP_PORT=56002
+Environment=UVP_ALLOWLIST=127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+EnvironmentFile=-/etc/default/uvp-firewall-agent
+ExecStart=/opt/uvp-gb28181/agent-current/uvp-firewall-agent --socket /run/uvp/firewall-agent.sock --sip-port ${UVP_SIP_PORT} --allowlist ${UVP_ALLOWLIST}
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

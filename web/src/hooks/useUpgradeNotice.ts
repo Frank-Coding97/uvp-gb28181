@@ -1,0 +1,196 @@
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import {
+  clearIgnoredServiceUpgradeNotice,
+  getServiceUpgradeNotice,
+  ignoreServiceUpgradeNotice,
+  setServiceUpgradeAutoCheck,
+  type UpgradeNotice
+} from "@/api/service-upgrade";
+import { APP_VERSION } from "@/config/version";
+import { hasPermission } from "@/hooks/usePermission";
+
+/**
+ * 侧边栏「发现新版本」徽标的数据源。
+ *
+ * ⛔ 这里**只读缓存**：真正查官方源的是升级助手的后台任务（每 15 分钟一次）。
+ *    在布局层发检查请求会让每个用户每次开页都打一次官方源，也会让离线部署
+ *    每次开页都报一次错。
+ *
+ * 页面开着很久时靠 2 分钟轮询把后台的新结果取回来；拿不到数据就当作
+ * 「没有新版本」，侧边栏什么都不画（版本号在服务升级页首屏）。
+ */
+const NOTICE_REFRESH_INTERVAL = 2 * 60 * 1000;
+
+/**
+ * 跨组件的「现在就去重取一次」信号。
+ *
+ * 升级落地那一刻当前版本就变了，可徽标是 2 分钟轮询一次才更新 —— 于是会出现
+ * 「升级成功」和「菜单还挂着新版本」同屏。升级页看到任务成功、且正在跑的构建
+ * 就是目标构建时拨一下这个计数，挂在布局上的实例立刻重取，不必等轮询。
+ *
+ * ⛔ 只是一个自增计数，不携带数据：取数口径仍然只有 `refresh()` 一处。
+ */
+const noticeEpoch = ref(0);
+
+export function invalidateUpgradeNotice() {
+  noticeEpoch.value += 1;
+}
+
+/**
+ * 「落地就自动查一次」的一次性信号（侧边栏「前往升级」→ 升级页）。
+ *
+ * ⛔ 这个意图**不能靠地址栏参数**传（曾经的 `?check=1`）：
+ *    布局层拿整条地址当页面组件的 key，查完把参数抹掉 = key 变了 =
+ *    整个升级页被重建，查到的结果跟着旧实例一起被丢弃 —— 用户看到的就是
+ *    「点『前往升级』进来，还得再手点一次检查」。单元测试里路由器是空桩，
+ *    所以那条用例当时一直是绿的。
+ *
+ * 信号只被取走一次；带着它跳转失败（被拦去登录、没有权限）时过了一会儿就作废，
+ * 免得下次从菜单正常进页面时莫名其妙查一次。
+ */
+const AUTO_CHECK_INTENT_TTL = 15 * 1000;
+const autoCheckRequestedAt = ref(0);
+
+export function requestUpgradeAutoCheck() {
+  autoCheckRequestedAt.value = Date.now();
+}
+
+/** 取走信号：有、且没过期才算数；取过即清。 */
+export function consumeUpgradeAutoCheck() {
+  const requestedAt = autoCheckRequestedAt.value;
+  if (!requestedAt) return false;
+  autoCheckRequestedAt.value = 0;
+  return Date.now() - requestedAt <= AUTO_CHECK_INTENT_TTL;
+}
+
+/**
+ * 页面已经开着时又点了「前往升级」（同页跳转不会重建组件）：靠这个监听补上。
+ * 返回的句柄由调用方在卸载时调用；清空信号那一次不算，所以只有「来信号」才触发。
+ */
+export function onUpgradeAutoCheck(handler: () => void) {
+  return watch(autoCheckRequestedAt, requestedAt => {
+    if (requestedAt) handler();
+  });
+}
+
+/** 能进服务升级页的人就看到提示；接口按这条权限放行，否则会 403。 */
+const NOTICE_PERMISSION = "system:upgrade:read";
+/** 「忽略此版本」是写操作，只有管理权限才能点。 */
+const IGNORE_PERMISSION = "system:upgrade:manage";
+/** 定时检查开关同样是管理动作：改的是整台机器的行为，不是个人偏好。 */
+const AUTO_CHECK_PERMISSION = "system:upgrade:manage";
+
+export function useUpgradeNotice() {
+  const notice = ref<UpgradeNotice>();
+  const refreshing = ref(false);
+  const ignoring = ref(false);
+  let timer: ReturnType<typeof setInterval> | undefined;
+
+  const canRead = computed(() => hasPermission(NOTICE_PERMISSION));
+  const canIgnore = computed(() => hasPermission(IGNORE_PERMISSION));
+  const currentVersion = computed(() => notice.value?.currentVersion || APP_VERSION);
+  const latestVersion = computed(() => notice.value?.latestVersion || "");
+  /**
+   * 徽标只在「确实有更新、没被忽略、这台机器能连官方源、且有查看权限」四条同时成立时出现。
+   * 忽略只作用于当前这一个版本：出现更新版本时后端返回的 ignored 会自动变 false。
+   */
+  const pending = computed(
+    () => canRead.value && Boolean(notice.value?.checkEnabled && notice.value?.hasUpdate && !notice.value?.ignored)
+  );
+  const checkedAt = computed(() => notice.value?.checkedAt || "");
+  /**
+   * 定时检查默认开启（后端缺文件即视为开），所以只有明确的 false 才算关闭。
+   * 没有官方源（离线部署 / 助手未运行）时开关没有意义，直接置灰。
+   */
+  const autoCheckEnabled = computed(() => notice.value?.autoCheck !== false);
+  const canSetAutoCheck = computed(
+    () => canRead.value && Boolean(notice.value?.checkEnabled) && hasPermission(AUTO_CHECK_PERMISSION)
+  );
+  const settingAutoCheck = ref(false);
+
+  const refresh = async () => {
+    if (!hasPermission(NOTICE_PERMISSION)) return;
+    refreshing.value = true;
+    try {
+      const response = await getServiceUpgradeNotice();
+      notice.value = response.data;
+    } catch {
+      // 助手未启动、离线部署、权限刚被回收：都按「没有更新信息」处理，
+      // 徽标退回只显示版本号，不打扰用户。
+    } finally {
+      refreshing.value = false;
+    }
+  };
+
+  const ignoreCurrentVersion = async () => {
+    const version = latestVersion.value;
+    if (!version || ignoring.value) return;
+    ignoring.value = true;
+    try {
+      await ignoreServiceUpgradeNotice(version);
+      await refresh();
+    } finally {
+      ignoring.value = false;
+    }
+  };
+
+  const restoreIgnoredVersion = async () => {
+    if (ignoring.value) return;
+    ignoring.value = true;
+    try {
+      await clearIgnoredServiceUpgradeNotice();
+      await refresh();
+    } finally {
+      ignoring.value = false;
+    }
+  };
+
+  /**
+   * 切换定时检查。成功返回 true，失败返回 false 由调用方提示——
+   * 这个 hook 同时服务侧边栏徽标，那里不该弹 toast。
+   */
+  const setAutoCheck = async (enabled: boolean) => {
+    if (settingAutoCheck.value) return false;
+    settingAutoCheck.value = true;
+    try {
+      await setServiceUpgradeAutoCheck(enabled);
+      await refresh();
+      return true;
+    } catch {
+      return false;
+    } finally {
+      settingAutoCheck.value = false;
+    }
+  };
+
+  onMounted(() => {
+    void refresh();
+    timer = setInterval(refresh, NOTICE_REFRESH_INTERVAL);
+  });
+  // 别的页面宣布「版本变了」：立刻重取，不等下一次轮询。
+  watch(noticeEpoch, () => {
+    void refresh();
+  });
+  onUnmounted(() => {
+    if (timer) clearInterval(timer);
+  });
+
+  return {
+    notice,
+    canRead,
+    canIgnore,
+    currentVersion,
+    latestVersion,
+    checkedAt,
+    pending,
+    refreshing,
+    ignoring,
+    refresh,
+    ignoreCurrentVersion,
+    restoreIgnoredVersion,
+    autoCheckEnabled,
+    canSetAutoCheck,
+    settingAutoCheck,
+    setAutoCheck
+  };
+}

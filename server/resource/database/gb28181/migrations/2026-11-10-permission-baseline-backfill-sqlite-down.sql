@@ -1,0 +1,16 @@
+-- 回滚：本迁移**故意不做删除**（no-op）。
+--
+-- 为什么不删：up 是 NOT EXISTS 型的「补齐基线」迁移 —— 那 5 个接口
+-- （map/center GET+PUT、map/channel-tree、map/trajectory、sysJobResults/clear）
+-- 与 32 条 casbin 策略本来就是 baseline/seeds 里的内容，全新安装库全都自带，
+-- 只有 2026-11-10 之前升级上来的老库缺。up 只补「恰好缺的那几条」，
+-- 但 down 无法知道当时补了哪几条：sys_api / sys_casbin_rule 都没有能区分
+-- 「基线导入」与「本次插入」的标记列，created_at 一律是执行时的 CURRENT_TIMESTAMP。
+--
+-- 强行按书面清单删会伤到不属于本迁移的行。实测（全新基线库上误跑本文件）：
+--   sys_api −5、sys_menu_api −5、sys_casbin_rule −32
+-- 老库 up→down 的净差是 sys_casbin_rule −24 —— 把与本次无关的既有授权一起删了，
+-- 结果是库比升级前**更缺权限**（正是这些路径当初导致前端 403）。
+--
+-- 要真正回到迁移前状态，只能用全量脚本重建库；-migrate-down 降级不需要撤销本迁移。
+SELECT 1;

@@ -5,21 +5,23 @@
  * 如果使用的第三方库是全局引入，也就是src/main.ts文件里，那么它就会自动被vite缓存到node_modules/.vite，此时就不用将该第三方库做依赖预构建(添加到include内)。
  */
 const include = [
-    // 绝对核心依赖（应用启动必需）
-    "vue",
-    "vue-router",
-    "pinia",
-    "axios",
-    // Arco Design 核心
-    "@arco-design/web-vue",
+  // 绝对核心依赖（应用启动必需）
+  "vue",
+  "vue-router",
+  "pinia",
+  "axios",
+  // Arco Design 核心
+  "@arco-design/web-vue",
+  // 只在懒加载页面里用到（s-qrcode-draw / share 页），启动扫描漏掉就会在
+  // 首次打开“SIP 接入信息”时被当场发现 ⇒ Vite 临时重跑预构建 ⇒ 旧 hash 的
+  // deps 请求 504（Outdated Optimize Dep）⇒ 之后所有动态 import 全都失败。
+  "qrcode"
 ];
 
 /**
  * 在预构建中强制排除的依赖项
  * 如果你有某些依赖包不希望被预构建，可以使用 exclude 属性来排除它们。
  */
-const exclude = [
-
-];
+const exclude = [];
 
 export { include, exclude };

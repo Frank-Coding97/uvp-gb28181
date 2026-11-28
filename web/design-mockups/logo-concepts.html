@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>UVP · Logo Concepts</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f5f7fb;
+  --panel: #ffffff;
+  --text: #0f172a;
+  --muted: #64748b;
+  --line: #e2e8f0;
+  --dark: #0b1f33;
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  padding: 32px;
+}
+.wrap {
+  max-width: 1260px;
+  margin: 0 auto;
+}
+.head {
+  margin-bottom: 28px;
+}
+.head h1 {
+  font-size: 28px;
+  margin-bottom: 10px;
+}
+.head p {
+  color: var(--muted);
+  line-height: 1.7;
+  max-width: 78ch;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.stage {
+  padding: 24px;
+  border-bottom: 1px solid var(--line);
+}
+.stage.dark {
+  background: linear-gradient(135deg, #0a1424 0%, #102642 100%);
+}
+.stage img {
+  display: block;
+  max-width: 100%;
+}
+.meta {
+  padding: 16px 18px 18px;
+}
+.meta h2 {
+  font-size: 16px;
+  margin-bottom: 8px;
+}
+.meta p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.usage {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+  margin-top: 14px;
+}
+.slot {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+.slot .label {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.slot .view {
+  min-height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+}
+.slot .view.dark {
+  background: var(--dark);
+}
+.slot .view.tab {
+  background: linear-gradient(180deg, #e5e7eb 0%, #cfd4da 100%);
+}
+.slot .view.tab .tabbox {
+  width: 100%;
+  max-width: 180px;
+  background: #fff;
+  border-radius: 8px 8px 0 0;
+  padding: 7px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #475569;
+}
+.slot .view.tab img {
+  width: 16px;
+  height: 16px;
+}
+@media (max-width: 1100px) {
+  .grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="head">
+      <h1>UVP Logo Concepts</h1>
+      <p>基于“UVP + GB/T 28181 + BS 架构”整理的三套方向。每套都给了登录页、侧边栏顶部、浏览器标签页三种使用形态，方便直接比较。</p>
+    </div>
+
+    <div class="grid">
+      <section class="card">
+        <div class="stage"><img src="../src/assets/logo/uvp-orbit-full.svg" alt="UVP Orbit full" style="height: 76px"></div>
+        <div class="meta">
+          <h2>方案 A · Orbit</h2>
+          <p>突出平台中枢和多端接入。环形轨道表示 BS 架构下的统一汇聚，三个节点对应浏览器、服务端、设备/视频源。</p>
+          <div class="usage">
+            <div class="slot">
+              <div class="label">登录页</div>
+              <div class="view dark"><img src="../src/assets/logo/uvp-orbit-full.svg" alt="" style="height: 30px"></div>
+            </div>
+            <div class="slot">
+              <div class="label">菜单栏顶部</div>
+              <div class="view"><img src="../src/assets/logo/uvp-orbit-wordmark.svg" alt="" style="height: 28px"></div>
+            </div>
+            <div class="slot">
+              <div class="label">浏览器标签</div>
+              <div class="view tab"><div class="tabbox"><img src="../src/assets/logo/uvp-orbit-favicon.svg" alt=""><span>UVP 控制台</span></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="stage"><img src="../src/assets/logo/uvp-shield-full.svg" alt="UVP Shield full" style="height: 76px"></div>
+        <div class="meta">
+          <h2>方案 B · Shield</h2>
+          <p>更偏“国标平台”气质。盾形强化标准化、稳定和平台可信感，内部的播放符号保留视频系统属性。</p>
+          <div class="usage">
+            <div class="slot">
+              <div class="label">登录页</div>
+              <div class="view dark"><img src="../src/assets/logo/uvp-shield-full.svg" alt="" style="height: 30px"></div>
+            </div>
+            <div class="slot">
+              <div class="label">菜单栏顶部</div>
+              <div class="view"><img src="../src/assets/logo/uvp-shield-wordmark.svg" alt="" style="height: 28px"></div>
+            </div>
+            <div class="slot">
+              <div class="label">浏览器标签</div>
+              <div class="view tab"><div class="tabbox"><img src="../src/assets/logo/uvp-shield-favicon.svg" alt=""><span>UVP 控制台</span></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="stage"><img src="../src/assets/logo/uvp-grid-full.svg" alt="UVP Grid full" style="height: 76px"></div>
+        <div class="meta">
+          <h2>方案 C · Grid</h2>
+          <p>更偏控制台和系统产品感。方格结构像平台面板，也对应 BS 的可视化控制界面，适合后台系统气质。</p>
+          <div class="usage">
+            <div class="slot">
+              <div class="label">登录页</div>
+              <div class="view dark"><img src="../src/assets/logo/uvp-grid-full.svg" alt="" style="height: 30px"></div>
+            </div>
+            <div class="slot">
+              <div class="label">菜单栏顶部</div>
+              <div class="view"><img src="../src/assets/logo/uvp-grid-wordmark.svg" alt="" style="height: 28px"></div>
+            </div>
+            <div class="slot">
+              <div class="label">浏览器标签</div>
+              <div class="view tab"><div class="tabbox"><img src="../src/assets/logo/uvp-grid-favicon.svg" alt=""><span>UVP 控制台</span></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</body>
+</html>

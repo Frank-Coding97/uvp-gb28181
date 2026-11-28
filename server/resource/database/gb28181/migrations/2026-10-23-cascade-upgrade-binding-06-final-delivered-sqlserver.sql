@@ -1,0 +1,1 @@
+IF COL_LENGTH(N'dbo.gb_device_firmware_upgrade', N'cascade_final_delivered') IS NULL ALTER TABLE [dbo].[gb_device_firmware_upgrade] ADD [cascade_final_delivered] BIT NOT NULL CONSTRAINT [df_fw_upgrade_cascade_final_delivered] DEFAULT 0;

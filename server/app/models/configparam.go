@@ -25,9 +25,22 @@ type CaptchaConfig struct {
 	Length int  `json:"length" yaml:"length"`
 }
 
+// LogCleanupConfig exposes retention fields as pointers so omitted or null
+// values in an update request can be rejected instead of silently becoming 0.
+type LogCleanupConfig struct {
+	SIPRetentionDays       *int `json:"sipRetentionDays" yaml:"sipRetentionDays"`
+	OperationRetentionDays *int `json:"operationRetentionDays" yaml:"operationRetentionDays"`
+	LoginRetentionDays     *int `json:"loginRetentionDays" yaml:"loginRetentionDays"`
+	JobRetentionDays       *int `json:"jobRetentionDays" yaml:"jobRetentionDays"`
+	PlaybackRetentionDays  *int `json:"playbackRetentionDays" yaml:"playbackRetentionDays"`
+	SchedulerRetentionDays *int `json:"schedulerRetentionDays" yaml:"schedulerRetentionDays"`
+	Configured             bool `json:"configured,omitempty" yaml:"configured,omitempty"`
+}
+
 // ConfigRequest 配置请求参数
 type ConfigRequest struct {
-	System  SystemConfig  `json:"system" yaml:"System"`
-	Safe    SafeConfig    `json:"safe" yaml:"Safe"`
-	Captcha CaptchaConfig `json:"captcha" yaml:"Captcha"`
+	System     *SystemConfig     `json:"system,omitempty" yaml:"System,omitempty"`
+	Safe       *SafeConfig       `json:"safe,omitempty" yaml:"Safe,omitempty"`
+	Captcha    *CaptchaConfig    `json:"captcha,omitempty" yaml:"Captcha,omitempty"`
+	LogCleanup *LogCleanupConfig `json:"logCleanup,omitempty" yaml:"logCleanup,omitempty"`
 }

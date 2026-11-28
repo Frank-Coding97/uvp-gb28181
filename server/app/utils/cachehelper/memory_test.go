@@ -3,11 +3,11 @@ package cachehelper
 import (
 	"context"
 	"errors"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"reflect"
 	"sync"
 	"testing"
 	"time"
+	"uvplatform.com/uvp-gb28181/app/global/app"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -15,7 +15,7 @@ import (
 func TestMemoryHelper_GetAll(t *testing.T) {
 	// 创建内存缓存实例
 	cache := NewMemoryHelper()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -44,10 +44,11 @@ func TestMemoryHelper_GetAll(t *testing.T) {
 	foundKey1 := false
 	foundKey2 := false
 	for _, item := range items {
-		if item.Key == "key1" {
+		switch item.Key {
+		case "key1":
 			assert.Equal(t, "value1", item.Value)
 			foundKey1 = true
-		} else if item.Key == "key2" {
+		case "key2":
 			assert.Equal(t, "value2", item.Value)
 			foundKey2 = true
 		}
@@ -72,7 +73,7 @@ func TestNewMemoryHelper(t *testing.T) {
 // TestMemoryHelper_SetAndGet 测试设置和获取操作
 func TestMemoryHelper_SetAndGet(t *testing.T) {
 	cache := NewMemoryHelper()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -131,7 +132,7 @@ func TestMemoryHelper_SetAndGet(t *testing.T) {
 // TestMemoryHelper_SetVal 测试设置任意类型值
 func TestMemoryHelper_SetVal(t *testing.T) {
 	cache := NewMemoryHelper().(*memoryHelper)
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -202,7 +203,7 @@ func TestMemoryHelper_SetVal(t *testing.T) {
 // TestMemoryHelper_Expiration 测试过期功能
 func TestMemoryHelper_Expiration(t *testing.T) {
 	cache := NewMemoryHelper()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 	key := "expire_test_key"
@@ -239,7 +240,7 @@ func TestMemoryHelper_Expiration(t *testing.T) {
 // TestMemoryHelper_Del 测试删除操作
 func TestMemoryHelper_Del(t *testing.T) {
 	cache := NewMemoryHelper()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -288,7 +289,7 @@ func TestMemoryHelper_Del(t *testing.T) {
 // TestMemoryHelper_Exists 测试存在性检查
 func TestMemoryHelper_Exists(t *testing.T) {
 	cache := NewMemoryHelper()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -341,7 +342,7 @@ func TestMemoryHelper_Exists(t *testing.T) {
 // TestMemoryHelper_Expire 测试重新设置过期时间
 func TestMemoryHelper_Expire(t *testing.T) {
 	cache := NewMemoryHelper()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 	key := "expire_reset_key"
@@ -390,7 +391,7 @@ func TestMemoryHelper_Expire(t *testing.T) {
 // TestMemoryHelper_ConcurrentAccess 测试并发访问安全性
 func TestMemoryHelper_ConcurrentAccess(t *testing.T) {
 	cache := NewMemoryHelper()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 	var wg sync.WaitGroup
@@ -450,7 +451,7 @@ func TestMemoryHelper_ConcurrentAccess(t *testing.T) {
 // TestMemoryHelper_UpdateExistingKey 测试更新已存在的键
 func TestMemoryHelper_UpdateExistingKey(t *testing.T) {
 	cache := NewMemoryHelper()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 	key := "update_key"
@@ -503,7 +504,7 @@ func TestMemoryHelper_Close(t *testing.T) {
 // TestMemoryHelper_AutoCleanup 测试自动清理功能
 func TestMemoryHelper_AutoCleanup(t *testing.T) {
 	cache := NewMemoryHelper().(*memoryHelper)
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -553,7 +554,7 @@ func TestMemoryHelper_AutoCleanup(t *testing.T) {
 // TestMemoryHelper_SetVal_NeverExpire 测试 expiration < 0 时永不过期
 func TestMemoryHelper_SetVal_NeverExpire(t *testing.T) {
 	cache := NewMemoryHelper().(*memoryHelper)
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -589,7 +590,7 @@ func TestMemoryHelper_SetVal_NeverExpire(t *testing.T) {
 // TestMemoryHelper_Expire_Negative_DeletesKey 测试 Expire 传入负数时立即删除键
 func TestMemoryHelper_Expire_Negative_DeletesKey(t *testing.T) {
 	cache := NewMemoryHelper()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -621,7 +622,7 @@ func TestMemoryHelper_Expire_Negative_DeletesKey(t *testing.T) {
 // TestMemoryHelper_Del_NeverExpire 测试删除永不过期的键（不在堆中）
 func TestMemoryHelper_Del_NeverExpire(t *testing.T) {
 	cache := NewMemoryHelper()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -644,7 +645,7 @@ func TestMemoryHelper_Del_NeverExpire(t *testing.T) {
 // TestMemoryHelper_GetAll_WithNeverExpire 测试 GetAll 包含永不过期的项
 func TestMemoryHelper_GetAll_WithNeverExpire(t *testing.T) {
 	cache := NewMemoryHelper()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -674,7 +675,7 @@ func TestMemoryHelper_GetAll_WithNeverExpire(t *testing.T) {
 // TestMemoryHelper_SetVal_UpdateFromNeverExpire 测试从永不过期更新为有过期时间
 func TestMemoryHelper_SetVal_UpdateFromNeverExpire(t *testing.T) {
 	cache := NewMemoryHelper().(*memoryHelper)
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -707,7 +708,7 @@ func TestMemoryHelper_SetVal_UpdateFromNeverExpire(t *testing.T) {
 // TestMemoryHelper_Expire_FromNeverExpire 测试给永不过期的键设置过期时间
 func TestMemoryHelper_Expire_FromNeverExpire(t *testing.T) {
 	cache := NewMemoryHelper().(*memoryHelper)
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -740,7 +741,7 @@ func TestMemoryHelper_Expire_FromNeverExpire(t *testing.T) {
 // BenchmarkMemoryHelper_Set 性能测试：设置操作
 func BenchmarkMemoryHelper_Set(b *testing.B) {
 	cache := NewMemoryHelper()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -748,14 +749,14 @@ func BenchmarkMemoryHelper_Set(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		key := "bench_key_" + string(rune('0'+(i%10)))
 		value := "bench_value_" + string(rune('0'+(i%10)))
-		cache.Set(ctx, key, value, 1*time.Minute)
+		_ = cache.Set(ctx, key, value, 1*time.Minute)
 	}
 }
 
 // BenchmarkMemoryHelper_Get 性能测试：获取操作
 func BenchmarkMemoryHelper_Get(b *testing.B) {
 	cache := NewMemoryHelper()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -763,20 +764,20 @@ func BenchmarkMemoryHelper_Get(b *testing.B) {
 	for i := 0; i < 100; i++ {
 		key := "bench_key_" + string(rune('0'+(i%10)))
 		value := "bench_value_" + string(rune('0'+(i%10)))
-		cache.Set(ctx, key, value, 1*time.Minute)
+		_ = cache.Set(ctx, key, value, 1*time.Minute)
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		key := "bench_key_" + string(rune('0'+(i%10)))
-		cache.Get(ctx, key)
+		_, _ = cache.Get(ctx, key)
 	}
 }
 
 // BenchmarkMemoryHelper_ConcurrentAccess 性能测试：并发访问
 func BenchmarkMemoryHelper_ConcurrentAccess(b *testing.B) {
 	cache := NewMemoryHelper()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -788,9 +789,9 @@ func BenchmarkMemoryHelper_ConcurrentAccess(b *testing.B) {
 
 			// 50% 写操作，50% 读操作
 			if i%2 == 0 {
-				cache.Set(ctx, key, value, 1*time.Minute)
+				_ = cache.Set(ctx, key, value, 1*time.Minute)
 			} else {
-				cache.Get(ctx, key)
+				_, _ = cache.Get(ctx, key)
 			}
 			i++
 		}
@@ -800,7 +801,7 @@ func BenchmarkMemoryHelper_ConcurrentAccess(b *testing.B) {
 // TestMemoryHelper_SetInt_GetInt 测试整数类型的写入与读取
 func TestMemoryHelper_SetInt_GetInt(t *testing.T) {
 	cache := NewMemoryHelper()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -842,7 +843,7 @@ func TestMemoryHelper_SetInt_GetInt(t *testing.T) {
 // TestMemoryHelper_GetInt_ExpiredKey 测试 GetInt 对已过期键返回 ErrKeyNotFound
 func TestMemoryHelper_GetInt_ExpiredKey(t *testing.T) {
 	cache := NewMemoryHelper()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -863,7 +864,7 @@ func TestMemoryHelper_GetInt_ExpiredKey(t *testing.T) {
 // TestMemoryHelper_GetInt_FromString 测试 GetInt 能解析由 Set 写入的数字字符串
 func TestMemoryHelper_GetInt_FromString(t *testing.T) {
 	cache := NewMemoryHelper()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -878,7 +879,7 @@ func TestMemoryHelper_GetInt_FromString(t *testing.T) {
 // TestMemoryHelper_GetInt_NotInteger 测试 GetInt 对非整数值返回错误
 func TestMemoryHelper_GetInt_NotInteger(t *testing.T) {
 	cache := NewMemoryHelper()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -892,7 +893,7 @@ func TestMemoryHelper_GetInt_NotInteger(t *testing.T) {
 // TestMemoryHelper_Incr 测试 Incr 的基本行为
 func TestMemoryHelper_Incr(t *testing.T) {
 	cache := NewMemoryHelper()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -920,7 +921,7 @@ func TestMemoryHelper_Incr(t *testing.T) {
 // TestMemoryHelper_Decr 测试 Decr 的基本行为
 func TestMemoryHelper_Decr(t *testing.T) {
 	cache := NewMemoryHelper()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -938,7 +939,7 @@ func TestMemoryHelper_Decr(t *testing.T) {
 // TestMemoryHelper_IncrDecr_Combined 测试 Incr 与 Decr 交替使用
 func TestMemoryHelper_IncrDecr_Combined(t *testing.T) {
 	cache := NewMemoryHelper()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -966,7 +967,7 @@ func TestMemoryHelper_IncrDecr_Combined(t *testing.T) {
 // TestMemoryHelper_Incr_PreservesExpiration 测试 Incr 应保留原有过期时间
 func TestMemoryHelper_Incr_PreservesExpiration(t *testing.T) {
 	cache := NewMemoryHelper().(*memoryHelper)
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -995,7 +996,7 @@ func TestMemoryHelper_Incr_PreservesExpiration(t *testing.T) {
 // TestMemoryHelper_Incr_ExpiredKey 测试对已过期 key 执行 Incr 按 0 处理
 func TestMemoryHelper_Incr_ExpiredKey(t *testing.T) {
 	cache := NewMemoryHelper()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -1012,7 +1013,7 @@ func TestMemoryHelper_Incr_ExpiredKey(t *testing.T) {
 // TestMemoryHelper_Incr_NonIntegerValue 测试对非整数值执行 Incr 应返回错误
 func TestMemoryHelper_Incr_NonIntegerValue(t *testing.T) {
 	cache := NewMemoryHelper()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -1026,7 +1027,7 @@ func TestMemoryHelper_Incr_NonIntegerValue(t *testing.T) {
 // TestMemoryHelper_Incr_FromNumericString 测试对数字字符串执行 Incr 应成功
 func TestMemoryHelper_Incr_FromNumericString(t *testing.T) {
 	cache := NewMemoryHelper()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -1041,7 +1042,7 @@ func TestMemoryHelper_Incr_FromNumericString(t *testing.T) {
 // TestMemoryHelper_Incr_Concurrent 测试 Incr 的并发安全性
 func TestMemoryHelper_Incr_Concurrent(t *testing.T) {
 	cache := NewMemoryHelper()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 	key := "concurrent_counter"

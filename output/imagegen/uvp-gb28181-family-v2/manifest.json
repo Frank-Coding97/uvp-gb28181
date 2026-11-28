@@ -1,0 +1,21 @@
+{
+  "target": "UVP-GB28181 server platform",
+  "direction": "Near-match family extension: existing azure/white UVP, server rack header, aperture in P",
+  "references": "Existing mobile and desktop icons are references only; unchanged",
+  "generator": "imagegen skill CLI / gpt-image-2",
+  "prompt": "prompt-master.txt",
+  "master": "uvp-server-master.png",
+  "export_processing": "Foreground extraction from generated alpha and color, flat palette normalization, resizing, exact text composition",
+  "palette": {
+    "blue": "#1687F8",
+    "white": "#FFFFFF",
+    "ink": "#10233F"
+  },
+  "source_foreground_bounds": [
+    184,
+    290,
+    1071,
+    911
+  ],
+  "favicon": "Same server rack badge isolated for legibility at 16-32px"
+}

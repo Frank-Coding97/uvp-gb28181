@@ -13,16 +13,18 @@ import (
 	"strings"
 	"time"
 
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
+	"uvplatform.com/uvp-gb28181/app/global/app"
+	"uvplatform.com/uvp-gb28181/app/models"
+	"uvplatform.com/uvp-gb28181/app/utils/gormhelper"
+	"uvplatform.com/uvp-gb28181/app/utils/logging"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
 // PluginsManagerService 插件管理服务
-type PluginsManagerService struct{}
+type PluginsManagerService struct{ scope context.Context }
 
 // NewPluginsManagerService 创建插件管理服务
 func NewPluginsManagerService() *PluginsManagerService {
@@ -176,29 +178,33 @@ func (pms *PluginsManagerService) ExportPluginToWriter(pluginName string, writer
 
 	// 创建zip写入器，直接写入到 io.Writer
 	zipWriter := zip.NewWriter(writer)
-	defer zipWriter.Close()
+	defer func() {
+		if closeErr := zipWriter.Close(); closeErr != nil {
+			app.Log(pms.logContext()).Warn("关闭插件导出压缩包失败", zap.String("event", "plugin.export_zip_close_failed"), logging.Error(closeErr))
+		}
+	}()
 
-	// 添加单个文件到zip的ginfastback目录
+	// 添加单个文件到zip的uvpback目录
 	for _, filePath := range filesToAdd {
 		// 统一使用正斜杠作为zip内的路径分隔符
-		arcPath := filepath.Join("ginfastback", filePath)
+		arcPath := filepath.Join("uvpback", filePath)
 		arcPath = strings.ReplaceAll(arcPath, "\\", "/")
 		if err := pms.addFileToZip(zipWriter, filePath, arcPath); err != nil {
 			return "", err
 		}
 	}
 
-	// 添加目录到zip的ginfastback目录
+	// 添加目录到zip的uvpback目录
 	for _, dirPath := range dirsToAdd {
 		// 统一使用正斜杠作为zip内的路径分隔符
-		arcPath := filepath.Join("ginfastback", dirPath)
+		arcPath := filepath.Join("uvpback", dirPath)
 		arcPath = strings.ReplaceAll(arcPath, "\\", "/")
 		if err := pms.addDirToZip(zipWriter, dirPath, arcPath); err != nil {
 			return "", err
 		}
 	}
 
-	// 添加前端文件到zip的ginfastfront目录
+	// 添加前端文件到zip的uvpfront目录
 	for _, filePath := range frontendFilesToAdd {
 		// 获取文件相对于前端根目录的相对路径
 		relPath, err := filepath.Rel(app.ConfigYml.GetString("gen.dir"), filePath)
@@ -206,14 +212,14 @@ func (pms *PluginsManagerService) ExportPluginToWriter(pluginName string, writer
 			return "", err
 		}
 		// 统一使用正斜杠作为zip内的路径分隔符
-		arcPath := filepath.Join("ginfastfront", relPath)
+		arcPath := filepath.Join("uvpfront", relPath)
 		arcPath = strings.ReplaceAll(arcPath, "\\", "/")
 		if err := pms.addFileToZip(zipWriter, filePath, arcPath); err != nil {
 			return "", err
 		}
 	}
 
-	// 添加前端目录到zip的ginfastfront目录
+	// 添加前端目录到zip的uvpfront目录
 	for _, dirPath := range frontendDirsToAdd {
 		// 获取目录相对于前端根目录的相对路径
 		relPath, err := filepath.Rel(app.ConfigYml.GetString("gen.dir"), dirPath)
@@ -221,7 +227,7 @@ func (pms *PluginsManagerService) ExportPluginToWriter(pluginName string, writer
 			return "", err
 		}
 		// 统一使用正斜杠作为zip内的路径分隔符
-		arcPath := filepath.Join("ginfastfront", relPath)
+		arcPath := filepath.Join("uvpfront", relPath)
 		arcPath = strings.ReplaceAll(arcPath, "\\", "/")
 		if err := pms.addDirToZip(zipWriter, dirPath, arcPath); err != nil {
 			return "", err
@@ -270,12 +276,16 @@ func (pms *PluginsManagerService) ExportPluginToWriter(pluginName string, writer
 }
 
 // addFileToZip 将单个文件添加到zip压缩包中
-func (pms *PluginsManagerService) addFileToZip(zipWriter *zip.Writer, filePath, arcPath string) error {
+func (pms *PluginsManagerService) addFileToZip(zipWriter *zip.Writer, filePath, arcPath string) (err error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 
 	// 在zip中创建文件条目
 	zipEntry, err := zipWriter.Create(arcPath)
@@ -334,16 +344,9 @@ func (pms *PluginsManagerService) generateTableSQL(tableNames []string, includeD
 	var db *gorm.DB
 	var err error
 
-	switch dbType {
-	case "mysql":
-		db, err = gormhelper.GetOneMysqlClient()
-	case "postgresql":
-		db, err = gormhelper.GetOnePostgreSqlClient()
-	case "sqlserver":
-		db, err = gormhelper.GetOneSqlserverClient()
-	default:
-		db, err = gormhelper.GetOneMysqlClient()
-	}
+	// ⛔ 统一走 gormhelper.Client，不要在这里再展开成逐方言的 switch：
+	// 这个文件原本有 4 份一模一样的四分支 switch，加一种库就要改 4 处。
+	db, err = gormhelper.Client(dbType)
 
 	if err != nil {
 		return "", err
@@ -360,7 +363,7 @@ func (pms *PluginsManagerService) generateTableSQL(tableNames []string, includeD
 
 	// 根据数据库类型生成SQL
 	for _, tableName := range tableNames {
-		switch dbType {
+		switch metadataSQLDialect(dbType) {
 		case "mysql":
 			if err := pms.generateMySQLTableSQL(sqlDB, tableName, &sqlContent, includeData); err != nil {
 				return "", err
@@ -383,13 +386,13 @@ func (pms *PluginsManagerService) generateTableSQL(tableNames []string, includeD
 func (pms *PluginsManagerService) generateMySQLTableSQL(sqlDB *sql.DB, tableName string, sqlContent *strings.Builder, includeData bool) error {
 	// 获取建表语句
 	var createTableSQL string
-	err := sqlDB.QueryRow(fmt.Sprintf("SHOW CREATE TABLE `%s`", tableName)).Scan(&tableName, &createTableSQL)
+	err := sqlDB.QueryRowContext(pms.logContext(), fmt.Sprintf("SHOW CREATE TABLE `%s`", tableName)).Scan(&tableName, &createTableSQL)
 	if err != nil {
 		return err
 	}
 
-	sqlContent.WriteString(fmt.Sprintf("-- Table structure for `%s`\n", tableName))
-	sqlContent.WriteString(fmt.Sprintf("DROP TABLE IF EXISTS `%s`;\n", tableName))
+	fmt.Fprintf(sqlContent, "-- Table structure for `%s`\n", tableName)
+	fmt.Fprintf(sqlContent, "DROP TABLE IF EXISTS `%s`;\n", tableName)
 	sqlContent.WriteString(createTableSQL)
 	sqlContent.WriteString(";\n\n")
 
@@ -399,11 +402,15 @@ func (pms *PluginsManagerService) generateMySQLTableSQL(sqlDB *sql.DB, tableName
 	}
 
 	// 获取表中的数据
-	rows, err := sqlDB.Query(fmt.Sprintf("SELECT * FROM `%s`", tableName))
+	rows, err := sqlDB.QueryContext(pms.logContext(), fmt.Sprintf("SELECT * FROM `%s`", tableName))
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			app.Log(pms.logContext()).Warn("关闭数据库结果集失败", zap.String("event", "plugin.rows_close_failed"), logging.Error(closeErr))
+		}
+	}()
 
 	// 获取列信息
 	columns, err := rows.Columns()
@@ -426,13 +433,13 @@ func (pms *PluginsManagerService) generateMySQLTableSQL(sqlDB *sql.DB, tableName
 
 		// 构建INSERT语句
 		var insertSQL strings.Builder
-		insertSQL.WriteString(fmt.Sprintf("INSERT INTO `%s` (", tableName))
+		fmt.Fprintf(&insertSQL, "INSERT INTO `%s` (", tableName)
 
 		for i, col := range columns {
 			if i > 0 {
 				insertSQL.WriteString(", ")
 			}
-			insertSQL.WriteString(fmt.Sprintf("`%s`", col))
+			fmt.Fprintf(&insertSQL, "`%s`", col)
 		}
 
 		insertSQL.WriteString(") VALUES (")
@@ -455,7 +462,7 @@ func (pms *PluginsManagerService) generateMySQLTableSQL(sqlDB *sql.DB, tableName
 // generatePostgreSQLTableSQL 生成PostgreSQL的建表和数据插入SQL
 func (pms *PluginsManagerService) generatePostgreSQLTableSQL(sqlDB *sql.DB, tableName string, sqlContent *strings.Builder, includeData bool) error {
 	// 获取建表语句
-	rows, err := sqlDB.Query(`
+	rows, err := sqlDB.QueryContext(pms.logContext(), `
 		SELECT 
 			'CREATE TABLE ' || t.tablename || ' (' || 
 			string_agg(a.attname || ' ' || format_type(a.atttypid, a.atttypmod), ', ') || 
@@ -469,15 +476,19 @@ func (pms *PluginsManagerService) generatePostgreSQLTableSQL(sqlDB *sql.DB, tabl
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			app.Log(pms.logContext()).Warn("关闭数据库结果集失败", zap.String("event", "plugin.rows_close_failed"), logging.Error(closeErr))
+		}
+	}()
 
 	for rows.Next() {
 		var createTableSQL string
 		if err := rows.Scan(&createTableSQL); err != nil {
 			return err
 		}
-		sqlContent.WriteString(fmt.Sprintf("-- Table structure for %s\n", tableName))
-		sqlContent.WriteString(fmt.Sprintf("DROP TABLE IF EXISTS %s;\n", tableName))
+		fmt.Fprintf(sqlContent, "-- Table structure for %s\n", tableName)
+		fmt.Fprintf(sqlContent, "DROP TABLE IF EXISTS %s;\n", tableName)
 		sqlContent.WriteString(createTableSQL)
 		sqlContent.WriteString(";\n\n")
 	}
@@ -488,11 +499,15 @@ func (pms *PluginsManagerService) generatePostgreSQLTableSQL(sqlDB *sql.DB, tabl
 	}
 
 	// 获取表中的数据
-	dataRows, err := sqlDB.Query(fmt.Sprintf("SELECT * FROM %s", tableName))
+	dataRows, err := sqlDB.QueryContext(pms.logContext(), fmt.Sprintf("SELECT * FROM %s", tableName))
 	if err != nil {
 		return err
 	}
-	defer dataRows.Close()
+	defer func() {
+		if closeErr := dataRows.Close(); closeErr != nil {
+			app.Log(pms.logContext()).Warn("关闭数据库结果集失败", zap.String("event", "plugin.data_rows_close_failed"), logging.Error(closeErr))
+		}
+	}()
 
 	columns, err := dataRows.Columns()
 	if err != nil {
@@ -512,7 +527,7 @@ func (pms *PluginsManagerService) generatePostgreSQLTableSQL(sqlDB *sql.DB, tabl
 		}
 
 		var insertSQL strings.Builder
-		insertSQL.WriteString(fmt.Sprintf("INSERT INTO %s (", tableName))
+		fmt.Fprintf(&insertSQL, "INSERT INTO %s (", tableName)
 
 		for i, col := range columns {
 			if i > 0 {
@@ -542,7 +557,7 @@ func (pms *PluginsManagerService) generatePostgreSQLTableSQL(sqlDB *sql.DB, tabl
 func (pms *PluginsManagerService) generateSQLServerTableSQL(sqlDB *sql.DB, tableName string, sqlContent *strings.Builder, includeData bool) error {
 	// 获取建表语句
 	var createTableSQL string
-	err := sqlDB.QueryRow(`
+	err := sqlDB.QueryRowContext(pms.logContext(), `
 		SELECT 
 			'CREATE TABLE [' + TABLE_NAME + '] (' + 
 			STUFF((SELECT ', ' + '[' + COLUMN_NAME + '] ' + DATA_TYPE
@@ -559,8 +574,8 @@ func (pms *PluginsManagerService) generateSQLServerTableSQL(sqlDB *sql.DB, table
 	}
 
 	if createTableSQL != "" {
-		sqlContent.WriteString(fmt.Sprintf("-- Table structure for [%s]\n", tableName))
-		sqlContent.WriteString(fmt.Sprintf("DROP TABLE IF EXISTS [%s];\n", tableName))
+		fmt.Fprintf(sqlContent, "-- Table structure for [%s]\n", tableName)
+		fmt.Fprintf(sqlContent, "DROP TABLE IF EXISTS [%s];\n", tableName)
 		sqlContent.WriteString(createTableSQL)
 		sqlContent.WriteString(";\n\n")
 	}
@@ -571,11 +586,15 @@ func (pms *PluginsManagerService) generateSQLServerTableSQL(sqlDB *sql.DB, table
 	}
 
 	// 获取表中的数据
-	rows, err := sqlDB.Query(fmt.Sprintf("SELECT * FROM [%s]", tableName))
+	rows, err := sqlDB.QueryContext(pms.logContext(), fmt.Sprintf("SELECT * FROM [%s]", tableName))
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			app.Log(pms.logContext()).Warn("关闭数据库结果集失败", zap.String("event", "plugin.rows_close_failed"), logging.Error(closeErr))
+		}
+	}()
 
 	columns, err := rows.Columns()
 	if err != nil {
@@ -595,13 +614,13 @@ func (pms *PluginsManagerService) generateSQLServerTableSQL(sqlDB *sql.DB, table
 		}
 
 		var insertSQL strings.Builder
-		insertSQL.WriteString(fmt.Sprintf("INSERT INTO [%s] (", tableName))
+		fmt.Fprintf(&insertSQL, "INSERT INTO [%s] (", tableName)
 
 		for i, col := range columns {
 			if i > 0 {
 				insertSQL.WriteString(", ")
 			}
-			insertSQL.WriteString(fmt.Sprintf("[%s]", col))
+			fmt.Fprintf(&insertSQL, "[%s]", col)
 		}
 
 		insertSQL.WriteString(") VALUES (")
@@ -658,7 +677,7 @@ func (pms *PluginsManagerService) generateMenuJSON(pluginMenus []models.PluginMe
 	}
 
 	// 获取菜单数据库连接
-	db := app.DB()
+	db := app.DBContext(pms.logContext())
 	if db == nil {
 		return "", errors.New("数据库连接失败")
 	}
@@ -679,7 +698,7 @@ func (pms *PluginsManagerService) generateMenuJSON(pluginMenus []models.PluginMe
 	if len(menuIds) == 0 {
 		return "", nil
 	}
-	ctx := context.Background()
+	ctx := pms.logContext()
 	// 获取所有菜单数据，包括子菜单
 	menuList := models.NewSysMenuList()
 	err := menuList.Find(ctx, func(d *gorm.DB) *gorm.DB {
@@ -700,7 +719,7 @@ func (pms *PluginsManagerService) generateMenuJSON(pluginMenus []models.PluginMe
 	}
 
 	// 构建树结构
-	menuTree := menuList.FixOrphanParentIDs().BuildTree()
+	menuTree := menuList.FixOrphanParentIDs().BuildTree(pms.logContext())
 
 	// 生成JSON
 	jsonStr, err := menuTree.Json()
@@ -739,11 +758,13 @@ func (pms *PluginsManagerService) processPluginImport(c *gin.Context, zipReader 
 			if err != nil {
 				return nil, fmt.Errorf("读取plugin.json失败: %v", err)
 			}
-			defer rc.Close()
-
 			data, err := io.ReadAll(rc)
+			closeErr := rc.Close()
 			if err != nil {
 				return nil, fmt.Errorf("读取plugin.json内容失败: %v", err)
+			}
+			if closeErr != nil {
+				return nil, fmt.Errorf("关闭plugin.json失败: %v", closeErr)
 			}
 
 			if err := json.Unmarshal(data, &pluginConfig); err != nil {
@@ -944,16 +965,9 @@ func (pms *PluginsManagerService) checkTablesExist(tableNames []string) ([]strin
 	var db *gorm.DB
 	var err error
 
-	switch dbType {
-	case "mysql":
-		db, err = gormhelper.GetOneMysqlClient()
-	case "postgresql":
-		db, err = gormhelper.GetOnePostgreSqlClient()
-	case "sqlserver":
-		db, err = gormhelper.GetOneSqlserverClient()
-	default:
-		db, err = gormhelper.GetOneMysqlClient()
-	}
+	// ⛔ 统一走 gormhelper.Client，不要在这里再展开成逐方言的 switch：
+	// 这个文件原本有 4 份一模一样的四分支 switch，加一种库就要改 4 处。
+	db, err = gormhelper.Client(dbType)
 
 	if err != nil {
 		return nil, fmt.Errorf("获取数据库连接失败: %v", err)
@@ -968,9 +982,9 @@ func (pms *PluginsManagerService) checkTablesExist(tableNames []string) ([]strin
 	for _, tableName := range tableNames {
 		var exists bool
 
-		switch dbType {
+		switch metadataSQLDialect(dbType) {
 		case "mysql":
-			err := sqlDB.QueryRow(
+			err := sqlDB.QueryRowContext(pms.logContext(),
 				"SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
 				tableName,
 			).Scan(&exists)
@@ -979,7 +993,7 @@ func (pms *PluginsManagerService) checkTablesExist(tableNames []string) ([]strin
 			}
 
 		case "postgresql":
-			err := sqlDB.QueryRow(
+			err := sqlDB.QueryRowContext(pms.logContext(),
 				"SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = $1)",
 				tableName,
 			).Scan(&exists)
@@ -988,7 +1002,7 @@ func (pms *PluginsManagerService) checkTablesExist(tableNames []string) ([]strin
 			}
 
 		case "sqlserver":
-			err := sqlDB.QueryRow(
+			err := sqlDB.QueryRowContext(pms.logContext(),
 				"SELECT CASE WHEN EXISTS(SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @TableName) THEN 1 ELSE 0 END",
 				sql.Named("TableName", tableName),
 			).Scan(&exists)
@@ -1018,8 +1032,8 @@ func (pms *PluginsManagerService) extractAndOverwriteFiles(zipReader *zip.Reader
 		}
 
 		// 处理后端文件
-		if strings.HasPrefix(file.Name, "ginfastback/") {
-			relPath := strings.TrimPrefix(file.Name, "ginfastback/")
+		if strings.HasPrefix(file.Name, "uvpback/") {
+			relPath := strings.TrimPrefix(file.Name, "uvpback/")
 			destPath := filepath.Join(backendRoot, relPath)
 			if err := pms.extractFile(file, destPath); err != nil {
 				return err
@@ -1027,8 +1041,8 @@ func (pms *PluginsManagerService) extractAndOverwriteFiles(zipReader *zip.Reader
 		}
 
 		// 处理前端文件
-		if frontendRoot != "" && strings.HasPrefix(file.Name, "ginfastfront/") {
-			relPath := strings.TrimPrefix(file.Name, "ginfastfront/")
+		if frontendRoot != "" && strings.HasPrefix(file.Name, "uvpfront/") {
+			relPath := strings.TrimPrefix(file.Name, "uvpfront/")
 			destPath := filepath.Join(frontendRoot, relPath)
 
 			if err := pms.extractFile(file, destPath); err != nil {
@@ -1041,7 +1055,7 @@ func (pms *PluginsManagerService) extractAndOverwriteFiles(zipReader *zip.Reader
 }
 
 // extractFile 解压单个文件
-func (pms *PluginsManagerService) extractFile(file *zip.File, destPath string) error {
+func (pms *PluginsManagerService) extractFile(file *zip.File, destPath string) (err error) {
 	// 如果是目录，创建目录
 	if file.FileInfo().IsDir() {
 		return os.MkdirAll(destPath, os.ModePerm)
@@ -1057,14 +1071,22 @@ func (pms *PluginsManagerService) extractFile(file *zip.File, destPath string) e
 	if err != nil {
 		return err
 	}
-	defer rc.Close()
+	defer func() {
+		if closeErr := rc.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 
 	// 创建目标文件
 	destFile, err := os.Create(destPath)
 	if err != nil {
 		return err
 	}
-	defer destFile.Close()
+	defer func() {
+		if closeErr := destFile.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 
 	// 复制内容
 	_, err = io.Copy(destFile, rc)
@@ -1081,11 +1103,13 @@ func (pms *PluginsManagerService) importDatabase(zipReader *zip.Reader) error {
 			if err != nil {
 				return fmt.Errorf("读取database.sql失败: %v", err)
 			}
-			defer rc.Close()
-
 			data, err := io.ReadAll(rc)
+			closeErr := rc.Close()
 			if err != nil {
 				return fmt.Errorf("读取database.sql内容失败: %v", err)
+			}
+			if closeErr != nil {
+				return fmt.Errorf("关闭database.sql失败: %v", closeErr)
 			}
 			sqlContent = string(data)
 			break
@@ -1101,16 +1125,9 @@ func (pms *PluginsManagerService) importDatabase(zipReader *zip.Reader) error {
 	var db *gorm.DB
 	var err error
 
-	switch dbType {
-	case "mysql":
-		db, err = gormhelper.GetOneMysqlClient()
-	case "postgresql":
-		db, err = gormhelper.GetOnePostgreSqlClient()
-	case "sqlserver":
-		db, err = gormhelper.GetOneSqlserverClient()
-	default:
-		db, err = gormhelper.GetOneMysqlClient()
-	}
+	// ⛔ 统一走 gormhelper.Client，不要在这里再展开成逐方言的 switch：
+	// 这个文件原本有 4 份一模一样的四分支 switch，加一种库就要改 4 处。
+	db, err = gormhelper.Client(dbType)
 
 	if err != nil {
 		return err
@@ -1123,7 +1140,7 @@ func (pms *PluginsManagerService) importDatabase(zipReader *zip.Reader) error {
 		if stmt == "" {
 			continue
 		}
-		if err := db.Exec(stmt).Error; err != nil {
+		if err := db.WithContext(pms.logContext()).Exec(stmt).Error; err != nil {
 			return fmt.Errorf("执行SQL失败: %v", err)
 		}
 	}
@@ -1141,11 +1158,13 @@ func (pms *PluginsManagerService) importMenus(c *gin.Context, zipReader *zip.Rea
 			if err != nil {
 				return fmt.Errorf("读取menus.json失败: %v", err)
 			}
-			defer rc.Close()
-
 			data, err := io.ReadAll(rc)
+			closeErr := rc.Close()
 			if err != nil {
 				return fmt.Errorf("读取menus.json内容失败: %v", err)
+			}
+			if closeErr != nil {
+				return fmt.Errorf("关闭menus.json失败: %v", closeErr)
 			}
 			menuContent = string(data)
 			break
@@ -1303,7 +1322,7 @@ func (pms *PluginsManagerService) uninstallMenus(c *gin.Context, pluginMenus []m
 		return nil
 	}
 
-	db := app.DB()
+	db := app.DBContext(pms.logContext())
 	if db == nil {
 		return errors.New("数据库连接失败")
 	}
@@ -1510,16 +1529,9 @@ func (pms *PluginsManagerService) dropDatabaseTables(tableNames []string) error 
 	var db *gorm.DB
 	var err error
 
-	switch dbType {
-	case "mysql":
-		db, err = gormhelper.GetOneMysqlClient()
-	case "postgresql":
-		db, err = gormhelper.GetOnePostgreSqlClient()
-	case "sqlserver":
-		db, err = gormhelper.GetOneSqlserverClient()
-	default:
-		db, err = gormhelper.GetOneMysqlClient()
-	}
+	// ⛔ 统一走 gormhelper.Client，不要在这里再展开成逐方言的 switch：
+	// 这个文件原本有 4 份一模一样的四分支 switch，加一种库就要改 4 处。
+	db, err = gormhelper.Client(dbType)
 
 	if err != nil {
 		return fmt.Errorf("获取数据库连接失败: %v", err)
@@ -1527,25 +1539,41 @@ func (pms *PluginsManagerService) dropDatabaseTables(tableNames []string) error 
 
 	// 删除每个表
 	for _, tableName := range tableNames {
-		switch dbType {
+		switch metadataSQLDialect(dbType) {
 		case "mysql":
-			if err := db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS `%s`", tableName)).Error; err != nil {
+			if err := db.WithContext(pms.logContext()).Exec(fmt.Sprintf("DROP TABLE IF EXISTS `%s`", tableName)).Error; err != nil {
 				return fmt.Errorf("删除MySQL表失败 %s: %v", tableName, err)
 			}
 		case "postgresql":
-			if err := db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s CASCADE", tableName)).Error; err != nil {
+			if err := db.WithContext(pms.logContext()).Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s CASCADE", tableName)).Error; err != nil {
 				return fmt.Errorf("删除PostgreSQL表失败 %s: %v", tableName, err)
 			}
 		case "sqlserver":
-			if err := db.Exec(fmt.Sprintf("IF OBJECT_ID('[%s]') IS NOT NULL DROP TABLE [%s]", tableName, tableName)).Error; err != nil {
+			if err := db.WithContext(pms.logContext()).Exec(fmt.Sprintf("IF OBJECT_ID('[%s]') IS NOT NULL DROP TABLE [%s]", tableName, tableName)).Error; err != nil {
 				return fmt.Errorf("删除SQL Server表失败 %s: %v", tableName, err)
 			}
 		default:
-			if err := db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS `%s`", tableName)).Error; err != nil {
+			if err := db.WithContext(pms.logContext()).Exec(fmt.Sprintf("DROP TABLE IF EXISTS `%s`", tableName)).Error; err != nil {
 				return fmt.Errorf("删除表失败 %s: %v", tableName, err)
 			}
 		}
 	}
 
 	return nil
+}
+
+// WithContext returns a request-scoped copy; the controller-owned service stays immutable.
+func (pms *PluginsManagerService) WithContext(ctx context.Context) *PluginsManagerService {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	clone := *pms
+	clone.scope = context.WithoutCancel(ctx)
+	return &clone
+}
+func (pms *PluginsManagerService) logContext() context.Context {
+	if pms.scope == nil {
+		return context.Background()
+	}
+	return pms.scope
 }
