@@ -63,6 +63,7 @@ FIREWALL_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --now)     WANT_NOW=1 ;;
+    --firewall-only) FIREWALL_ONLY=1 ;;
     -h|--help) usage; exit 0 ;;
     *)         fail "未知参数：$1（只支持 --now、--firewall-only 与 -h）" ;;
   esac
